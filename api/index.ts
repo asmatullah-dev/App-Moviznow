@@ -840,7 +840,7 @@ async function startServer() {
 
   app.post("/api/sync/compare", async (req, res) => {
     try {
-      const { sourceKey, targetKey, targetDbId } = req.body;
+      const { sourceKey, targetKey, targetDbId, onlyPublished } = req.body;
       const { sourceApp, targetApp, targetDbId: tDbId } = await getSyncApps(sourceKey, targetKey, targetDbId);
       if (!sourceApp || !targetApp) {
         return res.status(400).json({ error: "Service account keys missing or invalid" });
@@ -851,21 +851,20 @@ async function startServer() {
 
       console.log(`Comparing source DB (${firebaseConfig.firestoreDatabaseId}) with target DB (${targetDbId || 'default'})`);
 
-      const collections = [
-        'genres', 'languages', 'qualities', 'content', 
-        'users', 'admin_settings', 'notifications', 
-        'notification_templates', 'orders', 'movie_requests', 
-        'reported_links', 'error_links', 'whitelisted_phones', 
-        'fcm_tokens', 'income'
-      ];
+      const collections = ['content'];
       const results: any = {};
 
       for (const colName of collections) {
-        const sourceSnap = await sourceDb.collection(colName).get();
-        const targetSnap = await targetDb.collection(colName).get();
+        let sourceSnap = await sourceDb.collection(colName).get();
+        let targetSnap = await targetDb.collection(colName).get();
 
-        const sourceDocs = sourceSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        const targetDocs = targetSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        let sourceDocs = sourceSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        let targetDocs = targetSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+        if (onlyPublished && colName === 'content') {
+          sourceDocs = sourceDocs.filter((d: any) => d.status === 'published');
+          targetDocs = targetDocs.filter((d: any) => d.status === 'published');
+        }
 
         const sourceMap = new Map(sourceDocs.map(d => [d.id, d]));
         const targetMap = new Map(targetDocs.map(d => [d.id, d]));
@@ -919,7 +918,7 @@ async function startServer() {
 
   app.post("/api/sync/push", async (req, res) => {
     try {
-      const { sourceKey, targetKey, targetDbId, mode, specificIds } = req.body;
+      const { sourceKey, targetKey, targetDbId, mode, specificIds, onlyPublished } = req.body;
       const { sourceApp, targetApp, targetDbId: tDbId } = await getSyncApps(sourceKey, targetKey, targetDbId);
       if (!sourceApp || !targetApp) return res.status(400).json({ error: "Keys missing" });
 
@@ -928,13 +927,7 @@ async function startServer() {
 
       console.log(`Starting push: source (${firebaseConfig.firestoreDatabaseId}) -> target (${tDbId || 'default'}), mode: ${mode}, specificIds: ${specificIds ? Object.keys(specificIds).length : 'none'}`);
 
-      const collections = [
-        'genres', 'languages', 'qualities', 'content', 
-        'users', 'admin_settings', 'notifications', 
-        'notification_templates', 'orders', 'movie_requests', 
-        'reported_links', 'error_links', 'whitelisted_phones', 
-        'fcm_tokens', 'income'
-      ];
+      const collections = ['content'];
       const logs: string[] = [];
 
       for (const colName of collections) {
@@ -965,6 +958,10 @@ async function startServer() {
             docsToSync = docsToSync.filter(d => !targetIds.has(d.id));
           }
         }
+        
+        if (onlyPublished && colName === 'content') {
+          docsToSync = docsToSync.filter(d => d.data().status === 'published');
+        }
 
         if (docsToSync.length === 0) continue;
 
@@ -988,7 +985,7 @@ async function startServer() {
 
   app.post("/api/sync/pull", async (req, res) => {
     try {
-      const { sourceKey, targetKey, targetDbId, specificIds, mode } = req.body;
+      const { sourceKey, targetKey, targetDbId, specificIds, mode, onlyPublished } = req.body;
       const { sourceApp, targetApp, targetDbId: tDbId } = await getSyncApps(sourceKey, targetKey, targetDbId);
       if (!sourceApp || !targetApp) return res.status(400).json({ error: "Keys missing" });
 
@@ -997,13 +994,7 @@ async function startServer() {
 
       console.log(`Starting pull: target (${tDbId || 'default'}) -> source (${firebaseConfig.firestoreDatabaseId}), mode: ${mode}, specificIds: ${specificIds ? Object.keys(specificIds).length : 'none'}`);
 
-      const collections = [
-        'genres', 'languages', 'qualities', 'content', 
-        'users', 'admin_settings', 'notifications', 
-        'notification_templates', 'orders', 'movie_requests', 
-        'reported_links', 'error_links', 'whitelisted_phones', 
-        'fcm_tokens', 'income'
-      ];
+      const collections = ['content'];
       const logs: string[] = [];
 
       for (const colName of collections) {
@@ -1024,6 +1015,10 @@ async function startServer() {
             const sourceIds = new Set(sourceSnap.docs.map(d => d.id));
             docsToSync = docsToSync.filter(d => !sourceIds.has(d.id));
           }
+        }
+        
+        if (onlyPublished && colName === 'content') {
+          docsToSync = docsToSync.filter(d => d.data().status === 'published');
         }
 
         if (docsToSync.length === 0) continue;
