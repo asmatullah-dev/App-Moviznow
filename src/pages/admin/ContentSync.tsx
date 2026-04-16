@@ -37,7 +37,6 @@ export default function ContentSync() {
   const [isPulling, setIsPulling] = useState(false);
   const [isComparing, setIsComparing] = useState(false);
   const [syncMode, setSyncMode] = useState<'all' | 'changed' | 'missing'>('all');
-  const [onlyPublished, setOnlyPublished] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [comparison, setComparison] = useState<ComparisonResult | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -136,8 +135,7 @@ export default function ContentSync() {
         body: JSON.stringify({ 
           sourceKey,
           targetKey: t.key,
-          targetDbId: t.databaseId,
-          onlyPublished
+          targetDbId: t.databaseId
         })
       });
 
@@ -173,8 +171,7 @@ export default function ContentSync() {
           targetKey: t?.key,
           targetDbId: t?.databaseId,
           mode: syncMode,
-          specificIds,
-          onlyPublished
+          specificIds
         })
       });
       console.log("Push response status:", res.status);
@@ -213,8 +210,7 @@ export default function ContentSync() {
           targetKey: t?.key,
           targetDbId: t?.databaseId,
           specificIds,
-          mode: syncMode,
-          onlyPublished
+          mode: syncMode
         })
       });
       console.log("Pull response status:", res.status);
@@ -572,52 +568,40 @@ export default function ContentSync() {
                 <RefreshCw className="w-5 h-5 text-emerald-500" />
                 Sync Options
               </div>
-              <div className="flex flex-col gap-4">
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() => setSyncMode('all')}
-                    className={clsx(
-                      "px-4 py-2 rounded-xl border-2 transition-all text-xs font-bold",
-                      syncMode === 'all' 
-                        ? "border-emerald-500 bg-emerald-500 text-white" 
-                        : "border-zinc-100 dark:border-zinc-800 text-zinc-500 hover:border-zinc-200 dark:hover:border-zinc-700"
-                    )}
-                  >
-                    Full Sync
-                  </button>
-                  <button
-                    onClick={() => setSyncMode('changed')}
-                    className={clsx(
-                      "px-4 py-2 rounded-xl border-2 transition-all text-xs font-bold",
-                      syncMode === 'changed' 
-                        ? "border-emerald-500 bg-emerald-500 text-white" 
-                        : "border-zinc-100 dark:border-zinc-800 text-zinc-500 hover:border-zinc-200 dark:hover:border-zinc-700"
-                    )}
-                  >
-                    Smart Sync
-                  </button>
-                  <button
-                    onClick={() => setSyncMode('missing')}
-                    className={clsx(
-                      "px-4 py-2 rounded-xl border-2 transition-all text-xs font-bold",
-                      syncMode === 'missing' 
-                        ? "border-emerald-500 bg-emerald-500 text-white" 
-                        : "border-zinc-100 dark:border-zinc-800 text-zinc-500 hover:border-zinc-200 dark:hover:border-zinc-700"
-                    )}
-                  >
-                    Missing Only
-                  </button>
-                </div>
-                
-                <label className="flex items-center gap-3 p-3 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors w-fit">
-                  <input
-                    type="checkbox"
-                    checked={onlyPublished}
-                    onChange={(e) => setOnlyPublished(e.target.checked)}
-                    className="w-4 h-4 rounded border-zinc-300 text-emerald-500 focus:ring-emerald-500"
-                  />
-                  <span className="text-sm font-bold text-zinc-700 dark:text-zinc-300">Target Published Content Only</span>
-                </label>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => setSyncMode('all')}
+                  className={clsx(
+                    "px-4 py-2 rounded-xl border-2 transition-all text-xs font-bold",
+                    syncMode === 'all' 
+                      ? "border-emerald-500 bg-emerald-500 text-white" 
+                      : "border-zinc-100 dark:border-zinc-800 text-zinc-500 hover:border-zinc-200 dark:hover:border-zinc-700"
+                  )}
+                >
+                  Full Sync
+                </button>
+                <button
+                  onClick={() => setSyncMode('changed')}
+                  className={clsx(
+                    "px-4 py-2 rounded-xl border-2 transition-all text-xs font-bold",
+                    syncMode === 'changed' 
+                      ? "border-emerald-500 bg-emerald-500 text-white" 
+                      : "border-zinc-100 dark:border-zinc-800 text-zinc-500 hover:border-zinc-200 dark:hover:border-zinc-700"
+                  )}
+                >
+                  Smart Sync
+                </button>
+                <button
+                  onClick={() => setSyncMode('missing')}
+                  className={clsx(
+                    "px-4 py-2 rounded-xl border-2 transition-all text-xs font-bold",
+                    syncMode === 'missing' 
+                      ? "border-emerald-500 bg-emerald-500 text-white" 
+                      : "border-zinc-100 dark:border-zinc-800 text-zinc-500 hover:border-zinc-200 dark:hover:border-zinc-700"
+                  )}
+                >
+                  Missing Only
+                </button>
               </div>
             </div>
 
