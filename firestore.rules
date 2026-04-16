@@ -1,0 +1,266 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+           (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'owner')) ||
+          (('email' in request.auth.token) && request.auth.token.email == "asmatn628@gmail.com" && request.auth.token.email_verified == true) ||
+          (('email' in request.auth.token) && request.auth.token.email == "asmatullah9327@gmail.com" && request.auth.token.email_verified == true) ||
+          (('email' in request.auth.token) && request.auth.token.email == "kabirahmaddev@gmail.com" && request.auth.token.email_verified == true) ||
+          (('email' in request.auth.token) && request.auth.token.email == "wamoviesstation@gmail.com" && request.auth.token.email_verified == true) ||
+          (request.auth.uid == "fbG4L3d6gMPVcCcDwWUqbAEGs7E2")
+        );
+    }
+
+    function isContentManager() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'content_manager';
+    }
+
+    function isUserManager() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'user_manager';
+    }
+
+    function isManager() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'manager';
+    }
+
+    function isAdminOrEditor() {
+      return isAdmin() || isContentManager() || isManager();
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    function isValidUser(data) {
+      return data.get('email', '') is string && data.get('email', '').size() < 100 &&
+             data.get('phone', '') is string && data.get('phone', '').size() < 20 &&
+             data.get('displayName', '') is string && data.get('displayName', '').size() < 100 &&
+             data.role in ['admin', 'owner', 'manager', 'user_manager', 'content_manager', 'user', 'trial', 'selected_content'] &&
+             data.status in ['active', 'pending', 'suspended', 'expired'];
+    }
+
+    function protectedUserFieldsUnchanged() {
+      return request.resource.data.role == resource.data.role &&
+             request.resource.data.status == resource.data.status &&
+             request.resource.data.get('expiryDate', '') == resource.data.get('expiryDate', '') &&
+             request.resource.data.get('managedBy', '') == resource.data.get('managedBy', '') &&
+             request.resource.data.get('permissions', []) == resource.data.get('permissions', []) &&
+             request.resource.data.get('assignedContent', []) == resource.data.get('assignedContent', []);
+    }
+
+    function isPendingOwner(userId, resourceData) {
+      return isAuthenticated() && 
+             userId.startsWith('pending_') && 
+             (
+               (resourceData.email != null && ('email' in request.auth.token) && resourceData.email == request.auth.token.email) || 
+               (resourceData.phone != null && ('phone_number' in request.auth.token) && resourceData.phone == request.auth.token.phone_number) ||
+               (('email' in request.auth.token) && resourceData.phone != null && request.auth.token.email.replace('@moviznow.com', '') == resourceData.phone.replace('+', ''))
+             );
+    }
+
+    function isTrialActivation(userId) {
+      return isOwner(userId) &&
+             resource.data.role == 'user' &&
+             resource.data.status == 'pending' &&
+             request.resource.data.role == 'trial' &&
+             request.resource.data.status == 'active' &&
+             request.resource.data.get('expiryDate', '') != '' &&
+             request.resource.data.get('managedBy', '') == resource.data.get('managedBy', '') &&
+             request.resource.data.get('permissions', []) == resource.data.get('permissions', []) &&
+             request.resource.data.get('assignedContent', []) == resource.data.get('assignedContent', []);
+    }
+
+    match /users/{userId} {
+      // Protect PII: Only owner and authorized staff can read full profiles by ID
+      allow get: if isOwner(userId) || isAdminOrEditor() || isUserManager();
+      
+      // Protect against bulk scraping: 
+      // 1. Admins and Managers can query freely
+      // 2. Others (including unauthenticated) can only perform limited queries (max 5 results)
+      //    This is specifically to support the login/signup flow (finding dummy emails by phone).
+      allow list: if isAdminOrEditor() || isUserManager() || request.query.limit <= 5;
+
+      allow create: if (isAdmin() && isValidUser(request.resource.data)) ||
+                       (isOwner(userId) && request.resource.data.uid == request.auth.uid && request.resource.data.role == 'user' && isValidUser(request.resource.data)) || 
+                       (isOwner(userId) && request.resource.data.uid == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && 'managedBy' in request.resource.data && isValidUser(request.resource.data)) ||
+                       (isUserManager() && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended' && isValidUser(request.resource.data)) ||
+                       (isManager() && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended' && isValidUser(request.resource.data));
+      allow update: if (isAdmin() && isValidUser(request.resource.data)) || 
+                       (isOwner(userId) && protectedUserFieldsUnchanged() && isValidUser(request.resource.data)) ||
+                       (isTrialActivation(userId) && isValidUser(request.resource.data)) ||
+                       (isUserManager() && resource.data.managedBy == request.auth.uid && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended' && isValidUser(request.resource.data)) ||
+                       (isUserManager() && resource.data.status == 'pending' && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended' && isValidUser(request.resource.data)) ||
+                       (isManager() && resource.data.managedBy == request.auth.uid && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended' && isValidUser(request.resource.data)) ||
+                       (isManager() && resource.data.status == 'pending' && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended' && isValidUser(request.resource.data));
+      allow delete: if isAdmin() || isPendingOwner(userId, resource.data);
+    }
+
+    match /genres/{genreId} {
+      allow read: if true;
+      allow write: if isAdminOrEditor();
+    }
+
+    match /languages/{languageId} {
+      allow read: if true;
+      allow write: if isAdminOrEditor();
+    }
+
+    match /qualities/{qualityId} {
+      allow read: if true;
+      allow write: if isAdminOrEditor();
+    }
+
+    match /content/{contentId} {
+      // Allow read for all authenticated users, or for unauthenticated users if content is published
+      allow read: if isAuthenticated() || resource.data.status == 'published';
+      
+      // Allow admins/editors to create anything.
+      // Allow unauthenticated (other app) to create ONLY drafts with strict validation.
+      allow create: if isAdminOrEditor() || (
+        request.resource.data.status == 'draft' &&
+        request.resource.data.title is string && 
+        request.resource.data.title.size() > 0 && 
+        request.resource.data.title.size() < 200 &&
+        (request.resource.data.type == 'movie' || request.resource.data.type == 'series')
+      );
+      
+      // Allow admins/editors to update anything.
+      // Allow unauthenticated (other app) to update ONLY if it stays a draft.
+      allow update: if isAdminOrEditor() || (
+        resource.data.status == 'draft' && 
+        request.resource.data.status == 'draft' &&
+        (!('title' in request.resource.data) || (request.resource.data.title is string && request.resource.data.title.size() < 200))
+      );
+      
+      allow delete: if isAdminOrEditor();
+    }
+
+    match /metadata/{docId} {
+      allow read: if true;
+      allow write: if isAdminOrEditor();
+    }
+
+    match /analytics/{eventId} {
+      allow read: if isAdmin() || isManager() || (isUserManager() && get(/databases/$(database)/documents/users/$(resource.data.userId)).data.managedBy == request.auth.uid);
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    match /income/{incomeId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdminOrEditor();
+    }
+
+    match /notification_templates/{templateId} {
+      allow read, write: if isAdminOrEditor();
+    }
+
+    match /test/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    function isValidFCMToken(data) {
+      return data.token is string && data.token.size() > 0 &&
+             data.userId is string && data.userId.size() > 0 &&
+             data.updatedAt is string;
+    }
+
+    match /fcm_tokens/{tokenId} {
+      allow read: if isAdmin();
+      allow create: if (isAuthenticated() && isValidFCMToken(request.resource.data) && request.resource.data.userId == request.auth.uid) ||
+                       (!isAuthenticated() && isValidFCMToken(request.resource.data) && request.resource.data.userId == 'anonymous');
+      allow update: if (isAuthenticated() && isValidFCMToken(request.resource.data) && request.resource.data.userId == request.auth.uid && (resource.data.userId == request.auth.uid || resource.data.userId == 'anonymous')) ||
+                       (!isAuthenticated() && isValidFCMToken(request.resource.data) && request.resource.data.userId == 'anonymous' && resource.data.userId == 'anonymous');
+      allow delete: if isAdmin();
+    }
+
+    match /movie_requests/{requestId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && (
+        isAdmin() || 
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['requestedBy', 'requestCount']) &&
+         request.resource.data.requestedBy.size() == resource.data.requestedBy.size() + 1 &&
+         request.auth.uid in request.resource.data.requestedBy &&
+         !(request.auth.uid in resource.data.requestedBy))
+      );
+      allow delete: if isAdmin();
+    }
+
+    function isValidReport(data) {
+      return data.userId is string && data.userId.size() > 0 &&
+             data.userName is string &&
+             data.contentId is string &&
+             data.contentTitle is string &&
+             data.contentType in ['movie', 'series'] &&
+             data.linkId is string &&
+             data.linkName is string &&
+             data.linkUrl is string &&
+             data.status in ['pending', 'resolved'] &&
+             data.createdAt == request.time;
+    }
+
+    match /reported_links/{reportId} {
+      allow read: if isAdminOrEditor() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidReport(request.resource.data);
+      allow update, delete: if isAdminOrEditor();
+    }
+
+    match /orders/{orderId} {
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.userId || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAdmin() || 
+                       (isAuthenticated() && 
+                        request.auth.uid == resource.data.userId && 
+                        resource.data.status == 'pending' && 
+                        request.resource.data.status == 'cancelled' && 
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']));
+      allow delete: if isAdmin();
+    }
+
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isAuthenticated() && 
+                      exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+                      get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'owner';
+    }
+
+    match /whitelisted_phones/{phoneId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /admin_settings/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+  }
+}

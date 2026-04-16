@@ -1,0 +1,3462 @@
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useSearchParams, Link, useLocation, useNavigate } from 'react-router-dom';
+import { db } from '../../firebase';
+import { collection, addDoc, deleteDoc, doc, updateDoc, onSnapshot, writeBatch, getDocs } from 'firebase/firestore';
+import { useAuth } from '../../contexts/AuthContext';
+import { useContent } from '../../contexts/ContentContext';
+import { useUsers } from '../../contexts/UsersContext';
+import { Content, Genre, Language, Quality, QualityLinks, Season, Episode, LinkDef, Role, Trailer } from '../../types';
+import { motion, AnimatePresence } from 'framer-motion';
+import { clsx } from 'clsx';
+import { Plus, Edit2, Trash2, Share2, Film, Tv, X, Save, Upload, Search, Eye, EyeOff, ArrowUp, ArrowDown, Copy, ClipboardPaste, GripVertical, Bell, RefreshCw, ChevronDown, ChevronUp, User, Lock, Loader2 } from 'lucide-react';
+import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
+import ConfirmModal from '../../components/ConfirmModal';
+import AlertModal from '../../components/AlertModal';
+import { MediaModal, findTMDBByImdb, searchTMDBByTitle, fetchTMDBDetails, fetchSeriesSeasons, fetchIMDbRating } from '../../components/MediaModal';
+import { LinkCheckerModal } from '../../components/LinkCheckerModal';
+import { AdjustContentsModal } from '../../components/AdjustContentsModal';
+import ManageModal from '../../components/ManageModal';
+import { formatContentTitle, formatReleaseDate, formatRuntime, formatDateToMonthDDYYYY } from '../../utils/contentUtils';
+import { smartSearch } from '../../utils/searchUtils';
+import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
+import { generateTinyUrl } from '../../utils/tinyurl';
+import { useModalBehavior } from '../../hooks/useModalBehavior';
+import { useSettings } from '../../contexts/SettingsContext';
+
+interface QualityInputsProps {
+  links: QualityLinks;
+  onChange: (updater: QualityLinks | ((prev: QualityLinks) => QualityLinks)) => void;
+  droppableId: string;
+}
+
+const QualityInputs: React.FC<QualityInputsProps> = ({ links, onChange, droppableId }) => {
+  const safeLinks = links || [];
+  const handleUrlBlur = async (url: string, idx: number) => {
+    if (!url) return;
+    try {
+      const res = await fetch("/api/check-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.fileSize) {
+          let sizeInBytes = data.fileSize;
+          let size = 0;
+          let unit: 'MB' | 'GB' = 'MB';
+          
+          if (sizeInBytes >= 1000 * 1000 * 1000) {
+            size = sizeInBytes / (1000 * 1000 * 1000);
+            unit = 'GB';
+          } else {
+            size = sizeInBytes / (1000 * 1000);
+            unit = 'MB';
+          }
+          
+          onChange(prevLinks => {
+            const currentLinks = Array.isArray(prevLinks) ? prevLinks : [];
+            const newLinks = [...currentLinks];
+            if (newLinks[idx]) {
+              newLinks[idx] = {
+                ...newLinks[idx],
+                size: size.toFixed(2).replace(/\.00$/, ''),
+                unit: unit
+              };
+            }
+            return newLinks;
+          });
+        }
+      }
+    } catch (e) {
+      console.error("Failed to check link info", e);
+    }
+  };
+
+  const onDragEnd = (result: DropResult) => {
+    if (!result.destination) return;
+    const items = Array.from(links);
+    const [reorderedItem] = items.splice(result.source.index, 1);
+    items.splice(result.destination.index, 0, reorderedItem);
+    onChange(items);
+  };
+
+  return (
+    <DragDropContext onDragEnd={onDragEnd}>
+      <Droppable droppableId={droppableId}>
+        {(provided) => (
+          <div 
+            {...provided.droppableProps}
+            ref={provided.innerRef}
+            className="space-y-3"
+          >
+            {safeLinks.map((link, idx) => (
+              <Draggable key={link.id} draggableId={link.id} index={idx}>
+                {(provided, snapshot) => (
+                  <div 
+                    ref={provided.innerRef}
+                    {...provided.draggableProps}
+                    className={`flex flex-col gap-2 bg-zinc-50 dark:bg-zinc-900 p-3 rounded-xl border ${snapshot.isDragging ? 'border-emerald-500 shadow-lg shadow-emerald-500/20 z-50' : 'border-zinc-200 dark:border-zinc-800'} transition-all`}
+                  >
+                      {/* 1st line: Name field */}
+                      <div className="flex gap-2 items-center">
+                        <input
+                          type="text"
+                          placeholder="Name (e.g. 1080p, WEB-DL)"
+                          value={link.name}
+                          onChange={(e) => {
+                            onChange(prev => {
+                              const currentLinks = Array.isArray(prev) ? prev : [];
+                              const newLinks = [...currentLinks];
+                              newLinks[idx] = { ...newLinks[idx], name: e.target.value };
+                              return newLinks;
+                            });
+                          }}
+                          className={`${droppableId.startsWith('episode-links') ? 'w-45' : 'w-55'} bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-emerald-500`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onChange(prev => {
+                              const currentLinks = Array.isArray(prev) ? prev : [];
+                              return [...currentLinks, { id: Math.random().toString(36).substr(2, 9), name: '', url: '', size: '', unit: 'MB' }];
+                            });
+                          }}
+                          className="p-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 rounded-lg hover:bg-emerald-500/20 transition-colors"
+                          title="Add Link"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      {/* 2nd line: Size, Unit, Delete, Drag and drop */}
+                      <div className="flex gap-2 items-center">
+                        <div className="flex gap-2 items-center shrink-0">
+                          <input
+                            type="number"
+                            placeholder="Size"
+                            value={link.size}
+                            onChange={(e) => {
+                              onChange(prev => {
+                                const currentLinks = Array.isArray(prev) ? prev : [];
+                                const newLinks = [...currentLinks];
+                                newLinks[idx] = { ...newLinks[idx], size: e.target.value };
+                                return newLinks;
+                              });
+                            }}
+                            className="w-20 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-center focus:outline-none focus:border-emerald-500"
+                          />
+                          <div className="flex bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-0.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onChange(prev => {
+                                  const currentLinks = Array.isArray(prev) ? prev : [];
+                                  const newLinks = [...currentLinks];
+                                  newLinks[idx] = { ...newLinks[idx], unit: 'MB' };
+                                  return newLinks;
+                                });
+                              }}
+                              className={`px-2 py-1 rounded-md text-xs font-bold transition-all ${link.unit === 'MB' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'text-zinc-500 hover:text-zinc-600 dark:text-zinc-300'}`}
+                            >
+                              MB
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onChange(prev => {
+                                  const currentLinks = Array.isArray(prev) ? prev : [];
+                                  const newLinks = [...currentLinks];
+                                  newLinks[idx] = { ...newLinks[idx], unit: 'GB' };
+                                  return newLinks;
+                                });
+                              }}
+                              className={`px-2 py-1 rounded-md text-xs font-bold transition-all ${link.unit === 'GB' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'text-zinc-500 hover:text-zinc-600 dark:text-zinc-300'}`}
+                            >
+                              GB
+                            </button>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onChange(prev => {
+                              const currentLinks = Array.isArray(prev) ? prev : [];
+                              return currentLinks.filter((_, i) => i !== idx);
+                            });
+                          }}
+                          className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-colors shrink-0 ml-auto"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                        <div {...provided.dragHandleProps} className="text-zinc-600 hover:text-zinc-500 dark:text-zinc-400 cursor-grab active:cursor-grabbing p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-colors">
+                          <GripVertical className="w-4 h-4" />
+                        </div>
+                      </div>
+                    <div className="flex gap-2 items-center">
+                      <input
+                        type="text"
+                        placeholder="URL"
+                        value={link.url}
+                        onChange={(e) => {
+                          onChange(prev => {
+                            const currentLinks = Array.isArray(prev) ? prev : [];
+                            const newLinks = [...currentLinks];
+                            newLinks[idx] = { ...newLinks[idx], url: e.target.value };
+                            return newLinks;
+                          });
+                        }}
+                        onBlur={(e) => handleUrlBlur(e.target.value, idx)}
+                        className="flex-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                  </div>
+                )}
+              </Draggable>
+            ))}
+            {provided.placeholder}
+            {safeLinks.length === 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  onChange([{ id: Math.random().toString(36).substr(2, 9), name: '', url: '', size: '', unit: 'MB' }]);
+                }}
+                className="w-full py-3 border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-500 hover:text-emerald-500 hover:border-emerald-500 transition-all flex items-center justify-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                <span className="text-sm font-medium">
+                  Add {droppableId.startsWith('movie-links') ? 'Movie' : 
+                        droppableId.includes('zip') ? 'ZIP' : 
+                        droppableId.includes('mkv') ? 'MKV' : 
+                        droppableId.includes('episode') ? 'Episode' : ''} Link
+                </span>
+              </button>
+            )}
+          </div>
+        )}
+      </Droppable>
+    </DragDropContext>
+  );
+};
+
+export default function ContentManagement() {
+  const { profile, user } = useAuth();
+  const { users: allUsers } = useUsers();
+  const { settings } = useSettings();
+  const { contentList, genres, languages, qualities, loading: contextLoading, updateSearchIndex } = useContent();
+  const [loading, setLoading] = useState(true);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [alertConfig, setAlertConfig] = useState<{ isOpen: boolean; title: string; message: string }>({ isOpen: false, title: '', message: '' });
+  const [managers, setManagers] = useState<Record<string, string>>({});
+
+  // Form State
+  const [type, setType] = useState<'movie' | 'series'>('movie');
+  const [status, setStatus] = useState<'draft' | 'published' | 'selected_content'>('published');
+  const [title, setTitle] = useState('');
+  const [showTitleSuggestions, setShowTitleSuggestions] = useState(false);
+  const [description, setDescription] = useState('');
+  const [posterUrl, setPosterUrl] = useState('');
+  const [trailerUrl, setTrailerUrl] = useState('');
+  const [trailerTitle, setTrailerTitle] = useState('');
+  const [trailerYoutubeTitle, setTrailerYoutubeTitle] = useState('');
+  const [trailerSeasonNumber, setTrailerSeasonNumber] = useState<number | undefined>(undefined);
+  const [trailers, setTrailers] = useState<Trailer[]>([]);
+  const [sampleUrl, setSampleUrl] = useState('');
+  const [imdbLink, setImdbLink] = useState('');
+  const [imdbRating, setImdbRating] = useState('');
+  const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
+  const [selectedLanguages, setSelectedLanguages] = useState<string[]>([]);
+  const [selectedQuality, setSelectedQuality] = useState<string>('');
+  const [subtitles, setSubtitles] = useState(false);
+  const [cast, setCast] = useState('');
+  const [country, setCountry] = useState('');
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [releaseDate, setReleaseDate] = useState('');
+  const [runtime, setRuntime] = useState('');
+  const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
+  const [isCastExpanded, setIsCastExpanded] = useState(false);
+  const [isCountryExpanded, setIsCountryExpanded] = useState(false);
+  
+  // Movie specific
+  const [movieLinks, setMovieLinks] = useState<QualityLinks>([]);
+  
+  // Series specific
+  const [seasons, setSeasons] = useState<Season[]>([]);
+  const [expandedEpisodes, setExpandedEpisodes] = useState<Record<string, boolean>>({});
+ 
+  // Search States
+  const [searchTerm, setSearchTerm] = useState(() => sessionStorage.getItem('content_mgmt_search') || '');
+  const [filterType, setFilterType] = useState<'all' | 'movie' | 'series'>(() => (sessionStorage.getItem('content_mgmt_type') as any) || 'all');
+  const [filterGenre, setFilterGenre] = useState<string>(() => sessionStorage.getItem('content_mgmt_genre') || 'all');
+  const [filterLanguage, setFilterLanguage] = useState<string>(() => sessionStorage.getItem('content_mgmt_language') || 'all');
+  const [filterQuality, setFilterQuality] = useState<string>(() => sessionStorage.getItem('content_mgmt_quality') || 'all');
+  const [filterYear, setFilterYear] = useState<string>(() => sessionStorage.getItem('content_mgmt_year') || 'all');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'published' | 'draft' | 'selected_content'>(() => (sessionStorage.getItem('content_mgmt_status') as any) || 'all');
+  const [filterAddedBy, setFilterAddedBy] = useState<string>(() => sessionStorage.getItem('content_mgmt_added_by') || 'all');
+  const [filterSort, setFilterSort] = useState<'default' | 'newest' | 'oldest'>(() => (sessionStorage.getItem('content_mgmt_sort') as any) || 'default');
+  const [selectedContent, setSelectedContent] = useState<string[]>([]);
+
+  useEffect(() => {
+    sessionStorage.setItem('content_mgmt_search', searchTerm);
+    sessionStorage.setItem('content_mgmt_type', filterType);
+    sessionStorage.setItem('content_mgmt_genre', filterGenre);
+    sessionStorage.setItem('content_mgmt_language', filterLanguage);
+    sessionStorage.setItem('content_mgmt_quality', filterQuality);
+    sessionStorage.setItem('content_mgmt_year', filterYear);
+    sessionStorage.setItem('content_mgmt_status', filterStatus);
+    sessionStorage.setItem('content_mgmt_added_by', filterAddedBy);
+    sessionStorage.setItem('content_mgmt_sort', filterSort);
+  }, [searchTerm, filterType, filterGenre, filterLanguage, filterQuality, filterYear, filterStatus, filterAddedBy, filterSort]);
+
+  const [genreSearchTerm, setGenreSearchTerm] = useState('');
+  const [languageSearchTerm, setLanguageSearchTerm] = useState('');
+
+  const [isGenreDropdownOpen, setIsGenreDropdownOpen] = useState(false);
+  const [isLanguageDropdownOpen, setIsLanguageDropdownOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const [isMasterFetchModalOpen, setIsMasterFetchModalOpen] = useState(false);
+  const [isLinkCheckerOpen, setIsLinkCheckerOpen] = useState(false);
+  const [isAdjustContentsModalOpen, setIsAdjustContentsModalOpen] = useState(false);
+  const [manageModal, setManageModal] = useState<{ isOpen: boolean; type: 'genre' | 'language' | 'quality' | null }>({ isOpen: false, type: null });
+  const [fetchingPoster, setFetchingPoster] = useState(false);
+  const [isAutoFillModalOpen, setIsAutoFillModalOpen] = useState(false);
+  const [loadingShareId, setLoadingShareId] = useState<string | null>(null);
+  const [autoFillText, setAutoFillText] = useState('');
+  const [imdbSeasonsPopup, setImdbSeasonsPopup] = useState<{ isOpen: boolean; seasons: any[]; show: any; epData: any[] } | null>(null);
+  const [selectedImdbSeasons, setSelectedImdbSeasons] = useState<number[]>([]);
+  const [shareSeasonModal, setShareSeasonModal] = useState<{ isOpen: boolean; content: Content | null; seasons: Season[] }>({ isOpen: false, content: null, seasons: [] });
+  const [notificationModal, setNotificationModal] = useState<{ isOpen: boolean; content: Content | null; status: 'idle' | 'sending' | 'success' | 'error' }>({ isOpen: false, content: null, status: 'idle' });
+  const [shareAnywayConfig, setShareAnywayConfig] = useState<{ isOpen: boolean; content: Content | null }>({ isOpen: false, content: null });
+  const [selectedShareSeasons, setSelectedShareSeasons] = useState<number[]>([]);
+  const location = useLocation();
+
+  useModalBehavior(isModalOpen, () => setIsModalOpen(false));
+  useModalBehavior(imdbSeasonsPopup?.isOpen || false, () => setImdbSeasonsPopup(null));
+  useModalBehavior(shareSeasonModal.isOpen, () => setShareSeasonModal({ ...shareSeasonModal, isOpen: false }));
+  useModalBehavior(notificationModal.isOpen, () => setNotificationModal({ isOpen: false, content: null, status: 'idle' }));
+  useModalBehavior(shareAnywayConfig.isOpen, () => setShareAnywayConfig({ isOpen: false, content: null }));
+  useModalBehavior(isAutoFillModalOpen, () => setIsAutoFillModalOpen(false));
+  // isMasterFetchModalOpen, isLinkCheckerOpen, isAdjustContentsModalOpen, manageModal, alertConfig, deleteId 
+  // are handled internally by their respective components (MediaModal, LinkCheckerModal, etc.)
+
+  const prefilledDataApplied = useRef(false);
+
+  const titleSuggestions = useMemo(() => {
+    if (!title.trim() || title.length < 2) return [];
+    return smartSearch(contentList, title).filter(c => c.id !== editingId).slice(0, 5);
+  }, [title, contentList, editingId]);
+
+  useEffect(() => {
+    if (location.state?.prefilledData && !prefilledDataApplied.current && genres.length > 0) {
+      const data = location.state.prefilledData;
+      
+      // Reset form first
+      setEditingId(null);
+      setTitle('');
+      setDescription('');
+      setPosterUrl('');
+      setTrailerUrl('');
+      setImdbLink('');
+      setImdbRating('');
+      setYear(new Date().getFullYear());
+      setReleaseDate('');
+      setRuntime('');
+      setCast('');
+      setCountry('');
+      setType('movie');
+      setSelectedGenres([]);
+      setSeasons([]);
+      setMovieLinks([]);
+      
+      // Apply prefilled data using the standard apply function
+      applyFetchedData(data);
+      
+      setIsModalOpen(true);
+      prefilledDataApplied.current = true;
+      
+      // Clear state so it doesn't re-open on refresh, preserving history state for modals
+      // We use replaceState directly to preserve the modalId pushed by useModalBehavior
+      const currentState = window.history.state || {};
+      window.history.replaceState({ ...currentState, usr: {} }, document.title);
+    }
+  }, [location.state, genres]); // Added genres as dependency to ensure applyAIFetchedData can match genres
+
+  useEffect(() => {
+    setLoading(contextLoading);
+  }, [contextLoading]);
+
+  useEffect(() => {
+    const managersData: Record<string, string> = {};
+    allUsers.forEach(data => {
+      if (data.role === 'admin' || data.role === 'owner' || data.role === 'content_manager' || data.role === 'manager') {
+        managersData[data.uid] = data.displayName || data.email || 'Unknown';
+      }
+    });
+    setManagers(managersData);
+  }, [allUsers]);
+
+  useEffect(() => {
+    const mainElement = document.querySelector('main');
+    
+    const handleScroll = () => {
+      if (mainElement) {
+        sessionStorage.setItem('content_management_scroll_position', mainElement.scrollTop.toString());
+      }
+    };
+
+    if (mainElement) {
+      mainElement.addEventListener('scroll', handleScroll, { passive: true });
+    }
+
+    return () => {
+      if (mainElement) {
+        mainElement.removeEventListener('scroll', handleScroll);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!loading && contentList.length > 0) {
+      const mainElement = document.querySelector('main');
+      const savedPosition = sessionStorage.getItem('content_management_scroll_position');
+      if (savedPosition && mainElement) {
+        setTimeout(() => {
+          mainElement.scrollTop = parseInt(savedPosition, 10);
+        }, 100);
+      }
+    }
+  }, [loading, contentList.length]);
+
+  const clearFilters = () => {
+    setFilterType('all');
+    setFilterGenre('all');
+    setFilterLanguage('all');
+    setFilterQuality('all');
+    setFilterYear('all');
+    setFilterStatus('all');
+    setFilterAddedBy('all');
+    setFilterSort('newest');
+  };
+
+  useEffect(() => {
+    const fetchTitle = async (url: string, setter: (title: string) => void) => {
+      if (!url) return;
+      
+      let videoUrl = '';
+      if (url.includes('youtube.com/watch')) {
+        videoUrl = url;
+      } else if (url.includes('youtu.be/')) {
+        const videoId = url.split('youtu.be/')[1].split('?')[0];
+        videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+      }
+
+      if (videoUrl) {
+        try {
+          const res = await fetch(`https://www.youtube.com/oembed?url=${videoUrl}&format=json`);
+          const data = await res.json();
+          if (data && data.title) {
+            setter(data.title);
+          }
+        } catch (err) {
+          console.error("Error fetching YouTube title:", err);
+        }
+      }
+    };
+
+    // Main trailer
+    fetchTitle(trailerUrl, setTrailerYoutubeTitle);
+
+    // Additional trailers
+    trailers.forEach((trailer, idx) => {
+      if (trailer.url && !trailer.youtubeTitle) {
+        fetchTitle(trailer.url, (newTitle) => {
+          setTrailers(prev => {
+            const next = [...prev];
+            if (next[idx]) {
+              next[idx] = { ...next[idx], youtubeTitle: newTitle };
+            }
+            return next;
+          });
+        });
+      }
+    });
+  }, [trailerUrl, trailers]);
+
+  useEffect(() => {
+    const editId = searchParams.get('edit');
+    if (editId && contentList.length > 0) {
+      const content = contentList.find(c => c.id === editId);
+      if (content) {
+        const canEdit = profile?.role === 'admin' || profile?.role === 'owner' || content.status === 'draft';
+        if (canEdit) {
+          handleEdit(content);
+        }
+        // Clear the param so it doesn't reopen on refresh if we close it
+        setSearchParams({}, { replace: true });
+      }
+    }
+  }, [searchParams, contentList, profile]);
+
+  const resetForm = () => {
+    setType('movie');
+    setStatus('published');
+    setTitle('');
+    setDescription('');
+    setPosterUrl('');
+    setTrailerUrl('');
+    setTrailerTitle('');
+    setTrailerYoutubeTitle('');
+    setTrailerSeasonNumber(undefined);
+    setTrailers([]);
+    setSampleUrl('');
+    setImdbLink('');
+    setImdbRating('');
+    setSelectedGenres([]);
+    setSelectedLanguages([]);
+    setSelectedQuality('');
+    setSubtitles(false);
+    setCast('');
+    setCountry('');
+    setYear(new Date().getFullYear());
+    setReleaseDate('');
+    setRuntime('');
+    setMovieLinks([
+      { id: Math.random().toString(36).substr(2, 9), name: '480p', url: '', size: '', unit: 'MB' },
+      { id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'GB' },
+      { id: Math.random().toString(36).substr(2, 9), name: '1080p', url: '', size: '', unit: 'GB' }
+    ]);
+    setSeasons([]);
+    setEditingId(null);
+  };
+
+  const parseLinks = (linksStr: string | undefined): QualityLinks => {
+    if (!linksStr) return [];
+    try {
+      const parsed = JSON.parse(linksStr);
+      if (Array.isArray(parsed)) return parsed;
+      // Convert old format
+      if (typeof parsed === 'object') {
+        return Object.entries(parsed).map(([name, link]: [string, any]) => ({
+          id: Math.random().toString(36).substr(2, 9),
+          name,
+          url: link?.url || '',
+          size: link?.size || '',
+          unit: 'MB' as 'MB' | 'GB'
+        })).filter(l => l.url);
+      }
+    } catch (e) {
+      console.error("Error parsing links", e);
+    }
+    return [];
+  };
+
+  const handleEdit = (content: Content) => {
+    setType(content.type);
+    setStatus(content.status || 'published');
+    setTitle(content.title);
+    setDescription(content.description);
+    setPosterUrl(content.posterUrl);
+    setTrailerUrl(content.trailerUrl || '');
+    setTrailerTitle(content.trailerTitle || '');
+    setTrailerYoutubeTitle(content.trailerYoutubeTitle || '');
+    setTrailerSeasonNumber(content.trailerSeasonNumber);
+    setTrailers(content.trailers ? (Array.isArray(content.trailers) ? content.trailers : JSON.parse(content.trailers || '[]')) : []);
+    setSampleUrl(content.sampleUrl || '');
+    setImdbLink(content.imdbLink || '');
+    setImdbRating(content.imdbRating || '');
+    setSelectedGenres(content.genreIds || []);
+    setSelectedLanguages(content.languageIds || []);
+    setSelectedQuality(content.qualityId || '');
+    setSubtitles(content.subtitles || false);
+    setCast((content.cast || []).join(', '));
+    setCountry(content.country || '');
+    setYear(content.year);
+    setReleaseDate(content.releaseDate || '');
+    setRuntime(content.runtime || '');
+    
+    if (content.type === 'movie') {
+      setMovieLinks(parseLinks(content.movieLinks));
+    } else {
+      setMovieLinks([]);
+    }
+    
+    if (content.type === 'series' && content.seasons) {
+      try {
+        const parsedSeasons = Array.isArray(content.seasons) ? content.seasons : JSON.parse(content.seasons || '[]');
+        const normalizedSeasons = parsedSeasons.map((s: any) => ({
+          ...s,
+          zipLinks: parseLinks(JSON.stringify(s.zipLinks)),
+          episodes: s.episodes.map((ep: any) => ({
+            ...ep,
+            links: parseLinks(JSON.stringify(ep.links))
+          }))
+        }));
+        setSeasons(normalizedSeasons);
+      } catch (e) {
+        setSeasons([]);
+      }
+    } else {
+      setSeasons([]);
+    }
+    
+    setEditingId(content.id);
+    setIsModalOpen(true);
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 600;
+        const MAX_HEIGHT = 900;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        setPosterUrl(dataUrl);
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSaving(true);
+    try {
+      // Sort seasons and episodes before saving
+      const sortedSeasons = [...seasons].sort((a, b) => a.seasonNumber - b.seasonNumber).map(s => ({
+        ...s,
+        episodes: [...s.episodes].sort((a, b) => a.episodeNumber - b.episodeNumber)
+      }));
+
+      const data: Partial<Content> = {
+        type,
+        status: (profile?.role === 'content_manager' || profile?.role === 'manager') ? 'draft' : status,
+        title,
+        description,
+        posterUrl,
+        trailerUrl,
+        trailerTitle: trailerTitle || '',
+        trailerYoutubeTitle: trailerYoutubeTitle || '',
+        trailerSeasonNumber: trailerSeasonNumber || null,
+        trailers: JSON.stringify(trailers),
+        sampleUrl: sampleUrl || '',
+        imdbLink: imdbLink || '',
+        imdbRating: imdbRating || '',
+        genreIds: selectedGenres,
+        languageIds: selectedLanguages,
+        qualityId: selectedQuality,
+        subtitles: !!subtitles,
+        cast: cast.split(',').map(c => c.trim()).filter(Boolean),
+        country: country || '',
+        year: Number(year) || new Date().getFullYear(),
+        releaseDate: releaseDate || '',
+        runtime: runtime || '',
+        updatedAt: new Date().toISOString(),
+      };
+
+      if (type === 'movie') {
+        data.movieLinks = JSON.stringify(movieLinks);
+        data.seasons = JSON.stringify([]);
+      } else {
+        data.seasons = JSON.stringify(sortedSeasons);
+        data.movieLinks = JSON.stringify([]);
+      }
+
+      const currentEditingId = editingId;
+
+      if (currentEditingId) {
+        await updateDoc(doc(db, 'content', currentEditingId), data);
+      } else {
+        data.createdAt = new Date().toISOString();
+        data.addedBy = user?.uid;
+        data.addedByRole = profile?.role;
+        await addDoc(collection(db, 'content'), data);
+      }
+      
+      // Trigger search index update
+      updateSearchIndex();
+      
+      setIsModalOpen(false);
+      resetForm();
+    } catch (error) {
+      console.error('Error saving content:', error);
+      setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to save content' });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const processImdbSeasons = (epData: any[], selectedSeasons?: number[]) => {
+    const seasonsMap = new Map<number, any[]>();
+    epData.forEach((ep: any) => {
+      if (selectedSeasons && !selectedSeasons.includes(ep.season)) return;
+      if (!seasonsMap.has(ep.season)) seasonsMap.set(ep.season, []);
+      seasonsMap.get(ep.season)!.push(ep);
+    });
+    
+    setSeasons(prevSeasons => {
+      const newSeasons = prevSeasons.map(s => ({ ...s, episodes: [...s.episodes] }));
+      seasonsMap.forEach((eps, seasonNum) => {
+        let seasonIndex = newSeasons.findIndex(s => s.seasonNumber === seasonNum);
+        if (seasonIndex === -1) {
+          newSeasons.push({
+            id: Math.random().toString(36).substr(2, 9),
+            seasonNumber: seasonNum,
+            year: undefined,
+            episodes: [],
+            zipLinks: [
+              { id: Math.random().toString(36).substr(2, 9), name: '480p', url: '', size: '', unit: 'GB' },
+              { id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'GB' },
+              { id: Math.random().toString(36).substr(2, 9), name: '1080p', url: '', size: '', unit: 'GB' }
+            ],
+            mkvLinks: [
+              { id: Math.random().toString(36).substr(2, 9), name: '480p', url: '', size: '', unit: 'GB' },
+              { id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'GB' },
+              { id: Math.random().toString(36).substr(2, 9), name: '1080p', url: '', size: '', unit: 'GB' }
+            ]
+          });
+          seasonIndex = newSeasons.length - 1;
+        }
+        
+        const currentSeason = newSeasons[seasonIndex];
+        const newEpisodes = currentSeason.episodes;
+        
+        eps.forEach(ep => {
+          const epIndex = newEpisodes.findIndex(e => e.episodeNumber === ep.number);
+          if (epIndex === -1) {
+            newEpisodes.push({
+              id: Math.random().toString(36).substr(2, 9),
+              episodeNumber: ep.number,
+              title: ep.name,
+              links: [
+                { id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'MB' }
+              ]
+            });
+          } else {
+            newEpisodes[epIndex].title = ep.name;
+          }
+          
+          if (ep.number === 1 && ep.airdate) {
+              currentSeason.year = parseInt(ep.airdate.substring(0, 4));
+          } else if (!currentSeason.year && ep.airdate) {
+              currentSeason.year = parseInt(ep.airdate.substring(0, 4));
+          }
+        });
+        
+        currentSeason.episodes = newEpisodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
+      });
+      return newSeasons.sort((a, b) => a.seasonNumber - b.seasonNumber);
+    });
+  };
+
+  const handleAddLinksFromChecker = (
+    links: QualityLinks,
+    metadata?: {
+      languages: string[];
+      printQuality?: string;
+      subtitles?: boolean;
+      type?: "movie" | "series";
+      season?: number;
+      episode?: number;
+    }
+  ) => {
+    // Auto-select metadata if provided
+    let activeType: "movie" | "series" = type;
+    if (metadata) {
+      if (metadata.languages.length > 0) {
+        const matchedLangIds = languages
+          .filter(l => metadata.languages.includes(l.name))
+          .map(l => l.id);
+        
+        if (matchedLangIds.length > 0) {
+          setSelectedLanguages(prev => {
+            const combined = new Set([...prev, ...matchedLangIds]);
+            return Array.from(combined);
+          });
+        }
+      }
+
+      if (metadata.printQuality) {
+        const matchedQuality = qualities.find(q => q.name === metadata.printQuality);
+        if (matchedQuality) {
+          setSelectedQuality(matchedQuality.id);
+        }
+      }
+
+      if (typeof metadata.subtitles === "boolean") {
+        setSubtitles(metadata.subtitles);
+      }
+
+      if (metadata.type) {
+        setType(metadata.type);
+        activeType = metadata.type;
+      }
+    }
+
+    if (activeType === 'movie') {
+      setMovieLinks(prev => {
+        const currentLinks = [...prev];
+
+        const parseSizeInMB = (size: string, unit: string) => {
+          if (!size) return 0;
+          const num = parseFloat(size.replace(/,/g, '')) || 0;
+          const u = unit.toUpperCase();
+          if (u === 'GB') return num * 1000;
+          if (u === 'TB') return num * 1000 * 1000;
+          return num;
+        };
+
+        links.forEach(newLink => {
+          // Find an existing link with same name and empty URL
+          const emptyIdx = currentLinks.findIndex(l => l.name === newLink.name && (!l.url || !l.url.trim()));
+          if (emptyIdx !== -1) {
+            currentLinks[emptyIdx] = newLink;
+          } else {
+            currentLinks.push(newLink);
+          }
+        });
+
+        currentLinks.sort((a, b) => parseSizeInMB(a.size, a.unit) - parseSizeInMB(b.size, b.unit));
+        return currentLinks;
+      });
+      setAlertConfig({ isOpen: true, title: 'Success', message: `Added/Merged ${links.length} movie links.` });
+    } else {
+      // Series logic
+      const updatedSeasons = [...seasons];
+      
+      links.forEach(link => {
+        const targetSeason = link.season || metadata?.season || 1;
+        const targetEpisode = link.episode || metadata?.episode; // if undefined, it's a full season
+        
+        let seasonIdx = updatedSeasons.findIndex(s => s.seasonNumber === targetSeason);
+        if (seasonIdx === -1) {
+          const newSeason: Season = {
+            id: Math.random().toString(36).substr(2, 9),
+            seasonNumber: targetSeason,
+            zipLinks: [],
+            mkvLinks: [],
+            episodes: []
+          };
+          updatedSeasons.push(newSeason);
+          updatedSeasons.sort((a, b) => a.seasonNumber - b.seasonNumber);
+          seasonIdx = updatedSeasons.findIndex(s => s.seasonNumber === targetSeason);
+        }
+
+        if (targetEpisode === undefined || link.isFullSeasonMKV || link.isFullSeasonZIP) {
+          // Full season
+          const isZip = link.isFullSeasonZIP || link.url.toLowerCase().includes('.zip');
+          
+          const updatedSeason = { ...updatedSeasons[seasonIdx] };
+          const targetLinks = isZip ? [...updatedSeason.zipLinks] : [...(updatedSeason.mkvLinks || [])];
+          
+          // Merge logic: replace if name matches and URL is empty, otherwise add
+          // Special case for MKV Full Season: match "720p" if new is "720p HEVC"
+          const emptyIdx = targetLinks.findIndex(l => {
+            const isEmpty = !l.url || !l.url.trim();
+            if (!isEmpty) return false;
+            if (l.name === link.name) return true;
+            if (!isZip && link.name.endsWith(' HEVC') && l.name === link.name.replace(' HEVC', '')) return true;
+            return false;
+          });
+          if (emptyIdx !== -1) {
+            targetLinks[emptyIdx] = link;
+          } else {
+            targetLinks.push(link);
+          }
+
+          if (isZip) updatedSeason.zipLinks = targetLinks;
+          else updatedSeason.mkvLinks = targetLinks;
+          
+          updatedSeasons[seasonIdx] = updatedSeason;
+        } else {
+          // Episode logic
+          let epIdx = updatedSeasons[seasonIdx].episodes.findIndex(e => e.episodeNumber === targetEpisode);
+          if (epIdx === -1) {
+            const newEpisode: Episode = {
+              id: Math.random().toString(36).substr(2, 9),
+              episodeNumber: targetEpisode,
+              title: `Episode ${targetEpisode}`,
+              links: []
+            };
+            const updatedEpisodes = [...updatedSeasons[seasonIdx].episodes, newEpisode];
+            updatedEpisodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
+            
+            const updatedSeason = { ...updatedSeasons[seasonIdx], episodes: updatedEpisodes };
+            updatedSeasons[seasonIdx] = updatedSeason;
+            epIdx = updatedEpisodes.findIndex(e => e.episodeNumber === targetEpisode);
+          }
+
+          const updatedSeason = { ...updatedSeasons[seasonIdx] };
+          const updatedEpisodes = [...updatedSeason.episodes];
+          const updatedEpisode = { ...updatedEpisodes[epIdx] };
+          const targetLinks = [...updatedEpisode.links];
+          
+          // Merge logic: replace if name matches and URL is empty, otherwise add
+          const emptyIdx = targetLinks.findIndex(l => l.name === link.name && (!l.url || !l.url.trim()));
+          if (emptyIdx !== -1) {
+            targetLinks[emptyIdx] = link;
+          } else {
+            targetLinks.push(link);
+          }
+
+          updatedEpisode.links = targetLinks;
+          updatedEpisodes[epIdx] = updatedEpisode;
+          updatedSeason.episodes = updatedEpisodes;
+          updatedSeasons[seasonIdx] = updatedSeason;
+        }
+      });
+
+      const parseSizeInMB = (size: string, unit: string) => {
+        if (!size) return 0;
+        const num = parseFloat(size.replace(/,/g, '')) || 0;
+        const u = unit.toUpperCase();
+        if (u === 'GB') return num * 1000;
+        if (u === 'TB') return num * 1000 * 1000;
+        return num;
+      };
+
+      // Sort all links in all seasons and episodes
+      updatedSeasons.forEach(s => {
+        if (s.zipLinks) s.zipLinks.sort((a, b) => parseSizeInMB(a.size, a.unit) - parseSizeInMB(b.size, b.unit));
+        if (s.mkvLinks) s.mkvLinks.sort((a, b) => parseSizeInMB(a.size, a.unit) - parseSizeInMB(b.size, b.unit));
+        s.episodes.forEach(e => {
+          if (e.links) e.links.sort((a, b) => parseSizeInMB(a.size, a.unit) - parseSizeInMB(b.size, b.unit));
+        });
+      });
+      
+      setSeasons(updatedSeasons);
+      setAlertConfig({ isOpen: true, title: 'Success', message: `Added/Merged ${links.length} episode/season links.` });
+    }
+  };
+
+  const applyFetchedData = (data: any) => {
+    if (data.title) setTitle(data.title);
+    if (data.year) {
+      const parsedYear = parseInt(data.year.toString());
+      if (!isNaN(parsedYear)) setYear(parsedYear);
+    }
+    if (data.type) setType(data.type);
+    if (data.description) setDescription(data.description);
+    if (data.cast) setCast(data.cast);
+    if (data.country) setCountry(data.country);
+    if (data.releaseDate) setReleaseDate(data.releaseDate);
+    if (data.runtime) setRuntime(data.runtime);
+    if (data.imdbLink) setImdbLink(data.imdbLink);
+    if (data.imdbRating) setImdbRating(data.imdbRating);
+    if (data.subtitles !== undefined) setSubtitles(data.subtitles);
+    if (data.posterUrl) setPosterUrl(data.posterUrl);
+    if (data.trailerUrl) {
+      setTrailerUrl(data.trailerUrl);
+    }
+
+    if (data.genres && Array.isArray(data.genres)) {
+      const fetchedGenreNames = data.genres.map((g: string) => g.trim().toLowerCase());
+      const matchedGenreIds = genres.filter(g => {
+        const gName = g.name.toLowerCase();
+        return fetchedGenreNames.some((fetched: string) => 
+          fetched === gName || 
+          fetched.includes(gName) || 
+          gName.includes(fetched) ||
+          (fetched === 'history' && gName === 'historical') ||
+          (fetched === 'historical' && gName === 'history') ||
+          (fetched === 'sci-fi' && gName.includes('sci')) ||
+          (fetched === 'science fiction' && gName.includes('sci')) ||
+          (fetched === 'romance' && gName === 'romantic') ||
+          (fetched === 'romantic' && gName === 'romance') ||
+          (fetched === 'comedy' && gName === 'comic') ||
+          (fetched === 'comic' && gName === 'comedy')
+        );
+      }).map(g => g.id);
+      if (matchedGenreIds.length > 0) {
+        setSelectedGenres(prev => [...new Set([...prev, ...matchedGenreIds])]);
+      }
+    }
+
+    if (data.type === 'movie') {
+      // If movieLinks is empty, initialize with default links
+      setMovieLinks(prev => prev.length > 0 ? prev : [
+        { id: Math.random().toString(36).substr(2, 9), name: '480p', url: '', size: '', unit: 'MB' },
+        { id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'GB' },
+        { id: Math.random().toString(36).substr(2, 9), name: '1080p', url: '', size: '', unit: 'GB' }
+      ]);
+    } else {
+      setMovieLinks([]);
+    }
+    
+    if (data.type === 'series' && data.seasons && Array.isArray(data.seasons)) {
+      setSeasons(prevSeasons => {
+        const updatedSeasons = [...prevSeasons];
+        
+        data.seasons.forEach((fetchedSeason: any) => {
+          const existingSeasonIndex = updatedSeasons.findIndex(s => s.seasonNumber === fetchedSeason.seasonNumber);
+          
+          if (existingSeasonIndex !== -1) {
+            // Merge episodes
+            const existingSeason = updatedSeasons[existingSeasonIndex];
+            if (fetchedSeason.seasonYear) existingSeason.year = fetchedSeason.seasonYear;
+            if (fetchedSeason.title) existingSeason.title = fetchedSeason.title;
+            fetchedSeason.episodes.forEach((fetchedEp: any) => {
+              const existingEpIndex = existingSeason.episodes.findIndex(ep => ep.episodeNumber === fetchedEp.episodeNumber);
+              if (existingEpIndex !== -1) {
+                // Update title, description, duration, keep links
+                existingSeason.episodes[existingEpIndex] = {
+                  ...existingSeason.episodes[existingEpIndex],
+                  title: fetchedEp.title || existingSeason.episodes[existingEpIndex].title,
+                  description: fetchedEp.description || existingSeason.episodes[existingEpIndex].description,
+                  duration: fetchedEp.duration || existingSeason.episodes[existingEpIndex].duration,
+                };
+              } else {
+                // Add new episode with pre-filled 720p link
+                existingSeason.episodes.push({
+                  id: Math.random().toString(36).substr(2, 9),
+                  episodeNumber: fetchedEp.episodeNumber,
+                  title: fetchedEp.title || `Episode ${fetchedEp.episodeNumber}`,
+                  description: fetchedEp.description || '',
+                  duration: fetchedEp.duration || '',
+                  links: [{ id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'MB' }],
+                });
+              }
+            });
+            // Sort episodes
+            existingSeason.episodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
+          } else {
+            // Add new season with pre-filled links
+            updatedSeasons.push({
+              id: Math.random().toString(36).substr(2, 9),
+              seasonNumber: fetchedSeason.seasonNumber,
+              year: fetchedSeason.seasonYear,
+              title: fetchedSeason.title,
+              zipLinks: [
+                { id: Math.random().toString(36).substr(2, 9), name: '480p', url: '', size: '', unit: 'GB' },
+                { id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'GB' },
+                { id: Math.random().toString(36).substr(2, 9), name: '1080p', url: '', size: '', unit: 'GB' }
+              ],
+              mkvLinks: [
+                { id: Math.random().toString(36).substr(2, 9), name: '480p', url: '', size: '', unit: 'GB' },
+                { id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'GB' },
+                { id: Math.random().toString(36).substr(2, 9), name: '1080p', url: '', size: '', unit: 'GB' }
+              ],
+              episodes: fetchedSeason.episodes.map((ep: any) => ({
+                id: Math.random().toString(36).substr(2, 9),
+                episodeNumber: ep.episodeNumber,
+                title: ep.title || `Episode ${ep.episodeNumber}`,
+                description: ep.description || '',
+                duration: ep.duration || '',
+                links: [{ id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'MB' }],
+              })).sort((a: any, b: any) => a.episodeNumber - b.episodeNumber)
+            });
+          }
+        });
+        
+        return updatedSeasons.sort((a, b) => a.seasonNumber - b.seasonNumber);
+      });
+    }
+  };
+
+  const handleDelete = () => {
+    if (!deleteId) return;
+    const currentDeleteId = deleteId;
+    setDeleteId(null);
+    deleteDoc(doc(db, 'content', currentDeleteId)).catch(error => {
+      console.error('Error deleting content:', error);
+      setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to delete content' });
+    });
+  };
+
+  const getNotificationPreview = (content: Content | null) => {
+    if (!content) return { title: '', body: '' };
+    
+    let languageName = '';
+    if (content.languageIds && content.languageIds.length > 0) {
+      const langId = content.languageIds.length > 1 ? content.languageIds[1] : content.languageIds[0];
+      const lang = languages.find(l => l.id === langId);
+      if (lang) languageName = lang.name + ' ';
+    }
+
+    let genreNames = '';
+    if (content.genreIds && content.genreIds.length > 0) {
+      genreNames = content.genreIds
+        .map(id => genres.find(g => g.id === id)?.name)
+        .filter(Boolean)
+        .join(', ');
+    }
+
+    let qualityName = '';
+    if (content.qualityId) {
+      const quality = qualities.find(q => q.id === content.qualityId);
+      if (quality) qualityName = quality.name;
+    }
+
+    const contentType = content.type === 'movie' ? 'Movie' : 'Series';
+    const yearStr = content.year ? ` (${content.year})` : '';
+    
+    const title = `🎬 New ${languageName}${contentType} Added: ${content.title}${yearStr}`;
+    
+    let body = '';
+    if (genreNames) body += `${genreNames} ${contentType}`;
+    if (qualityName) body += `${body ? ' in ' : 'In '}${qualityName}`;
+    
+    if (!body) {
+       body = content.description.substring(0, 100) + (content.description.length > 100 ? '...' : '');
+    }
+
+    return { title, body };
+  };
+
+  const handleSendNotification = async () => {
+    if (!notificationModal.content) return;
+    
+    setNotificationModal(prev => ({ ...prev, status: 'sending' }));
+    
+    try {
+      const content = notificationModal.content;
+      const { title, body } = getNotificationPreview(content);
+      
+      const notification = {
+        title,
+        body,
+        contentId: content.id,
+        posterUrl: content.posterUrl,
+        type: content.type,
+        createdAt: new Date().toISOString(),
+        createdBy: 'admin' // In a real app, this would be the admin's UID
+      };
+
+      // Add to Firestore for in-app history
+      await addDoc(collection(db, 'notifications'), notification);
+      
+      // Send push notification via backend
+      await fetch('/api/notifications/send', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title,
+          body,
+          imageUrl: content.posterUrl,
+          url: `/movie/${content.id}`
+        })
+      });
+      
+      setNotificationModal(prev => ({ ...prev, status: 'success' }));
+      
+      // Close modal after 2 seconds on success
+      setTimeout(() => {
+        setNotificationModal({ isOpen: false, content: null, status: 'idle' });
+      }, 2000);
+      
+    } catch (error) {
+      console.error('Error sending notification:', error);
+      setNotificationModal(prev => ({ ...prev, status: 'error' }));
+    }
+  };
+
+  const getSizeInMB = (sizeStr: string, unit: string) => {
+    const size = parseFloat(sizeStr) || 0;
+    return unit === 'GB' ? size * 1000 : size;
+  };
+
+  const handleShare = async (content: Content) => {
+    const isMissingData = !content.runtime || !content.releaseDate || !content.genreIds || content.genreIds.length === 0;
+    
+    if (isMissingData) {
+      setLoadingShareId(content.id);
+      try {
+        let tmdbItem = null;
+        let type = content.type;
+        
+        if (content.imdbLink) {
+            const match = content.imdbLink.match(/tt\d+/);
+            if (match) {
+                const found = await findTMDBByImdb(match[0]);
+                if (found) {
+                    tmdbItem = found.item;
+                    type = found.type === 'tv' ? 'series' : 'movie';
+                }
+            }
+        }
+        
+        if (!tmdbItem) {
+            const results = await searchTMDBByTitle(content.title, content.year?.toString() || '');
+            if (results && results.length > 0) {
+                tmdbItem = results[0].item;
+                type = results[0].type === 'tv' ? 'series' : 'movie';
+            }
+        }
+        
+        if (tmdbItem) {
+            const tmdbType = type === 'series' ? 'tv' : 'movie';
+            const details = await fetchTMDBDetails(tmdbItem.id, tmdbType);
+            
+            const promises: Promise<any>[] = [];
+            let imdbPromiseIndex = -1;
+            let seasonsPromiseIndex = -1;
+
+            if (details.external_ids && details.external_ids.imdb_id) {
+                promises.push(fetchIMDbRating(details.external_ids.imdb_id));
+                imdbPromiseIndex = promises.length - 1;
+            }
+
+            let parsedSeasons: Season[] = [];
+            let needsDuration = false;
+            if (type === 'series') {
+                try {
+                    parsedSeasons = typeof content.seasons === 'string' ? JSON.parse(content.seasons || '[]') : (content.seasons || []);
+                    needsDuration = parsedSeasons.some(s => s.episodes?.some(e => !e.duration));
+                    if (needsDuration) {
+                        promises.push(fetchSeriesSeasons(tmdbItem.id));
+                        seasonsPromiseIndex = promises.length - 1;
+                    }
+                } catch (e) {
+                    console.error("Error parsing seasons for share:", e);
+                }
+            }
+
+            const results = await Promise.all(promises);
+            const imdbRatingData = imdbPromiseIndex !== -1 ? results[imdbPromiseIndex] : null;
+            const fetchedSeasons = seasonsPromiseIndex !== -1 ? results[seasonsPromiseIndex] : null;
+            
+            const updatedContent = {
+                ...content,
+                description: content.description || details.overview,
+                runtime: content.runtime || (details.runtime ? `${details.runtime} min` : (details.episode_run_time && details.episode_run_time.length > 0 ? `${details.episode_run_time[0]} min/episode` : '')),
+                releaseDate: content.releaseDate || details.release_date || details.first_air_date,
+                imdbRating: content.imdbRating || (imdbRatingData?.rating ? `${imdbRatingData.rating}/10` : ''),
+            };
+
+            if (updatedContent.type === 'series') {
+                try {
+                    if (needsDuration && fetchedSeasons) {
+                        parsedSeasons = parsedSeasons.map(s => {
+                            const fetchedSeason = fetchedSeasons.find((fs: any) => fs.season === s.seasonNumber);
+                            if (fetchedSeason) {
+                                return {
+                                    ...s,
+                                    episodes: s.episodes?.map(e => {
+                                        const fetchedEpisode = fetchedSeason.episodes.find((fe: any) => fe.episode_number === e.episodeNumber);
+                                        return {
+                                            ...e,
+                                            duration: e.duration || (fetchedEpisode?.runtime ? `${fetchedEpisode.runtime}m` : '')
+                                        };
+                                    })
+                                };
+                            }
+                            return s;
+                        });
+                        updatedContent.seasons = JSON.stringify(parsedSeasons);
+                    }
+
+                    if (parsedSeasons.length > 1) {
+                        setShareSeasonModal({ isOpen: true, content: updatedContent, seasons: parsedSeasons });
+                        setSelectedShareSeasons(parsedSeasons.map(s => s.seasonNumber));
+                        setLoadingShareId(null);
+                        return;
+                    }
+                } catch (e) {
+                    console.error("Error parsing/updating seasons for share:", e);
+                }
+            }
+            executeShare(updatedContent);
+        } else {
+            // Failed to find TMDB item, show share anyway option
+            setShareAnywayConfig({ isOpen: true, content });
+        }
+      } catch (error) {
+        console.error("Share Fetch Error:", error);
+        setShareAnywayConfig({ isOpen: true, content });
+      } finally {
+        setLoadingShareId(null);
+      }
+      return;
+    }
+
+    if (content.type === 'series' && content.seasons) {
+      try {
+        const parsedSeasons: Season[] = typeof content.seasons === 'string' ? JSON.parse(content.seasons || '[]') : content.seasons;
+        if (parsedSeasons.length > 1) {
+          setShareSeasonModal({ isOpen: true, content, seasons: parsedSeasons });
+          setSelectedShareSeasons(parsedSeasons.map(s => s.seasonNumber));
+          return;
+        }
+      } catch (e) {
+        console.error("Error parsing seasons for share:", e);
+        setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to parse content data.' });
+        return;
+      }
+    }
+    executeShare(content);
+  };
+
+  const formatRuntimeForShare = (runtimeStr?: string) => {
+    return formatRuntime(runtimeStr);
+  };
+
+  const formatReleaseDateForShare = (dateStr?: string) => {
+    return formatDateToMonthDDYYYY(dateStr);
+  };
+
+  const executeShare = async (content: Content, selectedSeasonNumbers?: number[]) => {
+    setLoadingShareId(content.id);
+    let text = `🎬 *${content.title}${content.year ? ` (${content.year})` : ''}*\n\n`;
+    
+    const contentGenres = genres.filter(g => content.genreIds?.includes(g.id)).map(g => g.name).join(', ');
+    if (contentGenres) text += `🎭 Genres: ${contentGenres}\n`;
+    
+    const contentLangs = languages.filter(l => content.languageIds?.includes(l.id)).map(l => l.name).join(', ');
+    if (contentLangs) text += `🗣️ Languages: ${contentLangs}\n`;
+
+    const contentQuality = qualities.find(q => q.id === content.qualityId)?.name;
+    if (contentQuality) text += `🖨️ Print Quality: ${contentQuality}\n`;
+    
+    if (content.runtime) text += `⏱️ Runtime: ${formatRuntimeForShare(content.runtime)}\n`;
+    if (content.releaseDate) text += `📅 Release: ${formatReleaseDateForShare(content.releaseDate)}\n`;
+    if (content.subtitles) text += `📝 Subtitles: Available\n`;
+    
+    if (content.sampleUrl) text += `📽️ Sample: ${content.sampleUrl}\n`;
+    text += `\n`;
+
+    let hasUpdates = false;
+    let updatedContent = { ...content };
+
+    const processLink = async (link: LinkDef) => {
+      if (!link.url) return link;
+      
+      // If the original URL is HTML, it's broken
+      if (link.url.toLowerCase().includes('<html')) {
+        return { ...link, url: '', tinyUrl: '' };
+      }
+
+      const isBadTinyUrl = link.tinyUrl && link.tinyUrl.toLowerCase().includes('<html');
+      
+      if (!link.url.includes('pixeldrain.com') && !link.url.includes('pixeldrain.dev') && !link.url.includes('pixeldrain.net') && (!link.tinyUrl || isBadTinyUrl)) {
+        const tinyUrl = await generateTinyUrl(link.url, true, settings?.supportNumber || '3363284466');
+        if (tinyUrl && tinyUrl !== link.url && !tinyUrl.toLowerCase().includes('<html')) {
+          hasUpdates = true;
+          return { ...link, tinyUrl };
+        } else if (isBadTinyUrl) {
+          // If we had a bad tinyUrl and couldn't generate a new one, clear it
+          hasUpdates = true;
+          return { ...link, tinyUrl: '' };
+        }
+      }
+      return link;
+    };
+
+    if (updatedContent.type === 'movie' && updatedContent.movieLinks) {
+      const links: QualityLinks = parseLinks(updatedContent.movieLinks);
+      
+      const processedLinks = await Promise.all(links.map(processLink));
+      for (let i = 0; i < links.length; i++) {
+        links[i] = processedLinks[i];
+      }
+
+      if (hasUpdates) {
+        updatedContent.movieLinks = JSON.stringify(links);
+      }
+
+      const sortedLinks = [...links].sort((a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit));
+      
+      const zipLinks = sortedLinks.filter(l => l.name.toLowerCase().includes('zip'));
+      const mkvLinks = sortedLinks.filter(l => l.name.toLowerCase().includes('mkv'));
+      const otherLinks = sortedLinks.filter(l => !l.name.toLowerCase().includes('zip') && !l.name.toLowerCase().includes('mkv'));
+
+      if (zipLinks.length > 0 || mkvLinks.length > 0 || otherLinks.length > 0) {
+        text += `📥 *Download Links:*\n`;
+      }
+
+      if (zipLinks.length > 0) {
+        text += `\n📦 *ZIP Files:*\n`;
+        zipLinks.forEach(l => { 
+          const finalUrl = l.tinyUrl || l.url;
+          if (finalUrl && !finalUrl.toLowerCase().includes('<html')) {
+            text += `▪️ ${l.name} (${l.size}${l.unit})\n${finalUrl}\n`; 
+          }
+        });
+      }
+      if (mkvLinks.length > 0) {
+        text += `\n🎞️ *MKV Files:*\n`;
+        mkvLinks.forEach(l => { 
+          const finalUrl = l.tinyUrl || l.url;
+          if (finalUrl && !finalUrl.toLowerCase().includes('<html')) {
+            text += `▪️ ${l.name} (${l.size}${l.unit})\n${finalUrl}\n`; 
+          }
+        });
+      }
+      if (otherLinks.length > 0) {
+        if (zipLinks.length > 0 || mkvLinks.length > 0) text += `\n📄 *Other Files:*\n`;
+        otherLinks.forEach(l => { 
+          const finalUrl = l.tinyUrl || l.url;
+          if (finalUrl && !finalUrl.toLowerCase().includes('<html')) {
+            text += `▪️ ${l.name} (${l.size}${l.unit})\n${finalUrl}\n`; 
+          }
+        });
+      }
+    } else if (updatedContent.type === 'series' && updatedContent.seasons) {
+      const parsedSeasons: Season[] = Array.isArray(updatedContent.seasons) ? updatedContent.seasons : JSON.parse(updatedContent.seasons || '[]');
+      const seasonsToShare = selectedSeasonNumbers 
+        ? parsedSeasons.filter(s => selectedSeasonNumbers.includes(s.seasonNumber))
+        : parsedSeasons;
+
+      const linkPromises: Promise<void>[] = [];
+
+      for (let s = 0; s < parsedSeasons.length; s++) {
+        const season = parsedSeasons[s];
+        
+        if (season.zipLinks) {
+          linkPromises.push((async () => {
+            const processed = await Promise.all(season.zipLinks!.map(processLink));
+            season.zipLinks = processed;
+          })());
+        }
+        if (season.mkvLinks) {
+          linkPromises.push((async () => {
+            const processed = await Promise.all(season.mkvLinks!.map(processLink));
+            season.mkvLinks = processed;
+          })());
+        }
+        if (season.episodes) {
+          for (let e = 0; e < season.episodes.length; e++) {
+            const ep = season.episodes[e];
+            if (ep.links) {
+              linkPromises.push((async () => {
+                const processed = await Promise.all(ep.links.map(processLink));
+                ep.links = processed;
+              })());
+            }
+          }
+        }
+      }
+
+      await Promise.all(linkPromises);
+
+      if (hasUpdates) {
+        updatedContent.seasons = JSON.stringify(parsedSeasons);
+      }
+
+      seasonsToShare.forEach(season => {
+        text += `\n📺 *Season ${season.seasonNumber}${season.year ? ` (${season.year})` : updatedContent.year ? ` (${updatedContent.year})` : ''}*\n`;
+        const zipLinks = parseLinks(JSON.stringify(season.zipLinks)).filter(l => l && l.url).sort((a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit));
+        const mkvLinks = parseLinks(JSON.stringify(season.mkvLinks || [])).filter(l => l && l.url).sort((a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit));
+        
+        if (zipLinks.length > 0) {
+          text += `📦 *Full Season ZIP:*\n`;
+          zipLinks.forEach((link) => {
+            const finalUrl = link.tinyUrl || link.url;
+            if (finalUrl && !finalUrl.toLowerCase().includes('<html')) {
+              text += `  ▪️ ${link.name} (${link.size}${link.unit})\n  ${finalUrl}\n`;
+            }
+          });
+        }
+        if (mkvLinks.length > 0) {
+          text += `\n🎞️ *Full Season MKV:*\n`;
+          mkvLinks.forEach((link) => {
+            const finalUrl = link.tinyUrl || link.url;
+            if (finalUrl && !finalUrl.toLowerCase().includes('<html')) {
+              text += `  ▪️ ${link.name} (${link.size}${link.unit})\n  ${finalUrl}\n`;
+            }
+          });
+        }
+        if (season.episodes && season.episodes.length > 0) {
+          const allEpLinks = season.episodes.flatMap(ep => parseLinks(JSON.stringify(ep.links)).filter(l => l && l.url));
+          const uniqueQualities = [...new Set(allEpLinks.map(l => l.name))];
+          const hasUniformQuality = uniqueQualities.length === 1 && 
+                                   allEpLinks.length === season.episodes.length &&
+                                   season.episodes.every(ep => parseLinks(JSON.stringify(ep.links)).filter(l => l && l.url).length === 1);
+
+          if (hasUniformQuality) {
+            text += `\n🎬 *Episodes (${uniqueQualities[0]}):*\n`;
+            season.episodes.forEach(ep => {
+              const link = parseLinks(JSON.stringify(ep.links)).find(l => l && l.url);
+              if (link) {
+                const finalUrl = link.tinyUrl || link.url;
+                if (finalUrl && !finalUrl.toLowerCase().includes('<html')) {
+                  text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ''} (${link.size}${link.unit})\n${finalUrl}\n`;
+                }
+              }
+            });
+          } else {
+            text += `\n🎬 *Episodes:*\n`;
+            season.episodes.forEach(ep => {
+              text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ''}\n`;
+              const epLinks = parseLinks(JSON.stringify(ep.links)).sort((a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit));
+              epLinks.forEach((link) => {
+                if (link && link.url) {
+                  const finalUrl = link.tinyUrl || link.url;
+                  if (finalUrl && !finalUrl.toLowerCase().includes('<html')) {
+                    text += `- ${link.name} (${link.size}${link.unit})\n${finalUrl}\n`;
+                  }
+                }
+              });
+            });
+          }
+        }
+      });
+    }
+
+    if (hasUpdates) {
+      try {
+        await updateDoc(doc(db, 'content', updatedContent.id), {
+          movieLinks: updatedContent.movieLinks,
+          seasons: updatedContent.seasons
+        });
+      } catch (error) {
+        console.error("Error saving tinyUrls to db:", error);
+      }
+    }
+
+    text += `\n🍿 Enjoy watching on ${settings?.headerText || 'MovizNow'}!\n`;
+    text += `📞 WhatsApp: 0${settings?.supportNumber || '3363284466'}`;
+    
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: updatedContent.title,
+          text: text,
+        });
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') {
+          // Fallback to clipboard
+          try {
+            await navigator.clipboard.writeText(text);
+            setAlertConfig({ isOpen: true, title: 'Success', message: 'Share content copied to clipboard! You can now paste it in WhatsApp.' });
+          } catch (clipErr) {
+            // Last resort: WhatsApp direct link
+            const encodedText = encodeURIComponent(text);
+            window.open(`https://wa.me/?text=${encodedText}`, '_blank');
+          }
+        }
+      }
+    } else {
+      // Fallback for browsers without navigator.share
+      try {
+        await navigator.clipboard.writeText(text);
+        setAlertConfig({ isOpen: true, title: 'Success', message: 'Share content copied to clipboard! You can now paste it in WhatsApp.' });
+      } catch (clipErr) {
+        const encodedText = encodeURIComponent(text);
+        window.open(`https://wa.me/?text=${encodedText}`, '_blank');
+      }
+    }
+    setLoadingShareId(null);
+  };
+
+  const handleCopyData = async (content: Content) => {
+    if (!content.posterUrl) {
+      setAlertConfig({ isOpen: true, title: 'Poster Required', message: 'Cannot copy data because poster URL is missing.' });
+      return;
+    }
+
+    let text = `🎬 *${content.title}${content.year ? ` (${content.year})` : ''}*\n\n`;
+    text += `Type: ${content.type.charAt(0).toUpperCase() + content.type.slice(1)}\n`;
+    
+    const contentGenres = genres.filter(g => content.genreIds?.includes(g.id)).map(g => g.name).join(', ');
+    if (contentGenres) text += `🎭 Genres: ${contentGenres}\n`;
+    
+    const contentLangs = languages.filter(l => content.languageIds?.includes(l.id)).map(l => l.name).join(', ');
+    if (contentLangs) text += `🗣️ Languages: ${contentLangs}\n`;
+
+    const contentQuality = qualities.find(q => q.id === content.qualityId)?.name;
+    if (contentQuality) text += `🖨️ Print Quality: ${contentQuality}\n`;
+
+    if (content.imdbLink) text += `⭐ IMDb: ${content.imdbLink}\n`;
+    if (content.trailerUrl) text += `🎥 Trailer: ${content.trailerUrl}\n`;
+    if (content.sampleUrl) text += `📽️ Sample: ${content.sampleUrl}\n`;
+    if (content.posterUrl) text += `🖼️ Poster: ${content.posterUrl}\n`;
+    if (content.cast && content.cast.length > 0) text += `👥 Cast: ${content.cast.join(', ')}\n`;
+    if (content.description) text += `📝 Description: ${content.description}\n\n`;
+
+    if (content.type === 'movie' && content.movieLinks) {
+      const links: QualityLinks = parseLinks(content.movieLinks);
+      text += `📥 *Download Links:*\n`;
+      links.forEach(l => {
+        if (l.url) text += `▪️ ${l.name} (${l.size}${l.unit}): ${l.url}\n`;
+      });
+    } else if (content.type === 'series' && content.seasons) {
+      try {
+        const parsedSeasons: Season[] = Array.isArray(content.seasons) ? content.seasons : JSON.parse(content.seasons || '[]');
+        parsedSeasons.forEach(season => {
+          text += `\n📺 *Season ${season.seasonNumber}${season.year ? ` (${season.year})` : content.year ? ` (${content.year})` : ''}*\n`;
+          const zipLinks = parseLinks(JSON.stringify(season.zipLinks));
+          const mkvLinks = parseLinks(JSON.stringify(season.mkvLinks || []));
+          
+          if (zipLinks.length > 0) {
+            text += `📦 *Full Season ZIP:*\n`;
+            zipLinks.forEach((link) => {
+              if (link && link.url) text += `  ▪️ ${link.name} (${link.size}${link.unit}): ${link.url}\n`;
+            });
+          }
+          if (mkvLinks.length > 0) {
+            text += `\n🎞️ *Full Season MKV:*\n`;
+            mkvLinks.forEach((link) => {
+              if (link && link.url) text += `  ▪️ ${link.name} (${link.size}${link.unit}): ${link.url}\n`;
+            });
+          }
+          if (season.episodes && season.episodes.length > 0) {
+            text += `\n🎬 *Episodes:*\n`;
+            season.episodes.forEach(ep => {
+              text += `  E${ep.episodeNumber}: ${ep.title}\n`;
+              const epLinks = parseLinks(JSON.stringify(ep.links));
+              epLinks.forEach((link) => {
+                if (link && link.url) text += `    - ${link.name} (${link.size}${link.unit}): ${link.url}\n`;
+              });
+            });
+          }
+        });
+      } catch (e) {
+        console.error("Error parsing seasons for copy:", e);
+        text += `\n⚠️ Error parsing season data.\n`;
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setAlertConfig({ isOpen: true, title: 'Success', message: 'All data copied to clipboard!' });
+    } catch (err) {
+      console.error('Error copying data:', err);
+      setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to copy data' });
+    }
+  };
+
+  const handleAutoFill = () => {
+    if (!autoFillText) return;
+
+    const lines = autoFillText.split('\n');
+    let newTitle = '';
+    let newYear = year;
+    let newType: 'movie' | 'series' = type;
+    let newDescription = '';
+    let newCast = '';
+    let newImdb = '';
+    let newTrailer = '';
+    let newSample = '';
+    let newPoster = '';
+    let newReleaseDate = '';
+    let newGenreIds: string[] = [];
+    let newLanguageIds: string[] = [];
+    let newQualityId = '';
+    let newMovieLinks: QualityLinks = [];
+    let newSeasons: Season[] = [];
+
+    const findGenreId = (name: string) => {
+      const fetched = name.toLowerCase();
+      return genres.find(g => {
+        const gName = g.name.toLowerCase();
+        return fetched === gName || 
+          fetched.includes(gName) || 
+          gName.includes(fetched) ||
+          (fetched === 'history' && gName === 'historical') ||
+          (fetched === 'historical' && gName === 'history') ||
+          (fetched === 'sci-fi' && gName.includes('sci')) ||
+          (fetched === 'science fiction' && gName.includes('sci'));
+      })?.id;
+    };
+    const findLanguageId = (name: string) => languages.find(l => l.name.toLowerCase() === name.toLowerCase())?.id;
+    const findQualityId = (name: string) => qualities.find(q => q.name.toLowerCase() === name.toLowerCase())?.id;
+
+    let currentSeason: Season | null = null;
+    let currentEpisode: Episode | null = null;
+    let linkSection: 'movie' | 'zip' | 'mkv' | 'episode' | null = null;
+
+    lines.forEach(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+
+      // Title and Year: 🎬 *Title (Year)* or Title (Year)
+      const titleYearMatch = trimmed.match(/🎬?\s*\*?([^(]+)\s*\((\d{4})\)\*?/);
+      if (titleYearMatch) {
+        newTitle = titleYearMatch[1].trim();
+        newYear = parseInt(titleYearMatch[2]);
+      }
+
+      // Type
+      if (trimmed.toLowerCase().includes('type: movie')) newType = 'movie';
+      if (trimmed.toLowerCase().includes('type: series')) newType = 'series';
+
+      // Genres
+      if (trimmed.includes('🎭 Genres:')) {
+        const genreNames = trimmed.split('🎭 Genres:')[1].split(',').map(s => s.trim());
+        newGenreIds = genreNames.map(findGenreId).filter(Boolean) as string[];
+      }
+
+      // Languages
+      if (trimmed.includes('🗣️ Languages:')) {
+        const langNames = trimmed.split('🗣️ Languages:')[1].split(',').map(s => s.trim());
+        newLanguageIds = langNames.map(findLanguageId).filter(Boolean) as string[];
+      }
+
+      // Quality
+      if (trimmed.includes('📺 Quality:')) {
+        const qName = trimmed.split('📺 Quality:')[1].trim();
+        newQualityId = findQualityId(qName) || '';
+      }
+
+      // IMDb
+      if (trimmed.includes('IMDb:')) {
+        const match = trimmed.match(/https?:\/\/[^\s]+/);
+        if (match) newImdb = match[0];
+      }
+
+      // Trailer
+      if (trimmed.includes('Trailer:')) {
+        const match = trimmed.match(/https?:\/\/[^\s]+/);
+        if (match) newTrailer = match[0];
+      }
+
+      // Sample
+      if (trimmed.includes('Sample:')) {
+        const match = trimmed.match(/https?:\/\/[^\s]+/);
+        if (match) newSample = match[0];
+      }
+
+      // Poster
+      if (trimmed.includes('Poster:')) {
+        const match = trimmed.match(/https?:\/\/[^\s]+/);
+        if (match) newPoster = match[0];
+      }
+
+      // Release Date
+      if (trimmed.includes('📅 Release:')) {
+        newReleaseDate = trimmed.split('📅 Release:')[1].trim();
+      } else if (trimmed.includes('Release Date:')) {
+        newReleaseDate = trimmed.split('Release Date:')[1].trim();
+      }
+
+      // Cast
+      if (trimmed.includes('👥 Cast:')) {
+        newCast = trimmed.split('👥 Cast:')[1].trim();
+      }
+
+      // Description
+      if (trimmed.includes('📝 Description:')) {
+        newDescription = trimmed.split('📝 Description:')[1].trim();
+      }
+
+      // Links Detection
+      if (trimmed.includes('Download Links:')) {
+        linkSection = 'movie';
+        newType = 'movie';
+      }
+      if (trimmed.includes('Full Season ZIP:')) {
+        linkSection = 'zip';
+        newType = 'series';
+        if (!currentSeason) {
+          currentSeason = {
+            id: Math.random().toString(36).substr(2, 9),
+            seasonNumber: 1,
+            zipLinks: [],
+            mkvLinks: [],
+            episodes: []
+          };
+          newSeasons.push(currentSeason);
+        }
+      }
+      if (trimmed.includes('Full Season MKV:')) {
+        linkSection = 'mkv';
+        newType = 'series';
+        if (!currentSeason) {
+          currentSeason = {
+            id: Math.random().toString(36).substr(2, 9),
+            seasonNumber: 1,
+            zipLinks: [],
+            mkvLinks: [],
+            episodes: []
+          };
+          newSeasons.push(currentSeason);
+        }
+      }
+      if (trimmed.includes('Episodes:')) {
+        linkSection = 'episode';
+        newType = 'series';
+        if (!currentSeason) {
+          currentSeason = {
+            id: Math.random().toString(36).substr(2, 9),
+            seasonNumber: 1,
+            zipLinks: [],
+            mkvLinks: [],
+            episodes: []
+          };
+          newSeasons.push(currentSeason);
+        }
+      }
+
+      // Season Detection: 📺 *Season X (Year)*
+      const seasonMatch = trimmed.match(/📺?\s*\*?Season\s*(\d+)/i);
+      if (seasonMatch) {
+        newType = 'series';
+        const sNum = parseInt(seasonMatch[1]);
+        currentSeason = {
+          id: Math.random().toString(36).substr(2, 9),
+          seasonNumber: sNum,
+          zipLinks: [],
+          mkvLinks: [],
+          episodes: []
+        };
+        newSeasons.push(currentSeason);
+      }
+
+      // Episode Detection: E1: Title or - E1: Title
+      const epMatch = trimmed.match(/E(\d+):\s*(.*)/i);
+      if (epMatch) {
+        if (!currentSeason) {
+          currentSeason = {
+            id: Math.random().toString(36).substr(2, 9),
+            seasonNumber: 1,
+            zipLinks: [],
+            mkvLinks: [],
+            episodes: []
+          };
+          newSeasons.push(currentSeason);
+        }
+        const epNum = parseInt(epMatch[1]);
+        currentEpisode = {
+          id: Math.random().toString(36).substr(2, 9),
+          episodeNumber: epNum,
+          title: epMatch[2].trim(),
+          links: []
+        };
+        currentSeason.episodes.push(currentEpisode);
+        linkSection = 'episode';
+      }
+
+      // Link Parsing
+      // Skip metadata lines that might contain URLs to avoid adding them as download links
+      if (trimmed.startsWith('IMDb:') || trimmed.startsWith('Trailer:') || trimmed.startsWith('Sample:') || trimmed.startsWith('Poster:')) {
+        return;
+      }
+
+      const urlMatch = trimmed.match(/(https?:\/\/[^\s]+)/);
+      if (urlMatch && linkSection) {
+        let url = urlMatch[1];
+        
+        // Auto-convert /api/file/ to /u/ and /api/list/ to /l/
+        if (url.includes('/api/file/')) {
+          url = url.replace('/api/file/', '/u/');
+        } else if (url.includes('/api/list/')) {
+          url = url.replace('/api/list/', '/l/');
+        }
+        
+        const sizeMatch = trimmed.match(/([\d.]+)\s*(MB|GB)/i);
+        const size = sizeMatch ? sizeMatch[1] : '';
+        const unit = sizeMatch ? sizeMatch[2].toUpperCase() as 'MB' | 'GB' : 'MB';
+        
+        let name = '';
+        if (sizeMatch) {
+          name = trimmed.substring(0, sizeMatch.index)
+            .replace(/^[▪️\-*•\s]+/, '')
+            .replace(/[\[\]():]/g, '')
+            .replace(/[\-*\s]+$/, '')
+            .trim();
+        } else {
+          name = trimmed.substring(0, urlMatch.index)
+            .replace(/^[▪️\-*•\s]+/, '')
+            .replace(/[\[\]():]/g, '')
+            .replace(/[\-*\s]+$/, '')
+            .trim();
+        }
+        
+        if (!name || name.toLowerCase() === 'download' || name.toLowerCase() === 'link') {
+          let count = 1;
+          if (linkSection === 'movie') count = newMovieLinks.length + 1;
+          else if (linkSection === 'zip' && currentSeason) count = currentSeason.zipLinks.length + 1;
+          else if (linkSection === 'mkv' && currentSeason) count = (currentSeason.mkvLinks?.length || 0) + 1;
+          else if (linkSection === 'episode' && currentEpisode) count = currentEpisode.links.length + 1;
+          name = `Link ${count}`;
+        }
+
+        // Skip if URL is actually HTML
+        if (url.toLowerCase().includes('<html')) {
+          return;
+        }
+
+        const link: LinkDef = {
+          id: Math.random().toString(36).substr(2, 9),
+          name,
+          size,
+          unit,
+          url
+        };
+
+        if (linkSection === 'movie') {
+          newMovieLinks.push(link);
+        } else if (linkSection === 'zip' && currentSeason) {
+          currentSeason.zipLinks.push(link);
+        } else if (linkSection === 'mkv' && currentSeason) {
+          if (!currentSeason.mkvLinks) currentSeason.mkvLinks = [];
+          currentSeason.mkvLinks.push(link);
+        } else if (linkSection === 'episode' && currentEpisode) {
+          currentEpisode.links.push(link);
+        }
+      }
+    });
+
+    if (newTitle) setTitle(newTitle);
+    if (newYear) setYear(newYear);
+    setType(newType);
+    if (newDescription) setDescription(newDescription);
+    if (newCast) setCast(newCast);
+    if (newImdb) setImdbLink(newImdb);
+    if (newTrailer) setTrailerUrl(newTrailer);
+    if (newSample) setSampleUrl(newSample);
+    if (newPoster) setPosterUrl(newPoster);
+    if (newReleaseDate) setReleaseDate(newReleaseDate);
+    if (newGenreIds.length > 0) setSelectedGenres(newGenreIds);
+    if (newLanguageIds.length > 0) setSelectedLanguages(newLanguageIds);
+    if (newQualityId) setSelectedQuality(newQualityId);
+    if (newMovieLinks.length > 0) setMovieLinks(newMovieLinks);
+    if (newSeasons.length > 0) setSeasons(newSeasons);
+
+    setIsAutoFillModalOpen(false);
+    setAutoFillText('');
+    setAlertConfig({ isOpen: true, title: 'Success', message: 'Data auto-filled successfully!' });
+  };
+
+
+  const uniqueYears = useMemo(() => {
+    const years = new Set(contentList.map(c => Number(c.year)).filter(y => y > 0 && !isNaN(y)));
+    return Array.from(years).sort((a, b) => b - a);
+  }, [contentList]);
+
+  const filteredContent = useMemo(() => {
+    let result = contentList;
+    
+    // Content Manager restriction: only see their own content
+    if (profile?.role === 'content_manager' || profile?.role === 'manager') {
+      result = result.filter(c => c.addedBy === user?.uid);
+    }
+
+    if (filterType !== 'all') {
+      result = result.filter(c => c.type === filterType);
+    }
+    if (filterGenre !== 'all') {
+      result = result.filter(c => c.genreIds?.includes(filterGenre));
+    }
+    if (filterLanguage !== 'all') {
+      result = result.filter(c => c.languageIds?.includes(filterLanguage));
+    }
+    if (filterQuality !== 'all') {
+      result = result.filter(c => c.qualityId === filterQuality);
+    }
+    if (filterYear !== 'all') {
+      result = result.filter(c => c.year === parseInt(filterYear));
+    }
+    if (filterStatus !== 'all') {
+      result = result.filter(c => (c.status || 'published') === filterStatus);
+    }
+    if (profile?.role === 'content_manager' || profile?.role === 'manager') {
+      result = result.filter(c => c.addedBy === user?.uid);
+    }
+
+    if (filterAddedBy !== 'all') {
+      result = result.filter(c => c.addedBy === filterAddedBy);
+    }
+    if (searchTerm) {
+      result = smartSearch(result, searchTerm);
+    }
+    
+    if (!searchTerm || filterSort === 'default') {
+      result.sort((a, b) => {
+        if (filterSort === 'default') {
+          if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
+          if (a.order === undefined && b.order !== undefined) return -1;
+          if (a.order !== undefined && b.order === undefined) return 1;
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        }
+        const timeA = new Date(a.createdAt).getTime();
+        const timeB = new Date(b.createdAt).getTime();
+        return filterSort === 'newest' ? timeB - timeA : timeA - timeB;
+      });
+    }
+    
+    return result;
+  }, [contentList, searchTerm, filterType, filterGenre, filterLanguage, filterQuality, filterYear, filterStatus, filterSort, filterAddedBy, profile, user]);
+
+  const filteredGenres = useMemo(() => {
+    if (!genreSearchTerm) return genres;
+    return smartSearch(genres, genreSearchTerm);
+  }, [genres, genreSearchTerm]);
+
+  const filteredLanguages = useMemo(() => {
+    if (!languageSearchTerm) return languages;
+    return smartSearch(languages, languageSearchTerm);
+  }, [languages, languageSearchTerm]);
+
+  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.checked) {
+      setSelectedContent(filteredContent.map(c => c.id));
+    } else {
+      setSelectedContent([]);
+    }
+  };
+
+  const handleSelectContent = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedContent(prev => 
+      prev.includes(id) ? prev.filter(cId => cId !== id) : [...prev, id]
+    );
+  };
+
+  const handleBulkStatusChange = async (status: 'published' | 'draft' | 'selected_content') => {
+    if (!window.confirm(`Are you sure you want to change the status of ${selectedContent.length} items to ${status}?`)) return;
+    
+    const currentSelected = [...selectedContent];
+    setSelectedContent([]);
+    
+    let batches = [writeBatch(db)];
+    let currentBatchIndex = 0;
+    let operationCount = 0;
+
+    currentSelected.forEach(id => {
+      const content = contentList.find(c => c.id === id);
+      if (content) {
+        // Prevent managers from modifying published content
+        if ((profile?.role === 'content_manager' || profile?.role === 'manager') && content.status === 'published') {
+          return;
+        }
+        const contentRef = doc(db, 'content', id);
+        
+        if (operationCount === 500) {
+          batches.push(writeBatch(db));
+          currentBatchIndex++;
+          operationCount = 0;
+        }
+        batches[currentBatchIndex].update(contentRef, { status });
+        operationCount++;
+      }
+    });
+
+    try {
+      await Promise.all(batches.map(b => b.commit()));
+    } catch (error) {
+      console.error('Error updating content:', error);
+      setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to update content' });
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (!window.confirm(`Are you sure you want to delete ${selectedContent.length} items? This action cannot be undone.`)) return;
+    
+    const currentSelected = [...selectedContent];
+    setSelectedContent([]);
+    
+    let batches = [writeBatch(db)];
+    let currentBatchIndex = 0;
+    let operationCount = 0;
+
+    currentSelected.forEach(id => {
+      const contentRef = doc(db, 'content', id);
+      
+      if (operationCount === 500) {
+        batches.push(writeBatch(db));
+        currentBatchIndex++;
+        operationCount = 0;
+      }
+      batches[currentBatchIndex].delete(contentRef);
+      operationCount++;
+    });
+
+    try {
+      await Promise.all(batches.map(b => b.commit()));
+    } catch (error) {
+      console.error('Error deleting content:', error);
+      setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to delete content' });
+    }
+  };
+
+  return (
+    <div className="p-4 md:p-8">
+      <div className="flex flex-col gap-4 mb-8">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl md:text-2xl font-bold whitespace-nowrap">Movies & Series</h1>
+            {(profile?.role === 'admin' || profile?.role === 'owner') && (
+              <button
+                onClick={() => setIsAdjustContentsModalOpen(true)}
+                className="flex items-center gap-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-3 py-1.5 rounded-lg transition-colors font-medium text-xs md:text-sm whitespace-nowrap"
+              >
+                <GripVertical className="w-3.5 h-3.5" />
+                Adjust Contents
+              </button>
+            )}
+          </div>
+          <div className="flex flex-col sm:flex-row gap-4">
+            <div className="relative w-full sm:w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-500" />
+              <input
+                type="text"
+                placeholder="Search content..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-10 pr-4 py-3 focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+            {selectedContent.length > 0 && (
+              <div className="flex items-center gap-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2">
+                <span className="text-sm text-zinc-500 dark:text-zinc-400">{selectedContent.length} selected</span>
+                <select
+                  onChange={(e) => {
+                    if (e.target.value === 'delete') {
+                      handleBulkDelete();
+                    } else if (e.target.value) {
+                      handleBulkStatusChange(e.target.value as any);
+                    }
+                    e.target.value = '';
+                  }}
+                  className="bg-transparent border-none text-sm focus:outline-none text-emerald-500 font-medium cursor-pointer"
+                >
+                  <option value="">Bulk Actions</option>
+                  {(profile?.role === 'admin' || profile?.role === 'owner') && (
+                    <>
+                      <option value="published">Publish</option>
+                      <option value="draft">Draft</option>
+                      <option value="selected_content">Selected Content Only</option>
+                      <option value="delete">Delete</option>
+                    </>
+                  )}
+                  {(profile?.role === 'content_manager' || profile?.role === 'manager') && (
+                    <option value="draft">Draft</option>
+                  )}
+                </select>
+              </div>
+            )}
+            <button
+              onClick={() => { resetForm(); setIsModalOpen(true); }}
+              className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-3 rounded-xl font-medium flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
+            >
+              <Plus className="w-5 h-5" />
+              Add Content
+            </button>
+          </div>
+        </div>
+        
+        <div className="flex flex-col gap-1 bg-zinc-50 dark:bg-zinc-900 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
+          {/* Line 1 */}
+          <div className="flex flex-row flex-nowrap gap-1">
+            <button onClick={clearFilters} className="flex-none bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-lg px-2 py-1 text-xs flex items-center gap-1">
+              <X className="w-3 h-3" />
+            </button>
+            <select value={filterType} onChange={(e) => setFilterType(e.target.value as any)} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500">
+              <option value="all">Types</option>
+              <option value="movie">Movies</option>
+              <option value="series">Series</option>
+            </select>
+            <select value={filterYear} onChange={(e) => setFilterYear(e.target.value)} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500">
+              <option value="all">Years</option>
+              {uniqueYears.map(y => <option key={y} value={y.toString()}>{y}</option>)}
+            </select>
+            <select value={filterSort} onChange={(e) => setFilterSort(e.target.value as any)} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500">
+              <option value="default">Default Order</option>
+              <option value="newest">Newest Added</option>
+              <option value="oldest">Oldest Added</option>
+            </select>
+          </div>
+          {/* Line 2 */}
+          <div className="flex flex-row flex-nowrap gap-1">
+            <select value={filterGenre} onChange={(e) => setFilterGenre(e.target.value)} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500">
+              <option value="all">Genres</option>
+              {genres.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+            </select>
+            <select value={filterLanguage} onChange={(e) => setFilterLanguage(e.target.value)} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500">
+              <option value="all">Languages</option>
+              {languages.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </select>
+            <select value={filterQuality} onChange={(e) => setFilterQuality(e.target.value)} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500">
+              <option value="all">Qualities</option>
+              {qualities.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+            </select>
+          </div>
+          {/* Line 3 */}
+          <div className="flex flex-row flex-nowrap gap-1">
+            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as any)} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500">
+              <option value="all">Status</option>
+              <option value="published">Published</option>
+              <option value="draft">Draft</option>
+            </select>
+            {(profile?.role === 'admin' || profile?.role === 'owner') && (
+              <select value={filterAddedBy} onChange={(e) => setFilterAddedBy(e.target.value)} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500">
+                <option value="all">Added By: All</option>
+                {Object.entries(managers).map(([id, name]) => (
+                  <option key={id} value={id}>{name}</option>
+                ))}
+              </select>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <input 
+            type="checkbox" 
+            checked={selectedContent.length === filteredContent.length && filteredContent.length > 0}
+            onChange={handleSelectAll}
+            className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-zinc-950"
+          />
+          <span className="text-sm text-zinc-500 dark:text-zinc-400">Select All</span>
+        </div>
+        <div className="text-sm text-zinc-500 dark:text-zinc-400">
+          {filteredContent.length} items found
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center items-center py-20">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-emerald-500"></div>
+        </div>
+      ) : filteredContent.length === 0 ? (
+        <div className="text-center py-20 text-zinc-500 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl">
+          <Film className="w-16 h-16 mx-auto mb-4 opacity-20" />
+          <p className="text-xl">No content found matching your filters.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-6">
+          {filteredContent.map((content) => (
+            <div key={content.id} className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden flex flex-col group relative">
+              <div className="absolute top-2 left-2 z-10">
+                <input 
+                  type="checkbox" 
+                  checked={selectedContent.includes(content.id)}
+                  onChange={(e) => {
+                    e.stopPropagation();
+                    handleSelectContent(content.id, e as any);
+                  }}
+                  className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-zinc-950"
+                />
+              </div>
+              <div className="relative aspect-[2/3]">
+                <Link to={`/movie/${content.id}`} className="block w-full h-full">
+                  <img src={content.posterUrl || 'https://picsum.photos/seed/movie/400/600'} alt={content.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                </Link>
+                <div className="absolute top-1 right-1 flex flex-col gap-1 items-end">
+                  <div className={clsx(
+                    "px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider text-white",
+                    content.type === 'movie' ? 'bg-blue-500/90' : 'bg-purple-500/90'
+                  )}>
+                    {content.type}
+                  </div>
+                  {content.status === 'draft' && (
+                    <div className="bg-yellow-500/90 text-black backdrop-blur-md px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                      <EyeOff className="w-3 h-3" />
+                      Draft
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="p-2 md:p-3 flex-1 flex flex-col">
+                <h3 className="font-bold text-sm md:text-base mb-0.5 line-clamp-1" title={content.title}>{content.title}</h3>
+                <p className="text-zinc-500 dark:text-zinc-400 text-xs mb-2">{content.year}</p>
+                
+                <div className="mt-auto flex items-center justify-between pt-2 border-t border-zinc-200 dark:border-zinc-800/50">
+                  <div className="flex gap-1">
+                    <button onClick={() => handleShare(content)} className="text-emerald-500 hover:text-emerald-400 p-1.5 transition-colors" title="Share to WhatsApp" disabled={loadingShareId === content.id}>
+                      {loadingShareId === content.id ? <RefreshCw className="w-4 h-4 md:w-5 md:h-5 animate-spin" /> : <Share2 className="w-4 h-4 md:w-5 md:h-5" />}
+                    </button>
+                    {(profile?.role === 'admin' || profile?.role === 'owner') && (
+                      <button onClick={() => setNotificationModal({ isOpen: true, content, status: 'idle' })} className="text-blue-500 hover:text-blue-400 p-1.5 transition-colors" title="Send Notification">
+                        <Bell className="w-4 h-4 md:w-5 md:h-5" />
+                      </button>
+                    )}
+                    {(profile?.role === 'admin' || profile?.role === 'owner') && (
+                      <button onClick={() => handleCopyData(content)} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-1.5 transition-colors" title="Copy Data">
+                        <Copy className="w-4 h-4 md:w-5 md:h-5" />
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex gap-1">
+                    {(profile?.role === 'admin' || profile?.role === 'owner' || content.status === 'draft') && (
+                      <button onClick={() => handleEdit(content)} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-1.5 transition-colors">
+                        <Edit2 className="w-4 h-4 md:w-5 md:h-5" />
+                      </button>
+                    )}
+                    {(profile?.role === 'admin' || profile?.role === 'owner') && (
+                      <button onClick={() => setDeleteId(content.id)} className="text-red-500 hover:text-red-400 p-1.5 transition-colors">
+                        <Trash2 className="w-4 h-4 md:w-5 md:h-5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <AnimatePresence>
+        {isModalOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+          >
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ duration: 0.2 }}
+              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-4xl my-8 flex flex-col max-h-[90vh] shadow-2xl"
+            >
+              <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between sticky top-0 bg-zinc-50 dark:bg-zinc-900 z-10 rounded-t-2xl">
+                <div className="flex items-center gap-2 sm:gap-4">
+                  <h2 className="text-lg sm:text-xl font-bold whitespace-nowrap">{editingId ? 'Edit Content' : 'Add Content'}</h2>
+                  <button
+                    type="button"
+                    onClick={() => setIsAutoFillModalOpen(true)}
+                    className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 px-2 sm:px-3 py-1.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 sm:gap-2 transition-colors border border-emerald-500/20 whitespace-nowrap"
+                  >
+                    <ClipboardPaste className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Auto-Fill from Text
+                  </button>
+                </div>
+                <button onClick={() => setIsModalOpen(false)} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-1 sm:p-2 ml-2 shrink-0 transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto p-4">
+                <form id="content-form" onSubmit={handleSave} className="space-y-4">
+                <div className="grid grid-cols-1 gap-4">
+                  
+                  {/* 1. Type+Status */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="flex gap-4">
+                      <div className="flex-1">
+                        <label className="block text-xs font-medium text-zinc-500 mb-1">Type</label>
+                        <div className="flex gap-2">
+                          <label className={clsx(
+                            "flex-1 flex items-center justify-center gap-1 p-1.5 rounded-lg border cursor-pointer transition-colors text-xs",
+                            type === 'movie' 
+                              ? 'bg-blue-500/10 border-blue-500 text-blue-500' 
+                              : 'bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400'
+                          )}>
+                            <input type="radio" name="type" value="movie" checked={type === 'movie'} onChange={() => setType('movie')} className="hidden" />
+                            <Film className="w-3.5 h-3.5" /> Movie
+                          </label>
+                          <label className={clsx(
+                            "flex-1 flex items-center justify-center gap-1 p-1.5 rounded-lg border cursor-pointer transition-colors text-xs",
+                            type === 'series' 
+                              ? 'bg-purple-500/10 border-purple-500 text-purple-500' 
+                              : 'bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400'
+                          )}>
+                            <input type="radio" name="type" value="series" checked={type === 'series'} onChange={() => setType('series')} className="hidden" />
+                            <Tv className="w-3.5 h-3.5" /> Series
+                          </label>
+                        </div>
+                      </div>
+                      <div className="flex-1">
+                        <label className="block text-xs font-medium text-zinc-500 mb-1">Status</label>
+                        <div className="flex gap-2">
+                          {(profile?.role === 'admin' || profile?.role === 'owner') && (
+                            <>
+                              <label className={`flex-1 flex items-center justify-center gap-1 p-1.5 rounded-lg border cursor-pointer transition-colors text-xs ${status === 'published' ? 'bg-emerald-500/10 border-emerald-500 text-emerald-500' : 'bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400'}`}>
+                                <input type="radio" name="status" value="published" checked={status === 'published'} onChange={() => setStatus('published')} className="hidden" />
+                                <Eye className="w-3.5 h-3.5" /> Pub
+                              </label>
+                              <label className={`flex-1 flex items-center justify-center gap-1 p-1.5 rounded-lg border cursor-pointer transition-colors text-xs ${status === 'draft' ? 'bg-yellow-500/10 border-yellow-500 text-yellow-500' : 'bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400'}`}>
+                                <input type="radio" name="status" value="draft" checked={status === 'draft'} onChange={() => setStatus('draft')} className="hidden" />
+                                <EyeOff className="w-3.5 h-3.5" /> Draft
+                              </label>
+                            </>
+                          )}
+                          {(profile?.role === 'content_manager' || profile?.role === 'manager') && (
+                            <label className={`flex-1 flex items-center justify-center gap-1 p-1.5 rounded-lg border cursor-pointer transition-colors text-xs bg-yellow-500/10 border-yellow-500 text-yellow-500`}>
+                              <EyeOff className="w-3.5 h-3.5" /> Draft
+                            </label>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* 2. Title */}
+                  <div className="relative">
+                    <label className="block text-xs font-medium text-zinc-500 mb-1">Title</label>
+                    <input 
+                      type="text" 
+                      value={title} 
+                      onChange={(e) => {
+                        setTitle(e.target.value);
+                        setShowTitleSuggestions(true);
+                      }} 
+                      onFocus={() => setShowTitleSuggestions(true)}
+                      onBlur={() => setTimeout(() => setShowTitleSuggestions(false), 200)}
+                      className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" 
+                    />
+                    {showTitleSuggestions && titleSuggestions.length > 0 && (
+                      <div className="absolute z-50 w-full mt-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg shadow-xl max-h-48 overflow-y-auto">
+                        <div className="p-2 text-xs text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-800">Similar content found:</div>
+                        {titleSuggestions.map(suggestion => (
+                          <div 
+                            key={suggestion.id} 
+                            className="px-3 py-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 cursor-pointer text-sm flex justify-between items-center"
+                            onClick={() => {
+                              setTitle(suggestion.title);
+                              setShowTitleSuggestions(false);
+                            }}
+                          >
+                            <span className="text-zinc-900 dark:text-zinc-200">{suggestion.title}</span>
+                            <span className="text-xs text-zinc-500 capitalize">{suggestion.type} • {suggestion.year}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* 3. Release Year+ Fetch +Master Fetch */}
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-500 mb-1">Release Year</label>
+                    <div className="flex gap-2">
+                      <input type="number" value={year || ''} onChange={(e) => setYear(parseInt(e.target.value) || new Date().getFullYear())} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-emerald-500" />
+                      <button type="button" onClick={() => setIsLinkCheckerOpen(true)} className="bg-emerald-500 hover:bg-emerald-600 text-white px-2 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-2 whitespace-nowrap" title="Add Links via Link Checker">
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        Add Links
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsMasterFetchModalOpen(true)}
+                        className="px-3 py-1.5 bg-black border border-cyan-500 text-white rounded-lg text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors flex items-center gap-1.5 whitespace-nowrap"
+                      >
+                        <Search className="w-3 h-3" />
+                        Master Fetch
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 4. Release date+Runtime */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-500 mb-1">Release Date</label>
+                      <input type="text" placeholder="DD-MM-YYYY" value={releaseDate} onChange={(e) => setReleaseDate(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-500 mb-1">Runtime</label>
+                      <input type="text" placeholder="e.g. 120 min" value={runtime} onChange={(e) => setRuntime(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" />
+                    </div>
+                  </div>
+
+                  {/* 5. Trailer Links */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-medium text-zinc-500">
+                        Trailers (YouTube)
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setTrailers(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), url: '', title: '' }])}
+                        className="p-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 rounded-lg hover:bg-emerald-500/20 transition-colors"
+                        title="Add Trailer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    
+                    {/* Trailer 1 (Main Trailer) */}
+                    <div className="space-y-2">
+                      <div className="flex flex-col">
+                        <label className="block text-[10px] font-medium text-zinc-400 uppercase tracking-wider">
+                          Trailer 1
+                        </label>
+                        {trailerYoutubeTitle && (
+                          <span className="text-[10px] text-emerald-600 break-words leading-tight">{trailerYoutubeTitle}</span>
+                        )}
+                      </div>
+                      <div className="flex flex-col gap-2 bg-zinc-50 dark:bg-zinc-900/50 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
+                        <input 
+                          type="text" 
+                          placeholder="Trailer Title (e.g. Season 1 Trailer, Teaser)"
+                          value={trailerTitle}
+                          onChange={(e) => setTrailerTitle(e.target.value)}
+                          className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" 
+                        />
+                        <input 
+                          type="url" 
+                          value={trailerUrl} 
+                          onChange={(e) => setTrailerUrl(e.target.value)} 
+                          placeholder="YouTube URL"
+                          className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" 
+                        />
+                        {type === 'series' && (
+                          <div className="flex items-center gap-2">
+                            <label className="text-[10px] text-zinc-500">Season (Optional):</label>
+                            <input 
+                              type="number" 
+                              placeholder="Season #"
+                              value={trailerSeasonNumber || ''}
+                              onChange={(e) => setTrailerSeasonNumber(parseInt(e.target.value) || undefined)}
+                              className="w-16 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-emerald-500" 
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Additional Trailers */}
+                    {trailers.map((trailer, idx) => (
+                      <div key={trailer.id} className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex flex-col">
+                            <label className="block text-[10px] font-medium text-zinc-400 uppercase tracking-wider">
+                              Trailer {idx + 2}
+                            </label>
+                            {trailer.youtubeTitle && (
+                              <span className="text-[10px] text-emerald-600 break-words leading-tight">{trailer.youtubeTitle}</span>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setTrailers(prev => prev.filter((_, i) => i !== idx))}
+                            className="p-1 text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <div className="flex flex-col gap-2 bg-zinc-50 dark:bg-zinc-900/50 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
+                          <input 
+                            type="text" 
+                            placeholder="Trailer Title (e.g. Season 1 Trailer, Teaser)"
+                            value={trailer.title}
+                            onChange={(e) => {
+                              const newTrailers = [...trailers];
+                              newTrailers[idx] = { ...newTrailers[idx], title: e.target.value };
+                              setTrailers(newTrailers);
+                            }}
+                            className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" 
+                          />
+                          <input 
+                            type="url" 
+                            placeholder="YouTube URL"
+                            value={trailer.url}
+                            onChange={(e) => {
+                              const newTrailers = [...trailers];
+                              newTrailers[idx] = { ...newTrailers[idx], url: e.target.value };
+                              setTrailers(newTrailers);
+                            }}
+                            className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" 
+                          />
+                          {type === 'series' && (
+                            <div className="flex items-center gap-2">
+                              <label className="text-[10px] text-zinc-500">Season (Optional):</label>
+                              <input 
+                                type="number" 
+                                placeholder="Season #"
+                                value={trailer.seasonNumber || ''}
+                                onChange={(e) => {
+                                  const newTrailers = [...trailers];
+                                  newTrailers[idx] = { ...newTrailers[idx], seasonNumber: parseInt(e.target.value) || undefined };
+                                  setTrailers(newTrailers);
+                                }}
+                                className="w-16 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-emerald-500" 
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* 6. IMDb Link + Rating */}
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-500 mb-1">IMDb Link & Rating (Optional)</label>
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <input 
+                          type="url" 
+                          value={imdbLink} 
+                          onChange={(e) => setImdbLink(e.target.value)} 
+                          className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" 
+                          placeholder="https://www.imdb.com/title/..." 
+                        />
+                      </div>
+                      <div className="w-24">
+                        <input 
+                          type="text" 
+                          value={imdbRating} 
+                          onChange={(e) => setImdbRating(e.target.value)} 
+                          className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-emerald-500" 
+                          placeholder="Rating" 
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 7. Poster link+Upload from gallery (remove auto fetch button) */}
+                  <div className="flex gap-4">
+                    <div className="flex-1">
+                      <label className="block text-xs font-medium text-zinc-500 mb-1">Poster (URL or Upload)</label>
+                      <div className="flex gap-2">
+                        <input type="text" placeholder="https://..." value={posterUrl} onChange={(e) => setPosterUrl(e.target.value)} className="flex-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" />
+                        <label className="flex items-center justify-center bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-3 py-1.5 rounded-lg cursor-pointer transition-colors">
+                          <Upload className="w-4 h-4" />
+                          <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                        </label>
+                      </div>
+                      {posterUrl && (
+                        <div className="mt-1 text-[10px] text-emerald-500 truncate">
+                          {posterUrl.startsWith('data:image') ? 'Image uploaded successfully' : 'Using image URL'}
+                        </div>
+                      )}
+                    </div>
+                    {posterUrl && (
+                      <div className="w-12 aspect-[2/3] rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 shrink-0">
+                        <img 
+                          src={posterUrl} 
+                          alt="Mini Poster" 
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = 'https://picsum.photos/seed/error/200/300';
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 8. Description+Cast+Country (with Arrows) */}
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="relative">
+                      <div 
+                        className="flex items-center justify-between bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1 cursor-pointer"
+                        onClick={() => setIsDescriptionExpanded(!isDescriptionExpanded)}
+                      >
+                        <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Description</span>
+                        {isDescriptionExpanded ? <ChevronUp className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" /> : <ChevronDown className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />}
+                      </div>
+                      {isDescriptionExpanded && (
+                        <div className="mt-1">
+                          <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" placeholder="Enter description..." />
+                        </div>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <div 
+                        className="flex items-center justify-between bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1 cursor-pointer"
+                        onClick={() => setIsCastExpanded(!isCastExpanded)}
+                      >
+                        <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Cast</span>
+                        {isCastExpanded ? <ChevronUp className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" /> : <ChevronDown className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />}
+                      </div>
+                      {isCastExpanded && (
+                        <div className="mt-1">
+                          <textarea rows={3} value={cast} onChange={(e) => setCast(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" placeholder="Enter cast (comma separated)..." />
+                        </div>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <div 
+                        className="flex items-center justify-between bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1 cursor-pointer"
+                        onClick={() => setIsCountryExpanded(!isCountryExpanded)}
+                      >
+                        <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Country</span>
+                        {isCountryExpanded ? <ChevronUp className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" /> : <ChevronDown className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />}
+                      </div>
+                      {isCountryExpanded && (
+                        <div className="mt-1">
+                          <textarea rows={3} value={country} onChange={(e) => setCountry(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" placeholder="Enter country (comma separated)..." />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 9. Genres */}
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-xs font-medium text-zinc-500">Genres</label>
+                      <button type="button" onClick={() => setManageModal({ isOpen: true, type: 'genre' })} className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-2 py-0.5 rounded hover:bg-zinc-300 dark:hover:bg-zinc-700">Manage</button>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {genres.map(g => {
+                        const isSelected = selectedGenres.includes(g.id);
+                        return (
+                          <button
+                            key={g.id}
+                            type="button"
+                            onClick={() => {
+                              if (isSelected) {
+                                setSelectedGenres(selectedGenres.filter(id => id !== g.id));
+                              } else {
+                                setSelectedGenres([...selectedGenres, g.id]);
+                              }
+                            }}
+                            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors border ${
+                              isSelected 
+                                ? 'bg-emerald-500/20 border-emerald-500 text-emerald-500'
+                                : 'bg-zinc-50 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:text-white'
+                            }`}
+                          >
+                            {g.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* 10. Languages */}
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-xs font-medium text-zinc-500">Languages</label>
+                      <button type="button" onClick={() => setManageModal({ isOpen: true, type: 'language' })} className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-2 py-0.5 rounded hover:bg-zinc-300 dark:hover:bg-zinc-700">Manage</button>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {languages.map(l => {
+                        const isSelected = selectedLanguages.includes(l.id);
+                        return (
+                          <button
+                            key={l.id}
+                            type="button"
+                            onClick={() => {
+                              if (isSelected) {
+                                setSelectedLanguages(selectedLanguages.filter(id => id !== l.id));
+                              } else {
+                                setSelectedLanguages([...selectedLanguages, l.id]);
+                              }
+                            }}
+                            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors border ${
+                              isSelected 
+                                ? 'bg-emerald-500/20 border-emerald-500 text-emerald-500'
+                                : 'bg-zinc-50 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:text-white'
+                            }`}
+                          >
+                            {l.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* 11. Print Quality */}
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-xs font-medium text-zinc-500">Print Quality</label>
+                      <button type="button" onClick={() => setManageModal({ isOpen: true, type: 'quality' })} className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-2 py-0.5 rounded hover:bg-zinc-300 dark:hover:bg-zinc-700">Manage</button>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {qualities.map(q => (
+                        <button
+                          key={q.id}
+                          type="button"
+                          onClick={() => setSelectedQuality(q.id)}
+                          className={`px-3 py-1 rounded-full text-xs font-medium transition-colors border ${
+                            selectedQuality === q.id
+                              ? 'bg-emerald-500/20 border-emerald-500 text-emerald-500'
+                              : 'bg-zinc-50 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:text-white'
+                          }`}
+                        >
+                          {q.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 11.5 Subtitles */}
+                  <div className="flex items-center gap-4">
+                    <label className="text-xs font-medium text-zinc-500 whitespace-nowrap">Subtitles</label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSubtitles(true)}
+                        className={`px-4 py-1 rounded-full text-xs font-medium transition-colors border ${
+                          subtitles
+                            ? 'bg-emerald-500/20 border-emerald-500 text-emerald-500'
+                            : 'bg-zinc-50 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:text-white'
+                        }`}
+                      >
+                        Yes
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSubtitles(false)}
+                        className={`px-4 py-1 rounded-full text-xs font-medium transition-colors border ${
+                          !subtitles
+                            ? 'bg-emerald-500/20 border-emerald-500 text-emerald-500'
+                            : 'bg-zinc-50 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:text-white'
+                        }`}
+                      >
+                        No
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 12. Sample link */}
+                  <div>
+                    <input type="url" value={sampleUrl} onChange={(e) => setSampleUrl(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" placeholder="Sample Video file" />
+                  </div>
+
+                </div>
+
+                <hr className="border-zinc-200 dark:border-zinc-800 my-4" />
+
+                {type === 'movie' ? (
+                  <div>
+                    <h3 className="text-lg font-bold mb-4">Movie Links</h3>
+                    <QualityInputs links={movieLinks} onChange={setMovieLinks} droppableId="movie-links" />
+                  </div>
+                ) : (
+                  <div>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-bold">Seasons</h3>
+                      <button
+                        type="button"
+                        onClick={() => setSeasons([...seasons, { 
+                          id: Date.now().toString(), 
+                          seasonNumber: seasons.length + 1, 
+                          zipLinks: [
+                            { id: Math.random().toString(36).substr(2, 9), name: '480p', url: '', size: '', unit: 'GB' },
+                            { id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'GB' },
+                            { id: Math.random().toString(36).substr(2, 9), name: '1080p', url: '', size: '', unit: 'GB' }
+                          ], 
+                          mkvLinks: [
+                            { id: Math.random().toString(36).substr(2, 9), name: '480p', url: '', size: '', unit: 'GB' },
+                            { id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'GB' },
+                            { id: Math.random().toString(36).substr(2, 9), name: '1080p', url: '', size: '', unit: 'GB' }
+                          ],
+                          episodes: [] 
+                        }])}
+                        className="text-emerald-500 hover:text-emerald-400 text-sm font-medium flex items-center gap-1"
+                      >
+                        <Plus className="w-4 h-4" /> Add Season
+                      </button>
+                    </div>
+                    
+                    <div className="space-y-6">
+                      {seasons.map((season, sIdx) => (
+                        <div key={season.id} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4">
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex flex-col gap-4">
+                              <div className="flex items-center gap-4">
+                                <div className="flex items-center gap-2">
+                                  <h4 className="font-bold">Season</h4>
+                                  <input
+                                    type="number"
+                                    step="0.1"
+                                    value={season.seasonNumber}
+                                    onChange={(e) => {
+                                      const newSeasons = [...seasons];
+                                      newSeasons[sIdx].seasonNumber = parseFloat(e.target.value) || 0;
+                                      setSeasons(newSeasons);
+                                    }}
+                                    className="w-20 bg-zinc-50 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 text-sm text-center"
+                                  />
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <h4 className="font-bold text-sm text-zinc-500 dark:text-zinc-400">Year</h4>
+                                  <input
+                                    type="number"
+                                    value={season.year || ''}
+                                    onChange={(e) => {
+                                      const newSeasons = [...seasons];
+                                      newSeasons[sIdx].year = parseInt(e.target.value) || undefined;
+                                      setSeasons(newSeasons);
+                                    }}
+                                    placeholder="YYYY"
+                                    className="w-20 bg-zinc-50 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 text-sm text-center"
+                                  />
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <h4 className="font-bold text-sm text-zinc-500 dark:text-zinc-400">Title</h4>
+                                <input
+                                  type="text"
+                                  value={season.title || ''}
+                                  onChange={(e) => {
+                                    const newSeasons = [...seasons];
+                                    newSeasons[sIdx].title = e.target.value;
+                                    setSeasons(newSeasons);
+                                  }}
+                                  placeholder="Season Title"
+                                  className="flex-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 text-sm"
+                                />
+                              </div>
+                            </div>
+                            <button type="button" onClick={() => setSeasons(seasons.filter((_, i) => i !== sIdx))} className="text-red-500 hover:text-red-400 p-1">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                          
+                          <div className="mb-6">
+                            <h5 className="text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-2">Season ZIP Links</h5>
+                            <QualityInputs 
+                              links={season.zipLinks} 
+                              onChange={(updater) => {
+                                setSeasons(prev => {
+                                  const newSeasons = [...prev];
+                                  const currentLinks = newSeasons[sIdx].zipLinks;
+                                  newSeasons[sIdx].zipLinks = typeof updater === 'function' ? updater(currentLinks) : updater;
+                                  return newSeasons;
+                                });
+                              }}
+                              droppableId={`season-zip-${sIdx}`}
+                            />
+                          </div>
+
+                          <div className="mb-6">
+                            <h5 className="text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-2">Season MKV Links</h5>
+                            <QualityInputs 
+                              links={season.mkvLinks || []} 
+                              onChange={(updater) => {
+                                setSeasons(prev => {
+                                  const newSeasons = [...prev];
+                                  const currentLinks = newSeasons[sIdx].mkvLinks || [];
+                                  newSeasons[sIdx].mkvLinks = typeof updater === 'function' ? updater(currentLinks) : updater;
+                                  return newSeasons;
+                                });
+                              }}
+                              droppableId={`season-mkv-${sIdx}`}
+                            />
+                          </div>
+
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <h5 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">Episodes</h5>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const newSeasons = [...seasons];
+                                  newSeasons[sIdx].episodes.push({
+                                    id: Date.now().toString(),
+                                    episodeNumber: newSeasons[sIdx].episodes.length + 1,
+                                    title: `Episode ${newSeasons[sIdx].episodes.length + 1}`,
+                                    links: [
+                                      { id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'MB' }
+                                    ]
+                                  });
+                                  setSeasons(newSeasons);
+                                }}
+                                className="text-emerald-500 hover:text-emerald-400 text-xs font-medium flex items-center gap-1"
+                              >
+                                <Plus className="w-3 h-3" /> Add Episode
+                              </button>
+                            </div>
+                            
+                            <div className="space-y-4">
+                              {season.episodes.map((ep, eIdx) => (
+                                <div key={ep.id} className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4">
+                                  <div className="flex gap-1 mb-4">
+                                    <input
+                                      type="number"
+                                      value={ep.episodeNumber}
+                                      onChange={(e) => {
+                                        const newSeasons = [...seasons];
+                                        newSeasons[sIdx].episodes[eIdx].episodeNumber = parseInt(e.target.value) || 0;
+                                        setSeasons(newSeasons);
+                                      }}
+                                      className="w-10 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-1 py-1 text-sm text-center"
+                                      placeholder="Ep #"
+                                    />
+                                    <input
+                                      type="text"
+                                      value={ep.duration || ''}
+                                      onChange={(e) => {
+                                        const newSeasons = [...seasons];
+                                        newSeasons[sIdx].episodes[eIdx].duration = e.target.value;
+                                        setSeasons(newSeasons);
+                                      }}
+                                      className="w-14 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-1 py-1 text-sm text-center"
+                                      placeholder="Dur"
+                                    />
+                                    <input
+                                      type="text"
+                                      value={ep.title}
+                                      onChange={(e) => {
+                                        const newSeasons = [...seasons];
+                                        newSeasons[sIdx].episodes[eIdx].title = e.target.value;
+                                        setSeasons(newSeasons);
+                                      }}
+                                      className="flex-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-sm"
+                                      placeholder="Episode Title"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => setExpandedEpisodes(prev => ({ ...prev, [ep.id]: !prev[ep.id] }))}
+                                      className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-2 transition-colors"
+                                      title="Toggle Description"
+                                    >
+                                      {expandedEpisodes[ep.id] ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                                    </button>
+                                    <button type="button" onClick={() => {
+                                      const newSeasons = [...seasons];
+                                      newSeasons[sIdx].episodes = newSeasons[sIdx].episodes.filter((_, i) => i !== eIdx);
+                                      setSeasons(newSeasons);
+                                    }} className="text-red-500 hover:text-red-400 p-2">
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                  
+                                  {expandedEpisodes[ep.id] && (
+                                    <div className="mb-4">
+                                      <textarea
+                                        value={ep.description || ''}
+                                        onChange={(e) => {
+                                          const newSeasons = [...seasons];
+                                          newSeasons[sIdx].episodes[eIdx].description = e.target.value;
+                                          setSeasons(newSeasons);
+                                        }}
+                                        className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-sm min-h-[80px]"
+                                        placeholder="Episode Description..."
+                                      />
+                                    </div>
+                                  )}
+
+                                  <div className="mb-4">
+                                    <h6 className="text-xs font-medium text-zinc-500 mb-2 uppercase tracking-wider">Episode Links</h6>
+                                    <QualityInputs 
+                                      links={ep.links} 
+                                      onChange={(updater) => {
+                                        setSeasons(prev => {
+                                          const newSeasons = [...prev];
+                                          const currentLinks = newSeasons[sIdx].episodes[eIdx].links;
+                                          newSeasons[sIdx].episodes[eIdx].links = typeof updater === 'function' ? updater(currentLinks) : updater;
+                                          return newSeasons;
+                                        });
+                                      }}
+                                      droppableId={`episode-links-${sIdx}-${eIdx}`}
+                                    />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </form>
+            </div>
+
+            <div className="p-4 sm:p-6 border-t border-zinc-200 dark:border-zinc-800 flex justify-between gap-2 sticky bottom-0 bg-zinc-50 dark:bg-zinc-900 z-10 rounded-b-2xl">
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="px-5 py-2.5 text-sm rounded-xl font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                form="content-form"
+                disabled={isSaving}
+                className="bg-emerald-500 hover:bg-emerald-600 text-white px-5 py-2.5 text-sm rounded-xl font-medium flex items-center gap-2 transition-colors disabled:opacity-50"
+              >
+                {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+                {isSaving ? 'Saving...' : 'Save Content'}
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Auto-Fill Modal */}
+      <AnimatePresence>
+        {isAutoFillModalOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 z-[60]"
+          >
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.2 }}
+              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl"
+            >
+              <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-900/50">
+                <div>
+                  <h3 className="text-xl font-bold text-zinc-900 dark:text-white">Auto-Fill from Text</h3>
+                  <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">Paste WhatsApp or copied data to automatically populate fields</p>
+                </div>
+                <button 
+                  onClick={() => setIsAutoFillModalOpen(false)}
+                  className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-full transition-all"
+                >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            
+            <div className="p-6">
+              <textarea
+                value={autoFillText}
+                onChange={(e) => setAutoFillText(e.target.value)}
+                placeholder="Paste your movie/series data here..."
+                className="w-full h-64 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 text-zinc-600 dark:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all resize-none font-mono text-sm"
+              />
+              
+              <div className="mt-6 flex gap-3">
+                <button
+                  onClick={handleAutoFill}
+                  disabled={!autoFillText.trim()}
+                  className="flex-1 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
+                >
+                  <ClipboardPaste className="w-5 h-5" /> Process & Auto-Fill
+                </button>
+                <button
+                  onClick={() => {
+                    setAutoFillText('');
+                    setIsAutoFillModalOpen(false);
+                  }}
+                  className="px-8 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white font-bold py-4 rounded-2xl transition-all"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+      </AnimatePresence>
+
+      <MediaModal
+        isOpen={isMasterFetchModalOpen}
+        onClose={() => setIsMasterFetchModalOpen(false)}
+        initialImdbId={imdbLink}
+        initialTitle={title}
+        initialYear={year.toString()}
+        onApply={applyFetchedData}
+      />
+      <LinkCheckerModal
+        isOpen={isLinkCheckerOpen}
+        onClose={() => setIsLinkCheckerOpen(false)}
+        onAddLinks={handleAddLinksFromChecker}
+        languages={languages}
+        qualities={qualities}
+      />
+
+      <ConfirmModal
+        isOpen={!!deleteId}
+        title="Delete Content"
+        message="Are you sure you want to delete this content? This action cannot be undone."
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteId(null)}
+      />
+
+      <AlertModal
+        isOpen={alertConfig.isOpen}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        onClose={() => setAlertConfig({ ...alertConfig, isOpen: false })}
+      />
+
+      <AnimatePresence>
+        {imdbSeasonsPopup && imdbSeasonsPopup.isOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4"
+          >
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.2 }}
+              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-md w-full relative shadow-2xl"
+            >
+              <button
+                onClick={() => setImdbSeasonsPopup(null)}
+                className="absolute top-4 right-4 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors"
+              >
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className="text-xl font-bold mb-2">Select Seasons</h3>
+            <p className="text-zinc-500 dark:text-zinc-400 mb-6">Choose which seasons to fetch for "{imdbSeasonsPopup.show.name}"</p>
+            
+            <div className="max-h-60 overflow-y-auto space-y-2 mb-6 pr-2 custom-scrollbar">
+              {imdbSeasonsPopup.seasons.map(season => (
+                <label key={season} className="flex items-center gap-3 p-3 rounded-xl hover:bg-zinc-200 dark:hover:bg-zinc-800/50 cursor-pointer border border-zinc-200 dark:border-zinc-800/50 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={selectedImdbSeasons.includes(season)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedImdbSeasons(prev => [...prev, season]);
+                      } else {
+                        setSelectedImdbSeasons(prev => prev.filter(s => s !== season));
+                      }
+                    }}
+                    className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-700 text-emerald-500 focus:ring-emerald-500/20 bg-white dark:bg-zinc-950"
+                  />
+                  <span className="font-medium">Season {season}</span>
+                </label>
+              ))}
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setSelectedImdbSeasons(imdbSeasonsPopup.seasons);
+                }}
+                className="flex-1 py-2 px-4 rounded-xl font-medium bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white transition-colors text-sm"
+              >
+                Select All
+              </button>
+              <button
+                onClick={() => {
+                  setSelectedImdbSeasons([]);
+                }}
+                className="flex-1 py-2 px-4 rounded-xl font-medium bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white transition-colors text-sm"
+              >
+                Deselect All
+              </button>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => setImdbSeasonsPopup(null)}
+                className="px-6 py-2 rounded-xl font-medium hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  processImdbSeasons(imdbSeasonsPopup.epData, selectedImdbSeasons);
+                  setImdbSeasonsPopup(null);
+                }}
+                disabled={selectedImdbSeasons.length === 0}
+                className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-xl font-bold transition-colors"
+              >
+                Fetch Selected
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+      </AnimatePresence>
+      {shareSeasonModal.isOpen && shareSeasonModal.content && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-md w-full relative">
+            <button
+              onClick={() => setShareSeasonModal({ ...shareSeasonModal, isOpen: false })}
+              className="absolute top-4 right-4 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className="text-xl font-bold mb-2">Share Series</h3>
+            <p className="text-zinc-500 dark:text-zinc-400 mb-6">Select which seasons of "{shareSeasonModal.content.title}" you want to share on WhatsApp.</p>
+            
+            <div className="max-h-60 overflow-y-auto space-y-2 mb-6 pr-2 custom-scrollbar">
+              <label className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer border transition-colors ${selectedShareSeasons.length === shareSeasonModal.seasons.length ? 'bg-emerald-500/10 border-emerald-500 text-emerald-500' : 'bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800/50'}`}>
+                <input
+                  type="checkbox"
+                  checked={selectedShareSeasons.length === shareSeasonModal.seasons.length}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setSelectedShareSeasons(shareSeasonModal.seasons.map(s => s.seasonNumber));
+                    } else {
+                      setSelectedShareSeasons([]);
+                    }
+                  }}
+                  className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-700 text-emerald-500 focus:ring-emerald-500/20 bg-white dark:bg-zinc-950"
+                />
+                <span className="font-medium">All Seasons</span>
+              </label>
+              <div className="h-px bg-zinc-100 dark:bg-zinc-800 my-2" />
+              {shareSeasonModal.seasons.map(season => (
+                <label key={season.id} className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer border transition-colors ${selectedShareSeasons.includes(season.seasonNumber) ? 'bg-emerald-500/10 border-emerald-500 text-emerald-500' : 'bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800/50'}`}>
+                  <input
+                    type="checkbox"
+                    checked={selectedShareSeasons.includes(season.seasonNumber)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedShareSeasons(prev => [...prev, season.seasonNumber]);
+                      } else {
+                        setSelectedShareSeasons(prev => prev.filter(s => s !== season.seasonNumber));
+                      }
+                    }}
+                    className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-700 text-emerald-500 focus:ring-emerald-500/20 bg-white dark:bg-zinc-950"
+                  />
+                  <span className="font-medium">Season {season.seasonNumber}</span>
+                </label>
+              ))}
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShareSeasonModal({ ...shareSeasonModal, isOpen: false })}
+                className="px-6 py-2 rounded-xl font-medium hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (shareSeasonModal.content) {
+                    executeShare(shareSeasonModal.content, selectedShareSeasons);
+                    setShareSeasonModal({ ...shareSeasonModal, isOpen: false });
+                  }
+                }}
+                disabled={selectedShareSeasons.length === 0}
+                className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-xl font-bold transition-colors flex items-center gap-2"
+              >
+                <Share2 className="w-4 h-4" /> Share ({selectedShareSeasons.length})
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Notification Modal */}
+      {notificationModal.isOpen && notificationModal.content && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+          <div className="bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-6 max-w-md w-full border border-zinc-200 dark:border-zinc-800 shadow-2xl">
+            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+              <Bell className="w-6 h-6 text-blue-500" />
+              Send Notification
+            </h2>
+            
+            <div className="bg-white dark:bg-zinc-950 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 mb-6 flex gap-4">
+              {notificationModal.content.posterUrl && (
+                <img 
+                  src={notificationModal.content.posterUrl} 
+                  alt="Poster" 
+                  className="w-16 h-24 object-cover rounded-md shrink-0"
+                  referrerPolicy="no-referrer"
+                />
+              )}
+              <div>
+                <h3 className="font-bold text-zinc-900 dark:text-white mb-1">{getNotificationPreview(notificationModal.content).title}</h3>
+                <p className="text-sm text-zinc-500 dark:text-zinc-400 line-clamp-2">{getNotificationPreview(notificationModal.content).body}</p>
+              </div>
+            </div>
+
+            {notificationModal.status === 'idle' && (
+              <p className="text-zinc-500 dark:text-zinc-400 mb-6">
+                This will send a push notification to all users about this new content. Do you want to proceed?
+              </p>
+            )}
+
+            {notificationModal.status === 'sending' && (
+              <div className="flex flex-col items-center justify-center py-6">
+                <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-blue-500 mb-4"></div>
+                <p className="text-blue-500 font-medium">Sending notification...</p>
+              </div>
+            )}
+
+            {notificationModal.status === 'success' && (
+              <div className="flex flex-col items-center justify-center py-6">
+                <div className="w-12 h-12 bg-emerald-500/20 rounded-full flex items-center justify-center mb-4">
+                  <svg className="w-6 h-6 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
+                </div>
+                <p className="text-emerald-500 font-medium">Notification successfully pushed!</p>
+              </div>
+            )}
+
+            {notificationModal.status === 'error' && (
+              <div className="flex flex-col items-center justify-center py-6">
+                <div className="w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mb-4">
+                  <X className="w-6 h-6 text-red-500" />
+                </div>
+                <p className="text-red-500 font-medium">Error sending notification.</p>
+              </div>
+            )}
+
+            {notificationModal.status === 'idle' && (
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setNotificationModal({ isOpen: false, content: null, status: 'idle' })}
+                  className="px-6 py-2 rounded-xl font-medium hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSendNotification}
+                  className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-xl font-bold transition-colors flex items-center gap-2"
+                >
+                  <Bell className="w-4 h-4" /> Send Now
+                </button>
+              </div>
+            )}
+            
+            {notificationModal.status === 'error' && (
+              <div className="flex justify-end gap-3 mt-4">
+                <button
+                  onClick={() => setNotificationModal({ isOpen: false, content: null, status: 'idle' })}
+                  className="bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-6 py-2 rounded-xl font-bold transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <ConfirmModal
+        isOpen={shareAnywayConfig.isOpen}
+        title="Missing Data"
+        message="Failed to fetch missing metadata from TMDB. Would you like to share with available data anyway?"
+        confirmText="Share Anyway"
+        cancelText="Cancel"
+        onConfirm={() => {
+          if (shareAnywayConfig.content) {
+            executeShare(shareAnywayConfig.content);
+            setShareAnywayConfig({ isOpen: false, content: null });
+          }
+        }}
+        onCancel={() => setShareAnywayConfig({ isOpen: false, content: null })}
+      />
+
+      <AdjustContentsModal
+        isOpen={isAdjustContentsModalOpen}
+        onClose={() => setIsAdjustContentsModalOpen(false)}
+        contentList={contentList}
+      />
+      <ManageModal
+        isOpen={manageModal.isOpen}
+        title={`Manage ${manageModal.type ? manageModal.type.charAt(0).toUpperCase() + manageModal.type.slice(1) : ''}s`}
+        onClose={() => setManageModal({ isOpen: false, type: null })}
+        type={manageModal.type || 'genre'}
+        items={
+          manageModal.type === 'genre' ? genres :
+          manageModal.type === 'language' ? languages :
+          manageModal.type === 'quality' ? qualities : []
+        }
+        onSave={async (items) => {
+          if (!manageModal.type) return;
+          const collectionName = manageModal.type === 'quality' ? 'qualities' : `${manageModal.type}s`;
+          const batch = writeBatch(db);
+          
+          // Delete all existing
+          const snapshot = await getDocs(collection(db, collectionName));
+          snapshot.docs.forEach(doc => batch.delete(doc.ref));
+          
+          // Add new
+          items.forEach((item, idx) => {
+            const docRef = doc(collection(db, collectionName), item.id);
+            const data: any = { name: item.name, order: idx };
+            if (manageModal.type === 'quality') data.color = item.color;
+            batch.set(docRef, data);
+          });
+          
+          await batch.commit();
+          setManageModal({ isOpen: false, type: null });
+        }}
+      />
+    </div>
+  );
+}

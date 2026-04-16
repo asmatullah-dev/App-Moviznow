@@ -1,0 +1,243 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the MovizNow app.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "The user's unique ID." },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "user", "temporary"] },
+        "permissions": { "type": "array", "items": { "type": "string" }, "description": "Specific administrative permissions." },
+        "status": { "type": "string", "enum": ["pending", "active", "expired"] },
+        "phone": { "type": "string" },
+        "expiryDate": { "type": "string", "format": "date-time" },
+        "assignedContent": { "type": "array", "items": { "type": "string" } },
+        "watchLater": { "type": "array", "items": { "type": "string" } },
+        "favorites": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "sessionsCount": { "type": "number" },
+        "timeSpent": { "type": "number" }
+      },
+      "required": ["uid", "email", "role", "status", "createdAt"]
+    },
+    "Genre": {
+      "title": "Genre",
+      "description": "A movie or series genre.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "Language": {
+      "title": "Language",
+      "description": "A movie or series language.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "Content": {
+      "title": "Content",
+      "description": "A movie or series.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "enum": ["movie", "series"] },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "posterUrl": { "type": "string" },
+        "trailerUrl": { "type": "string" },
+        "genreIds": { "type": "array", "items": { "type": "string" } },
+        "languageIds": { "type": "array", "items": { "type": "string" } },
+        "qualityIds": { "type": "array", "items": { "type": "string" } },
+        "cast": { "type": "array", "items": { "type": "string" } },
+        "year": { "type": "number" },
+        "runtime": { "type": "string" },
+        "releaseDate": { "type": "string" },
+        "country": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "movieLinks": { "type": "string", "description": "JSON stringified movie links" },
+        "sampleLinks": { "type": "string", "description": "JSON stringified sample/preview links" },
+        "seasons": { "type": "string", "description": "JSON stringified seasons array" }
+      },
+      "required": ["id", "type", "title", "posterUrl", "createdAt", "updatedAt"]
+    },
+    "AnalyticsEvent": {
+      "title": "AnalyticsEvent",
+      "description": "An event tracked for analytics.",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["session_start", "content_view", "link_click", "watch_time"] },
+        "userId": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "contentId": { "type": "string" },
+        "contentTitle": { "type": "string" },
+        "quality": { "type": "string" },
+        "duration": { "type": "number" }
+      },
+      "required": ["type", "userId", "timestamp"]
+    },
+    "Quality": {
+      "title": "Quality",
+      "description": "A movie or series quality.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "A notification for users.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "contentId": { "type": "string" },
+        "posterUrl": { "type": "string" },
+        "targetUserId": { "type": "string", "description": "Optional user ID for targeted notifications." },
+        "targetUserIds": { "type": "array", "items": { "type": "string" }, "description": "List of user IDs for targeted notifications." },
+        "targetUserNames": { "type": "array", "items": { "type": "string" }, "description": "List of user names for targeted notifications." },
+        "buttonLabel": { "type": "string" },
+        "buttonUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["id", "title", "body", "createdAt", "createdBy"]
+    },
+    "NotificationTemplate": {
+      "title": "NotificationTemplate",
+      "description": "A template for notifications.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "buttonLabel": { "type": "string" },
+        "buttonUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "title", "body", "createdAt"]
+    },
+    "FCMToken": {
+      "title": "FCMToken",
+      "description": "A Firebase Cloud Messaging token for a user.",
+      "type": "object",
+      "properties": {
+        "token": { "type": "string" },
+        "userId": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["token", "userId", "updatedAt"]
+    },
+    "MovieRequest": {
+      "title": "MovieRequest",
+      "description": "A request for a movie or series from a user.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "type": { "type": "string", "enum": ["movie", "series"] },
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "userName": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "completed", "rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "requestedBy": { "type": "array", "items": { "type": "string" }, "description": "List of user IDs who requested this." },
+        "requestCount": { "type": "number", "description": "Number of users who requested this." },
+        "linkedContentId": { "type": "string", "description": "The ID of the content that fulfills this request." },
+        "adminComment": { "type": "string", "description": "A comment from the administrator regarding this request." }
+      },
+      "required": ["id", "title", "userId", "status", "createdAt", "requestedBy", "requestCount"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "A user order for membership or content.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "type": { "type": "string", "enum": ["membership", "content"] },
+        "items": { "type": "array", "items": { "type": "object" } },
+        "totalAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "approved", "declined"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "orderId": { "type": "string" }
+      },
+      "required": ["id", "userId", "type", "totalAmount", "status", "createdAt", "orderId"]
+    },
+    "AppSettings": {
+      "title": "AppSettings",
+      "description": "Global application settings.",
+      "type": "object",
+      "properties": {
+        "headerText": { "type": "string" },
+        "membershipFee": { "type": "number" },
+        "movieFee": { "type": "number" },
+        "seasonFee": { "type": "number" },
+        "paymentDetails": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/settings/app_settings": {
+      "schema": { "$ref": "#/entities/AppSettings" },
+      "description": "Stores global app settings."
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "Stores user orders."
+    },
+    "/movie_requests/{requestId}": {
+      "schema": { "$ref": "#/entities/MovieRequest" },
+      "description": "Stores movie requests."
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/Notification" },
+      "description": "Stores notifications."
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores user profiles."
+    },
+    "/genres/{genreId}": {
+      "schema": { "$ref": "#/entities/Genre" },
+      "description": "Stores genres."
+    },
+    "/languages/{languageId}": {
+      "schema": { "$ref": "#/entities/Language" },
+      "description": "Stores languages."
+    },
+    "/content/{contentId}": {
+      "schema": { "$ref": "#/entities/Content" },
+      "description": "Stores movies and series."
+    },
+    "/analytics/{eventId}": {
+      "schema": { "$ref": "#/entities/AnalyticsEvent" },
+      "description": "Stores analytics events."
+    },
+    "/qualities/{qualityId}": {
+      "schema": { "$ref": "#/entities/Quality" },
+      "description": "Stores movie and series qualities."
+    },
+    "/fcm_tokens/{tokenId}": {
+      "schema": { "$ref": "#/entities/FCMToken" },
+      "description": "Stores FCM tokens for push notifications."
+    },
+    "/notification_templates/{templateId}": {
+      "schema": { "$ref": "#/entities/NotificationTemplate" },
+      "description": "Stores notification templates."
+    }
+  }
+}

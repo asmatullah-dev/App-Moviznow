@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="description" content="MovizNow - Your premium movie and series streaming platform" />
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <link rel="apple-touch-icon" href="/pwa-192x192.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <title>MovizNow</title>
+    <script>
+      // Apply theme on load
+      (function() {
+        try {
+          var savedTheme = localStorage.getItem('theme');
+          var isDark = false;
+          if (savedTheme === 'dark') {
+            isDark = true;
+          } else if (savedTheme === 'light') {
+            isDark = false;
+          } else {
+            isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          }
+          if (isDark) {
+            document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.classList.remove('dark');
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <script>
+      // Global variable to store the PWA install prompt
+      window.deferredPrompt = null;
+      window.addEventListener('beforeinstallprompt', (e) => {
+        // Prevent the mini-infobar from appearing on mobile
+        e.preventDefault();
+        // Stash the event so it can be triggered later.
+        window.deferredPrompt = e;
+        // Dispatch a custom event to notify React
+        window.dispatchEvent(new CustomEvent('pwa-installable', { detail: e }));
+        console.log('PWA: beforeinstallprompt event captured globally');
+      });
+      window.addEventListener('appinstalled', (e) => {
+        window.deferredPrompt = null;
+        window.dispatchEvent(new CustomEvent('pwa-installed'));
+        console.log('PWA: appinstalled event captured globally');
+      });
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

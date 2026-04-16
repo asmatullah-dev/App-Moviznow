@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>OMDB Modal</title>
+    <style>
+        /* Modal container - hidden by default */
+        .omdb-modal {
+            display: none;
+            position: fixed;
+            z-index: 9999;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.7);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+        }
+
+        /* Modal content */
+        .omdb-modal-content {
+            background-color: #fff;
+            margin: 5% auto;
+            padding: 20px;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 800px;
+            max-height: 85vh;
+            overflow-y: auto;
+            position: relative;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        /* Close button */
+        .omdb-close {
+            position: absolute;
+            right: 20px;
+            top: 15px;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            color: #aaa;
+            transition: 0.2s;
+        }
+        .omdb-close:hover {
+            color: #000;
+        }
+
+        /* Search area */
+        .omdb-search-area {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 25px;
+            align-items: center;
+        }
+        .omdb-search-area input {
+            flex: 1;
+            min-width: 140px;
+            padding: 10px 12px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        .omdb-search-area button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        .omdb-search-area button:hover {
+            background: #0056b3;
+        }
+
+        /* Result styling */
+        .omdb-result {
+            margin-top: 15px;
+        }
+        .omdb-loading {
+            text-align: center;
+            color: #666;
+            font-style: italic;
+            padding: 20px;
+        }
+        .omdb-error {
+            color: #d32f2f;
+            background: #ffebee;
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 10px;
+        }
+        .omdb-movie h2 {
+            margin-top: 0;
+            margin-bottom: 8px;
+        }
+        .omdb-movie p {
+            margin: 8px 0;
+            line-height: 1.4;
+        }
+        .omdb-ratings {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin: 12px 0;
+        }
+        .omdb-ratings span {
+            background: #f0f0f0;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.9em;
+        }
+        .omdb-season {
+            margin-top: 20px;
+            border-left: 3px solid #007bff;
+            padding-left: 16px;
+            margin-bottom: 20px;
+        }
+        .omdb-season h4 {
+            margin-bottom: 8px;
+        }
+        .omdb-episode {
+            margin: 8px 0 8px 20px;
+            font-size: 0.95em;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 6px;
+        }
+        hr {
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+
+<!-- This is the modal HTML structure -->
+<div id="omdbModal" class="omdb-modal">
+    <div class="omdb-modal-content">
+        <span class="omdb-close">&times;</span>
+        <h2>Search OMDB</h2>
+        <div class="omdb-search-area">
+            <input type="text" id="omdbImdb" placeholder="IMDb ID or link (e.g., tt3896198)">
+            <span>OR</span>
+            <input type="text" id="omdbTitle" placeholder="Movie/Series title">
+            <input type="text" id="omdbYear" placeholder="Year (optional)">
+            <button id="omdbFetchBtn">Fetch Data</button>
+        </div>
+        <div id="omdbResult" class="omdb-result">
+            <p>Enter an IMDb ID or a title + year and click "Fetch Data".</p>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- CONFIGURATION -------------------------------------------------
+    const OMDB_API_KEY = '19daa310';   // Your API key
+    const OMDB_BASE = 'https://www.omdbapi.com/';
+
+    // --- DOM elements --------------------------------------------------
+    const modal = document.getElementById('omdbModal');
+    const closeBtn = document.querySelector('.omdb-close');
+    const fetchBtn = document.getElementById('omdbFetchBtn');
+    const imdbInput = document.getElementById('omdbImdb');
+    const titleInput = document.getElementById('omdbTitle');
+    const yearInput = document.getElementById('omdbYear');
+    const resultDiv = document.getElementById('omdbResult');
+
+    // --- Utility: delay for rate limiting (avoids overwhelming the API) ---
+    const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+    // --- Fetch main data (movie or series) ------------------------------
+    async function fetchMedia(imdbID, title, year) {
+        let url = `${OMDB_BASE}?apikey=${OMDB_API_KEY}&plot=full`;
+        if (imdbID) {
+            // Extract ID from full link if needed
+            const match = imdbID.match(/tt\d+/);
+            if (match) imdbID = match[0];
+            url += `&i=${encodeURIComponent(imdbID)}`;
+        } else if (title) {
+            url += `&t=${encodeURIComponent(title)}`;
+            if (year) url += `&y=${encodeURIComponent(year)}`;
+        } else {
+            throw new Error('Please provide either an IMDb ID or a movie title');
+        }
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data.Response === 'False') throw new Error(data.Error || 'Not found');
+        return data;
+    }
+
+    // --- For series: fetch all seasons and episodes ----------------------
+    async function fetchSeriesDetails(imdbID, totalSeasons) {
+        const seasons = [];
+        for (let s = 1; s <= totalSeasons; s++) {
+            // Get season info (list of episodes)
+            const seasonUrl = `${OMDB_BASE}?apikey=${OMDB_API_KEY}&i=${imdbID}&Season=${s}`;
+            const seasonRes = await fetch(seasonUrl);
+            const seasonData = await seasonRes.json();
+            if (seasonData.Response === 'False') continue;
+
+            const episodes = [];
+            for (const ep of seasonData.Episodes) {
+                // Fetch full episode details (plot, runtime)
+                const epUrl = `${OMDB_BASE}?apikey=${OMDB_API_KEY}&i=${imdbID}&Season=${s}&Episode=${ep.Episode}`;
+                const epRes = await fetch(epUrl);
+                const epData = await epRes.json();
+                if (epData.Response === 'True') {
+                    episodes.push({
+                        episode: epData.Episode,
+                        title: epData.Title,
+                        runtime: epData.Runtime || 'N/A',
+                        plot: epData.Plot || 'No description',
+                        released: epData.Released || 'N/A'
+                    });
+                } else {
+                    // Fallback to basic info from season list
+                    episodes.push({
+                        episode: ep.Episode,
+                        title: ep.Title,
+                        runtime: ep.Runtime || 'N/A',
+                        plot: ep.Plot || 'No description',
+                        released: ep.Released || 'N/A'
+                    });
+                }
+                await delay(100); // be kind to the API
+            }
+            seasons.push({
+                season: s,
+                year: seasonData.Year,
+                episodes
+            });
+        }
+        return seasons;
+    }
+
+    // --- Format ratings (IMDb, Rotten Tomatoes, Metacritic) ------------
+    function formatRatings(ratings) {
+        if (!ratings || ratings.length === 0) return '';
+        let html = '<div class="omdb-ratings">';
+        ratings.forEach(r => {
+            html += `<span><strong>${r.Source}:</strong> ${r.Value}</span>`;
+        });
+        html += '</div>';
+        return html;
+    }
+
+    // --- Main display function ------------------------------------------
+    async function displayMedia() {
+        resultDiv.innerHTML = '<div class="omdb-loading">Loading...</div>';
+        const imdbValue = imdbInput.value.trim();
+        const titleValue = titleInput.value.trim();
+        const yearValue = yearInput.value.trim();
+
+        try {
+            // 1. Fetch main data
+            const mainData = await fetchMedia(imdbValue, titleValue, yearValue);
+
+            // 2. Build main info HTML
+            let html = `<div class="omdb-movie">
+                            <h2>${mainData.Title} (${mainData.Year})</h2>
+                            <p><strong>Genre:</strong> ${mainData.Genre}</p>
+                            <p><strong>Runtime:</strong> ${mainData.Runtime}</p>
+                            <p><strong>Released:</strong> ${mainData.Released}</p>
+                            <p><strong>Director:</strong> ${mainData.Director}</p>
+                            <p><strong>Writer:</strong> ${mainData.Writer}</p>
+                            <p><strong>Actors:</strong> ${mainData.Actors}</p>
+                            <p><strong>Plot:</strong> ${mainData.Plot}</p>
+                            <p><strong>Language:</strong> ${mainData.Language}</p>
+                            <p><strong>Awards:</strong> ${mainData.Awards}</p>
+                            ${formatRatings(mainData.Ratings)}
+                        </div>`;
+
+            // 3. If series, fetch seasons & episodes
+            if (mainData.Type === 'series') {
+                html += `<h3>📺 Series Details</h3>`;
+                html += `<p><strong>Total Seasons:</strong> ${mainData.totalSeasons}</p>`;
+                resultDiv.innerHTML = html + '<div class="omdb-loading">Fetching seasons & episodes (may take a moment)...</div>';
+                const seasonsData = await fetchSeriesDetails(mainData.imdbID, parseInt(mainData.totalSeasons));
+                let seasonsHtml = '<div class="omdb-seasons">';
+                for (const season of seasonsData) {
+                    seasonsHtml += `<div class="omdb-season">
+                                        <h4>Season ${season.season} (${season.year})</h4>`;
+                    for (const ep of season.episodes) {
+                        seasonsHtml += `<div class="omdb-episode">
+                                            <strong>Episode ${ep.episode}:</strong> ${ep.title}<br>
+                                            <small>Runtime: ${ep.runtime} | Released: ${ep.released}</small><br>
+                                            <em>${ep.plot.substring(0, 200)}${ep.plot.length > 200 ? '...' : ''}</em>
+                                        </div>`;
+                    }
+                    seasonsHtml += `</div>`;
+                }
+                seasonsHtml += `</div>`;
+                html += seasonsHtml;
+            }
+
+            // 4. Display final result
+            resultDiv.innerHTML = html;
+
+        } catch (err) {
+            resultDiv.innerHTML = `<div class="omdb-error">❌ Error: ${err.message}</div>`;
+        }
+    }
+
+    // --- Modal open/close functions (exposed globally) ------------------
+    window.showOMDBModal = function() {
+        modal.style.display = 'block';
+        // Optional: clear previous results and inputs
+        resultDiv.innerHTML = '<p>Enter an IMDb ID or a title + year and click "Fetch Data".</p>';
+        imdbInput.value = '';
+        titleInput.value = '';
+        yearInput.value = '';
+    };
+
+    function closeModal() {
+        modal.style.display = 'none';
+    }
+
+    // --- Event listeners ------------------------------------------------
+    closeBtn.onclick = closeModal;
+    window.onclick = function(event) {
+        if (event.target === modal) closeModal();
+    };
+    fetchBtn.onclick = displayMedia;
+
+    // Allow pressing Enter in any input to trigger search
+    const inputs = [imdbInput, titleInput, yearInput];
+    inputs.forEach(input => {
+        input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') displayMedia();
+        });
+    });
+
+    // Optional: ensure modal is hidden on page load
+    modal.style.display = 'none';
+</script>
+
+</body>
+</html>
