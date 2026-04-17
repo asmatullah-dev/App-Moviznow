@@ -38,6 +38,10 @@ export default function AdminSettings() {
       'Income', 'ErrorLinks', 'ReportedLinks', 'Notifications', 'Requests', 'Sync'
     ],
     hiddenAdminTabs: [],
+    isTrialEnabled: true,
+    isPhoneLoginEnabled: true,
+    isAdminContactEnabled: true,
+    isPaymentEnabled: true,
     serviceAccounts: {
       sourceKey: '',
       targets: []
@@ -309,6 +313,74 @@ export default function AdminSettings() {
                 />
               </div>
             </div>
+
+            <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700">
+                <div>
+                  <h3 className="font-medium text-zinc-900 dark:text-white">Enable Trial</h3>
+                  <p className="text-sm text-zinc-500">Allow direct link trial activation.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSettings({ ...settings, isTrialEnabled: !settings.isTrialEnabled })}
+                  className={clsx(
+                    "relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0",
+                    settings.isTrialEnabled !== false ? "bg-emerald-500" : "bg-zinc-300 dark:bg-zinc-600"
+                  )}
+                >
+                  <span
+                    className={clsx(
+                      "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                      settings.isTrialEnabled !== false ? "translate-x-6" : "translate-x-1"
+                    )}
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700">
+                <div>
+                  <h3 className="font-medium text-zinc-900 dark:text-white">Enable Phone Login</h3>
+                  <p className="text-sm text-zinc-500">Show phone login option on login page.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSettings({ ...settings, isPhoneLoginEnabled: settings.isPhoneLoginEnabled !== false ? false : true })}
+                  className={clsx(
+                    "relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0",
+                    settings.isPhoneLoginEnabled !== false ? "bg-emerald-500" : "bg-zinc-300 dark:bg-zinc-600"
+                  )}
+                >
+                  <span
+                    className={clsx(
+                      "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                      settings.isPhoneLoginEnabled !== false ? "translate-x-6" : "translate-x-1"
+                    )}
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700">
+                <div>
+                  <h3 className="font-medium text-zinc-900 dark:text-white">Enable Admin Contact</h3>
+                  <p className="text-zinc-500 text-xs sm:text-sm">Show contact admin buttons and WhatsApp numbers.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSettings({ ...settings, isAdminContactEnabled: settings.isAdminContactEnabled !== false ? false : true })}
+                  className={clsx(
+                    "relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0",
+                    settings.isAdminContactEnabled !== false ? "bg-emerald-500" : "bg-zinc-300 dark:bg-zinc-600"
+                  )}
+                >
+                  <span
+                    className={clsx(
+                      "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                      settings.isAdminContactEnabled !== false ? "translate-x-6" : "translate-x-1"
+                    )}
+                  />
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -385,11 +457,30 @@ export default function AdminSettings() {
           </div>
         </div>
 
-        {/* Payment Settings */}
+        {/* Payment Options */}
         <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
-          <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2">
-            <Wallet className="w-5 h-5 text-zinc-400" />
-            <h2 className="text-lg font-semibold">Payment Settings</h2>
+          <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Wallet className="w-5 h-5 text-zinc-400" />
+              <h2 className="text-lg font-semibold">Payment Options</h2>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setSettings({ ...settings, isPaymentEnabled: settings.isPaymentEnabled !== false ? false : true })}
+                className={clsx(
+                  "relative inline-flex h-6 w-11 items-center rounded-full transition-colors",
+                  settings.isPaymentEnabled !== false ? "bg-emerald-500" : "bg-zinc-300 dark:bg-zinc-600"
+                )}
+              >
+                <span
+                  className={clsx(
+                    "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                    settings.isPaymentEnabled !== false ? "translate-x-6" : "translate-x-1"
+                  )}
+                />
+              </button>
+            </div>
           </div>
           <div className="p-6 space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

@@ -1339,9 +1339,23 @@ export default function MovieDetails() {
                  'You do not have permission to access links for this content.'}
               </p>
               <div className="flex flex-wrap gap-3">
-                <a href={`https://wa.me/92${settings?.supportNumber || '3363284466'}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 bg-red-500/20 px-6 py-3 text-sm sm:text-base rounded-xl font-medium hover:bg-red-500/30 transition-colors">
-                  <MessageCircle className="w-5 h-5" /> Contact Admin ({settings?.supportNumber || '03363284466'})
-                </a>
+                {settings?.isAdminContactEnabled !== false && (
+                  <button onClick={() => {
+                    let supportPhone = settings?.supportNumber || '3363284466';
+                    if (supportPhone.startsWith('0')) {
+                      supportPhone = '92' + supportPhone.substring(1);
+                    } else if (!supportPhone.startsWith('92')) {
+                      supportPhone = '92' + supportPhone;
+                    }
+                    const adminPhone = supportPhone.replace('+', '');
+                    const contentTitle = mergedContent?.type === 'series' ? `${mergedContent?.title} (Full Series)` : mergedContent?.title;
+                    const msg = `Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\n\nYour message/question:\n${profile?.role === 'selected_content' ? `I want to get access to ${contentTitle}. Please tell me how to pay and add it to my account.` : `I cannot access ${contentTitle}.`}`;
+                    window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+                  }} 
+                  className="inline-flex items-center gap-2 bg-red-500/20 px-6 py-3 text-sm sm:text-base rounded-xl font-medium hover:bg-red-500/30 transition-colors text-red-500">
+                    <MessageCircle className="w-5 h-5" /> Contact Admin ({(settings?.supportNumber || '03363284466').startsWith('0') ? (settings?.supportNumber || '03363284466') : `0${settings?.supportNumber || '3363284466'}`})
+                  </button>
+                )}
                 {(((profile?.role === 'selected_content' || profile?.role === 'user') && !isExpired) || isPending) && mergedContent?.type === 'movie' && (
                   cart.some(item => item.contentId === mergedContent.id) ? (
                     <Link
@@ -2038,9 +2052,30 @@ export default function MovieDetails() {
                 <ShoppingCart className="w-5 h-5" /> Cart
               </Link>
             )}
-            <a href={`https://wa.me/92${settings?.supportNumber || '3363284466'}`} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white px-6 py-3 text-sm sm:text-base rounded-xl font-bold hover:bg-zinc-300 dark:hover:bg-zinc-700 transition-all">
-              <MessageCircle className="w-5 h-5" /> Admin
-            </a>
+            {settings?.isAdminContactEnabled !== false && (
+              <a 
+                href={(() => {
+                  let supportPhone = settings?.supportNumber || '3363284466';
+                  if (supportPhone.startsWith('0')) {
+                    supportPhone = '92' + supportPhone.substring(1);
+                  } else if (!supportPhone.startsWith('92')) {
+                    supportPhone = '92' + supportPhone;
+                  }
+                  const adminPhone = supportPhone.replace('+', '');
+                  const displayTitle = lockedContentInfo?.title || mergedContent?.title || 'this content';
+                  const helpText = profile?.role === 'selected_content' 
+                    ? `I want to get access to ${displayTitle}. Please tell me how to pay and add it to my account.`
+                    : `I need assistance with ${displayTitle}.`;
+                  const message = encodeURIComponent(`Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\n\nYour message/question:\n${helpText}`);
+                  return `https://wa.me/${adminPhone}?text=${message}`;
+                })()} 
+                target="_blank" 
+                rel="noreferrer" 
+                className="flex items-center justify-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white px-6 py-3 text-sm sm:text-base rounded-xl font-bold hover:bg-zinc-300 dark:hover:bg-zinc-700 transition-all"
+              >
+                <MessageCircle className="w-5 h-5" /> Admin
+              </a>
+            )}
           </div>
         )}
       </AlertModal>

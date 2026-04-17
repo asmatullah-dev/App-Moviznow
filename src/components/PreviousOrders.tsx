@@ -100,18 +100,27 @@ export default function PreviousOrders() {
               <div className="flex items-center gap-3">
                 {order.status === 'pending' && (
                   <div className="flex items-center gap-2">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const message = `${order.type === 'membership' ? 'Membership Top Up' : 'Add Content'}\nOrder ID: ${order.id}\nAmount: Rs ${order.amount}`;
-                        const whatsappUrl = `https://wa.me/92${settings?.supportNumber || '3363284466'}?text=${encodeURIComponent(message)}`;
-                        window.open(whatsappUrl, '_blank');
-                      }}
-                      className="text-blue-500 hover:text-blue-600 p-1"
-                      title="Send Screenshot"
-                    >
-                      <Send className="w-4 h-4" />
-                    </button>
+                    {settings?.isAdminContactEnabled !== false && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          let supportPhone = settings?.supportNumber || '3363284466';
+                          if (supportPhone.startsWith('0')) {
+                            supportPhone = '92' + supportPhone.substring(1);
+                          } else if (!supportPhone.startsWith('92')) {
+                            supportPhone = '92' + supportPhone;
+                          }
+                          const adminPhone = supportPhone.replace('+', '');
+                          const message = `${order.type === 'membership' ? 'Membership Top Up' : 'Add Content'}\nOrder ID: ${order.id}\nAmount: Rs ${order.amount}`;
+                          const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
+                          window.open(whatsappUrl, '_blank');
+                        }}
+                        className="text-blue-500 hover:text-blue-600 p-1"
+                        title="Send Screenshot"
+                      >
+                        <Send className="w-4 h-4" />
+                      </button>
+                    )}
                     <button
                       onClick={(e) => {
                         e.stopPropagation();

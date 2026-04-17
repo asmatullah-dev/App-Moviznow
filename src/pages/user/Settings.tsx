@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useSettings } from '../../contexts/SettingsContext';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Save, Lock, User, Mail, Phone, Loader2 } from 'lucide-react';
 import { clsx } from 'clsx';
 
 export default function Settings() {
   const { profile, updateUserProfileData } = useAuth();
+  const { settings } = useSettings();
   const navigate = useNavigate();
   
   const [name, setName] = useState(profile?.displayName || '');
@@ -111,7 +113,21 @@ export default function Settings() {
                       placeholder="your@email.com"
                     />
                   </div>
-                  <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">Email address cannot be changed. Contact admin if needed.</p>
+                  <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                    Email address cannot be changed. 
+                      {settings?.isAdminContactEnabled !== false && (
+                         <span> <a href={(() => {
+                           let supportPhone = settings?.supportNumber || '3363284466';
+                           if (supportPhone.startsWith('0')) {
+                             supportPhone = '92' + supportPhone.substring(1);
+                           } else if (!supportPhone.startsWith('92')) {
+                             supportPhone = '92' + supportPhone;
+                           }
+                           const adminPhone = supportPhone.replace('+', '');
+                           return `https://wa.me/${adminPhone}?text=${encodeURIComponent(`Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\n\nYour message/question:\nI need to change my email address.`)}`;
+                         })()} target="_blank" rel="noreferrer" className="text-emerald-500 hover:underline">Contact admin</a> if needed.</span>
+                      )}
+                  </p>
                 </div>
 
                 <div>

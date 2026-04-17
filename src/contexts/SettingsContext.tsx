@@ -45,6 +45,10 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           supportNumber: '3363284466',
           accountTitle: 'Asmat Ullah',
           accountNumber: '03416286423',
+          isTrialEnabled: true,
+          isPhoneLoginEnabled: true,
+          isAdminContactEnabled: true,
+          isPaymentEnabled: true,
           bankAccounts: [
             { id: '1', name: 'Easypaisa', accountNumber: '', accountTitle: '', color: '#00c652', labelColor: '#00c652', textColor: '#ffffff', iconUrl: '' },
             { id: '2', name: 'JazzCash', accountNumber: '', accountTitle: '', color: '#ed1c24', labelColor: '#ed1c24', textColor: '#ffffff', iconUrl: '' },

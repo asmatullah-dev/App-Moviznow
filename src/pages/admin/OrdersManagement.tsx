@@ -101,6 +101,7 @@ export default function OrdersManagement() {
   };
 
   const getPaymentDetailsString = () => {
+    if (settings?.isPaymentEnabled === false) return '';
     if (settings?.paymentDetails) return settings.paymentDetails;
     
     if (settings?.bankAccounts && settings.bankAccounts.length > 0) {
@@ -219,6 +220,14 @@ export default function OrdersManagement() {
 
       batch.update(doc(db, 'orders', order.id), {
         status: 'approved'
+      });
+
+      // Record in Income Management
+      batch.set(doc(collection(db, 'income')), {
+        amount: order.amount,
+        description: `${order.type === 'membership' ? 'Membership Renewal' : 'Content Purchase'} (${order.id})`,
+        date: new Date().toISOString(),
+        userName: order.userName || 'Unknown User'
       });
 
       await batch.commit();
@@ -499,7 +508,7 @@ export default function OrdersManagement() {
                       <a 
                         href={`https://wa.me/${selectedUserPhone.replace(/\D/g, '')}?text=${encodeURIComponent(
                           selectedOrder.status === 'pending' 
-                            ? `*Ap ke Order ka Shukriya!*\nAp ke Order ${selectedOrder.id} ki total payment Rs ${selectedOrder.amount} hai. Order ke Approval ke liye Payment kar ke Screenshot bhej dain.\n\n*Payment Details:*\n${getPaymentDetailsString()}`
+                            ? `*Ap ke Order ka Shukriya!*\nAp ke Order ${selectedOrder.id} ki total payment Rs ${selectedOrder.amount} hai. Order ke Approval ke liye Payment kar ke Screenshot bhej dain.${settings?.isPaymentEnabled !== false ? `\n\n*Payment Details:*\n${getPaymentDetailsString()}` : ''}`
                             : selectedOrder.status === 'approved'
                             ? `Thanks for your Payment, Your order ${selectedOrder.id} has been approved.\n🍿 Enjoy watching on ${settings?.headerText || 'MovizNow'}!`
                             : ""

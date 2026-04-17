@@ -402,25 +402,54 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
                   <ShoppingCart className="w-3 h-3 sm:w-5 sm:h-5" /> Cart
                 </Link>
               )}
-              <a href={`https://wa.me/92${settings?.supportNumber || '3363284466'}`} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-1.5 sm:gap-2 bg-yellow-500/10 border border-yellow-500 text-yellow-600 dark:text-yellow-500 px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-yellow-500/20 transition-all active:scale-95">
-                <MessageCircle className="w-3 h-3 sm:w-5 sm:h-5" /> Admin
-              </a>
+              {settings?.isAdminContactEnabled !== false && (
+                <button onClick={() => {
+                  let supportPhone = settings?.supportNumber || '3363284466';
+                  if (supportPhone.startsWith('0')) {
+                    supportPhone = '92' + supportPhone.substring(1);
+                  } else if (!supportPhone.startsWith('92')) {
+                    supportPhone = '92' + supportPhone;
+                  }
+                  const adminPhone = supportPhone.replace('+', '');
+                  const msg = `Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\n\nYour message/question:\nMy account is pending and I need assistance.`;
+                  window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+                }} className="flex items-center justify-center gap-1.5 sm:gap-2 bg-yellow-500/10 border border-yellow-500 text-yellow-600 dark:text-yellow-500 px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-yellow-500/20 transition-all active:scale-95">
+                  <MessageCircle className="w-3 h-3 sm:w-5 sm:h-5" /> Admin
+                </button>
+              )}
             </div>
           </div>
         )}
         {profile?.status === 'expired' && (
           <div className="bg-red-500/10 border border-red-500/20 text-red-500 p-4 sm:p-6 rounded-2xl mb-8 flex flex-row items-center justify-between gap-4 sm:gap-8">
             <div className="flex-1 min-w-0">
-              <h3 className="font-bold text-lg sm:text-2xl mb-1 sm:mb-2">Membership Expired</h3>
-              <p className="text-red-500/80 text-sm sm:text-lg font-medium">Your membership has expired. Please renew to continue watching.</p>
+              <h3 className="font-bold text-lg sm:text-2xl mb-1 sm:mb-2">{profile.role === 'trial' ? 'Trial Expired' : 'Membership Expired'}</h3>
+              <p className="text-red-500/80 text-sm sm:text-lg font-medium">
+                {profile.role === 'trial' 
+                  ? 'Your free Trial has expired. Please get Membership to continue watching.'
+                  : 'Your membership has expired. Please renew to continue watching.'}
+              </p>
             </div>
             <div className="flex flex-col gap-2 sm:gap-3 min-w-[140px] sm:min-w-[220px] shrink-0">
               <Link to="/top-up" className="flex items-center justify-center gap-1.5 sm:gap-2 bg-red-500 text-white px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-red-600 transition-all active:scale-95 shadow-lg shadow-red-500/20 border border-white/20">
                 Renew Now
               </Link>
-              <a href={`https://wa.me/92${settings?.supportNumber || '3363284466'}`} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-1.5 sm:gap-2 bg-red-500/10 border border-red-500/30 px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-red-500/20 transition-all active:scale-95">
-                <MessageCircle className="w-3 h-3 sm:w-5 sm:h-5" /> Admin
-              </a>
+              {settings?.isAdminContactEnabled !== false && (
+                <button onClick={() => {
+                  let supportPhone = settings?.supportNumber || '3363284466';
+                  if (supportPhone.startsWith('0')) {
+                    supportPhone = '92' + supportPhone.substring(1);
+                  } else if (!supportPhone.startsWith('92')) {
+                    supportPhone = '92' + supportPhone;
+                  }
+                  const adminPhone = supportPhone.replace('+', '');
+                  const expiryType = profile?.role === 'trial' ? 'Trial' : 'membership';
+                  const msg = `Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\n\nYour message/question:\nMy ${expiryType} has expired and I need assistance.`;
+                  window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+                }} className="flex items-center justify-center gap-1.5 sm:gap-2 bg-red-500/10 border border-red-500/30 px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-red-500/20 transition-all active:scale-95">
+                  <MessageCircle className="w-3 h-3 sm:w-5 sm:h-5" /> Admin
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -733,12 +762,24 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-zinc-200 dark:border-zinc-800 py-8 text-center text-zinc-500">
-        <p>Need help or want to renew membership?</p>
-        <a href={`https://wa.me/92${settings?.supportNumber || '3363284466'}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-emerald-500 hover:text-emerald-400 mt-2 font-medium">
-          <MessageCircle className="w-4 h-4" /> WhatsApp: 0{settings?.supportNumber || '3363284466'}
-        </a>
-      </footer>
+      {settings?.isAdminContactEnabled !== false && (
+        <footer className="border-t border-zinc-200 dark:border-zinc-800 py-8 text-center text-zinc-500">
+          <p>Need help or want to renew membership?</p>
+          <button onClick={() => {
+            let supportPhone = settings?.supportNumber || '3363284466';
+            if (supportPhone.startsWith('0')) {
+              supportPhone = '92' + supportPhone.substring(1);
+            } else if (!supportPhone.startsWith('92')) {
+              supportPhone = '92' + supportPhone;
+            }
+            const adminPhone = supportPhone.replace('+', '');
+            const msg = `Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\n\nYour message/question:\nI need help or want to renew my membership.`;
+            window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+          }} className="inline-flex items-center gap-2 text-emerald-500 hover:text-emerald-400 mt-2 font-medium cursor-pointer bg-transparent border-none">
+            <MessageCircle className="w-4 h-4" /> WhatsApp: {(settings?.supportNumber || '3363284466').startsWith('0') ? (settings?.supportNumber || '3363284466') : `0${settings?.supportNumber || '3363284466'}`}
+          </button>
+        </footer>
+      )}
 
       <ConfirmModal
         isOpen={isLogoutModalOpen}

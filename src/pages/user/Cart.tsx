@@ -87,8 +87,16 @@ export default function Cart() {
       const snapshot = await getDocs(q);
       const lastOrder = snapshot.docs[0]?.data();
 
-      const message = `Add Content\nOrder ID: ${currentOrderId}\nItems: ${lastOrder?.items?.length || 0}\nTotal Amount: Rs ${lastOrder?.amount || totalPrice}`;
-      const whatsappUrl = `https://wa.me/92${settings?.supportNumber || '3363284466'}?text=${encodeURIComponent(message)}`;
+      const message = `Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\n\nYour message/question:\nPlease approve my order. Order ID: ${currentOrderId}\nItems: ${lastOrder?.items?.length || 0}\nTotal Amount: Rs ${lastOrder?.amount || totalPrice}`;
+      
+      let supportPhone = settings?.supportNumber || '3363284466';
+      if (supportPhone.startsWith('0')) {
+        supportPhone = '92' + supportPhone.substring(1);
+      } else if (!supportPhone.startsWith('92')) {
+        supportPhone = '92' + supportPhone;
+      }
+      const adminPhone = supportPhone.replace('+', '');
+      const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
       
       clearCart();
       window.open(whatsappUrl, '_blank');
@@ -145,21 +153,23 @@ export default function Cart() {
           </div>
         </div>
 
-        <div className="bg-zinc-50 dark:bg-zinc-900 rounded-xl p-6 mb-6 shadow-2xl border border-zinc-200 dark:border-zinc-800/50">
-          <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-            <Wallet className="w-5 h-5 text-emerald-500" />
-            Payment Details
-          </h2>
-          <p className="text-zinc-500 dark:text-zinc-400 mb-6 text-sm">
-            Please send the payment to the following account via any of these methods:
-          </p>
-          
-          <PaymentMethods copied={copied} onCopy={handleCopy} />
-        </div>
+        {settings?.isPaymentEnabled !== false && (
+          <div className="bg-zinc-50 dark:bg-zinc-900 rounded-xl p-6 mb-6 shadow-2xl border border-zinc-200 dark:border-zinc-800/50">
+            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+              <Wallet className="w-5 h-5 text-emerald-500" />
+              Payment Details
+            </h2>
+            <p className="text-zinc-500 dark:text-zinc-400 mb-6 text-sm">
+              Please send the payment to the following account via any of these methods:
+            </p>
+            
+            <PaymentMethods copied={copied} onCopy={handleCopy} />
+          </div>
+        )}
 
         <div className="text-center mb-6">
           <p className="text-zinc-500 dark:text-zinc-400 text-sm">
-            After Payment Send Screenshot for Approval
+            {settings?.isPaymentEnabled !== false ? 'After Payment Send Screenshot for Approval' : 'Submit your request for approval'}
           </p>
         </div>
 
@@ -171,14 +181,16 @@ export default function Cart() {
           {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : confirmed ? 'Confirmed' : 'Confirm Order'}
         </button>
 
-        <button
-          onClick={handleSendPaymentScreenshot}
-          disabled={loading}
-          className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50 border border-white/20 shadow-lg"
-        >
-          {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-          {loading ? 'Processing...' : 'Send Payment Screenshot'}
-        </button>
+        {settings?.isAdminContactEnabled !== false && (
+          <button
+            onClick={handleSendPaymentScreenshot}
+            disabled={loading}
+            className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50 border border-white/20 shadow-lg"
+          >
+            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+            {loading ? 'Processing...' : (settings?.isPaymentEnabled !== false ? 'Send Payment Screenshot' : 'Contact Admin For Order')}
+          </button>
+        )}
 
         <PreviousOrders />
       </div>

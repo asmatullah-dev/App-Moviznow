@@ -222,6 +222,10 @@ export interface AppSettings {
   bankAccounts: BankAccount[];
   adminTabsOrder: string[];
   hiddenAdminTabs?: string[];
+  isTrialEnabled?: boolean;
+  isPhoneLoginEnabled?: boolean;
+  isAdminContactEnabled?: boolean;
+  isPaymentEnabled?: boolean;
   serviceAccounts?: {
     sourceKey?: string;
     targets?: {

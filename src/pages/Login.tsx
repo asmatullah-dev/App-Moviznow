@@ -143,16 +143,19 @@ export default function Login() {
                   >
                     Use Google <span className="text-[10px] uppercase tracking-wider opacity-90 bg-white/20 px-1.5 py-0.5 rounded-md">(Recommended)</span>
                   </button>
-                  <button 
-                    type="button"
-                    onClick={() => {
-                      const adminPhone = `92${settings?.supportNumber || '3363284466'}`;
-                      window.open(`https://wa.me/${adminPhone}?text=I want to register my number: ${formattedPhone}`, '_blank');
-                    }}
-                    className="w-full bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-700 py-2.5 rounded-lg font-medium hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors"
-                  >
-                    Contact Admin
-                  </button>
+                  {settings?.isAdminContactEnabled !== false && (
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        const adminPhone = `92${settings?.supportNumber || '3363284466'}`;
+                        const message = `Hello Admin,\n\nName: ${user?.displayName || 'Unknown'}\nEmail: ${user?.email || 'N/A'}\nPhone: ${formattedPhone}\n\nYour message/question:\nI need help logging in.`;
+                        window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
+                      }}
+                      className="w-full bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-700 py-2.5 rounded-lg font-medium hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors"
+                    >
+                      Contact Admin
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -200,9 +203,13 @@ export default function Login() {
         alert(error.message || 'Failed to send reset email.');
       }
     } else {
+      if (settings?.isAdminContactEnabled === false) {
+        alert("Password reset via admin contact is currently disabled.");
+        return;
+      }
       // Open WhatsApp to admin
       const adminPhone = `92${settings?.supportNumber || '3363284466'}`;
-      const message = `I forgot my password.\nName: ${registeredUser?.displayName || 'Unknown'}\nPhone: ${registeredUser?.phone || identifier}\nEmail: ${registeredUser?.email || 'N/A'}`;
+      const message = `Hello Admin,\n\nName: ${registeredUser?.displayName || 'Unknown'}\nEmail: ${registeredUser?.email || 'N/A'}\nPhone: ${registeredUser?.phone || identifier}\n\nYour message/question:\nI forgot my password and need help resetting it.`;
       window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
     }
   };
@@ -253,17 +260,19 @@ export default function Login() {
               Continue with Google
             </button>
 
-            <button
-              onClick={() => { clearError(); setStep('identifier'); }}
-              className="w-full bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-700 font-semibold py-3 px-4 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors flex items-center justify-center gap-3"
-            >
-              <Phone className="w-5 h-5" />
-              Continue with WhatsApp Number
-            </button>
+            {settings?.isPhoneLoginEnabled !== false && (
+              <button
+                onClick={() => { clearError(); setStep('identifier'); }}
+                className="w-full bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-700 font-semibold py-3 px-4 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors flex items-center justify-center gap-3"
+              >
+                <Phone className="w-5 h-5" />
+                Continue with WhatsApp Number
+              </button>
+            )}
           </div>
         )}
 
-        {step === 'identifier' && (
+        {step === 'identifier' && settings?.isPhoneLoginEnabled !== false && (
           <form onSubmit={handleIdentifierNext} className="space-y-4">
             <button 
               type="button"
