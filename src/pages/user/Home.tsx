@@ -712,7 +712,8 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
                       const isLast = page === totalPages;
                       const isNear = page >= currentPage - 1 && page <= currentPage + 1;
                       
-                      if (isFirst || isLast || isNear) {
+                      // Never show the last page number button
+                      if ((isFirst || isNear) && !isLast) {
                         return (
                           <button
                             key={page}
@@ -731,10 +732,11 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
                           </button>
                         );
                       } else if (
-                        page === currentPage - 2 || 
-                        page === currentPage + 2
+                        (page === currentPage - 2 && page > 1) || 
+                        (isLast && currentPage < totalPages)
                       ) {
-                        return <span key={page} className="text-zinc-400 dark:text-zinc-600 px-0.5 sm:px-1">...</span>;
+                        // Show dots if it's the gap before or the very last page position
+                        return <span key={`dots-${page}`} className="text-zinc-400 dark:text-zinc-600 px-0.5 sm:px-1">...</span>;
                       }
                       return null;
                     })}
@@ -752,9 +754,6 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
                     <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
-                <p className="text-[10px] sm:text-xs text-zinc-500 font-medium">
-                  Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1} to {Math.min(currentPage * ITEMS_PER_PAGE, filteredAndSortedContent.length)} of {filteredAndSortedContent.length} contents
-                </p>
               </div>
             )}
           </>

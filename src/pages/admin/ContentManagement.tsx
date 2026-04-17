@@ -256,6 +256,7 @@ export default function ContentManagement() {
   const [status, setStatus] = useState<'draft' | 'published' | 'selected_content'>('published');
   const [title, setTitle] = useState('');
   const [showTitleSuggestions, setShowTitleSuggestions] = useState(false);
+  const [disableSuggestions, setDisableSuggestions] = useState(false);
   const [description, setDescription] = useState('');
   const [posterUrl, setPosterUrl] = useState('');
   const [trailerUrl, setTrailerUrl] = useState('');
@@ -538,6 +539,7 @@ export default function ContentManagement() {
     ]);
     setSeasons([]);
     setEditingId(null);
+    setDisableSuggestions(false);
   };
 
   const parseLinks = (linksStr: string | undefined): QualityLinks => {
@@ -2572,7 +2574,20 @@ export default function ContentManagement() {
                   
                   {/* 2. Title */}
                   <div className="relative">
-                    <label className="block text-xs font-medium text-zinc-500 mb-1">Title</label>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block text-xs font-medium text-zinc-500">Title</label>
+                      {titleSuggestions.length > 0 && (
+                        <button 
+                          type="button"
+                          onClick={() => setDisableSuggestions(!disableSuggestions)}
+                          className="text-[10px] text-zinc-400 hover:text-emerald-500 flex items-center gap-1 transition-colors"
+                          title={disableSuggestions ? "Show suggestions" : "Hide suggestions"}
+                        >
+                          {disableSuggestions ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
+                          {disableSuggestions ? 'Show Similar' : 'Hide Similar'}
+                        </button>
+                      )}
+                    </div>
                     <input 
                       type="text" 
                       value={title} 
@@ -2580,11 +2595,14 @@ export default function ContentManagement() {
                         setTitle(e.target.value);
                         setShowTitleSuggestions(true);
                       }} 
-                      onFocus={() => setShowTitleSuggestions(true)}
+                      onFocus={() => {
+                        setShowTitleSuggestions(true);
+                        setDisableSuggestions(false);
+                      }}
                       onBlur={() => setTimeout(() => setShowTitleSuggestions(false), 200)}
                       className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" 
                     />
-                    {showTitleSuggestions && titleSuggestions.length > 0 && (
+                    {showTitleSuggestions && !disableSuggestions && titleSuggestions.length > 0 && (
                       <div className="absolute z-50 w-full mt-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg shadow-xl max-h-48 overflow-y-auto">
                         <div className="p-2 text-xs text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-800">Similar content found:</div>
                         {titleSuggestions.map(suggestion => (
