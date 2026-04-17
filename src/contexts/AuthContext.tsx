@@ -261,7 +261,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               // Create new user profile
               const isOwner = currentUser.email === 'asmatn628@gmail.com';
               const isAdmin = currentUser.email === 'asmatullah9327@gmail.com';
-              const roleToSet = isOwner ? 'owner' : isAdmin ? 'admin' : 'user';
+              const defaultRoleToSet = isOwner ? 'owner' : isAdmin ? 'admin' : 'user';
+              const defaultStatusToSet = (isOwner || isAdmin) ? 'active' : 'pending';
               const hasPassword = currentUser.providerData.some(p => p.providerId === 'password');
               
               // Extract phone from dummy email if available
@@ -270,25 +271,59 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 const phonePart = currentUser.email.replace('@moviznow.com', '');
                 extractedPhone = standardizePhone(phonePart);
               }
+              const standardizedUserPhone = standardizePhone(currentUser.phoneNumber || extractedPhone);
+
+              let existingProfile: UserProfile | undefined = undefined;
+              let existingDocId: string | undefined = undefined;
+
+              try {
+                // Find by email if it's a real email, otherwise find by phone
+                const searchRef = collection(db, 'users');
+                let q;
+                if (currentUser.email && !currentUser.email.endsWith('@moviznow.com')) {
+                  q = query(searchRef, where('email', '==', currentUser.email));
+                } else if (standardizedUserPhone) {
+                  q = query(searchRef, where('phone', '==', standardizedUserPhone));
+                }
+                
+                if (q) {
+                  const querySnapshot = await getDocs(q);
+                  querySnapshot.forEach(snap => {
+                    if (snap.id !== currentUser.uid && !existingProfile) {
+                      existingProfile = snap.data() as UserProfile;
+                      existingDocId = snap.id;
+                    }
+                  });
+                }
+              } catch (e) {
+                console.error("Failed to check for existing accounts:", e);
+              }
 
               const newProfile: UserProfile = {
                 uid: currentUser.uid,
-                email: currentUser.email || '',
-                phone: standardizePhone(currentUser.phoneNumber || extractedPhone),
-                displayName: currentUser.displayName || '',
-                photoURL: currentUser.photoURL || '',
-                role: roleToSet,
-                status: (isOwner || isAdmin) ? 'active' : 'pending',
-                createdAt: new Date().toISOString(),
-                sessionsCount: 1,
-                timeSpent: 0,
-                expiryDate: isOwner ? 'Lifetime' : null,
+                email: currentUser.email || existingProfile?.email || '',
+                phone: standardizedUserPhone || existingProfile?.phone || '',
+                displayName: currentUser.displayName || existingProfile?.displayName || '',
+                photoURL: currentUser.photoURL || existingProfile?.photoURL || '',
+                role: isOwner ? 'owner' : isAdmin ? 'admin' : (existingProfile?.role || defaultRoleToSet),
+                status: (isOwner || isAdmin) ? 'active' : (existingProfile?.status || defaultStatusToSet),
+                createdAt: existingProfile?.createdAt || new Date().toISOString(),
+                sessionsCount: (existingProfile?.sessionsCount || 0) + 1,
+                timeSpent: existingProfile?.timeSpent || 0,
+                expiryDate: isOwner ? 'Lifetime' : (existingProfile?.expiryDate || null),
                 hasPassword: hasPassword,
                 sessionId: getLocalSessionId(),
+                favorites: existingProfile?.favorites || [],
+                watchLater: existingProfile?.watchLater || [],
               };
 
               try {
                 await setDoc(userRef, newProfile);
+                // Clean up the old dangling account document mapped by the same email/phone
+                if (existingDocId) {
+                  await deleteDoc(doc(db, 'users', existingDocId));
+                  console.log(`Merged profile and deleted old account record for ${existingDocId}`);
+                }
               } catch (err) {
                 console.error("Failed to create user profile:", err);
               }

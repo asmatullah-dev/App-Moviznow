@@ -201,6 +201,25 @@ async function startServer() {
   });
 
   // IMDb Fetch Proxy
+  app.get(["/api/image-proxy"], async (req, res) => {
+    try {
+      const { url } = req.query;
+      if (!url || typeof url !== 'string') return res.status(400).json({ error: "URL required" });
+      
+      const response = await fetch(url);
+      if (!response.ok) {
+        return res.status(response.status).send(`Failed to fetch image: ${response.statusText}`);
+      }
+      const buffer = await response.arrayBuffer();
+      res.setHeader('Content-Type', response.headers.get('content-type') || 'application/octet-stream');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.send(Buffer.from(buffer));
+    } catch (error) {
+      console.error("Image proxy error:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
   app.get(["/api/imdb-fetch", "/imdb-fetch"], async (req, res) => {
     try {
       const { url } = req.query;
@@ -840,7 +859,7 @@ async function startServer() {
 
   app.post("/api/sync/compare", async (req, res) => {
     try {
-      const { sourceKey, targetKey, targetDbId, onlyPublished } = req.body;
+      const { sourceKey, targetKey, targetDbId, onlyPublished, syncAllData } = req.body;
       const { sourceApp, targetApp, targetDbId: tDbId } = await getSyncApps(sourceKey, targetKey, targetDbId);
       if (!sourceApp || !targetApp) {
         return res.status(400).json({ error: "Service account keys missing or invalid" });
@@ -851,7 +870,13 @@ async function startServer() {
 
       console.log(`Comparing source DB (${firebaseConfig.firestoreDatabaseId}) with target DB (${targetDbId || 'default'})`);
 
-      const collections = ['content'];
+      const collections = syncAllData ? [
+        'genres', 'languages', 'qualities', 'content', 
+        'users', 'admin_settings', 'notifications', 
+        'notification_templates', 'orders', 'movie_requests', 
+        'reported_links', 'error_links', 'whitelisted_phones', 
+        'fcm_tokens', 'income'
+      ] : ['content'];
       const results: any = {};
 
       for (const colName of collections) {
@@ -918,16 +943,22 @@ async function startServer() {
 
   app.post("/api/sync/push", async (req, res) => {
     try {
-      const { sourceKey, targetKey, targetDbId, mode, specificIds, onlyPublished } = req.body;
+      const { sourceKey, targetKey, targetDbId, mode, specificIds, onlyPublished, syncAllData } = req.body;
       const { sourceApp, targetApp, targetDbId: tDbId } = await getSyncApps(sourceKey, targetKey, targetDbId);
       if (!sourceApp || !targetApp) return res.status(400).json({ error: "Keys missing" });
 
       const sourceDb = getFirestore(sourceApp, firebaseConfig.firestoreDatabaseId);
       const targetDb = getFirestore(targetApp, tDbId || '(default)');
 
-      console.log(`Starting push: source (${firebaseConfig.firestoreDatabaseId}) -> target (${tDbId || 'default'}), mode: ${mode}, specificIds: ${specificIds ? Object.keys(specificIds).length : 'none'}`);
+      console.log(`Starting push: source (${firebaseConfig.firestoreDatabaseId}) -> target (${tDbId || 'default'}), mode: ${mode}, specificIds: ${specificIds ? Object.keys(specificIds).length : 'none'}, syncAllData: ${syncAllData}`);
 
-      const collections = ['content'];
+      const collections = syncAllData ? [
+        'genres', 'languages', 'qualities', 'content', 
+        'users', 'admin_settings', 'notifications', 
+        'notification_templates', 'orders', 'movie_requests', 
+        'reported_links', 'error_links', 'whitelisted_phones', 
+        'fcm_tokens', 'income'
+      ] : ['content'];
       const logs: string[] = [];
 
       for (const colName of collections) {
@@ -985,16 +1016,22 @@ async function startServer() {
 
   app.post("/api/sync/pull", async (req, res) => {
     try {
-      const { sourceKey, targetKey, targetDbId, specificIds, mode, onlyPublished } = req.body;
+      const { sourceKey, targetKey, targetDbId, specificIds, mode, onlyPublished, syncAllData } = req.body;
       const { sourceApp, targetApp, targetDbId: tDbId } = await getSyncApps(sourceKey, targetKey, targetDbId);
       if (!sourceApp || !targetApp) return res.status(400).json({ error: "Keys missing" });
 
       const sourceDb = getFirestore(sourceApp, firebaseConfig.firestoreDatabaseId);
       const targetDb = getFirestore(targetApp, tDbId || '(default)');
 
-      console.log(`Starting pull: target (${tDbId || 'default'}) -> source (${firebaseConfig.firestoreDatabaseId}), mode: ${mode}, specificIds: ${specificIds ? Object.keys(specificIds).length : 'none'}`);
+      console.log(`Starting pull: target (${tDbId || 'default'}) -> source (${firebaseConfig.firestoreDatabaseId}), mode: ${mode}, specificIds: ${specificIds ? Object.keys(specificIds).length : 'none'}, syncAllData: ${syncAllData}`);
 
-      const collections = ['content'];
+      const collections = syncAllData ? [
+        'genres', 'languages', 'qualities', 'content', 
+        'users', 'admin_settings', 'notifications', 
+        'notification_templates', 'orders', 'movie_requests', 
+        'reported_links', 'error_links', 'whitelisted_phones', 
+        'fcm_tokens', 'income'
+      ] : ['content'];
       const logs: string[] = [];
 
       for (const colName of collections) {

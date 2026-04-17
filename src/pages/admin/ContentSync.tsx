@@ -38,6 +38,7 @@ export default function ContentSync() {
   const [isComparing, setIsComparing] = useState(false);
   const [syncMode, setSyncMode] = useState<'all' | 'changed' | 'missing'>('all');
   const [onlyPublished, setOnlyPublished] = useState(false);
+  const [syncAllData, setSyncAllData] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [comparison, setComparison] = useState<ComparisonResult | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -137,7 +138,8 @@ export default function ContentSync() {
           sourceKey,
           targetKey: t.key,
           targetDbId: t.databaseId,
-          onlyPublished
+          onlyPublished,
+          syncAllData
         })
       });
 
@@ -174,7 +176,8 @@ export default function ContentSync() {
           targetDbId: t?.databaseId,
           mode: syncMode,
           specificIds,
-          onlyPublished
+          onlyPublished,
+          syncAllData
         })
       });
       console.log("Push response status:", res.status);
@@ -214,7 +217,8 @@ export default function ContentSync() {
           targetDbId: t?.databaseId,
           specificIds,
           mode: syncMode,
-          onlyPublished
+          onlyPublished,
+          syncAllData
         })
       });
       console.log("Pull response status:", res.status);
@@ -617,6 +621,16 @@ export default function ContentSync() {
                     className="w-4 h-4 rounded border-zinc-300 text-emerald-500 focus:ring-emerald-500"
                   />
                   <span className="text-sm font-bold text-zinc-700 dark:text-zinc-300">Target Published Content Only</span>
+                </label>
+
+                <label className="flex items-center gap-3 p-3 bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800/30 rounded-xl cursor-pointer hover:bg-red-100 dark:hover:bg-red-900/20 transition-colors w-fit">
+                  <input
+                    type="checkbox"
+                    checked={syncAllData}
+                    onChange={(e) => setSyncAllData(e.target.checked)}
+                    className="w-4 h-4 rounded border-red-300 text-red-500 focus:ring-red-500"
+                  />
+                  <span className="text-sm font-bold text-red-700 dark:text-red-400">Include All App Data (Users, Settings, Orders, etc.)</span>
                 </label>
               </div>
             </div>

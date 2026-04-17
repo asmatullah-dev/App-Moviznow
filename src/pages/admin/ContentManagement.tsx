@@ -8,7 +8,7 @@ import { useUsers } from '../../contexts/UsersContext';
 import { Content, Genre, Language, Quality, QualityLinks, Season, Episode, LinkDef, Role, Trailer } from '../../types';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
-import { Plus, Edit2, Trash2, Share2, Film, Tv, X, Save, Upload, Search, Eye, EyeOff, ArrowUp, ArrowDown, Copy, ClipboardPaste, GripVertical, Bell, RefreshCw, ChevronDown, ChevronUp, User, Lock, Loader2 } from 'lucide-react';
+import { Plus, Edit2, Trash2, Share2, Film, Tv, X, Save, Upload, Search, Eye, EyeOff, ArrowUp, ArrowDown, Copy, ClipboardPaste, GripVertical, Bell, RefreshCw, ChevronDown, ChevronUp, User, Lock, Loader2, MessageCircle, MoreVertical } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import ConfirmModal from '../../components/ConfirmModal';
 import AlertModal from '../../components/AlertModal';
@@ -324,20 +324,28 @@ export default function ContentManagement() {
   const [fetchingPoster, setFetchingPoster] = useState(false);
   const [isAutoFillModalOpen, setIsAutoFillModalOpen] = useState(false);
   const [loadingShareId, setLoadingShareId] = useState<string | null>(null);
+  const [loadingWhatsappShareId, setLoadingWhatsappShareId] = useState<string | null>(null);
   const [autoFillText, setAutoFillText] = useState('');
   const [imdbSeasonsPopup, setImdbSeasonsPopup] = useState<{ isOpen: boolean; seasons: any[]; show: any; epData: any[] } | null>(null);
   const [selectedImdbSeasons, setSelectedImdbSeasons] = useState<number[]>([]);
-  const [shareSeasonModal, setShareSeasonModal] = useState<{ isOpen: boolean; content: Content | null; seasons: Season[] }>({ isOpen: false, content: null, seasons: [] });
+  const [shareSeasonModal, setShareSeasonModal] = useState<{ isOpen: boolean; content: Content | null; seasons: Season[], mode: 'standard' | 'whatsapp' }>({ isOpen: false, content: null, seasons: [], mode: 'standard' });
   const [notificationModal, setNotificationModal] = useState<{ isOpen: boolean; content: Content | null; status: 'idle' | 'sending' | 'success' | 'error' }>({ isOpen: false, content: null, status: 'idle' });
-  const [shareAnywayConfig, setShareAnywayConfig] = useState<{ isOpen: boolean; content: Content | null }>({ isOpen: false, content: null });
+  const [shareAnywayConfig, setShareAnywayConfig] = useState<{ isOpen: boolean; content: Content | null, mode: 'standard' | 'whatsapp' }>({ isOpen: false, content: null, mode: 'standard' });
   const [selectedShareSeasons, setSelectedShareSeasons] = useState<number[]>([]);
+  const [activeDropdownId, setActiveDropdownId] = useState<string | null>(null);
   const location = useLocation();
+
+  useEffect(() => {
+    const handleClickOutside = () => setActiveDropdownId(null);
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, []);
 
   useModalBehavior(isModalOpen, () => setIsModalOpen(false));
   useModalBehavior(imdbSeasonsPopup?.isOpen || false, () => setImdbSeasonsPopup(null));
   useModalBehavior(shareSeasonModal.isOpen, () => setShareSeasonModal({ ...shareSeasonModal, isOpen: false }));
   useModalBehavior(notificationModal.isOpen, () => setNotificationModal({ isOpen: false, content: null, status: 'idle' }));
-  useModalBehavior(shareAnywayConfig.isOpen, () => setShareAnywayConfig({ isOpen: false, content: null }));
+  useModalBehavior(shareAnywayConfig.isOpen, () => setShareAnywayConfig({ ...shareAnywayConfig, isOpen: false, content: null }));
   useModalBehavior(isAutoFillModalOpen, () => setIsAutoFillModalOpen(false));
   // isMasterFetchModalOpen, isLinkCheckerOpen, isAdjustContentsModalOpen, manageModal, alertConfig, deleteId 
   // are handled internally by their respective components (MediaModal, LinkCheckerModal, etc.)
@@ -1184,11 +1192,16 @@ export default function ContentManagement() {
     return unit === 'GB' ? size * 1000 : size;
   };
 
-  const handleShare = async (content: Content) => {
-    const isMissingData = !content.runtime || !content.releaseDate || !content.genreIds || content.genreIds.length === 0;
+  const handleShare = async (content: Content, mode: 'standard' | 'whatsapp' = 'standard') => {
+    const isMissingWhatsappData = mode === 'whatsapp' && (!content.country || !content.languageIds || content.languageIds.length === 0);
+    const isMissingData = !content.runtime || !content.releaseDate || !content.genreIds || content.genreIds.length === 0 || isMissingWhatsappData;
     
     if (isMissingData) {
-      setLoadingShareId(content.id);
+      if (mode === 'whatsapp') {
+        setLoadingWhatsappShareId(content.id);
+      } else {
+        setLoadingShareId(content.id);
+      }
       try {
         let tmdbItem = null;
         let type = content.type;
@@ -1252,6 +1265,14 @@ export default function ContentManagement() {
                 imdbRating: content.imdbRating || (imdbRatingData?.rating ? `${imdbRatingData.rating}/10` : ''),
             };
 
+            if (mode === 'whatsapp' && !updatedContent.country && details.production_countries && details.production_countries.length > 0) {
+                updatedContent.country = details.production_countries[0].name || details.production_countries[0].iso_3166_1;
+            }
+
+            if (!updatedContent.posterUrl && details.poster_path) {
+                updatedContent.posterUrl = `https://image.tmdb.org/t/p/w500${details.poster_path}`;
+            }
+
             if (updatedContent.type === 'series') {
                 try {
                     if (needsDuration && fetchedSeasons) {
@@ -1275,25 +1296,31 @@ export default function ContentManagement() {
                     }
 
                     if (parsedSeasons.length > 1) {
-                        setShareSeasonModal({ isOpen: true, content: updatedContent, seasons: parsedSeasons });
+                        setShareSeasonModal({ isOpen: true, content: updatedContent, seasons: parsedSeasons, mode });
                         setSelectedShareSeasons(parsedSeasons.map(s => s.seasonNumber));
                         setLoadingShareId(null);
+                        setLoadingWhatsappShareId(null);
                         return;
                     }
                 } catch (e) {
                     console.error("Error parsing/updating seasons for share:", e);
                 }
             }
-            executeShare(updatedContent);
+            if (mode === 'whatsapp') {
+                executeWhatsappShare(updatedContent);
+            } else {
+                executeShare(updatedContent);
+            }
         } else {
             // Failed to find TMDB item, show share anyway option
-            setShareAnywayConfig({ isOpen: true, content });
+            setShareAnywayConfig({ isOpen: true, content, mode });
         }
       } catch (error) {
         console.error("Share Fetch Error:", error);
-        setShareAnywayConfig({ isOpen: true, content });
+        setShareAnywayConfig({ isOpen: true, content, mode });
       } finally {
         setLoadingShareId(null);
+        setLoadingWhatsappShareId(null);
       }
       return;
     }
@@ -1302,7 +1329,7 @@ export default function ContentManagement() {
       try {
         const parsedSeasons: Season[] = typeof content.seasons === 'string' ? JSON.parse(content.seasons || '[]') : content.seasons;
         if (parsedSeasons.length > 1) {
-          setShareSeasonModal({ isOpen: true, content, seasons: parsedSeasons });
+          setShareSeasonModal({ isOpen: true, content, seasons: parsedSeasons, mode });
           setSelectedShareSeasons(parsedSeasons.map(s => s.seasonNumber));
           return;
         }
@@ -1312,7 +1339,136 @@ export default function ContentManagement() {
         return;
       }
     }
-    executeShare(content);
+    if (mode === 'whatsapp') {
+        executeWhatsappShare(content);
+    } else {
+        executeShare(content);
+    }
+  };
+
+  const getCountryDemonym = (countryStr?: string) => {
+    const c = String(countryStr || '').toLowerCase();
+    if (c.includes('united states') || c === 'us' || c === 'usa') return 'American';
+    if (c.includes('korea') || c === 'kr' || c === 'south korea') return 'Korean';
+    if (c.includes('united kingdom') || c === 'uk' || c === 'great britain') return 'British';
+    if (c.includes('japan') || c === 'jp') return 'Japanese';
+    if (c.includes('china') || c === 'cn') return 'Chinese';
+    if (c.includes('france') || c === 'fr') return 'French';
+    if (c.includes('germany') || c === 'de') return 'German';
+    if (c.includes('spain') || c === 'es') return 'Spanish';
+    if (c.includes('italy') || c === 'it') return 'Italian';
+    if (c.includes('canada') || c === 'ca') return 'Canadian';
+    if (c.includes('australia') || c === 'au') return 'Australian';
+    if (c.includes('turkey') || c === 'tr') return 'Turkish';
+    if (c.includes('thailand') || c === 'th') return 'Thai';
+    if (c.includes('mexico') || c === 'mx') return 'Mexican';
+    if (c.includes('brazil') || c === 'br') return 'Brazilian';
+    
+    // Fallback: capitalize each word
+    return (countryStr || '').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+  };
+
+  const executeWhatsappShare = async (content: Content, selectedSeasonNumbers?: number[]) => {
+    setLoadingWhatsappShareId(content.id);
+    try {
+      let origin = '';
+      const countryRaw = (content.country || '').toUpperCase();
+      const contentLangs = languages.filter(l => content.languageIds?.includes(l.id)).map(l => l.name);
+      
+      if (countryRaw.includes('INDIA') || countryRaw === 'IN') {
+        if (contentLangs.length >= 2) {
+          origin = contentLangs[1];
+        } else if (contentLangs.length === 1) {
+          origin = contentLangs[0];
+        } else {
+          origin = 'Indian';
+        }
+      } else if (countryRaw) {
+        origin = getCountryDemonym(content.country);
+      }
+
+      const contentGenres = genres.filter(g => content.genreIds?.includes(g.id)).map(g => g.name).join(', ');
+      
+      if (!origin && (!contentLangs || contentLangs.length === 0)) {
+         setAlertConfig({ isOpen: true, title: 'Missing Data', message: 'Country or Language is required for WhatsApp sharing. Please update the content or use Master Fetch.' });
+         setLoadingWhatsappShareId(null);
+         return;
+      }
+      
+      let typeStr = '';
+      if (content.type === 'movie') {
+        typeStr = 'Movie';
+      } else {
+        if (selectedSeasonNumbers && selectedSeasonNumbers.length > 0) {
+          const sorted = [...selectedSeasonNumbers].sort((a,b) => a - b);
+          if (sorted.length === 1) {
+            typeStr = `Season ${sorted[0]}`;
+          } else if (sorted.length === 2) {
+            typeStr = `Season ${sorted[0]},${sorted[1]}`;
+          } else {
+            typeStr = `Season ${sorted[0]}-${sorted[sorted.length - 1]}`;
+          }
+        } else {
+          typeStr = 'Series';
+        }
+      }
+
+      const parts = [origin, contentGenres, typeStr].filter(Boolean);
+      const partsStr = parts.join(' ');
+      const text = `*${content.title} ${content.year || ''}*\n${partsStr}`;
+      
+      let files: File[] = [];
+      if (content.posterUrl) {
+        try {
+          const response = await fetch(content.posterUrl);
+          const blob = await response.blob();
+          const file = new File([blob], 'poster.jpg', { type: blob.type || 'image/jpeg' });
+          files = [file];
+        } catch (e) {
+          console.error("Direct fetch failed, falling back to proxy for WhatsApp sharing", e);
+          try {
+            const proxyResponse = await fetch(`/api/image-proxy?url=${encodeURIComponent(content.posterUrl)}`);
+            if (proxyResponse.ok) {
+              const blob = await proxyResponse.blob();
+              const file = new File([blob], 'poster.jpg', { type: blob.type || 'image/jpeg' });
+              files = [file];
+            } else {
+              throw new Error("Proxy fetch also failed");
+            }
+          } catch (proxyError) {
+             console.error("Could not fetch poster for WhatsApp sharing via proxy", proxyError);
+          }
+        }
+      }
+
+      const shareData: any = {
+        title: content.title,
+        text: text,
+      };
+
+      if (files.length > 0 && navigator.canShare && navigator.canShare({ files })) {
+        shareData.files = files;
+      }
+
+      if (navigator.share) {
+        await navigator.share(shareData);
+      } else {
+        await navigator.clipboard.writeText(text);
+        setAlertConfig({ isOpen: true, title: 'Success', message: 'WhatsApp share content copied to clipboard!' });
+      }
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+         try {
+           const fallbackText = `*${content.title} ${content.year || ''}*\n\n${content.posterUrl ? content.posterUrl + '\n\n' : ''}`;
+           await navigator.clipboard.writeText(fallbackText);
+           setAlertConfig({ isOpen: true, title: 'Notice', message: 'Sharing failed directly, but content was copied to clipboard.' });
+         } catch(e) {
+           setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to share to WhatsApp.' });
+         }
+      }
+    } finally {
+      setLoadingWhatsappShareId(null);
+    }
   };
 
   const formatRuntimeForShare = (runtimeStr?: string) => {
@@ -2237,7 +2393,7 @@ export default function ContentManagement() {
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-6">
           {filteredContent.map((content) => (
-            <div key={content.id} className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden flex flex-col group relative">
+            <div key={content.id} className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl flex flex-col group relative">
               <div className="absolute top-2 left-2 z-10">
                 <input 
                   type="checkbox" 
@@ -2249,7 +2405,7 @@ export default function ContentManagement() {
                   className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-zinc-950"
                 />
               </div>
-              <div className="relative aspect-[2/3]">
+              <div className="relative aspect-[2/3] rounded-t-xl overflow-hidden">
                 <Link to={`/movie/${content.id}`} className="block w-full h-full">
                   <img src={content.posterUrl || 'https://picsum.photos/seed/movie/400/600'} alt={content.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                 </Link>
@@ -2272,33 +2428,54 @@ export default function ContentManagement() {
                 <h3 className="font-bold text-sm md:text-base mb-0.5 line-clamp-1" title={content.title}>{content.title}</h3>
                 <p className="text-zinc-500 dark:text-zinc-400 text-xs mb-2">{content.year}</p>
                 
-                <div className="mt-auto flex items-center justify-between pt-2 border-t border-zinc-200 dark:border-zinc-800/50">
-                  <div className="flex gap-1">
-                    <button onClick={() => handleShare(content)} className="text-emerald-500 hover:text-emerald-400 p-1.5 transition-colors" title="Share to WhatsApp" disabled={loadingShareId === content.id}>
+                <div className="mt-auto flex flex-wrap items-center justify-between gap-1 pt-2 border-t border-zinc-200 dark:border-zinc-800/50">
+                  <div className="flex flex-wrap gap-1">
+                    <button onClick={() => handleShare(content, 'whatsapp')} className="text-emerald-500 hover:text-emerald-400 p-1.5 transition-colors" title="Share to WhatsApp" disabled={loadingWhatsappShareId === content.id}>
+                      {loadingWhatsappShareId === content.id ? <RefreshCw className="w-4 h-4 md:w-5 md:h-5 animate-spin" /> : <MessageCircle className="w-4 h-4 md:w-5 md:h-5" />}
+                    </button>
+                    <button onClick={() => handleShare(content, 'standard')} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-1.5 transition-colors" title="Share Links & Details" disabled={loadingShareId === content.id}>
                       {loadingShareId === content.id ? <RefreshCw className="w-4 h-4 md:w-5 md:h-5 animate-spin" /> : <Share2 className="w-4 h-4 md:w-5 md:h-5" />}
                     </button>
-                    {(profile?.role === 'admin' || profile?.role === 'owner') && (
-                      <button onClick={() => setNotificationModal({ isOpen: true, content, status: 'idle' })} className="text-blue-500 hover:text-blue-400 p-1.5 transition-colors" title="Send Notification">
-                        <Bell className="w-4 h-4 md:w-5 md:h-5" />
-                      </button>
-                    )}
-                    {(profile?.role === 'admin' || profile?.role === 'owner') && (
-                      <button onClick={() => handleCopyData(content)} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-1.5 transition-colors" title="Copy Data">
-                        <Copy className="w-4 h-4 md:w-5 md:h-5" />
-                      </button>
-                    )}
                   </div>
-                  <div className="flex gap-1">
+                  <div className="flex gap-1 ml-auto">
                     {(profile?.role === 'admin' || profile?.role === 'owner' || content.status === 'draft') && (
                       <button onClick={() => handleEdit(content)} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-1.5 transition-colors">
                         <Edit2 className="w-4 h-4 md:w-5 md:h-5" />
                       </button>
                     )}
-                    {(profile?.role === 'admin' || profile?.role === 'owner') && (
-                      <button onClick={() => setDeleteId(content.id)} className="text-red-500 hover:text-red-400 p-1.5 transition-colors">
-                        <Trash2 className="w-4 h-4 md:w-5 md:h-5" />
+                    <div className="relative">
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveDropdownId(activeDropdownId === content.id ? null : content.id);
+                        }}
+                        className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white p-1.5 transition-colors"
+                      >
+                        <MoreVertical className="w-4 h-4 md:w-5 md:h-5" />
                       </button>
-                    )}
+                      {activeDropdownId === content.id && (
+                        <div 
+                          className="absolute bottom-full right-0 mb-2 w-48 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-xl overflow-hidden z-20 py-1"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {(profile?.role === 'admin' || profile?.role === 'owner') && (
+                            <button onClick={() => { setNotificationModal({ isOpen: true, content, status: 'idle' }); setActiveDropdownId(null); }} className="w-full flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 text-sm text-blue-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left">
+                              <Bell className="w-4 h-4" /> Send Notification
+                            </button>
+                          )}
+                          {(profile?.role === 'admin' || profile?.role === 'owner') && (
+                            <button onClick={() => { handleCopyData(content); setActiveDropdownId(null); }} className="w-full flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left">
+                              <Copy className="w-4 h-4" /> Copy Data
+                            </button>
+                          )}
+                          {(profile?.role === 'admin' || profile?.role === 'owner') && (
+                            <button onClick={() => { setDeleteId(content.id); setActiveDropdownId(null); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left">
+                              <Trash2 className="w-4 h-4" /> Delete
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -3306,14 +3483,18 @@ export default function ContentManagement() {
               <button
                 onClick={() => {
                   if (shareSeasonModal.content) {
-                    executeShare(shareSeasonModal.content, selectedShareSeasons);
+                    if (shareSeasonModal.mode === 'whatsapp') {
+                      executeWhatsappShare(shareSeasonModal.content, selectedShareSeasons);
+                    } else {
+                      executeShare(shareSeasonModal.content, selectedShareSeasons);
+                    }
                     setShareSeasonModal({ ...shareSeasonModal, isOpen: false });
                   }
                 }}
                 disabled={selectedShareSeasons.length === 0}
                 className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-xl font-bold transition-colors flex items-center gap-2"
               >
-                <Share2 className="w-4 h-4" /> Share ({selectedShareSeasons.length})
+                {shareSeasonModal.mode === 'whatsapp' ? <MessageCircle className="w-4 h-4" /> : <Share2 className="w-4 h-4" />} Share ({selectedShareSeasons.length})
               </button>
             </div>
           </div>
@@ -3414,11 +3595,15 @@ export default function ContentManagement() {
         cancelText="Cancel"
         onConfirm={() => {
           if (shareAnywayConfig.content) {
-            executeShare(shareAnywayConfig.content);
-            setShareAnywayConfig({ isOpen: false, content: null });
+            if (shareAnywayConfig.mode === 'whatsapp') {
+              executeWhatsappShare(shareAnywayConfig.content);
+            } else {
+              executeShare(shareAnywayConfig.content);
+            }
+            setShareAnywayConfig({ isOpen: false, content: null, mode: 'standard' });
           }
         }}
-        onCancel={() => setShareAnywayConfig({ isOpen: false, content: null })}
+        onCancel={() => setShareAnywayConfig({ isOpen: false, content: null, mode: 'standard' })}
       />
 
       <AdjustContentsModal
