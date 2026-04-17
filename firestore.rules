@@ -94,15 +94,22 @@ service cloud.firestore {
              request.resource.data.get('assignedContent', []) == resource.data.get('assignedContent', []);
     }
 
+    function isIdentityMatch(resourceData) {
+      return isAuthenticated() && 
+             (
+               (resourceData.get('email', '') != '' && ('email' in request.auth.token) && resourceData.email.lower() == request.auth.token.email.lower()) || 
+               (resourceData.get('phone', '') != '' && ('phone_number' in request.auth.token) && resourceData.phone == request.auth.token.phone_number)
+             );
+    }
+
     match /users/{userId} {
-      // Protect PII: Only owner and authorized staff can read full profiles by ID
-      allow get: if isOwner(userId) || isAdminOrEditor() || isUserManager();
+      // Protect PII: Only owner, authorized staff, or identity-matched users can read profiles
+      allow get: if isOwner(userId) || isAdminOrEditor() || isUserManager() || isIdentityMatch(resource.data);
       
       // Protect against bulk scraping: 
       // 1. Admins and Managers can query freely
       // 2. Others (including unauthenticated) can only perform limited queries (max 5 results)
-      //    This is specifically to support the login/signup flow (finding dummy emails by phone).
-      allow list: if isAdminOrEditor() || isUserManager() || request.query.limit <= 5;
+      allow list: if isAdminOrEditor() || isUserManager() || (isAuthenticated() && request.query.limit <= 5);
 
       allow create: if (isAdmin() && isValidUser(request.resource.data)) ||
                        (isOwner(userId) && request.resource.data.uid == request.auth.uid && request.resource.data.role == 'user' && isValidUser(request.resource.data)) || 
@@ -116,7 +123,7 @@ service cloud.firestore {
                        (isUserManager() && resource.data.status == 'pending' && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended' && isValidUser(request.resource.data)) ||
                        (isManager() && resource.data.managedBy == request.auth.uid && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended' && isValidUser(request.resource.data)) ||
                        (isManager() && resource.data.status == 'pending' && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended' && isValidUser(request.resource.data));
-      allow delete: if isAdmin() || isPendingOwner(userId, resource.data);
+      allow delete: if isAdmin() || isPendingOwner(userId, resource.data) || isIdentityMatch(resource.data);
     }
 
     match /genres/{genreId} {

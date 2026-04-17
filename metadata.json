@@ -1,6 +1,6 @@
 {
-  "name": "Remix: MovizNow",
-  "description": "Premium Movies \u0026 Series app with membership management. To enable push notifications, set VITE_FCM_VAPID_KEY and FIREBASE_PROJECT_ID in environment variables.",
+  "name": "MovizNow Premium",
+  "description": "A high-performance streaming platform with multi-account merging, secure membership management, and real-time content synchronization.",
   "requestFramePermissions": [
     "notifications",
     "web-share"

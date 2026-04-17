@@ -279,19 +279,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               try {
                 const searchRef = collection(db, 'users');
                 const findMatches = async (field: string, value: string) => {
-                  const q = query(searchRef, where(field, '==', value));
+                  if (!value) return [];
+                  const q = query(searchRef, where(field, '==', value), limit(5));
                   const snap = await getDocs(q);
                   return snap.docs.filter(d => d.id !== currentUser.uid);
                 };
 
                 let matchDocs: any[] = [];
                 if (currentUser.email && !currentUser.email.endsWith('@moviznow.com')) {
+                  // Try exact match
                   const emailMatches = await findMatches('email', currentUser.email);
                   matchDocs = [...matchDocs, ...emailMatches];
+                  
+                  // Try lowercase match
+                  const lowerEmail = currentUser.email.toLowerCase();
+                  if (lowerEmail !== currentUser.email) {
+                    const lowerEmailMatches = await findMatches('email', lowerEmail);
+                    matchDocs = [...matchDocs, ...lowerEmailMatches];
+                  }
                 }
+                
                 if (standardizedUserPhone) {
+                  // Try standardized
                   const phoneMatches = await findMatches('phone', standardizedUserPhone);
                   matchDocs = [...matchDocs, ...phoneMatches];
+                  
+                  // Try raw digits if different
+                  const rawDigits = standardizedUserPhone.replace(/\D/g, '');
+                  if (rawDigits && rawDigits !== standardizedUserPhone) {
+                    const rawMatches = await findMatches('phone', rawDigits);
+                    matchDocs = [...matchDocs, ...rawMatches];
+                  }
+
+                  // Try without leading 0 or +92 if present
+                  let baseNumber = rawDigits;
+                  if (baseNumber.startsWith('92')) baseNumber = baseNumber.substring(2);
+                  if (baseNumber.startsWith('0')) baseNumber = baseNumber.substring(1);
+                  if (baseNumber && baseNumber !== rawDigits) {
+                    const baseMatches = await findMatches('phone', baseNumber);
+                    const zeroPrefixMatches = await findMatches('phone', `0${baseNumber}`);
+                    const plus92Matches = await findMatches('phone', `+92${baseNumber}`);
+                    matchDocs = [...matchDocs, ...baseMatches, ...zeroPrefixMatches, ...plus92Matches];
+                  }
                 }
 
                 // Deduplicate by ID
