@@ -273,59 +273,134 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               }
               const standardizedUserPhone = standardizePhone(currentUser.phoneNumber || extractedPhone);
 
-              let existingProfile: UserProfile | undefined = undefined;
-              let existingDocId: string | undefined = undefined;
+              let mergedOldData: any = {};
+              let oldDocIds: string[] = [];
 
               try {
-                // Find by email if it's a real email, otherwise find by phone
                 const searchRef = collection(db, 'users');
-                let q;
+                const findMatches = async (field: string, value: string) => {
+                  const q = query(searchRef, where(field, '==', value));
+                  const snap = await getDocs(q);
+                  return snap.docs.filter(d => d.id !== currentUser.uid);
+                };
+
+                let matchDocs: any[] = [];
                 if (currentUser.email && !currentUser.email.endsWith('@moviznow.com')) {
-                  q = query(searchRef, where('email', '==', currentUser.email));
-                } else if (standardizedUserPhone) {
-                  q = query(searchRef, where('phone', '==', standardizedUserPhone));
+                  const emailMatches = await findMatches('email', currentUser.email);
+                  matchDocs = [...matchDocs, ...emailMatches];
                 }
-                
-                if (q) {
-                  const querySnapshot = await getDocs(q);
-                  querySnapshot.forEach(snap => {
-                    if (snap.id !== currentUser.uid && !existingProfile) {
-                      existingProfile = snap.data() as UserProfile;
-                      existingDocId = snap.id;
+                if (standardizedUserPhone) {
+                  const phoneMatches = await findMatches('phone', standardizedUserPhone);
+                  matchDocs = [...matchDocs, ...phoneMatches];
+                }
+
+                // Deduplicate by ID
+                const uniqueMatchDocs = matchDocs.filter((doc, index, self) =>
+                  index === self.findIndex((t) => t.id === doc.id)
+                );
+
+                if (uniqueMatchDocs.length > 0) {
+                  oldDocIds = uniqueMatchDocs.map(d => d.id);
+                  mergedOldData = uniqueMatchDocs.reduce((acc, doc) => {
+                    const data = doc.data() as UserProfile;
+                    
+                    // Role Priority: owner > admin > manager > ... > user
+                    const rolePriority: Record<string, number> = {
+                      'owner': 100,
+                      'admin': 90,
+                      'manager': 80,
+                      'user_manager': 75,
+                      'content_manager': 70,
+                      'selected_content': 60,
+                      'user': 10,
+                      'trial': 5
+                    };
+                    const getRoleRank = (r: string) => rolePriority[r] || 0;
+                    const betterRole = getRoleRank(data.role) > getRoleRank(acc.role || '') ? data.role : acc.role || data.role;
+
+                    // Status Priority: active > pending > expired > suspended
+                    const statusPriority: Record<string, number> = {
+                      'active': 100,
+                      'pending': 50,
+                      'expired': 20,
+                      'suspended': 0
+                    };
+                    const getStatusRank = (s: string) => statusPriority[s] || 0;
+                    const betterStatus = getStatusRank(data.status) > getStatusRank(acc.status || '') ? data.status : acc.status || data.status;
+
+                    // Expiry Date Logic: "Lifetime" wins, otherwise latest date
+                    let betterExpiry = acc.expiryDate;
+                    if (data.expiryDate === 'Lifetime' || acc.expiryDate === 'Lifetime') {
+                      betterExpiry = 'Lifetime';
+                    } else if (data.expiryDate && (!acc.expiryDate || data.expiryDate > acc.expiryDate)) {
+                      betterExpiry = data.expiryDate;
                     }
-                  });
+
+                    return {
+                      ...acc,
+                      ...data,
+                      role: betterRole,
+                      status: betterStatus,
+                      expiryDate: betterExpiry,
+                      favorites: [...new Set([...(acc.favorites || []), ...(data.favorites || [])])],
+                      watchLater: [...new Set([...(acc.watchLater || []), ...(data.watchLater || [])])],
+                      assignedContent: [...new Set([...(acc.assignedContent || []), ...(data.assignedContent || [])])],
+                      sessionsCount: (acc.sessionsCount || 0) + (data.sessionsCount || 0),
+                      timeSpent: (acc.timeSpent || 0) + (data.timeSpent || 0),
+                      createdAt: acc.createdAt && acc.createdAt < data.createdAt ? acc.createdAt : data.createdAt,
+                      lastActive: acc.lastActive && acc.lastActive > (data.lastActive || '') ? acc.lastActive : (data.lastActive || acc.lastActive),
+                    };
+                  }, {} as any);
                 }
               } catch (e) {
                 console.error("Failed to check for existing accounts:", e);
               }
 
               const newProfile: UserProfile = {
+                // Start with all aggregated data from old accounts
+                ...mergedOldData,
+                // Ensure identity fields match exactly what was used for this successful login
                 uid: currentUser.uid,
-                email: currentUser.email || existingProfile?.email || '',
-                phone: standardizedUserPhone || existingProfile?.phone || '',
-                displayName: currentUser.displayName || existingProfile?.displayName || '',
-                photoURL: currentUser.photoURL || existingProfile?.photoURL || '',
-                role: isOwner ? 'owner' : isAdmin ? 'admin' : (existingProfile?.role || defaultRoleToSet),
-                status: (isOwner || isAdmin) ? 'active' : (existingProfile?.status || defaultStatusToSet),
-                createdAt: existingProfile?.createdAt || new Date().toISOString(),
-                sessionsCount: (existingProfile?.sessionsCount || 0) + 1,
-                timeSpent: existingProfile?.timeSpent || 0,
-                expiryDate: isOwner ? 'Lifetime' : (existingProfile?.expiryDate || null),
+                email: currentUser.email || mergedOldData.email || '',
+                phone: standardizedUserPhone || mergedOldData.phone || '',
+                displayName: currentUser.displayName || mergedOldData.displayName || '',
+                photoURL: currentUser.photoURL || mergedOldData.photoURL || '',
+                // Increment session data for the current session
+                sessionsCount: (mergedOldData.sessionsCount || 0) + 1,
                 hasPassword: hasPassword,
                 sessionId: getLocalSessionId(),
-                favorites: existingProfile?.favorites || [],
-                watchLater: existingProfile?.watchLater || [],
+                // Enforce roles based on the high-privileged list or the old data
+                role: isOwner ? 'owner' : isAdmin ? 'admin' : (mergedOldData.role || defaultRoleToSet),
+                status: (isOwner || isAdmin) ? 'active' : (mergedOldData.status || defaultStatusToSet),
+                expiryDate: isOwner ? 'Lifetime' : (mergedOldData.expiryDate || null),
+                // Ensure we have a creation date
+                createdAt: mergedOldData.createdAt || new Date().toISOString(),
+                lastActive: new Date().toISOString(),
+                // Ensure arrays are initialized if missing
+                favorites: mergedOldData.favorites || [],
+                watchLater: mergedOldData.watchLater || [],
+                assignedContent: mergedOldData.assignedContent || [],
               };
 
               try {
-                await setDoc(userRef, newProfile);
-                // Clean up the old dangling account document mapped by the same email/phone
-                if (existingDocId) {
-                  await deleteDoc(doc(db, 'users', existingDocId));
-                  console.log(`Merged profile and deleted old account record for ${existingDocId}`);
-                }
+                const batch = writeBatch(db);
+                // Set the new user record
+                batch.set(userRef, newProfile);
+                
+                // Delete all old records that were merged
+                oldDocIds.forEach(oldId => {
+                  batch.delete(doc(db, 'users', oldId));
+                  console.log(`Merged and scheduled deletion of old profile: ${oldId}`);
+                });
+                
+                await batch.commit();
+                console.log(`Successfully combined ${oldDocIds.length} accounts into new UID ${currentUser.uid}`);
               } catch (err) {
-                console.error("Failed to create user profile:", err);
+                console.error("Failed to merge/create user profile:", err);
+                // Fallback attempt if batch fails
+                try {
+                   await setDoc(userRef, newProfile);
+                } catch(e) {}
               }
               safeStorage.setItem('profile_cache', JSON.stringify(newProfile));
               setProfile(newProfile);
