@@ -12,7 +12,8 @@ export const logEvent = async (
     linkName?: string;
     duration?: number;
     playerType?: string;
-  }
+  },
+  skipFirestore = false
 ) => {
   if (!userId) return;
 
@@ -26,7 +27,7 @@ export const logEvent = async (
     }
 
     // Keep sessionsCount in Firestore for the User Profile UI
-    if (type === 'session_start') {
+    if (type === 'session_start' && !skipFirestore) {
       const userRef = doc(db, 'users', userId);
       await updateDoc(userRef, {
         sessionsCount: increment(1)

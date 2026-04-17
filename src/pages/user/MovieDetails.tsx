@@ -1347,10 +1347,14 @@ export default function MovieDetails() {
                     } else if (!supportPhone.startsWith('92')) {
                       supportPhone = '92' + supportPhone;
                     }
-                    const adminPhone = supportPhone.replace('+', '');
-                    const contentTitle = mergedContent?.type === 'series' ? `${mergedContent?.title} (Full Series)` : mergedContent?.title;
-                    const msg = `Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\n\nYour message/question:\n${profile?.role === 'selected_content' ? `I want to get access to ${contentTitle}. Please tell me how to pay and add it to my account.` : `I cannot access ${contentTitle}.`}`;
-                    window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+                  const adminPhone = supportPhone.replace('+', '');
+                  const seasonText = mergedContent?.type === 'series' ? ' (Full Series)' : '';
+                  const contentTitle = mergedContent?.title + seasonText;
+                  const helpText = profile?.role === 'selected_content' 
+                    ? `I want to get access to ${contentTitle}. Please tell me how to pay and add it to my account.`
+                    : `I cannot access ${contentTitle}.`;
+                  const msg = `Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\n\nYour message/question:\n${helpText}`;
+                  window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(msg)}`, '_blank');
                   }} 
                   className="inline-flex items-center gap-2 bg-red-500/20 px-6 py-3 text-sm sm:text-base rounded-xl font-medium hover:bg-red-500/30 transition-colors text-red-500">
                     <MessageCircle className="w-5 h-5" /> Contact Admin ({(settings?.supportNumber || '03363284466').startsWith('0') ? (settings?.supportNumber || '03363284466') : `0${settings?.supportNumber || '3363284466'}`})
@@ -2062,7 +2066,8 @@ export default function MovieDetails() {
                     supportPhone = '92' + supportPhone;
                   }
                   const adminPhone = supportPhone.replace('+', '');
-                  const displayTitle = lockedContentInfo?.title || mergedContent?.title || 'this content';
+                  const seasonText = lockedContentInfo?.type === 'season' && lockedContentInfo.seasonNumber ? ` Season ${lockedContentInfo.seasonNumber}` : '';
+                  const displayTitle = (lockedContentInfo?.title || mergedContent?.title || 'this content') + seasonText;
                   const helpText = profile?.role === 'selected_content' 
                     ? `I want to get access to ${displayTitle}. Please tell me how to pay and add it to my account.`
                     : `I need assistance with ${displayTitle}.`;

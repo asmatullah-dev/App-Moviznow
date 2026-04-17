@@ -64,19 +64,33 @@ export const requestNotificationPermission = async () => {
       });
       
       if (token) {
-        // Store token in Firestore
-        await setDoc(doc(collection(db, 'fcm_tokens'), token), {
-          token,
-          updatedAt: new Date().toISOString(),
-          userId: auth.currentUser?.uid || 'anonymous'
-        });
-        
-        // Also register with server for topic subscription
-        await fetch('/api/notifications/subscribe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token })
-        });
+        // Optimized: Only store token in Firestore if it changed or hasn't been updated in 24 hours
+        const CACHE_KEY = `fcm_token_last_update_${auth.currentUser?.uid || 'anon'}`;
+        const lastUpdate = localStorage.getItem(CACHE_KEY);
+        const now = Date.now();
+        const oneDay = 24 * 60 * 60 * 1000;
+
+        const needsUpdate = !lastUpdate || 
+                            JSON.parse(lastUpdate).token !== token || 
+                            (now - JSON.parse(lastUpdate).timestamp > oneDay);
+
+        if (needsUpdate) {
+          // Store token in Firestore
+          await setDoc(doc(collection(db, 'fcm_tokens'), token), {
+            token,
+            updatedAt: new Date().toISOString(),
+            userId: auth.currentUser?.uid || 'anonymous'
+          });
+          
+          localStorage.setItem(CACHE_KEY, JSON.stringify({ token, timestamp: now }));
+          
+          // Also register with server for topic subscription
+          await fetch('/api/notifications/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token })
+          });
+        }
         
         return token;
       }

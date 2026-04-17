@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react';
 import { db, auth } from '../firebase';
 import { safeStorage } from '../utils/safeStorage';
 import { collection, onSnapshot, query, where, getDoc, getDocs, doc, setDoc, orderBy, limit } from 'firebase/firestore';
@@ -235,6 +235,8 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     };
   }, [profile?.role]);
 
+  const lastSearchIndexRef = useRef<string>('');
+
   const updateSearchIndex = async () => {
     if (contentList.length === 0) return;
     
@@ -255,9 +257,17 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       return `${c.id}|${c.title}|${c.year}|${c.posterUrl}|${c.type}|${c.qualityId || ''}|${c.languageIds?.join(',') || ''}|${c.genreIds?.join(',') || ''}|${c.createdAt}|${c.order ?? ''}|${seasonsInfo}`;
     });
 
+    const indexString = JSON.stringify(searchIndex);
+    
+    // Only write if the index has actually changed
+    if (indexString === lastSearchIndexRef.current) {
+      return;
+    }
+
     try {
       await setDoc(doc(db, 'metadata', 'search_index'), { data: searchIndex });
-      console.log("Search index updated successfully");
+      lastSearchIndexRef.current = indexString;
+      console.log("Search index updated successfully (only changed content)");
     } catch (e) {
       console.error("Failed to update search_index", e);
     }
@@ -266,21 +276,21 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
   // Debounced search index update to prevent excessive writes
   useEffect(() => {
     const userId = auth.currentUser?.uid;
-    if (!userId || contentList.length === 0) return;
+    // Don't trigger if offline or no user or empty list
+    if (!userId || contentList.length === 0 || !navigator.onLine) return;
 
     let timer: NodeJS.Timeout;
 
     const checkRoleAndUpdate = async () => {
       try {
-        const userDoc = await getDoc(doc(db, 'users', userId));
-        if (userDoc.exists()) {
-          const role = userDoc.data().role;
-          if (role === 'admin' || role === 'owner') {
-            // Debounce the update by 30 seconds
-            timer = setTimeout(() => {
-              updateSearchIndex();
-            }, 30000);
-          }
+        // Only the owner should update the index to minimize writes
+        // If no owner is online, the search index might lag, but most managing is done by owners.
+        const isUpdater = profile?.role === 'owner';
+        if (isUpdater) {
+          // Debounce the update by 30 minutes to consolidate multiple changes
+          timer = setTimeout(() => {
+            updateSearchIndex();
+          }, 30 * 60000);
         }
       } catch (e) {}
     };
@@ -289,7 +299,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     return () => {
       if (timer) clearTimeout(timer);
     };
-  }, [contentList.length]);
+  }, [contentList, profile?.role]); // Changed from length to contentList for deeper check
 
   return (
     <ContentContext.Provider value={{ contentList, genres, languages, qualities, loading, isOffline, updateSearchIndex }}>

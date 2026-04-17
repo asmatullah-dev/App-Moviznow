@@ -183,13 +183,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (currentUser) {
         const userRef = doc(db, 'users', currentUser.uid);
 
+        const sessionKey = `last_session_start_${currentUser.uid}`;
+        const lastSessionStart = localStorage.getItem(sessionKey);
+        const now = Date.now();
+        const twelveHours = 12 * 60 * 60 * 1000;
+
         if (!sessionStorage.getItem('session_started')) {
           sessionStorage.setItem('session_started', 'true');
-          sessionStartTimeRef.current = Date.now();
-          logEvent('session_start', currentUser.uid);
+          sessionStartTimeRef.current = now;
           
-          // Update lastActive on session start
-          updateDoc(userRef, { lastActive: new Date().toISOString() }).catch(console.error);
+          if (!lastSessionStart || (now - parseInt(lastSessionStart) > twelveHours)) {
+            // Merged write: increment session count and update lastActive in ONE call
+            logEvent('session_start', currentUser.uid, {}, true); // Log to GA, skip individual Firestore write
+            localStorage.setItem(sessionKey, now.toString());
+            
+            updateDoc(userRef, { 
+              sessionsCount: increment(1),
+              lastActive: new Date().toISOString() 
+            }).catch(console.error);
+          }
         }
         
         // Listen to profile changes
@@ -203,8 +215,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               const isAdmin = currentUser.email === 'asmatullah9327@gmail.com';
               const hasAdminPrivileges = isOwner || isAdmin || data.role === 'owner' || data.role === 'admin';
               
-              // 1-Device Lock Check
+              const updates: any = {};
               const localSessionId = getLocalSessionId();
+
+              // 1-Device Lock Check
               if (!hasAdminPrivileges && !justLoggedInRef.current) {
                 if (data.sessionId && data.sessionId !== localSessionId) {
                   console.log("Logged in from another device. Logging out.");
@@ -212,7 +226,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   setError("You have been logged out because your account was accessed from another device.");
                   return;
                 } else if (!data.sessionId) {
-                  updateDoc(userRef, { sessionId: localSessionId }).catch(console.error);
+                  updates.sessionId = localSessionId;
                   data.sessionId = localSessionId;
                 }
               }
@@ -221,42 +235,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               const now = new Date();
               if (data.status === 'active' && data.expiryDate && data.role !== 'owner') {
                 const expiryDate = new Date(data.expiryDate);
-                // Add 1 day to expiryDate so it expires on the next day
                 expiryDate.setDate(expiryDate.getDate() + 1);
                 if (expiryDate < now) {
-                  try {
-                    await updateDoc(userRef, { status: 'expired' });
-                    data.status = 'expired';
-                  } catch (err) {
-                    console.error("Failed to auto-expire user:", err);
-                  }
+                  updates.status = 'expired';
+                  data.status = 'expired';
                 }
               }
 
+              // Role enforcement
               if (isOwner && (data.role !== 'owner' || data.status !== 'active' || data.expiryDate !== 'Lifetime')) {
-                try {
-                  await updateDoc(userRef, { role: 'owner', status: 'active', expiryDate: 'Lifetime' });
-                  setProfile({ ...data, role: 'owner', status: 'active', expiryDate: 'Lifetime' });
-                } catch (err) {
-                  console.error("Failed to update owner role:", err);
-                  setProfile({ ...data, role: 'owner', status: 'active', expiryDate: 'Lifetime' }); // Set locally anyway
-                }
+                updates.role = 'owner';
+                updates.status = 'active';
+                updates.expiryDate = 'Lifetime';
+                data.role = 'owner';
+                data.status = 'active';
+                data.expiryDate = 'Lifetime';
               } else if (isAdmin && (data.role !== 'admin' || data.status !== 'active')) {
-                try {
-                  await updateDoc(userRef, { role: 'admin', status: 'active' });
-                  setProfile({ ...data, role: 'admin', status: 'active' });
-                } catch (err) {
-                  console.error("Failed to update admin role:", err);
-                  setProfile({ ...data, role: 'admin', status: 'active' }); // Set locally anyway
-                }
-              } else {
-                const hasPassword = currentUser.providerData.some(p => p.providerId === 'password');
-                if (!data.hasPassword && hasPassword) {
-                  updateDoc(userRef, { hasPassword: true }).catch(console.error);
-                  data.hasPassword = true;
-                }
-                setProfile(data);
+                updates.role = 'admin';
+                updates.status = 'active';
+                data.role = 'admin';
+                data.status = 'active';
               }
+
+              const hasPassword = currentUser.providerData.some(p => p.providerId === 'password');
+              if (!data.hasPassword && hasPassword) {
+                updates.hasPassword = true;
+                data.hasPassword = true;
+              }
+
+              // Perform consolidated update if needed
+              if (Object.keys(updates).length > 0) {
+                try {
+                  await updateDoc(userRef, updates);
+                } catch (err) {
+                  console.error("Failed to perform consolidated profile update:", err);
+                }
+              }
+
+              setProfile(data);
             } else {
               // Create new user profile
               const isOwner = currentUser.email === 'asmatn628@gmail.com';
@@ -460,20 +476,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    // Track time spent periodically (every 5 minutes to reduce Firestore writes)
+    // Track time spent periodically (every 30 minutes to reduce Firestore writes)
     const timeTrackerInterval = setInterval(() => {
-      if (auth.currentUser && sessionStartTimeRef.current) {
-        // Combine updates into a single write
-        const userRef = doc(db, 'users', auth.currentUser.uid);
-        updateDoc(userRef, {
-          timeSpent: increment(5),
-          lastActive: new Date().toISOString()
-        }).then(() => {
-          // Also log to GA4
-          logEvent('time_spent', auth.currentUser!.uid, { duration: 5 });
-        }).catch(console.error);
+      if (auth.currentUser && sessionStartTimeRef.current && navigator.onLine) {
+        // Only update if the tab is visible
+        if (document.visibilityState === 'visible') {
+          const userRef = doc(db, 'users', auth.currentUser.uid);
+          updateDoc(userRef, {
+            timeSpent: increment(30),
+            lastActive: new Date().toISOString()
+          }).then(() => {
+            // Also log to GA4
+            logEvent('time_spent', auth.currentUser!.uid, { duration: 30 });
+          }).catch(console.error);
+        }
       }
-    }, 5 * 60000);
+    }, 30 * 60000);
 
     // Also track time spent when window unloads
     const handleBeforeUnload = () => {

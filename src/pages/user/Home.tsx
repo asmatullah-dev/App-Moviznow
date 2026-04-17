@@ -443,7 +443,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
                     supportPhone = '92' + supportPhone;
                   }
                   const adminPhone = supportPhone.replace('+', '');
-                  const expiryType = profile?.role === 'trial' ? 'Trial' : 'membership';
+                  const expiryType = profile?.role === 'trial' ? 'Trial' : 'Membership';
                   const msg = `Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\n\nYour message/question:\nMy ${expiryType} has expired and I need assistance.`;
                   window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(msg)}`, '_blank');
                 }} className="flex items-center justify-center gap-1.5 sm:gap-2 bg-red-500/10 border border-red-500/30 px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-red-500/20 transition-all active:scale-95">
@@ -706,40 +706,51 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
                   </button>
                   
                   <div className="flex items-center gap-1">
-                    {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
-                      // Show limited page numbers for better UI
-                      const isFirst = page === 1;
-                      const isLast = page === totalPages;
-                      const isNear = page >= currentPage - 1 && page <= currentPage + 1;
+                    {(() => {
+                      const pages = [];
+                      const range = 1; // Number of pages around current page
                       
-                      // Never show the last page number button
-                      if ((isFirst || isNear) && !isLast) {
-                        return (
-                          <button
-                            key={page}
-                            onClick={() => {
-                              setCurrentPage(page);
-                              window.scrollTo({ top: 0, behavior: 'smooth' });
-                            }}
-                            className={clsx(
-                              "w-9 h-9 sm:w-10 sm:h-10 rounded-xl text-sm font-medium transition-colors",
-                              currentPage === page 
-                                ? "bg-emerald-500 text-white" 
-                                : "bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800"
-                            )}
-                          >
-                            {page}
-                          </button>
-                        );
-                      } else if (
-                        (page === currentPage - 2 && page > 1) || 
-                        (isLast && currentPage < totalPages)
-                      ) {
-                        // Show dots if it's the gap before or the very last page position
-                        return <span key={`dots-${page}`} className="text-zinc-400 dark:text-zinc-600 px-0.5 sm:px-1">...</span>;
+                      for (let i = 1; i < totalPages; i++) { // Note: i < totalPages to hide last page number
+                        if (
+                          i === 1 || 
+                          (i >= currentPage - range && i <= currentPage + range)
+                        ) {
+                          pages.push(
+                            <button
+                              key={i}
+                              onClick={() => {
+                                setCurrentPage(i);
+                                window.scrollTo({ top: 0, behavior: 'smooth' });
+                              }}
+                              className={clsx(
+                                "w-9 h-9 sm:w-10 sm:h-10 rounded-xl text-sm font-medium transition-colors",
+                                currentPage === i 
+                                  ? "bg-emerald-500 text-white" 
+                                  : "bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800"
+                              )}
+                            >
+                              {i}
+                            </button>
+                          );
+                        } else if (
+                          (i === currentPage - range - 1 && i > 1) || 
+                          (i === totalPages - 1 && currentPage < totalPages - 2)
+                        ) {
+                          pages.push(<span key={`dots-${i}`} className="text-zinc-400 dark:text-zinc-600 px-1">...</span>);
+                        }
                       }
-                      return null;
-                    })}
+                      
+                      // Always show ... at the end if not on last page
+                      if (currentPage < totalPages) {
+                         // Only add if last item isn't already dots
+                         const lastItem = pages[pages.length - 1];
+                         if (lastItem && (lastItem as any).key && !(lastItem as any).key.startsWith('dots')) {
+                           pages.push(<span key="final-dots" className="text-zinc-400 dark:text-zinc-600 px-1">...</span>);
+                         }
+                      }
+                      
+                      return pages;
+                    })()}
                   </div>
 
                   <button

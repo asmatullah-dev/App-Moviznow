@@ -710,9 +710,6 @@ export default function ContentManagement() {
         await addDoc(collection(db, 'content'), data);
       }
       
-      // Trigger search index update
-      updateSearchIndex();
-      
       setIsModalOpen(false);
       resetForm();
     } catch (error) {
@@ -2580,8 +2577,8 @@ export default function ContentManagement() {
                         <button 
                           type="button"
                           onClick={() => setDisableSuggestions(!disableSuggestions)}
-                          className="text-[10px] text-zinc-400 hover:text-emerald-500 flex items-center gap-1 transition-colors"
-                          title={disableSuggestions ? "Show suggestions" : "Hide suggestions"}
+                          className="text-[10px] bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 px-2 py-0.5 rounded-md text-zinc-400 dark:text-zinc-500 hover:text-emerald-500 flex items-center gap-1 transition-colors border border-zinc-200 dark:border-zinc-800"
+                          title={disableSuggestions ? "Show similar titles" : "Hide similar titles"}
                         >
                           {disableSuggestions ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
                           {disableSuggestions ? 'Show Similar' : 'Hide Similar'}
