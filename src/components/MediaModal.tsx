@@ -50,7 +50,7 @@ export async function searchTMDBByTitle(searchTitle: string, searchYear: string)
 }
 
 export async function fetchTMDBDetails(tmdbId: string, type: string) {
-  const url = `${TMDB_BASE}/${type}/${tmdbId}?api_key=${TMDB_API_KEY}&append_to_response=credits,external_ids,content_ratings`;
+  const url = `${TMDB_BASE}/${type}/${tmdbId}?api_key=${TMDB_API_KEY}&append_to_response=credits,external_ids,content_ratings,videos`;
   const res = await fetch(url);
   return await res.json();
 }

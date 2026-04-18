@@ -18,7 +18,7 @@ import {
   Plus,
   X
 } from "lucide-react";
-import { QualityLinks, Language, Quality } from '../types';
+import { QualityLinks, Language, Quality, LinkDef } from '../types';
 import { 
   LinkCheckResult, 
   StatusLabel, 
@@ -37,6 +37,7 @@ type Props = {
   title?: string;
   initialInput?: string;
   autoStart?: boolean;
+  isBatchMode?: boolean;
   onAddLinks?: (
     links: QualityLinks,
     metadata?: {
@@ -46,7 +47,17 @@ type Props = {
       type?: "movie" | "series";
       season?: number;
       episode?: number;
+      title?: string;
+      year?: number;
     }
+  ) => void;
+  onBatchAddLinks?: (
+    batches: {
+      title: string;
+      year?: number;
+      links: QualityLinks;
+      metadata: any;
+    }[]
   ) => void;
   onResults?: (results: LinkCheckResult[]) => void;
   languages?: Language[];
@@ -72,7 +83,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
   title = "Link Checker",
   initialInput = "",
   autoStart = false,
+  isBatchMode = false,
   onAddLinks,
+  onBatchAddLinks,
   onResults,
   languages = [],
   qualities = [],
@@ -203,7 +216,17 @@ export const LinkCheckerModal: React.FC<Props> = ({
           if (result.statusLabel === "WORKING" || result.statusLabel === "SMALL_FILE" || result.statusLabel === "MISSING_FILENAME" || result.statusLabel === "MISSING_METADATA" || result.statusLabel === "SIZE_MISMATCH") {
             setSelectedUrls((prev) => new Set(prev).add(result.url));
           }
-
+        } catch (e: any) {
+          console.error(`Error checking link ${u}:`, e);
+          const errorResult: LinkCheckResult = {
+            url: u,
+            ok: false,
+            statusLabel: "UNKNOWN",
+            message: e?.message || "Check failed due to a network or fetch error."
+          };
+          allResults.push(errorResult);
+          completedCount++;
+        } finally {
           // Update results incrementally for better UX
           setResults((prev) => {
             let merged: LinkCheckResult[];
@@ -213,12 +236,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
             } else {
               merged = [...allResults];
             }
-            // Skip mismatchWarnings calculation during incremental updates to improve performance
             return merged;
           });
-        } catch (e) {
-          console.error(`Error checking link ${u}:`, e);
-        } finally {
           activeCount--;
           await processNext();
         }
@@ -257,13 +276,202 @@ export const LinkCheckerModal: React.FC<Props> = ({
     }
   };
 
+  const extractTitleAndYear = (text: string) => {
+    let year: number | undefined;
+    let title: string | undefined;
+
+    // First, strip extensions and common noise from full text
+    // Replace dots, brackets, hyphens, underscores and slashes with spaces
+    let processedText = text
+      .replace(/\.(mkv|mp4|zip|rar|avi|mov|wmv|flv|ts)$/i, '')
+      .replace(/[\[\]\(\)\{\}\.\-_/]/g, ' ') 
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    // Detect year - look for 4 digits that start with 19 or 20
+    const yearMatch = processedText.match(/\b(19\d{2}|20\d{2})\b/);
+    if (yearMatch) {
+      year = parseInt(yearMatch[1], 10);
+      const parts = processedText.split(yearMatch[1]);
+      title = (parts[0] && parts[0].trim().length > 2) ? parts[0] : processedText;
+    } else {
+      title = processedText;
+    }
+
+    // Detect series patterns to split title
+    const seriesSplitPattern = /\b(s\d+e\d+|s\d+|season\s*\d+)\b/i;
+    const seriesSplitMatch = title!.match(seriesSplitPattern);
+    if (seriesSplitMatch) {
+      const splitIndex = seriesSplitMatch.index!;
+      title = title!.substring(0, splitIndex).trim();
+    }
+
+    // Strip series info and common keywords from the title part
+    let cleanedTitle = title
+      // Strip S01E01, S01, E01, Season 1, Episode 1 patterns
+      .replace(/\bs\d+e\d+\b/gi, '')
+      .replace(/\bs\d+\s*e\d+\b/gi, '')
+      .replace(/\bs\d+\b/gi, '')
+      .replace(/\be\d+\b/gi, '')
+      .replace(/\b(season|episode|ep|se|dl)\s*\d+(\s*\s*\d+)?\b/gi, '')
+      .replace(/\b(complete|full season|all episodes|collection|trilogy|quadrilogy|series)\b/gi, '')
+      // Strip quality and other keywords
+      .replace(/\b(download|watch|free|online|dual audio|dual|audio|hin|eng|telugu|tamil|malayalam|kannada|hindi|english|org|subs|multi|hevc|x264|x265|aac|ac3|hdr|imax|proper|internal|repack|director's cut|extended|unrated|web-dl|web-rip|hdtc|hdcam|bluray|brrip|bdrip|webrip|dl)\b/gi, '')
+      .replace(/\b(\d{3,4}p|2160p|4k|8k|hdrip|web|cam)\b/gi, '')
+      .replace(/https?:\/\/[^\s]+/g, '')
+      .replace(/\d{1,2}\s*(?:mb|gb|tb|kb)\b/gi, '') // Remove sizes
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (cleanedTitle) {
+      // Capitalize first letter of each word
+      cleanedTitle = cleanedTitle.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+      return { title: cleanedTitle, year };
+    }
+
+    return { title: processedText || undefined, year };
+  };
+
   const handleAddLinks = () => {
-    if (!onAddLinks || results.length === 0) return;
+    if ((!onAddLinks && !onBatchAddLinks) || results.length === 0) return;
     
     const validResults = results.filter(r => selectedUrls.has(r.url));
     if (validResults.length === 0) return;
 
-    // Collect metadata to pass back
+    const qualityLinks: QualityLinks = validResults.map(r => {
+      // Use detected quality or fallback
+      const quality = r.qualityLabel || '720p';
+
+      // Build a descriptive name
+      let finalName = quality;
+      
+      const source = `${r.fileName || ""} ${r.finalUrl || ""}`.toLowerCase();
+      let detectedS: number | undefined;
+      let detectedE: number | undefined;
+
+      const combinedMatch = source.match(/\bs(\d+)e(\d+)(?![a-z0-9])/i) || 
+                           source.match(/season\s*(\d+).*?episode\s*(\d+)/i) ||
+                           source.match(/\bs(\d+)\s*e(\d+)\b/i) ||
+                           source.match(/\bdl\s*(\d+)\s*(\d+)\b/i);
+
+      if (combinedMatch) {
+        detectedS = parseInt(combinedMatch[1]);
+        detectedE = parseInt(combinedMatch[2]);
+      } else {
+        const sMatch = source.match(/\bs(\d+)\b/i) || source.match(/season\s*(\d+)/i) || source.match(/ss\s*(\d+)/i);
+        const eMatch = source.match(/\be(\d+)\b/i) || source.match(/episode\s*(\d+)\b/i) || source.match(/ep\s*(\d+)\b/i);
+        if (sMatch) detectedS = parseInt(sMatch[1]);
+        if (eMatch) detectedE = parseInt(eMatch[1]);
+      }
+
+      if (r.codecLabel === "HEVC") finalName += ` HEVC`;
+      if (r.audioLabel && r.audioLabel.includes('Dual') && r.codecLabel !== "HEVC") finalName += ' Dual';
+
+      // Determine size and unit
+      let sizeStr = '';
+      let unit: 'MB' | 'GB' = 'MB';
+      
+      if (r.fileSize) {
+        const sizeMB = r.fileSize / (1000 * 1000);
+        if (sizeMB >= 1000) {
+          sizeStr = (sizeMB / 1048).toFixed(2);
+          unit = 'GB';
+        } else {
+          sizeStr = sizeMB.toFixed(1).replace(/\.0$/, '');
+          unit = 'MB';
+        }
+      }
+
+      const linkItem: LinkDef = {
+        id: Math.random().toString(36).substr(2, 9),
+        name: finalName,
+        url: normalizeUrl(r.finalUrl || r.url),
+        size: sizeStr,
+        unit: unit,
+      };
+
+      if (detectedS !== undefined) linkItem.season = detectedS;
+      if (detectedE !== undefined) linkItem.episode = detectedE;
+      if (/full season|all episodes|complete/i.test(source) && !detectedE) linkItem.isFullSeasonMKV = true;
+
+      return linkItem;
+    });
+    
+    if (isBatchMode && onBatchAddLinks) {
+      const batchesMap = new Map<string, { 
+        title: string; 
+        year: number | undefined; 
+        links: QualityLinks;
+        detectMetadata: {
+          languages: Set<string>;
+          printQuality?: string;
+          subtitles: boolean;
+          type: "movie" | "series";
+          season?: number;
+          episode?: number;
+        }
+      }>();
+      
+      qualityLinks.forEach((ql, idx) => {
+        const r = validResults[idx];
+        const sourceText = `${r.fileName || ""} ${r.url || ""}`;
+        const { title, year } = extractTitleAndYear(sourceText);
+        const derivedTitle = title || `Untitled ${new Date().getFullYear()}`;
+        const isSeries = !!(ql.season || ql.episode);
+        const key = isSeries ? derivedTitle : `${derivedTitle}|${year || ''}`;
+
+        if (!batchesMap.has(key)) {
+           batchesMap.set(key, { 
+             title: derivedTitle, 
+             year, 
+             links: [],
+             detectMetadata: {
+               languages: new Set<string>(),
+               subtitles: false,
+               type: "movie"
+             }
+           });
+        }
+        
+        const batch = batchesMap.get(key)!;
+        batch.links.push(ql);
+
+        // Update detection per batch (if movie, keep movie, if any link is series, whole batch is series)
+        if (ql.season || ql.episode) {
+          batch.detectMetadata.type = "series";
+        }
+        
+        if (r.audioLabel) {
+          r.audioLabel.split(" / ").forEach(l => batch.detectMetadata.languages.add(l));
+        }
+        if (r.printQualityLabel && !batch.detectMetadata.printQuality) {
+          batch.detectMetadata.printQuality = r.printQualityLabel;
+        }
+        const source = (r.fileName || "" + " " + r.finalUrl || "").toLowerCase();
+        if (r.subtitleLabel || /subtitles|subs|softsub|hardsub|esub|esubs|msub|msubs/i.test(source)) {
+          batch.detectMetadata.subtitles = true;
+        }
+
+        // Apply detected S/E to batch metadata if not already set (fallback for creation)
+        if (ql.season && !batch.detectMetadata.season) batch.detectMetadata.season = ql.season;
+        if (ql.episode && !batch.detectMetadata.episode) batch.detectMetadata.episode = ql.episode;
+      });
+
+      onBatchAddLinks(Array.from(batchesMap.values()).map(b => ({
+        title: b.title,
+        year: b.year,
+        links: b.links,
+        metadata: {
+          ...b.detectMetadata,
+          languages: Array.from(b.detectMetadata.languages)
+        }
+      })));
+      reset();
+      onClose();
+      return;
+    }
+
+    // Collect metadata to pass back (Single mode)
     const detectedLangs = new Set<string>();
     let detectedPrintQuality: string | undefined;
     let detectedSubtitles = false;
@@ -304,52 +512,23 @@ export const LinkCheckerModal: React.FC<Props> = ({
       }
     });
 
-    const qualityLinks: QualityLinks = validResults.map(r => {
-      // Use detected quality or fallback
-      const quality = r.qualityLabel || '720p';
+    const combinedNames = validResults.map(r => r.fileName || '').join(' ') + ' ' + input;
+    const { title, year } = extractTitleAndYear(combinedNames);
 
-      // Build a descriptive name
-      let finalName = quality;
-      
-      if (r.codecLabel === "HEVC") finalName += ` HEVC`;
-      if (r.audioLabel && r.audioLabel.includes('Dual') && r.codecLabel !== "HEVC") finalName += ' Dual';
-
-      // Determine size and unit
-      let sizeStr = '';
-      let unit: 'MB' | 'GB' = 'MB';
-      
-      if (r.fileSize) {
-        const sizeMB = r.fileSize / (1000 * 1000);
-        if (sizeMB >= 1000) {
-          sizeStr = (sizeMB / 1000).toFixed(2);
-          unit = 'GB';
-        } else {
-          sizeStr = sizeMB.toFixed(2).replace(/\.00$/, '');
-          unit = 'MB';
-        }
-      }
-
-      return {
-        id: Math.random().toString(36).substr(2, 9),
-        name: finalName,
-        url: normalizeUrl(r.finalUrl || r.url),
-        size: sizeStr,
-        unit: unit,
-        season: r.season,
-        episode: r.episode,
-        isFullSeasonMKV: r.isFullSeasonMKV,
-        isFullSeasonZIP: r.isFullSeasonZIP,
-      };
-    });
-    
-    onAddLinks(qualityLinks, {
-      languages: Array.from(detectedLangs),
-      printQuality: detectedPrintQuality,
-      subtitles: detectedSubtitles,
-      type: detectedType,
-      season: detectedSeason,
-      episode: detectedEpisode,
-    });
+    if (onAddLinks) {
+      onAddLinks(qualityLinks, {
+        languages: Array.from(detectedLangs),
+        printQuality: detectedPrintQuality,
+        subtitles: detectedSubtitles,
+        type: detectedType,
+        season: detectedSeason,
+        episode: detectedEpisode,
+        // @ts-ignore
+        title,
+        // @ts-ignore
+        year
+      });
+    }
     reset();
     onClose();
   };
@@ -360,24 +539,22 @@ export const LinkCheckerModal: React.FC<Props> = ({
       if (!text) return;
 
       const newLinks = splitLinks(text).map(normalizeUrl).filter(Boolean);
-      if (newLinks.length === 0) return;
 
       let addedAny = false;
       const newlyAddedUrls: string[] = [];
 
       setInput((prev) => {
-        const existingLinks = splitLinks(prev).map(normalizeUrl).filter(Boolean);
-        const uniqueNewLinks = newLinks.filter(l => !existingLinks.includes(l));
-        
-        if (uniqueNewLinks.length === 0) return prev;
-        
+        if (prev.includes(text)) return prev;
         addedAny = true;
-        newlyAddedUrls.push(...uniqueNewLinks);
-        const separator = prev.trim() ? '\n' : '';
-        return prev + separator + uniqueNewLinks.join('\n');
+        if (newLinks.length > 0) {
+          newlyAddedUrls.push(...newLinks);
+        }
+        // Instead of conditionally doing text, insert the entire pasted payload
+        // This is safe because splitLinks will extract the URLs anyway
+        return prev.trim() ? prev + '\n' + text : text;
       });
 
-      if (addedAny && isAuto && results.length > 0 && !loading) {
+      if (addedAny && newLinks.length > 0 && isAuto && results.length > 0 && !loading) {
         // Automatically check the newly added links if we already have results
         handleCheck(newlyAddedUrls);
       }
@@ -463,8 +640,10 @@ export const LinkCheckerModal: React.FC<Props> = ({
                       <LinkIcon className="h-5 w-5 text-cyan-500 dark:text-cyan-400" />
                     </div>
                     <div>
-                      <h2 className="text-xl font-semibold leading-none text-zinc-900 dark:text-white">{title}</h2>
-                      <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">Check Pixeldrain, direct file links, protected download gateways, and movie post mismatches.</p>
+                      <h2 className="text-xl font-semibold leading-none text-zinc-900 dark:text-white">
+                        {isBatchMode ? 'Batch Link Checker (Missing Details)' : title}
+                      </h2>
+                      <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">Check Pixeldrain, direct file links, protected download gateways, and missing movie posts.</p>
                     </div>
                   </div>
                   <button onClick={onClose} className="rounded-full px-3 py-1.5 text-sm text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white transition">Close</button>
@@ -503,10 +682,10 @@ export const LinkCheckerModal: React.FC<Props> = ({
                     </button>
                   )}
 
-                  {onAddLinks && selectedUrls.size > 0 && !loading && (
+                  {(onAddLinks || onBatchAddLinks) && selectedUrls.size > 0 && !loading && (
                     <button onClick={handleAddLinks} className="inline-flex items-center justify-center rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white dark:text-black hover:bg-emerald-700 gap-2 ml-auto transition-colors">
                       <Plus className="h-4 w-4" />
-                      Add {selectedUrls.size} Link(s)
+                      {isBatchMode ? `Add ${selectedUrls.size} Links Missing` : `Add ${selectedUrls.size} Link(s)`}
                     </button>
                   )}
                 </div>

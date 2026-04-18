@@ -302,8 +302,15 @@ export function detectMetadataForLink(text: string, url: string, languages?: Lan
     audioLabel: audio,
     subtitleLabel: /subtitles|subs|softsub|hardsub|esub|esubs|msub|msubs/i.test(lower) ? "Yes" : undefined,
     printQualityLabel: normalizePrintQuality(lower, qualities),
-    season: parseInt(lower.match(/(?<=^|[^a-zA-Z0-9])S(?:eason)?\s*(\d+)\b/i)?.[1] || "0") || undefined,
-    episode: parseInt(lower.match(/(?<=^|[^a-zA-Z0-9])E(?:pisode|p)?\s*(\d+)\b/i)?.[1] || "0") || undefined,
+    ...(() => {
+      const yearMatch = lower.match(/(?:\D|^)(19\d{2}|20\d{2})(?:\D|$)/);
+      const year = yearMatch ? parseInt(yearMatch[1]) : undefined;
+      const seriesPattern = /(?<=^|[^a-zA-Z0-9])(?:s(?:eason)?\s*(\d+))(?:\s*e(?:pisode|p)?\s*(\d+))?(?![a-z0-9])/i;
+      const seriesMatch = lower.match(seriesPattern);
+      const season = seriesMatch ? parseInt(seriesMatch[1]) : undefined;
+      const episode = seriesMatch && seriesMatch[2] ? parseInt(seriesMatch[2]) : undefined;
+      return { season, episode, year };
+    })(),
     isFullSeasonMKV: /full\s*season|complete\s*season/i.test(lower) && lower.includes(".mkv"),
     isFullSeasonZIP: /full\s*season|complete\s*season/i.test(lower) && lower.includes(".zip"),
   };
@@ -487,9 +494,14 @@ export function detectFromFilename(fileName?: string, finalUrl?: string, languag
     episode: undefined as number | undefined,
     isFullSeasonMKV: false,
     isFullSeasonZIP: false,
+    year: undefined as number | undefined,
   };
 
-  const combinedMatch = source.match(/(?<=^|[^a-zA-Z0-9])s(\d+)e(\d+)(?![a-z0-9])/i);
+  const yearMatch = source.match(/(?:\D|^)(19\d{2}|20\d{2})(?:\D|$)/);
+  if (yearMatch) result.year = parseInt(yearMatch[1]);
+
+  const combinedMatch = source.match(/(?<=^|[^a-zA-Z0-9])s(\d+)e(\d+)(?![a-z0-9])/i) ||
+                    source.match(/(?<=^|[^a-zA-Z0-9])dl\s+(\d+)\s+(\d+)(?![a-z0-9])/i);
   if (combinedMatch) {
     result.season = parseInt(combinedMatch[1]);
     result.episode = parseInt(combinedMatch[2]);

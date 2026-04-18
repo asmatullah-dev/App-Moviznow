@@ -8,7 +8,7 @@ import { useUsers } from '../../contexts/UsersContext';
 import { Content, Genre, Language, Quality, QualityLinks, Season, Episode, LinkDef, Role, Trailer } from '../../types';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
-import { Plus, Edit2, Trash2, Share2, Film, Tv, X, Save, Upload, Search, Eye, EyeOff, ArrowUp, ArrowDown, Copy, ClipboardPaste, GripVertical, Bell, RefreshCw, ChevronDown, ChevronUp, User, Lock, Loader2, MessageCircle, MoreVertical } from 'lucide-react';
+import { Plus, Edit2, Trash2, Share2, Film, Tv, X, Save, Upload, Search, Eye, EyeOff, ArrowUp, ArrowDown, Copy, ClipboardPaste, GripVertical, Bell, RefreshCw, ChevronDown, ChevronUp, User, Lock, Loader2, MessageCircle, MoreVertical, Link2 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import ConfirmModal from '../../components/ConfirmModal';
 import AlertModal from '../../components/AlertModal';
@@ -238,6 +238,8 @@ const QualityInputs: React.FC<QualityInputsProps> = ({ links, onChange, droppabl
   );
 };
 
+import { BatchFetchModal } from '../../components/BatchFetchModal';
+
 export default function ContentManagement() {
   const { profile, user } = useAuth();
   const { users: allUsers } = useUsers();
@@ -248,6 +250,8 @@ export default function ContentManagement() {
   const [isSaving, setIsSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [isBatchFetchModalOpen, setIsBatchFetchModalOpen] = useState(false);
+  const [batchFetchMode, setBatchFetchMode] = useState<'media'|'links'>('media');
   const [alertConfig, setAlertConfig] = useState<{ isOpen: boolean; title: string; message: string }>({ isOpen: false, title: '', message: '' });
   const [managers, setManagers] = useState<Record<string, string>>({});
 
@@ -320,6 +324,7 @@ export default function ContentManagement() {
   const navigate = useNavigate();
   const [isMasterFetchModalOpen, setIsMasterFetchModalOpen] = useState(false);
   const [isLinkCheckerOpen, setIsLinkCheckerOpen] = useState(false);
+  const [isBatchLinkCheckerOpen, setIsBatchLinkCheckerOpen] = useState(false);
   const [isAdjustContentsModalOpen, setIsAdjustContentsModalOpen] = useState(false);
   const [manageModal, setManageModal] = useState<{ isOpen: boolean; type: 'genre' | 'language' | 'quality' | null }>({ isOpen: false, type: null });
   const [fetchingPoster, setFetchingPoster] = useState(false);
@@ -334,6 +339,8 @@ export default function ContentManagement() {
   const [shareAnywayConfig, setShareAnywayConfig] = useState<{ isOpen: boolean; content: Content | null, mode: 'standard' | 'whatsapp' }>({ isOpen: false, content: null, mode: 'standard' });
   const [selectedShareSeasons, setSelectedShareSeasons] = useState<number[]>([]);
   const [activeDropdownId, setActiveDropdownId] = useState<string | null>(null);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const location = useLocation();
 
   useEffect(() => {
@@ -564,15 +571,16 @@ export default function ContentManagement() {
   };
 
   const handleEdit = (content: Content) => {
-    setType(content.type);
+    const normalizedType = (content.type.toLowerCase() === 'series' || content.type.toLowerCase() === 'tv') ? 'series' : 'movie';
+    setType(normalizedType);
     setStatus(content.status || 'published');
-    setTitle(content.title);
-    setDescription(content.description);
-    setPosterUrl(content.posterUrl);
+    setTitle(content.title || '');
+    setDescription(content.description || '');
+    setPosterUrl(content.posterUrl || '');
     setTrailerUrl(content.trailerUrl || '');
     setTrailerTitle(content.trailerTitle || '');
     setTrailerYoutubeTitle(content.trailerYoutubeTitle || '');
-    setTrailerSeasonNumber(content.trailerSeasonNumber);
+    setTrailerSeasonNumber(content.trailerSeasonNumber || undefined);
     setTrailers(content.trailers ? (Array.isArray(content.trailers) ? content.trailers : JSON.parse(content.trailers || '[]')) : []);
     setSampleUrl(content.sampleUrl || '');
     setImdbLink(content.imdbLink || '');
@@ -583,7 +591,7 @@ export default function ContentManagement() {
     setSubtitles(content.subtitles || false);
     setCast((content.cast || []).join(', '));
     setCountry(content.country || '');
-    setYear(content.year);
+    setYear(content.year || new Date().getFullYear());
     setReleaseDate(content.releaseDate || '');
     setRuntime(content.runtime || '');
     
@@ -669,7 +677,7 @@ export default function ContentManagement() {
         type,
         status: (profile?.role === 'content_manager' || profile?.role === 'manager') ? 'draft' : status,
         title,
-        description,
+        description: description || '',
         posterUrl,
         trailerUrl,
         trailerTitle: trailerTitle || '',
@@ -700,14 +708,15 @@ export default function ContentManagement() {
       }
 
       const currentEditingId = editingId;
+      const cleanedData = deepClean(data);
 
       if (currentEditingId) {
-        await updateDoc(doc(db, 'content', currentEditingId), data);
+        await updateDoc(doc(db, 'content', currentEditingId), cleanedData);
       } else {
-        data.createdAt = new Date().toISOString();
-        data.addedBy = user?.uid;
-        data.addedByRole = profile?.role;
-        await addDoc(collection(db, 'content'), data);
+        cleanedData.createdAt = new Date().toISOString();
+        cleanedData.addedBy = user?.uid;
+        cleanedData.addedByRole = profile?.role;
+        await addDoc(collection(db, 'content'), deepClean(cleanedData));
       }
       
       setIsModalOpen(false);
@@ -792,11 +801,23 @@ export default function ContentManagement() {
       type?: "movie" | "series";
       season?: number;
       episode?: number;
+      title?: string;
+      year?: number;
     }
   ) => {
     // Auto-select metadata if provided
     let activeType: "movie" | "series" = type;
     if (metadata) {
+      if (metadata.title && !title.trim()) {
+        setTitle(metadata.title);
+      }
+      if (metadata.year) {
+        // Only set year if it's currently empty, '0', or current year might be acceptable, but let's just check empty
+        if (!year) {
+          setYear(metadata.year);
+        }
+      }
+
       if (metadata.languages.length > 0) {
         const matchedLangIds = languages
           .filter(l => metadata.languages.includes(l.name))
@@ -822,8 +843,9 @@ export default function ContentManagement() {
       }
 
       if (metadata.type) {
-        setType(metadata.type);
-        activeType = metadata.type;
+        const normalizedType = (metadata.type.toLowerCase() === 'series' || metadata.type.toLowerCase() === 'tv') ? 'series' : 'movie';
+        setType(normalizedType);
+        activeType = normalizedType;
       }
     }
 
@@ -940,26 +962,156 @@ export default function ContentManagement() {
         }
       });
 
-      const parseSizeInMB = (size: string, unit: string) => {
-        if (!size) return 0;
-        const num = parseFloat(size.replace(/,/g, '')) || 0;
-        const u = unit.toUpperCase();
-        if (u === 'GB') return num * 1000;
-        if (u === 'TB') return num * 1000 * 1000;
-        return num;
-      };
-
       // Sort all links in all seasons and episodes
       updatedSeasons.forEach(s => {
-        if (s.zipLinks) s.zipLinks.sort((a, b) => parseSizeInMB(a.size, a.unit) - parseSizeInMB(b.size, b.unit));
-        if (s.mkvLinks) s.mkvLinks.sort((a, b) => parseSizeInMB(a.size, a.unit) - parseSizeInMB(b.size, b.unit));
+        if (s.zipLinks) s.zipLinks.sort((a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit));
+        if (s.mkvLinks) s.mkvLinks.sort((a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit));
         s.episodes.forEach(e => {
-          if (e.links) e.links.sort((a, b) => parseSizeInMB(a.size, a.unit) - parseSizeInMB(b.size, b.unit));
+          if (e.links) e.links.sort((a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit));
         });
       });
       
       setSeasons(updatedSeasons);
       setAlertConfig({ isOpen: true, title: 'Success', message: `Added/Merged ${links.length} episode/season links.` });
+    }
+
+    // Ensure the main form modal is open so the user sees the newly populated data
+    setIsModalOpen(true);
+  };
+
+  const deepClean = (obj: any): any => {
+    if (obj === undefined) return undefined;
+    if (obj === null) return null;
+    
+    if (Array.isArray(obj)) {
+      const cleanedArr = obj.map(deepClean).filter(v => v !== undefined);
+      return cleanedArr.length > 0 ? cleanedArr : [];
+    }
+    
+    if (typeof obj === 'object') {
+      const cleanedObj: any = {};
+      let hasProps = false;
+      for (const [key, value] of Object.entries(obj)) {
+        const cleanedValue = deepClean(value);
+        if (cleanedValue !== undefined) {
+          cleanedObj[key] = cleanedValue;
+          hasProps = true;
+        }
+      }
+      return hasProps ? cleanedObj : {};
+    }
+    
+    return obj;
+  };
+
+  const getSizeInMB = (sizeStr: string, unit: string) => {
+    if (!sizeStr) return 0;
+    const num = parseFloat(sizeStr.replace(/,/g, '')) || 0;
+    const u = (unit || '').toUpperCase();
+    if (u.includes('GB')) return num * 1048;
+    if (u.includes('TB')) return num * 1048 * 1024;
+    return num;
+  };
+
+  const handleBatchAddLinks = async (
+    batches: {
+      title: string;
+      year?: number;
+      links: QualityLinks;
+      metadata: any;
+    }[]
+  ) => {
+    setIsSaving(true);
+    let newItemsAdded = 0;
+    try {
+      console.log("Starting batch save for", batches.length, "batches");
+      const batchOp = writeBatch(db);
+      batches.forEach((b, index) => {
+         const newRef = doc(collection(db, 'content'));
+         const contentData: any = {
+           title: b.title || "Untitled",
+           year: b.year || new Date().getFullYear(),
+           type: b.metadata.type || 'movie',
+           description: '',
+           status: 'draft',
+           addedBy: user?.uid || null,
+           createdAt: Date.now(),
+           updatedAt: Date.now(),
+         };
+         
+         if (b.metadata.type === 'movie' || !b.metadata.type) {
+           contentData.movieLinks = JSON.stringify([...b.links].sort((a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit)));
+           contentData.seasons = JSON.stringify([]);
+           contentData.type = 'movie';
+         } else {
+           contentData.type = 'series';
+           const seasonMap = new Map<number, Season>();
+           
+           b.links.forEach((l: LinkDef) => {
+             const sNum = l.season || b.metadata.season || 1;
+             if (!seasonMap.has(sNum)) {
+               seasonMap.set(sNum, {
+                 id: Math.random().toString(36).substr(2, 9),
+                 seasonNumber: sNum,
+                 zipLinks: [],
+                 mkvLinks: [],
+                 episodes: [],
+               });
+             }
+             const s = seasonMap.get(sNum)!;
+             
+             if (l.episode !== undefined) {
+               let ep = s.episodes.find(e => e.episodeNumber === l.episode);
+               if (!ep) {
+                 ep = {
+                   id: Math.random().toString(36).substr(2, 9),
+                   episodeNumber: l.episode,
+                   title: `Episode ${l.episode}`,
+                   links: []
+                 };
+                 s.episodes.push(ep);
+                 s.episodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
+               }
+               ep.links.push(l);
+               ep.links.sort((a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit));
+             } else {
+               if (l.isFullSeasonMKV) {
+                 if (!s.mkvLinks) s.mkvLinks = [];
+                  s.mkvLinks.push(l);
+                  s.mkvLinks.sort((a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit));
+               } else {
+                  s.zipLinks.push(l);
+                  s.zipLinks.sort((a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit));
+               }
+             }
+           });
+           
+           contentData.seasons = JSON.stringify(Array.from(seasonMap.values()).sort((a, b) => a.seasonNumber - b.seasonNumber));
+           contentData.movieLinks = JSON.stringify([]);
+         }
+         
+         const matchedQuality = qualities.find(q => q.name === b.metadata.printQuality);
+         if (matchedQuality) contentData.qualityId = matchedQuality.id;
+         if (b.metadata.languages?.length) {
+            const matchedLangIds = languages.filter(l => b.metadata.languages.includes(l.name)).map(l => l.id);
+            if (matchedLangIds.length > 0) contentData.languageIds = matchedLangIds;
+         }
+
+         // Clean up all undefined fields recursively to avoid Firestore errors
+         const cleanedData = deepClean(contentData);
+         console.log(`Cleaned data for batch ${index} (${b.title}):`, cleanedData);
+
+         batchOp.set(newRef, cleanedData);
+         newItemsAdded++;
+      });
+
+      await batchOp.commit();
+      setAlertConfig({ isOpen: true, title: 'Success', message: `Batch created ${newItemsAdded} draft content entries.` });
+    } catch (e: any) {
+      console.error(e);
+      setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to batch save links: ' + e.message });
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -969,7 +1121,10 @@ export default function ContentManagement() {
       const parsedYear = parseInt(data.year.toString());
       if (!isNaN(parsedYear)) setYear(parsedYear);
     }
-    if (data.type) setType(data.type);
+    if (data.type) {
+        const normalizedType = (data.type.toLowerCase() === 'series' || data.type.toLowerCase() === 'tv') ? 'series' : 'movie';
+        setType(normalizedType);
+    }
     if (data.description) setDescription(data.description);
     if (data.cast) setCast(data.cast);
     if (data.country) setCountry(data.country);
@@ -1186,11 +1341,6 @@ export default function ContentManagement() {
     }
   };
 
-  const getSizeInMB = (sizeStr: string, unit: string) => {
-    const size = parseFloat(sizeStr) || 0;
-    return unit === 'GB' ? size * 1000 : size;
-  };
-
   const handleShare = async (content: Content, mode: 'standard' | 'whatsapp' = 'standard') => {
     const isMissingWhatsappData = mode === 'whatsapp' && (!content.country || !content.languageIds || content.languageIds.length === 0);
     const isMissingData = !content.runtime || !content.releaseDate || !content.genreIds || content.genreIds.length === 0 || isMissingWhatsappData;
@@ -1258,7 +1408,7 @@ export default function ContentManagement() {
             
             const updatedContent = {
                 ...content,
-                description: content.description || details.overview,
+                description: content.description || details.overview || '',
                 runtime: content.runtime || (details.runtime ? `${details.runtime} min` : (details.episode_run_time && details.episode_run_time.length > 0 ? `${details.episode_run_time[0]} min/episode` : '')),
                 releaseDate: content.releaseDate || details.release_date || details.first_air_date,
                 imdbRating: content.imdbRating || (imdbRatingData?.rating ? `${imdbRatingData.rating}/10` : ''),
@@ -2170,8 +2320,8 @@ export default function ContentManagement() {
     }
   };
 
-  const handleSelectContent = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleSelectContent = (id: string, e?: React.SyntheticEvent) => {
+    if (e) e.stopPropagation();
     setSelectedContent(prev => 
       prev.includes(id) ? prev.filter(cId => cId !== id) : [...prev, id]
     );
@@ -2215,10 +2365,10 @@ export default function ContentManagement() {
   };
 
   const handleBulkDelete = async () => {
-    if (!window.confirm(`Are you sure you want to delete ${selectedContent.length} items? This action cannot be undone.`)) return;
+    setShowBulkDeleteConfirm(false);
+    setIsBulkDeleting(true);
     
     const currentSelected = [...selectedContent];
-    setSelectedContent([]);
     
     let batches = [writeBatch(db)];
     let currentBatchIndex = 0;
@@ -2238,9 +2388,13 @@ export default function ContentManagement() {
 
     try {
       await Promise.all(batches.map(b => b.commit()));
+      setSelectedContent([]);
+      setAlertConfig({ isOpen: true, title: 'Success', message: `Successfully deleted ${currentSelected.length} items` });
     } catch (error) {
       console.error('Error deleting content:', error);
       setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to delete content' });
+    } finally {
+      setIsBulkDeleting(false);
     }
   };
 
@@ -2250,14 +2404,24 @@ export default function ContentManagement() {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <h1 className="text-xl md:text-2xl font-bold whitespace-nowrap">Movies & Series</h1>
-            {(profile?.role === 'admin' || profile?.role === 'owner') && (
-              <button
-                onClick={() => setIsAdjustContentsModalOpen(true)}
-                className="flex items-center gap-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-3 py-1.5 rounded-lg transition-colors font-medium text-xs md:text-sm whitespace-nowrap"
-              >
-                <GripVertical className="w-3.5 h-3.5" />
-                Adjust Contents
-              </button>
+            {profile?.role === 'owner' && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setIsBatchLinkCheckerOpen(true)}
+                  className="flex items-center justify-center bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white p-2 rounded-lg transition-colors"
+                  title="Batch Link Checker"
+                >
+                  <Plus className="w-4 h-4" />
+                  <Link2 className="w-4 h-4 ml-1" />
+                </button>
+                <button
+                  onClick={() => setIsAdjustContentsModalOpen(true)}
+                  className="flex items-center justify-center bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white p-2 rounded-lg transition-colors"
+                  title="Adjust Contents"
+                >
+                  <GripVertical className="w-4 h-4" />
+                </button>
+              </div>
             )}
           </div>
           <div className="flex flex-col sm:flex-row gap-4">
@@ -2273,31 +2437,48 @@ export default function ContentManagement() {
             </div>
             {selectedContent.length > 0 && (
               <div className="flex items-center gap-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2">
-                <span className="text-sm text-zinc-500 dark:text-zinc-400">{selectedContent.length} selected</span>
-                <select
-                  onChange={(e) => {
-                    if (e.target.value === 'delete') {
-                      handleBulkDelete();
-                    } else if (e.target.value) {
-                      handleBulkStatusChange(e.target.value as any);
-                    }
-                    e.target.value = '';
-                  }}
-                  className="bg-transparent border-none text-sm focus:outline-none text-emerald-500 font-medium cursor-pointer"
-                >
-                  <option value="">Bulk Actions</option>
-                  {(profile?.role === 'admin' || profile?.role === 'owner') && (
-                    <>
-                      <option value="published">Publish</option>
-                      <option value="draft">Draft</option>
-                      <option value="selected_content">Selected Content Only</option>
-                      <option value="delete">Delete</option>
-                    </>
-                  )}
-                  {(profile?.role === 'content_manager' || profile?.role === 'manager') && (
-                    <option value="draft">Draft</option>
-                  )}
-                </select>
+                {isBulkDeleting ? (
+                  <div className="flex items-center gap-2 text-sm text-zinc-500">
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Deleting {selectedContent.length} items...</span>
+                  </div>
+                ) : (
+                  <>
+                    <span className="text-sm text-zinc-500 dark:text-zinc-400">{selectedContent.length} selected</span>
+                    <select
+                      onChange={(e) => {
+                        if (e.target.value === 'delete') {
+                          setShowBulkDeleteConfirm(true);
+                        } else if (e.target.value === 'batch_fetch') {
+                          setIsBatchFetchModalOpen(true);
+                          setBatchFetchMode('media');
+                        } else if (e.target.value === 'batch_links') {
+                          setIsBatchFetchModalOpen(true);
+                          setBatchFetchMode('links');
+                        } else if (e.target.value) {
+                          handleBulkStatusChange(e.target.value as any);
+                        }
+                        e.target.value = '';
+                      }}
+                      className="bg-transparent border-none text-sm focus:outline-none text-emerald-500 font-medium cursor-pointer"
+                    >
+                      <option value="">Bulk Actions</option>
+                      {(profile?.role === 'admin' || profile?.role === 'owner') && (
+                        <>
+                          <option value="published">Publish</option>
+                          <option value="draft">Draft</option>
+                          <option value="selected_content">Selected Content Only</option>
+                          <option value="batch_fetch">Batch Fetch Missing Data</option>
+                          <option value="batch_links">Batch Fetch Links</option>
+                          <option value="delete">Delete</option>
+                        </>
+                      )}
+                      {(profile?.role === 'content_manager' || profile?.role === 'manager') && (
+                        <option value="draft">Draft</option>
+                      )}
+                    </select>
+                  </>
+                )}
               </div>
             )}
             <button
@@ -2392,20 +2573,30 @@ export default function ContentManagement() {
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-6">
           {filteredContent.map((content) => (
-            <div key={content.id} className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl flex flex-col group relative">
-              <div className="absolute top-2 left-2 z-10">
-                <input 
-                  type="checkbox" 
-                  checked={selectedContent.includes(content.id)}
-                  onChange={(e) => {
-                    e.stopPropagation();
-                    handleSelectContent(content.id, e as any);
-                  }}
-                  className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-zinc-950"
-                />
-              </div>
+            <div key={content.id} className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl flex flex-col group relative overflow-hidden transition-all hover:ring-2 hover:ring-emerald-500/50">
+              <label className="absolute top-0 left-0 z-30 w-16 h-16 cursor-pointer group/checkbox">
+                <div className="absolute top-3 left-3 w-5 h-5 flex items-center justify-center rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 group-hover/checkbox:border-emerald-500 transition-colors">
+                  <input 
+                    type="checkbox" 
+                    checked={selectedContent.includes(content.id)}
+                    onChange={(e) => {
+                      handleSelectContent(content.id, e as any);
+                    }}
+                    className="w-4 h-4 rounded border-none bg-transparent text-emerald-500 focus:ring-emerald-500 focus:ring-offset-zinc-950 cursor-pointer"
+                  />
+                </div>
+              </label>
               <div className="relative aspect-[2/3] rounded-t-xl overflow-hidden">
-                <Link to={`/movie/${content.id}`} className="block w-full h-full">
+                <Link 
+                  to={selectedContent.length > 0 ? '#' : `/movie/${content.id}`} 
+                  onClick={(e) => {
+                    if (selectedContent.length > 0) {
+                      e.preventDefault();
+                      handleSelectContent(content.id, e as any);
+                    }
+                  }}
+                  className="block w-full h-full"
+                >
                   <img src={content.posterUrl || 'https://picsum.photos/seed/movie/400/600'} alt={content.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                 </Link>
                 <div className="absolute top-1 right-1 flex flex-col gap-1 items-end">
@@ -3339,6 +3530,14 @@ export default function ContentManagement() {
         languages={languages}
         qualities={qualities}
       />
+      <LinkCheckerModal
+        isOpen={isBatchLinkCheckerOpen}
+        onClose={() => setIsBatchLinkCheckerOpen(false)}
+        isBatchMode={true}
+        onBatchAddLinks={handleBatchAddLinks}
+        languages={languages}
+        qualities={qualities}
+      />
 
       <ConfirmModal
         isOpen={!!deleteId}
@@ -3348,11 +3547,28 @@ export default function ContentManagement() {
         onCancel={() => setDeleteId(null)}
       />
 
+      <ConfirmModal
+        isOpen={showBulkDeleteConfirm}
+        title="Batch Delete"
+        message={`Are you sure you want to delete ${selectedContent.length} items? This action cannot be undone.`}
+        onConfirm={handleBulkDelete}
+        onCancel={() => setShowBulkDeleteConfirm(false)}
+        confirmText="Delete All"
+      />
+
       <AlertModal
         isOpen={alertConfig.isOpen}
         title={alertConfig.title}
         message={alertConfig.message}
         onClose={() => setAlertConfig({ ...alertConfig, isOpen: false })}
+      />
+
+      <BatchFetchModal
+        isOpen={isBatchFetchModalOpen}
+        onClose={() => setIsBatchFetchModalOpen(false)}
+        selectedContentIds={selectedContent}
+        mode={batchFetchMode}
+        genres={genres}
       />
 
       <AnimatePresence>

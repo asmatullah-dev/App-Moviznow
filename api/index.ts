@@ -542,7 +542,10 @@ async function startServer() {
       // Try to resolve redirects first if it's not already a known special host
       if (!currentHost.includes("pixeldrain.com") && !currentHost.includes("pixeldrain.dev") && !currentHost.includes("raj.lat")) {
         try {
-          const redirectCheck = await fetch(currentUrl, { method: "HEAD", headers, redirect: "follow" });
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 8000);
+          const redirectCheck = await fetch(currentUrl, { method: "HEAD", headers, redirect: "follow", signal: controller.signal });
+          clearTimeout(timeout);
           if (redirectCheck.url && redirectCheck.url !== currentUrl) {
             currentUrl = redirectCheck.url;
             currentParsed = new URL(currentUrl);
@@ -550,7 +553,10 @@ async function startServer() {
           }
         } catch (e) {
           try {
-            const redirectCheckGet = await fetch(currentUrl, { method: "GET", headers: { ...headers, Range: "bytes=0-0" }, redirect: "follow" });
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 8000);
+            const redirectCheckGet = await fetch(currentUrl, { method: "GET", headers: { ...headers, Range: "bytes=0-0" }, redirect: "follow", signal: controller.signal });
+            clearTimeout(timeout);
             if (redirectCheckGet.url && redirectCheckGet.url !== currentUrl) {
               currentUrl = redirectCheckGet.url;
               currentParsed = new URL(currentUrl);
@@ -561,7 +567,7 @@ async function startServer() {
       }
 
       // PIXELDRAIN SPECIAL CHECK
-      if (currentHost.includes("pixeldrain.com") || currentHost.includes("pixeldrain.dev")) {
+      if (currentHost.includes("pixeldrain.com") || currentHost.includes("pixeldrain.dev") || currentHost.includes("pixeldrain.net")) {
         const match = currentParsed.pathname.match(/\/u\/([^/?#]+)/);
         if (match?.[1]) {
           const fileId = match[1];
@@ -656,10 +662,24 @@ async function startServer() {
 
       // GENERAL CHECK
       try {
-        let res_fetch = await fetch(currentUrl, { method: "HEAD", headers, redirect: "follow" });
-        if (!res_fetch.ok || res_fetch.status === 405) {
-          res_fetch = await fetch(currentUrl, { method: "GET", headers: { ...headers, Range: "bytes=0-0" }, redirect: "follow" });
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 12000);
+        
+        let res_fetch: Response;
+        try {
+          res_fetch = await fetch(currentUrl, { method: "HEAD", headers, redirect: "follow", signal: controller.signal });
+          if (!res_fetch.ok || res_fetch.status === 405) {
+            const getController = new AbortController();
+            const getTimeout = setTimeout(() => getController.abort(), 12000);
+            res_fetch = await fetch(currentUrl, { method: "GET", headers: { ...headers, Range: "bytes=0-0" }, redirect: "follow", signal: getController.signal });
+            clearTimeout(getTimeout);
+          }
+        } catch (fetchErr) {
+          clearTimeout(timeout);
+          return res.json({ ok: false, statusLabel: "UNKNOWN", message: "Network error or timeout reaching host", finalUrl: currentUrl, source: "general-check", host: currentHost });
         }
+        
+        clearTimeout(timeout);
 
         const contentType = res_fetch.headers.get("content-type") || undefined;
         const disposition = res_fetch.headers.get("content-disposition") || "";

@@ -49,7 +49,9 @@ export const requestNotificationPermission = async () => {
       // Register service worker explicitly to ensure it's the right one
       let registration;
       if ('serviceWorker' in navigator) {
-        registration = await navigator.serviceWorker.register('/sw.js');
+        // Pass Firebase config via query parameters to the service worker so it dynamically updates on remix
+        const configParams = new URLSearchParams(firebaseConfig as any).toString();
+        registration = await navigator.serviceWorker.register(`/sw.js?${configParams}`);
       }
 
       const vapidKey = import.meta.env.VITE_FCM_VAPID_KEY;

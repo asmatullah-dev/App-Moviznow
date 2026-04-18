@@ -2,36 +2,39 @@ if (typeof importScripts === 'function') {
   importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js');
   importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js');
 
-  // Initialize Firebase
-  firebase.initializeApp({
-    apiKey: "AIzaSyBgB-N6dt9k0WFWgAWHjq2C5YjNVXEQ2qQ",
-    authDomain: "gen-lang-client-0278230090.firebaseapp.com",
-    projectId: "gen-lang-client-0278230090",
-    storageBucket: "gen-lang-client-0278230090.firebasestorage.app",
-    messagingSenderId: "578203790665",
-    appId: "1:578203790665:web:9506c7bb463f65d5773e98"
-  });
+  // Parse config from URL parameters
+  const urlParams = new URL(location.href).searchParams;
+  const firebaseConfig = Object.fromEntries(urlParams.entries());
 
-  const messaging = firebase.messaging();
+  if (firebaseConfig.apiKey && firebaseConfig.projectId) {
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
 
-  messaging.onBackgroundMessage((payload) => {
-    console.log('[firebase-messaging-sw.js] Received background message ', payload);
-    
-    // Add this log to verify the handler is actually running
-    console.log('[firebase-messaging-sw.js] Payload data:', payload.data);
-    
-    if (payload.data) {
-      const notificationTitle = payload.data.title || 'New Notification';
-      const notificationOptions = {
-        body: payload.data.body,
-        icon: payload.data.imageUrl || '/launcher.svg',
-        image: payload.data.imageUrl,
-        data: { url: payload.data.url || '/' }
-      };
+    const messaging = firebase.messaging();
 
-      self.registration.showNotification(notificationTitle, notificationOptions);
-    }
-  });
+    messaging.onBackgroundMessage((payload) => {
+      console.log('[firebase-messaging-sw.js] Received background message ', payload);
+      
+      // Add this log to verify the handler is actually running
+      console.log('[firebase-messaging-sw.js] Payload data:', payload.data);
+      
+      if (payload.data) {
+        const notificationTitle = payload.data.title || payload.notification?.title || 'New Notification';
+        const notificationOptions = {
+          body: payload.data.body || payload.notification?.body,
+          icon: payload.data.imageUrl || '/launcher.svg',
+          image: payload.data.imageUrl,
+          data: Object.assign({}, payload.data, {
+            url: payload.data.url || '/'
+          })
+        };
+
+        self.registration.showNotification(notificationTitle, notificationOptions);
+      }
+    });
+  } else {
+    console.warn('[firebase-messaging-sw.js] Missing Firebase config in URL parameters. Push notifications inactive.');
+  }
 }
 
 self.addEventListener('install', (event) => {

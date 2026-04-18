@@ -4,29 +4,34 @@ importScripts('https://storage.googleapis.com/workbox-cdn/releases/5.1.2/workbox
 importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js');
 
-// Initialize Firebase for FCM
-firebase.initializeApp({
-  apiKey: "AIzaSyBgB-N6dt9k0WFWgAWHjq2C5YjNVXEQ2qQ",
-  authDomain: "gen-lang-client-0278230090.firebaseapp.com",
-  projectId: "gen-lang-client-0278230090",
-  storageBucket: "gen-lang-client-0278230090.firebasestorage.app",
-  messagingSenderId: "578203790665",
-  appId: "1:578203790665:web:9506c7bb463f65d5773e98"
-});
+// Parse config from URL parameters
+const urlParams = new URL(location.href).searchParams;
+const firebaseConfig = Object.fromEntries(urlParams.entries());
 
-const messaging = firebase.messaging();
+// Make sure we have the required keys before initializing
+if (firebaseConfig.apiKey && firebaseConfig.projectId) {
+  // Initialize Firebase for FCM
+  firebase.initializeApp(firebaseConfig);
 
-messaging.onBackgroundMessage((payload) => {
-  console.log('[sw.js] Received background message ', payload);
-  const notificationTitle = payload.notification.title;
-  const notificationOptions = {
-    body: payload.notification.body,
-    icon: '/logo.svg',
-    data: payload.data
-  };
+  const messaging = firebase.messaging();
 
-  self.registration.showNotification(notificationTitle, notificationOptions);
-});
+  messaging.onBackgroundMessage((payload) => {
+    console.log('[sw.js] Received background message ', payload);
+    const notificationTitle = payload.notification?.title || payload.data?.title || 'New Notification';
+    const notificationOptions = {
+      body: payload.notification?.body || payload.data?.body,
+      icon: payload.data?.imageUrl || '/logo.svg',
+      image: payload.data?.imageUrl,
+      data: Object.assign({}, payload.data, {
+        url: payload.data?.url || '/'
+      })
+    };
+
+    self.registration.showNotification(notificationTitle, notificationOptions);
+  });
+} else {
+  console.warn('[sw.js] Missing Firebase config in URL parameters. Push notifications inactive.');
+}
 
 const CACHE = "pwabuilder-page";
 const offlineFallbackPage = "offline.html";
@@ -38,10 +43,15 @@ self.addEventListener("message", (event) => {
 });
 
 self.addEventListener('install', async (event) => {
+  self.skipWaiting(); // Force update so mobile users don't need to close all tabs
   event.waitUntil(
     caches.open(CACHE)
       .then((cache) => cache.add(offlineFallbackPage))
   );
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(self.clients.claim()); // Take control of all open pages immediately
 });
 
 if (workbox.navigationPreload.isSupported()) {
