@@ -2029,8 +2029,8 @@ export default function ContentManagement() {
     if (hasUpdates) {
       try {
         await updateDoc(doc(db, 'content', updatedContent.id), {
-          movieLinks: updatedContent.movieLinks,
-          seasons: updatedContent.seasons
+          movieLinks: JSON.stringify(updatedContent.movieLinks || []),
+          seasons: JSON.stringify(updatedContent.seasons || [])
         });
       } catch (error) {
         console.error("Error saving tinyUrls to db:", error);
