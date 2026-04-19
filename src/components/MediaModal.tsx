@@ -10,6 +10,7 @@ interface MediaModalProps {
   initialImdbId?: string;
   initialTitle?: string;
   initialYear?: string;
+  initialType?: string;
   onApply?: (data: any) => void;
 }
 
@@ -18,32 +19,43 @@ const OMDB_API_KEY = import.meta.env.VITE_OMDB_API_KEY || '19daa310';
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const OMDB_BASE = 'https://www.omdbapi.com/';
 
-export async function findTMDBByImdb(imdbID: string) {
+export async function findTMDBByImdb(imdbID: string, forceType?: string) {
   const url = `${TMDB_BASE}/find/${imdbID}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
   const res = await fetch(url);
   const data = await res.json();
-  if (data.movie_results && data.movie_results.length > 0) return { item: data.movie_results[0], type: 'movie' };
-  if (data.tv_results && data.tv_results.length > 0) return { item: data.tv_results[0], type: 'tv' };
+  
+  if ((!forceType || forceType === 'movie') && data.movie_results && data.movie_results.length > 0) {
+    return { item: data.movie_results[0], type: 'movie' };
+  }
+  
+  if ((!forceType || forceType === 'series' || forceType === 'tv') && data.tv_results && data.tv_results.length > 0) {
+    return { item: data.tv_results[0], type: 'tv' };
+  }
+  
   return null;
 }
 
-export async function searchTMDBByTitle(searchTitle: string, searchYear: string) {
-  let movieUrl = `${TMDB_BASE}/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(searchTitle)}`;
-  if (searchYear) movieUrl += `&year=${searchYear}`;
-  let movieRes = await fetch(movieUrl);
-  let movieData = await movieRes.json();
-  
-  let tvUrl = `${TMDB_BASE}/search/tv?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(searchTitle)}`;
-  if (searchYear) tvUrl += `&first_air_date_year=${searchYear}`;
-  let tvRes = await fetch(tvUrl);
-  let tvData = await tvRes.json();
-
+export async function searchTMDBByTitle(searchTitle: string, searchYear: string, forceType?: string) {
   const results: any[] = [];
-  if (movieData.results) {
-    movieData.results.forEach((item: any) => results.push({ item, type: 'movie' }));
+  
+  if (!forceType || forceType === 'movie') {
+    let movieUrl = `${TMDB_BASE}/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(searchTitle)}`;
+    if (searchYear) movieUrl += `&year=${searchYear}`;
+    let movieRes = await fetch(movieUrl);
+    let movieData = await movieRes.json();
+    if (movieData.results) {
+      movieData.results.forEach((item: any) => results.push({ item, type: 'movie' }));
+    }
   }
-  if (tvData.results) {
-    tvData.results.forEach((item: any) => results.push({ item, type: 'tv' }));
+  
+  if (!forceType || forceType === 'series' || forceType === 'tv') {
+    let tvUrl = `${TMDB_BASE}/search/tv?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(searchTitle)}`;
+    if (searchYear) tvUrl += `&first_air_date_year=${searchYear}`;
+    let tvRes = await fetch(tvUrl);
+    let tvData = await tvRes.json();
+    if (tvData.results) {
+      tvData.results.forEach((item: any) => results.push({ item, type: 'tv' }));
+    }
   }
   
   return results;
@@ -92,7 +104,7 @@ export async function fetchIMDbRating(imdbID: string) {
   return null;
 }
 
-export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initialImdbId = '', initialTitle = '', initialYear = '', onApply }) => {
+export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initialImdbId = '', initialTitle = '', initialYear = '', initialType = '', onApply }) => {
   const [imdbId, setImdbId] = useState(initialImdbId);
   const [title, setTitle] = useState(initialTitle);
   const [year, setYear] = useState(initialYear);
@@ -100,7 +112,11 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
   const [error, setError] = useState<string | null>(null);
   const [fetchedData, setFetchedData] = useState<any>(null);
   const [searchResults, setSearchResults] = useState<any[] | null>(null);
-  const [filterType, setFilterType] = useState<'all' | 'movie' | 'tv'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'movie' | 'tv'>(() => {
+    if (initialType === 'movie') return 'movie';
+    if (initialType === 'series' || initialType === 'tv') return 'tv';
+    return 'all';
+  });
   const [selectedFields, setSelectedFields] = useState<Record<string, boolean>>(() => {
     const saved = localStorage.getItem('mediaModal_selectedFields');
     return saved ? JSON.parse(saved) : {};
@@ -139,49 +155,57 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
       setYear(initialYear);
       setFetchedData(null);
       setSearchResults(null);
-      setFilterType('all');
+      
+      const defaultFilter = initialType === 'movie' ? 'movie' : (initialType === 'series' || initialType === 'tv' ? 'tv' : 'all');
+      setFilterType(defaultFilter);
       setError(null);
       
       if (initialImdbId || initialTitle) {
-        handleFetchWithParams(initialImdbId, initialTitle, initialYear);
+        handleFetchWithParams(initialImdbId, initialTitle, initialYear, initialType);
       }
     }
   }, [isOpen, initialImdbId, initialTitle, initialYear]);
 
   const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-  async function findTMDBByImdb(imdbID: string) {
+  async function findTMDBByImdb(imdbID: string, forceType?: string) {
     const url = `${TMDB_BASE}/find/${imdbID}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
     const res = await fetch(url);
     const data = await res.json();
-    if (data.movie_results && data.movie_results.length > 0) return { item: data.movie_results[0], type: 'movie' };
-    if (data.tv_results && data.tv_results.length > 0) return { item: data.tv_results[0], type: 'tv' };
+    
+    if ((!forceType || forceType === 'movie') && data.movie_results && data.movie_results.length > 0) {
+      return { item: data.movie_results[0], type: 'movie' };
+    }
+    
+    if ((!forceType || forceType === 'series' || forceType === 'tv') && data.tv_results && data.tv_results.length > 0) {
+      return { item: data.tv_results[0], type: 'tv' };
+    }
+    
     return null;
   }
 
-  async function searchTMDBByTitle(searchTitle: string, searchYear: string) {
-    let movieUrl = `${TMDB_BASE}/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(searchTitle)}`;
-    if (searchYear) movieUrl += `&year=${searchYear}`;
-    
-    let tvUrl = `${TMDB_BASE}/search/tv?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(searchTitle)}`;
-    if (searchYear) tvUrl += `&first_air_date_year=${searchYear}`;
-
-    const [movieRes, tvRes] = await Promise.all([
-      fetch(movieUrl),
-      fetch(tvUrl)
-    ]);
-
-    const [movieData, tvData] = await Promise.all([
-      movieRes.json(),
-      tvRes.json()
-    ]);
-
+  async function searchTMDBByTitle(searchTitle: string, searchYear: string, forceType?: string) {
     const results: any[] = [];
-    if (movieData.results) {
-      movieData.results.forEach((item: any) => results.push({ item, type: 'movie' }));
+    const promises = [];
+
+    if (!forceType || forceType === 'movie' || forceType === 'all') {
+      let movieUrl = `${TMDB_BASE}/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(searchTitle)}`;
+      if (searchYear) movieUrl += `&year=${searchYear}`;
+      promises.push(fetch(movieUrl).then(r => r.json()).then(data => {
+        if (data.results) data.results.forEach((item: any) => results.push({ item, type: 'movie' }));
+      }));
     }
-    if (tvData.results) {
-      tvData.results.forEach((item: any) => results.push({ item, type: 'tv' }));
+    
+    if (!forceType || forceType === 'tv' || forceType === 'series' || forceType === 'all') {
+      let tvUrl = `${TMDB_BASE}/search/tv?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(searchTitle)}`;
+      if (searchYear) tvUrl += `&first_air_date_year=${searchYear}`;
+      promises.push(fetch(tvUrl).then(r => r.json()).then(data => {
+        if (data.results) data.results.forEach((item: any) => results.push({ item, type: 'tv' }));
+      }));
+    }
+
+    if (promises.length > 0) {
+      await Promise.all(promises);
     }
     
     return results;
@@ -230,12 +254,15 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
     return null;
   }
 
-  const handleFetchWithParams = async (searchImdbId: string, searchTitle: string, searchYear: string) => {
+  const handleFetchWithParams = async (searchImdbId: string, searchTitle: string, searchYear: string, searchForceType?: string) => {
     setLoading(true);
     setError(null);
     setFetchedData(null);
     setSearchResults(null);
-    setFilterType('all');
+    
+    // Set filterType based on searchForceType if provided
+    const initialFilter = searchForceType === 'movie' ? 'movie' : (searchForceType === 'series' || searchForceType === 'tv' ? 'tv' : 'all');
+    setFilterType(initialFilter);
 
     try {
       if (searchImdbId.trim()) {
@@ -243,27 +270,30 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
         const isNumeric = /^\d+$/.test(idStr);
         
         if (isNumeric) {
-          // Try fetching as movie first
-          try {
-            const movieRes = await fetch(`${TMDB_BASE}/movie/${idStr}?api_key=${TMDB_API_KEY}`);
-            if (movieRes.ok) {
-              await fetchFullDetails(idStr, 'movie');
-              return;
-            }
-          } catch (e) {}
+          // If searching by TMDB ID, we should still respect the type if provided
+          if (!searchForceType || searchForceType === 'movie' || searchForceType === 'all') {
+            try {
+              const movieRes = await fetch(`${TMDB_BASE}/movie/${idStr}?api_key=${TMDB_API_KEY}`);
+              if (movieRes.ok) {
+                await fetchFullDetails(idStr, 'movie');
+                return;
+              }
+            } catch (e) {}
+          }
           
-          // Try fetching as tv
-          try {
-            const tvRes = await fetch(`${TMDB_BASE}/tv/${idStr}?api_key=${TMDB_API_KEY}`);
-            if (tvRes.ok) {
-              await fetchFullDetails(idStr, 'tv');
-              return;
-            }
-          } catch (e) {}
+          if (!searchForceType || searchForceType === 'series' || searchForceType === 'tv' || searchForceType === 'all') {
+            try {
+              const tvRes = await fetch(`${TMDB_BASE}/tv/${idStr}?api_key=${TMDB_API_KEY}`);
+              if (tvRes.ok) {
+                await fetchFullDetails(idStr, 'tv');
+                return;
+              }
+            } catch (e) {}
+          }
           
           // If not found by TMDB ID, fall back to title search if title is provided
           if (searchTitle.trim()) {
-            const results = await searchTMDBByTitle(searchTitle.trim(), searchYear.trim());
+            const results = await searchTMDBByTitle(searchTitle.trim(), searchYear.trim(), searchForceType);
             if (results && results.length > 1) {
               setSearchResults(results);
               return;
@@ -276,14 +306,14 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
         } else {
           const match = idStr.match(/tt\d+/);
           const imdbID = match ? match[0] : idStr;
-          const found = await findTMDBByImdb(imdbID);
+          const found = await findTMDBByImdb(imdbID, searchForceType);
           if (found) {
             await fetchFullDetails(found.item.id, found.type);
             return;
           } else {
             // If not found by IMDb ID, fall back to title search if title is provided
             if (searchTitle.trim()) {
-              const results = await searchTMDBByTitle(searchTitle.trim(), searchYear.trim());
+              const results = await searchTMDBByTitle(searchTitle.trim(), searchYear.trim(), searchForceType);
               if (results && results.length > 1) {
                 setSearchResults(results);
                 return;
@@ -296,7 +326,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
           }
         }
       } else if (searchTitle.trim()) {
-        const results = await searchTMDBByTitle(searchTitle.trim(), searchYear.trim());
+        const results = await searchTMDBByTitle(searchTitle.trim(), searchYear.trim(), searchForceType);
         if (results && results.length > 1) {
           setSearchResults(results);
         } else if (results && results.length === 1) {
@@ -475,7 +505,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
             <input type="text" value={year} onChange={e => setYear(e.target.value)} placeholder="Year" className="w-24 p-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500 transition-colors duration-300" />
             <div className="flex gap-2">
               <button 
-                onClick={() => handleFetchWithParams(imdbId, title, year)} 
+                onClick={() => handleFetchWithParams(imdbId, title, year, filterType === 'all' ? undefined : filterType)} 
                 disabled={loading}
                 className="bg-emerald-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-emerald-700 flex items-center gap-2 disabled:opacity-50 transition-all active:scale-95 border border-white/20 shadow-lg"
               >
