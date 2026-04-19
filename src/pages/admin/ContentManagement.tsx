@@ -8,7 +8,7 @@ import { useUsers } from '../../contexts/UsersContext';
 import { Content, Genre, Language, Quality, QualityLinks, Season, Episode, LinkDef, Role, Trailer } from '../../types';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
-import { Plus, Edit2, Trash2, Share2, Film, Tv, X, Save, Upload, Search, Eye, EyeOff, ArrowUp, ArrowDown, Copy, ClipboardPaste, GripVertical, Bell, RefreshCw, ChevronDown, ChevronUp, User, Lock, Loader2, MessageCircle, MoreVertical, Link2 } from 'lucide-react';
+import { Plus, Edit2, Trash2, Share2, Film, Tv, X, Save, Upload, Search, Eye, EyeOff, ArrowUp, ArrowDown, Copy, ClipboardPaste, GripVertical, Bell, RefreshCw, ChevronDown, ChevronUp, User, Lock, Loader2, MessageCircle, MoreVertical, Link2, AlertCircle } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import ConfirmModal from '../../components/ConfirmModal';
 import AlertModal from '../../components/AlertModal';
@@ -293,6 +293,41 @@ export default function ContentManagement() {
  
   // Search States
   const [searchTerm, setSearchTerm] = useState(() => sessionStorage.getItem('content_mgmt_search') || '');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [showDuplicates, setShowDuplicates] = useState(() => sessionStorage.getItem('adminShowDuplicates') === 'true');
+  const [showMissing, setShowMissing] = useState(() => sessionStorage.getItem('adminShowMissingOnly') === 'true');
+  
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        suggestionsRef.current && 
+        !suggestionsRef.current.contains(event.target as Node) &&
+        searchInputRef.current &&
+        !searchInputRef.current.contains(event.target as Node)
+      ) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const searchSuggestions = useMemo(() => {
+    if (!debouncedSearchTerm.trim()) return [];
+    return smartSearch(contentList, debouncedSearchTerm, ['title', 'description', 'cast', 'country', 'year']).slice(0, 5);
+  }, [debouncedSearchTerm, contentList]);
+
   const [filterType, setFilterType] = useState<'all' | 'movie' | 'series'>(() => (sessionStorage.getItem('content_mgmt_type') as any) || 'all');
   const [filterGenre, setFilterGenre] = useState<string>(() => sessionStorage.getItem('content_mgmt_genre') || 'all');
   const [filterLanguage, setFilterLanguage] = useState<string>(() => sessionStorage.getItem('content_mgmt_language') || 'all');
@@ -313,7 +348,9 @@ export default function ContentManagement() {
     sessionStorage.setItem('content_mgmt_status', filterStatus);
     sessionStorage.setItem('content_mgmt_added_by', filterAddedBy);
     sessionStorage.setItem('content_mgmt_sort', filterSort);
-  }, [searchTerm, filterType, filterGenre, filterLanguage, filterQuality, filterYear, filterStatus, filterAddedBy, filterSort]);
+    sessionStorage.setItem('adminShowDuplicates', showDuplicates.toString());
+    sessionStorage.setItem('adminShowMissingOnly', showMissing.toString());
+  }, [searchTerm, filterType, filterGenre, filterLanguage, filterQuality, filterYear, filterStatus, filterAddedBy, filterSort, showDuplicates, showMissing]);
 
   const [genreSearchTerm, setGenreSearchTerm] = useState('');
   const [languageSearchTerm, setLanguageSearchTerm] = useState('');
@@ -2248,9 +2285,150 @@ export default function ContentManagement() {
     return Array.from(years).sort((a, b) => b - a);
   }, [contentList]);
 
+  const getMissingLabels = (content: Content, profile: any) => {
+    const labels: string[] = [];
+    const isStaff = profile?.role === 'owner' || profile?.role === 'admin' || profile?.role === 'manager' || profile?.role === 'content_manager';
+    if (isStaff) {
+      if (!content.trailerUrl && (!content.trailers || content.trailers === '[]' || (Array.isArray(content.trailers) && content.trailers.length === 0))) labels.push('Missing Trailer');
+      if (content.type === 'movie') {
+          try {
+              let has480 = false, has720 = false, has1080 = false;
+              if (content.movieLinks) {
+                  const ml = typeof content.movieLinks === 'string' ? JSON.parse(content.movieLinks) : (Array.isArray(content.movieLinks) ? content.movieLinks : []);
+                  if (Array.isArray(ml)) {
+                      const isStandard = (l: any, res: string) => 
+                          (l.name?.includes(res) || l.quality === res) && 
+                          !l.name?.toUpperCase().includes('HEVC');
+                          
+                      has480 = ml.some((l: any) => isStandard(l, '480p'));
+                      has720 = ml.some((l: any) => isStandard(l, '720p'));
+                      has1080 = ml.some((l: any) => isStandard(l, '1080p'));
+                  }
+              }
+              if (!has480) labels.push('Missing 480p');
+              if (!has720) labels.push('Missing 720p');
+              if (!has1080) labels.push('Missing 1080p');
+          } catch(e){
+              console.error('Error parsing movieLinks', e);
+          }
+      } else if (content.type === 'series') {
+          try {
+              if (content.seasons) {
+                  const seasonsList = typeof content.seasons === 'string' ? JSON.parse(content.seasons) : (Array.isArray(content.seasons) ? content.seasons : []);
+                  if (seasonsList.length === 0) {
+                      labels.push('Missing Seasons Data');
+                  } else {
+                      seasonsList.forEach((s: any) => {
+                          if (!s.year) labels.push(`Missing S${s.seasonNumber} Year`);
+                          
+                          if (!s.zipLinks || !Array.isArray(s.zipLinks) || s.zipLinks.length === 0) labels.push(`Missing S${s.seasonNumber} Zip`);
+                          if (!s.mkvLinks || !Array.isArray(s.mkvLinks) || s.mkvLinks.length === 0) labels.push(`Missing S${s.seasonNumber} MKV`);
+                          
+                          if (!s.episodes || !Array.isArray(s.episodes) || s.episodes.length === 0) {
+                              labels.push(`Missing S${s.seasonNumber} Episodes`);
+                          } else {
+                              const seasonHas1080pEpisode = s.episodes.some((ep: any) => 
+                                  Array.isArray(ep.links) && ep.links.some((l: any) => l.name?.includes('1080p') || l.quality === '1080p')
+                              );
+
+                              s.episodes.forEach((ep: any) => {
+                                  if (!ep.links || !Array.isArray(ep.links) || ep.links.length === 0) {
+                                      labels.push(`Missing S${s.seasonNumber}E${ep.episodeNumber}`);
+                                  } else {
+                                      const has720p = ep.links.some((l: any) => l.name?.includes('720p') || l.quality === '720p');
+                                      const has1080p = ep.links.some((l: any) => l.name?.includes('1080p') || l.quality === '1080p');
+                                      
+                                      if (!has720p) labels.push(`Missing S${s.seasonNumber}E${ep.episodeNumber} 720p`);
+                                      if (seasonHas1080pEpisode && !has1080p) labels.push(`Missing S${s.seasonNumber}E${ep.episodeNumber} 1080p`);
+                                  }
+                              });
+                          }
+                          
+                          if (s.zipLinks && Array.isArray(s.zipLinks) && s.zipLinks.length > 0) {
+                              const isStandardZip = (l: any, res: string) => {
+                                  const matchesRes = l.name?.includes(res) || l.quality === res;
+                                  if (!matchesRes) return false;
+                                  if (res === '480p') return true;
+                                  return !l.name?.toUpperCase().includes('HEVC');
+                              };
+                              let has480 = s.zipLinks.some((l: any) => isStandardZip(l, '480p'));
+                              let has720 = s.zipLinks.some((l: any) => isStandardZip(l, '720p'));
+                              let has1080 = s.zipLinks.some((l: any) => isStandardZip(l, '1080p'));
+                              if (!has480) labels.push(`Missing S${s.seasonNumber} Zip 480p`);
+                              if (!has720) labels.push(`Missing S${s.seasonNumber} Zip 720p`);
+                              if (!has1080) labels.push(`Missing S${s.seasonNumber} Zip 1080p`);
+                          }
+                          
+                          if (s.mkvLinks && Array.isArray(s.mkvLinks) && s.mkvLinks.length > 0) {
+                              const isStandardMkv = (l: any, res: string) => {
+                                  const matchesRes = l.name?.includes(res) || l.quality === res;
+                                  if (!matchesRes) return false;
+                                  if (res === '480p') return true;
+                                  return !l.name?.toUpperCase().includes('HEVC');
+                              };
+                              let has480 = s.mkvLinks.some((l: any) => isStandardMkv(l, '480p'));
+                              let has720 = s.mkvLinks.some((l: any) => isStandardMkv(l, '720p'));
+                              let has1080 = s.mkvLinks.some((l: any) => isStandardMkv(l, '1080p'));
+                              if (!has480) labels.push(`Missing S${s.seasonNumber} MKV 480p`);
+                              if (!has720) labels.push(`Missing S${s.seasonNumber} MKV 720p`);
+                              if (!has1080) labels.push(`Missing S${s.seasonNumber} MKV 1080p`);
+                          }
+                      });
+                  }
+              } else {
+                  labels.push('Missing Seasons Data');
+              }
+          } catch(e) {
+              console.error('Error parsing seasons', e);
+          }
+      }
+      if (!content.qualityId) labels.push('Missing Print Quality');
+      if (!content.languageIds || content.languageIds.length === 0) labels.push('Missing Language');
+      if (!content.genreIds || content.genreIds.length === 0) labels.push('Missing Genre');
+    }
+    return labels;
+  };
+
+  const duplicateIds = useMemo(() => {
+    const ids = new Set<string>();
+    const duplicateGroups = new Map<string, string[]>();
+    contentList.forEach(c => {
+      const titleKey = (c.title || '').trim().toLowerCase();
+      let key = '';
+      if (c.type === 'movie') {
+         key = `movie_${titleKey}_${c.year || ''}`;
+      } else {
+         key = `series_${titleKey}`;
+      }
+      if (!duplicateGroups.has(key)) {
+         duplicateGroups.set(key, []);
+      }
+      duplicateGroups.get(key)!.push(c.id);
+    });
+
+    duplicateGroups.forEach(group => {
+      if (group.length > 1) {
+        group.forEach(id => ids.add(id));
+      }
+    });
+
+    return ids;
+  }, [contentList]);
+
   const filteredContent = useMemo(() => {
     let result = contentList;
     
+    if (showDuplicates) {
+      result = result.filter(c => duplicateIds.has(c.id));
+    }
+
+    if (showMissing) {
+      result = result.filter(c => {
+        const labels = getMissingLabels(c, profile);
+        return labels.length > 0;
+      });
+    }
+
     // Content Manager restriction: only see their own content
     if (profile?.role === 'content_manager' || profile?.role === 'manager') {
       result = result.filter(c => c.addedBy === user?.uid);
@@ -2269,23 +2447,31 @@ export default function ContentManagement() {
       result = result.filter(c => c.qualityId === filterQuality);
     }
     if (filterYear !== 'all') {
-      result = result.filter(c => c.year === parseInt(filterYear));
+      result = result.filter(c => {
+        if (String(c.year) === filterYear) return true;
+        if (c.type === 'series' && c.seasons) {
+          try {
+            const seasonsList = typeof c.seasons === 'string' ? JSON.parse(c.seasons) : (Array.isArray(c.seasons) ? c.seasons : []);
+            return seasonsList.some((s: any) => String(s.year) === filterYear);
+          } catch(e) { return false; }
+        }
+        return false;
+      });
     }
     if (filterStatus !== 'all') {
       result = result.filter(c => (c.status || 'published') === filterStatus);
-    }
-    if (profile?.role === 'content_manager' || profile?.role === 'manager') {
-      result = result.filter(c => c.addedBy === user?.uid);
     }
 
     if (filterAddedBy !== 'all') {
       result = result.filter(c => c.addedBy === filterAddedBy);
     }
-    if (searchTerm) {
-      result = smartSearch(result, searchTerm);
+    if (debouncedSearchTerm) {
+      result = smartSearch(result, debouncedSearchTerm, ['title', 'description', 'cast', 'country', 'year']);
     }
     
-    if (!searchTerm || filterSort === 'default') {
+    // Allow smartSearch to handle sorting (by relevance) if we're searching and have default sort
+    const shouldManualSort = !debouncedSearchTerm || filterSort !== 'default';
+    if (shouldManualSort) {
       result.sort((a, b) => {
         if (filterSort === 'default') {
           if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
@@ -2300,7 +2486,7 @@ export default function ContentManagement() {
     }
     
     return result;
-  }, [contentList, searchTerm, filterType, filterGenre, filterLanguage, filterQuality, filterYear, filterStatus, filterSort, filterAddedBy, profile, user]);
+  }, [contentList, debouncedSearchTerm, filterType, filterGenre, filterLanguage, filterQuality, filterYear, filterStatus, filterSort, filterAddedBy, profile, user, showDuplicates, showMissing, duplicateIds]);
 
   const filteredGenres = useMemo(() => {
     if (!genreSearchTerm) return genres;
@@ -2421,6 +2607,26 @@ export default function ContentManagement() {
                 >
                   <GripVertical className="w-4 h-4" />
                 </button>
+                <button
+                  onClick={() => setShowDuplicates(!showDuplicates)}
+                  className={clsx(
+                    "flex items-center justify-center p-2 rounded-lg transition-colors",
+                    showDuplicates ? "bg-emerald-500 text-white" : "bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white"
+                  )}
+                  title={showDuplicates ? "Viewing Duplicates" : "Find Duplicates"}
+                >
+                  <Copy className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setShowMissing(!showMissing)}
+                  className={clsx(
+                    "flex items-center justify-center p-2 rounded-lg transition-colors",
+                    showMissing ? "bg-emerald-500 text-white" : "bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white"
+                  )}
+                  title={showMissing ? "Viewing Missing Only" : "Find Missing Info"}
+                >
+                  <AlertCircle className="w-4 h-4" />
+                </button>
               </div>
             )}
           </div>
@@ -2428,12 +2634,47 @@ export default function ContentManagement() {
             <div className="relative w-full sm:w-64">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-500" />
               <input
+                ref={searchInputRef}
                 type="text"
-                placeholder="Search content..."
+                placeholder="Search movies & series..."
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setShowSuggestions(true);
+                }}
+                onFocus={() => setShowSuggestions(true)}
                 className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-10 pr-4 py-3 focus:outline-none focus:border-emerald-500"
               />
+              {showSuggestions && searchSuggestions.length > 0 && (
+                <div 
+                  ref={suggestionsRef}
+                  className="absolute z-50 w-full mt-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-xl shadow-2xl max-h-60 overflow-y-auto"
+                >
+                  <div className="p-2 text-xs font-medium text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-800">Suggestions</div>
+                  {searchSuggestions.map(suggestion => (
+                    <div 
+                      key={suggestion.id} 
+                      className="px-4 py-3 hover:bg-zinc-200 dark:hover:bg-zinc-800 cursor-pointer flex items-center gap-3 transition-colors"
+                      onClick={() => {
+                        setSearchTerm(suggestion.title);
+                        setShowSuggestions(false);
+                      }}
+                    >
+                      {suggestion.posterUrl ? (
+                        <img src={suggestion.posterUrl} alt={suggestion.title} className="w-8 h-12 object-cover rounded" />
+                      ) : (
+                        <div className="w-8 h-12 bg-zinc-100 dark:bg-zinc-800 rounded flex items-center justify-center">
+                          <Film className="w-4 h-4 text-zinc-600" />
+                        </div>
+                      )}
+                      <div>
+                        <div className="font-medium text-sm text-zinc-900 dark:text-white line-clamp-1">{formatContentTitle(suggestion)}</div>
+                        <div className="text-xs text-zinc-500 dark:text-zinc-400">{suggestion.year} • {suggestion.type}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             {selectedContent.length > 0 && (
               <div className="flex items-center gap-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2">
@@ -2572,8 +2813,12 @@ export default function ContentManagement() {
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-6">
-          {filteredContent.map((content) => (
-            <div key={content.id} className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl flex flex-col group relative overflow-hidden transition-all hover:ring-2 hover:ring-emerald-500/50">
+          {filteredContent.map((content) => {
+            const missingLabels = getMissingLabels(content, profile);
+
+            const isDuplicate = duplicateIds.has(content.id);
+            return (
+            <div key={content.id} className={clsx("bg-zinc-50 dark:bg-zinc-900 border rounded-xl flex flex-col group relative overflow-hidden transition-all hover:ring-2", isDuplicate ? "border-red-500 hover:ring-red-500/50" : "border-zinc-200 dark:border-zinc-800 hover:ring-emerald-500/50")}>
               <label className="absolute top-0 left-0 z-30 w-16 h-16 cursor-pointer group/checkbox">
                 <div className="absolute top-3 left-3 w-5 h-5 flex items-center justify-center rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 group-hover/checkbox:border-emerald-500 transition-colors">
                   <input 
@@ -2599,6 +2844,22 @@ export default function ContentManagement() {
                 >
                   <img src={content.posterUrl || 'https://picsum.photos/seed/movie/400/600'} alt={content.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                 </Link>
+                {isDuplicate && (
+                  <div className="absolute top-3 left-10 z-20 pointer-events-none">
+                    <div className="bg-red-600 animate-pulse text-white px-2 py-0.5 rounded shadow-lg shadow-red-600/40 text-[11px] font-black uppercase tracking-widest border border-red-400">
+                      Duplicate
+                    </div>
+                  </div>
+                )}
+                {missingLabels.length > 0 && (
+                  <div className="absolute bottom-1 left-1 right-1 flex flex-row flex-wrap items-end gap-0.5 pointer-events-none opacity-80 group-hover:opacity-100 transition-opacity max-h-[80%] overflow-hidden">
+                    {missingLabels.map((lbl, idx) => (
+                      <div key={idx} className="bg-red-600/90 backdrop-blur-sm text-white px-1.5 py-[1px] rounded text-[9px] font-bold uppercase tracking-wider shadow-sm truncate max-w-full">
+                        {lbl}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="absolute top-1 right-1 flex flex-col gap-1 items-end">
                   <div className={clsx(
                     "px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider text-white",
@@ -2670,7 +2931,8 @@ export default function ContentManagement() {
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

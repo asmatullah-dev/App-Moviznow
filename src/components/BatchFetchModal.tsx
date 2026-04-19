@@ -95,6 +95,21 @@ export const BatchFetchModal: React.FC<Props> = ({
             const bestMatch = tmdbResults[0];
             const details = await fetchTMDBDetails(bestMatch.item.id, bestMatch.type);
             
+            // Validate Match
+            const normalizeStr = (str: string) => (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            const targetTitle = normalizeStr(searchTitle);
+            const matchTitle = normalizeStr(details.title || details.name);
+            const targetYearStr = searchYear ? searchYear.toString() : '';
+            const bestMatchYear = (details.release_date || details.first_air_date || '').split('-')[0];
+            
+            const resemblesTitle = matchTitle && targetTitle && (targetTitle.includes(matchTitle) || matchTitle.includes(targetTitle));
+            const isSameYear = targetYearStr && bestMatchYear && targetYearStr === bestMatchYear;
+            
+            if (!resemblesTitle && !isSameYear) {
+                updateResult(id, 'error', `Unconfident match: "${details.title || details.name}"`);
+                continue;
+            }
+
             const updates: any = {};
             
             if (fetchFields.title) updates.title = details.title || details.name || data.title;
@@ -146,7 +161,6 @@ export const BatchFetchModal: React.FC<Props> = ({
                 }));
             }
 
-            /*
             if (fetchFields.genres && Array.isArray(details.genres) && genres) {
               const fetchedGenreNames = details.genres.map((g: any) => g.name.trim().toLowerCase());
               const matchedGenreIds = genres.filter(g => {
@@ -171,7 +185,6 @@ export const BatchFetchModal: React.FC<Props> = ({
                 updates.genreIds = [...new Set([...existingGenreIds, ...matchedGenreIds])];
               }
             }
-            */
 
             if (Object.keys(updates).length > 0) {
               try {
