@@ -492,6 +492,9 @@ export default function ContentManagement() {
     setFilterStatus('all');
     setFilterAddedBy('all');
     setFilterSort('newest');
+    setSearchTerm('');
+    setShowMissing(false);
+    setShowDuplicates(false);
   };
 
   useEffect(() => {
@@ -2632,6 +2635,18 @@ export default function ContentManagement() {
     }
   };
 
+  const isFiltered = searchTerm !== '' || 
+    filterType !== 'all' || 
+    filterGenre !== 'all' || 
+    filterLanguage !== 'all' || 
+    filterQuality !== 'all' || 
+    filterYear !== 'all' || 
+    filterStatus !== 'all' || 
+    filterAddedBy !== 'all' || 
+    filterSort !== 'newest' || 
+    showMissing || 
+    showDuplicates;
+
   return (
     <div className="p-4 md:p-8">
       <div className="flex flex-col gap-4 mb-8">
@@ -2783,9 +2798,11 @@ export default function ContentManagement() {
         <div className="flex flex-col gap-1 bg-zinc-50 dark:bg-zinc-900 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
           {/* Line 1 */}
           <div className="flex flex-row flex-nowrap gap-1">
-            <button onClick={clearFilters} className="flex-none bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-lg px-2 py-1 text-xs flex items-center gap-1">
-              <X className="w-3 h-3" />
-            </button>
+            {isFiltered && (
+              <button onClick={clearFilters} className="flex-none bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-lg px-2 py-1 text-xs flex items-center gap-1">
+                <X className="w-3 h-3" />
+              </button>
+            )}
             <select value={filterType} onChange={(e) => setFilterType(e.target.value as any)} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500">
               <option value="all">Types</option>
               <option value="movie">Movies</option>
