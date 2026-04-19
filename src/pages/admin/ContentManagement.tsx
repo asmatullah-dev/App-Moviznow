@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, memo, useCallback } from 'react';
 import { useSearchParams, Link, useLocation, useNavigate } from 'react-router-dom';
 import { db } from '../../firebase';
 import { collection, addDoc, deleteDoc, doc, updateDoc, onSnapshot, writeBatch, getDocs } from 'firebase/firestore';
@@ -240,6 +240,155 @@ const QualityInputs: React.FC<QualityInputsProps> = ({ links, onChange, droppabl
 
 import { BatchFetchModal } from '../../components/BatchFetchModal';
 
+interface ContentCardProps {
+  content: Content;
+  profile: any;
+  selectedContent: string[];
+  handleSelectContent: (id: string, e?: React.SyntheticEvent) => void;
+  handleShare: (content: Content, mode: 'standard' | 'whatsapp') => void;
+  handleEdit: (content: Content) => void;
+  handleCopyData: (content: Content) => void;
+  setDeleteId: (id: string) => void;
+  setNotificationModal: (modal: { isOpen: boolean; content: Content | null; status: 'idle' | 'sending' | 'success' | 'error' }) => void;
+  activeDropdownId: string | null;
+  setActiveDropdownId: (id: string | null) => void;
+  isDuplicate: boolean;
+  getMissingLabels: (content: Content, profile: any) => string[];
+  loadingShareId: string | null;
+  loadingWhatsappShareId: string | null;
+}
+
+const ContentCard = memo(({ 
+  content, profile, selectedContent, handleSelectContent, handleShare, handleEdit, 
+  handleCopyData, setDeleteId, setNotificationModal, activeDropdownId, 
+  setActiveDropdownId, isDuplicate, getMissingLabels, loadingShareId, loadingWhatsappShareId
+}: ContentCardProps) => {
+  const missingLabels = getMissingLabels(content, profile);
+  const isSelected = selectedContent.includes(content.id);
+
+  return (
+    <div className={clsx("bg-zinc-50 dark:bg-zinc-900 border rounded-xl flex flex-col group relative overflow-hidden transition-all hover:ring-2", isDuplicate ? "border-red-500 hover:ring-red-500/50" : "border-zinc-200 dark:border-zinc-800 hover:ring-emerald-500/50")}>
+      <label className="absolute top-0 left-0 z-30 w-16 h-16 cursor-pointer group/checkbox">
+        <div className="absolute top-3 left-3 w-5 h-5 flex items-center justify-center rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 group-hover/checkbox:border-emerald-500 transition-colors">
+          <input 
+            type="checkbox" 
+            checked={isSelected}
+            onChange={(e) => {
+              handleSelectContent(content.id, e);
+            }}
+            className="w-4 h-4 rounded border-none bg-transparent text-emerald-500 focus:ring-emerald-500 focus:ring-offset-zinc-950 cursor-pointer"
+          />
+        </div>
+      </label>
+      <div className="relative aspect-[2/3] rounded-t-xl overflow-hidden">
+        <Link 
+          to={selectedContent.length > 0 ? '#' : `/movie/${content.id}`} 
+          onClick={(e) => {
+            if (selectedContent.length > 0) {
+              e.preventDefault();
+              handleSelectContent(content.id, e);
+            }
+          }}
+          className="block w-full h-full"
+        >
+          <img 
+            src={content.posterUrl || 'https://picsum.photos/seed/movie/400/600'} 
+            alt={content.title} 
+            className="w-full h-full object-cover" 
+            referrerPolicy="no-referrer"
+            loading="lazy" 
+          />
+        </Link>
+        {isDuplicate && (
+          <div className="absolute top-3 left-10 z-20 pointer-events-none">
+            <div className="bg-red-600 animate-pulse text-white px-2 py-0.5 rounded shadow-lg shadow-red-600/40 text-[11px] font-black uppercase tracking-widest border border-red-400">
+              Duplicate
+            </div>
+          </div>
+        )}
+        {missingLabels.length > 0 && (
+          <div className="absolute bottom-1 left-1 right-1 flex flex-row flex-wrap items-end gap-0.5 pointer-events-none opacity-80 group-hover:opacity-100 transition-opacity max-h-[80%] overflow-hidden">
+            {missingLabels.map((lbl, idx) => (
+              <div key={idx} className="bg-red-600/90 backdrop-blur-sm text-white px-1.5 py-[1px] rounded text-[9px] font-bold uppercase tracking-wider shadow-sm truncate max-w-full">
+                {lbl}
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="absolute top-1 right-1 flex flex-col gap-1 items-end">
+          <div className={clsx(
+            "px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider text-white",
+            content.type === 'movie' ? 'bg-blue-500/90' : 'bg-purple-500/90'
+          )}>
+            {content.type}
+          </div>
+          {content.status === 'draft' && (
+            <div className="bg-yellow-500/90 text-black backdrop-blur-md px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+              <EyeOff className="w-3 h-3" />
+              Draft
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="p-2 md:p-3 flex-1 flex flex-col">
+        <h3 className="font-bold text-sm md:text-base mb-0.5 line-clamp-1" title={content.title}>{content.title}</h3>
+        <p className="text-zinc-500 dark:text-zinc-400 text-xs mb-2">{content.year}</p>
+        
+        <div className="mt-auto flex flex-wrap items-center justify-between gap-1 pt-2 border-t border-zinc-200 dark:border-zinc-800/50">
+          <div className="flex flex-wrap gap-1">
+            <button onClick={() => handleShare(content, 'whatsapp')} className="text-emerald-500 hover:text-emerald-400 p-1.5 transition-colors" title="Share to WhatsApp" disabled={loadingWhatsappShareId === content.id}>
+              {loadingWhatsappShareId === content.id ? <RefreshCw className="w-4 h-4 md:w-5 md:h-5 animate-spin" /> : <MessageCircle className="w-4 h-4 md:w-5 md:h-5" />}
+            </button>
+            <button onClick={() => handleShare(content, 'standard')} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-1.5 transition-colors" title="Share Links & Details" disabled={loadingShareId === content.id}>
+              {loadingShareId === content.id ? <RefreshCw className="w-4 h-4 md:w-5 md:h-5 animate-spin" /> : <Share2 className="w-4 h-4 md:w-5 md:h-5" />}
+            </button>
+          </div>
+          <div className="flex gap-1 ml-auto">
+            {(profile?.role === 'admin' || profile?.role === 'owner' || content.status === 'draft') && (
+              <button onClick={() => handleEdit(content)} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-1.5 transition-colors">
+                <Edit2 className="w-4 h-4 md:w-5 md:h-5" />
+              </button>
+            )}
+            <div className="relative">
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setActiveDropdownId(activeDropdownId === content.id ? null : content.id);
+                }}
+                className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white p-1.5 transition-colors"
+              >
+                <MoreVertical className="w-4 h-4 md:w-5 md:h-5" />
+              </button>
+              {activeDropdownId === content.id && (
+                <div 
+                  className="absolute bottom-full right-0 mb-2 w-48 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-xl overflow-hidden z-20 py-1"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {(profile?.role === 'admin' || profile?.role === 'owner') && (
+                    <button onClick={() => { setNotificationModal({ isOpen: true, content, status: 'idle' }); setActiveDropdownId(null); }} className="w-full flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 text-sm text-blue-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left">
+                      <Bell className="w-4 h-4" /> Send Notification
+                    </button>
+                  )}
+                  {(profile?.role === 'admin' || profile?.role === 'owner') && (
+                    <button onClick={() => { handleCopyData(content); setActiveDropdownId(null); }} className="w-full flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left">
+                      <Copy className="w-4 h-4" /> Copy Data
+                    </button>
+                  )}
+                  {(profile?.role === 'admin' || profile?.role === 'owner') && (
+                    <button onClick={() => { setDeleteId(content.id); setActiveDropdownId(null); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left">
+                      <Trash2 className="w-4 h-4" /> Delete
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});
+
 export default function ContentManagement() {
   const { profile, user } = useAuth();
   const { users: allUsers } = useUsers();
@@ -339,17 +488,20 @@ export default function ContentManagement() {
   const [selectedContent, setSelectedContent] = useState<string[]>([]);
 
   useEffect(() => {
-    sessionStorage.setItem('content_mgmt_search', searchTerm);
-    sessionStorage.setItem('content_mgmt_type', filterType);
-    sessionStorage.setItem('content_mgmt_genre', filterGenre);
-    sessionStorage.setItem('content_mgmt_language', filterLanguage);
-    sessionStorage.setItem('content_mgmt_quality', filterQuality);
-    sessionStorage.setItem('content_mgmt_year', filterYear);
-    sessionStorage.setItem('content_mgmt_status', filterStatus);
-    sessionStorage.setItem('content_mgmt_added_by', filterAddedBy);
-    sessionStorage.setItem('content_mgmt_sort', filterSort);
-    sessionStorage.setItem('adminShowDuplicates', showDuplicates.toString());
-    sessionStorage.setItem('adminShowMissingOnly', showMissing.toString());
+    const timer = setTimeout(() => {
+      sessionStorage.setItem('content_mgmt_search', searchTerm);
+      sessionStorage.setItem('content_mgmt_type', filterType);
+      sessionStorage.setItem('content_mgmt_genre', filterGenre);
+      sessionStorage.setItem('content_mgmt_language', filterLanguage);
+      sessionStorage.setItem('content_mgmt_quality', filterQuality);
+      sessionStorage.setItem('content_mgmt_year', filterYear);
+      sessionStorage.setItem('content_mgmt_status', filterStatus);
+      sessionStorage.setItem('content_mgmt_added_by', filterAddedBy);
+      sessionStorage.setItem('content_mgmt_sort', filterSort);
+      sessionStorage.setItem('adminShowDuplicates', showDuplicates.toString());
+      sessionStorage.setItem('adminShowMissingOnly', showMissing.toString());
+    }, 500);
+    return () => clearTimeout(timer);
   }, [searchTerm, filterType, filterGenre, filterLanguage, filterQuality, filterYear, filterStatus, filterAddedBy, filterSort, showDuplicates, showMissing]);
 
   const [genreSearchTerm, setGenreSearchTerm] = useState('');
@@ -453,11 +605,16 @@ export default function ContentManagement() {
 
   useEffect(() => {
     const mainElement = document.querySelector('main');
+    let scrollTimeout: any;
     
     const handleScroll = () => {
-      if (mainElement) {
-        sessionStorage.setItem('content_management_scroll_position', mainElement.scrollTop.toString());
-      }
+      if (scrollTimeout) return;
+      scrollTimeout = setTimeout(() => {
+        if (mainElement) {
+          sessionStorage.setItem('content_management_scroll_position', mainElement.scrollTop.toString());
+        }
+        scrollTimeout = null;
+      }, 100);
     };
 
     if (mainElement) {
@@ -468,6 +625,7 @@ export default function ContentManagement() {
       if (mainElement) {
         mainElement.removeEventListener('scroll', handleScroll);
       }
+      if (scrollTimeout) clearTimeout(scrollTimeout);
     };
   }, []);
 
@@ -2288,7 +2446,7 @@ export default function ContentManagement() {
     return Array.from(years).sort((a, b) => b - a);
   }, [contentList]);
 
-  const getMissingLabels = (content: Content, profile: any) => {
+  const getMissingLabels = useCallback((content: Content, profile: any) => {
     const labels: string[] = [];
     const isStaff = profile?.role === 'owner' || profile?.role === 'admin' || profile?.role === 'manager' || profile?.role === 'content_manager';
     if (!isStaff) return [];
@@ -2438,7 +2596,7 @@ export default function ContentManagement() {
       if (!content.genreIds || content.genreIds.length === 0) labels.push('Missing Genre');
     }
     return labels;
-  };
+  }, []);
 
   const duplicateIds = useMemo(() => {
     const ids = new Set<string>();
@@ -2878,126 +3036,26 @@ export default function ContentManagement() {
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-6">
-          {filteredContent.map((content) => {
-            const missingLabels = getMissingLabels(content, profile);
-
-            const isDuplicate = duplicateIds.has(content.id);
-            return (
-            <div key={content.id} className={clsx("bg-zinc-50 dark:bg-zinc-900 border rounded-xl flex flex-col group relative overflow-hidden transition-all hover:ring-2", isDuplicate ? "border-red-500 hover:ring-red-500/50" : "border-zinc-200 dark:border-zinc-800 hover:ring-emerald-500/50")}>
-              <label className="absolute top-0 left-0 z-30 w-16 h-16 cursor-pointer group/checkbox">
-                <div className="absolute top-3 left-3 w-5 h-5 flex items-center justify-center rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 group-hover/checkbox:border-emerald-500 transition-colors">
-                  <input 
-                    type="checkbox" 
-                    checked={selectedContent.includes(content.id)}
-                    onChange={(e) => {
-                      handleSelectContent(content.id, e as any);
-                    }}
-                    className="w-4 h-4 rounded border-none bg-transparent text-emerald-500 focus:ring-emerald-500 focus:ring-offset-zinc-950 cursor-pointer"
-                  />
-                </div>
-              </label>
-              <div className="relative aspect-[2/3] rounded-t-xl overflow-hidden">
-                <Link 
-                  to={selectedContent.length > 0 ? '#' : `/movie/${content.id}`} 
-                  onClick={(e) => {
-                    if (selectedContent.length > 0) {
-                      e.preventDefault();
-                      handleSelectContent(content.id, e as any);
-                    }
-                  }}
-                  className="block w-full h-full"
-                >
-                  <img src={content.posterUrl || 'https://picsum.photos/seed/movie/400/600'} alt={content.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                </Link>
-                {isDuplicate && (
-                  <div className="absolute top-3 left-10 z-20 pointer-events-none">
-                    <div className="bg-red-600 animate-pulse text-white px-2 py-0.5 rounded shadow-lg shadow-red-600/40 text-[11px] font-black uppercase tracking-widest border border-red-400">
-                      Duplicate
-                    </div>
-                  </div>
-                )}
-                {missingLabels.length > 0 && (
-                  <div className="absolute bottom-1 left-1 right-1 flex flex-row flex-wrap items-end gap-0.5 pointer-events-none opacity-80 group-hover:opacity-100 transition-opacity max-h-[80%] overflow-hidden">
-                    {missingLabels.map((lbl, idx) => (
-                      <div key={idx} className="bg-red-600/90 backdrop-blur-sm text-white px-1.5 py-[1px] rounded text-[9px] font-bold uppercase tracking-wider shadow-sm truncate max-w-full">
-                        {lbl}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <div className="absolute top-1 right-1 flex flex-col gap-1 items-end">
-                  <div className={clsx(
-                    "px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider text-white",
-                    content.type === 'movie' ? 'bg-blue-500/90' : 'bg-purple-500/90'
-                  )}>
-                    {content.type}
-                  </div>
-                  {content.status === 'draft' && (
-                    <div className="bg-yellow-500/90 text-black backdrop-blur-md px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
-                      <EyeOff className="w-3 h-3" />
-                      Draft
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="p-2 md:p-3 flex-1 flex flex-col">
-                <h3 className="font-bold text-sm md:text-base mb-0.5 line-clamp-1" title={content.title}>{content.title}</h3>
-                <p className="text-zinc-500 dark:text-zinc-400 text-xs mb-2">{content.year}</p>
-                
-                <div className="mt-auto flex flex-wrap items-center justify-between gap-1 pt-2 border-t border-zinc-200 dark:border-zinc-800/50">
-                  <div className="flex flex-wrap gap-1">
-                    <button onClick={() => handleShare(content, 'whatsapp')} className="text-emerald-500 hover:text-emerald-400 p-1.5 transition-colors" title="Share to WhatsApp" disabled={loadingWhatsappShareId === content.id}>
-                      {loadingWhatsappShareId === content.id ? <RefreshCw className="w-4 h-4 md:w-5 md:h-5 animate-spin" /> : <MessageCircle className="w-4 h-4 md:w-5 md:h-5" />}
-                    </button>
-                    <button onClick={() => handleShare(content, 'standard')} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-1.5 transition-colors" title="Share Links & Details" disabled={loadingShareId === content.id}>
-                      {loadingShareId === content.id ? <RefreshCw className="w-4 h-4 md:w-5 md:h-5 animate-spin" /> : <Share2 className="w-4 h-4 md:w-5 md:h-5" />}
-                    </button>
-                  </div>
-                  <div className="flex gap-1 ml-auto">
-                    {(profile?.role === 'admin' || profile?.role === 'owner' || content.status === 'draft') && (
-                      <button onClick={() => handleEdit(content)} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-1.5 transition-colors">
-                        <Edit2 className="w-4 h-4 md:w-5 md:h-5" />
-                      </button>
-                    )}
-                    <div className="relative">
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActiveDropdownId(activeDropdownId === content.id ? null : content.id);
-                        }}
-                        className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white p-1.5 transition-colors"
-                      >
-                        <MoreVertical className="w-4 h-4 md:w-5 md:h-5" />
-                      </button>
-                      {activeDropdownId === content.id && (
-                        <div 
-                          className="absolute bottom-full right-0 mb-2 w-48 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-xl overflow-hidden z-20 py-1"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {(profile?.role === 'admin' || profile?.role === 'owner') && (
-                            <button onClick={() => { setNotificationModal({ isOpen: true, content, status: 'idle' }); setActiveDropdownId(null); }} className="w-full flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 text-sm text-blue-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left">
-                              <Bell className="w-4 h-4" /> Send Notification
-                            </button>
-                          )}
-                          {(profile?.role === 'admin' || profile?.role === 'owner') && (
-                            <button onClick={() => { handleCopyData(content); setActiveDropdownId(null); }} className="w-full flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left">
-                              <Copy className="w-4 h-4" /> Copy Data
-                            </button>
-                          )}
-                          {(profile?.role === 'admin' || profile?.role === 'owner') && (
-                            <button onClick={() => { setDeleteId(content.id); setActiveDropdownId(null); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left">
-                              <Trash2 className="w-4 h-4" /> Delete
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            );
-          })}
+          {filteredContent.map((content) => (
+            <ContentCard
+              key={content.id}
+              content={content}
+              profile={profile}
+              selectedContent={selectedContent}
+              handleSelectContent={handleSelectContent}
+              handleShare={handleShare}
+              handleEdit={handleEdit}
+              handleCopyData={handleCopyData}
+              setDeleteId={setDeleteId}
+              setNotificationModal={setNotificationModal}
+              activeDropdownId={activeDropdownId}
+              setActiveDropdownId={setActiveDropdownId}
+              isDuplicate={duplicateIds.has(content.id)}
+              getMissingLabels={getMissingLabels}
+              loadingShareId={loadingShareId}
+              loadingWhatsappShareId={loadingWhatsappShareId}
+            />
+          ))}
         </div>
       )}
 
