@@ -35,6 +35,7 @@ export type LinkCheckResult = {
   episode?: number;
   isFullSeasonMKV?: boolean;
   isFullSeasonZIP?: boolean;
+  year?: number;
   mismatchWarnings?: string[];
   confidenceScore?: number;
 };
@@ -303,7 +304,7 @@ export function detectMetadataForLink(text: string, url: string, languages?: Lan
     subtitleLabel: /subtitles|subs|softsub|hardsub|esub|esubs|msub|msubs/i.test(lower) ? "Yes" : undefined,
     printQualityLabel: normalizePrintQuality(lower, qualities),
     ...(() => {
-      const yearMatch = lower.match(/(?:\D|^)(19\d{2}|20\d{2})(?:\D|$)/);
+      const yearMatch = lower.match(/\b(19\d{2}|20\d{2})\b/);
       const year = yearMatch ? parseInt(yearMatch[1]) : undefined;
       const seriesPattern = /(?<=^|[^a-zA-Z0-9])(?:s(?:eason)?\s*(\d+))(?:\s*e(?:pisode|p)?\s*(\d+))?(?![a-z0-9])/i;
       const seriesMatch = lower.match(seriesPattern);
@@ -497,7 +498,7 @@ export function detectFromFilename(fileName?: string, finalUrl?: string, languag
     year: undefined as number | undefined,
   };
 
-  const yearMatch = source.match(/(?:\D|^)(19\d{2}|20\d{2})(?:\D|$)/);
+  const yearMatch = source.match(/\b(19\d{2}|20\d{2})\b/);
   if (yearMatch) result.year = parseInt(yearMatch[1]);
 
   const combinedMatch = source.match(/(?<=^|[^a-zA-Z0-9])s(\d+)e(\d+)(?![a-z0-9])/i) ||
@@ -624,6 +625,7 @@ export async function performFullLinkScan(
     episode: fileMeta.episode || postMeta.episode,
     isFullSeasonMKV: fileMeta.isFullSeasonMKV || postMeta.isFullSeasonMKV,
     isFullSeasonZIP: fileMeta.isFullSeasonZIP || postMeta.isFullSeasonZIP,
+    year: fileMeta.year || postMeta.year || base.year,
   };
 
   if (result.ok && !result.fileName) {

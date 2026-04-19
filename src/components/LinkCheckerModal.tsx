@@ -289,11 +289,14 @@ export const LinkCheckerModal: React.FC<Props> = ({
       .trim();
 
     // Detect year - look for 4 digits that start with 19 or 20
-    const yearMatch = processedText.match(/\b(19\d{2}|20\d{2})\b/);
+    // Improved regex to handle cases without clear word boundaries
+    const yearMatch = text.match(/(?:\D|^)(19\d{2}|20\d{2})(?:\D|$)/) || 
+                      processedText.match(/\b(19\d{2}|20\d{2})\b/);
     if (yearMatch) {
       year = parseInt(yearMatch[1], 10);
-      const parts = processedText.split(yearMatch[1]);
-      title = (parts[0] && parts[0].trim().length > 2) ? parts[0] : processedText;
+      const yearStr = yearMatch[1];
+      const parts = processedText.split(yearStr);
+      title = (parts[0] && parts[0].trim().length > 2) ? parts[0] : processedText.replace(yearStr, '').trim();
     } else {
       title = processedText;
     }
@@ -415,7 +418,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
       qualityLinks.forEach((ql, idx) => {
         const r = validResults[idx];
         const sourceText = `${r.fileName || ""} ${r.url || ""}`;
-        const { title, year } = extractTitleAndYear(sourceText);
+        const { title: extractedTitle, year: extractedYear } = extractTitleAndYear(sourceText);
+        const year = extractedYear || r.year;
+        const title = extractedTitle;
         const derivedTitle = title || `Untitled ${new Date().getFullYear()}`;
         const isSeries = !!(ql.season || ql.episode);
         const key = isSeries ? derivedTitle : `${derivedTitle}|${year || ''}`;
@@ -513,7 +518,12 @@ export const LinkCheckerModal: React.FC<Props> = ({
     });
 
     const combinedNames = validResults.map(r => r.fileName || '').join(' ') + ' ' + input;
-    const { title, year } = extractTitleAndYear(combinedNames);
+    const { title: extractedTitle, year: extractedYear } = extractTitleAndYear(combinedNames);
+    
+    // Fallback to first working result's year if available
+    const fallbackYear = validResults.find(r => r.year)?.year;
+    const year = extractedYear || fallbackYear;
+    const title = extractedTitle;
 
     if (onAddLinks) {
       onAddLinks(qualityLinks, {

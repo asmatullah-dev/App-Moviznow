@@ -1015,10 +1015,7 @@ export default function ContentManagement() {
         setTitle(metadata.title);
       }
       if (metadata.year) {
-        // Only set year if it's currently empty, '0', or current year might be acceptable, but let's just check empty
-        if (!year) {
-          setYear(metadata.year);
-        }
+        setYear(metadata.year);
       }
 
       if (metadata.languages.length > 0) {
