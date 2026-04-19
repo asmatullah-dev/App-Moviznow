@@ -105,29 +105,41 @@ export const requestNotificationPermission = async () => {
 
 if (messaging) {
   onMessage(messaging, (payload) => {
-    console.log('Message received. ', payload);
-    // Show system notification even when app is in foreground
+    console.log('[FCM] Received foreground message:', payload);
+    const { title, body, imageUrl, url } = payload.data || {};
+    
     if (Notification.permission === 'granted' && payload.data) {
       navigator.serviceWorker.getRegistrations().then((registrations) => {
+        console.log('[FCM] Found registrations:', registrations.length);
         const myReg = registrations.find(
-          (reg) => reg.active && reg.active.scriptURL.includes("firebase-messaging-sw.js")
+          (reg) => reg.active && (reg.active.scriptURL.includes("sw.js") || reg.active.scriptURL.includes("firebase-messaging-sw.js"))
         );
         if (myReg) {
-          myReg.showNotification(payload.data.title || 'New Notification', {
-            body: payload.data.body,
-            icon: payload.data.imageUrl || '/launcher.svg',
-            image: payload.data.imageUrl,
-            data: { url: payload.data.url },
+          console.log('[FCM] Showing notification via Service Worker');
+          myReg.showNotification(title || 'New Notification', {
+            body: body,
+            icon: imageUrl || '/launcher.svg',
+            image: imageUrl,
+            badge: '/launcher.svg',
+            data: { url: url },
+            tag: payload.messageId, // Use messageId to avoid duplicates
+            renotify: true
           } as any);
         } else {
-          new Notification(payload.data.title || 'New Notification', {
-            body: payload.data.body,
-            icon: payload.data.imageUrl || '/launcher.svg',
-            image: payload.data.imageUrl,
-            data: { url: payload.data.url },
+          console.log('[FCM] Showing notification via browser Notification API');
+          new Notification(title || 'New Notification', {
+            body: body,
+            icon: imageUrl || '/launcher.svg',
+            image: imageUrl,
+            badge: '/launcher.svg',
+            data: { url: url },
+            tag: payload.messageId,
+            renotify: true
           } as any);
         }
       });
+    } else {
+      console.log('[FCM] Notification not shown:', { permission: Notification.permission, hasData: !!payload.data });
     }
   });
 }

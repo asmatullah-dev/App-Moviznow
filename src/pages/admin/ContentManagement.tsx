@@ -2288,23 +2288,48 @@ export default function ContentManagement() {
   const getMissingLabels = (content: Content, profile: any) => {
     const labels: string[] = [];
     const isStaff = profile?.role === 'owner' || profile?.role === 'admin' || profile?.role === 'manager' || profile?.role === 'content_manager';
+    if (!isStaff) return [];
+
+    const safeParse = (data: any) => {
+        if (!data) return [];
+        try {
+            const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+            if (Array.isArray(parsed)) return parsed;
+            if (typeof parsed === 'object') {
+                return Object.entries(parsed).map(([name, val]: [string, any]) => ({
+                    name,
+                    url: typeof val === 'string' ? val : val?.url || '',
+                    ... (typeof val === 'object' ? val : {})
+                }));
+            }
+        } catch(e) {}
+        return [];
+    };
+
     if (isStaff) {
       if (!content.trailerUrl && (!content.trailers || content.trailers === '[]' || (Array.isArray(content.trailers) && content.trailers.length === 0))) labels.push('Missing Trailer');
       if (content.type === 'movie') {
           try {
               let has480 = false, has720 = false, has1080 = false;
-              if (content.movieLinks) {
-                  const ml = typeof content.movieLinks === 'string' ? JSON.parse(content.movieLinks) : (Array.isArray(content.movieLinks) ? content.movieLinks : []);
-                  if (Array.isArray(ml)) {
-                      const isStandard = (l: any, res: string) => 
-                          (l.name?.includes(res) || l.quality === res) && 
-                          !l.name?.toUpperCase().includes('HEVC');
-                          
-                      has480 = ml.some((l: any) => isStandard(l, '480p'));
-                      has720 = ml.some((l: any) => isStandard(l, '720p'));
-                      has1080 = ml.some((l: any) => isStandard(l, '1080p'));
-                  }
-              }
+              const ml = safeParse(content.movieLinks);
+              
+              const isStandard = (l: any, res: string) => 
+                  (l.name?.includes(res) || l.quality === res) && 
+                  !l.name?.toUpperCase().includes('HEVC') &&
+                  l.url;
+                  
+              has480 = ml.some((l: any) => isStandard(l, '480p'));
+              has720 = ml.some((l: any) => isStandard(l, '720p'));
+              has1080 = ml.some((l: any) => isStandard(l, '1080p'));
+
+              // Explicitly catch any empty URL in existing links, but skip standard ones we'll flag anyway
+              ml.forEach((l: any) => {
+                  const isStd = ['480p', '720p', '1080p'].some(res => 
+                      (l.name?.includes(res) || l.quality === res) && !l.name?.toUpperCase().includes('HEVC')
+                  );
+                  if (!l.url && !isStd) labels.push(`Missing Link URL: ${l.name || 'Link'}`);
+              });
+
               if (!has480) labels.push('Missing 480p');
               if (!has720) labels.push('Missing 720p');
               if (!has1080) labels.push('Missing 1080p');
@@ -2321,54 +2346,77 @@ export default function ContentManagement() {
                       seasonsList.forEach((s: any) => {
                           if (!s.year) labels.push(`Missing S${s.seasonNumber} Year`);
                           
-                          if (!s.zipLinks || !Array.isArray(s.zipLinks) || s.zipLinks.length === 0) labels.push(`Missing S${s.seasonNumber} Zip`);
-                          if (!s.mkvLinks || !Array.isArray(s.mkvLinks) || s.mkvLinks.length === 0) labels.push(`Missing S${s.seasonNumber} MKV`);
+                          const zips = safeParse(s.zipLinks);
+                          const mkvs = safeParse(s.mkvLinks);
+
+                          if (zips.length === 0) labels.push(`Missing S${s.seasonNumber} Zip`);
+                          if (mkvs.length === 0) labels.push(`Missing S${s.seasonNumber} MKV`);
                           
                           if (!s.episodes || !Array.isArray(s.episodes) || s.episodes.length === 0) {
                               labels.push(`Missing S${s.seasonNumber} Episodes`);
                           } else {
-                              const seasonHas1080pEpisode = s.episodes.some((ep: any) => 
-                                  Array.isArray(ep.links) && ep.links.some((l: any) => l.name?.includes('1080p') || l.quality === '1080p')
-                              );
+                              const seasonHas1080pEpisode = s.episodes.some((ep: any) => {
+                                  const epLinks = safeParse(ep.links);
+                                  return epLinks.some((l: any) => l.name?.includes('1080p') || l.quality === '1080p');
+                              });
 
                               s.episodes.forEach((ep: any) => {
-                                  if (!ep.links || !Array.isArray(ep.links) || ep.links.length === 0) {
+                                  const epLinks = safeParse(ep.links);
+                                  if (epLinks.length === 0) {
                                       labels.push(`Missing S${s.seasonNumber}E${ep.episodeNumber}`);
                                   } else {
-                                      const has720p = ep.links.some((l: any) => l.name?.includes('720p') || l.quality === '720p');
-                                      const has1080p = ep.links.some((l: any) => l.name?.includes('1080p') || l.quality === '1080p');
+                                      const isStd = (l: any, res: string) => (l.name?.includes(res) || l.quality === res) && !l.name?.toUpperCase().includes('HEVC') && l.url;
+                                      const has720p = epLinks.some((l: any) => isStd(l, '720p'));
+                                      const has1080p = epLinks.some((l: any) => isStd(l, '1080p'));
                                       
+                                      epLinks.forEach((l: any) => {
+                                          const isStandardRes = ['480p', '720p', '1080p'].some(res => 
+                                              (l.name?.includes(res) || l.quality === res) && !l.name?.toUpperCase().includes('HEVC')
+                                          );
+                                          if (!l.url && !isStandardRes) labels.push(`Missing S${s.seasonNumber}E${ep.episodeNumber} URL: ${l.name || 'Link'}`);
+                                      });
+
                                       if (!has720p) labels.push(`Missing S${s.seasonNumber}E${ep.episodeNumber} 720p`);
                                       if (seasonHas1080pEpisode && !has1080p) labels.push(`Missing S${s.seasonNumber}E${ep.episodeNumber} 1080p`);
                                   }
                               });
                           }
                           
-                          if (s.zipLinks && Array.isArray(s.zipLinks) && s.zipLinks.length > 0) {
+                          if (zips.length > 0) {
                               const isStandardZip = (l: any, res: string) => {
-                                  const matchesRes = l.name?.includes(res) || l.quality === res;
-                                  if (!matchesRes) return false;
-                                  if (res === '480p') return true;
-                                  return !l.name?.toUpperCase().includes('HEVC');
+                                  return (l.name?.includes(res) || l.quality === res) && !l.name?.toUpperCase().includes('HEVC') && l.url;
                               };
-                              let has480 = s.zipLinks.some((l: any) => isStandardZip(l, '480p'));
-                              let has720 = s.zipLinks.some((l: any) => isStandardZip(l, '720p'));
-                              let has1080 = s.zipLinks.some((l: any) => isStandardZip(l, '1080p'));
+                              let has480 = zips.some((l: any) => isStandardZip(l, '480p'));
+                              let has720 = zips.some((l: any) => isStandardZip(l, '720p'));
+                              let has1080 = zips.some((l: any) => isStandardZip(l, '1080p'));
+                              
+                              zips.forEach((l: any) => {
+                                  const isStandardRes = ['480p', '720p', '1080p'].some(res => 
+                                      (l.name?.includes(res) || l.quality === res) && !l.name?.toUpperCase().includes('HEVC')
+                                  );
+                                  if (!l.url && !isStandardRes) labels.push(`Missing S${s.seasonNumber} Zip URL: ${l.name || 'Link'}`);
+                              });
+
                               if (!has480) labels.push(`Missing S${s.seasonNumber} Zip 480p`);
                               if (!has720) labels.push(`Missing S${s.seasonNumber} Zip 720p`);
                               if (!has1080) labels.push(`Missing S${s.seasonNumber} Zip 1080p`);
                           }
                           
-                          if (s.mkvLinks && Array.isArray(s.mkvLinks) && s.mkvLinks.length > 0) {
+                          if (mkvs.length > 0) {
                               const isStandardMkv = (l: any, res: string) => {
-                                  const matchesRes = l.name?.includes(res) || l.quality === res;
-                                  if (!matchesRes) return false;
-                                  if (res === '480p') return true;
-                                  return !l.name?.toUpperCase().includes('HEVC');
+                                  return (l.name?.includes(res) || l.quality === res) && l.url;
                               };
-                              let has480 = s.mkvLinks.some((l: any) => isStandardMkv(l, '480p'));
-                              let has720 = s.mkvLinks.some((l: any) => isStandardMkv(l, '720p'));
-                              let has1080 = s.mkvLinks.some((l: any) => isStandardMkv(l, '1080p'));
+                              let has480 = mkvs.some((l: any) => isStandardMkv(l, '480p'));
+                              let has720 = mkvs.some((l: any) => isStandardMkv(l, '720p'));
+                              let has1080 = mkvs.some((l: any) => isStandardMkv(l, '1080p'));
+
+                              mkvs.forEach((l: any) => {
+                                  const isStandardRes = ['480p', '720p', '1080p'].some(res => 
+                                      (l.name?.includes(res) || l.quality === res)
+                                  );
+                                  if (!l.url && !isStandardRes) labels.push(`Missing S${s.seasonNumber} MKV URL: ${l.name || 'Link'}`);
+                              });
+
                               if (!has480) labels.push(`Missing S${s.seasonNumber} MKV 480p`);
                               if (!has720) labels.push(`Missing S${s.seasonNumber} MKV 720p`);
                               if (!has1080) labels.push(`Missing S${s.seasonNumber} MKV 1080p`);
