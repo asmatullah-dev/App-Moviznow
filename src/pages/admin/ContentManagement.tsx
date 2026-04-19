@@ -1230,7 +1230,7 @@ export default function ContentManagement() {
          const newRef = doc(collection(db, 'content'));
          const contentData: any = {
            title: b.title || "Untitled",
-           year: b.year || new Date().getFullYear(),
+           year: b.year || '',
            type: b.metadata.type || 'movie',
            description: '',
            status: 'draft',

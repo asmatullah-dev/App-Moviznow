@@ -97,6 +97,14 @@ export const LinkCheckerModal: React.FC<Props> = ({
   const [selectedUrls, setSelectedUrls] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [isReviewingBatch, setIsReviewingBatch] = useState(false);
+  const [batchReviewItems, setBatchReviewItems] = useState<{
+    key: string;
+    title: string;
+    year: string;
+    links: QualityLinks;
+    metadata: any;
+  }[]>([]);
 
   useModalBehavior(isOpen, onClose);
 
@@ -169,6 +177,25 @@ export const LinkCheckerModal: React.FC<Props> = ({
     } else {
       setSelectedUrls(new Set(results.map((r) => r.url)));
     }
+  };
+
+  const updateBatchReviewItem = (key: string, field: 'title' | 'year', value: string) => {
+    setBatchReviewItems(prev => prev.map(item => 
+      item.key === key ? { ...item, [field]: value } : item
+    ));
+  };
+
+  const confirmBatchReview = () => {
+    if (!onBatchAddLinks) return;
+    
+    onBatchAddLinks(batchReviewItems.map(item => ({
+      title: item.title,
+      year: item.year ? parseInt(item.year) : undefined,
+      links: item.links,
+      metadata: item.metadata
+    })));
+    reset();
+    onClose();
   };
 
   const handleCheck = async (onlyUrls?: string[]) => {
@@ -401,79 +428,81 @@ export const LinkCheckerModal: React.FC<Props> = ({
     });
     
     if (isBatchMode && onBatchAddLinks) {
-      const batchesMap = new Map<string, { 
-        title: string; 
-        year: number | undefined; 
-        links: QualityLinks;
-        detectMetadata: {
-          languages: Set<string>;
-          printQuality?: string;
-          subtitles: boolean;
-          type: "movie" | "series";
-          season?: number;
-          episode?: number;
-        }
-      }>();
-      
-      qualityLinks.forEach((ql, idx) => {
-        const r = validResults[idx];
-        const sourceText = `${r.fileName || ""} ${r.url || ""}`;
-        const { title: extractedTitle, year: extractedYear } = extractTitleAndYear(sourceText);
-        const year = extractedYear || r.year;
-        const title = extractedTitle;
-        const derivedTitle = title || `Untitled ${new Date().getFullYear()}`;
-        const isSeries = !!(ql.season || ql.episode);
-        const key = isSeries ? derivedTitle : `${derivedTitle}|${year || ''}`;
+       const batchesMap = new Map<string, { 
+         title: string; 
+         year: number | undefined; 
+         links: QualityLinks;
+         detectMetadata: {
+           languages: Set<string>;
+           printQuality?: string;
+           subtitles: boolean;
+           type: "movie" | "series";
+           season?: number;
+           episode?: number;
+         }
+       }>();
+       
+       qualityLinks.forEach((ql, idx) => {
+         const r = validResults[idx];
+         const sourceText = `${r.fileName || ""} ${r.url || ""}`;
+         const { title: extractedTitle, year: extractedYear } = extractTitleAndYear(sourceText);
+         const year = extractedYear || r.year;
+         const title = extractedTitle;
+         const derivedTitle = title || `Untitled ${new Date().getFullYear()}`;
+         const isSeries = !!(ql.season || ql.episode);
+         const key = isSeries ? derivedTitle : `${derivedTitle}|${year || ''}`;
+ 
+         if (!batchesMap.has(key)) {
+            batchesMap.set(key, { 
+              title: derivedTitle, 
+              year, 
+              links: [],
+              detectMetadata: {
+                languages: new Set<string>(),
+                subtitles: false,
+                type: "movie"
+              }
+            });
+         }
+         
+         const batch = batchesMap.get(key)!;
+         batch.links.push(ql);
+ 
+         // Update detection per batch (if movie, keep movie, if any link is series, whole batch is series)
+         if (ql.season || ql.episode) {
+           batch.detectMetadata.type = "series";
+         }
+         
+         if (r.audioLabel) {
+           r.audioLabel.split(" / ").forEach(l => batch.detectMetadata.languages.add(l));
+         }
+         if (r.printQualityLabel && !batch.detectMetadata.printQuality) {
+           batch.detectMetadata.printQuality = r.printQualityLabel;
+         }
+         const source = (r.fileName || "" + " " + r.finalUrl || "").toLowerCase();
+         if (r.subtitleLabel || /subtitles|subs|softsub|hardsub|esub|esubs|msub|msubs/i.test(source)) {
+           batch.detectMetadata.subtitles = true;
+         }
+ 
+         // Apply detected S/E to batch metadata if not already set (fallback for creation)
+         if (ql.season && !batch.detectMetadata.season) batch.detectMetadata.season = ql.season;
+         if (ql.episode && !batch.detectMetadata.episode) batch.detectMetadata.episode = ql.episode;
+       });
 
-        if (!batchesMap.has(key)) {
-           batchesMap.set(key, { 
-             title: derivedTitle, 
-             year, 
-             links: [],
-             detectMetadata: {
-               languages: new Set<string>(),
-               subtitles: false,
-               type: "movie"
-             }
-           });
-        }
-        
-        const batch = batchesMap.get(key)!;
-        batch.links.push(ql);
+       const itemsToReview = Array.from(batchesMap.entries()).map(([key, b]) => ({
+         key,
+         title: b.title,
+         year: b.year ? String(b.year) : '',
+         links: b.links,
+         metadata: {
+           ...b.detectMetadata,
+           languages: Array.from(b.detectMetadata.languages)
+         }
+       }));
 
-        // Update detection per batch (if movie, keep movie, if any link is series, whole batch is series)
-        if (ql.season || ql.episode) {
-          batch.detectMetadata.type = "series";
-        }
-        
-        if (r.audioLabel) {
-          r.audioLabel.split(" / ").forEach(l => batch.detectMetadata.languages.add(l));
-        }
-        if (r.printQualityLabel && !batch.detectMetadata.printQuality) {
-          batch.detectMetadata.printQuality = r.printQualityLabel;
-        }
-        const source = (r.fileName || "" + " " + r.finalUrl || "").toLowerCase();
-        if (r.subtitleLabel || /subtitles|subs|softsub|hardsub|esub|esubs|msub|msubs/i.test(source)) {
-          batch.detectMetadata.subtitles = true;
-        }
-
-        // Apply detected S/E to batch metadata if not already set (fallback for creation)
-        if (ql.season && !batch.detectMetadata.season) batch.detectMetadata.season = ql.season;
-        if (ql.episode && !batch.detectMetadata.episode) batch.detectMetadata.episode = ql.episode;
-      });
-
-      onBatchAddLinks(Array.from(batchesMap.values()).map(b => ({
-        title: b.title,
-        year: b.year,
-        links: b.links,
-        metadata: {
-          ...b.detectMetadata,
-          languages: Array.from(b.detectMetadata.languages)
-        }
-      })));
-      reset();
-      onClose();
-      return;
+       setBatchReviewItems(itemsToReview);
+       setIsReviewingBatch(true);
+       return;
     }
 
     // Collect metadata to pass back (Single mode)
@@ -587,6 +616,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
     setSelectedUrls(new Set());
     setError(null);
     setExpanded({});
+    setIsReviewingBatch(false);
+    setBatchReviewItems([]);
   };
 
   const retryFailed = () => {
@@ -651,15 +682,96 @@ export const LinkCheckerModal: React.FC<Props> = ({
                     </div>
                     <div>
                       <h2 className="text-xl font-semibold leading-none text-zinc-900 dark:text-white">
-                        {isBatchMode ? 'Batch Link Checker (Missing Details)' : title}
+                        {isReviewingBatch ? 'Review Batch Items' : (isBatchMode ? 'Batch Link Checker (Missing Details)' : title)}
                       </h2>
-                      <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">Check Pixeldrain, direct file links, protected download gateways, and missing movie posts.</p>
+                      <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
+                        {isReviewingBatch ? 'Please verify and enter missing years for each item before saving.' : 'Check Pixeldrain, direct file links, protected download gateways, and missing movie posts.'}
+                      </p>
                     </div>
                   </div>
                   <button onClick={onClose} className="rounded-full px-3 py-1.5 text-sm text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white transition">Close</button>
                 </div>
 
-                <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/60 p-4 space-y-3 transition-colors duration-300">
+                {isReviewingBatch ? (
+                  <div className="space-y-6">
+                    <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 p-4 space-y-4 max-h-[60vh] overflow-y-auto custom-scrollbar">
+                      {batchReviewItems.map((item) => (
+                        <div key={item.key} className="flex flex-col md:flex-row gap-4 p-4 rounded-xl bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-100 dark:border-zinc-800">
+                          <div className="flex-1 space-y-3">
+                            <div>
+                              <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1 block">Content Title</label>
+                              <input 
+                                type="text" 
+                                value={item.title} 
+                                onChange={(e) => updateBatchReviewItem(item.key, 'title', e.target.value)}
+                                className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-500 transition-all"
+                                placeholder="Enter title..."
+                              />
+                            </div>
+                            <div className="flex gap-4">
+                              <div className="w-32">
+                                <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1 block">Year</label>
+                                <input 
+                                  type="text" 
+                                  value={item.year} 
+                                  onChange={(e) => updateBatchReviewItem(item.key, 'year', e.target.value.replace(/\D/g, ''))}
+                                  className={`w-full bg-white dark:bg-zinc-950 border ${!item.year ? 'border-red-500 focus:ring-red-500' : 'border-zinc-200 dark:border-zinc-800 focus:ring-cyan-500'} rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 transition-all`}
+                                  placeholder="YYYY"
+                                  maxLength={4}
+                                />
+                                {!item.year && <p className="text-[10px] text-red-500 mt-1">Please enter year</p>}
+                              </div>
+                              <div className="flex-1">
+                                <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1 block">Detected Metadata</label>
+                                <div className="flex flex-wrap gap-2">
+                                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20 uppercase font-bold">{item.metadata.type}</span>
+                                  {item.metadata.languages.map((l: string) => (
+                                    <span key={l} className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">{l}</span>
+                                  ))}
+                                  {item.metadata.printQuality && (
+                                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-fuchsia-500/10 text-fuchsia-500 border border-fuchsia-500/20">{item.metadata.printQuality}</span>
+                                  )}
+                                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-zinc-500/10 text-zinc-500 border border-zinc-500/20">{item.links.length} Link(s)</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="md:w-px md:bg-zinc-200 dark:md:bg-zinc-800" />
+                          <div className="md:w-48 space-y-2">
+                            <button 
+                              onClick={() => setBatchReviewItems(prev => prev.filter(i => i.key !== item.key))}
+                              className="w-full py-2 text-xs font-bold text-red-500 hover:bg-red-500/10 rounded-lg transition-colors border border-transparent hover:border-red-500/20"
+                            >
+                              Remove Item
+                            </button>
+                            <p className="text-[10px] text-zinc-500 text-center uppercase tracking-tighter">Will be saved as DRAFT</p>
+                          </div>
+                        </div>
+                      ))}
+                      {batchReviewItems.length === 0 && (
+                        <div className="py-12 text-center text-zinc-500">No items to save.</div>
+                      )}
+                    </div>
+                    
+                    <div className="flex gap-3 justify-end pt-2">
+                      <button 
+                        onClick={() => setIsReviewingBatch(false)}
+                        className="px-6 py-2.5 rounded-2xl border border-zinc-200 dark:border-zinc-800 text-sm font-bold hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all"
+                      >
+                        Back to Results
+                      </button>
+                      <button 
+                        onClick={confirmBatchReview}
+                        disabled={batchReviewItems.length === 0}
+                        className="px-8 py-2.5 rounded-2xl bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700 disabled:opacity-50 transition-all shadow-lg shadow-emerald-500/20"
+                      >
+                        Save Drafts ({batchReviewItems.length})
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/60 p-4 space-y-3 transition-colors duration-300">
                   <label className="text-sm font-medium text-zinc-700 dark:text-zinc-200">Paste one or multiple links / full movie post</label>
                   <textarea value={input} onChange={(e) => setInput(e.target.value)} placeholder="Paste links or a full movie post here..." rows={6} className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-4 py-3 text-sm text-zinc-900 dark:text-white placeholder:text-zinc-500 outline-none focus:ring-2 focus:ring-cyan-500 transition-colors duration-300" />
 
@@ -699,6 +811,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
                     </button>
                   )}
                 </div>
+              </>
+            )}
 
                 {error ? <div className="rounded-2xl border border-red-200 dark:border-red-900/70 bg-red-50 dark:bg-red-950/40 p-4 text-red-600 dark:text-red-300 text-sm flex items-start gap-2 transition-colors duration-300"><AlertTriangle className="h-4 w-4 mt-0.5" /><span>{error}</span></div> : null}
 
