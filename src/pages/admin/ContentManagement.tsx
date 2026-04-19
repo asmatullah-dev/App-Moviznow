@@ -445,7 +445,12 @@ export default function ContentManagement() {
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showDuplicates, setShowDuplicates] = useState(() => sessionStorage.getItem('adminShowDuplicates') === 'true');
-  const [showMissing, setShowMissing] = useState(() => sessionStorage.getItem('adminShowMissingOnly') === 'true');
+  const [showMissing, setShowMissing] = useState<'none' | 'missing' | 'complete'>(() => {
+    const saved = sessionStorage.getItem('adminShowMissingOnly');
+    if (saved === 'true') return 'missing';
+    if (saved === 'complete') return 'complete';
+    return 'none';
+  });
   
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -651,7 +656,7 @@ export default function ContentManagement() {
     setFilterAddedBy('all');
     setFilterSort('newest');
     setSearchTerm('');
-    setShowMissing(false);
+    setShowMissing('none');
     setShowDuplicates(false);
   };
 
@@ -2602,12 +2607,18 @@ export default function ContentManagement() {
     const ids = new Set<string>();
     const duplicateGroups = new Map<string, string[]>();
     contentList.forEach(c => {
-      const titleKey = (c.title || '').trim().toLowerCase();
+      const title = (c.title || '').trim().toLowerCase();
+      // Normalize series titles for duplicate detection by removing season markers (e.g. "Season 1", "S1")
+      // this ensures "Show Season 1" and "Show Season 2" are correctly identified as duplicates
+      const baseTitle = c.type === 'series' 
+        ? title.replace(/\s+(s(eason)?|part|vol)\s*\d+/gi, '').trim()
+        : title;
+
       let key = '';
       if (c.type === 'movie') {
-         key = `movie_${titleKey}_${c.year || ''}`;
+         key = `movie_${baseTitle}_${c.year || ''}`;
       } else {
-         key = `series_${titleKey}`;
+         key = `series_${baseTitle}`;
       }
       if (!duplicateGroups.has(key)) {
          duplicateGroups.set(key, []);
@@ -2631,10 +2642,15 @@ export default function ContentManagement() {
       result = result.filter(c => duplicateIds.has(c.id));
     }
 
-    if (showMissing) {
+    if (showMissing === 'missing') {
       result = result.filter(c => {
         const labels = getMissingLabels(c, profile);
         return labels.length > 0;
+      });
+    } else if (showMissing === 'complete') {
+      result = result.filter(c => {
+        const labels = getMissingLabels(c, profile);
+        return labels.length === 0;
       });
     }
 
@@ -2656,16 +2672,7 @@ export default function ContentManagement() {
       result = result.filter(c => c.qualityId === filterQuality);
     }
     if (filterYear !== 'all') {
-      result = result.filter(c => {
-        if (String(c.year) === filterYear) return true;
-        if (c.type === 'series' && c.seasons) {
-          try {
-            const seasonsList = typeof c.seasons === 'string' ? JSON.parse(c.seasons) : (Array.isArray(c.seasons) ? c.seasons : []);
-            return seasonsList.some((s: any) => String(s.year) === filterYear);
-          } catch(e) { return false; }
-        }
-        return false;
-      });
+      result = result.filter(c => String(c.year) === filterYear);
     }
     if (filterStatus !== 'all') {
       result = result.filter(c => (c.status || 'published') === filterStatus);
@@ -2707,11 +2714,11 @@ export default function ContentManagement() {
     return smartSearch(languages, languageSearchTerm);
   }, [languages, languageSearchTerm]);
 
-  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.checked) {
-      setSelectedContent(filteredContent.map(c => c.id));
-    } else {
+  const handleSelectAll = () => {
+    if (selectedContent.length > 0) {
       setSelectedContent([]);
+    } else {
+      setSelectedContent(filteredContent.map(c => c.id));
     }
   };
 
@@ -2802,7 +2809,7 @@ export default function ContentManagement() {
     filterStatus !== 'all' || 
     filterAddedBy !== 'all' || 
     filterSort !== 'newest' || 
-    showMissing || 
+    showMissing !== 'none' || 
     showDuplicates;
 
   return (
@@ -2839,14 +2846,27 @@ export default function ContentManagement() {
                   <Copy className="w-4 h-4" />
                 </button>
                 <button
-                  onClick={() => setShowMissing(!showMissing)}
+                  onClick={() => {
+                    if (showMissing === 'none') setShowMissing('missing');
+                    else if (showMissing === 'missing') setShowMissing('complete');
+                    else setShowMissing('none');
+                  }}
                   className={clsx(
-                    "flex items-center justify-center p-2 rounded-lg transition-colors",
-                    showMissing ? "bg-emerald-500 text-white" : "bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white"
+                    "flex items-center justify-center p-2 rounded-lg transition-colors relative",
+                    showMissing === 'missing' ? "bg-red-500 text-white" : 
+                    showMissing === 'complete' ? "bg-emerald-500 text-white" : 
+                    "bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white"
                   )}
-                  title={showMissing ? "Viewing Missing Only" : "Find Missing Info"}
+                  title={
+                    showMissing === 'missing' ? "Viewing Missing Info" : 
+                    showMissing === 'complete' ? "Viewing Complete Info" : 
+                    "Filter Missing/Complete Info"
+                  }
                 >
                   <AlertCircle className="w-4 h-4" />
+                  {showMissing !== 'none' && (
+                    <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-white border border-zinc-200" />
+                  )}
                 </button>
               </div>
             )}
@@ -3016,9 +3036,20 @@ export default function ContentManagement() {
             type="checkbox" 
             checked={selectedContent.length === filteredContent.length && filteredContent.length > 0}
             onChange={handleSelectAll}
+            ref={(el) => {
+              if (el) {
+                el.indeterminate = selectedContent.length > 0 && selectedContent.length < filteredContent.length;
+              }
+            }}
             className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-zinc-950"
           />
-          <span className="text-sm text-zinc-500 dark:text-zinc-400">Select All</span>
+          <span className="text-sm text-zinc-500 dark:text-zinc-400">
+            {selectedContent.length === filteredContent.length && filteredContent.length > 0 
+              ? "Deselect All" 
+              : selectedContent.length > 0 
+                ? "Deselect Selected" 
+                : "Select All"}
+          </span>
         </div>
         <div className="text-sm text-zinc-500 dark:text-zinc-400">
           {filteredContent.length} items found
