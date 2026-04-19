@@ -89,7 +89,7 @@ export const BatchFetchModal: React.FC<Props> = ({
          let searchTitle = data.title;
          let searchYear = data.year?.toString();
          
-         const tmdbResults = await searchTMDBByTitle(searchTitle, searchYear, data.type);
+         const tmdbResults = await searchTMDBByTitle(searchTitle, searchYear);
          
          if (tmdbResults && tmdbResults.length > 0) {
             const bestMatch = tmdbResults[0];

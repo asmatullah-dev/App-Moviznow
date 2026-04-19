@@ -1558,7 +1558,7 @@ export default function ContentManagement() {
         if (content.imdbLink) {
             const match = content.imdbLink.match(/tt\d+/);
             if (match) {
-                const found = await findTMDBByImdb(match[0], content.type);
+                const found = await findTMDBByImdb(match[0]);
                 if (found) {
                     tmdbItem = found.item;
                     type = found.type === 'tv' ? 'series' : 'movie';
@@ -1567,7 +1567,7 @@ export default function ContentManagement() {
         }
         
         if (!tmdbItem) {
-            const results = await searchTMDBByTitle(content.title, content.year?.toString() || '', content.type);
+            const results = await searchTMDBByTitle(content.title, content.year?.toString() || '');
             if (results && results.length > 0) {
                 tmdbItem = results[0].item;
                 type = results[0].type === 'tv' ? 'series' : 'movie';
@@ -3934,7 +3934,6 @@ export default function ContentManagement() {
         initialImdbId={imdbLink}
         initialTitle={title}
         initialYear={year.toString()}
-        initialType={type}
         onApply={applyFetchedData}
       />
       <LinkCheckerModal
