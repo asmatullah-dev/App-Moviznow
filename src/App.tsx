@@ -46,9 +46,12 @@ import ContentSync from './pages/admin/ContentSync';
 const InstallApp = lazy(() => import('./pages/InstallApp'));
 
 const LoadingFallback = () => (
-  <div className="min-h-screen bg-white dark:bg-zinc-950 transition-colors duration-300 flex flex-col items-center justify-center gap-4">
-    <img src="/logo.svg" alt="MovizNow" className="w-32 h-32 animate-pulse" />
-    <Loader2 className="w-6 h-6 animate-spin text-zinc-500 dark:text-zinc-400" />
+  <div className="min-h-screen bg-white dark:bg-zinc-950 transition-colors duration-300 flex flex-col items-center justify-center gap-6">
+    <div className="flex flex-col items-center animate-pulse">
+      <img src="/Blacklogo.svg" alt="Logo" className="w-auto h-32 block dark:hidden" />
+      <img src="/Whitelogo.svg" alt="Logo" className="w-auto h-32 hidden dark:block" />
+    </div>
+    <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />
   </div>
 );
 

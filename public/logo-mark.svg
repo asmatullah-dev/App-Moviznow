@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <!-- Vivid Emerald Pop Gradient -->
+    <linearGradient id="emerald" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#047857" />
+    </linearGradient>
+    
+    <!-- Neon Accent Glow -->
+    <filter id="neon" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="0" stdDeviation="20" flood-color="#10b981" flood-opacity="0.9"/>
+    </filter>
+  </defs>
+
+  <g transform="translate(0, 0)">
+    <!-- Abstract 'M' architectural silhouette -->
+    <path d="M 90 400 L 90 150 L 256 280 L 422 150 L 422 400" fill="none" stroke="#27272a" stroke-width="60" stroke-linecap="round" stroke-linejoin="round" />
+    
+    <!-- Glowing Play Button -->
+    <path d="M 215 210 L 330 280 L 215 350 Z" fill="url(#emerald)" filter="url(#neon)" stroke="url(#emerald)" stroke-width="24" stroke-linejoin="round" />
+  </g>
+</svg>

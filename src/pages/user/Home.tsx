@@ -359,9 +359,14 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
       {/* Header */}
       <header className="sticky top-0 z-40 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 transition-colors duration-300">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-          <Link to="/" className="text-2xl font-bold text-emerald-500 flex items-center gap-3">
-            <LazyLoadImage src="/logo.svg?v=2" alt="Logo" className="w-8 h-8" />
-            <span className="tracking-tight">{settings?.headerText || 'MovizNow'}</span>
+          <Link to="/" className="flex items-center gap-2">
+            <div className="flex items-center gap-2">
+              <img src="/Blacklogo.svg" alt="Logo" className="w-auto h-8 block dark:hidden" />
+              <img src="/Whitelogo.svg" alt="Logo" className="w-auto h-8 hidden dark:block" />
+            </div>
+            <span className="text-xl font-bold tracking-tight text-emerald-500 whitespace-nowrap">
+              {settings?.headerText || 'MovizNow'}
+            </span>
           </Link>
 
           <div className="flex items-center gap-2">

@@ -10,11 +10,6 @@
     <filter id="neon" x="-50%" y="-50%" width="200%" height="200%">
       <feDropShadow dx="0" dy="0" stdDeviation="20" flood-color="#10b981" flood-opacity="0.9"/>
     </filter>
-
-    <linearGradient id="textGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="100%" stop-color="#e4e4e7"/>
-    </linearGradient>
   </defs>
 
   <g transform="translate(0, -50)">
@@ -25,6 +20,8 @@
     <path d="M 215 160 L 330 230 L 215 300 Z" fill="url(#emerald)" filter="url(#neon)" stroke="url(#emerald)" stroke-width="24" stroke-linejoin="round" />
   </g>
 
-  <!-- Wordmark label (Thick 15px black border for extreme contrast) -->
-  <text x="256" y="475" font-family="'Inter', system-ui, -apple-system, sans-serif" font-size="108" font-weight="900" text-anchor="middle" fill="url(#textGrad)" letter-spacing="-3" stroke="#000000" stroke-width="15" stroke-linejoin="round" paint-order="stroke fill">Moviz<tspan fill="#10b981">Now</tspan></text>
+  <!-- Wordmark label: Black text "Moviz" with thick White border for extreme contrast -->
+  <text x="256" y="475" font-family="'Inter', system-ui, -apple-system, sans-serif" font-size="108" font-weight="900" text-anchor="middle" fill="#000000" letter-spacing="-3" stroke="#ffffff" stroke-width="15" stroke-linejoin="round" paint-order="stroke fill">
+    Moviz<tspan fill="#10b981">Now</tspan>
+  </text>
 </svg>

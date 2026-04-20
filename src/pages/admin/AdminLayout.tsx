@@ -110,15 +110,19 @@ export default function AdminLayout() {
     <div className="min-h-screen bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white flex flex-col md:flex-row transition-colors duration-300">
       {/* Mobile Header */}
       <div className="md:hidden sticky top-0 z-40 h-16 flex items-center justify-between p-4 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 transition-colors duration-300">
-        <h1 className="text-xl font-bold text-emerald-500 flex items-center gap-3">
-          <img src="/logo.svg?v=2" alt="Logo" className="w-6 h-6" />
-          <span className="tracking-tight">
-            {profile?.role === 'user_manager' ? `${settings?.headerText || 'MovizNow'} User Manager` : 
-             profile?.role === 'content_manager' ? `${settings?.headerText || 'MovizNow'} Content Manager` : 
-             profile?.role === 'manager' ? `${settings?.headerText || 'MovizNow'} Manager` : 
-             profile?.role === 'owner' ? `${settings?.headerText || 'MovizNow'} Owner` : `${settings?.headerText || 'MovizNow'} Admin`}
+        <Link to="/" className="flex items-center gap-2">
+          <img src="/Blacklogo.svg" alt="Logo" className="w-auto h-8 block dark:hidden" />
+          <img src="/Whitelogo.svg" alt="Logo" className="w-auto h-8 hidden dark:block" />
+          <span className="ml-2 text-sm font-bold text-emerald-500 tracking-tighter whitespace-nowrap">
+            {settings?.headerText || 'MovizNow'}
           </span>
-        </h1>
+          <span className="ml-2 text-xs font-normal text-zinc-500 uppercase tracking-widest whitespace-nowrap">
+            {profile?.role === 'user_manager' ? 'User Manager' : 
+             profile?.role === 'content_manager' ? 'Content Manager' : 
+             profile?.role === 'manager' ? 'Manager' : 
+             profile?.role === 'owner' ? 'Owner' : 'Admin'}
+          </span>
+        </Link>
         {(profile?.role === 'admin' || profile?.role === 'owner') ? (
           <button 
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
@@ -142,16 +146,21 @@ export default function AdminLayout() {
         isMobileMenuOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
       )}>
         <div className="p-6 hidden md:block">
-          <h1 className="text-2xl font-bold text-emerald-500 flex items-center gap-3">
-            <img src="/logo.svg?v=2" alt="Logo" className="w-8 h-8" />
-            <span className="tracking-tight">{settings?.headerText || 'MovizNow'}</span>
-          </h1>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 uppercase tracking-wider font-semibold">
-            {profile?.role === 'user_manager' ? 'User Manager' : 
-             profile?.role === 'content_manager' ? 'Content Manager' : 
-             profile?.role === 'manager' ? 'Manager' : 
-             profile?.role === 'owner' ? 'Owner Panel' : 'Admin Panel'}
-          </p>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <img src="/Blacklogo.svg" alt="Logo" className="w-auto h-8 block dark:hidden" />
+              <img src="/Whitelogo.svg" alt="Logo" className="w-auto h-8 hidden dark:block" />
+              <span className="text-xl font-bold text-emerald-500 tracking-tight whitespace-nowrap">
+                {settings?.headerText || 'MovizNow'}
+              </span>
+            </div>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 uppercase tracking-wider font-semibold">
+              {profile?.role === 'user_manager' ? 'User Manager' : 
+               profile?.role === 'content_manager' ? 'Content Manager' : 
+               profile?.role === 'manager' ? 'Manager' : 
+               profile?.role === 'owner' ? 'Owner Panel' : 'Admin Panel'}
+            </p>
+          </div>
         </div>
 
         <nav className="flex-1 px-4 py-4 md:py-0 space-y-2 overflow-y-auto">

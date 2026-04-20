@@ -232,10 +232,15 @@ export default function Login() {
   return (
     <div className="min-h-screen bg-white dark:bg-zinc-950 flex flex-col items-center justify-center text-zinc-900 dark:text-white p-4 transition-colors duration-300">
       <div className="max-w-md w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-8 shadow-2xl border border-zinc-200 dark:border-zinc-800 transition-colors duration-300">
-        <div className="flex justify-center mb-6">
-          <LazyLoadImage src="/logo.svg?v=2" alt="Logo" className="w-24 h-24" />
+        <div className="flex flex-col items-center mb-6">
+          <div className="flex items-center justify-center mb-3">
+            <img src="/Blacklogo.svg" alt="Logo" className="w-auto h-20 block dark:hidden" />
+            <img src="/Whitelogo.svg" alt="Logo" className="w-auto h-20 hidden dark:block" />
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight text-emerald-500">
+            {settings?.headerText || 'MovizNow'}
+          </h1>
         </div>
-        <h1 className="text-3xl font-bold mb-2 text-center">{settings?.headerText || 'MovizNow'}</h1>
         <p className="text-zinc-500 dark:text-zinc-400 mb-8 text-center">Your ultimate movies & series destination</p>
         
         {(error || customError) && !isLoggingIn && (
