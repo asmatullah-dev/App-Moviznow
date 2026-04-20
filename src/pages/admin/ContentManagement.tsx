@@ -567,6 +567,9 @@ export default function ContentManagement() {
   const [activeDropdownId, setActiveDropdownId] = useState<string | null>(null);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  const [isMerging, setIsMerging] = useState(false);
+  const [showMergeConfirm, setShowMergeConfirm] = useState(false);
+  const [mergeData, setMergeData] = useState<{ title: string; year: number | ''; items: Content[] }>({ title: '', year: '', items: [] });
   const location = useLocation();
 
   useEffect(() => {
@@ -581,6 +584,7 @@ export default function ContentManagement() {
   useModalBehavior(notificationModal.isOpen, () => setNotificationModal({ isOpen: false, content: null, status: 'idle' }));
   useModalBehavior(shareAnywayConfig.isOpen, () => setShareAnywayConfig({ ...shareAnywayConfig, isOpen: false, content: null }));
   useModalBehavior(isAutoFillModalOpen, () => setIsAutoFillModalOpen(false));
+  useModalBehavior(showMergeConfirm, () => setShowMergeConfirm(false));
   // isMasterFetchModalOpen, isLinkCheckerOpen, isAdjustContentsModalOpen, manageModal, alertConfig, deleteId 
   // are handled internally by their respective components (MediaModal, LinkCheckerModal, etc.)
 
@@ -2841,6 +2845,199 @@ export default function ContentManagement() {
     }
   };
 
+  const initiateMerge = () => {
+    const items = contentList.filter(c => selectedContent.includes(c.id));
+    if (items.length < 2) {
+      setAlertConfig({ isOpen: true, title: 'Error', message: 'Select at least 2 items to merge' });
+      return;
+    }
+    
+    setMergeData({
+      title: items[0].title,
+      year: items[0].year,
+      items
+    });
+    setShowMergeConfirm(true);
+  };
+
+  const handleMerge = async () => {
+    setIsMerging(true);
+    setShowMergeConfirm(false);
+    
+    const { items, title: finalTitle, year: finalYear } = mergeData;
+    const targetItem = items[0];
+    const otherItems = items.slice(1);
+    
+    try {
+      console.log("Merging", items.length, "items into", targetItem.id);
+      let combinedMovieLinks: LinkDef[] = [];
+      let combinedSeasons: Season[] = [];
+      
+      // Metadata accumulation
+      const combinedGenres = new Set<string>();
+      const combinedLanguages = new Set<string>();
+      const combinedCast = new Set<string>();
+      const combinedTrailers: Trailer[] = [];
+      const trailerUrls = new Set<string>();
+
+      let finalPoster = targetItem.posterUrl;
+      let finalImdb = targetItem.imdbLink;
+      let finalTrailer = targetItem.trailerUrl;
+      let finalQuality = targetItem.qualityId;
+      let finalDesc = targetItem.description;
+      let finalCountry = targetItem.country;
+      let finalReleaseDate = targetItem.releaseDate;
+      let finalRuntime = targetItem.runtime;
+      let finalImdbRating = targetItem.imdbRating;
+      let finalTrailerTitle = targetItem.trailerTitle;
+      let finalTrailerYoutubeTitle = targetItem.trailerYoutubeTitle;
+      let finalTrailerSeasonNumber = targetItem.trailerSeasonNumber;
+      let finalSubtitles = targetItem.subtitles;
+      
+      items.forEach(item => {
+        // Collect arrays
+        if (item.genreIds && Array.isArray(item.genreIds)) {
+          item.genreIds.forEach(g => combinedGenres.add(g));
+        }
+        if (item.languageIds && Array.isArray(item.languageIds)) {
+          item.languageIds.forEach(l => combinedLanguages.add(l));
+        }
+        if (item.cast && Array.isArray(item.cast)) {
+          item.cast.forEach(c => combinedCast.add(c));
+        }
+
+        // Collect trailers
+        if (item.trailers) {
+          try {
+            const itemTrailers: Trailer[] = JSON.parse(item.trailers);
+            itemTrailers.forEach(t => {
+              if (!trailerUrls.has(t.url)) {
+                trailerUrls.add(t.url);
+                combinedTrailers.push(t);
+              }
+            });
+          } catch (e) {}
+        }
+
+        // Collect single values if target is empty
+        if (!finalPoster) finalPoster = item.posterUrl;
+        if (!finalImdb) finalImdb = item.imdbLink;
+        if (!finalTrailer) finalTrailer = item.trailerUrl;
+        if (!finalQuality) finalQuality = item.qualityId;
+        if (!finalDesc) finalDesc = item.description;
+        if (!finalCountry) finalCountry = item.country;
+        if (!finalReleaseDate) finalReleaseDate = item.releaseDate;
+        if (!finalRuntime) finalRuntime = item.runtime;
+        if (!finalImdbRating) finalImdbRating = item.imdbRating;
+        if (!finalTrailerTitle) finalTrailerTitle = item.trailerTitle;
+        if (!finalTrailerYoutubeTitle) finalTrailerYoutubeTitle = item.trailerYoutubeTitle;
+        if (!finalTrailerSeasonNumber) finalTrailerSeasonNumber = item.trailerSeasonNumber;
+        if (finalSubtitles === undefined) finalSubtitles = item.subtitles;
+
+        // Merge links logic...
+        if (item.type === 'movie' || !item.type) {
+          let links: LinkDef[] = [];
+          try {
+            links = typeof item.movieLinks === 'string' ? JSON.parse(item.movieLinks) : (item.movieLinks || []);
+          } catch (e) {
+            links = [];
+          }
+          combinedMovieLinks = [...combinedMovieLinks, ...links];
+        } else {
+          let seasons: Season[] = [];
+          try {
+            seasons = typeof item.seasons === 'string' ? JSON.parse(item.seasons) : (item.seasons || []);
+          } catch (e) {
+            seasons = [];
+          }
+          
+          seasons.forEach(s => {
+            const existingSeason = combinedSeasons.find(cs => cs.seasonNumber === s.seasonNumber);
+            if (existingSeason) {
+              // Merge episodes
+              if (s.episodes) {
+                s.episodes.forEach(ep => {
+                  const existingEp = existingSeason.episodes.find(ce => ce.episodeNumber === ep.episodeNumber);
+                  if (existingEp) {
+                    existingEp.links = [...(existingEp.links || []), ...(ep.links || [])];
+                  } else {
+                    existingSeason.episodes.push(ep);
+                  }
+                });
+              }
+              // Merge season-level links
+              if (s.zipLinks) existingSeason.zipLinks = [...(existingSeason.zipLinks || []), ...s.zipLinks];
+              if (s.mkvLinks) existingSeason.mkvLinks = [...(existingSeason.mkvLinks || []), ...s.mkvLinks];
+            } else {
+              combinedSeasons.push(s);
+            }
+          });
+        }
+      });
+      
+      // Sort and dedupe links
+      const dedupeAndSort = (links: LinkDef[] | undefined) => {
+        if (!links) return [];
+        return links.filter((l, i, self) => i === self.findIndex(t => t.url === l.url)) 
+          .sort((a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit));
+      };
+
+      combinedMovieLinks = dedupeAndSort(combinedMovieLinks);
+      combinedSeasons.forEach(s => {
+        if (s.zipLinks) s.zipLinks = dedupeAndSort(s.zipLinks);
+        if (s.mkvLinks) s.mkvLinks = dedupeAndSort(s.mkvLinks);
+        if (s.episodes) {
+          s.episodes.forEach(e => {
+            if (e.links) e.links = dedupeAndSort(e.links);
+          });
+          s.episodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
+        }
+      });
+      combinedSeasons.sort((a, b) => a.seasonNumber - b.seasonNumber);
+
+      const batchOp = writeBatch(db);
+      const targetRef = doc(db, 'content', targetItem.id);
+      
+      batchOp.update(targetRef, {
+        title: finalTitle,
+        year: finalYear,
+        movieLinks: JSON.stringify(combinedMovieLinks),
+        seasons: JSON.stringify(combinedSeasons),
+        genreIds: Array.from(combinedGenres),
+        languageIds: Array.from(combinedLanguages),
+        posterUrl: finalPoster || '',
+        imdbLink: finalImdb || '',
+        trailerUrl: finalTrailer || '',
+        trailerTitle: finalTrailerTitle || '',
+        trailerYoutubeTitle: finalTrailerYoutubeTitle || '',
+        trailerSeasonNumber: finalTrailerSeasonNumber || null,
+        trailers: JSON.stringify(combinedTrailers),
+        subtitles: !!finalSubtitles,
+        qualityId: finalQuality || '',
+        description: finalDesc || '',
+        cast: Array.from(combinedCast),
+        country: finalCountry || '',
+        releaseDate: finalReleaseDate || '',
+        runtime: finalRuntime || '',
+        imdbRating: finalImdbRating || '',
+        updatedAt: Date.now()
+      });
+      
+      otherItems.forEach(item => {
+        batchOp.delete(doc(db, 'content', item.id));
+      });
+      
+      await batchOp.commit();
+      setSelectedContent([]);
+      setAlertConfig({ isOpen: true, title: 'Success', message: `Successfully merged ${items.length} items into "${finalTitle}"` });
+    } catch (e: any) {
+      console.error(e);
+      setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to merge: ' + e.message });
+    } finally {
+      setIsMerging(false);
+    }
+  };
+
   const isFiltered = searchTerm !== '' || 
     filterType !== 'all' || 
     filterGenre !== 'all' || 
@@ -2972,6 +3169,8 @@ export default function ContentManagement() {
                       onChange={(e) => {
                         if (e.target.value === 'delete') {
                           setShowBulkDeleteConfirm(true);
+                        } else if (e.target.value === 'merge') {
+                          initiateMerge();
                         } else if (e.target.value === 'batch_fetch') {
                           setIsBatchFetchModalOpen(true);
                           setBatchFetchMode('media');
@@ -2993,6 +3192,7 @@ export default function ContentManagement() {
                           <option value="selected_content">Selected Content Only</option>
                           <option value="batch_fetch">Batch Fetch Missing Data</option>
                           <option value="batch_links">Batch Fetch Links</option>
+                          <option value="merge">Merge Contents</option>
                           <option value="delete">Delete</option>
                         </>
                       )}
@@ -4014,6 +4214,88 @@ export default function ContentManagement() {
         onCancel={() => setShowBulkDeleteConfirm(false)}
         confirmText="Delete All"
       />
+
+      <AnimatePresence>
+        {showMergeConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[80] flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.95 }}
+              className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden"
+            >
+              <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex justify-between items-center bg-zinc-50 dark:bg-zinc-900/50">
+                <h2 className="text-xl font-bold flex items-center gap-2">
+                  <RefreshCw className="w-5 h-5 text-emerald-500" />
+                  Confirm Merge
+                </h2>
+                <button onClick={() => setShowMergeConfirm(false)} className="text-zinc-500 hover:text-zinc-900 dark:hover:text-white"><X className="w-6 h-6" /></button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                  You are merging <strong>{mergeData.items.length} items</strong>. All links will be combined into one content entry. The other items will be deleted.
+                </p>
+
+                <div className="space-y-4 bg-zinc-50 dark:bg-zinc-900/50 p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Final Title</label>
+                    <input 
+                      type="text" 
+                      value={mergeData.title} 
+                      onChange={(e) => setMergeData({...mergeData, title: e.target.value})}
+                      className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Final Year</label>
+                    <input 
+                      type="number" 
+                      value={mergeData.year} 
+                      onChange={(e) => setMergeData({...mergeData, year: e.target.value ? parseInt(e.target.value) : ''})}
+                      className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
+                      placeholder="YYYY"
+                    />
+                  </div>
+                </div>
+
+                <div className="max-h-32 overflow-y-auto custom-scrollbar space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 block mb-1">Items being merged:</label>
+                  {mergeData.items.map(item => (
+                    <div key={item.id} className="text-xs p-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg flex justify-between">
+                      <span className="truncate">{item.title}</span>
+                      <span className="text-zinc-500 shrink-0 ml-2">{item.year}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="p-6 border-t border-zinc-100 dark:border-zinc-800 flex gap-3">
+                <button 
+                  onClick={() => setShowMergeConfirm(false)}
+                  disabled={isMerging}
+                  className="flex-1 px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 text-sm font-bold hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleMerge}
+                  disabled={isMerging}
+                  className="flex-1 px-4 py-3 rounded-xl bg-emerald-500 text-white text-sm font-bold hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2"
+                >
+                  {isMerging ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                  {isMerging ? 'Merging...' : 'Merge Now'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AlertModal
         isOpen={alertConfig.isOpen}
