@@ -30,7 +30,11 @@ export const BatchFetchModal: React.FC<Props> = ({
     const saved = localStorage.getItem('batchFetchModal_fetchFields');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        // Force seasons and episodes to true
+        parsed.seasons = true;
+        parsed.episodes = true;
+        return parsed;
       } catch (e) {
         console.error("Error parsing saved batchFetch fields:", e);
       }
@@ -49,7 +53,7 @@ export const BatchFetchModal: React.FC<Props> = ({
       cast: true,
       genres: true,
       seasons: true,
-      episodes: false,
+      episodes: true,
       posterUrl: true,
       backdropUrl: true,
     };
@@ -71,17 +75,17 @@ export const BatchFetchModal: React.FC<Props> = ({
 
   const processMediaData = async () => {
     setIsProcessing(true);
-    let successCount = 0;
+    let completedCount = 0;
+    let isCancelled = false;
 
-    for (let i = 0; i < selectedContentIds.length; i++) {
-       const id = selectedContentIds[i];
-       if (!isOpen) break;
+    const processSingleItem = async (id: string) => {
+       if (!isOpen || isCancelled) return;
 
        try {
          const d = await getDoc(doc(db, 'content', id));
          if (!d.exists()) {
            updateResult(id, 'error', 'Not found');
-           continue;
+           return;
          }
          const data = d.data();
          updateTitle(id, data.title || 'Unknown');
@@ -107,7 +111,7 @@ export const BatchFetchModal: React.FC<Props> = ({
             
             if (!resemblesTitle && !isSameYear) {
                 updateResult(id, 'error', `Unconfident match: "${details.title || details.name}"`);
-                continue;
+                return;
             }
 
             const updates: any = {};
@@ -146,19 +150,78 @@ export const BatchFetchModal: React.FC<Props> = ({
                if (imdbRatingInfo) updates.imdbRating = imdbRatingInfo.rating;
             }
 
-            if (bestMatch.type === 'tv' && fetchFields.seasons) {
+            if (bestMatch.type === 'tv') {
+                let existingSeasons: any[] = [];
+                if (data.seasons) {
+                   try {
+                     existingSeasons = typeof data.seasons === 'string' ? JSON.parse(data.seasons) : data.seasons;
+                   } catch (e) {
+                     existingSeasons = [];
+                   }
+                }
+
                 const seasonsData = await fetchSeriesSeasons(bestMatch.item.id);
-                updates.seasons = seasonsData.map((s: any) => ({
-                    seasonNumber: s.season,
-                    title: s.name,
-                    year: s.year,
-                    episodes: fetchFields.episodes ? s.episodes.map((e: any) => ({
-                        episodeNumber: e.episode_number,
-                        title: e.name,
-                        duration: e.runtime ? `${e.runtime}m` : undefined,
-                        description: fetchFields.description ? (e.overview || undefined) : undefined
-                    })) : []
-                }));
+                
+                const mergedSeasons = [...existingSeasons];
+
+                seasonsData.forEach((fetchedSeason: any) => {
+                    const existingSeasonIndex = mergedSeasons.findIndex((s: any) => s.seasonNumber === fetchedSeason.season);
+                    const existingSeason = existingSeasonIndex !== -1 ? mergedSeasons[existingSeasonIndex] : {
+                        id: `s${fetchedSeason.season}`,
+                        seasonNumber: fetchedSeason.season,
+                        zipLinks: [],
+                        mkvLinks: [],
+                        episodes: []
+                    };
+                    
+                    const seasonYear = fetchedSeason.year && fetchedSeason.year !== 'N/A' ? parseInt(fetchedSeason.year.toString()) : undefined;
+                    const title = fetchedSeason.name && !/^Season\s+\d+$/i.test(fetchedSeason.name) ? fetchedSeason.name : existingSeason.title;
+
+                    const mergedEpisodes = [...(existingSeason.episodes || [])];
+
+                    if (fetchedSeason.episodes && Array.isArray(fetchedSeason.episodes)) {
+                        fetchedSeason.episodes.forEach((fetchedEp: any) => {
+                            const existingEpIndex = mergedEpisodes.findIndex((e: any) => e.episodeNumber === fetchedEp.episode_number);
+                            
+                            if (existingEpIndex !== -1) {
+                                mergedEpisodes[existingEpIndex] = {
+                                    ...mergedEpisodes[existingEpIndex],
+                                    title: fetchedEp.name || mergedEpisodes[existingEpIndex].title || `Episode ${fetchedEp.episode_number}`,
+                                    duration: fetchedEp.runtime ? `${fetchedEp.runtime}m` : mergedEpisodes[existingEpIndex].duration || '',
+                                    description: fetchFields.description ? (fetchedEp.overview || mergedEpisodes[existingEpIndex].description || '') : (mergedEpisodes[existingEpIndex].description || '')
+                                };
+                            } else {
+                                mergedEpisodes.push({
+                                    id: `e${fetchedEp.episode_number}`,
+                                    episodeNumber: fetchedEp.episode_number,
+                                    title: fetchedEp.name || `Episode ${fetchedEp.episode_number}`,
+                                    duration: fetchedEp.runtime ? `${fetchedEp.runtime}m` : '',
+                                    description: fetchFields.description ? (fetchedEp.overview || '') : '',
+                                    links: [{ id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'MB' }]
+                                });
+                            }
+                        });
+                    }
+                    
+                    mergedEpisodes.sort((a: any, b: any) => a.episodeNumber - b.episodeNumber);
+
+                    const finalizedSeason = {
+                        ...existingSeason,
+                        title: title || '',
+                        year: seasonYear || existingSeason.year,
+                        episodes: mergedEpisodes
+                    };
+
+                    if (existingSeasonIndex !== -1) {
+                        mergedSeasons[existingSeasonIndex] = finalizedSeason;
+                    } else {
+                        mergedSeasons.push(finalizedSeason);
+                    }
+                });
+
+                mergedSeasons.sort((a, b) => a.seasonNumber - b.seasonNumber);
+                
+                updates.seasons = JSON.stringify(mergedSeasons);
             }
 
             if (fetchFields.genres && Array.isArray(details.genres) && genres) {
@@ -190,7 +253,6 @@ export const BatchFetchModal: React.FC<Props> = ({
               try {
                 await updateDoc(doc(db, 'content', id), updates);
                 updateResult(id, 'success', 'Updated');
-                successCount++;
               } catch (e: any) {
                 console.error(`Update Error for doc ${id}:`, updates, e);
                 updateResult(id, 'error', `Update Error: ${e.message}`);
@@ -203,8 +265,20 @@ export const BatchFetchModal: React.FC<Props> = ({
          }
        } catch (err: any) {
          updateResult(id, 'error', err.message || 'Error fetching');
+       } finally {
+         completedCount++;
+         setProgress((completedCount / selectedContentIds.length) * 100);
        }
-       setProgress(((i + 1) / selectedContentIds.length) * 100);
+    };
+
+    const CONCURRENCY_LIMIT = 5;
+    for (let i = 0; i < selectedContentIds.length; i += CONCURRENCY_LIMIT) {
+        if (!isOpen) {
+            isCancelled = true;
+            break;
+        }
+        const chunk = selectedContentIds.slice(i, i + CONCURRENCY_LIMIT);
+        await Promise.all(chunk.map(id => processSingleItem(id)));
     }
     
     setIsProcessing(false);
@@ -267,8 +341,8 @@ export const BatchFetchModal: React.FC<Props> = ({
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-sm font-medium text-zinc-300">Select data to fetch:</h3>
                     <div className="flex gap-2">
-                       <button onClick={() => setFetchFields({title:true, description:true, type:true, year:true, releaseDate:true, country:true, runtime:true, imdbRating:true, imdbLink:true, trailerUrl:true, cast:true, genres:true, posterUrl:true, backdropUrl:true})} className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 rounded text-zinc-300">Select All</button>
-                       <button onClick={() => setFetchFields({title:false, description:false, type:false, year:false, releaseDate:false, country:false, runtime:false, imdbRating:false, imdbLink:false, trailerUrl:false, cast:false, genres:false, posterUrl:false, backdropUrl:false})} className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 rounded text-zinc-300">Deselect All</button>
+                       <button onClick={() => setFetchFields({title:true, description:true, type:true, year:true, releaseDate:true, country:true, runtime:true, imdbRating:true, imdbLink:true, trailerUrl:true, cast:true, genres:true, seasons:true, episodes:true, posterUrl:true, backdropUrl:true})} className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 rounded text-zinc-300">Select All</button>
+                       <button onClick={() => setFetchFields({title:false, description:false, type:false, year:false, releaseDate:false, country:false, runtime:false, imdbRating:false, imdbLink:false, trailerUrl:false, cast:false, genres:false, seasons:false, episodes:false, posterUrl:false, backdropUrl:false})} className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 rounded text-zinc-300">Deselect All</button>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto custom-scrollbar">

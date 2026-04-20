@@ -188,9 +188,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const now = Date.now();
         const twelveHours = 12 * 60 * 60 * 1000;
 
+        // Always initialize the ref for this React lifecycle to ensure interval tracking works
+        if (!sessionStartTimeRef.current) {
+          sessionStartTimeRef.current = now;
+        }
+
         if (!sessionStorage.getItem('session_started')) {
           sessionStorage.setItem('session_started', 'true');
-          sessionStartTimeRef.current = now;
           
           if (!lastSessionStart || (now - parseInt(lastSessionStart) > twelveHours)) {
             // Merged write: increment session count and update lastActive in ONE call
@@ -476,37 +480,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    // Track time spent periodically (every 30 minutes to reduce Firestore writes)
+    // Track time spent periodically (every 1 minute to ensure accuracy)
     const timeTrackerInterval = setInterval(() => {
       if (auth.currentUser && sessionStartTimeRef.current && navigator.onLine) {
         // Only update if the tab is visible
         if (document.visibilityState === 'visible') {
           const userRef = doc(db, 'users', auth.currentUser.uid);
           updateDoc(userRef, {
-            timeSpent: increment(30),
+            timeSpent: increment(1),
             lastActive: new Date().toISOString()
           }).then(() => {
-            // Also log to GA4
-            logEvent('time_spent', auth.currentUser!.uid, { duration: 30 });
+            // Log to GA4 every 5 minutes (approximate) to reduce event spam, 
+            // but keep firestore updated every minute for UI
+            const timeSpentMs = Date.now() - sessionStartTimeRef.current!;
+            const timeSpentMinutes = Math.floor(timeSpentMs / 60000);
+            if (timeSpentMinutes > 0 && timeSpentMinutes % 5 === 0) {
+                logEvent('time_spent', auth.currentUser!.uid, { duration: 5 });
+            }
           }).catch(console.error);
         }
       }
-    }, 30 * 60000);
+    }, 60000);
 
-    // Also track time spent when window unloads
-    const handleBeforeUnload = () => {
-      if (auth.currentUser && sessionStartTimeRef.current) {
-        const timeSpentMs = Date.now() - sessionStartTimeRef.current;
-        const timeSpentMinutes = Math.floor(timeSpentMs / 60000);
-        if (timeSpentMinutes > 0) {
-          // We can't reliably await async calls in beforeunload, but we can try
-          // Usually beacon API is better, but this is a simple approach
-          // The periodic interval is the main tracker
-        }
+    // Track time and last active on visibility change
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && auth.currentUser) {
+         const userRef = doc(db, 'users', auth.currentUser.uid);
+         updateDoc(userRef, {
+           lastActive: new Date().toISOString()
+         }).catch(console.error);
       }
     };
 
-    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       unsubscribe();
@@ -514,7 +520,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         unsubProfile();
       }
       clearInterval(timeTrackerInterval);
-      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
 

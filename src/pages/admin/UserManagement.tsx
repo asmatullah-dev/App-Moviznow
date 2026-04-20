@@ -389,10 +389,9 @@ export default function UserManagement() {
         permissions: editForm.permissions || [],
       };
       
-      // Set isUserManager flag if role is user_manager or manager
-      if (editForm.role === 'user_manager' || editForm.role === 'manager') {
-        updateData.isUserManager = true;
-      }
+      // Update isUserManager flag to match role
+      const isNowManager = editForm.role === 'user_manager' || editForm.role === 'manager';
+      updateData.isUserManager = isNowManager;
       
       if (editForm.expiryDate) {
         updateData.expiryDate = new Date(editForm.expiryDate).toISOString();
@@ -406,21 +405,25 @@ export default function UserManagement() {
 
       await updateDoc(doc(db, 'users', currentEditingId), updateData);
 
-      // Handle User Manager role changes
-      if (previousRole === 'user_manager' && newRole !== 'user_manager') {
+      // Handle Manager role changes
+      const wasManager = previousRole === 'user_manager' || previousRole === 'manager' || selectedUser.isUserManager;
+
+      if (wasManager && !isNowManager) {
         // Expire all managed users
         const managedUsers = allUsers.filter(u => u.managedBy === currentEditingId);
         if (managedUsers.length > 0) {
           const batch = writeBatch(db);
           managedUsers.forEach(userData => {
-            batch.update(doc(db, 'users', userData.uid), {
-              status: 'expired',
-              previousStatus: userData.status || 'active'
-            });
+            if (userData.status !== 'pending') {
+              batch.update(doc(db, 'users', userData.uid), {
+                status: 'expired',
+                previousStatus: userData.status || 'active'
+              });
+            }
           });
           await batch.commit();
         }
-      } else if (previousRole !== 'user_manager' && newRole === 'user_manager') {
+      } else if (!wasManager && isNowManager) {
         // Restore all managed users
         const managedUsers = allUsers.filter(u => u.managedBy === currentEditingId);
         if (managedUsers.length > 0) {
@@ -1521,7 +1524,7 @@ export default function UserManagement() {
                               <Clock className="w-4 h-4 text-emerald-500" />
                               <span className="text-xs font-medium">Time in App</span>
                             </div>
-                            <span className="font-bold text-zinc-900 dark:text-white text-xs">{userAnalytics.timeSpent || 0} mins</span>
+                            <span className="font-bold text-zinc-900 dark:text-white text-xs">{selectedUser.timeSpent || userAnalytics.timeSpent || 0} mins</span>
                           </div>
                           <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
                             <div className="flex items-center justify-between mb-1">
@@ -1529,7 +1532,7 @@ export default function UserManagement() {
                                 <Heart className="w-4 h-4 text-emerald-500" />
                                 <span className="text-xs font-medium">Favorites</span>
                               </div>
-                              <span className="font-bold text-zinc-900 dark:text-white text-xs">{userAnalytics.favoritesCount || 0}</span>
+                              <span className="font-bold text-zinc-900 dark:text-white text-xs">{selectedUser.favorites?.length || userAnalytics.favoritesCount || 0}</span>
                             </div>
                           </div>
                           <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
@@ -1538,7 +1541,7 @@ export default function UserManagement() {
                                 <Bookmark className="w-4 h-4 text-emerald-500" />
                                 <span className="text-xs font-medium">Watch Later</span>
                               </div>
-                              <span className="font-bold text-zinc-900 dark:text-white text-xs">{userAnalytics.watchLaterCount || 0}</span>
+                              <span className="font-bold text-zinc-900 dark:text-white text-xs">{selectedUser.watchLater?.length || userAnalytics.watchLaterCount || 0}</span>
                             </div>
                           </div>
                         </div>

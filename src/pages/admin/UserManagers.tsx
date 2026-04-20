@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../firebase';
-import { collection, onSnapshot, query, where, doc, updateDoc, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, doc, updateDoc, getDocs, writeBatch } from 'firebase/firestore';
 import { UserProfile, Role } from '../../types';
 import { Users, ChevronRight, Search, X, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
@@ -37,7 +37,30 @@ export default function UserManagers() {
     if (!managerToRemove) return;
     setProcessing(prev => ({ ...prev, remove: true }));
     try {
-      await updateDoc(doc(db, 'users', managerToRemove), { isUserManager: false });
+      const batch = writeBatch(db);
+      const managerUser = allUsers.find(u => u.uid === managerToRemove);
+      
+      const newRole = managerUser?.role === 'user_manager' || managerUser?.role === 'manager' 
+        ? 'user' 
+        : managerUser?.role || 'user';
+
+      batch.update(doc(db, 'users', managerToRemove), { 
+        isUserManager: false,
+        role: newRole
+      });
+
+      // Expire all managed users
+      const managedUsers = allUsers.filter(u => u.managedBy === managerToRemove);
+      managedUsers.forEach(userData => {
+        if (userData.status !== 'pending') {
+          batch.update(doc(db, 'users', userData.uid), {
+            status: 'expired',
+            previousStatus: userData.status || 'active'
+          });
+        }
+      });
+
+      await batch.commit();
       setManagers(prev => prev.filter(m => m.uid !== managerToRemove));
     } catch (error) {
       console.error('Error removing manager:', error);

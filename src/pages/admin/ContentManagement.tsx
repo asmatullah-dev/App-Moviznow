@@ -243,28 +243,27 @@ import { BatchFetchModal } from '../../components/BatchFetchModal';
 interface ContentCardProps {
   content: Content;
   profile: any;
-  selectedContent: string[];
+  isSelected: boolean;
+  isActiveDropdown: boolean;
+  isDuplicate: boolean;
+  isShareLoading: boolean;
+  isWhatsappLoading: boolean;
   handleSelectContent: (id: string, e?: React.SyntheticEvent) => void;
   handleShare: (content: Content, mode: 'standard' | 'whatsapp') => void;
   handleEdit: (content: Content) => void;
   handleCopyData: (content: Content) => void;
   setDeleteId: (id: string) => void;
   setNotificationModal: (modal: { isOpen: boolean; content: Content | null; status: 'idle' | 'sending' | 'success' | 'error' }) => void;
-  activeDropdownId: string | null;
   setActiveDropdownId: (id: string | null) => void;
-  isDuplicate: boolean;
   getMissingLabels: (content: Content, profile: any) => string[];
-  loadingShareId: string | null;
-  loadingWhatsappShareId: string | null;
 }
 
 const ContentCard = memo(({ 
-  content, profile, selectedContent, handleSelectContent, handleShare, handleEdit, 
-  handleCopyData, setDeleteId, setNotificationModal, activeDropdownId, 
-  setActiveDropdownId, isDuplicate, getMissingLabels, loadingShareId, loadingWhatsappShareId
+  content, profile, isSelected, handleSelectContent, handleShare, handleEdit, 
+  handleCopyData, setDeleteId, setNotificationModal, isActiveDropdown, 
+  setActiveDropdownId, isDuplicate, getMissingLabels, isShareLoading, isWhatsappLoading
 }: ContentCardProps) => {
-  const missingLabels = getMissingLabels(content, profile);
-  const isSelected = selectedContent.includes(content.id);
+  const missingLabels = useMemo(() => getMissingLabels(content, profile), [content, profile, getMissingLabels]);
 
   return (
     <div className={clsx("bg-zinc-50 dark:bg-zinc-900 border rounded-xl flex flex-col group relative overflow-hidden transition-all hover:ring-2", isDuplicate ? "border-red-500 hover:ring-red-500/50" : "border-zinc-200 dark:border-zinc-800 hover:ring-emerald-500/50")}>
@@ -282,9 +281,9 @@ const ContentCard = memo(({
       </label>
       <div className="relative aspect-[2/3] rounded-t-xl overflow-hidden">
         <Link 
-          to={selectedContent.length > 0 ? '#' : `/movie/${content.id}`} 
+          to={isSelected ? '#' : `/movie/${content.id}`} 
           onClick={(e) => {
-            if (selectedContent.length > 0) {
+            if (isSelected) {
               e.preventDefault();
               handleSelectContent(content.id, e);
             }
@@ -336,11 +335,11 @@ const ContentCard = memo(({
         
         <div className="mt-auto flex flex-wrap items-center justify-between gap-1 pt-2 border-t border-zinc-200 dark:border-zinc-800/50">
           <div className="flex flex-wrap gap-1">
-            <button onClick={() => handleShare(content, 'whatsapp')} className="text-emerald-500 hover:text-emerald-400 p-1.5 transition-colors" title="Share to WhatsApp" disabled={loadingWhatsappShareId === content.id}>
-              {loadingWhatsappShareId === content.id ? <RefreshCw className="w-4 h-4 md:w-5 md:h-5 animate-spin" /> : <MessageCircle className="w-4 h-4 md:w-5 md:h-5" />}
+            <button onClick={() => handleShare(content, 'whatsapp')} className="text-emerald-500 hover:text-emerald-400 p-1.5 transition-colors" title="Share to WhatsApp" disabled={isWhatsappLoading}>
+              {isWhatsappLoading ? <RefreshCw className="w-4 h-4 md:w-5 md:h-5 animate-spin" /> : <MessageCircle className="w-4 h-4 md:w-5 md:h-5" />}
             </button>
-            <button onClick={() => handleShare(content, 'standard')} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-1.5 transition-colors" title="Share Links & Details" disabled={loadingShareId === content.id}>
-              {loadingShareId === content.id ? <RefreshCw className="w-4 h-4 md:w-5 md:h-5 animate-spin" /> : <Share2 className="w-4 h-4 md:w-5 md:h-5" />}
+            <button onClick={() => handleShare(content, 'standard')} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-1.5 transition-colors" title="Share Links & Details" disabled={isShareLoading}>
+              {isShareLoading ? <RefreshCw className="w-4 h-4 md:w-5 md:h-5 animate-spin" /> : <Share2 className="w-4 h-4 md:w-5 md:h-5" />}
             </button>
           </div>
           <div className="flex gap-1 ml-auto">
@@ -353,13 +352,13 @@ const ContentCard = memo(({
               <button 
                 onClick={(e) => {
                   e.stopPropagation();
-                  setActiveDropdownId(activeDropdownId === content.id ? null : content.id);
+                  setActiveDropdownId(isActiveDropdown ? null : content.id);
                 }}
                 className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white p-1.5 transition-colors"
               >
                 <MoreVertical className="w-4 h-4 md:w-5 md:h-5" />
               </button>
-              {activeDropdownId === content.id && (
+              {isActiveDropdown && (
                 <div 
                   className="absolute bottom-full right-0 mb-2 w-48 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-xl overflow-hidden z-20 py-1"
                   onClick={(e) => e.stopPropagation()}
@@ -3069,19 +3068,19 @@ export default function ContentManagement() {
               key={content.id}
               content={content}
               profile={profile}
-              selectedContent={selectedContent}
+              isSelected={selectedContent.includes(content.id)}
+              isActiveDropdown={activeDropdownId === content.id}
+              isDuplicate={duplicateIds.has(content.id)}
+              isShareLoading={loadingShareId === content.id}
+              isWhatsappLoading={loadingWhatsappShareId === content.id}
               handleSelectContent={handleSelectContent}
               handleShare={handleShare}
               handleEdit={handleEdit}
               handleCopyData={handleCopyData}
               setDeleteId={setDeleteId}
               setNotificationModal={setNotificationModal}
-              activeDropdownId={activeDropdownId}
               setActiveDropdownId={setActiveDropdownId}
-              isDuplicate={duplicateIds.has(content.id)}
               getMissingLabels={getMissingLabels}
-              loadingShareId={loadingShareId}
-              loadingWhatsappShareId={loadingWhatsappShareId}
             />
           ))}
         </div>
