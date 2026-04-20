@@ -307,59 +307,53 @@ export const LinkCheckerModal: React.FC<Props> = ({
     let year: number | undefined;
     let title: string | undefined;
 
-    // First, strip extensions and common noise from full text
-    // Replace dots, brackets, hyphens, underscores and slashes with spaces
-    let processedText = text
-      .replace(/\.(mkv|mp4|zip|rar|avi|mov|wmv|flv|ts)$/i, '')
-      .replace(/[\[\]\(\)\{\}\.\-_/]/g, ' ') 
-      .replace(/\s+/g, ' ')
-      .trim();
-
     // Detect year - look for 4 digits that start with 19 or 20
-    // Improved regex to handle cases without clear word boundaries
-    const yearMatch = text.match(/(?:\D|^)(19\d{2}|20\d{2})(?:\D|$)/) || 
-                      processedText.match(/\b(19\d{2}|20\d{2})\b/);
+    const yearPattern = /(?:\D|^)(19\d{2}|20\d{2})(?:\D|$)/;
+    const yearMatch = text.match(yearPattern);
+
     if (yearMatch) {
       year = parseInt(yearMatch[1], 10);
-      const yearStr = yearMatch[1];
-      const parts = processedText.split(yearStr);
-      title = (parts[0] && parts[0].trim().length > 2) ? parts[0] : processedText.replace(yearStr, '').trim();
+      const yearIndex = text.indexOf(yearMatch[1]);
+      title = text.substring(0, yearIndex).trim();
     } else {
-      title = processedText;
+      // No year, look for quality/print/language markers
+      const noiseMarkers = [
+        '\\d{3,4}p', '[0-9]k', 'web[-.\\s_]?(dl|rip)', 
+        'hd[-.\\s_]?rip', 'blu[-.\\s_]?ray', 'bd[-.\\s_]?rip', 
+        'br[-.\\s_]?rip', 'hdtc', 'hdcam', 'dvdrip', 'webrip',
+        'hq', 'proper', 'repack', 'internal', 'hevc', 'x264', 'x265', 'aac', 'ac3',
+        'dual[-.\\s_]?audio', 'multi[-.\\s_]?audio',
+        'hindi', 'english', 'tamil', 'telugu', 'malayalam', 'kannada', 'urdu', 'punjabi',
+        's\\d+e\\d+', 's\\d+', 'season', 'episode'
+      ];
+      
+      const markerRegex = new RegExp(`\\b(${noiseMarkers.join('|')})\\b`, 'i');
+      const markerMatch = text.match(markerRegex);
+      
+      if (markerMatch) {
+        title = text.substring(0, markerMatch.index).trim();
+      } else {
+        title = text.trim();
+      }
     }
 
-    // Detect series patterns to split title
-    const seriesSplitPattern = /\b(s\d+e\d+|s\d+|season\s*\d+)\b/i;
-    const seriesSplitMatch = title!.match(seriesSplitPattern);
-    if (seriesSplitMatch) {
-      const splitIndex = seriesSplitMatch.index!;
-      title = title!.substring(0, splitIndex).trim();
+    if (title) {
+      // Strip extensions and noise
+      title = title
+        .replace(/\.(mkv|mp4|zip|rar|avi|mov|wmv|flv|ts)$/i, '')
+        .replace(/[\[\]\(\)\{\}\.\-_/]/g, ' ') 
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      // Clean up common prefix noise like "🎬", "*", etc
+      title = title.replace(/^[🎬\s\*]+/, '');
+
+      // Capitalize
+      title = title.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+      return { title: title || undefined, year };
     }
 
-    // Strip series info and common keywords from the title part
-    let cleanedTitle = title
-      // Strip S01E01, S01, E01, Season 1, Episode 1 patterns
-      .replace(/\bs\d+e\d+\b/gi, '')
-      .replace(/\bs\d+\s*e\d+\b/gi, '')
-      .replace(/\bs\d+\b/gi, '')
-      .replace(/\be\d+\b/gi, '')
-      .replace(/\b(season|episode|ep|se|dl)\s*\d+(\s*\s*\d+)?\b/gi, '')
-      .replace(/\b(complete|full season|all episodes|collection|trilogy|quadrilogy|series)\b/gi, '')
-      // Strip quality and other keywords
-      .replace(/\b(download|watch|free|online|dual audio|dual|audio|hin|eng|telugu|tamil|malayalam|kannada|hindi|english|org|subs|multi|hevc|x264|x265|aac|ac3|hdr|imax|proper|internal|repack|director's cut|extended|unrated|web-dl|web-rip|hdtc|hdcam|bluray|brrip|bdrip|webrip|dl)\b/gi, '')
-      .replace(/\b(\d{3,4}p|2160p|4k|8k|hdrip|web|cam)\b/gi, '')
-      .replace(/https?:\/\/[^\s]+/g, '')
-      .replace(/\d{1,2}\s*(?:mb|gb|tb|kb)\b/gi, '') // Remove sizes
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    if (cleanedTitle) {
-      // Capitalize first letter of each word
-      cleanedTitle = cleanedTitle.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
-      return { title: cleanedTitle, year };
-    }
-
-    return { title: processedText || undefined, year };
+    return { title: undefined, year };
   };
 
   const handleAddLinks = () => {

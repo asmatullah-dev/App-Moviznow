@@ -244,6 +244,7 @@ interface ContentCardProps {
   content: Content;
   profile: any;
   isSelected: boolean;
+  anySelected: boolean;
   isActiveDropdown: boolean;
   isDuplicate: boolean;
   isShareLoading: boolean;
@@ -259,15 +260,25 @@ interface ContentCardProps {
 }
 
 const ContentCard = memo(({ 
-  content, profile, isSelected, handleSelectContent, handleShare, handleEdit, 
+  content, profile, isSelected, anySelected, handleSelectContent, handleShare, handleEdit, 
   handleCopyData, setDeleteId, setNotificationModal, isActiveDropdown, 
   setActiveDropdownId, isDuplicate, getMissingLabels, isShareLoading, isWhatsappLoading
 }: ContentCardProps) => {
   const missingLabels = useMemo(() => getMissingLabels(content, profile), [content, profile, getMissingLabels]);
 
   return (
-    <div className={clsx("bg-zinc-50 dark:bg-zinc-900 border rounded-xl flex flex-col group relative overflow-hidden transition-all hover:ring-2", isDuplicate ? "border-red-500 hover:ring-red-500/50" : "border-zinc-200 dark:border-zinc-800 hover:ring-emerald-500/50")}>
-      <label className="absolute top-0 left-0 z-30 w-16 h-16 cursor-pointer group/checkbox">
+    <div 
+      className={clsx(
+        "bg-zinc-50 dark:bg-zinc-900 border rounded-xl flex flex-col group relative overflow-hidden transition-all hover:ring-2 cursor-pointer", 
+        isSelected ? "ring-2 ring-emerald-500 border-emerald-500" : (isDuplicate ? "border-red-500 hover:ring-red-500/50" : "border-zinc-200 dark:border-zinc-800 hover:ring-emerald-500/50")
+      )}
+      onClick={(e) => {
+        if (anySelected) {
+          handleSelectContent(content.id, e);
+        }
+      }}
+    >
+      <label className="absolute top-0 left-0 z-30 w-16 h-16 cursor-pointer group/checkbox" onClick={(e) => e.stopPropagation()}>
         <div className="absolute top-3 left-3 w-5 h-5 flex items-center justify-center rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 group-hover/checkbox:border-emerald-500 transition-colors">
           <input 
             type="checkbox" 
@@ -281,9 +292,9 @@ const ContentCard = memo(({
       </label>
       <div className="relative aspect-[2/3] rounded-t-xl overflow-hidden">
         <Link 
-          to={isSelected ? '#' : `/movie/${content.id}`} 
+          to={anySelected ? '#' : `/movie/${content.id}`} 
           onClick={(e) => {
-            if (isSelected) {
+            if (anySelected) {
               e.preventDefault();
               handleSelectContent(content.id, e);
             }
@@ -335,16 +346,38 @@ const ContentCard = memo(({
         
         <div className="mt-auto flex flex-wrap items-center justify-between gap-1 pt-2 border-t border-zinc-200 dark:border-zinc-800/50">
           <div className="flex flex-wrap gap-1">
-            <button onClick={() => handleShare(content, 'whatsapp')} className="text-emerald-500 hover:text-emerald-400 p-1.5 transition-colors" title="Share to WhatsApp" disabled={isWhatsappLoading}>
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                handleShare(content, 'whatsapp');
+              }} 
+              className="text-emerald-500 hover:text-emerald-400 p-1.5 transition-colors" 
+              title="Share to WhatsApp" 
+              disabled={isWhatsappLoading}
+            >
               {isWhatsappLoading ? <RefreshCw className="w-4 h-4 md:w-5 md:h-5 animate-spin" /> : <MessageCircle className="w-4 h-4 md:w-5 md:h-5" />}
             </button>
-            <button onClick={() => handleShare(content, 'standard')} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-1.5 transition-colors" title="Share Links & Details" disabled={isShareLoading}>
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                handleShare(content, 'standard');
+              }} 
+              className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-1.5 transition-colors" 
+              title="Share Links & Details" 
+              disabled={isShareLoading}
+            >
               {isShareLoading ? <RefreshCw className="w-4 h-4 md:w-5 md:h-5 animate-spin" /> : <Share2 className="w-4 h-4 md:w-5 md:h-5" />}
             </button>
           </div>
           <div className="flex gap-1 ml-auto">
             {(profile?.role === 'admin' || profile?.role === 'owner' || content.status === 'draft') && (
-              <button onClick={() => handleEdit(content)} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-1.5 transition-colors">
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleEdit(content);
+                }} 
+                className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-1.5 transition-colors"
+              >
                 <Edit2 className="w-4 h-4 md:w-5 md:h-5" />
               </button>
             )}
@@ -2192,11 +2225,23 @@ export default function ContentManagement() {
       const trimmed = line.trim();
       if (!trimmed) return;
 
-      // Title and Year: 🎬 *Title (Year)* or Title (Year)
-      const titleYearMatch = trimmed.match(/🎬?\s*\*?([^(]+)\s*\((\d{4})\)\*?/);
-      if (titleYearMatch) {
-        newTitle = titleYearMatch[1].trim();
+      // Title and Year: 🎬 *Title (Year)* or Title (Year) or just Title Year
+      const titleYearMatch = trimmed.match(/🎬?\s*\*?([^(]+)\s*\((\d{4})\)\*?/) || 
+                            trimmed.match(/🎬?\s*\*?([^(]+)\s*(\d{4})\*?/);
+      if (titleYearMatch && !newTitle) { // Only set if not already set by first link
+        newTitle = titleYearMatch[1].replace(/[🎬\*]/g, '').trim();
         newYear = parseInt(titleYearMatch[2]);
+
+        // Further clean Title: if it includes markers, take everything before
+        const noiseMarkers = ['\\d{3,4}p', '[0-9]k', 'web[-.\\s_]?(dl|rip)', 'hd[-.\\s_]?rip', 'blu[-.\\s_]?ray', 'bd[-.\\s_]?rip', 'br[-.\\s_]?rip', 'hdtc', 'hdcam', 'dvdrip', 'webrip', 'hevc', 'x264', 'x265', 'dual[-.\\s_]?audio', 'hindi', 'english'];
+        const markerRegex = new RegExp(`\\b(${noiseMarkers.join('|')})\\b`, 'i');
+        const markerMatch = newTitle.match(markerRegex);
+        if (markerMatch) {
+          newTitle = newTitle.substring(0, markerMatch.index).trim();
+        }
+        
+        // Capitalize
+        newTitle = newTitle.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
       }
 
       // Type
@@ -3069,6 +3114,7 @@ export default function ContentManagement() {
               content={content}
               profile={profile}
               isSelected={selectedContent.includes(content.id)}
+              anySelected={selectedContent.length > 0}
               isActiveDropdown={activeDropdownId === content.id}
               isDuplicate={duplicateIds.has(content.id)}
               isShareLoading={loadingShareId === content.id}
