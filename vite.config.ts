@@ -29,12 +29,12 @@ export default defineConfig(({mode}) => {
           display: 'standalone',
           icons: [
             {
-              src: '/launcher.svg',
+              src: '/launcher.svg?v=1.1',
               sizes: '192x192',
               type: 'image/svg+xml'
             },
             {
-              src: '/launcher.svg',
+              src: '/launcher.svg?v=1.1',
               sizes: '512x512',
               type: 'image/svg+xml'
             }
