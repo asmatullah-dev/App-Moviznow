@@ -93,21 +93,35 @@ export const BatchFetchModal: React.FC<Props> = ({
          let searchTitle = data.title;
          let searchYear = data.year?.toString();
          
-         const tmdbResults = await searchTMDBByTitle(searchTitle, searchYear, data.type);
+         let tmdbResults = await searchTMDBByTitle(searchTitle, searchYear, data.type);
          
+         if ((!tmdbResults || tmdbResults.length === 0) && searchYear) {
+             tmdbResults = await searchTMDBByTitle(searchTitle, '', data.type);
+         }
+
          if (tmdbResults && tmdbResults.length > 0) {
             const normalizeStr = (str: string) => (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
             const targetTitle = normalizeStr(searchTitle);
             const targetYearStr = searchYear ? searchYear.toString() : '';
+            const targetYearNum = parseInt(targetYearStr);
 
-            // Find best exact match natively from TMDB array
+            // Find best exact match natively from TMDB array (Exact Title + Exact Year)
             let bestMatch = tmdbResults.find((res: any) => {
                const matchTitle = normalizeStr(res.item.title || res.item.name || res.item.original_title || res.item.original_name);
                const matchYear = (res.item.release_date || res.item.first_air_date || '').split('-')[0];
                return matchTitle === targetTitle && (!targetYearStr || matchYear === targetYearStr);
             });
 
-            // If no strict year match, fall back to exact title match
+            // If no strict year match, fall back to exact title match within +/- 3 years
+            if (!bestMatch && !isNaN(targetYearNum)) {
+                bestMatch = tmdbResults.find((res: any) => {
+                   const matchTitle = normalizeStr(res.item.title || res.item.name || res.item.original_title || res.item.original_name);
+                   const matchYearNum = parseInt((res.item.release_date || res.item.first_air_date || '').split('-')[0]);
+                   return matchTitle === targetTitle && !isNaN(matchYearNum) && Math.abs(matchYearNum - targetYearNum) <= 3;
+                });
+            }
+
+            // If still no match, fall back to exact title match (any year)
             if (!bestMatch) {
                 bestMatch = tmdbResults.find((res: any) => {
                    const matchTitle = normalizeStr(res.item.title || res.item.name || res.item.original_title || res.item.original_name);

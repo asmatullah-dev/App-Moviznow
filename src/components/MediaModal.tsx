@@ -38,8 +38,13 @@ export async function findTMDBByImdb(imdbID: string, forceType?: string) {
 export async function searchTMDBByTitle(searchTitle: string, searchYear: string, forceType?: string) {
   const results: any[] = [];
   
-  if (!forceType || forceType === 'movie') {
-    let movieUrl = `${TMDB_BASE}/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(searchTitle)}`;
+  // Clean title for URL passing, TMDB often fails if there are hard symbols like dots in strange places
+  // We replace symbols with spaces because TMDB searches best with spaced words
+  const queryStr = searchTitle.replace(/[^a-zA-Z0-9\u00C0-\u024F]/g, ' ').replace(/\s+/g, ' ').trim();
+  const finalQuery = encodeURIComponent(queryStr || searchTitle);
+  
+  if (!forceType || forceType === 'movie' || forceType === 'all') {
+    let movieUrl = `${TMDB_BASE}/search/movie?api_key=${TMDB_API_KEY}&query=${finalQuery}`;
     if (searchYear) movieUrl += `&year=${searchYear}`;
     let movieRes = await fetch(movieUrl);
     let movieData = await movieRes.json();
@@ -48,8 +53,8 @@ export async function searchTMDBByTitle(searchTitle: string, searchYear: string,
     }
   }
   
-  if (!forceType || forceType === 'series' || forceType === 'tv') {
-    let tvUrl = `${TMDB_BASE}/search/tv?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(searchTitle)}`;
+  if (!forceType || forceType === 'series' || forceType === 'tv' || forceType === 'all') {
+    let tvUrl = `${TMDB_BASE}/search/tv?api_key=${TMDB_API_KEY}&query=${finalQuery}`;
     if (searchYear) tvUrl += `&first_air_date_year=${searchYear}`;
     let tvRes = await fetch(tvUrl);
     let tvData = await tvRes.json();
@@ -184,33 +189,6 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
     return null;
   }
 
-  async function searchTMDBByTitle(searchTitle: string, searchYear: string, forceType?: string) {
-    const results: any[] = [];
-    const promises = [];
-
-    if (!forceType || forceType === 'movie' || forceType === 'all') {
-      let movieUrl = `${TMDB_BASE}/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(searchTitle)}`;
-      if (searchYear) movieUrl += `&year=${searchYear}`;
-      promises.push(fetch(movieUrl).then(r => r.json()).then(data => {
-        if (data.results) data.results.forEach((item: any) => results.push({ item, type: 'movie' }));
-      }));
-    }
-    
-    if (!forceType || forceType === 'tv' || forceType === 'series' || forceType === 'all') {
-      let tvUrl = `${TMDB_BASE}/search/tv?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(searchTitle)}`;
-      if (searchYear) tvUrl += `&first_air_date_year=${searchYear}`;
-      promises.push(fetch(tvUrl).then(r => r.json()).then(data => {
-        if (data.results) data.results.forEach((item: any) => results.push({ item, type: 'tv' }));
-      }));
-    }
-
-    if (promises.length > 0) {
-      await Promise.all(promises);
-    }
-    
-    return results;
-  }
-
   async function fetchTMDBDetails(tmdbId: string, type: string) {
     const url = `${TMDB_BASE}/${type}/${tmdbId}?api_key=${TMDB_API_KEY}&append_to_response=credits,external_ids,content_ratings,videos`;
     const res = await fetch(url);
@@ -264,6 +242,14 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
     const initialFilter = searchForceType === 'movie' ? 'movie' : (searchForceType === 'series' || searchForceType === 'tv' ? 'tv' : 'all');
     setFilterType(initialFilter);
 
+    const performTitleSearch = async (t: string, y: string, ft?: string) => {
+      let res = await searchTMDBByTitle(t.trim(), y.trim(), ft);
+      if ((!res || res.length === 0) && y.trim()) {
+        res = await searchTMDBByTitle(t.trim(), '', ft);
+      }
+      return res;
+    };
+
     try {
       if (searchImdbId.trim()) {
         const idStr = searchImdbId.trim();
@@ -293,7 +279,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
           
           // If not found by TMDB ID, fall back to title search if title is provided
           if (searchTitle.trim()) {
-            const results = await searchTMDBByTitle(searchTitle.trim(), searchYear.trim(), searchForceType);
+            const results = await performTitleSearch(searchTitle, searchYear, searchForceType);
             if (results && results.length > 1) {
               setSearchResults(results);
               return;
@@ -313,7 +299,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
           } else {
             // If not found by IMDb ID, fall back to title search if title is provided
             if (searchTitle.trim()) {
-              const results = await searchTMDBByTitle(searchTitle.trim(), searchYear.trim(), searchForceType);
+              const results = await performTitleSearch(searchTitle, searchYear, searchForceType);
               if (results && results.length > 1) {
                 setSearchResults(results);
                 return;
@@ -326,7 +312,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
           }
         }
       } else if (searchTitle.trim()) {
-        const results = await searchTMDBByTitle(searchTitle.trim(), searchYear.trim(), searchForceType);
+        const results = await performTitleSearch(searchTitle, searchYear, searchForceType);
         if (results && results.length > 1) {
           setSearchResults(results);
         } else if (results && results.length === 1) {
@@ -353,11 +339,32 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
     }
     
     return results.sort((a, b) => {
+      const normalizeStr = (str: string) => (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const searchTitleNorm = normalizeStr(title);
+      
+      const titleA = normalizeStr(a.item.title || a.item.name || a.item.original_title || a.item.original_name);
+      const titleB = normalizeStr(b.item.title || b.item.name || b.item.original_title || b.item.original_name);
+      
+      const isExactA = titleA === searchTitleNorm ? 1 : 0;
+      const isExactB = titleB === searchTitleNorm ? 1 : 0;
+      
+      const targetYear = parseInt(year);
       const yearA = parseInt((a.item.release_date || a.item.first_air_date || '0').split('-')[0]) || 0;
       const yearB = parseInt((b.item.release_date || b.item.first_air_date || '0').split('-')[0]) || 0;
+
+      const isNearYearA = !isNaN(targetYear) && Math.abs(yearA - targetYear) <= 3 ? 1 : 0;
+      const isNearYearB = !isNaN(targetYear) && Math.abs(yearB - targetYear) <= 3 ? 1 : 0;
+
+      const scoreA = (isExactA * 10) + isNearYearA;
+      const scoreB = (isExactB * 10) + isNearYearB;
+
+      if (scoreA !== scoreB) {
+        return scoreB - scoreA;
+      }
+
       return yearB - yearA;
     });
-  }, [searchResults, filterType]);
+  }, [searchResults, filterType, title, year]);
 
   const fetchFullDetails = async (tmdbId: string, type: string) => {
     setLoading(true);
