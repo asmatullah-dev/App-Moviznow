@@ -477,11 +477,11 @@ export default function ContentManagement() {
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showDuplicates, setShowDuplicates] = useState(() => sessionStorage.getItem('adminShowDuplicates') === 'true');
-  const [showMissing, setShowMissing] = useState<'none' | 'missing' | 'complete' | '480p' | '720p' | '1080p' | 'trailer' | 'genre' | 'language' | 'quality' | 'poster' | 'disabled'>(() => {
+  const [showMissing, setShowMissing] = useState<'none' | 'missing' | 'complete' | '480p' | '720p' | '1080p' | 'trailer' | 'genre' | 'language' | 'quality' | 'poster' | 'year' | 'imdb' | 'releaseDate' | 'disabled'>(() => {
     const saved = sessionStorage.getItem('adminShowMissingOnly');
     if (saved === 'true') return 'missing';
     if (saved === 'complete') return 'complete';
-    if (['480p', '720p', '1080p', 'trailer', 'genre', 'language', 'quality', 'poster', 'disabled'].includes(saved || '')) return saved as any;
+    if (['480p', '720p', '1080p', 'trailer', 'genre', 'language', 'quality', 'poster', 'year', 'imdb', 'releaseDate', 'disabled'].includes(saved || '')) return saved as any;
     return 'none';
   });
   const [isMissingFilterOpen, setIsMissingFilterOpen] = useState(false);
@@ -2550,9 +2550,12 @@ export default function ContentManagement() {
 
     if (isStaff) {
       if (!content.posterUrl) labels.push('Missing Poster');
+      if (!content.year) labels.push('Missing Year');
+      if (!content.releaseDate) labels.push('Missing Release Date');
+      if (!content.imdbLink) labels.push('Missing IMDb Link');
       if (!content.genreIds || content.genreIds.length === 0) labels.push('Missing Genre');
       if (!content.languageIds || content.languageIds.length === 0) labels.push('Missing Language');
-      if (!content.qualityId) labels.push('Missing Quality');
+      if (!content.qualityId) labels.push('Missing Print Quality');
       if (!content.trailerUrl && (!content.trailers || content.trailers === '[]' || (Array.isArray(content.trailers) && content.trailers.length === 0))) labels.push('Missing Trailer');
       if (content.type === 'movie') {
           try {
@@ -2676,9 +2679,6 @@ export default function ContentManagement() {
               console.error('Error parsing seasons', e);
           }
       }
-      if (!content.qualityId) labels.push('Missing Print Quality');
-      if (!content.languageIds || content.languageIds.length === 0) labels.push('Missing Language');
-      if (!content.genreIds || content.genreIds.length === 0) labels.push('Missing Genre');
     }
     return labels;
   }, []);
@@ -2743,12 +2743,20 @@ export default function ContentManagement() {
         if (showMissing === 'trailer') searchTag = 'Missing Trailer';
         else if (showMissing === 'genre') searchTag = 'Missing Genre';
         else if (showMissing === 'language') searchTag = 'Missing Language';
-        else if (showMissing === 'quality') searchTag = 'Missing Quality';
+        else if (showMissing === 'quality') searchTag = 'Missing Print Quality';
         else if (showMissing === 'poster') searchTag = 'Missing Poster';
+        else if (showMissing === 'year') searchTag = 'Missing Year';
+        else if (showMissing === 'releaseDate') searchTag = 'Missing Release Date';
+        else if (showMissing === 'imdb') searchTag = 'Missing IMDb Link';
         else searchTag = showMissing; // e.g. '480p', '720p', '1080p'
         
-        // Strict filtering: All current missing details must match the selected category
-        // This ensures items that are missing MULTIPLE DIFFERENT types of info don't clutter specific lists
+        // For metadata fields (Poster, Year, Release Date, IMDb), show ANY item missing that field
+        if (['poster', 'year', 'releaseDate', 'imdb'].includes(showMissing)) {
+          return labels.some(l => l.toLowerCase().includes(searchTag.toLowerCase()));
+        }
+
+        // For link qualities and metadata tags, use strict filtering: 
+        // Show items missing ONLY that selected category to focus work
         return labels.every(l => l.toLowerCase().includes(searchTag.toLowerCase()));
       });
     }
@@ -3117,8 +3125,7 @@ export default function ContentManagement() {
                   className="flex items-center justify-center bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white p-2 rounded-lg transition-colors"
                   title="Batch Link Checker"
                 >
-                  <Plus className="w-4 h-4" />
-                  <Link2 className="w-4 h-4 ml-1" />
+                  <Link2 className="w-5 h-5 md:w-4 md:h-4" />
                 </button>
                 <button
                   onClick={() => setIsAdjustContentsModalOpen(true)}
@@ -3178,8 +3185,11 @@ export default function ContentManagement() {
                             { label: 'Missing Trailer', value: 'trailer' },
                             { label: 'Missing Genre', value: 'genre' },
                             { label: 'Missing Language', value: 'language' },
-                            { label: 'Missing Quality', value: 'quality' },
+                            { label: 'Missing Print Quality', value: 'quality' },
                             { label: 'Missing Poster', value: 'poster' },
+                            { label: 'Missing Year', value: 'year' },
+                            { label: 'Missing Release Date', value: 'releaseDate' },
+                            { label: 'Missing IMDb Link', value: 'imdb' },
                             { type: 'divider' },
                             { label: 'Disabled (Draft)', value: 'disabled', icon: <EyeOff className="w-4 h-4" /> }
                           ].map((item, idx) => {
