@@ -359,8 +359,18 @@ export const LinkCheckerModal: React.FC<Props> = ({
   const handleAddLinks = () => {
     if ((!onAddLinks && !onBatchAddLinks) || results.length === 0) return;
     
-    const validResults = results.filter(r => selectedUrls.has(r.url));
-    if (validResults.length === 0) return;
+    const validResultsRaw = results.filter(r => selectedUrls.has(r.url));
+    if (validResultsRaw.length === 0) return;
+
+    // Deduplicate by URL
+    const seenUrls = new Set<string>();
+    const validResults: LinkCheckResult[] = [];
+    for (const r of validResultsRaw) {
+      if (!seenUrls.has(r.url)) {
+        seenUrls.add(r.url);
+        validResults.push(r);
+      }
+    }
 
     const qualityLinks: QualityLinks = validResults.map(r => {
       // Use detected quality or fallback
@@ -398,7 +408,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
       if (r.fileSize) {
         const sizeMB = r.fileSize / (1000 * 1000);
         if (sizeMB >= 1000) {
-          sizeStr = (sizeMB / 1048).toFixed(2);
+          sizeStr = (sizeMB / 1000).toFixed(2);
           unit = 'GB';
         } else {
           sizeStr = sizeMB.toFixed(1).replace(/\.0$/, '');
@@ -460,7 +470,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
          }
          
          const batch = batchesMap.get(key)!;
-         batch.links.push(ql);
+         if (!batch.links.some(l => l.url === ql.url)) {
+           batch.links.push(ql);
+         }
  
          // Update detection per batch (if movie, keep movie, if any link is series, whole batch is series)
          if (ql.season || ql.episode) {

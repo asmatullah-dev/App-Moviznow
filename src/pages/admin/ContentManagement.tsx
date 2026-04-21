@@ -8,7 +8,7 @@ import { useUsers } from '../../contexts/UsersContext';
 import { Content, Genre, Language, Quality, QualityLinks, Season, Episode, LinkDef, Role, Trailer } from '../../types';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
-import { Plus, Edit2, Trash2, Share2, Film, Tv, X, Save, Upload, Search, Eye, EyeOff, ArrowUp, ArrowDown, Copy, ClipboardPaste, GripVertical, Bell, RefreshCw, ChevronDown, ChevronUp, User, Lock, Loader2, MessageCircle, MoreVertical, Link2, AlertCircle } from 'lucide-react';
+import { Plus, Edit2, Trash2, Share2, Film, Tv, X, Save, Upload, Search, Eye, EyeOff, ArrowUp, ArrowDown, Copy, ClipboardPaste, GripVertical, Bell, RefreshCw, ChevronDown, ChevronUp, User, Lock, Loader2, MessageCircle, MoreVertical, Link2, AlertCircle, Check } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import ConfirmModal from '../../components/ConfirmModal';
 import AlertModal from '../../components/AlertModal';
@@ -477,12 +477,14 @@ export default function ContentManagement() {
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showDuplicates, setShowDuplicates] = useState(() => sessionStorage.getItem('adminShowDuplicates') === 'true');
-  const [showMissing, setShowMissing] = useState<'none' | 'missing' | 'complete'>(() => {
+  const [showMissing, setShowMissing] = useState<'none' | 'missing' | 'complete' | '480p' | '720p' | '1080p' | 'trailer' | 'genre' | 'language' | 'quality' | 'poster' | 'disabled'>(() => {
     const saved = sessionStorage.getItem('adminShowMissingOnly');
     if (saved === 'true') return 'missing';
     if (saved === 'complete') return 'complete';
+    if (['480p', '720p', '1080p', 'trailer', 'genre', 'language', 'quality', 'poster', 'disabled'].includes(saved || '')) return saved as any;
     return 'none';
   });
+  const [isMissingFilterOpen, setIsMissingFilterOpen] = useState(false);
   
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -573,7 +575,10 @@ export default function ContentManagement() {
   const location = useLocation();
 
   useEffect(() => {
-    const handleClickOutside = () => setActiveDropdownId(null);
+    const handleClickOutside = () => {
+      setActiveDropdownId(null);
+      setIsMissingFilterOpen(false);
+    };
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
   }, []);
@@ -1099,6 +1104,12 @@ export default function ContentManagement() {
         };
 
         links.forEach(newLink => {
+          // SKIP if URL already exists in content
+          if (newLink.url && currentLinks.some(l => l.url === newLink.url)) {
+            console.log("Skipping duplicate movie link:", newLink.url);
+            return;
+          }
+
           // Find an existing link with same name and empty URL
           const emptyIdx = currentLinks.findIndex(l => l.name === newLink.name && (!l.url || !l.url.trim()));
           if (emptyIdx !== -1) {
@@ -1111,7 +1122,7 @@ export default function ContentManagement() {
         currentLinks.sort((a, b) => parseSizeInMB(a.size, a.unit) - parseSizeInMB(b.size, b.unit));
         return currentLinks;
       });
-      setAlertConfig({ isOpen: true, title: 'Success', message: `Added/Merged ${links.length} movie links.` });
+      setAlertConfig({ isOpen: true, title: 'Success', message: `Added/Merged movie links.` });
     } else {
       // Series logic
       const updatedSeasons = [...seasons];
@@ -1141,6 +1152,12 @@ export default function ContentManagement() {
           const updatedSeason = { ...updatedSeasons[seasonIdx] };
           const targetLinks = isZip ? [...updatedSeason.zipLinks] : [...(updatedSeason.mkvLinks || [])];
           
+          // SKIP if URL already exists in this season
+          if (link.url && targetLinks.some(l => l.url === link.url)) {
+            console.log("Skipping duplicate season link:", link.url);
+            return;
+          }
+
           // Merge logic: replace if name matches and URL is empty, otherwise add
           // Special case for MKV Full Season: match "720p" if new is "720p HEVC"
           const emptyIdx = targetLinks.findIndex(l => {
@@ -1183,6 +1200,12 @@ export default function ContentManagement() {
           const updatedEpisode = { ...updatedEpisodes[epIdx] };
           const targetLinks = [...updatedEpisode.links];
           
+          // SKIP if URL already exists in this episode
+          if (link.url && targetLinks.some(l => l.url === link.url)) {
+            console.log("Skipping duplicate episode link:", link.url);
+            return;
+          }
+
           // Merge logic: replace if name matches and URL is empty, otherwise add
           const emptyIdx = targetLinks.findIndex(l => l.name === link.name && (!l.url || !l.url.trim()));
           if (emptyIdx !== -1) {
@@ -1244,8 +1267,8 @@ export default function ContentManagement() {
     if (!sizeStr) return 0;
     const num = parseFloat(sizeStr.replace(/,/g, '')) || 0;
     const u = (unit || '').toUpperCase();
-    if (u.includes('GB')) return num * 1048;
-    if (u.includes('TB')) return num * 1048 * 1024;
+    if (u.includes('GB')) return num * 1000;
+    if (u.includes('TB')) return num * 1000 * 1000;
     return num;
   };
 
@@ -2457,14 +2480,22 @@ export default function ContentManagement() {
         };
 
         if (linkSection === 'movie') {
-          newMovieLinks.push(link);
+          if (!newMovieLinks.some(l => l.url === url)) {
+            newMovieLinks.push(link);
+          }
         } else if (linkSection === 'zip' && currentSeason) {
-          currentSeason.zipLinks.push(link);
+          if (!currentSeason.zipLinks.some(l => l.url === url)) {
+            currentSeason.zipLinks.push(link);
+          }
         } else if (linkSection === 'mkv' && currentSeason) {
           if (!currentSeason.mkvLinks) currentSeason.mkvLinks = [];
-          currentSeason.mkvLinks.push(link);
+          if (!currentSeason.mkvLinks.some(l => l.url === url)) {
+            currentSeason.mkvLinks.push(link);
+          }
         } else if (linkSection === 'episode' && currentEpisode) {
-          currentEpisode.links.push(link);
+          if (!currentEpisode.links.some(l => l.url === url)) {
+            currentEpisode.links.push(link);
+          }
         }
       }
     });
@@ -2518,6 +2549,10 @@ export default function ContentManagement() {
     };
 
     if (isStaff) {
+      if (!content.posterUrl) labels.push('Missing Poster');
+      if (!content.genreIds || content.genreIds.length === 0) labels.push('Missing Genre');
+      if (!content.languageIds || content.languageIds.length === 0) labels.push('Missing Language');
+      if (!content.qualityId) labels.push('Missing Quality');
       if (!content.trailerUrl && (!content.trailers || content.trailers === '[]' || (Array.isArray(content.trailers) && content.trailers.length === 0))) labels.push('Missing Trailer');
       if (content.type === 'movie') {
           try {
@@ -2696,6 +2731,25 @@ export default function ContentManagement() {
       result = result.filter(c => {
         const labels = getMissingLabels(c, profile);
         return labels.length === 0;
+      });
+    } else if (showMissing === 'disabled') {
+      result = result.filter(c => (c.status || 'published') === 'draft');
+    } else if (showMissing !== 'none') {
+      result = result.filter(c => {
+        const labels = getMissingLabels(c, profile);
+        if (labels.length === 0) return false;
+
+        let searchTag = '';
+        if (showMissing === 'trailer') searchTag = 'Missing Trailer';
+        else if (showMissing === 'genre') searchTag = 'Missing Genre';
+        else if (showMissing === 'language') searchTag = 'Missing Language';
+        else if (showMissing === 'quality') searchTag = 'Missing Quality';
+        else if (showMissing === 'poster') searchTag = 'Missing Poster';
+        else searchTag = showMissing; // e.g. '480p', '720p', '1080p'
+        
+        // Strict filtering: All current missing details must match the selected category
+        // This ensures items that are missing MULTIPLE DIFFERENT types of info don't clutter specific lists
+        return labels.every(l => l.toLowerCase().includes(searchTag.toLowerCase()));
       });
     }
 
@@ -3083,29 +3137,81 @@ export default function ContentManagement() {
                 >
                   <Copy className="w-4 h-4" />
                 </button>
-                <button
-                  onClick={() => {
-                    if (showMissing === 'none') setShowMissing('missing');
-                    else if (showMissing === 'missing') setShowMissing('complete');
-                    else setShowMissing('none');
-                  }}
-                  className={clsx(
-                    "flex items-center justify-center p-2 rounded-lg transition-colors relative",
-                    showMissing === 'missing' ? "bg-red-500 text-white" : 
-                    showMissing === 'complete' ? "bg-emerald-500 text-white" : 
-                    "bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white"
-                  )}
-                  title={
-                    showMissing === 'missing' ? "Viewing Missing Info" : 
-                    showMissing === 'complete' ? "Viewing Complete Info" : 
-                    "Filter Missing/Complete Info"
-                  }
-                >
-                  <AlertCircle className="w-4 h-4" />
-                  {showMissing !== 'none' && (
-                    <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-white border border-zinc-200" />
-                  )}
-                </button>
+                <div className="relative">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsMissingFilterOpen(!isMissingFilterOpen);
+                    }}
+                    className={clsx(
+                      "flex items-center justify-center p-2 rounded-lg transition-colors relative gap-1",
+                      showMissing !== 'none' ? (showMissing === 'complete' ? "bg-emerald-500 text-white" : "bg-red-500 text-white") : 
+                      "bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white"
+                    )}
+                    title="Missing Details Filter"
+                  >
+                    <AlertCircle className="w-4 h-4" />
+                    <ChevronDown className={clsx("w-3 h-3 transition-transform", isMissingFilterOpen && "rotate-180")} />
+                    {showMissing !== 'none' && (
+                      <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-white border-2 border-zinc-900 shadow-sm" />
+                    )}
+                  </button>
+                  
+                  <AnimatePresence>
+                    {isMissingFilterOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                        className="absolute right-0 mt-2 w-56 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xl z-[60] overflow-hidden"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="p-2 space-y-0.5">
+                          {[
+                            { label: 'All Content', value: 'none', icon: <Eye className="w-4 h-4" /> },
+                            { label: 'Missing Info (All)', value: 'missing', icon: <AlertCircle className="w-4 h-4" />, color: 'text-red-500' },
+                            { label: 'Complete Info', value: 'complete', icon: <Check className="w-4 h-4" />, color: 'text-emerald-500' },
+                            { type: 'divider' },
+                            { label: 'Missing 480p', value: '480p' },
+                            { label: 'Missing 720p', value: '720p' },
+                            { label: 'Missing 1080p', value: '1080p' },
+                            { label: 'Missing Trailer', value: 'trailer' },
+                            { label: 'Missing Genre', value: 'genre' },
+                            { label: 'Missing Language', value: 'language' },
+                            { label: 'Missing Quality', value: 'quality' },
+                            { label: 'Missing Poster', value: 'poster' },
+                            { type: 'divider' },
+                            { label: 'Disabled (Draft)', value: 'disabled', icon: <EyeOff className="w-4 h-4" /> }
+                          ].map((item, idx) => {
+                            if (item.type === 'divider') return <div key={`div-${idx}`} className="h-px bg-zinc-200 dark:bg-zinc-800 my-1 mx-2" />;
+                            
+                            return (
+                              <button
+                                key={item.value}
+                                onClick={() => {
+                                  setShowMissing(item.value as any);
+                                  setIsMissingFilterOpen(false);
+                                }}
+                                className={clsx(
+                                  "w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors",
+                                  showMissing === item.value 
+                                    ? "bg-emerald-500 text-white" 
+                                    : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800"
+                                )}
+                              >
+                                <div className="flex items-center gap-2">
+                                  {item.icon && <span className={clsx(showMissing === item.value ? "text-white" : item.color)}>{item.icon}</span>}
+                                  <span className={clsx(!item.icon && "ml-6")}>{item.label}</span>
+                                </div>
+                                {showMissing === item.value && <Check className="w-4 h-4" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
               </div>
             )}
           </div>
