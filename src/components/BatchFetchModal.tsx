@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Loader2, CheckCircle2, XCircle, Search, RefreshCw } from 'lucide-react';
 import { useModalBehavior } from '../hooks/useModalBehavior';
 import { LinkCheckResult, performFullLinkScan, guessLinkType } from '../utils/linkScanner';
-import { searchTMDBByTitle, fetchTMDBDetails, fetchSeriesSeasons, fetchIMDbRating, getBestTrailer, searchYouTubeTrailer } from './MediaModal';
+import { searchTMDBByTitle, fetchTMDBDetails, fetchSeriesSeasons, fetchIMDbRating, getBestTrailer, searchYouTubeTrailer, fetchKinoCheckTrailer } from './MediaModal';
 import { db } from '../firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 
@@ -156,29 +156,6 @@ export const BatchFetchModal: React.FC<Props> = ({
                 if (finalRuntime) updates.runtime = finalRuntime;
             }
             if (fetchFields.imdbLink && details.external_ids?.imdb_id) updates.imdbLink = `https://www.imdb.com/title/${details.external_ids.imdb_id}`;
-            if (fetchFields.trailerUrl) {
-               let trailerUrl = getBestTrailer(details.videos);
-               if (!trailerUrl) {
-                  const ytResults = await searchYouTubeTrailer(details.title || details.name);
-                  if (ytResults && ytResults.length > 0) {
-                      // Need an exact match to avoid incorrect trailers in batch mode
-                      const targetStr = normalizeStr((details.title || details.name) + ' trailer');
-                      const titleStrOnly = normalizeStr(details.title || details.name);
-                      
-                      const exactMatch = ytResults.find((yt: any) => {
-                          const ytStr = normalizeStr(yt.title);
-                          return ytStr === targetStr || ytStr === titleStrOnly || ytStr.includes(targetStr);
-                      });
-                      
-                      if (exactMatch) {
-                          trailerUrl = exactMatch.url;
-                      } else if (ytResults.length === 1) {
-                          trailerUrl = ytResults[0].url;
-                      }
-                  }
-               }
-               if (trailerUrl) updates.trailerUrl = trailerUrl;
-            }
             if (fetchFields.cast) updates.cast = details.credits?.cast?.slice(0, 10).map((c: any) => c.name).join(', ') || data.cast;
             if (fetchFields.posterUrl && details.poster_path) updates.posterUrl = `https://image.tmdb.org/t/p/w500${details.poster_path}`;
             if (fetchFields.backdropUrl && details.backdrop_path) updates.backdropUrl = `https://image.tmdb.org/t/p/original${details.backdrop_path}`;
@@ -186,6 +163,12 @@ export const BatchFetchModal: React.FC<Props> = ({
             const parallelOps: Promise<any>[] = [];
             let imdbPromiseIdx = -1;
             let seasonsPromiseIdx = -1;
+            let kinocheckPromiseIdx = -1;
+
+            if (fetchFields.trailerUrl) {
+               parallelOps.push(fetchKinoCheckTrailer(bestMatch.item.id, bestMatch.type));
+               kinocheckPromiseIdx = parallelOps.length - 1;
+            }
 
             if (fetchFields.imdbRating && details.external_ids?.imdb_id) {
                parallelOps.push(fetchIMDbRating(details.external_ids.imdb_id));
@@ -198,6 +181,33 @@ export const BatchFetchModal: React.FC<Props> = ({
             }
 
             const parallelResults = await Promise.all(parallelOps);
+
+            if (kinocheckPromiseIdx !== -1) {
+               // Flow: TMDB First -> KinoCheck Second -> YouTube Third
+               let trailerUrl = getBestTrailer(details.videos) || '';
+               
+               if (!trailerUrl) {
+                  trailerUrl = parallelResults[kinocheckPromiseIdx] || '';
+               }
+               
+               if (!trailerUrl) {
+                  const ytResults = await searchYouTubeTrailer(details.title || details.name, bestMatch.type);
+                  if (ytResults && ytResults.length > 0) {
+                      const titleNorm = normalizeStr(details.title || details.name);
+                      const strictMatch = ytResults.find((yt: any) => {
+                          const ytTitleNorm = normalizeStr(yt.title);
+                          return ytTitleNorm.includes(titleNorm) && 
+                                 ytTitleNorm.includes('official') && 
+                                 ytTitleNorm.includes('trailer');
+                      });
+                      
+                      if (strictMatch) {
+                          trailerUrl = strictMatch.url;
+                      }
+                  }
+               }
+               if (trailerUrl) updates.trailerUrl = trailerUrl;
+            }
 
             if (imdbPromiseIdx !== -1 && parallelResults[imdbPromiseIdx]) {
                updates.imdbRating = parallelResults[imdbPromiseIdx].rating;
@@ -229,6 +239,7 @@ export const BatchFetchModal: React.FC<Props> = ({
                     
                     const seasonYear = fetchedSeason.year && fetchedSeason.year !== 'N/A' ? parseInt(fetchedSeason.year.toString()) : undefined;
                     const title = fetchedSeason.name && !/^Season\s+\d+$/i.test(fetchedSeason.name) ? fetchedSeason.name : existingSeason.title;
+                    const trailerUrl = fetchedSeason.trailerUrl || existingSeason.trailerUrl || '';
 
                     const mergedEpisodes = [...(existingSeason.episodes || [])];
 
@@ -262,6 +273,7 @@ export const BatchFetchModal: React.FC<Props> = ({
                         ...existingSeason,
                         title: title || '',
                         year: seasonYear || existingSeason.year,
+                        trailerUrl,
                         episodes: mergedEpisodes
                     };
 
@@ -275,6 +287,34 @@ export const BatchFetchModal: React.FC<Props> = ({
                 mergedSeasons.sort((a, b) => a.seasonNumber - b.seasonNumber);
                 
                 updates.seasons = JSON.stringify(mergedSeasons);
+
+                // Add season trailers to the global trailers array
+                const seasonTrailers = mergedSeasons
+                    .filter((s: any) => s.trailerUrl)
+                    .map((s: any) => ({
+                        id: `season-trailer-${s.seasonNumber}`,
+                        url: s.trailerUrl,
+                        title: s.title || `Season ${s.seasonNumber} Trailer`,
+                        seasonNumber: s.seasonNumber
+                    }));
+
+                if (seasonTrailers.length > 0) {
+                    let existingTrailers: any[] = [];
+                    if (data.trailers) {
+                        try {
+                            existingTrailers = typeof data.trailers === 'string' ? JSON.parse(data.trailers) : data.trailers;
+                        } catch (e) {}
+                    }
+                    
+                    const newTrailers = [...existingTrailers];
+                    seasonTrailers.forEach(st => {
+                        if (!newTrailers.some(t => t.url === st.url)) {
+                            newTrailers.push(st);
+                        }
+                    });
+                    
+                    updates.trailers = JSON.stringify(newTrailers);
+                }
             }
 
             if (fetchFields.genres && Array.isArray(details.genres) && genres) {

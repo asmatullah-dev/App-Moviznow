@@ -20,13 +20,15 @@ const YOUTUBE_API_KEY = import.meta.env.VITE_YOUTUBE_API_KEY || '';
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const OMDB_BASE = 'https://www.omdbapi.com/';
 
-export async function searchYouTubeTrailer(query: string) {
+export async function searchYouTubeTrailer(title: string, type: string) {
   if (!YOUTUBE_API_KEY) {
      console.warn("YouTube API key is missing. Cannot fallback to YouTube search.");
      return [];
   }
   try {
-    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query + ' trailer')}&type=video&key=${YOUTUBE_API_KEY}&maxResults=5`;
+    const typeLabel = type === 'tv' || type === 'series' ? 'Series' : 'Movie';
+    const query = `${title} ${typeLabel} Hindi Trailer`;
+    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query)}&type=video&key=${YOUTUBE_API_KEY}&maxResults=10`;
     const res = await fetch(url);
     const data = await res.json();
     if (data.items) {
@@ -41,6 +43,48 @@ export async function searchYouTubeTrailer(query: string) {
     console.error("YouTube Search Error:", e);
   }
   return [];
+}
+
+export async function fetchKinoCheckTrailer(tmdbId: string, type: string) {
+  try {
+     const endpoint = (type === 'series' || type === 'tv') ? 'shows' : 'movies';
+     
+     // Priority languages: Hindi, English, Punjabi, Tamil, Telugu, Malayalam, Kannada + Global
+     const languages = ['hi', 'en', 'pa', 'ta', 'te', 'ml', 'kn', ''];
+     
+     const fetchPromises = languages.map(async (lang) => {
+       try {
+         const langParam = lang ? `&language=${lang}` : '';
+         const res = await fetch(`https://api.kinocheck.de/${endpoint}?tmdb_id=${tmdbId}${langParam}`);
+         if (res.ok) {
+           const data = await res.json();
+           if (data.trailer?.youtube_video_id) {
+             return { lang, url: `https://www.youtube.com/watch?v=${data.trailer.youtube_video_id}` };
+           }
+         }
+       } catch (e) {}
+       return null;
+     });
+
+     const results = await Promise.all(fetchPromises);
+     
+     // Filter out nulls and sort by original priority
+     const validResults = results.filter((r): r is { lang: string; url: string } => r !== null);
+     
+     if (validResults.length === 0) return null;
+
+     // Sort by original languages array order
+     validResults.sort((a, b) => {
+       const indexA = languages.indexOf(a.lang);
+       const indexB = languages.indexOf(b.lang);
+       return indexA - indexB;
+     });
+
+     return validResults[0].url;
+  } catch (e) {
+     console.error("KinoCheck Error:", e);
+  }
+  return null;
 }
 
 export async function findTMDBByImdb(imdbID: string, forceType?: string) {
@@ -91,7 +135,7 @@ export async function searchTMDBByTitle(searchTitle: string, searchYear: string,
 }
 
 export async function fetchTMDBDetails(tmdbId: string, type: string) {
-  const url = `${TMDB_BASE}/${type}/${tmdbId}?api_key=${TMDB_API_KEY}&append_to_response=credits,external_ids,content_ratings,videos&include_video_language=en,es,fr,de,it,pt,ru,zh,ja,ko,hi,null`;
+  const url = `${TMDB_BASE}/${type}/${tmdbId}?api_key=${TMDB_API_KEY}&append_to_response=credits,external_ids,content_ratings,videos&include_video_language=hi,en,es,fr,de,it,pt,ru,zh,ja,ko,null`;
   const res = await fetch(url);
   return await res.json();
 }
@@ -108,13 +152,14 @@ export async function fetchSeriesSeasons(tmdbId: string, knownSeasons?: any[]) {
 
   const validSeasons = seasonsDataList.filter((s: any) => s.season_number !== 0);
   const seasonPromises = validSeasons.map(async (season: any) => {
-    const seasonUrl = `${TMDB_BASE}/tv/${tmdbId}/season/${season.season_number}?api_key=${TMDB_API_KEY}`;
+    const seasonUrl = `${TMDB_BASE}/tv/${tmdbId}/season/${season.season_number}?api_key=${TMDB_API_KEY}&append_to_response=videos&include_video_language=hi,en,es,fr,de,it,pt,ru,zh,ja,ko,null`;
     const seasonRes = await fetch(seasonUrl);
     const seasonData = await seasonRes.json();
     return {
       season: season.season_number,
       name: season.name,
       year: season.air_date ? season.air_date.split('-')[0] : 'N/A',
+      trailerUrl: getBestTrailer(seasonData.videos) || '',
       episodes: seasonData.episodes || []
     };
   });
@@ -128,22 +173,36 @@ export function getBestTrailer(videos: { results?: any[] }) {
   const youtubeVideos = videos.results.filter(v => v.site === 'YouTube');
   if (youtubeVideos.length === 0) return null;
 
-  // 1. Official Trailer
-  let best = youtubeVideos.find(v => v.type === 'Trailer' && v.official);
-  // 2. Any Trailer
-  if (!best) best = youtubeVideos.find(v => v.type === 'Trailer');
-  // 3. Official Teaser
-  if (!best) best = youtubeVideos.find(v => v.type === 'Teaser' && v.official);
-  // 4. Any Teaser
-  if (!best) best = youtubeVideos.find(v => v.type === 'Teaser');
-  // 5. Official Clip
-  if (!best) best = youtubeVideos.find(v => v.type === 'Clip' && v.official);
-  // 6. Name includes 'trailer'
-  if (!best) best = youtubeVideos.find(v => v.name.toLowerCase().includes('trailer'));
-  // 7. Fallback to the first video
-  if (!best) best = youtubeVideos[0];
+  // Language priority: Hindi then English
+  const hindiVideos = youtubeVideos.filter(v => v.iso_639_1 === 'hi');
+  const englishVideos = youtubeVideos.filter(v => v.iso_639_1 === 'en');
+  
+  const searchInSet = (set: any[]) => {
+    // 1. Official Trailer
+    let best = set.find(v => v.type === 'Trailer' && v.official);
+    if (best) return best;
+    // 2. Any Trailer
+    best = set.find(v => v.type === 'Trailer');
+    if (best) return best;
+    // 3. Official Teaser
+    best = set.find(v => v.type === 'Teaser' && v.official);
+    if (best) return best;
+    // 4. Any Teaser
+    best = set.find(v => v.type === 'Teaser');
+    if (best) return best;
+    // 5. Clip/Other
+    best = set.find(v => v.type === 'Clip' || v.type === 'Featurette');
+    return best || null;
+  };
 
-  return `https://www.youtube.com/watch?v=${best.key}`;
+  const bestHindi = searchInSet(hindiVideos);
+  if (bestHindi) return `https://www.youtube.com/watch?v=${bestHindi.key}`;
+
+  const bestEnglish = searchInSet(englishVideos);
+  if (bestEnglish) return `https://www.youtube.com/watch?v=${bestEnglish.key}`;
+
+  const bestOther = searchInSet(youtubeVideos);
+  return bestOther ? `https://www.youtube.com/watch?v=${bestOther.key}` : null;
 }
 
 export async function fetchIMDbRating(imdbID: string) {
@@ -166,6 +225,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
   const [year, setYear] = useState(initialYear);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [trailerSource, setTrailerSource] = useState<'kinocheck' | 'tmdb' | 'youtube' | null>(null);
   const [fetchedData, setFetchedData] = useState<any>(null);
   const [searchResults, setSearchResults] = useState<any[] | null>(null);
   const [youtubeTrailerOptions, setYoutubeTrailerOptions] = useState<any[] | null>(null);
@@ -215,6 +275,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
       
       const defaultFilter = initialType === 'movie' ? 'movie' : (initialType === 'series' || initialType === 'tv' ? 'tv' : 'all');
       setFilterType(defaultFilter);
+      setTrailerSource(null);
       setError(null);
       
       if (initialImdbId || initialTitle) {
@@ -385,6 +446,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
       const promises: Promise<any>[] = [];
       let imdbPromiseIndex = -1;
       let seasonsPromiseIndex = -1;
+      let kinocheckPromiseIndex = -1;
 
       if (details.external_ids && details.external_ids.imdb_id) {
         promises.push(fetchIMDbRating(details.external_ids.imdb_id));
@@ -396,10 +458,21 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
         seasonsPromiseIndex = promises.length - 1;
       }
 
+      promises.push(fetchKinoCheckTrailer(tmdbId, type));
+      kinocheckPromiseIndex = promises.length - 1;
+
       const results = await Promise.all(promises);
 
       const imdbRatingData = imdbPromiseIndex !== -1 ? results[imdbPromiseIndex] : null;
       const seasonsData = seasonsPromiseIndex !== -1 ? results[seasonsPromiseIndex] : null;
+      let trailerUrl = getBestTrailer(details.videos) || '';
+      
+      if (trailerUrl) {
+          setTrailerSource('tmdb');
+      } else {
+          trailerUrl = kinocheckPromiseIndex !== -1 ? results[kinocheckPromiseIndex] : null;
+          if (trailerUrl) setTrailerSource('kinocheck');
+      }
 
       const parsedData: any = {
         title: details.title || details.name,
@@ -414,7 +487,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
         imdbLink: details.external_ids?.imdb_id ? `https://www.imdb.com/title/${details.external_ids.imdb_id}` : '',
         imdbRating: imdbRatingData?.rating && imdbRatingData.rating !== 'N/A' ? `${imdbRatingData.rating}/10` : '',
         genres: details.genres?.map((g: any) => g.name) || [],
-        trailerUrl: getBestTrailer(details.videos) || '',
+        trailerUrl,
         seasons: seasonsData
       };
 
@@ -423,8 +496,21 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
       // Search YouTube if TMDB didn't provide a trailer
       if (!parsedData.trailerUrl) {
          setLoading(true);
-         const ytResults = await searchYouTubeTrailer(parsedData.title || details.name);
+         const ytResults = await searchYouTubeTrailer(parsedData.title || details.name, type);
          if (ytResults && ytResults.length > 0) {
+             // Sort by priority: Official Trailer > Trailer > Teaser > Clip
+             ytResults.sort((a: any, b: any) => {
+                 const tA = a.title.toLowerCase();
+                 const tB = b.title.toLowerCase();
+                 const p = (t: string) => {
+                     if (t.includes('official') && t.includes('trailer')) return 1;
+                     if (t.includes('trailer')) return 2;
+                     if (t.includes('teaser')) return 3;
+                     if (t.includes('clip')) return 4;
+                     return 5;
+                 };
+                 return p(tA) - p(tB);
+             });
              setYoutubeTrailerOptions(ytResults);
          }
          setLoading(false);
@@ -486,6 +572,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
         title: s.name && !/^Season\s+\d+$/i.test(s.name) ? s.name : '',
         year: s.year && s.year !== 'N/A' ? parseInt(s.year.toString()) : undefined,
         seasonYear: s.year && s.year !== 'N/A' ? parseInt(s.year.toString()) : undefined,
+        trailerUrl: s.trailerUrl || '',
         episodes: s.episodes.map((e: any) => ({
           id: `e${e.episode_number}`,
           episodeNumber: e.episode_number,
@@ -495,6 +582,20 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
           videoUrl: ''
         }))
       }));
+
+      // Map season trailers to the main trailers array if they exist
+      const seasonTrailers = fetchedData.seasons
+        .filter((s: any) => selectedSeasons.includes(s.season) && s.trailerUrl)
+        .map((s: any) => ({
+          id: `season-trailer-${s.season}`,
+          url: s.trailerUrl,
+          title: s.name || `Season ${s.season} Trailer`,
+          seasonNumber: s.season
+        }));
+      
+      if (seasonTrailers.length > 0) {
+        dataToApply.trailers = seasonTrailers;
+      }
     }
 
     onApply(dataToApply);
@@ -674,8 +775,21 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
                         onChange={() => toggleField(field.key)}
                         className="mt-1 rounded bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-emerald-500 focus:ring-emerald-500 cursor-pointer"
                       />
-                      <div>
-                        <div className="text-xs text-zinc-500 dark:text-zinc-500 font-medium uppercase">{field.label}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <div className="text-xs text-zinc-500 dark:text-zinc-500 font-medium uppercase">{field.label}</div>
+                          {field.key === 'trailerUrl' && trailerSource && (
+                            <span className={clsx(
+                              "text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider",
+                              trailerSource === 'kinocheck' ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20" : 
+                              trailerSource === 'tmdb' ? "bg-blue-500/10 text-blue-500 border border-blue-500/20" :
+                              "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                            )}>
+                              {trailerSource === 'kinocheck' ? 'By KinoCheck' : 
+                               trailerSource === 'tmdb' ? 'By TMDB' : 'By YouTube'}
+                            </span>
+                          )}
+                        </div>
                         <div className="text-sm text-zinc-900 dark:text-white break-all">{field.value}</div>
                         {field.key === 'trailerUrl' && fetchedData.trailerTitle && (
                           <div className="text-xs text-emerald-500 mt-1 font-medium">

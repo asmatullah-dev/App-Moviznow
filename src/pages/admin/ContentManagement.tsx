@@ -1396,6 +1396,17 @@ export default function ContentManagement() {
     if (data.trailerUrl) {
       setTrailerUrl(data.trailerUrl);
     }
+    if (data.trailers && Array.isArray(data.trailers)) {
+      setTrailers(prev => {
+        const newTrailers = [...prev];
+        data.trailers.forEach((newTrailer: any) => {
+          if (!newTrailers.some(t => t.url === newTrailer.url)) {
+            newTrailers.push(newTrailer);
+          }
+        });
+        return newTrailers;
+      });
+    }
 
     if (data.genres && Array.isArray(data.genres)) {
       const fetchedGenreNames = data.genres.map((g: string) => g.trim().toLowerCase());
@@ -1443,6 +1454,7 @@ export default function ContentManagement() {
             const existingSeason = updatedSeasons[existingSeasonIndex];
             if (fetchedSeason.seasonYear) existingSeason.year = fetchedSeason.seasonYear;
             if (fetchedSeason.title) existingSeason.title = fetchedSeason.title;
+            if (fetchedSeason.trailerUrl) existingSeason.trailerUrl = fetchedSeason.trailerUrl;
             fetchedSeason.episodes.forEach((fetchedEp: any) => {
               const existingEpIndex = existingSeason.episodes.findIndex(ep => ep.episodeNumber === fetchedEp.episodeNumber);
               if (existingEpIndex !== -1) {
@@ -1474,6 +1486,7 @@ export default function ContentManagement() {
               seasonNumber: fetchedSeason.seasonNumber,
               year: fetchedSeason.seasonYear,
               title: fetchedSeason.title,
+              trailerUrl: fetchedSeason.trailerUrl || '',
               zipLinks: [
                 { id: Math.random().toString(36).substr(2, 9), name: '480p', url: '', size: '', unit: 'GB' },
                 { id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'GB' },
@@ -4045,6 +4058,20 @@ export default function ContentManagement() {
                                     setSeasons(newSeasons);
                                   }}
                                   placeholder="Season Title"
+                                  className="flex-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 text-sm"
+                                />
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <h4 className="font-bold text-sm text-zinc-500 dark:text-zinc-400">Trailer URL</h4>
+                                <input
+                                  type="url"
+                                  value={season.trailerUrl || ''}
+                                  onChange={(e) => {
+                                    const newSeasons = [...seasons];
+                                    newSeasons[sIdx].trailerUrl = e.target.value;
+                                    setSeasons(newSeasons);
+                                  }}
+                                  placeholder="Season Trailer YouTube URL"
                                   className="flex-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 text-sm"
                                 />
                               </div>
