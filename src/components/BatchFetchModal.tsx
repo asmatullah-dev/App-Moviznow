@@ -96,24 +96,31 @@ export const BatchFetchModal: React.FC<Props> = ({
          const tmdbResults = await searchTMDBByTitle(searchTitle, searchYear, data.type);
          
          if (tmdbResults && tmdbResults.length > 0) {
-            const bestMatch = tmdbResults[0];
-            const details = await fetchTMDBDetails(bestMatch.item.id, bestMatch.type);
-            
-            // Validate Match
             const normalizeStr = (str: string) => (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
             const targetTitle = normalizeStr(searchTitle);
-            const matchTitle = normalizeStr(details.title || details.name);
             const targetYearStr = searchYear ? searchYear.toString() : '';
-            const bestMatchYear = (details.release_date || details.first_air_date || '').split('-')[0];
+
+            // Find best exact match natively from TMDB array
+            let bestMatch = tmdbResults.find((res: any) => {
+               const matchTitle = normalizeStr(res.item.title || res.item.name || res.item.original_title || res.item.original_name);
+               const matchYear = (res.item.release_date || res.item.first_air_date || '').split('-')[0];
+               return matchTitle === targetTitle && (!targetYearStr || matchYear === targetYearStr);
+            });
+
+            // If no strict year match, fall back to exact title match
+            if (!bestMatch) {
+                bestMatch = tmdbResults.find((res: any) => {
+                   const matchTitle = normalizeStr(res.item.title || res.item.name || res.item.original_title || res.item.original_name);
+                   return matchTitle === targetTitle;
+                });
+            }
             
-            const resemblesTitle = matchTitle && targetTitle && (targetTitle.includes(matchTitle) || matchTitle.includes(targetTitle));
-            const isSameYear = targetYearStr && bestMatchYear && targetYearStr === bestMatchYear;
-            
-            if (!resemblesTitle && !isSameYear) {
-                updateResult(id, 'error', `Unconfident match: "${details.title || details.name}"`);
+            if (!bestMatch) {
+                updateResult(id, 'error', `No exact title match found for "${searchTitle}"`);
                 return;
             }
 
+            const details = await fetchTMDBDetails(bestMatch.item.id, bestMatch.type);
             const updates: any = {};
             
             if (fetchFields.title) updates.title = details.title || details.name || data.title;
