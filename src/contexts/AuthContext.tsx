@@ -480,35 +480,144 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    // Track time spent periodically (every 1 minute to ensure accuracy)
+    // Track time spent accurately every second and save to local storage
     const timeTrackerInterval = setInterval(() => {
-      if (auth.currentUser && sessionStartTimeRef.current && navigator.onLine) {
-        // Only update if the tab is visible
+      if (auth.currentUser && sessionStartTimeRef.current) {
         if (document.visibilityState === 'visible') {
-          const userRef = doc(db, 'users', auth.currentUser.uid);
-          updateDoc(userRef, {
-            timeSpent: increment(1),
-            lastActive: new Date().toISOString()
-          }).then(() => {
-            // Log to GA4 every 5 minutes (approximate) to reduce event spam, 
-            // but keep firestore updated every minute for UI
-            const timeSpentMs = Date.now() - sessionStartTimeRef.current!;
-            const timeSpentMinutes = Math.floor(timeSpentMs / 60000);
-            if (timeSpentMinutes > 0 && timeSpentMinutes % 5 === 0) {
-                logEvent('time_spent', auth.currentUser!.uid, { duration: 5 });
+          const uid = auth.currentUser.uid;
+          const globalTickKey = `last_global_tick_${uid}`;
+          const now = Date.now();
+          const lastTick = parseInt(safeStorage.getItem(globalTickKey) || '0', 10);
+          
+          // Prevent double-counting if multiple tabs are active (wall-clock precision lock)
+          if (now - lastTick >= 900) {
+            safeStorage.setItem(globalTickKey, now.toString());
+            
+            const cacheKey = `accumulated_time_seconds_${uid}`;
+            const lastSyncKey = `last_time_sync_${uid}`;
+            
+            let accSeconds = parseInt(safeStorage.getItem(cacheKey) || '0', 10);
+            if (isNaN(accSeconds)) accSeconds = 0;
+            accSeconds += 1;
+            safeStorage.setItem(cacheKey, accSeconds.toString());
+
+            // Initialize last sync time if it doesn't exist so the 12-hour timer starts correctly
+            let lastSyncTimeStr = safeStorage.getItem(lastSyncKey);
+            if (!lastSyncTimeStr) {
+               lastSyncTimeStr = Date.now().toString();
+               safeStorage.setItem(lastSyncKey, lastSyncTimeStr);
             }
-          }).catch(console.error);
+
+            let lastSyncTime = parseInt(lastSyncTimeStr, 10);
+            if (isNaN(lastSyncTime)) lastSyncTime = Date.now();
+            const twelveHoursMs = 12 * 60 * 60 * 1000;
+            const forceSync = (Date.now() - lastSyncTime) >= twelveHoursMs;
+
+            // Sync to Firestore every 5 minutes (300 seconds) or every 12 hours to reduce write operations
+            if ((accSeconds >= 300 || forceSync) && navigator.onLine) {
+              let minutesToSync = Math.floor(accSeconds / 60);
+              
+              // If forced by 12 hours and we have less than 1 minute, round up so we don't drop the time
+              if (forceSync && minutesToSync === 0 && accSeconds > 0) {
+                minutesToSync = 1;
+              }
+
+              if (minutesToSync > 0) {
+                // Critical multi-tab lock: Deduct exactly what we consume immediately BEFORE the async request
+                const actualSecondsToConsume = Math.min(accSeconds, minutesToSync * 60);
+                
+                // Double-check the cache before deducting to prevent race conditions across tabs
+                let currentSafeSeconds = parseInt(safeStorage.getItem(cacheKey) || '0', 10);
+                if (isNaN(currentSafeSeconds)) currentSafeSeconds = 0;
+                
+                // If another tab already synced and emptied this, abort
+                if (currentSafeSeconds < actualSecondsToConsume) {
+                  return;
+                }
+
+                const remainingSeconds = Math.max(0, currentSafeSeconds - actualSecondsToConsume);
+                const optimisticSyncTime = Date.now().toString();
+                
+                safeStorage.setItem(cacheKey, remainingSeconds.toString());
+                safeStorage.setItem(lastSyncKey, optimisticSyncTime);
+                
+                const userRef = doc(db, 'users', uid);
+                const updates: any = {
+                   lastActive: new Date().toISOString(),
+                   timeSpent: increment(minutesToSync)
+                };
+
+                updateDoc(userRef, updates).then(() => {
+                   logEvent('time_spent', uid, { duration: minutesToSync });
+                }).catch((err) => {
+                   console.error("Failed to sync time spent:", err);
+                   // Revert strictly what was consumed on failure
+                   let revertSafeSeconds = parseInt(safeStorage.getItem(cacheKey) || '0', 10);
+                   if (isNaN(revertSafeSeconds)) revertSafeSeconds = 0;
+                   safeStorage.setItem(cacheKey, (revertSafeSeconds + actualSecondsToConsume).toString());
+                   // Only revert sync timer if another tab hasn't already successfully synced in the meantime
+                   if (safeStorage.getItem(lastSyncKey) === optimisticSyncTime) {
+                     safeStorage.setItem(lastSyncKey, lastSyncTime.toString());
+                   }
+                });
+              }
+            }
+          }
         }
       }
-    }, 60000);
+    }, 1000);
 
-    // Track time and last active on visibility change
+    // Sync any remaining full minutes on visibility change
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden' && auth.currentUser) {
-         const userRef = doc(db, 'users', auth.currentUser.uid);
-         updateDoc(userRef, {
-           lastActive: new Date().toISOString()
-         }).catch(console.error);
+      if (document.visibilityState === 'hidden' && auth.currentUser && navigator.onLine) {
+         const uid = auth.currentUser.uid;
+         const cacheKey = `accumulated_time_seconds_${uid}`;
+         const lastSyncKey = `last_time_sync_${uid}`;
+         
+         let accSeconds = parseInt(safeStorage.getItem(cacheKey) || '0', 10);
+         if (isNaN(accSeconds)) accSeconds = 0;
+         
+         const minutesToSync = Math.floor(accSeconds / 60);
+
+         // Only execute a Firestore update on hide if there are actually full minutes to sync
+         if (minutesToSync > 0) {
+           const actualSecondsToConsume = minutesToSync * 60;
+           
+           // Read latest cache to prevent cross-tab overlap deduction
+           let currentSafeSeconds = parseInt(safeStorage.getItem(cacheKey) || '0', 10);
+           if (isNaN(currentSafeSeconds)) currentSafeSeconds = 0;
+           
+           if (currentSafeSeconds < actualSecondsToConsume) {
+             return; // Another tab synced it
+           }
+
+           const remainingSeconds = Math.max(0, currentSafeSeconds - actualSecondsToConsume);
+           const optimisticSyncTime = Date.now().toString();
+           
+           // Synchronously deduct before async
+           safeStorage.setItem(cacheKey, remainingSeconds.toString());
+           safeStorage.setItem(lastSyncKey, optimisticSyncTime);
+           
+           const userRef = doc(db, 'users', uid);
+           const updates: any = {
+             lastActive: new Date().toISOString(),
+             timeSpent: increment(minutesToSync)
+           };
+
+           updateDoc(userRef, updates)
+             .then(() => {
+               logEvent('time_spent', uid, { duration: minutesToSync });
+             })
+             .catch((err) => {
+               console.error("Failed to sync closing time spent:", err);
+               // Revert safely
+               let revertSafeSeconds = parseInt(safeStorage.getItem(cacheKey) || '0', 10);
+               if (isNaN(revertSafeSeconds)) revertSafeSeconds = 0;
+               safeStorage.setItem(cacheKey, (revertSafeSeconds + actualSecondsToConsume).toString());
+               
+               // Let lastSyncKey naturally wait instead of complex revert parsing since the tab is hidden
+             });
+         }
       }
     };
 
