@@ -831,7 +831,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
                   {(onAddLinks || onBatchAddLinks) && selectedUrls.size > 0 && !loading && (
                     <button onClick={handleAddLinks} className="inline-flex items-center justify-center rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white dark:text-black hover:bg-emerald-700 gap-2 ml-auto transition-colors">
-                      <Plus className="h-4 w-4" />
+                      <LinkIcon className="h-4 w-4" />
                       {isBatchMode ? `Add ${selectedUrls.size} Links Missing` : `Add ${selectedUrls.size} Link(s)`}
                     </button>
                   )}

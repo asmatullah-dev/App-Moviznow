@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
-import { collection, doc, updateDoc, onSnapshot, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit } from 'firebase/firestore';
+import { collection, doc, updateDoc, getDoc, onSnapshot, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit } from 'firebase/firestore';
 import { UserProfile, Role, Status, AnalyticsEvent } from '../../types';
 import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
@@ -260,29 +260,34 @@ export default function UserManagement() {
     setUserRequests([]);
     setAssignedContentTitles([]);
     try {
+      // Fetch latest user data from Firestore to get fresh counts
+      const userRef = doc(db, 'users', user.uid);
+      const userSnap = await getDoc(userRef);
+      const freshUser = userSnap.exists() ? userSnap.data() as UserProfile : user;
+
       // Fetch movie requests
       const requestsSnapshot = await getDocs(query(collection(db, 'movie_requests'), where('userId', '==', user.uid)));
       const requestsData = requestsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setUserRequests(requestsData);
 
       // Process Assigned Content Titles using contentList from context
-      if (user.role === 'selected_content' && user.assignedContent && user.assignedContent.length > 0) {
+      if (freshUser.role === 'selected_content' && freshUser.assignedContent && freshUser.assignedContent.length > 0) {
         const contentMap = new Map<string, string>();
         contentList.forEach(c => {
           contentMap.set(c.id, c.title);
         });
-        const titles = user.assignedContent.map(id => contentMap.get(id) || 'Unknown Content');
+        const titles = freshUser.assignedContent.map(id => contentMap.get(id) || 'Unknown Content');
         setAssignedContentTitles(titles);
       } else {
         setAssignedContentTitles([]);
       }
 
-      // Process Analytics (Migrated to GA4)
+      // Process Analytics (Enhanced counting from fresh doc)
       const newAnalytics = { 
-        timeSpent: user.timeSpent || 0,
-        favoritesCount: (user.favorites || []).length,
-        watchLaterCount: (user.watchLater || []).length,
-        lastActive: user.lastActive || null,
+        timeSpent: freshUser.timeSpent || 0,
+        favoritesCount: (freshUser.favorites || []).length,
+        watchLaterCount: (freshUser.watchLater || []).length,
+        lastActive: freshUser.lastActive || null,
         hasScanned: true
       };
       setUserAnalytics(newAnalytics);
@@ -1509,12 +1514,16 @@ export default function UserManagement() {
                                   </span>
                                 )}
                                 <div className={`font-bold text-xs ${isUserOnline(userAnalytics.lastActive || selectedUser.lastActive) ? 'text-emerald-500' : 'text-zinc-900 dark:text-white'}`}>
-                                  {isUserOnline(userAnalytics.lastActive || selectedUser.lastActive) ? 'Online' : ((userAnalytics.lastActive || selectedUser.lastActive) ? format(new Date((userAnalytics.lastActive || selectedUser.lastActive)!), 'MMM dd, HH:mm') : 'Never')}
+                                  {!userAnalytics.hasScanned ? (
+                                    <span className="text-zinc-400 italic font-normal">Not Scanned</span>
+                                  ) : (
+                                    isUserOnline(userAnalytics.lastActive) ? 'Online' : (userAnalytics.lastActive ? format(new Date(userAnalytics.lastActive), 'MMM dd, HH:mm') : 'Never')
+                                  )}
                                 </div>
                               </div>
-                              {(userAnalytics.lastActive || selectedUser.lastActive) && (
+                              {userAnalytics.hasScanned && userAnalytics.lastActive && (
                                 <div className="text-[10px] text-zinc-500">
-                                  {formatDistanceToNow(new Date((userAnalytics.lastActive || selectedUser.lastActive)!), { addSuffix: true })}
+                                  {formatDistanceToNow(new Date(userAnalytics.lastActive), { addSuffix: true })}
                                 </div>
                               )}
                             </div>
@@ -1524,7 +1533,13 @@ export default function UserManagement() {
                               <Clock className="w-4 h-4 text-emerald-500" />
                               <span className="text-xs font-medium">Time in App</span>
                             </div>
-                            <span className="font-bold text-zinc-900 dark:text-white text-xs">{selectedUser.timeSpent || userAnalytics.timeSpent || 0} mins</span>
+                            <span className="font-bold text-zinc-900 dark:text-white text-xs">
+                              {!userAnalytics.hasScanned ? (
+                                <span className="text-zinc-400 italic font-normal">Not Scanned</span>
+                              ) : (
+                                `${userAnalytics.timeSpent || 0} mins`
+                              )}
+                            </span>
                           </div>
                           <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
                             <div className="flex items-center justify-between mb-1">
@@ -1532,7 +1547,13 @@ export default function UserManagement() {
                                 <Heart className="w-4 h-4 text-emerald-500" />
                                 <span className="text-xs font-medium">Favorites</span>
                               </div>
-                              <span className="font-bold text-zinc-900 dark:text-white text-xs">{selectedUser.favorites?.length || userAnalytics.favoritesCount || 0}</span>
+                              <span className="font-bold text-zinc-900 dark:text-white text-xs">
+                                {!userAnalytics.hasScanned ? (
+                                  <span className="text-zinc-400 italic font-normal">Not Scanned</span>
+                                ) : (
+                                  userAnalytics.favoritesCount || 0
+                                )}
+                              </span>
                             </div>
                           </div>
                           <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
@@ -1541,7 +1562,13 @@ export default function UserManagement() {
                                 <Bookmark className="w-4 h-4 text-emerald-500" />
                                 <span className="text-xs font-medium">Watch Later</span>
                               </div>
-                              <span className="font-bold text-zinc-900 dark:text-white text-xs">{selectedUser.watchLater?.length || userAnalytics.watchLaterCount || 0}</span>
+                              <span className="font-bold text-zinc-900 dark:text-white text-xs">
+                                {!userAnalytics.hasScanned ? (
+                                  <span className="text-zinc-400 italic font-normal">Not Scanned</span>
+                                ) : (
+                                  userAnalytics.watchLaterCount || 0
+                                )}
+                              </span>
                             </div>
                           </div>
                         </div>
