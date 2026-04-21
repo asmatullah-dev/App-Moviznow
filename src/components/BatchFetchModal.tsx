@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Loader2, CheckCircle2, XCircle, Search, RefreshCw } from 'lucide-react';
 import { useModalBehavior } from '../hooks/useModalBehavior';
 import { LinkCheckResult, performFullLinkScan, guessLinkType } from '../utils/linkScanner';
-import { searchTMDBByTitle, fetchTMDBDetails, fetchSeriesSeasons, fetchIMDbRating } from './MediaModal';
+import { searchTMDBByTitle, fetchTMDBDetails, fetchSeriesSeasons, fetchIMDbRating, getBestTrailer, searchYouTubeTrailer } from './MediaModal';
 import { db } from '../firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 
@@ -157,18 +157,50 @@ export const BatchFetchModal: React.FC<Props> = ({
             }
             if (fetchFields.imdbLink && details.external_ids?.imdb_id) updates.imdbLink = `https://www.imdb.com/title/${details.external_ids.imdb_id}`;
             if (fetchFields.trailerUrl) {
-               const trailer = details.videos?.results?.find((v: any) => v.type === 'Trailer' && v.site === 'YouTube') ||
-                               details.videos?.results?.find((v: any) => (v.type === 'Teaser' || v.type === 'Clip') && v.site === 'YouTube') ||
-                               details.videos?.results?.find((v: any) => v.site === 'YouTube');
-               if (trailer) updates.trailerUrl = `https://www.youtube.com/watch?v=${trailer.key}`;
+               let trailerUrl = getBestTrailer(details.videos);
+               if (!trailerUrl) {
+                  const ytResults = await searchYouTubeTrailer(details.title || details.name);
+                  if (ytResults && ytResults.length > 0) {
+                      // Need an exact match to avoid incorrect trailers in batch mode
+                      const targetStr = normalizeStr((details.title || details.name) + ' trailer');
+                      const titleStrOnly = normalizeStr(details.title || details.name);
+                      
+                      const exactMatch = ytResults.find((yt: any) => {
+                          const ytStr = normalizeStr(yt.title);
+                          return ytStr === targetStr || ytStr === titleStrOnly || ytStr.includes(targetStr);
+                      });
+                      
+                      if (exactMatch) {
+                          trailerUrl = exactMatch.url;
+                      } else if (ytResults.length === 1) {
+                          trailerUrl = ytResults[0].url;
+                      }
+                  }
+               }
+               if (trailerUrl) updates.trailerUrl = trailerUrl;
             }
             if (fetchFields.cast) updates.cast = details.credits?.cast?.slice(0, 10).map((c: any) => c.name).join(', ') || data.cast;
             if (fetchFields.posterUrl && details.poster_path) updates.posterUrl = `https://image.tmdb.org/t/p/w500${details.poster_path}`;
             if (fetchFields.backdropUrl && details.backdrop_path) updates.backdropUrl = `https://image.tmdb.org/t/p/original${details.backdrop_path}`;
             
+            const parallelOps: Promise<any>[] = [];
+            let imdbPromiseIdx = -1;
+            let seasonsPromiseIdx = -1;
+
             if (fetchFields.imdbRating && details.external_ids?.imdb_id) {
-               const imdbRatingInfo = await fetchIMDbRating(details.external_ids.imdb_id);
-               if (imdbRatingInfo) updates.imdbRating = imdbRatingInfo.rating;
+               parallelOps.push(fetchIMDbRating(details.external_ids.imdb_id));
+               imdbPromiseIdx = parallelOps.length - 1;
+            }
+
+            if (bestMatch.type === 'tv' && fetchFields.seasons) {
+               parallelOps.push(fetchSeriesSeasons(bestMatch.item.id, details.seasons));
+               seasonsPromiseIdx = parallelOps.length - 1;
+            }
+
+            const parallelResults = await Promise.all(parallelOps);
+
+            if (imdbPromiseIdx !== -1 && parallelResults[imdbPromiseIdx]) {
+               updates.imdbRating = parallelResults[imdbPromiseIdx].rating;
             }
 
             if (bestMatch.type === 'tv') {
@@ -181,7 +213,7 @@ export const BatchFetchModal: React.FC<Props> = ({
                    }
                 }
 
-                const seasonsData = await fetchSeriesSeasons(bestMatch.item.id);
+                const seasonsData = seasonsPromiseIdx !== -1 ? parallelResults[seasonsPromiseIdx] : [];
                 
                 const mergedSeasons = [...existingSeasons];
 
@@ -292,7 +324,7 @@ export const BatchFetchModal: React.FC<Props> = ({
        }
     };
 
-    const CONCURRENCY_LIMIT = 5;
+    const CONCURRENCY_LIMIT = 15;
     for (let i = 0; i < selectedContentIds.length; i += CONCURRENCY_LIMIT) {
         if (!isOpen) {
             isCancelled = true;

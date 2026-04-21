@@ -16,8 +16,32 @@ interface MediaModalProps {
 
 const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || 'f71c2391161526fa9d19bd0b2759efaf';
 const OMDB_API_KEY = import.meta.env.VITE_OMDB_API_KEY || '19daa310';
+const YOUTUBE_API_KEY = import.meta.env.VITE_YOUTUBE_API_KEY || '';
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const OMDB_BASE = 'https://www.omdbapi.com/';
+
+export async function searchYouTubeTrailer(query: string) {
+  if (!YOUTUBE_API_KEY) {
+     console.warn("YouTube API key is missing. Cannot fallback to YouTube search.");
+     return [];
+  }
+  try {
+    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query + ' trailer')}&type=video&key=${YOUTUBE_API_KEY}&maxResults=5`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.items) {
+      return data.items.map((item: any) => ({
+        id: item.id.videoId,
+        title: item.snippet.title,
+        url: `https://www.youtube.com/watch?v=${item.id.videoId}`,
+        thumbnail: item.snippet.thumbnails?.default?.url
+      }));
+    }
+  } catch (e) {
+    console.error("YouTube Search Error:", e);
+  }
+  return [];
+}
 
 export async function findTMDBByImdb(imdbID: string, forceType?: string) {
   const url = `${TMDB_BASE}/find/${imdbID}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
@@ -67,18 +91,22 @@ export async function searchTMDBByTitle(searchTitle: string, searchYear: string,
 }
 
 export async function fetchTMDBDetails(tmdbId: string, type: string) {
-  const url = `${TMDB_BASE}/${type}/${tmdbId}?api_key=${TMDB_API_KEY}&append_to_response=credits,external_ids,content_ratings,videos`;
+  const url = `${TMDB_BASE}/${type}/${tmdbId}?api_key=${TMDB_API_KEY}&append_to_response=credits,external_ids,content_ratings,videos&include_video_language=en,es,fr,de,it,pt,ru,zh,ja,ko,hi,null`;
   const res = await fetch(url);
   return await res.json();
 }
 
-export async function fetchSeriesSeasons(tmdbId: string) {
-  const url = `${TMDB_BASE}/tv/${tmdbId}?api_key=${TMDB_API_KEY}`;
-  const res = await fetch(url);
-  const data = await res.json();
-  if (!data.seasons) return [];
+export async function fetchSeriesSeasons(tmdbId: string, knownSeasons?: any[]) {
+  let seasonsDataList = knownSeasons;
+  if (!seasonsDataList) {
+    const url = `${TMDB_BASE}/tv/${tmdbId}?api_key=${TMDB_API_KEY}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!data.seasons) return [];
+    seasonsDataList = data.seasons;
+  }
 
-  const validSeasons = data.seasons.filter((s: any) => s.season_number !== 0);
+  const validSeasons = seasonsDataList.filter((s: any) => s.season_number !== 0);
   const seasonPromises = validSeasons.map(async (season: any) => {
     const seasonUrl = `${TMDB_BASE}/tv/${tmdbId}/season/${season.season_number}?api_key=${TMDB_API_KEY}`;
     const seasonRes = await fetch(seasonUrl);
@@ -93,6 +121,29 @@ export async function fetchSeriesSeasons(tmdbId: string) {
 
   const seasons = await Promise.all(seasonPromises);
   return seasons.sort((a, b) => a.season - b.season);
+}
+
+export function getBestTrailer(videos: { results?: any[] }) {
+  if (!videos || !Array.isArray(videos.results)) return null;
+  const youtubeVideos = videos.results.filter(v => v.site === 'YouTube');
+  if (youtubeVideos.length === 0) return null;
+
+  // 1. Official Trailer
+  let best = youtubeVideos.find(v => v.type === 'Trailer' && v.official);
+  // 2. Any Trailer
+  if (!best) best = youtubeVideos.find(v => v.type === 'Trailer');
+  // 3. Official Teaser
+  if (!best) best = youtubeVideos.find(v => v.type === 'Teaser' && v.official);
+  // 4. Any Teaser
+  if (!best) best = youtubeVideos.find(v => v.type === 'Teaser');
+  // 5. Official Clip
+  if (!best) best = youtubeVideos.find(v => v.type === 'Clip' && v.official);
+  // 6. Name includes 'trailer'
+  if (!best) best = youtubeVideos.find(v => v.name.toLowerCase().includes('trailer'));
+  // 7. Fallback to the first video
+  if (!best) best = youtubeVideos[0];
+
+  return `https://www.youtube.com/watch?v=${best.key}`;
 }
 
 export async function fetchIMDbRating(imdbID: string) {
@@ -117,6 +168,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
   const [error, setError] = useState<string | null>(null);
   const [fetchedData, setFetchedData] = useState<any>(null);
   const [searchResults, setSearchResults] = useState<any[] | null>(null);
+  const [youtubeTrailerOptions, setYoutubeTrailerOptions] = useState<any[] | null>(null);
   const [filterType, setFilterType] = useState<'all' | 'movie' | 'tv'>(() => {
     if (initialType === 'movie') return 'movie';
     if (initialType === 'series' || initialType === 'tv') return 'tv';
@@ -186,49 +238,6 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
       return { item: data.tv_results[0], type: 'tv' };
     }
     
-    return null;
-  }
-
-  async function fetchTMDBDetails(tmdbId: string, type: string) {
-    const url = `${TMDB_BASE}/${type}/${tmdbId}?api_key=${TMDB_API_KEY}&append_to_response=credits,external_ids,content_ratings,videos`;
-    const res = await fetch(url);
-    return await res.json();
-  }
-
-  async function fetchSeriesSeasons(tmdbId: string) {
-    const url = `${TMDB_BASE}/tv/${tmdbId}?api_key=${TMDB_API_KEY}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if (!data.seasons) return [];
-
-    const validSeasons = data.seasons.filter((s: any) => s.season_number !== 0);
-    const seasonPromises = validSeasons.map(async (season: any) => {
-      const seasonUrl = `${TMDB_BASE}/tv/${tmdbId}/season/${season.season_number}?api_key=${TMDB_API_KEY}`;
-      const seasonRes = await fetch(seasonUrl);
-      const seasonData = await seasonRes.json();
-      return {
-        season: season.season_number,
-        name: season.name,
-        year: season.air_date ? season.air_date.split('-')[0] : 'N/A',
-        episodes: seasonData.episodes || []
-      };
-    });
-
-    const seasons = await Promise.all(seasonPromises);
-    return seasons.sort((a, b) => a.season - b.season);
-  }
-
-  async function fetchIMDbRating(imdbID: string) {
-    if (!imdbID) return null;
-    const url = `${OMDB_BASE}?i=${imdbID}&apikey=${OMDB_API_KEY}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if (data.Response === 'True') {
-      return {
-        rating: data.imdbRating,
-        votes: data.imdbVotes,
-      };
-    }
     return null;
   }
 
@@ -369,6 +378,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
   const fetchFullDetails = async (tmdbId: string, type: string) => {
     setLoading(true);
     setSearchResults(null);
+    setYoutubeTrailerOptions(null);
     try {
       const details = await fetchTMDBDetails(tmdbId, type);
       
@@ -382,7 +392,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
       }
 
       if (type === 'tv') {
-        promises.push(fetchSeriesSeasons(tmdbId));
+        promises.push(fetchSeriesSeasons(tmdbId, details.seasons));
         seasonsPromiseIndex = promises.length - 1;
       }
 
@@ -404,22 +414,28 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
         imdbLink: details.external_ids?.imdb_id ? `https://www.imdb.com/title/${details.external_ids.imdb_id}` : '',
         imdbRating: imdbRatingData?.rating && imdbRatingData.rating !== 'N/A' ? `${imdbRatingData.rating}/10` : '',
         genres: details.genres?.map((g: any) => g.name) || [],
-        trailerUrl: details.videos?.results?.find((v: any) => v.site === 'YouTube' && v.type === 'Trailer')?.key 
-          ? `https://www.youtube.com/watch?v=${details.videos.results.find((v: any) => v.site === 'YouTube' && v.type === 'Trailer').key}` 
-          : '',
+        trailerUrl: getBestTrailer(details.videos) || '',
         seasons: seasonsData
       };
 
       setFetchedData(parsedData);
 
-      // Fetch YouTube title if trailerUrl exists
-      if (parsedData.trailerUrl) {
+      // Search YouTube if TMDB didn't provide a trailer
+      if (!parsedData.trailerUrl) {
+         setLoading(true);
+         const ytResults = await searchYouTubeTrailer(parsedData.title || details.name);
+         if (ytResults && ytResults.length > 0) {
+             setYoutubeTrailerOptions(ytResults);
+         }
+         setLoading(false);
+      } else {
+        // Fetch YouTube title if trailerUrl exists
         try {
           const res = await fetch(`https://www.youtube.com/oembed?url=${parsedData.trailerUrl}&format=json`);
           if (res.ok) {
             const ytData = await res.json();
             if (ytData.title) {
-              setFetchedData(prev => prev ? { ...prev, trailerTitle: ytData.title } : null);
+              setFetchedData((prev: any) => prev ? { ...prev, trailerTitle: ytData.title } : null);
             }
           }
         } catch (e) {
@@ -595,6 +611,31 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
                         </span>
                         <span>{(res.item.release_date || res.item.first_air_date || '').split('-')[0]}</span>
                       </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {youtubeTrailerOptions && (
+            <div className="bg-zinc-100 dark:bg-zinc-800/80 p-4 rounded-xl space-y-3">
+              <div className="text-sm font-bold text-zinc-900 dark:text-white">Trailer not found in TMDB. Select a YouTube Match:</div>
+              <div className="grid grid-cols-1 gap-3 max-h-[200px] overflow-y-auto pr-2 custom-scrollbar">
+                {youtubeTrailerOptions.map((yt: any) => (
+                  <button
+                    key={yt.id}
+                    onClick={() => {
+                       setFetchedData((prev: any) => ({ ...prev, trailerUrl: yt.url, trailerTitle: yt.title }));
+                       setSelectedFields(prev => ({ ...prev, trailerUrl: true }));
+                       setYoutubeTrailerOptions(null);
+                    }}
+                    className="flex items-center gap-3 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800/80 p-2 text-left rounded-lg transition-colors border border-zinc-200 dark:border-zinc-700/50"
+                  >
+                    <img src={yt.thumbnail} alt="" className="w-16 h-12 object-cover rounded shadow-sm" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-zinc-900 dark:text-white truncate">{yt.title}</div>
+                      <div className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5 truncate">youtube.com/watch?v={yt.id}</div>
                     </div>
                   </button>
                 ))}
