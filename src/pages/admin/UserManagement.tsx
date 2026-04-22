@@ -551,7 +551,7 @@ export default function UserManagement() {
     // Check if today is the joining date
     const isJoiningDate = user.createdAt && new Date(user.createdAt).toDateString() === now.toDateString();
     const welcomeText = isJoiningDate ? `Welcome to ${settings?.headerText || 'MovizNow'} App. ` : '';
-    const membershipType = user.role === 'trial' ? 'Trial' : 'membership';
+    const membershipType = user.role === 'trial' ? 'Trial' : 'Membership';
     
     if (user.expiryDate) {
       const expiryDate = new Date(user.expiryDate);
@@ -559,7 +559,9 @@ export default function UserManagement() {
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
       const expiryStr = formatDateToMonthDDYYYY(user.expiryDate);
 
-      if (diffDays > 3) {
+      if (diffDays < 0) {
+        message = `Hello ${name},\n\nYour ${membershipType} for ${settings?.headerText || 'MovizNow'} app is Expird. Please renew to continue enjoying our services.\n\nThank You`;
+      } else if (diffDays > 3) {
         message = `Hello ${name},\n\n${welcomeText}Your ${membershipType} for ${settings?.headerText || 'MovizNow'} app will expire on ${expiryStr}.\n\nThank You`;
       } else {
         message = `Hello ${name},\n\n${welcomeText}Your ${membershipType} for ${settings?.headerText || 'MovizNow'} app is expiring very soon on ${expiryStr}. Please renew to continue enjoying our services.\n\nThank You`;
