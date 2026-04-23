@@ -108,18 +108,31 @@ export const AdjustContentsModal: React.FC<Props> = ({ isOpen, onClose, contentL
   const handleSave = async () => {
     setSaving(true);
     try {
+      // Find only items that have actually changed their position
+      const itemsToUpdate = items
+        .map((item, index) => ({ item, index }))
+        .filter(({ item, index }) => item.order !== index);
+      
+      if (itemsToUpdate.length === 0) {
+        onClose();
+        return;
+      }
+
+      const commitPromises = [];
       const chunkSize = 500;
-      for (let i = 0; i < items.length; i += chunkSize) {
+      for (let i = 0; i < itemsToUpdate.length; i += chunkSize) {
         const batch = writeBatch(db);
-        const chunk = items.slice(i, i + chunkSize);
+        const chunk = itemsToUpdate.slice(i, i + chunkSize);
         
-        chunk.forEach((item, index) => {
+        chunk.forEach(({ item, index }) => {
           const contentRef = doc(db, 'content', item.id);
-          batch.update(contentRef, { order: i + index });
+          batch.update(contentRef, { order: index });
         });
         
-        await batch.commit();
+        commitPromises.push(batch.commit());
       }
+      
+      await Promise.all(commitPromises);
       onClose();
     } catch (error) {
       console.error("Error saving content order:", error);

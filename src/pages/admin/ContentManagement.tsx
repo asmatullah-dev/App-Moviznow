@@ -11,7 +11,6 @@ import { clsx } from 'clsx';
 import { Plus, Edit2, Trash2, Share2, Film, Tv, X, Save, Upload, Search, Eye, EyeOff, ArrowUp, ArrowDown, Copy, ClipboardPaste, GripVertical, Bell, RefreshCw, ChevronDown, ChevronUp, User, Lock, Loader2, MessageCircle, MoreVertical, Link2, AlertCircle, Check, TrendingUp, Clock } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import ConfirmModal from '../../components/ConfirmModal';
-import AlertModal from '../../components/AlertModal';
 import { MediaModal, findTMDBByImdb, searchTMDBByTitle, fetchTMDBDetails, fetchSeriesSeasons, fetchIMDbRating } from '../../components/MediaModal';
 import { LinkCheckerModal } from '../../components/LinkCheckerModal';
 import { AdjustContentsModal } from '../../components/AdjustContentsModal';
@@ -2906,9 +2905,10 @@ export default function ContentManagement() {
     }
     
     // Allow smartSearch to handle sorting (by relevance) if we're searching and have default sort
+    let sortedResult = [...result];
     const shouldManualSort = !debouncedSearchTerm || filterSort !== 'default';
     if (shouldManualSort) {
-      result.sort((a, b) => {
+      sortedResult.sort((a, b) => {
         if (filterSort === 'default') {
           if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
           if (a.order === undefined && b.order !== undefined) return -1;
@@ -2921,7 +2921,7 @@ export default function ContentManagement() {
       });
     }
     
-    return result;
+    return sortedResult;
   }, [contentList, debouncedSearchTerm, filterType, filterGenre, filterLanguage, filterQuality, filterYear, filterStatus, filterSort, filterAddedBy, profile, user, showDuplicates, showMissing, duplicateIds]);
 
   const filteredGenres = useMemo(() => {
@@ -4542,7 +4542,7 @@ export default function ContentManagement() {
       </AnimatePresence>
 
       {/* Toasts Container */}
-      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[10000] flex flex-col gap-2 items-center pointer-events-none">
+      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[10000] flex flex-col gap-2 items-center pointer-events-none w-full max-w-sm px-4">
         <AnimatePresence>
           {toasts.map((toast) => (
             <motion.div
@@ -4551,39 +4551,28 @@ export default function ContentManagement() {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
               className={clsx(
-                "pointer-events-auto px-6 py-2.5 rounded-full flex items-center gap-3 text-sm font-medium shadow-xl whitespace-nowrap border backdrop-blur-md",
-                toast.type === 'error' ? "bg-red-500 text-white border-red-400" :
-                toast.type === 'success' ? "bg-emerald-500 text-white border-emerald-400" :
-                "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 border-zinc-700 dark:border-zinc-300"
+                "pointer-events-auto px-6 py-2.5 rounded-full flex items-center gap-3 text-sm font-medium shadow-lg whitespace-nowrap",
+                toast.type === 'error' ? "bg-red-500 text-white" :
+                toast.type === 'success' ? "bg-emerald-500 text-white" :
+                "bg-zinc-950 text-white"
               )}
             >
-              <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center shrink-0">
-                {toast.type === 'error' ? <AlertCircle className="w-3 h-3" /> : 
-                 toast.type === 'success' ? <Check className="w-3 h-3" /> : 
-                 <Bell className="w-3 h-3" />}
+              <div className="shrink-0">
+                {toast.type === 'error' ? <AlertCircle className="w-4 h-4" /> : 
+                 toast.type === 'success' ? <Check className="w-4 h-4" /> : 
+                 <Bell className="w-4 h-4" />}
               </div>
-              <div className="flex flex-col min-w-0 pr-2">
-                {toast.title && <span className="text-[10px] opacity-80 font-bold uppercase tracking-wider leading-none mb-0.5">{toast.title}</span>}
-                <span className="truncate max-w-[250px] sm:max-w-md">{toast.message}</span>
-              </div>
+              <span className="truncate">{toast.message}</span>
               <button 
                 onClick={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
-                className="p-1 hover:bg-white/10 rounded-full transition-colors"
-                title="Dismiss"
+                className="ml-2 p-1 hover:bg-black/10 rounded-full transition-colors flex items-center justify-center"
               >
-                <X className="w-3 h-3" />
+                <X className="w-3.5 h-3.5" />
               </button>
             </motion.div>
           ))}
         </AnimatePresence>
       </div>
-
-      <AlertModal
-        isOpen={alertConfig.isOpen}
-        title={alertConfig.title}
-        message={alertConfig.message}
-        onClose={() => setAlertConfig({ ...alertConfig, isOpen: false })}
-      />
 
       <BatchFetchModal
         isOpen={isBatchFetchModalOpen}

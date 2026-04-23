@@ -129,7 +129,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
                 id, title, year, posterUrl, type: type as 'movie' | 'series', qualityId,
                 languageIds: langIds ? langIds.split(',') : [],
                 genreIds: genreIds ? genreIds.split(',') : [],
-                createdAt, order: order ? parseInt(order, 10) : undefined,
+                createdAt, order: (order !== undefined && order !== '') ? parseInt(order, 10) : undefined,
                 seasons, status: 'published', description: '', trailerUrl: '', cast: [], updatedAt: createdAt
               } as unknown as Content;
             });

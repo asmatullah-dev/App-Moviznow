@@ -149,10 +149,12 @@ export const smartSearch = <T extends Record<string, any>>(
       }
       
       // Secondary sort by 'order' field ascending (if available)
-      const orderA = a.item.order !== undefined ? a.item.order : Infinity;
-      const orderB = b.item.order !== undefined ? b.item.order : Infinity;
+      const orderA = a.item.order;
+      const orderB = b.item.order;
       
       if (orderA !== orderB) {
+        if (orderA === undefined) return -1;
+        if (orderB === undefined) return 1;
         return orderA - orderB;
       }
 
