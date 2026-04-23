@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Outlet, Link, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSettings } from '../../contexts/SettingsContext';
-import { Film, Users, Tags, Languages, Clock, LogOut, Menu, X, MonitorPlay, BarChart3, DollarSign, AlertTriangle, Bell, MessageCircle, Settings, LayoutDashboard, RefreshCw } from 'lucide-react';
+import { Film, Users, Tags, Languages, Clock, LogOut, Menu, X, MonitorPlay, BarChart3, DollarSign, AlertTriangle, Bell, MessageCircle, Settings, LayoutDashboard, RefreshCw, Layers } from 'lucide-react';
 import { clsx } from 'clsx';
 import ConfirmModal from '../../components/ConfirmModal';
 import { collection, onSnapshot, query, where, getDocs } from 'firebase/firestore';
@@ -51,6 +51,7 @@ export default function AdminLayout() {
     { id: 'Analytics', path: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
     { id: 'Orders', path: '/admin/orders', label: `Orders${pendingOrdersCount > 0 ? ` (${pendingOrdersCount})` : ''}`, icon: DollarSign },
     { id: 'Content', path: '/admin/content', label: 'Movies & Series', icon: Film },
+    { id: 'Collections', path: '/admin/collections', label: 'Collections', icon: Layers },
     { id: 'Users', path: '/admin/users', label: 'Membership', icon: Users },
     { id: 'UserManagers', path: '/admin/user-managers', label: 'User Managers', icon: Users },
     { id: 'SelectedContent', path: '/admin/selected-content', label: 'Selected Content Only', icon: Film },

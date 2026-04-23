@@ -35,6 +35,7 @@ import QualityManagement from './pages/admin/QualityManagement';
 import UserManagement from './pages/admin/UserManagement';
 import UserManagers from './pages/admin/UserManagers';
 import SelectedContentUsers from './pages/admin/SelectedContentUsers';
+import CollectionsManagement from './pages/admin/CollectionsManagement';
 import IncomeManagement from './pages/admin/IncomeManagement';
 import ErrorLinks from './pages/admin/ErrorLinks';
 import ReportedLinks from './pages/admin/ReportedLinks';
@@ -106,6 +107,7 @@ export default function App() {
                       <Route path="analytics" element={<Analytics />} />
                       <Route path="orders" element={<OrdersManagement />} />
                       <Route path="content" element={<ContentManagement />} />
+                      <Route path="collections" element={<CollectionsManagement />} />
                       <Route path="genres" element={<GenreManagement />} />
                       <Route path="languages" element={<LanguageManagement />} />
                       <Route path="qualities" element={<QualityManagement />} />

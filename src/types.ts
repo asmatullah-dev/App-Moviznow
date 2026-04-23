@@ -66,6 +66,15 @@ export interface AnalyticsEvent {
   playerType?: string;
 }
 
+export interface Collection {
+  id: string;
+  title: string;
+  description?: string;
+  contentIds: string[]; // Array of content IDs
+  createdAt: string;
+  order?: number;
+}
+
 export interface Genre {
   id: string;
   name: string;

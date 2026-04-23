@@ -1,13 +1,14 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { db } from '../../firebase';
-import { doc, updateDoc } from 'firebase/firestore';
-import { Content, Role } from '../../types';
+import { doc, updateDoc, collection, onSnapshot } from 'firebase/firestore';
+import { Content, Role, Collection as AppCollection } from '../../types';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../../contexts/AuthContext';
 import { useContent } from '../../contexts/ContentContext';
 import { useCart } from '../../contexts/CartContext';
 import { usePWA } from '../../contexts/PWAContext';
-import { Film, Search, Filter, MessageCircle, Clock, Heart, LogOut, User, Users, Lock, LayoutDashboard, X, ShoppingCart, Plus, ChevronLeft, ChevronRight, Download } from 'lucide-react';
+import { Film, Search, Filter, MessageCircle, Clock, Heart, LogOut, User, Users, Lock, LayoutDashboard, X, ShoppingCart, Plus, ChevronLeft, ChevronRight, Download, TrendingUp, Zap } from 'lucide-react';
 import { clsx } from 'clsx';
 import { format } from 'date-fns';
 import ConfirmModal from '../../components/ConfirmModal';
@@ -33,7 +34,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
   const { isInstallable, installApp } = usePWA();
   const navigate = useNavigate();
   
-  const [search, setSearch] = useState(() => sessionStorage.getItem('home_search') || '');
+  const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState(search);
   const [showSuggestions, setShowSuggestions] = useState(false);
   
@@ -55,10 +56,6 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
   }, [debouncedSearch, contentList]);
 
   useEffect(() => {
-    sessionStorage.setItem('home_search', debouncedSearch);
-  }, [debouncedSearch]);
-
-  useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (
         suggestionsRef.current && 
@@ -72,31 +69,46 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-  const [sort, setSort] = useState<'default' | 'newest' | 'year' | 'az'>(() => (sessionStorage.getItem('home_sort') as any) || 'default');
-  const [selectedGenre, setSelectedGenre] = useState<string>(() => sessionStorage.getItem('home_genre') || '');
-  const [selectedLanguage, setSelectedLanguage] = useState<string>(() => sessionStorage.getItem('home_language') || '');
-  const [selectedType, setSelectedType] = useState<string>(() => sessionStorage.getItem('home_type') || '');
-  const [selectedQuality, setSelectedQuality] = useState<string>(() => sessionStorage.getItem('home_quality') || '');
-  const [selectedYear, setSelectedYear] = useState<string>(() => sessionStorage.getItem('home_year') || '');
-  const [currentPage, setCurrentPage] = useState(() => parseInt(sessionStorage.getItem('home_page') || '1', 10));
+  const [sort, setSort] = useState<'default' | 'newest' | 'year' | 'az'>('default');
+  const [selectedGenre, setSelectedGenre] = useState<string>('');
+  const [selectedLanguage, setSelectedLanguage] = useState<string>('');
+  const [selectedType, setSelectedType] = useState<string>('');
+  const [selectedQuality, setSelectedQuality] = useState<string>('');
+  const [selectedYear, setSelectedYear] = useState<string>('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const firstPageSize = 10;
+  const pageSizeAfterFirst = settings?.itemsPerPage || 20;
 
-  useEffect(() => {
-    sessionStorage.setItem('home_sort', sort);
-    sessionStorage.setItem('home_genre', selectedGenre);
-    sessionStorage.setItem('home_language', selectedLanguage);
-    sessionStorage.setItem('home_type', selectedType);
-    sessionStorage.setItem('home_quality', selectedQuality);
-    sessionStorage.setItem('home_year', selectedYear);
-    sessionStorage.setItem('home_page', currentPage.toString());
-  }, [sort, selectedGenre, selectedLanguage, selectedType, selectedQuality, selectedYear, currentPage]);
-  const ITEMS_PER_PAGE = settings?.itemsPerPage || 20;
+  const [showFilters, setShowFilters] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const [showWhatsappPrompt, setShowWhatsappPrompt] = useState(false);
   const [whatsappNumber, setWhatsappNumber] = useState('');
   const [hasDismissedSession, setHasDismissedSession] = useState(false);
+  
+  const [collections, setCollections] = useState<AppCollection[]>([]);
+  const [selectedCollection, setSelectedCollection] = useState<AppCollection | null>(null);
+  const [collectionSort, setCollectionSort] = useState<'default' | 'newest' | 'az'>('default');
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'collections'), (snapshot) => {
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AppCollection));
+      list.sort((a, b) => (a.order || 0) - (b.order || 0));
+      setCollections(list);
+    });
+    return unsub;
+  }, []);
+
+  const trendingCollection = useMemo(() => collections.find(c => c.title.toLowerCase() === 'trending' && (c.contentIds?.length || 0) >= 2), [collections]);
+  const newlyAddedCollection = useMemo(() => collections.find(c => c.title.toLowerCase() === 'newly added' && (c.contentIds?.length || 0) >= 2), [collections]);
+  const otherCollections = useMemo(() => collections.filter(c => 
+    c.title.toLowerCase() !== 'trending' && 
+    c.title.toLowerCase() !== 'newly added' && 
+    (c.contentIds?.length || 0) >= 2
+  ), [collections]);
 
   useModalBehavior(isLogoutModalOpen, () => setIsLogoutModalOpen(false));
   useModalBehavior(showWhatsappPrompt, () => setShowWhatsappPrompt(false));
+  useModalBehavior(!!selectedCollection, () => setSelectedCollection(null));
 
   const clearFilters = () => {
     setSort('default');
@@ -119,15 +131,18 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
     sessionStorage.removeItem('home_search');
   };
 
-  const hasFiltersOrPagination = 
+  const hasActiveFilters = 
     sort !== 'default' || 
     selectedType !== '' || 
     selectedGenre !== '' || 
     selectedLanguage !== '' || 
     selectedQuality !== '' || 
     selectedYear !== '' || 
-    search !== '' || 
-    currentPage > 1;
+    search !== '';
+
+  const hasAnyFilter = hasActiveFilters;
+  
+  const hideScrollingTabs = hasActiveFilters || currentPage > 1;
 
   useEffect(() => {
     if (profile && !profile.phone && profile.role !== 'admin' && profile.role !== 'content_manager' && profile.role !== 'manager' && profile.role !== 'owner' && !hasDismissedSession) {
@@ -331,11 +346,20 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
     return result;
   }, [contentList, debouncedSearch, sort, selectedType, selectedGenre, selectedLanguage, selectedQuality, selectedYear, profile]);
 
-  const totalPages = Math.ceil(filteredAndSortedContent.length / ITEMS_PER_PAGE);
+  const totalPages = useMemo(() => {
+    const totalCount = filteredAndSortedContent.length;
+    if (totalCount <= firstPageSize) return 1;
+    return 1 + Math.ceil((totalCount - firstPageSize) / pageSizeAfterFirst);
+  }, [filteredAndSortedContent, firstPageSize, pageSizeAfterFirst]);
+
   const paginatedContent = useMemo(() => {
-    const start = (currentPage - 1) * ITEMS_PER_PAGE;
-    return filteredAndSortedContent.slice(start, start + ITEMS_PER_PAGE);
-  }, [filteredAndSortedContent, currentPage]);
+    if (currentPage === 1) {
+      return filteredAndSortedContent.slice(0, firstPageSize);
+    } else {
+      const start = firstPageSize + (currentPage - 2) * pageSizeAfterFirst;
+      return filteredAndSortedContent.slice(start, start + pageSizeAfterFirst);
+    }
+  }, [filteredAndSortedContent, currentPage, firstPageSize, pageSizeAfterFirst]);
 
   const isInitialMount = useRef(true);
   // Reset to page 1 when filters change
@@ -370,6 +394,27 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
           </Link>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className={clsx(
+                "w-8 h-8 rounded-full flex items-center justify-center transition-colors border",
+                hasAnyFilter
+                  ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20 hover:bg-emerald-500/20"
+                  : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 border-transparent"
+              )}
+              title="Search and Filters"
+            >
+              <Search className="w-4 h-4" />
+            </button>
+            {hasAnyFilter && (
+              <button
+                onClick={clearFilters}
+                className="w-8 h-8 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center border border-red-500/20 hover:bg-red-500/20 transition-colors"
+                title="Clear Filters"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
             {isInstallable && (
               <button
                 onClick={installApp}
@@ -459,90 +504,295 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
           </div>
         )}
 
-        {/* Recently Viewed Section */}
-        {recentlyViewed.length > 0 && (
-          <div className="mb-6">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-[10px] font-bold text-zinc-500 flex items-center gap-2 uppercase tracking-wider">
-                <Clock className="w-3 h-3 text-indigo-500" />
+        {/* Filters */}
+        <AnimatePresence>
+          {showFilters && (
+            <motion.div 
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden"
+            >
+              <div className="flex flex-col gap-4 mb-6">
+                <div className="relative w-full">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-500" />
+                  <input
+                    ref={searchInputRef}
+                    type="text"
+                    placeholder="Search movies & series..."
+                    value={search}
+                    onChange={(e) => {
+                      setSearch(e.target.value);
+                      setShowSuggestions(true);
+                    }}
+                    onFocus={() => setShowSuggestions(true)}
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-12 pr-4 py-3 focus:outline-none focus:border-emerald-500 text-zinc-900 dark:text-white placeholder-zinc-500 dark:placeholder-zinc-400 transition-colors duration-300"
+                  />
+                  {showSuggestions && searchSuggestions.length > 0 && (
+                    <div 
+                      ref={suggestionsRef}
+                      className="absolute z-50 w-full mt-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-xl shadow-2xl max-h-60 overflow-y-auto"
+                    >
+                      <div className="p-2 text-xs font-medium text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-800">Suggestions</div>
+                      {searchSuggestions.map(suggestion => (
+                        <div 
+                          key={suggestion.id} 
+                          className="px-4 py-3 hover:bg-zinc-200 dark:hover:bg-zinc-800 cursor-pointer flex items-center gap-3 transition-colors"
+                          onClick={() => {
+                            setSearch(suggestion.title);
+                            setShowSuggestions(false);
+                            navigate(`/movie/${suggestion.id}`);
+                          }}
+                        >
+                          {suggestion.posterUrl ? (
+                            <img src={suggestion.posterUrl} alt={suggestion.title} className="w-8 h-12 object-cover rounded" />
+                          ) : (
+                            <div className="w-8 h-12 bg-zinc-100 dark:bg-zinc-800 rounded flex items-center justify-center">
+                              <Film className="w-4 h-4 text-zinc-600" />
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium text-zinc-900 dark:text-zinc-200">{formatContentTitle(suggestion)}</div>
+                            <div className="text-xs text-zinc-500 capitalize mt-0.5">
+                              {suggestion.type} • {suggestion.year}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                
+                <div className="flex gap-3 overflow-x-auto pb-2 md:pb-0 flex-nowrap relative">
+                  {hasActiveFilters && (
+                    <button onClick={clearFilters} className="sticky left-0 z-10 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-lg px-2 py-1 text-xs flex items-center gap-1 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.1)] dark:shadow-[4px_0_8px_-4px_rgba(0,0,0,0.5)]">
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                  <select
+                    value={sort}
+                    onChange={(e) => setSort(e.target.value as any)}
+                    className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
+                  >
+                    <option value="default">Default Order</option>
+                    <option value="newest">Recently Added</option>
+                    <option value="year">Release Year</option>
+                    <option value="az">A-Z</option>
+                  </select>
+      
+                  <select
+                    value={selectedType}
+                    onChange={(e) => setSelectedType(e.target.value)}
+                    className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
+                  >
+                    <option value="">Types</option>
+                    <option value="movie">Movies</option>
+                    <option value="series">Series</option>
+                  </select>
+      
+                  <select
+                    value={selectedGenre}
+                    onChange={(e) => setSelectedGenre(e.target.value)}
+                    className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
+                  >
+                    <option value="">Genres</option>
+                    {genres.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                  </select>
+      
+                  <select
+                    value={selectedLanguage}
+                    onChange={(e) => setSelectedLanguage(e.target.value)}
+                    className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
+                  >
+                    <option value="">Languages</option>
+                    {languages.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                  </select>
+      
+                  <select
+                    value={selectedQuality}
+                    onChange={(e) => setSelectedQuality(e.target.value)}
+                    className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
+                  >
+                    <option value="">Qualities</option>
+                    {qualities.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+                  </select>
+      
+                  <select
+                    value={selectedYear}
+                    onChange={(e) => setSelectedYear(e.target.value)}
+                    className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
+                  >
+                    <option value="">Years</option>
+                    {uniqueYears.map(y => <option key={y} value={y}>{y}</option>)}
+                  </select>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>        {/* Recently Viewed Section */}
+        {!hideScrollingTabs && recentlyViewed.length > 0 && (
+          <div className="mb-6 sm:mb-8">
+            <div className="flex items-center justify-between mb-4 border-b border-zinc-200 dark:border-zinc-800 pb-2">
+              <h2 className="text-lg sm:text-xl font-bold tracking-tight text-zinc-900 dark:text-white flex items-center gap-2">
+                <span className="w-1.5 h-6 bg-indigo-500 rounded-full"></span>
+                <Clock className="w-5 h-5 text-indigo-500" />
                 Recently Viewed
               </h2>
             </div>
             <div className="relative group">
               <div 
-                className="flex overflow-x-auto gap-3 pb-3 snap-x snap-mandatory hide-scrollbar"
+                className="flex overflow-x-auto gap-4 pb-4 snap-x snap-mandatory flex-nowrap hide-scrollbar"
                 style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
               >
-                {recentlyViewed.slice(0, settings?.recentViewLimit || 10).map(content => {
-                  const qualityObj = qualities.find(q => q.id === content.qualityId);
-                  const contentLangs = languages.filter(l => content.languageIds?.includes(l.id)).map(l => l.name).join(', ');
-                  const contentGenres = genres.filter(g => content.genreIds?.includes(g.id)).map(g => g.name).join(', ');
-                  const isAssigned = profile?.role === 'selected_content' && profile.assignedContent?.some((id: string) => id === content.id || id.startsWith(`${content.id}:`));
-                  const isLocked = profile?.status !== 'active' || (profile?.role === 'selected_content' && !isAssigned);
-                  const isPending = profile?.status === 'pending';
-                  
-                  return (
-                    <Link
-                      key={content.id}
-                      to={`/movie/${content.id}`}
-                      className="flex-none w-[80px] sm:w-[100px] snap-start group/card relative rounded-xl overflow-hidden bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/50 transition-all duration-300 shadow-md transform-gpu"
-                    >
-                      <div className="aspect-[2/3] relative">
-                        <LazyLoadImage
-                          src={content.posterUrl || settings?.defaultAppImage || 'https://images.unsplash.com/photo-1440404653325-ab127d49abc1?auto=format&fit=crop&w=300&q=80'}
-                          alt={content.title}
-                          effect="blur"
-                          threshold={300}
-                          className="w-full h-full object-cover transition-transform duration-500 group-hover/card:scale-110"
-                          wrapperClassName="w-full h-full"
-                          referrerPolicy="no-referrer"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent opacity-80 group-hover/card:opacity-100 transition-opacity" />
-                        
-                        <div className="absolute top-1 left-1 flex flex-col gap-0.5 z-10">
-                          <span className={clsx(
-                            "px-1 py-0.5 rounded text-[6px] font-bold uppercase tracking-wider backdrop-blur-md border text-white",
-                            content.type === 'movie' 
-                              ? "bg-blue-500/80 border-blue-500/30"
-                              : "bg-purple-500/80 border-purple-500/30"
-                          )}>
-                            {content.type}
-                          </span>
-                          {qualityObj && (
-                            <span 
-                              className="px-1 py-0.5 rounded text-[6px] font-bold shadow-sm"
-                              style={{ 
-                                backgroundColor: qualityObj.color || '#34d399',
-                                color: getContrastColor(qualityObj.color || '#34d399')
-                              }}
-                            >
-                              {qualityObj.name}
-                            </span>
-                          )}
-                        </div>
+                {recentlyViewed.slice(0, settings?.recentViewLimit || 10).map(content => (
+                  <div key={content.id} className="w-[100px] sm:w-[130px] shrink-0 snap-start">
+                     <ContentCard 
+                        content={content}
+                        profile={profile}
+                        qualities={qualities}
+                        languages={languages}
+                        genres={genres}
+                        onToggleFavorite={toggleFavorite}
+                        onToggleWatchLater={toggleWatchLater}
+                        isSmall={true}
+                     />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
-                        {isLocked && (
-                          <div className={clsx(
-                            "absolute top-1 right-1 px-1 py-0.5 rounded text-[6px] font-bold uppercase tracking-wider flex items-center gap-0.5 shadow-lg z-20",
-                            isPending ? "bg-yellow-500 text-white dark:text-black" : "bg-red-500 text-white"
-                          )}>
-                            <Lock className="w-1.5 h-1.5" />
-                            {isPending ? 'PND' : 'RES'}
-                          </div>
-                        )}
-                      </div>
+        {/* Trending Section */}
+        {!hideScrollingTabs && trendingCollection && (trendingCollection.contentIds?.length || 0) >= 2 && (
+          <div className="mb-6 sm:mb-8">
+            <div className="flex items-center justify-between mb-4 border-b border-zinc-200 dark:border-zinc-800 pb-2">
+              <div className="flex flex-col">
+                <h2 className="text-lg sm:text-xl font-bold tracking-tight text-zinc-900 dark:text-white flex items-center gap-2">
+                  <span className="w-1.5 h-6 bg-pink-500 rounded-full"></span>
+                  <TrendingUp className="w-5 h-5 text-pink-500" />
+                  Trending
+                </h2>
+                {trendingCollection.description && (
+                  <p className="text-[10px] sm:text-xs text-zinc-500 dark:text-zinc-400 mt-1 ml-3.5 italic">{trendingCollection.description}</p>
+                )}
+              </div>
+            </div>
+            <div className="relative group">
+              <div className="flex overflow-x-auto gap-4 pb-4 snap-x snap-mandatory flex-nowrap hide-scrollbar" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                {trendingCollection.contentIds.map(id => {
+                   const content = contentList.find(c => c.id === id);
+                   if (!content) return null;
+                   return (
+                     <div key={content.id} className="w-[140px] sm:w-[180px] shrink-0 snap-start">
+                       <ContentCard 
+                         content={content}
+                         profile={profile}
+                         qualities={qualities}
+                         languages={languages}
+                         genres={genres}
+                         onToggleFavorite={toggleFavorite}
+                         onToggleWatchLater={toggleWatchLater}
+                       />
+                     </div>
+                   );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Newly Added Section */}
+        {!hideScrollingTabs && newlyAddedCollection && (newlyAddedCollection.contentIds?.length || 0) >= 2 && (
+          <div className="mb-6 sm:mb-8">
+            <div className="flex items-center justify-between mb-4 border-b border-zinc-200 dark:border-zinc-800 pb-2">
+              <div className="flex flex-col">
+                <h2 className="text-lg sm:text-xl font-bold tracking-tight text-zinc-900 dark:text-white flex items-center gap-2">
+                  <span className="w-1.5 h-6 bg-cyan-500 rounded-full"></span>
+                  <Zap className="w-5 h-5 text-cyan-500" />
+                  Newly Added
+                </h2>
+                {newlyAddedCollection.description && (
+                  <p className="text-[10px] sm:text-xs text-zinc-500 dark:text-zinc-400 mt-1 ml-3.5 italic">{newlyAddedCollection.description}</p>
+                )}
+              </div>
+            </div>
+            <div className="relative group">
+              <div className="flex overflow-x-auto gap-4 pb-4 snap-x snap-mandatory flex-nowrap hide-scrollbar" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                {newlyAddedCollection.contentIds.map(id => {
+                   const content = contentList.find(c => c.id === id);
+                   if (!content) return null;
+                   return (
+                     <div key={content.id} className="w-[140px] sm:w-[180px] shrink-0 snap-start">
+                       <ContentCard 
+                         content={content}
+                         profile={profile}
+                         qualities={qualities}
+                         languages={languages}
+                         genres={genres}
+                         onToggleFavorite={toggleFavorite}
+                         onToggleWatchLater={toggleWatchLater}
+                       />
+                     </div>
+                   );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Collections Overview */}
+        {!hideScrollingTabs && otherCollections.length > 0 && (
+          <div className="mb-6 sm:mb-8">
+            <div className="flex items-center justify-between mb-4 border-b border-zinc-200 dark:border-zinc-800 pb-2">
+              <h2 className="text-lg sm:text-xl font-bold tracking-tight text-zinc-900 dark:text-white flex items-center gap-2">
+                <span className="w-1.5 h-6 bg-emerald-500 rounded-full"></span>
+                Collections
+              </h2>
+            </div>
+            <div className="relative group">
+              <div className="flex overflow-x-auto gap-4 pb-4 snap-x snap-mandatory flex-nowrap hide-scrollbar" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                {otherCollections.map(collection => {
+                  const firstContentId = collection.contentIds[0];
+                  const firstContent = contentList.find(c => c.id === firstContentId);
+                  const posterUrl = firstContent?.posterUrl || settings?.defaultAppImage;
+
+                  return (
+                    <button
+                      key={collection.id}
+                      onClick={() => setSelectedCollection(collection)}
+                      className="w-[140px] h-[210px] sm:w-[180px] sm:h-[270px] shrink-0 snap-start relative transition-all hover:scale-[1.02] group shadow-sm cursor-pointer transform-gpu"
+                    >
+                      <div className="absolute -inset-[1px] bg-gradient-to-br from-emerald-500 to-emerald-700 rounded-2xl z-0 transition-all duration-300 group-hover:blur-sm" />
                       
-                      <div className="p-1">
-                        <h3 className="text-[8px] font-bold text-zinc-900 dark:text-white mb-0.5 group-hover/card:text-emerald-500 transition-colors">
-                          {formatContentTitle(content)}
-                        </h3>
-                        <div className="flex flex-col gap-0.5 text-[8px] text-zinc-500 dark:text-zinc-400">
-                          <div className="flex items-center justify-between">
-                            <span>{content.year}</span>
+                      <div className="relative h-full w-full rounded-[15px] p-[1px] bg-gradient-to-br from-emerald-400 via-emerald-500 to-emerald-600 z-10">
+                        <div className="relative h-full w-full bg-black rounded-[14px] p-[0.5px]">
+                          <div className="relative h-full w-full bg-zinc-50 dark:bg-zinc-900 rounded-[13.5px] overflow-hidden">
+                            {posterUrl ? (
+                               <div className="absolute inset-0">
+                                 <img 
+                                   src={posterUrl} 
+                                   alt="" 
+                                   className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" 
+                                 />
+                                 <div className="absolute inset-0 bg-black/60 group-hover:bg-black/40 transition-colors" />
+                               </div>
+                            ) : (
+                              <div className="absolute inset-0 bg-gradient-to-br from-zinc-100 to-zinc-200 dark:from-zinc-800 dark:to-zinc-900" />
+                            )}
+                            
+                            <div className="relative z-10 p-4 h-full flex flex-col items-center justify-center border border-zinc-200/20 dark:border-zinc-700/50 rounded-2xl group-hover:border-emerald-500/50 transition-colors">
+                              <h3 className="text-white font-bold text-center drop-shadow-md line-clamp-2 text-sm sm:text-lg">{collection.title}</h3>
+                              {collection.description && (
+                                <p className="text-[8px] sm:text-xs text-white/60 mt-1 text-center line-clamp-2 italic px-2">{collection.description}</p>
+                              )}
+                              <span className="text-[10px] sm:text-sm text-white/70 mt-2">{collection.contentIds.length} Contents</span>
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </Link>
+                    </button>
                   );
                 })}
               </div>
@@ -550,120 +800,23 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
           </div>
         )}
 
-        {/* Filters */}
-        <div className="flex flex-col gap-4 mb-6">
-          <div className="relative w-full">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-500" />
-            <input
-              ref={searchInputRef}
-              type="text"
-              placeholder="Search movies & series..."
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setShowSuggestions(true);
+        {/* Grid Title */}
+        <div className="flex items-center justify-between mb-4 border-b border-zinc-200 dark:border-zinc-800 pb-2 mt-8">
+          <h2 className="text-lg sm:text-xl font-bold tracking-tight text-zinc-900 dark:text-white flex items-center gap-2">
+            <span className="w-1.5 h-6 bg-blue-500 rounded-full"></span>
+            All Contents
+          </h2>
+          {currentPage > 1 && (
+            <button
+              onClick={() => {
+                setCurrentPage(1);
+                clearFilters();
               }}
-              onFocus={() => setShowSuggestions(true)}
-              className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-12 pr-4 py-3 focus:outline-none focus:border-emerald-500 text-zinc-900 dark:text-white placeholder-zinc-500 dark:placeholder-zinc-400 transition-colors duration-300"
-            />
-            {showSuggestions && searchSuggestions.length > 0 && (
-              <div 
-                ref={suggestionsRef}
-                className="absolute z-50 w-full mt-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-xl shadow-2xl max-h-60 overflow-y-auto"
-              >
-                <div className="p-2 text-xs font-medium text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-800">Suggestions</div>
-                {searchSuggestions.map(suggestion => (
-                  <div 
-                    key={suggestion.id} 
-                    className="px-4 py-3 hover:bg-zinc-200 dark:hover:bg-zinc-800 cursor-pointer flex items-center gap-3 transition-colors"
-                    onClick={() => {
-                      setSearch(suggestion.title);
-                      setShowSuggestions(false);
-                      navigate(`/movie/${suggestion.id}`);
-                    }}
-                  >
-                    {suggestion.posterUrl ? (
-                      <img src={suggestion.posterUrl} alt={suggestion.title} className="w-8 h-12 object-cover rounded" />
-                    ) : (
-                      <div className="w-8 h-12 bg-zinc-100 dark:bg-zinc-800 rounded flex items-center justify-center">
-                        <Film className="w-4 h-4 text-zinc-600" />
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-zinc-900 dark:text-zinc-200">{formatContentTitle(suggestion)}</div>
-                      <div className="text-xs text-zinc-500 capitalize mt-0.5">
-                        {suggestion.type} • {suggestion.year}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          
-          <div className="flex gap-3 overflow-x-auto pb-2 md:pb-0 flex-nowrap relative">
-            {hasFiltersOrPagination && (
-              <button onClick={clearFilters} className="sticky left-0 z-10 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-lg px-2 py-1 text-xs flex items-center gap-1 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.1)] dark:shadow-[4px_0_8px_-4px_rgba(0,0,0,0.5)]">
-                <X className="w-3 h-3" />
-              </button>
-            )}
-            <select
-              value={sort}
-              onChange={(e) => setSort(e.target.value as any)}
-              className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
+              className="text-sm text-emerald-500 hover:text-emerald-400 font-medium transition-colors"
             >
-              <option value="default">Default Order</option>
-              <option value="newest">Recently Added</option>
-              <option value="year">Release Year</option>
-              <option value="az">A-Z</option>
-            </select>
-
-            <select
-              value={selectedType}
-              onChange={(e) => setSelectedType(e.target.value)}
-              className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
-            >
-              <option value="">Types</option>
-              <option value="movie">Movies</option>
-              <option value="series">Series</option>
-            </select>
-
-            <select
-              value={selectedGenre}
-              onChange={(e) => setSelectedGenre(e.target.value)}
-              className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
-            >
-              <option value="">Genres</option>
-              {genres.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-            </select>
-
-            <select
-              value={selectedLanguage}
-              onChange={(e) => setSelectedLanguage(e.target.value)}
-              className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
-            >
-              <option value="">Languages</option>
-              {languages.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-            </select>
-
-            <select
-              value={selectedQuality}
-              onChange={(e) => setSelectedQuality(e.target.value)}
-              className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
-            >
-              <option value="">Qualities</option>
-              {qualities.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
-            </select>
-
-            <select
-              value={selectedYear}
-              onChange={(e) => setSelectedYear(e.target.value)}
-              className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
-            >
-              <option value="">Years</option>
-              {uniqueYears.map(y => <option key={y} value={y}>{y}</option>)}
-            </select>
-          </div>
+              Go to Home
+            </button>
+          )}
         </div>
 
         {/* Grid */}
@@ -715,9 +868,10 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
                       const pages = [];
                       const range = 1; // Number of pages around current page
                       
-                      for (let i = 1; i < totalPages; i++) { // Note: i < totalPages to hide last page number
+                      for (let i = 1; i <= totalPages; i++) {
                         if (
                           i === 1 || 
+                          i === totalPages ||
                           (i >= currentPage - range && i <= currentPage + range)
                         ) {
                           pages.push(
@@ -852,6 +1006,87 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
           </div>
         </div>
       )}
+
+      {/* Collection Modal */}
+      <AnimatePresence>
+        {selectedCollection && (
+          <motion.div
+            initial={{ opacity: 0, y: '100%' }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: '100%' }}
+            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+            className="fixed inset-0 z-[100] bg-white dark:bg-zinc-950 overflow-y-auto"
+          >
+            <div className="sticky top-0 z-20 flex items-center justify-between p-4 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-xl border-b border-zinc-200 dark:border-zinc-800">
+              <div className="flex items-center gap-4">
+                <div>
+                  <h2 className="text-xl font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+                    <span className="w-1.5 h-6 bg-emerald-500 rounded-full"></span>
+                    {selectedCollection.title}
+                  </h2>
+                  {selectedCollection.description && (
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 ml-3.5 italic">{selectedCollection.description}</p>
+                  )}
+                </div>
+                <select
+                  value={collectionSort}
+                  onChange={(e) => setCollectionSort(e.target.value as any)}
+                  className="bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500 outline-none"
+                >
+                  <option value="default">Default Order</option>
+                  <option value="newest">Newest First</option>
+                  <option value="az">A-Z</option>
+                </select>
+              </div>
+              <button 
+                onClick={() => {
+                  setSelectedCollection(null);
+                  setCollectionSort('default');
+                }} 
+                className="p-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-full text-zinc-500 transition-colors"
+                title="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="max-w-7xl mx-auto p-4 md:p-8">
+              {selectedCollection.contentIds.length === 0 ? (
+                <div className="text-center py-20 text-zinc-500">
+                  <Film className="w-16 h-16 mx-auto mb-4 opacity-20" />
+                  <p className="text-xl">No content in this collection</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6">
+                  {(() => {
+                    let items = selectedCollection.contentIds
+                      .map(id => contentList.find(c => c.id === id))
+                      .filter((c): c is Content => !!c);
+                    
+                    if (collectionSort === 'newest') {
+                      items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                    } else if (collectionSort === 'az') {
+                      items.sort((a, b) => a.title.localeCompare(b.title));
+                    }
+                    
+                    return items.map(content => (
+                      <ContentCard 
+                        key={`modal-${content.id}`}
+                        content={content}
+                        profile={profile}
+                        qualities={qualities}
+                        languages={languages}
+                        genres={genres}
+                        onToggleFavorite={toggleFavorite}
+                        onToggleWatchLater={toggleWatchLater}
+                      />
+                    ));
+                  })()}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

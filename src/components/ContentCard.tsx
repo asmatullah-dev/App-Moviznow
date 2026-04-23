@@ -17,6 +17,7 @@ interface ContentCardProps {
   onToggleFavorite: (id: string) => void;
   onToggleWatchLater: (id: string) => void;
   selectedYear?: string;
+  isSmall?: boolean;
 }
 
 const ContentCard = React.memo(({ 
@@ -27,7 +28,8 @@ const ContentCard = React.memo(({
   genres, 
   onToggleFavorite, 
   onToggleWatchLater,
-  selectedYear
+  selectedYear,
+  isSmall
 }: ContentCardProps) => {
   const { addToCart, cart } = useCart();
   const { settings } = useSettings();
@@ -135,10 +137,7 @@ const ContentCard = React.memo(({
   };
 
   return (
-    <div className="group relative rounded-2xl p-[0.5px] transition-all hover:scale-[1.02] bg-gradient-to-br from-black to-white/20 dark:bg-black flex flex-col h-full transform-gpu">
-      {/* Blur black to white gradient background outside of content */}
-      <div className="absolute -inset-[1px] bg-gradient-to-br from-black to-white/20 dark:from-black dark:to-black rounded-2xl z-0 transition-all duration-300 group-hover:blur-sm"></div>
-
+    <div className="group relative transition-all hover:scale-[1.02] flex flex-col h-full transform-gpu">
       {/* Color Gradient Layer (1px) */}
       <div className="relative rounded-[15.5px] p-[1px] bg-[linear-gradient(to_bottom_right,#ff0000,#ef4444,#f97316,#facc15,#4ade80,#06b6d4,#3b82f6,#a855f7)] z-10 flex flex-col h-full">
         {/* Gap Layer (0.5px gap) */}
@@ -165,43 +164,56 @@ const ContentCard = React.memo(({
             </div>
           </div>
 
-            <div className={clsx(
-              "absolute top-2 right-2 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider text-white z-20",
-              content.type === 'movie' ? 'bg-blue-500/90' : 'bg-purple-500/90'
-            )}>
-              {content.type}
+            <div className="absolute top-1.5 right-1.5 flex flex-col items-end gap-1 z-20">
+              <div className={clsx(
+                "px-1 py-0.5 rounded-sm font-bold uppercase tracking-wider text-white shadow-sm",
+                content.type === 'movie' ? 'bg-blue-500/90' : 'bg-purple-500/90',
+                isSmall ? 'text-[6px]' : 'text-[8px]'
+              )}>
+                {content.type}
+              </div>
+              
+              {qualityObj && (
+                <div 
+                  className={clsx(
+                    "px-1 py-0.5 rounded-sm font-bold uppercase tracking-wider shadow-sm",
+                    isSmall ? 'text-[6px]' : 'text-[8px]'
+                  )}
+                  style={{ 
+                    backgroundColor: qualityObj.color || '#10b981',
+                    color: getContrastColor(qualityObj.color || '#10b981')
+                  }}
+                >
+                  {qualityObj.name}
+                </div>
+              )}
+
+              {matchingSeason && (
+                <div className={clsx(
+                  "px-1 py-0.5 rounded-sm font-bold uppercase tracking-wider bg-emerald-500 text-white shadow-sm",
+                  isSmall ? 'text-[6px]' : 'text-[8px]'
+                )}>
+                  Season {matchingSeason.seasonNumber}
+                </div>
+              )}
             </div>
-            
-            {qualityObj && (
-              <div 
-                className="absolute top-9 right-2 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider shadow-lg z-20"
-                style={{ 
-                  backgroundColor: qualityObj.color || '#10b981',
-                  color: getContrastColor(qualityObj.color || '#10b981')
-                }}
-              >
-                {qualityObj.name}
-              </div>
-            )}
 
-            {matchingSeason && (
-              <div className="absolute top-16 right-2 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-500 text-white shadow-lg z-20">
-                Season {matchingSeason.seasonNumber}
-              </div>
-            )}
-
-          <div className="absolute top-2 left-2 flex flex-col gap-1 z-20">
+          <div className="absolute top-1.5 left-1.5 flex flex-col gap-1 z-20">
             {content.status === 'draft' && canSeeDraft && (
-              <div className="px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider bg-orange-500 text-white shadow-lg">
+              <div className={clsx(
+                "px-1 py-0.5 rounded-sm font-bold uppercase tracking-wider bg-orange-500 text-white shadow-sm",
+                isSmall ? 'text-[6px]' : 'text-[8px]'
+              )}>
                 Draft
               </div>
             )}
             {isLocked && (
               <div className={clsx(
-                "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 shadow-lg",
-                isPending ? "bg-yellow-500 text-white dark:text-black" : "bg-red-500 text-white"
+                "px-1 py-0.5 rounded-sm font-bold uppercase tracking-wider flex items-center gap-1 shadow-sm",
+                isPending ? "bg-yellow-500 text-white dark:text-black" : "bg-red-500 text-white",
+                isSmall ? 'text-[6px]' : 'text-[8px]'
               )}>
-                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width={isSmall ? "6" : "8"} height={isSmall ? "6" : "8"} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
                 {isPending ? 'Pending' : 'Restricted'}
               </div>
             )}
@@ -279,9 +291,18 @@ const ContentCard = React.memo(({
           </button>
         </div>
 
-          <div className="p-3 flex flex-col flex-1 bg-zinc-50 dark:bg-zinc-900">
-            <h3 className="font-bold text-sm md:text-base leading-tight mb-1 group-hover:text-emerald-500 transition-colors">{formatContentTitle(content)}</h3>
-            <div className="flex items-center gap-2 text-zinc-500 text-sm mb-2">
+          <div className={clsx(
+            "flex flex-col flex-1 bg-zinc-50 dark:bg-zinc-900",
+            isSmall ? 'p-2' : 'p-3'
+          )}>
+            <h3 className={clsx(
+              "font-bold leading-tight mb-1 group-hover:text-emerald-500 transition-colors",
+              isSmall ? 'text-[10px] line-clamp-1' : 'text-sm md:text-base'
+            )}>{formatContentTitle(content)}</h3>
+            <div className={clsx(
+              "flex items-center gap-2 text-zinc-500 mb-2",
+              isSmall ? 'text-[8px]' : 'text-sm'
+            )}>
               <span>{content.year}</span>
               {content.runtime && (
                 <>
@@ -290,18 +311,20 @@ const ContentCard = React.memo(({
                 </>
               )}
             </div>
-            <div className="flex flex-col gap-0.5 mt-auto">
-              {contentGenres && (
-                <p className="text-zinc-500 text-[10px] line-clamp-1 italic">
-                  {contentGenres}
-                </p>
-              )}
-              {contentLangs && (
-                <p className="text-zinc-500 dark:text-zinc-400 text-sm font-medium line-clamp-1">
-                  {contentLangs}
-                </p>
-              )}
-            </div>
+            {!isSmall && (
+              <div className="flex flex-col gap-0.5 mt-auto">
+                {contentGenres && (
+                  <p className="text-zinc-500 text-[10px] line-clamp-1 italic">
+                    {contentGenres}
+                  </p>
+                )}
+                {contentLangs && (
+                  <p className="text-zinc-500 dark:text-zinc-400 text-sm font-medium line-clamp-1">
+                    {contentLangs}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>

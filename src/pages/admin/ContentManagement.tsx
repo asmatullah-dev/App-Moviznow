@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useMemo, useRef, memo, useCallback } from 'react';
 import { useSearchParams, Link, useLocation, useNavigate } from 'react-router-dom';
 import { db } from '../../firebase';
-import { collection, addDoc, deleteDoc, doc, updateDoc, onSnapshot, writeBatch, getDocs } from 'firebase/firestore';
+import { collection, addDoc, deleteDoc, doc, updateDoc, onSnapshot, writeBatch, getDocs, query, where, arrayUnion, deleteField } from 'firebase/firestore';
 import { useAuth } from '../../contexts/AuthContext';
 import { useContent } from '../../contexts/ContentContext';
 import { useUsers } from '../../contexts/UsersContext';
 import { Content, Genre, Language, Quality, QualityLinks, Season, Episode, LinkDef, Role, Trailer } from '../../types';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
-import { Plus, Edit2, Trash2, Share2, Film, Tv, X, Save, Upload, Search, Eye, EyeOff, ArrowUp, ArrowDown, Copy, ClipboardPaste, GripVertical, Bell, RefreshCw, ChevronDown, ChevronUp, User, Lock, Loader2, MessageCircle, MoreVertical, Link2, AlertCircle, Check } from 'lucide-react';
+import { Plus, Edit2, Trash2, Share2, Film, Tv, X, Save, Upload, Search, Eye, EyeOff, ArrowUp, ArrowDown, Copy, ClipboardPaste, GripVertical, Bell, RefreshCw, ChevronDown, ChevronUp, User, Lock, Loader2, MessageCircle, MoreVertical, Link2, AlertCircle, Check, TrendingUp, Clock } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import ConfirmModal from '../../components/ConfirmModal';
 import AlertModal from '../../components/AlertModal';
@@ -257,12 +257,14 @@ interface ContentCardProps {
   setNotificationModal: (modal: { isOpen: boolean; content: Content | null; status: 'idle' | 'sending' | 'success' | 'error' }) => void;
   setActiveDropdownId: (id: string | null) => void;
   getMissingLabels: (content: Content, profile: any) => string[];
+  handleAddToSpecialCollection: (contentId: string, type: 'trending' | 'newly_added') => void;
 }
 
 const ContentCard = memo(({ 
   content, profile, isSelected, anySelected, handleSelectContent, handleShare, handleEdit, 
   handleCopyData, setDeleteId, setNotificationModal, isActiveDropdown, 
-  setActiveDropdownId, isDuplicate, getMissingLabels, isShareLoading, isWhatsappLoading
+  setActiveDropdownId, isDuplicate, getMissingLabels, isShareLoading, isWhatsappLoading,
+  handleAddToSpecialCollection
 }: ContentCardProps) => {
   const missingLabels = useMemo(() => getMissingLabels(content, profile), [content, profile, getMissingLabels]);
 
@@ -402,6 +404,16 @@ const ContentCard = memo(({
                     </button>
                   )}
                   {(profile?.role === 'admin' || profile?.role === 'owner') && (
+                    <button onClick={() => { handleAddToSpecialCollection(content.id, 'trending'); setActiveDropdownId(null); }} className="w-full flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 text-sm text-amber-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left">
+                      <TrendingUp className="w-4 h-4" /> Add to Trending
+                    </button>
+                  )}
+                  {(profile?.role === 'admin' || profile?.role === 'owner') && (
+                    <button onClick={() => { handleAddToSpecialCollection(content.id, 'newly_added'); setActiveDropdownId(null); }} className="w-full flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 text-sm text-emerald-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left">
+                      <Clock className="w-4 h-4" /> Add to Newly Added
+                    </button>
+                  )}
+                  {(profile?.role === 'admin' || profile?.role === 'owner') && (
                     <button onClick={() => { handleCopyData(content); setActiveDropdownId(null); }} className="w-full flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left">
                       <Copy className="w-4 h-4" /> Copy Data
                     </button>
@@ -434,11 +446,37 @@ export default function ContentManagement() {
   const [isBatchFetchModalOpen, setIsBatchFetchModalOpen] = useState(false);
   const [batchFetchMode, setBatchFetchMode] = useState<'media'|'links'>('media');
   const [alertConfig, setAlertConfig] = useState<{ isOpen: boolean; title: string; message: string }>({ isOpen: false, title: '', message: '' });
+  const [toasts, setToasts] = useState<{ id: string; title: string; message: string; type: 'success' | 'error' | 'info' }[]>([]);
+
+  const addToast = (title: string, message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    const id = Math.random().toString(36).substr(2, 9);
+    setToasts(prev => [...prev, { id, title, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 5000);
+  };
+
+  // Helper to replace setAlertConfig with addToast where appropriate
+  const triggerAlert = (title: string, message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    addToast(title, message, type);
+  };
+
+  useEffect(() => {
+    if (alertConfig.isOpen) {
+      const type = alertConfig.title.toLowerCase().includes('success') ? 'success' : 
+                   alertConfig.title.toLowerCase().includes('error') ? 'error' : 'info';
+      addToast(alertConfig.title, alertConfig.message, type);
+      setAlertConfig(prev => ({ ...prev, isOpen: false }));
+    }
+  }, [alertConfig.isOpen]);
   const [managers, setManagers] = useState<Record<string, string>>({});
 
   // Form State
   const [type, setType] = useState<'movie' | 'series'>('movie');
   const [status, setStatus] = useState<'draft' | 'published' | 'selected_content'>('published');
+  const [initialStatus, setInitialStatus] = useState<'draft' | 'published' | 'selected_content' | null>(null);
+  const [addToTrending, setAddToTrending] = useState(false);
+  const [addToNewlyAdded, setAddToNewlyAdded] = useState(false);
   const [title, setTitle] = useState('');
   const [showTitleSuggestions, setShowTitleSuggestions] = useState(false);
   const [disableSuggestions, setDisableSuggestions] = useState(false);
@@ -763,6 +801,9 @@ export default function ContentManagement() {
   const resetForm = () => {
     setType('movie');
     setStatus('published');
+    setInitialStatus(null);
+    setAddToTrending(false);
+    setAddToNewlyAdded(false);
     setTitle('');
     setDescription('');
     setPosterUrl('');
@@ -818,6 +859,7 @@ export default function ContentManagement() {
     const normalizedType = (content.type.toLowerCase() === 'series' || content.type.toLowerCase() === 'tv') ? 'series' : 'movie';
     setType(normalizedType);
     setStatus(content.status || 'published');
+    setInitialStatus(content.status || 'published');
     setTitle(content.title || '');
     setDescription(content.description || '');
     setPosterUrl(content.posterUrl || '');
@@ -917,9 +959,12 @@ export default function ContentManagement() {
         episodes: [...s.episodes].sort((a, b) => a.episodeNumber - b.episodeNumber)
       }));
 
+      const currentEditingId = editingId;
+      const finalStatus = (profile?.role === 'content_manager' || profile?.role === 'manager') ? 'draft' : status;
+      
       const data: Partial<Content> = {
         type,
-        status: (profile?.role === 'content_manager' || profile?.role === 'manager') ? 'draft' : status,
+        status: finalStatus,
         title,
         description: description || '',
         posterUrl,
@@ -943,6 +988,11 @@ export default function ContentManagement() {
         updatedAt: new Date().toISOString(),
       };
 
+      if (currentEditingId && initialStatus === 'draft' && finalStatus === 'published') {
+        data.createdAt = new Date().toISOString();
+        data.order = deleteField() as any; // using deleteField to reset order
+      }
+
       if (type === 'movie') {
         data.movieLinks = JSON.stringify(movieLinks);
         data.seasons = JSON.stringify([]);
@@ -951,8 +1001,8 @@ export default function ContentManagement() {
         data.movieLinks = JSON.stringify([]);
       }
 
-      const currentEditingId = editingId;
       const cleanedData = deepClean(data);
+      let newDocId = currentEditingId;
 
       if (currentEditingId) {
         await updateDoc(doc(db, 'content', currentEditingId), cleanedData);
@@ -960,7 +1010,18 @@ export default function ContentManagement() {
         cleanedData.createdAt = new Date().toISOString();
         cleanedData.addedBy = user?.uid;
         cleanedData.addedByRole = profile?.role;
-        await addDoc(collection(db, 'content'), deepClean(cleanedData));
+        const newRef = await addDoc(collection(db, 'content'), deepClean(cleanedData));
+        newDocId = newRef.id;
+      }
+      
+      // Add to special collections if checked
+      if (newDocId) {
+        if (addToTrending) {
+          await handleAddToSpecialCollection(newDocId, 'trending');
+        }
+        if (addToNewlyAdded) {
+          await handleAddToSpecialCollection(newDocId, 'newly_added');
+        }
       }
       
       setIsModalOpen(false);
@@ -1242,6 +1303,11 @@ export default function ContentManagement() {
     if (obj === undefined) return undefined;
     if (obj === null) return null;
     
+    // Check if it's a Firestore FieldValue (they have internal properties like _methodName or are instances we shouldn't touch)
+    if (obj && typeof obj === 'object' && obj.constructor && obj.constructor.name === 'FieldValueImpl') {
+      return obj;
+    }
+
     if (Array.isArray(obj)) {
       const cleanedArr = obj.map(deepClean).filter(v => v !== undefined);
       return cleanedArr.length > 0 ? cleanedArr : [];
@@ -1610,6 +1676,40 @@ export default function ContentManagement() {
     } catch (error) {
       console.error('Error sending notification:', error);
       setNotificationModal(prev => ({ ...prev, status: 'error' }));
+    }
+  };
+
+  const handleAddToSpecialCollection = async (contentId: string, type: 'trending' | 'newly_added') => {
+    try {
+      const title = type === 'trending' ? 'Trending' : 'Newly Added';
+      const q = query(collection(db, 'collections'), where('title', '==', title));
+      const snapshot = await getDocs(q);
+
+      if (!snapshot.empty) {
+        // Collection exists, update it
+        const docRef = doc(db, 'collections', snapshot.docs[0].id);
+        const currentIds = snapshot.docs[0].data().contentIds || [];
+        
+        // Remove if already exists to move it to the front
+        const newIds = [contentId, ...currentIds.filter((id: string) => id !== contentId)];
+        
+        await updateDoc(docRef, {
+          contentIds: newIds
+        });
+      } else {
+        // Create new collection
+        const allColls = await getDocs(collection(db, 'collections'));
+        await addDoc(collection(db, 'collections'), {
+          title,
+          contentIds: [contentId],
+          createdAt: new Date().toISOString(),
+          order: allColls.size // Put new at the end
+        });
+      }
+      triggerAlert('Success', `Added to ${title}`, 'success');
+    } catch (error) {
+      console.error('Error adding to collection:', error);
+      triggerAlert('Error', 'Failed to add to collection', 'error');
     }
   };
 
@@ -3456,6 +3556,7 @@ export default function ContentManagement() {
               setNotificationModal={setNotificationModal}
               setActiveDropdownId={setActiveDropdownId}
               getMissingLabels={getMissingLabels}
+              handleAddToSpecialCollection={handleAddToSpecialCollection}
             />
           ))}
         </div>
@@ -4439,6 +4540,43 @@ export default function ContentManagement() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Toasts Container */}
+      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[10000] flex flex-col gap-2 items-center pointer-events-none">
+        <AnimatePresence>
+          {toasts.map((toast) => (
+            <motion.div
+              key={toast.id}
+              initial={{ opacity: 0, y: 20, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
+              className={clsx(
+                "pointer-events-auto px-6 py-2.5 rounded-full flex items-center gap-3 text-sm font-medium shadow-xl whitespace-nowrap border backdrop-blur-md",
+                toast.type === 'error' ? "bg-red-500 text-white border-red-400" :
+                toast.type === 'success' ? "bg-emerald-500 text-white border-emerald-400" :
+                "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 border-zinc-700 dark:border-zinc-300"
+              )}
+            >
+              <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                {toast.type === 'error' ? <AlertCircle className="w-3 h-3" /> : 
+                 toast.type === 'success' ? <Check className="w-3 h-3" /> : 
+                 <Bell className="w-3 h-3" />}
+              </div>
+              <div className="flex flex-col min-w-0 pr-2">
+                {toast.title && <span className="text-[10px] opacity-80 font-bold uppercase tracking-wider leading-none mb-0.5">{toast.title}</span>}
+                <span className="truncate max-w-[250px] sm:max-w-md">{toast.message}</span>
+              </div>
+              <button 
+                onClick={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
+                className="p-1 hover:bg-white/10 rounded-full transition-colors"
+                title="Dismiss"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
 
       <AlertModal
         isOpen={alertConfig.isOpen}
