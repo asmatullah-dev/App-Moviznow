@@ -10,27 +10,12 @@ import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorH
 import { formatContentTitle } from '../../utils/contentUtils';
 
 export default function CollectionsManagement() {
-  const { contentList } = useContent();
-  const [collections, setCollections] = useState<AppCollection[]>([]);
+  const { contentList, collections } = useContent();
   const [isEditing, setIsEditing] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{ title: string; description: string; contentIds: string[] }>({ title: '', description: '', contentIds: [] });
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [contentSearch, setContentSearch] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  
-  useEffect(() => {
-    const unsub = onSnapshot(query(collection(db, 'collections'), orderBy('order', 'asc')), (snapshot) => {
-      setCollections(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AppCollection)));
-    }, (error) => {
-      // Fallback
-      onSnapshot(collection(db, 'collections'), (snap) => {
-         const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as AppCollection));
-         list.sort((a,b) => (a.order||0) - (b.order||0));
-         setCollections(list);
-      });
-    });
-    return unsub;
-  }, []);
 
   const handleAdd = async () => {
     try {

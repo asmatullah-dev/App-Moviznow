@@ -4,7 +4,7 @@ import { safeStorage } from '../utils/safeStorage';
 import { collection, onSnapshot, query, where, getDoc, getDocs, doc, setDoc, orderBy, limit } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { useAuth } from './AuthContext';
-import { Content, Genre, Language, Quality } from '../types';
+import { Content, Genre, Language, Quality, Collection as AppCollection } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
 
 interface ContentContextType {
@@ -12,6 +12,7 @@ interface ContentContextType {
   genres: Genre[];
   languages: Language[];
   qualities: Quality[];
+  collections: AppCollection[];
   loading: boolean;
   isOffline: boolean;
   updateSearchIndex: () => Promise<void>;
@@ -36,11 +37,16 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     const cached = safeStorage.getItem('qualities_cache');
     return cached ? JSON.parse(cached) : [];
   });
+  const [collections, setCollections] = useState<AppCollection[]>(() => {
+    const cached = safeStorage.getItem('collections_cache');
+    return cached ? JSON.parse(cached) : [];
+  });
   const [loading, setLoading] = useState(() => {
     const hasCache = safeStorage.getItem('content_cache') || 
                      safeStorage.getItem('genres_cache') || 
                      safeStorage.getItem('languages_cache') || 
-                     safeStorage.getItem('qualities_cache');
+                     safeStorage.getItem('qualities_cache') ||
+                     safeStorage.getItem('collections_cache');
     return !hasCache;
   });
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
@@ -184,6 +190,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     let unsubGenres: () => void;
     let unsubLanguages: () => void;
     let unsubQualities: () => void;
+    let unsubCollections: () => void;
 
     const setupStaticDataListeners = () => {
       if (!navigator.onLine) return;
@@ -223,6 +230,13 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         safeStorage.setItem('qualities_cache', JSON.stringify(qualitiesData));
         setQualities(qualitiesData);
       });
+
+      unsubCollections = onSnapshot(collection(db, 'collections'), (snapshot) => {
+        const collectionsData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as AppCollection));
+        collectionsData.sort((a, b) => (a.order || 0) - (b.order || 0));
+        safeStorage.setItem('collections_cache', JSON.stringify(collectionsData));
+        setCollections(collectionsData);
+      });
     };
 
     setupStaticDataListeners();
@@ -232,6 +246,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       if (unsubGenres) unsubGenres();
       if (unsubLanguages) unsubLanguages();
       if (unsubQualities) unsubQualities();
+      if (unsubCollections) unsubCollections();
     };
   }, [profile?.role]);
 
@@ -302,7 +317,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
   }, [contentList, profile?.role]); // Changed from length to contentList for deeper check
 
   return (
-    <ContentContext.Provider value={{ contentList, genres, languages, qualities, loading, isOffline, updateSearchIndex }}>
+    <ContentContext.Provider value={{ contentList, genres, languages, qualities, collections, loading, isOffline, updateSearchIndex }}>
       {children}
     </ContentContext.Provider>
   );

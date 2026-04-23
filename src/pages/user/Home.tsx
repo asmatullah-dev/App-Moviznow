@@ -28,7 +28,7 @@ import { useSettings } from '../../contexts/SettingsContext';
 
 export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => void }) {
   const { profile, logout, toggleFavorite, toggleWatchLater } = useAuth();
-  const { contentList, genres, languages, qualities, loading, isOffline } = useContent();
+  const { contentList, genres, languages, qualities, collections, loading, isOffline } = useContent();
   const { cart } = useCart();
   const { settings } = useSettings();
   const { isInstallable, installApp } = usePWA();
@@ -85,18 +85,8 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
   const [whatsappNumber, setWhatsappNumber] = useState('');
   const [hasDismissedSession, setHasDismissedSession] = useState(false);
   
-  const [collections, setCollections] = useState<AppCollection[]>([]);
   const [selectedCollection, setSelectedCollection] = useState<AppCollection | null>(null);
   const [collectionSort, setCollectionSort] = useState<'default' | 'newest' | 'az'>('default');
-
-  useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'collections'), (snapshot) => {
-      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AppCollection));
-      list.sort((a, b) => (a.order || 0) - (b.order || 0));
-      setCollections(list);
-    });
-    return unsub;
-  }, []);
 
   const trendingCollection = useMemo(() => collections.find(c => c.title.toLowerCase() === 'trending' && (c.contentIds?.length || 0) >= 2), [collections]);
   const newlyAddedCollection = useMemo(() => collections.find(c => c.title.toLowerCase() === 'newly added' && (c.contentIds?.length || 0) >= 2), [collections]);
