@@ -36,7 +36,6 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
   
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState(search);
-  const [showSuggestions, setShowSuggestions] = useState(false);
   
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -46,29 +45,9 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
   }, [search]);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const suggestionsRef = useRef<HTMLDivElement>(null);
   
   // ... (rest of the component)
 
-  const searchSuggestions = useMemo(() => {
-    if (!debouncedSearch.trim()) return [];
-    return smartSearch(contentList, debouncedSearch).slice(0, 5);
-  }, [debouncedSearch, contentList]);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        suggestionsRef.current && 
-        !suggestionsRef.current.contains(event.target as Node) &&
-        searchInputRef.current &&
-        !searchInputRef.current.contains(event.target as Node)
-      ) {
-        setShowSuggestions(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
   const [sort, setSort] = useState<'default' | 'newest' | 'year' | 'az'>('default');
   const [selectedGenre, setSelectedGenre] = useState<string>('');
   const [selectedLanguage, setSelectedLanguage] = useState<string>('');
@@ -514,44 +493,9 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
                     value={search}
                     onChange={(e) => {
                       setSearch(e.target.value);
-                      setShowSuggestions(true);
                     }}
-                    onFocus={() => setShowSuggestions(true)}
                     className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-12 pr-4 py-3 focus:outline-none focus:border-emerald-500 text-zinc-900 dark:text-white placeholder-zinc-500 dark:placeholder-zinc-400 transition-colors duration-300"
                   />
-                  {showSuggestions && searchSuggestions.length > 0 && (
-                    <div 
-                      ref={suggestionsRef}
-                      className="absolute z-50 w-full mt-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-xl shadow-2xl max-h-60 overflow-y-auto"
-                    >
-                      <div className="p-2 text-xs font-medium text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-800">Suggestions</div>
-                      {searchSuggestions.map(suggestion => (
-                        <div 
-                          key={suggestion.id} 
-                          className="px-4 py-3 hover:bg-zinc-200 dark:hover:bg-zinc-800 cursor-pointer flex items-center gap-3 transition-colors"
-                          onClick={() => {
-                            setSearch(suggestion.title);
-                            setShowSuggestions(false);
-                            navigate(`/movie/${suggestion.id}`);
-                          }}
-                        >
-                          {suggestion.posterUrl ? (
-                            <img src={suggestion.posterUrl} alt={suggestion.title} className="w-8 h-12 object-cover rounded" />
-                          ) : (
-                            <div className="w-8 h-12 bg-zinc-100 dark:bg-zinc-800 rounded flex items-center justify-center">
-                              <Film className="w-4 h-4 text-zinc-600" />
-                            </div>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <div className="text-sm font-medium text-zinc-900 dark:text-zinc-200">{formatContentTitle(suggestion)}</div>
-                            <div className="text-xs text-zinc-500 capitalize mt-0.5">
-                              {suggestion.type} • {suggestion.year}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </div>
                 
                 <div className="flex gap-3 overflow-x-auto pb-2 md:pb-0 flex-nowrap relative">
