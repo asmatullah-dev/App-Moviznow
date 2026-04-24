@@ -2973,7 +2973,16 @@ export default function ContentManagement() {
           currentBatchIndex++;
           operationCount = 0;
         }
-        batches[currentBatchIndex].update(contentRef, { status });
+
+        const updateData: any = { status };
+        
+        // When moving from draft to published, consider it as new
+        if (content.status === 'draft' && status === 'published') {
+          updateData.createdAt = new Date().toISOString();
+          updateData.order = deleteField();
+        }
+
+        batches[currentBatchIndex].update(contentRef, updateData);
         operationCount++;
       }
     });
