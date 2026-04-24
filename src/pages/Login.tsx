@@ -454,11 +454,12 @@ export default function Login() {
                 )}
                 {(!registeredUser?.email || registeredUser.email.endsWith('@moviznow.com')) && (
                   <div>
-                    <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Email (Optional)</label>
+                    <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Email</label>
                     <div className="relative">
                       <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
                       <input
                         type="email"
+                        required
                         value={optionalEmail}
                         onChange={(e) => setOptionalEmail(e.target.value)}
                         className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-11 pr-4 py-3 text-sm focus:outline-none focus:border-emerald-500 transition-colors"

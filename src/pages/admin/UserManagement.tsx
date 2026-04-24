@@ -733,6 +733,97 @@ export default function UserManagement() {
     );
   };
 
+  const handleMergeUsers = async () => {
+    if (selectedUsers.length !== 2) {
+      setAlertConfig({ isOpen: true, title: 'Error', message: 'You must select exactly two users to merge.' });
+      return;
+    }
+
+    const user1 = users.find(u => u.uid === selectedUsers[0]);
+    const user2 = users.find(u => u.uid === selectedUsers[1]);
+
+    if (!user1 || !user2) return;
+
+    if (!window.confirm(`Are you sure you want to merge "${user2.displayName || user2.email || user2.phone || 'User 2'}" into "${user1.displayName || user1.email || user1.phone || 'User 1'}"?\n\nAll data from the second user will be merged into the first, and the second user record will be deleted. This cannot be undone.`)) {
+      return;
+    }
+
+    setProcessing(prev => ({ ...prev, bulk: true }));
+
+    try {
+      const batch = writeBatch(db);
+      const u1Ref = doc(db, 'users', user1.uid);
+      const u2Ref = doc(db, 'users', user2.uid);
+
+      const updates: any = {};
+      
+      // Merge email
+      if (!user1.email && user2.email) {
+        updates.email = user2.email;
+      }
+      
+      // Merge phone
+      if (!user1.phone && user2.phone) {
+        updates.phone = user2.phone;
+      }
+
+      // Merge expiry (take the latest)
+      if (user1.expiryDate || user2.expiryDate) {
+        const t1 = user1.expiryDate ? new Date(user1.expiryDate).getTime() : 0;
+        const t2 = user2.expiryDate ? new Date(user2.expiryDate).getTime() : 0;
+        updates.expiryDate = t1 > t2 ? user1.expiryDate : user2.expiryDate;
+      }
+      
+      // Merge access contents
+      if (user1.assignedContent || user2.assignedContent) {
+        updates.assignedContent = Array.from(new Set([...(user1.assignedContent || []), ...(user2.assignedContent || [])]));
+      }
+
+      // Merge favorites
+      if (user1.favorites || user2.favorites) {
+        updates.favorites = Array.from(new Set([...(user1.favorites || []), ...(user2.favorites || [])]));
+      }
+
+      // Merge watchLater
+      if (user1.watchLater || user2.watchLater) {
+        updates.watchLater = Array.from(new Set([...(user1.watchLater || []), ...(user2.watchLater || [])]));
+      }
+
+      // Missing fields from user2 to user1
+      const excludeKeys = ['uid', 'id', 'email', 'phone', 'expiryDate', 'assignedContent', 'favorites', 'watchLater', 'role', 'status', 'managedBy', 'createdAt', 'updatedAt'];
+      Object.keys(user2).forEach(key => {
+        if (!excludeKeys.includes(key) && (user1 as any)[key] === undefined && (user2 as any)[key] !== undefined) {
+          updates[key] = (user2 as any)[key];
+        }
+      });
+
+      updates.updatedAt = new Date().toISOString();
+
+      batch.update(u1Ref, updates);
+      batch.delete(u2Ref);
+
+      // Re-assign relational collections from user2 to user1
+      const migrateCollections = ['movie_requests', 'orders', 'reported_links', 'fcm_tokens'];
+      for (const colName of migrateCollections) {
+        const docsSnapshot = await getDocs(query(collection(db, colName), where('userId', '==', user2.uid)));
+        docsSnapshot.docs.forEach(docSnap => {
+          batch.update(docSnap.ref, { userId: user1.uid });
+        });
+      }
+
+      await batch.commit();
+
+      setAlertConfig({ isOpen: true, title: 'Success', message: 'Users merged successfully' });
+      setSelectedUsers([]);
+    } catch (error) {
+      console.error('Error merging users:', error);
+      setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to merge users' });
+      handleFirestoreError(error, OperationType.UPDATE, `users/${user1.uid}`);
+    } finally {
+      setProcessing(prev => ({ ...prev, bulk: false }));
+    }
+  };
+
   const handleBulkStatusChange = async (status: 'active' | 'pending' | 'suspended' | 'expired') => {
     if (!window.confirm(`Are you sure you want to change the status of ${selectedUsers.length} users to ${status}?`)) return;
     
@@ -955,7 +1046,11 @@ export default function UserManagement() {
                 <select
                   onChange={(e) => {
                     if (e.target.value) {
-                      handleBulkStatusChange(e.target.value as any);
+                      if (e.target.value === 'merge') {
+                        handleMergeUsers();
+                      } else {
+                        handleBulkStatusChange(e.target.value as any);
+                      }
                       e.target.value = '';
                     }
                   }}
@@ -967,6 +1062,9 @@ export default function UserManagement() {
                   <option value="expired">Set Expired</option>
                   {(profile?.role === 'admin' || profile?.role === 'owner') && (
                     <option value="suspended">Suspend</option>
+                  )}
+                  {selectedUsers.length === 2 && (profile?.role === 'admin' || profile?.role === 'owner') && (
+                    <option value="merge">Merge Users</option>
                   )}
                 </select>
               </div>

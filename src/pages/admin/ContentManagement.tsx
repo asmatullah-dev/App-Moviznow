@@ -990,6 +990,7 @@ export default function ContentManagement() {
       if (currentEditingId && initialStatus === 'draft' && finalStatus === 'published') {
         data.createdAt = new Date().toISOString();
         data.order = deleteField() as any; // using deleteField to reset order
+        await handleAddToSpecialCollection(currentEditingId, 'newly_added');
       }
 
       if (type === 'movie') {
@@ -2989,6 +2990,30 @@ export default function ContentManagement() {
 
     try {
       await Promise.all(batches.map(b => b.commit()));
+      
+      if (status === 'published') {
+        const draftToPublishedIds = currentSelected.filter(id => {
+          const c = contentList.find(c => c.id === id);
+          return c && c.status === 'draft';
+        });
+        
+        if (draftToPublishedIds.length > 0) {
+          try {
+            const q = query(collection(db, 'collections'), where('title', '==', 'Newly Added'));
+            const snapshot = await getDocs(q);
+            if (!snapshot.empty) {
+              const docRef = doc(db, 'collections', snapshot.docs[0].id);
+              let currentIds = snapshot.docs[0].data().contentIds || [];
+              const newIds = draftToPublishedIds.filter(id => !currentIds.includes(id));
+              if (newIds.length > 0) {
+                await updateDoc(docRef, { contentIds: [...newIds, ...currentIds] });
+              }
+            }
+          } catch (e) {
+            console.error("Error adding to Newly Added collection:", e);
+          }
+        }
+      }
     } catch (error) {
       console.error('Error updating content:', error);
       setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to update content' });
