@@ -3004,9 +3004,9 @@ export default function ContentManagement() {
             if (!snapshot.empty) {
               const docRef = doc(db, 'collections', snapshot.docs[0].id);
               let currentIds = snapshot.docs[0].data().contentIds || [];
-              const newIds = draftToPublishedIds.filter(id => !currentIds.includes(id));
+              const newIds = [...draftToPublishedIds, ...currentIds.filter((id: string) => !draftToPublishedIds.includes(id))];
               if (newIds.length > 0) {
-                await updateDoc(docRef, { contentIds: [...newIds, ...currentIds] });
+                await updateDoc(docRef, { contentIds: newIds });
               }
             }
           } catch (e) {
