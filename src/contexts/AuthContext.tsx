@@ -80,21 +80,31 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const standardizePhone = (phone: string) => {
-  const digits = phone.replace(/\D/g, "");
+  if (!phone) return "";
+  // Remove all non-digits except for a possible leading +
+  const cleaned = phone.trim();
+  const digits = cleaned.replace(/\D/g, "");
   if (!digits) return "";
 
   // Pakistan specific standardization
   let base = digits;
-  if (base.startsWith("92") && base.length >= 12) base = base.substring(2);
-  else if (base.startsWith("0") && base.length >= 11) base = base.substring(1);
+  if (base.startsWith("92") && base.length >= 11) {
+    base = base.substring(2);
+  } else if (base.startsWith("0") && base.length >= 10) {
+    base = base.substring(1);
+  }
 
-  // If it's a 10-digit number (standard Pak mobile length without prefix)
+  // standard Pak mobile length is 10 digits
   if (base.length === 10) {
     return `+92${base}`;
   }
 
-  // Fallback for other lengths or formats
-  return phone.startsWith("+") ? `+${digits}` : digits;
+  // Fallback for other countries or formats: keep the plus if it was originally there
+  if (cleaned.startsWith("+")) {
+    return `+${digits}`;
+  }
+
+  return digits;
 };
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -379,6 +389,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   extractedPhone = standardizePhone(phonePart);
                 }
                 const pendingPhone = sessionStorage.getItem('pending_signup_phone');
+                if (pendingPhone) {
+                  sessionStorage.removeItem('pending_signup_phone');
+                }
                 const standardizedUserPhone = standardizePhone(
                   currentUser.phoneNumber || extractedPhone || pendingPhone || "",
                 );
@@ -939,14 +952,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Check if phone is already in use
       if (phone) {
-        const phoneUsers = await findUsersByEmailOrPhone(phone);
+        const standardizedPhone = standardizePhone(phone);
+        const phoneUsers = await findUsersByEmailOrPhone(standardizedPhone);
         if (phoneUsers.some((u) => u.hasPassword)) {
           throw new Error(
             "This phone number is already registered to another account.",
           );
         }
 
-        const isWhitelisted = await isPhoneWhitelisted(phone);
+        const isWhitelisted = await isPhoneWhitelisted(standardizedPhone);
         if (!isWhitelisted) {
           throw new Error(
             "This phone number is not authorized for new account creation.",
@@ -954,6 +968,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       } else {
         throw new Error("Phone number is required for new account creation.");
+      }
+
+      if (phone) {
+        const standardizedPhone = standardizePhone(phone);
+        sessionStorage.setItem('pending_signup_phone', standardizedPhone);
       }
 
       justLoggedInRef.current = true;
@@ -972,15 +991,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       await updateProfile(userCredential.user, { displayName });
 
-      if (phone) {
-        setTimeout(async () => {
-          try {
-            await updateDoc(doc(db, "users", userCredential.user.uid), {
-              phone,
-            });
-          } catch (e) {}
-        }, 2000);
-      }
       setTimeout(() => {
         justLoggedInRef.current = false;
       }, 10000);
@@ -1056,16 +1066,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       await updateProfile(userCredential.user, { displayName });
 
-      if (standardizedPhone) {
-        sessionStorage.removeItem('pending_signup_phone'); // Clean up
-        setTimeout(async () => {
-          try {
-            await updateDoc(doc(db, "users", userCredential.user.uid), {
-              phone: standardizedPhone,
-            });
-          } catch (e) {}
-        }, 2000);
-      }
       setTimeout(() => {
         justLoggedInRef.current = false;
       }, 10000);
@@ -1108,85 +1108,91 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
       };
 
-      const queries = [];
+      const evaluateQuery = async (q: any, name: string) => {
+        try {
+          const snap = await getDocs(q);
+          addMatches(snap);
+        } catch (err) {
+          console.error(`Error in query ${name}:`, err);
+        }
+      };
 
-      // 1. Check exactly as provided (email or phone)
-      queries.push(
-        getDocs(
-          query(
-            collection(db, "users"),
-            where("email", "==", trimmed.toLowerCase()),
-            limit(5),
-          ),
+      // 1. Check email variations
+      const lowercaseIdentifier = trimmed.toLowerCase();
+      await evaluateQuery(
+        query(
+          collection(db, "users"),
+          where("email", "==", lowercaseIdentifier),
+          limit(5)
         ),
-      );
-      queries.push(
-        getDocs(
-          query(
-            collection(db, "users"),
-            where("phone", "==", trimmed),
-            limit(5),
-          ),
-        ),
+        "email_exact"
       );
 
-      // 2. If it looks like a phone number, try multiple formats
-      const cleaned = trimmed.replace(/[^\d+]/g, "");
-      const isPhone = cleaned.length >= 7 && /^[\d+]+$/.test(cleaned);
+      // 2. Check phone variations
+      // Clean identifier: remove everything except digits and possibly a leading +
+      const cleanedForSearch = trimmed.replace(/[^\d+]/g, "");
+      const isLikelyPhone = cleanedForSearch.length >= 7 && /^[\d+]+$/.test(cleanedForSearch);
 
-      if (isPhone) {
-        const standardized = standardizePhone(cleaned);
-
-        let digitsOnly = cleaned.replace(/[^\d]/g, "");
-        let base = digitsOnly;
-        if (base.startsWith("92")) base = base.substring(2);
-        else if (base.startsWith("0")) base = base.substring(1);
+      if (isLikelyPhone) {
+        const standardized = standardizePhone(cleanedForSearch);
+        
+        let digitsOnly = cleanedForSearch.replace(/\D/g, "");
+        let baseNumber = digitsOnly;
+        if (baseNumber.startsWith("92")) baseNumber = baseNumber.substring(2);
+        else if (baseNumber.startsWith("0")) baseNumber = baseNumber.substring(1);
 
         const phoneFormats = [
+          cleanedForSearch,
           standardized,
-          `+92${base}`,
-          `0${base}`,
-          `92${base}`,
-          base,
+          `+92${baseNumber}`,
+          `0${baseNumber}`,
+          `92${baseNumber}`,
+          baseNumber,
         ].filter((v, i, a) => v && a.indexOf(v) === i);
 
         const emailFormats = [
-          `${base}@moviznow.com`,
-          `92${base}@moviznow.com`,
-          `0${base}@moviznow.com`,
-          `+92${base}@moviznow.com`,
+          `${baseNumber}@moviznow.com`,
+          `92${baseNumber}@moviznow.com`,
+          `0${baseNumber}@moviznow.com`,
+          `+92${baseNumber}@moviznow.com`,
         ].filter((v, i, a) => v && a.indexOf(v) === i);
 
         if (phoneFormats.length > 0) {
-          queries.push(
-            getDocs(
-              query(
-                collection(db, "users"),
-                where("phone", "in", phoneFormats),
-                limit(5),
-              ),
+          await evaluateQuery(
+            query(
+              collection(db, "users"),
+              where("phone", "in", phoneFormats),
+              limit(5)
             ),
+            "phone_in"
           );
         }
+        
         if (emailFormats.length > 0) {
-          queries.push(
-            getDocs(
-              query(
-                collection(db, "users"),
-                where("email", "in", emailFormats),
-                limit(5),
-              ),
+          await evaluateQuery(
+            query(
+              collection(db, "users"),
+              where("email", "in", emailFormats),
+              limit(5)
             ),
+            "email_in"
           );
         }
+      } else {
+        // Just search the raw trimmed identifier in phone too in case it was saved oddly
+        await evaluateQuery(
+          query(
+            collection(db, "users"),
+            where("phone", "==", trimmed),
+            limit(5)
+          ),
+          "phone_exact"
+        );
       }
-
-      const snapshots = await Promise.all(queries);
-      snapshots.forEach(addMatches);
 
       return matches;
     } catch (err) {
-      console.error("Error finding users:", err);
+      console.error("Error finding users (outer):", err);
       return [];
     }
   };
@@ -1202,12 +1208,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Check for phone duplicate if changing
       if (data.phone && data.phone !== profile.phone) {
-        const existingPhones = await findUsersByEmailOrPhone(data.phone);
+        const standardizedNewPhone = standardizePhone(data.phone);
+        const existingPhones = await findUsersByEmailOrPhone(standardizedNewPhone);
         if (existingPhones.some((u) => u.uid !== user.uid)) {
           throw new Error(
             "This phone number is already in use by another account.",
           );
         }
+        data.phone = standardizedNewPhone;
       }
 
       // Check for email duplicate if changing (though UI might prevent this)

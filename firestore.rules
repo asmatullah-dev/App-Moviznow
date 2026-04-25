@@ -111,7 +111,7 @@ service cloud.firestore {
       // Protect against bulk scraping: 
       // 1. Admins and Managers can query freely
       // 2. Others (including unauthenticated) can only perform limited queries (max 5 results)
-      allow list: if isAdminOrEditor() || isUserManager() || request.query.limit <= 5;
+      allow list: if (('limit' in request.query) && request.query.limit <= 10) || isAdminOrEditor() || isUserManager();
 
       allow create: if (isAdmin() && isValidUser(request.resource.data)) ||
                        (isOwner(userId) && request.resource.data.uid == request.auth.uid && request.resource.data.role == 'user' && isValidUser(request.resource.data)) || 

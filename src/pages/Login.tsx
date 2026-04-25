@@ -95,23 +95,25 @@ export default function Login() {
     setIsLoggingIn(true);
     
     try {
-      // Try finding user with raw input first
-      const foundUsersRaw = await findUsersByEmailOrPhone(identifier.trim());
-      let foundUser = foundUsersRaw.length > 0 ? foundUsersRaw[0] : null;
+      const rawTrimmed = identifier.trim();
+      const formatted = formatIdentifier(rawTrimmed);
       
-      if (!foundUser) {
-        // If not found, try with formatted identifier
-        const formatted = formatIdentifier(identifier);
-        const foundUsersFormatted = await findUsersByEmailOrPhone(formatted);
-        foundUser = foundUsersFormatted.length > 0 ? foundUsersFormatted[0] : null;
-        if (foundUser) {
+      // Try finding user with both raw and formatted identifier
+      const [foundUsersRaw, foundUsersFormatted] = await Promise.all([
+        findUsersByEmailOrPhone(rawTrimmed),
+        rawTrimmed !== formatted ? findUsersByEmailOrPhone(formatted) : Promise.resolve([])
+      ]);
+      
+      const allFound = [...foundUsersRaw, ...foundUsersFormatted];
+      // Deduplicate by UID
+      const uniqueFound = allFound.filter((v, i, a) => a.findIndex(t => t.uid === v.uid) === i);
+      
+      let foundUser = uniqueFound.length > 0 ? uniqueFound[0] : null;
+      
+      // If we found a user with formatted input, update identifier to formatted for consistency
+      if (foundUser) {
+        if (/^[\d+]+$/.test(rawTrimmed)) {
           setIdentifier(formatted);
-        }
-      } else {
-        // If found with raw input, format it for the UI if it's a phone
-        if (/^[\d+]+$/.test(identifier.trim())) {
-           const formatted = formatIdentifier(identifier);
-           setIdentifier(formatted);
         }
       }
 
@@ -129,8 +131,9 @@ export default function Login() {
         // Not registered, check if it's a phone number and if it's whitelisted
         const isEmail = identifier.includes('@');
         if (!isEmail) {
-          const formattedPhone = formatIdentifier(identifier);
-          const isWhitelisted = await isPhoneWhitelisted(formattedPhone);
+          const standardizedPhone = standardizePhone(rawTrimmed);
+          const isWhitelisted = await isPhoneWhitelisted(standardizedPhone);
+          
           if (!isWhitelisted) {
             setCustomError(
               <div className="flex flex-col gap-3">
@@ -148,7 +151,7 @@ export default function Login() {
                       type="button"
                       onClick={() => {
                         const adminPhone = `92${settings?.supportNumber || '3363284466'}`;
-                        const message = `Hello Admin,\n\nName: ${user?.displayName || 'Unknown'}\nEmail: ${user?.email || 'N/A'}\nPhone: ${formattedPhone}\n\nYour message/question:\nI need help logging in.`;
+                        const message = `Hello Admin,\n\nName: ${user?.displayName || 'Unknown'}\nEmail: ${user?.email || 'N/A'}\nPhone: ${standardizedPhone}\n\nYour message/question:\nI need help logging in.`;
                         window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
                       }}
                       className="w-full bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-700 py-2.5 rounded-lg font-medium hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors"
@@ -162,6 +165,8 @@ export default function Login() {
             setIsLoggingIn(false);
             return;
           }
+          // If whitelisted but not found, ensure we use standardized phone for next steps
+          setIdentifier(standardizedPhone);
         }
         
         // Allow to create account
