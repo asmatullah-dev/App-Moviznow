@@ -1,6 +1,6 @@
 import { doc, updateDoc, increment } from 'firebase/firestore';
 import { logEvent as firebaseLogEvent } from 'firebase/analytics';
-import { db, analytics } from '../firebase';
+import { db, analytics, analyticsPromise } from '../firebase';
 
 export const logEvent = async (
   type: 'session_start' | 'content_click' | 'link_click' | 'time_spent',
@@ -19,8 +19,9 @@ export const logEvent = async (
 
   try {
     // Log to Google Analytics if initialized
-    if (analytics) {
-      firebaseLogEvent(analytics, type, {
+    const gaInstance = analytics || await analyticsPromise;
+    if (gaInstance) {
+      firebaseLogEvent(gaInstance, type, {
         user_id: userId,
         ...data
       });
