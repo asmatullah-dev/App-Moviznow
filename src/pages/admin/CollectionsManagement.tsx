@@ -184,9 +184,9 @@ export default function CollectionsManagement() {
                       <div className="flex items-center gap-1.5 self-end">
                         <button
                           onClick={() => handleSave(collection.id)}
-                          disabled={isSaving || editForm.contentIds.length < 2 || !editForm.title.trim()}
+                          disabled={isSaving || !editForm.title.trim()}
                           className="flex items-center gap-1.5 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-emerald-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
-                          title={editForm.contentIds.length < 2 ? "At least 2 items are required" : ""}
+                          title=""
                         >
                           {isSaving ? (
                             <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -203,9 +203,6 @@ export default function CollectionsManagement() {
                           <X className="w-3.5 h-3.5" />
                         </button>
                       </div>
-                      {editForm.contentIds.length < 2 && (
-                        <span className="text-[9px] text-zinc-400 font-medium">Add at least 2 items to save</span>
-                      )}
                     </div>
                 </div>
 

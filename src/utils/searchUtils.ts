@@ -42,10 +42,25 @@ export const smartSearch = <T extends Record<string, any>>(
   if (searchWords.length === 0) return [];
 
   const scoredItems = items.map(item => {
-    // Combine all searchable fields into one string for matching
-    const searchableText = fields
-      .map(f => String(item[f] || '').toLowerCase())
-      .join(' ');
+    // Helper to normalize phone numbers
+    const normalizePhone = (p: string) => {
+      const d = p.replace(/\D/g, '');
+      if (d.startsWith('92') && d.length >= 11) return d.substring(2);
+      if (d.startsWith('0') && d.length >= 10) return d.substring(1);
+      return d;
+    };
+
+    // Combine all searchable fields into one string for matching, with extra phone formats
+    const searchableTextParts = fields.map(f => {
+      const val = String(item[f] || '').toLowerCase();
+      if (String(f).toLowerCase().includes('phone')) {
+        const digits = val.replace(/\D/g, '');
+        const normalized = normalizePhone(val);
+        return Array.from(new Set([val, digits, normalized])).join(' ');
+      }
+      return val;
+    });
+    const searchableText = searchableTextParts.join(' ');
     
     const itemWords = searchableText.split(/[\s\-:]+/).filter(w => w.length > 0);
     
@@ -57,16 +72,30 @@ export const smartSearch = <T extends Record<string, any>>(
 
     for (const searchWord of searchWords) {
       let foundMatch = false;
+      const qNormalized = normalizePhone(searchWord);
       
       // 1. Try exact or prefix match
       for (let i = 0; i < itemWords.length; i++) {
         if (matchedIndices.has(i)) continue;
         const itemWord = itemWords[i];
+        
+        // Regular match
         if (itemWord === searchWord || itemWord.startsWith(searchWord)) {
           exactMatches++;
           matchedIndices.add(i);
           foundMatch = true;
           break;
+        }
+
+        // Phone normalized match
+        if (searchWord.length >= 3 && qNormalized.length >= 3) {
+          const itemWordNormalized = normalizePhone(itemWord);
+          if (itemWordNormalized === qNormalized || itemWordNormalized.startsWith(qNormalized)) {
+            exactMatches++;
+            matchedIndices.add(i);
+            foundMatch = true;
+            break;
+          }
         }
       }
 
@@ -102,25 +131,38 @@ export const smartSearch = <T extends Record<string, any>>(
       let exactFieldMatch = false;
       let startsWithFieldMatch = false;
       
+      // Specialized phone number matching
+      const qNormalized = normalizePhone(q);
+
       for (const f of fields) {
         const val = String(item[f] || '').toLowerCase();
+        
+        // Exact string match
         if (val === q) {
           exactFieldMatch = true;
-          break;
-        }
-        if (val.startsWith(q)) {
+          score += 50000;
+        } else if (val.startsWith(q)) {
           startsWithFieldMatch = true;
+          score += 25000;
+        }
+
+        // Phone specific boost
+        if (String(f).toLowerCase().includes('phone') && qNormalized.length >= 3) {
+          const valNormalized = normalizePhone(val);
+          if (valNormalized === qNormalized) {
+            score += 60000; // Priority over exact string match
+            exactFieldMatch = true;
+          } else if (valNormalized.startsWith(qNormalized)) {
+            score += 35000; // Priority over generic startsWith
+            startsWithFieldMatch = true;
+          } else if (valNormalized.includes(qNormalized)) {
+            score += 15000; // Higher than generic inclusion
+          }
         }
       }
 
-      if (exactFieldMatch) {
-        score += 50000;
-      } else if (startsWithFieldMatch) {
-        score += 25000;
-      }
-
-      // Exact substring match in any field gets highest priority
-      if (searchableText.includes(q)) {
+      // Exact substring match in any field gets priority
+      if (!exactFieldMatch && !startsWithFieldMatch && searchableText.includes(q)) {
         score += 10000;
       }
       

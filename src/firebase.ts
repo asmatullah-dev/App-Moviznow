@@ -6,12 +6,18 @@ import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 import { getAnalytics, isSupported } from 'firebase/analytics';
 import firebaseConfig from '../firebase-applet-config.json';
 
-export const app = initializeApp(firebaseConfig);
+// Support injecting GA Measurement ID via Environment Variables for easier configuration
+const extendedConfig = {
+  ...firebaseConfig,
+  measurementId: firebaseConfig.measurementId || import.meta.env.VITE_GA_MEASUREMENT_ID || ""
+};
+
+export const app = initializeApp(extendedConfig);
 
 // Use initializeFirestore with experimentalForceLongPolling: true to fix connection issues in sandboxed environments
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
-}, firebaseConfig.firestoreDatabaseId);
+}, extendedConfig.firestoreDatabaseId);
 
 export const auth = getAuth(app);
 export const storage = getStorage(app);
@@ -19,7 +25,7 @@ export const messaging = typeof window !== 'undefined' ? getMessaging(app) : nul
 
 export const analyticsPromise = typeof window !== 'undefined' 
   ? isSupported()
-      .then(yes => (yes && firebaseConfig.measurementId) ? getAnalytics(app) : null)
+      .then(yes => (yes && extendedConfig.measurementId) ? getAnalytics(app) : null)
       .catch((e) => {
         console.warn("Analytics not supported or failed to initialize", e);
         return null;

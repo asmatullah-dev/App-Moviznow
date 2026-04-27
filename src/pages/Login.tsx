@@ -32,6 +32,7 @@ export default function Login() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [customError, setCustomError] = useState<React.ReactNode | null>(null);
+  const [emailWarningShown, setEmailWarningShown] = useState(false);
   
   const [identifier, setIdentifier] = useState(''); // Email or Phone
   const [password, setPassword] = useState('');
@@ -171,6 +172,9 @@ export default function Login() {
         
         // Allow to create account
         setRegisteredUser(null);
+        setDisplayName('');
+        setOptionalEmail('');
+        setPassword('');
         setStep('create_password');
       }
     } catch (err) {
@@ -384,13 +388,21 @@ export default function Login() {
             clearError();
             setCustomError(null);
             setIsLoggingIn(true);
+            
+            if (!optionalEmail.trim() && !emailWarningShown && (!registeredUser?.email || registeredUser.email.endsWith('@moviznow.com'))) {
+              setEmailWarningShown(true);
+              setIsLoggingIn(false);
+              return;
+            }
+
             try {
               if (!registeredUser || registeredUser.uid.startsWith('pending_')) {
                 // New user or pending user
-                await signUpWithPhoneAndPassword(identifier, password, displayName, optionalEmail.trim().toLowerCase() || undefined);
+                const dummyEmail = `${identifier.replace(/[^0-9]/g, '')}@moviznow.com`;
+                await signUpWithPhoneAndPassword(identifier, password, displayName, optionalEmail.trim().toLowerCase() || dummyEmail);
               } else {
                 // Active user without password (likely Google login)
-                setCustomError("This account was created with Google. Please log in with Google, or use 'Forgot Password' to set a password.");
+                setCustomError("This account was created with Google. Please log in with Google below.");
                 setIsLoggingIn(false);
               }
             } catch (err) {
@@ -405,14 +417,18 @@ export default function Login() {
               <ArrowLeft className="w-4 h-4" /> Back
             </button>
             <div className="text-center mb-4">
-              <h2 className="text-xl font-bold">Create Password</h2>
-              <p className="text-sm text-zinc-500">Set up a password for {identifier}</p>
+              <h2 className="text-xl font-bold">
+                {registeredUser && !registeredUser.uid.startsWith('pending_') ? "Can't Login with Number" : "Create Password"}
+              </h2>
+              <p className="text-sm text-zinc-500">
+                {registeredUser && !registeredUser.uid.startsWith('pending_') ? `Password set up is not available for ${identifier}` : `Set up a password for ${identifier}`}
+              </p>
             </div>
             
             {registeredUser && !registeredUser.uid.startsWith('pending_') ? (
               <div className="space-y-4">
                 <div className="p-3 bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 rounded-xl text-blue-600 dark:text-blue-400 text-sm mb-4">
-                  This account was created with Google. You can log in with Google below, or use 'Forgot Password' to set a password via email.
+                  This account was created with Google. You can log in with Google below.
                 </div>
                 
                 <button
@@ -429,15 +445,6 @@ export default function Login() {
                   Login with Google
                 </button>
                 
-                {registeredUser?.email && !registeredUser.email.endsWith('@moviznow.com') && (
-                  <button
-                    type="button"
-                    onClick={handleForgotPassword}
-                    className="w-full bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-700 font-semibold py-3 px-4 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors"
-                  >
-                    Send Password Reset Email
-                  </button>
-                )}
               </div>
             ) : (
               <>
@@ -461,16 +468,20 @@ export default function Login() {
                   <div>
                     <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Email</label>
                     <div className="relative">
-                      <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                      <Mail className={`absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 ${emailWarningShown ? 'text-amber-500' : 'text-zinc-400'}`} />
                       <input
                         type="email"
-                        required
                         value={optionalEmail}
-                        onChange={(e) => setOptionalEmail(e.target.value)}
-                        className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-11 pr-4 py-3 text-sm focus:outline-none focus:border-emerald-500 transition-colors"
+                        onChange={(e) => { setOptionalEmail(e.target.value); setEmailWarningShown(false); }}
+                        className={`w-full bg-white dark:bg-zinc-950 border ${emailWarningShown ? 'border-amber-500 focus:border-amber-500' : 'border-zinc-200 dark:border-zinc-800 focus:border-emerald-500'} rounded-xl pl-11 pr-4 py-3 text-sm focus:outline-none transition-colors`}
                         placeholder="you@example.com"
                       />
                     </div>
+                    {emailWarningShown && (
+                      <p className="text-xs text-amber-600 dark:text-amber-500 mt-2 font-medium">
+                        It's highly recommended to provide an email for account recovery. Press Create Password again to continue without an email.
+                      </p>
+                    )}
                   </div>
                 )}
                 <div>

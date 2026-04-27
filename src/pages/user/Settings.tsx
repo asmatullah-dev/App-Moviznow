@@ -6,9 +6,12 @@ import { ArrowLeft, Save, Lock, User, Mail, Phone, Loader2 } from 'lucide-react'
 import { clsx } from 'clsx';
 
 export default function Settings() {
-  const { profile, updateUserProfileData } = useAuth();
+  const { profile, user, updateUserProfileData } = useAuth();
   const { settings } = useSettings();
   const navigate = useNavigate();
+  
+  const isGoogleAuth = user?.providerData.some(p => p.providerId === 'google.com');
+  const showPasswordSection = profile?.hasPassword || !isGoogleAuth;
   
   const [name, setName] = useState(profile?.displayName || '');
   const [email, setEmail] = useState(profile?.email?.endsWith('@moviznow.com') ? '' : (profile?.email || ''));
@@ -145,57 +148,61 @@ export default function Settings() {
                 </div>
               </div>
 
-              <div className="h-px bg-zinc-200 dark:bg-zinc-800 my-8"></div>
+              {showPasswordSection && (
+                <>
+                  <div className="h-px bg-zinc-200 dark:bg-zinc-800 my-8"></div>
 
-              <div className="space-y-4">
-                <h3 className="text-lg font-bold mb-4">{profile?.hasPassword ? 'Change Password' : 'Create Password'}</h3>
-                
-                {profile?.hasPassword && (
-                  <div>
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">Current Password</label>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400" />
-                      <input
-                        type="password"
-                        value={currentPassword}
-                        onChange={(e) => setCurrentPassword(e.target.value)}
-                        className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-10 pr-4 py-2.5 focus:outline-none focus:border-emerald-500 transition-colors"
-                        placeholder="Enter current password if changing"
-                      />
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-bold mb-4">{profile?.hasPassword ? 'Change Password' : 'Create Password'}</h3>
+                    
+                    {profile?.hasPassword && (
+                      <div>
+                        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">Current Password</label>
+                        <div className="relative">
+                          <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400" />
+                          <input
+                            type="password"
+                            value={currentPassword}
+                            onChange={(e) => setCurrentPassword(e.target.value)}
+                            className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-10 pr-4 py-2.5 focus:outline-none focus:border-emerald-500 transition-colors"
+                            placeholder="Enter current password if changing"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">New Password</label>
+                      <div className="relative">
+                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400" />
+                        <input
+                          type="password"
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-10 pr-4 py-2.5 focus:outline-none focus:border-emerald-500 transition-colors"
+                          placeholder="New password"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">Confirm New Password</label>
+                      <div className="relative">
+                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400" />
+                        <input
+                          type="password"
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-10 pr-4 py-2.5 focus:outline-none focus:border-emerald-500 transition-colors"
+                          placeholder="Confirm new password"
+                        />
+                      </div>
                     </div>
                   </div>
-                )}
+                </>
+              )}
 
-                <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">New Password</label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400" />
-                    <input
-                      type="password"
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-10 pr-4 py-2.5 focus:outline-none focus:border-emerald-500 transition-colors"
-                      placeholder="New password"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">Confirm New Password</label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400" />
-                    <input
-                      type="password"
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-10 pr-4 py-2.5 focus:outline-none focus:border-emerald-500 transition-colors"
-                      placeholder="Confirm new password"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-4">
+              <div className="pt-6">
                 <button
                   type="submit"
                   disabled={loading}

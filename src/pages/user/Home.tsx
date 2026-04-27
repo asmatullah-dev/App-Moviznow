@@ -599,7 +599,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
         )}
 
         {/* Trending Section */}
-        {!hideScrollingTabs && trendingCollection && (trendingCollection.contentIds?.length || 0) >= 2 && (
+        {!hideScrollingTabs && trendingCollection && (
           <div className="mb-6 sm:mb-8">
             <div className="flex items-center justify-between mb-4 border-b border-zinc-200 dark:border-zinc-800 pb-2">
               <div className="flex flex-col">
@@ -638,7 +638,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
         )}
 
         {/* Newly Added Section */}
-        {!hideScrollingTabs && newlyAddedCollection && (newlyAddedCollection.contentIds?.length || 0) >= 2 && (
+        {!hideScrollingTabs && newlyAddedCollection && (
           <div className="mb-6 sm:mb-8">
             <div className="flex items-center justify-between mb-4 border-b border-zinc-200 dark:border-zinc-800 pb-2">
               <div className="flex flex-col">
