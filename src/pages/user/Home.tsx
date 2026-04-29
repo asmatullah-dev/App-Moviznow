@@ -430,7 +430,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
                     supportPhone = '92' + supportPhone;
                   }
                   const adminPhone = supportPhone.replace('+', '');
-                  const msg = `Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\n\nYour message/question:\nMy account is pending and I need assistance.`;
+                  const msg = `Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nMy account is pending and I need assistance.`;
                   window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(msg)}`, '_blank');
                 }} className="flex items-center justify-center gap-1.5 sm:gap-2 bg-yellow-500/10 border border-yellow-500 text-yellow-600 dark:text-yellow-500 px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-yellow-500/20 transition-all active:scale-95">
                   <MessageCircle className="w-3 h-3 sm:w-5 sm:h-5" /> Admin
@@ -463,7 +463,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
                   }
                   const adminPhone = supportPhone.replace('+', '');
                   const expiryType = profile?.role === 'trial' ? 'Trial' : 'Membership';
-                  const msg = `Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\n\nYour message/question:\nMy ${expiryType} has expired and I need assistance.`;
+                  const msg = `Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nMy ${expiryType} has expired and I need assistance.`;
                   window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(msg)}`, '_blank');
                 }} className="flex items-center justify-center gap-1.5 sm:gap-2 bg-red-500/10 border border-red-500/30 px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-red-500/20 transition-all active:scale-95">
                   <MessageCircle className="w-3 h-3 sm:w-5 sm:h-5" /> Admin
@@ -876,7 +876,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
               supportPhone = '92' + supportPhone;
             }
             const adminPhone = supportPhone.replace('+', '');
-            const msg = `Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\n\nYour message/question:\nI need help or want to renew my membership.`;
+            const msg = `Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nI need help or want to renew my membership.`;
             window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(msg)}`, '_blank');
           }} className="inline-flex items-center gap-2 text-emerald-500 hover:text-emerald-400 mt-2 font-medium cursor-pointer bg-transparent border-none">
             <MessageCircle className="w-4 h-4" /> WhatsApp: {(settings?.supportNumber || '3363284466').startsWith('0') ? (settings?.supportNumber || '3363284466') : `0${settings?.supportNumber || '3363284466'}`}

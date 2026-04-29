@@ -92,11 +92,11 @@ export default function App() {
                     
                     {/* User Routes */}
                     <Route path="/" element={<ProtectedRoute><Home onOpenMediaModal={() => setIsMediaModalOpen(true)} /></ProtectedRoute>} />
-                    <Route path="/movie/:id" element={<MovieDetails />} />
+                    <Route path="/movie/:id" element={<ProtectedRoute><MovieDetails /></ProtectedRoute>} />
                     <Route path="/watch-later" element={<ProtectedRoute><WatchLater /></ProtectedRoute>} />
                     <Route path="/favorites" element={<ProtectedRoute><Favorites /></ProtectedRoute>} />
                     <Route path="/requests" element={<ProtectedRoute><MovieRequests /></ProtectedRoute>} />
-                    <Route path="/trial" element={<Trial />} />
+                    <Route path="/trial" element={<ProtectedRoute><Trial /></ProtectedRoute>} />
                     <Route path="/top-up" element={<ProtectedRoute><TopUp /></ProtectedRoute>} />
                     <Route path="/cart" element={<ProtectedRoute><Cart /></ProtectedRoute>} />
                     <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />

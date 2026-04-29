@@ -1353,7 +1353,7 @@ export default function MovieDetails() {
                   const helpText = profile?.role === 'selected_content' 
                     ? `I want to get access to ${contentTitle}. Please tell me how to pay and add it to my account.`
                     : `I cannot access ${contentTitle}.`;
-                  const msg = `Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\n\nYour message/question:\n${helpText}`;
+                  const msg = `Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\n${helpText}`;
                   window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(msg)}`, '_blank');
                   }} 
                   className="inline-flex items-center gap-2 bg-red-500/20 px-6 py-3 text-sm sm:text-base rounded-xl font-medium hover:bg-red-500/30 transition-colors text-red-500">
@@ -2071,7 +2071,7 @@ export default function MovieDetails() {
                   const helpText = profile?.role === 'selected_content' 
                     ? `I want to get access to ${displayTitle}. Please tell me how to pay and add it to my account.`
                     : `I need assistance with ${displayTitle}.`;
-                  const message = encodeURIComponent(`Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\n\nYour message/question:\n${helpText}`);
+                  const message = encodeURIComponent(`Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\n${helpText}`);
                   return `https://wa.me/${adminPhone}?text=${message}`;
                 })()} 
                 target="_blank" 

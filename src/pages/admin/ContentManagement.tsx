@@ -344,6 +344,9 @@ const ContentCard = memo(({
       <div className="p-2 md:p-3 flex-1 flex flex-col">
         <h3 className="font-bold text-sm md:text-base mb-0.5 line-clamp-1" title={content.title}>{content.title}</h3>
         <p className="text-zinc-500 dark:text-zinc-400 text-xs mb-2">{content.year}</p>
+        {['owner', 'admin'].includes(profile?.role) && content.addedByRole && !['owner', 'admin'].includes(content.addedByRole) && content.addedByName && (
+          <p className="text-zinc-400 dark:text-zinc-500 text-[10px] italic mb-1 -mt-1">By {content.addedByName}</p>
+        )}
         
         <div className="mt-auto flex flex-wrap items-center justify-between gap-1 pt-2 border-t border-zinc-200 dark:border-zinc-800/50">
           <div className="flex flex-wrap gap-1">
@@ -969,9 +972,9 @@ export default function ContentManagement() {
         posterUrl,
         trailerUrl,
         trailerTitle: trailerTitle || '',
-        trailerYoutubeTitle: trailerYoutubeTitle || '',
+        // Do not save trailerYoutubeTitle to Firestore
         trailerSeasonNumber: trailerSeasonNumber || null,
-        trailers: JSON.stringify(trailers),
+        trailers: JSON.stringify(trailers.map(({ youtubeTitle, ...rest }) => rest)),
         sampleUrl: sampleUrl || '',
         imdbLink: imdbLink || '',
         imdbRating: imdbRating || '',
@@ -1009,6 +1012,7 @@ export default function ContentManagement() {
         cleanedData.createdAt = new Date().toISOString();
         cleanedData.addedBy = user?.uid;
         cleanedData.addedByRole = profile?.role;
+        cleanedData.addedByName = profile?.displayName || profile?.email || 'Unknown';
         const newRef = await addDoc(collection(db, 'content'), deepClean(cleanedData));
         newDocId = newRef.id;
       }
@@ -1164,6 +1168,10 @@ export default function ContentManagement() {
         };
 
         links.forEach(newLink => {
+          if (newLink.isSample && newLink.url) {
+            setSampleUrl(newLink.url);
+          }
+
           // SKIP if URL already exists in content
           if (newLink.url && currentLinks.some(l => l.url === newLink.url)) {
             console.log("Skipping duplicate movie link:", newLink.url);
@@ -1188,6 +1196,10 @@ export default function ContentManagement() {
       const updatedSeasons = [...seasons];
       
       links.forEach(link => {
+        if (link.isSample && link.url) {
+          setSampleUrl(link.url);
+        }
+
         const targetSeason = link.season || metadata?.season || 1;
         const targetEpisode = link.episode || metadata?.episode; // if undefined, it's a full season
         
@@ -1359,6 +1371,8 @@ export default function ContentManagement() {
            description: '',
            status: 'draft',
            addedBy: user?.uid || null,
+           addedByRole: profile?.role,
+           addedByName: profile?.displayName || profile?.email || 'Unknown',
            createdAt: Date.now(),
            updatedAt: Date.now(),
          };
@@ -2904,10 +2918,9 @@ export default function ContentManagement() {
       result = smartSearch(result, debouncedSearchTerm, ['title', 'description', 'cast', 'country', 'year']);
     }
     
-    // Allow smartSearch to handle sorting (by relevance) if we're searching and have default sort
+    // Sort according to user preference, just like Home page
     let sortedResult = [...result];
-    const shouldManualSort = !debouncedSearchTerm || filterSort !== 'default';
-    if (shouldManualSort) {
+    if (!debouncedSearchTerm || filterSort === 'default' || filterSort !== 'default') {
       sortedResult.sort((a, b) => {
         if (filterSort === 'default') {
           if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
@@ -3213,6 +3226,7 @@ export default function ContentManagement() {
       
       await batchOp.commit();
       setSelectedContent([]);
+      setShowMergeConfirm(false);
       setAlertConfig({ isOpen: true, title: 'Success', message: `Successfully merged ${items.length} items into "${finalTitle}"` });
     } catch (e: any) {
       console.error(e);
@@ -3588,7 +3602,22 @@ export default function ContentManagement() {
             >
               <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between sticky top-0 bg-zinc-50 dark:bg-zinc-900 z-10 rounded-t-2xl">
                 <div className="flex items-center gap-2 sm:gap-4">
-                  <h2 className="text-lg sm:text-xl font-bold whitespace-nowrap">{editingId ? 'Edit Content' : 'Add Content'}</h2>
+                  <div className="flex flex-col">
+                    <h2 className="text-lg sm:text-xl font-bold whitespace-nowrap">{editingId ? 'Edit Content' : 'Add Content'}</h2>
+                    {(() => {
+                      const editingContent = editingId ? contentList.find(c => c.id === editingId) : null;
+                      if (!editingContent) return null;
+                      const shouldShow = ['owner', 'admin'].includes(profile?.role) && 
+                        editingContent.addedByRole && 
+                        !['owner', 'admin'].includes(editingContent.addedByRole) && 
+                        editingContent.addedByName;
+                      
+                      if (shouldShow) {
+                        return <span className="text-xs text-zinc-400 dark:text-zinc-500 italic flex -mt-1">By {editingContent.addedByName}</span>;
+                      }
+                      return null;
+                    })()}
+                  </div>
                   <button
                     type="button"
                     onClick={() => setIsAutoFillModalOpen(true)}
@@ -3768,7 +3797,7 @@ export default function ContentManagement() {
                       <div className="flex flex-col gap-2 bg-zinc-50 dark:bg-zinc-900/50 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
                         <input 
                           type="text" 
-                          placeholder="Trailer Title (e.g. Season 1 Trailer, Teaser)"
+                          placeholder="Trailer Title (e.g. Official Trailer, Teaser)"
                           value={trailerTitle}
                           onChange={(e) => setTrailerTitle(e.target.value)}
                           className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" 
@@ -3818,7 +3847,7 @@ export default function ContentManagement() {
                         <div className="flex flex-col gap-2 bg-zinc-50 dark:bg-zinc-900/50 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
                           <input 
                             type="text" 
-                            placeholder="Trailer Title (e.g. Season 1 Trailer, Teaser)"
+                            placeholder="Trailer Title (e.g. Official Trailer, Teaser)"
                             value={trailer.title}
                             onChange={(e) => {
                               const newTrailers = [...trailers];
@@ -4168,20 +4197,6 @@ export default function ContentManagement() {
                                     setSeasons(newSeasons);
                                   }}
                                   placeholder="Season Title"
-                                  className="flex-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 text-sm"
-                                />
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <h4 className="font-bold text-sm text-zinc-500 dark:text-zinc-400">Trailer URL</h4>
-                                <input
-                                  type="url"
-                                  value={season.trailerUrl || ''}
-                                  onChange={(e) => {
-                                    const newSeasons = [...seasons];
-                                    newSeasons[sIdx].trailerUrl = e.target.value;
-                                    setSeasons(newSeasons);
-                                  }}
-                                  placeholder="Season Trailer YouTube URL"
                                   className="flex-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 text-sm"
                                 />
                               </div>

@@ -105,6 +105,7 @@ export interface LinkDef {
   episode?: number;
   isFullSeasonMKV?: boolean;
   isFullSeasonZIP?: boolean;
+  isSample?: boolean;
 }
 
 export type QualityLinks = LinkDef[];
@@ -170,6 +171,7 @@ export interface Content {
   updatedAt: string;
   addedBy?: string; // UID of the Content Manager who added this content
   addedByRole?: Role; // Role of the person who added this content
+  addedByName?: string; // Display name of the person who added this content
   status?: 'draft' | 'published' | 'selected_content';
   movieLinks?: string; // JSON stringified QualityLinks
   fullSeasonZip?: string; // JSON stringified QualityLinks
@@ -235,6 +237,8 @@ export interface AppSettings {
   isPhoneLoginEnabled?: boolean;
   isAdminContactEnabled?: boolean;
   isPaymentEnabled?: boolean;
+  isMaintenanceModeEnabled?: boolean;
+  maintenanceMessage?: string;
   serviceAccounts?: {
     sourceKey?: string;
     targets?: {

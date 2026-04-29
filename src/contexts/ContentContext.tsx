@@ -4,6 +4,7 @@ import { safeStorage } from '../utils/safeStorage';
 import { collection, onSnapshot, query, where, getDoc, getDocs, doc, setDoc, orderBy, limit } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { useAuth } from './AuthContext';
+import { useUsers } from './UsersContext';
 import { Content, Genre, Language, Quality, Collection as AppCollection } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
 
@@ -63,6 +64,23 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const { profile } = useAuth();
+  const { users: allUsers } = useUsers();
+
+  const augmentedContentList = useMemo(() => {
+    return contentList.map(c => {
+      if (c.addedBy && (!c.addedByName || !c.addedByRole)) {
+        const adder = allUsers.find(u => u.uid === c.addedBy);
+        if (adder) {
+          return {
+            ...c,
+            addedByName: adder.displayName || adder.email || 'Unknown',
+            addedByRole: adder.role || 'user'
+          };
+        }
+      }
+      return c;
+    });
+  }, [contentList, allUsers]);
 
   useEffect(() => {
     let unsubContent: () => void;
@@ -317,7 +335,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
   }, [contentList, profile?.role]); // Changed from length to contentList for deeper check
 
   return (
-    <ContentContext.Provider value={{ contentList, genres, languages, qualities, collections, loading, isOffline, updateSearchIndex }}>
+    <ContentContext.Provider value={{ contentList: augmentedContentList, genres, languages, qualities, collections, loading, isOffline, updateSearchIndex }}>
       {children}
     </ContentContext.Provider>
   );

@@ -250,7 +250,12 @@ export default function UserManagement() {
 
   useEffect(() => {
     if (contentList && contentList.length > 0) {
-      setAllContent([...contentList].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()));
+      setAllContent([...contentList].sort((a, b) => {
+        if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
+        if (a.order === undefined && b.order !== undefined) return -1;
+        if (a.order !== undefined && b.order === undefined) return 1;
+        return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+      }));
     }
   }, [contentList]);
 
@@ -810,6 +815,16 @@ export default function UserManagement() {
           batch.update(docSnap.ref, { userId: user1.uid });
         });
       }
+
+      // Re-assign any content they added (for Content Management Tab)
+      const contentSnapshot = await getDocs(query(collection(db, 'content'), where('addedBy', '==', user2.uid)));
+      contentSnapshot.docs.forEach(docSnap => {
+        batch.update(docSnap.ref, { 
+          addedBy: user1.uid,
+          addedByName: user1.displayName || user1.email || 'Unknown',
+          addedByRole: user1.role
+        });
+      });
 
       await batch.commit();
 

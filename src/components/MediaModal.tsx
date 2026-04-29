@@ -586,12 +586,20 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
       // Map season trailers to the main trailers array if they exist
       const seasonTrailers = fetchedData.seasons
         .filter((s: any) => selectedSeasons.includes(s.season) && s.trailerUrl)
-        .map((s: any) => ({
-          id: `season-trailer-${s.season}`,
-          url: s.trailerUrl,
-          title: s.name || `Season ${s.season} Trailer`,
-          seasonNumber: s.season
-        }));
+        .map((s: any) => {
+          let trailerTitle = s.name || '';
+          // If title is just "Season X", make it empty per user request
+          if (/^Season\s+\d+$/i.test(trailerTitle.trim())) {
+            trailerTitle = '';
+          }
+          
+          return {
+            id: `season-trailer-${s.season}`,
+            url: s.trailerUrl,
+            title: trailerTitle,
+            seasonNumber: s.season
+          };
+        });
       
       if (seasonTrailers.length > 0) {
         dataToApply.trailers = seasonTrailers;

@@ -103,7 +103,7 @@ export default function Trial() {
     // Remove '+' if present
     supportPhone = supportPhone.replace('+', '');
     
-    const message = encodeURIComponent(`Hello Admin,\n\nName: ${user?.displayName || 'Unknown'}\nEmail: ${user?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\n\nYour message/question:\nI tried to activate a trial but saw that it is disabled on the direct link. Please help me get a trial or membership.`);
+    const message = encodeURIComponent(`Hello Admin,\n\nName: ${user?.displayName || 'Unknown'}\nEmail: ${user?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nI tried to activate a trial but saw that it is disabled on the direct link. Please help me get a trial or membership.`);
     window.open(`https://wa.me/${supportPhone}?text=${message}`, '_blank');
   };
 

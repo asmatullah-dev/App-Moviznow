@@ -80,7 +80,7 @@ const ContentCard = React.memo(({
   const isWatchLater = profile?.watchLater?.includes(content.id);
 
   const canSeeDraft = ['owner', 'admin', 'manager', 'content_manager'].includes(profile?.role);
-
+  
   const matchingSeason = React.useMemo(() => {
     if (!selectedYear || content.type !== 'series') return null;
     return seasons.find((s: any) => s.year?.toString() === selectedYear);

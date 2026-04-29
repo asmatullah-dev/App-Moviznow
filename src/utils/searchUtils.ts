@@ -120,12 +120,13 @@ export const smartSearch = <T extends Record<string, any>>(
     const totalMatches = exactMatches + fuzzyMatches;
     const matchRatio = totalMatches / searchWords.length;
     
-    // Requirement: if half words match then also show results
-    const isMatch = matchRatio >= 0.5;
+    // Show related (at least one matching word) or high ratio
+    const isMatch = totalMatches > 0;
 
     let score = 0;
     if (isMatch) {
       const q = query.toLowerCase();
+      const qDigits = q.replace(/\D/g, '');
       
       // Check individual fields for exact or startsWith matches to give higher precision
       let exactFieldMatch = false;
@@ -136,27 +137,43 @@ export const smartSearch = <T extends Record<string, any>>(
 
       for (const f of fields) {
         const val = String(item[f] || '').toLowerCase();
+        const valDigits = val.replace(/\D/g, '');
         
         // Exact string match
         if (val === q) {
           exactFieldMatch = true;
-          score += 50000;
+          score += 100000;
         } else if (val.startsWith(q)) {
           startsWithFieldMatch = true;
-          score += 25000;
+          score += 50000;
         }
 
         // Phone specific boost
-        if (String(f).toLowerCase().includes('phone') && qNormalized.length >= 3) {
+        if (String(f).toLowerCase().includes('phone')) {
           const valNormalized = normalizePhone(val);
-          if (valNormalized === qNormalized) {
-            score += 60000; // Priority over exact string match
-            exactFieldMatch = true;
-          } else if (valNormalized.startsWith(qNormalized)) {
-            score += 35000; // Priority over generic startsWith
-            startsWithFieldMatch = true;
-          } else if (valNormalized.includes(qNormalized)) {
-            score += 15000; // Higher than generic inclusion
+          
+          if (qDigits.length >= 7 && valDigits.length >= 7) {
+             // Exact digit match (priority)
+             if (qDigits === valDigits) {
+               score += 120000;
+               exactFieldMatch = true;
+             }
+             // Suffix match (last 7 digits)
+             else if (valDigits.endsWith(qDigits.slice(-7))) {
+               score += 40000;
+             }
+          }
+
+          if (qNormalized.length >= 3) {
+            if (valNormalized === qNormalized) {
+              score += 80000; 
+              exactFieldMatch = true;
+            } else if (valNormalized.startsWith(qNormalized)) {
+              score += 45000; 
+              startsWithFieldMatch = true;
+            } else if (valNormalized.includes(qNormalized)) {
+              score += 20000; 
+            }
           }
         }
       }

@@ -42,6 +42,8 @@ export default function AdminSettings() {
     isPhoneLoginEnabled: true,
     isAdminContactEnabled: true,
     isPaymentEnabled: true,
+    isMaintenanceModeEnabled: false,
+    maintenanceMessage: 'App is currently under maintenance. Please try again later.',
     serviceAccounts: {
       sourceKey: '',
       targets: []
@@ -379,6 +381,45 @@ export default function AdminSettings() {
                     )}
                   />
                 </button>
+              </div>
+
+              <div className="flex flex-col gap-4 p-4 bg-red-50 dark:bg-red-900/10 rounded-xl border border-red-200 dark:border-red-900/30">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-medium text-red-900 dark:text-red-400">Not Available Mode</h3>
+                    <p className="text-red-700/80 dark:text-red-400/80 text-xs sm:text-sm">Disable access for non-members (e.g. pending, trial, expired) and show a "Not Available" screen.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSettings({ ...settings, isMaintenanceModeEnabled: !settings.isMaintenanceModeEnabled })}
+                    className={clsx(
+                      "relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0",
+                      settings.isMaintenanceModeEnabled ? "bg-red-600" : "bg-zinc-300 dark:bg-zinc-600"
+                    )}
+                  >
+                    <span
+                      className={clsx(
+                        "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                        settings.isMaintenanceModeEnabled ? "translate-x-6" : "translate-x-1"
+                      )}
+                    />
+                  </button>
+                </div>
+                
+                {settings.isMaintenanceModeEnabled && (
+                  <div>
+                    <label className="block text-sm font-medium text-red-900 dark:text-red-400 mb-2">
+                      Custom Maintenance Message
+                    </label>
+                    <textarea
+                      value={settings.maintenanceMessage || ''}
+                      onChange={(e) => setSettings({ ...settings, maintenanceMessage: e.target.value })}
+                      className="w-full bg-white dark:bg-black/20 border border-red-200 dark:border-red-900/30 rounded-lg p-3 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-red-500/50"
+                      rows={3}
+                      placeholder="Enter the message to show to users..."
+                    />
+                  </div>
+                )}
               </div>
             </div>
           </div>
