@@ -440,7 +440,7 @@ export default function ContentManagement() {
   const { users: allUsers } = useUsers();
   const { settings } = useSettings();
   const { contentList, genres, languages, qualities, loading: contextLoading, updateSearchIndex } = useContent();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(contextLoading);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -2920,8 +2920,7 @@ export default function ContentManagement() {
     
     // Sort according to user preference, just like Home page
     let sortedResult = [...result];
-    if (!debouncedSearchTerm || filterSort === 'default' || filterSort !== 'default') {
-      sortedResult.sort((a, b) => {
+    sortedResult.sort((a, b) => {
         if (filterSort === 'default') {
           if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
           if (a.order === undefined && b.order !== undefined) return -1;
@@ -2932,8 +2931,6 @@ export default function ContentManagement() {
         const timeB = new Date(b.createdAt).getTime();
         return filterSort === 'newest' ? timeB - timeA : timeA - timeB;
       });
-    }
-    
     return sortedResult;
   }, [contentList, debouncedSearchTerm, filterType, filterGenre, filterLanguage, filterQuality, filterYear, filterStatus, filterSort, filterAddedBy, profile, user, showDuplicates, showMissing, duplicateIds]);
 
@@ -3549,7 +3546,7 @@ export default function ContentManagement() {
         </div>
       </div>
 
-      {loading ? (
+      {loading && contentList.length === 0 ? (
         <div className="flex justify-center items-center py-20">
           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-emerald-500"></div>
         </div>
@@ -4908,6 +4905,12 @@ export default function ContentManagement() {
           setManageModal({ isOpen: false, type: null });
         }}
       />
+      {loading && contentList.length > 0 && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[9999] bg-emerald-500 text-white px-6 py-2.5 rounded-full flex items-center justify-center gap-2 text-sm font-medium shadow-lg whitespace-nowrap">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          <span>Syncing changes...</span>
+        </div>
+      )}
     </div>
   );
 }

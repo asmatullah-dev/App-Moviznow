@@ -8,6 +8,7 @@ import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorH
 import { LinkCheckerModal } from '../../components/LinkCheckerModal';
 import { motion, AnimatePresence } from 'framer-motion';
 import { performFullLinkScan, LinkCheckResult } from '../../utils/linkScanner';
+import { linkScannerManager } from '../../utils/linkScannerManager';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
 
 const parseLinks = (linksStr: string | undefined): QualityLinks => {
@@ -35,17 +36,24 @@ export default function ErrorLinks() {
   const [loading, setLoading] = useState(true);
   
   // Client-side/Deep Scan State
-  const [scanning, setScanning] = useState(false);
-  const [scanStatus, setScanStatus] = useState<'idle' | 'scanning' | 'completed' | 'error'>(() => {
-    return (localStorage.getItem('moviznow_scan_status') as any) || 'idle';
-  });
-  const [scanProgress, setScanProgress] = useState(0);
-  const [scanTotal, setScanTotal] = useState(0);
+  const [scanning, setScanning] = useState(linkScannerManager.status === 'scanning');
+  const [scanStatus, setScanStatus] = useState(linkScannerManager.status);
+  const [scanProgress, setScanProgress] = useState(linkScannerManager.scannedCount);
+  const [scanTotal, setScanTotal] = useState(linkScannerManager.totalCount);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
-  const [errorLinks, setErrorLinks] = useState<ErrorLinkInfo[]>(() => {
-    const cached = localStorage.getItem('moviznow_error_links');
-    return cached ? JSON.parse(cached) : [];
-  });
+  const [errorLinks, setErrorLinks] = useState<ErrorLinkInfo[]>(linkScannerManager.errorLinks);
+
+  useEffect(() => {
+    linkScannerManager.setConfig(languages, qualities);
+    const unsubscribe = linkScannerManager.subscribe(() => {
+      setScanning(linkScannerManager.status === 'scanning');
+      setScanStatus(linkScannerManager.status);
+      setScanProgress(linkScannerManager.scannedCount);
+      setScanTotal(linkScannerManager.totalCount);
+      setErrorLinks([...linkScannerManager.errorLinks]);
+    });
+    return () => unsubscribe();
+  }, [languages, qualities]);
 
   const [isLinkCheckerModalOpen, setIsLinkCheckerModalOpen] = useState(false);
   const [modalInput, setModalInput] = useState('');
@@ -155,25 +163,7 @@ export default function ErrorLinks() {
     setLoading(contentLoading);
   }, [contentLoading]);
 
-  useEffect(() => {
-    const unsubErrorLinks = onSnapshot(collection(db, 'error_links'), (snapshot) => {
-      setErrorLinks(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any as ErrorLinkInfo)));
-    });
 
-    return () => {
-      unsubErrorLinks();
-    };
-  }, []);
-
-  // Sync errorLinks to localStorage
-  useEffect(() => {
-    localStorage.setItem('moviznow_error_links', JSON.stringify(errorLinks));
-  }, [errorLinks]);
-
-  // Sync scanStatus to localStorage
-  useEffect(() => {
-    localStorage.setItem('moviznow_scan_status', scanStatus);
-  }, [scanStatus]);
 
   // Auto-recheck links if they change
   useEffect(() => {
@@ -377,10 +367,8 @@ export default function ErrorLinks() {
     return allLinksToScan;
   };
 
+  
   const handleScanResults = async (results: any[]) => {
-    setScanning(false);
-    setScanStatus('completed');
-    
     const allLinksToScan = getAllLinksToScan();
     const newErrorLinks: ErrorLinkInfo[] = [];
 
@@ -402,107 +390,34 @@ export default function ErrorLinks() {
       }
     });
 
+    linkScannerManager.errorLinks = newErrorLinks;
     setErrorLinks(newErrorLinks);
   };
 
   const scanLinks = async (onlyFiltered = false) => {
-    if (scanning) return;
-    
-    let linksToScan: { info: ErrorLinkInfo, url: string }[] = [];
+    let linksToScan = [];
     if (onlyFiltered) {
       linksToScan = filteredAndSortedLinks.map(l => ({ info: l, url: l.link.url }));
     } else {
       linksToScan = getAllLinksToScan();
     }
-    
     if (linksToScan.length === 0) return;
     
-    setScanning(true);
-    setScanStatus('scanning');
-    setScanProgress(0);
-    setScanTotal(linksToScan.length);
-    
-    // Clear previous results when starting a new scan
-    setErrorLinks([]);
-    localStorage.removeItem('moviznow_error_links');
-    localStorage.setItem('moviznow_scan_status', 'scanning');
-    
-    const controller = new AbortController();
-    setAbortController(controller);
+    linkScannerManager.startScan(linksToScan);
+  };
 
-    const concurrency = 5;
-    const results: any[] = [];
-    const queue = [...linksToScan];
-    let completed = 0;
+  const resumeScan = () => {
+    linkScannerManager.resumeScan();
+  };
 
-    const processNext = async () => {
-      if (queue.length === 0 || controller.signal.aborted) return;
-      
-      const item = queue.shift()!;
-      try {
-        const res = await performFullLinkScan(
-          item.url, 
-          {}, 
-          languages, 
-          qualities, 
-          controller.signal,
-          item.info.link?.size,
-          item.info.link?.unit
-        );
-        results.push(res);
-        
-        // Show new results as they are found
-        const isMissingLanguageOnly = res.statusLabel === "MISSING_METADATA" && res.message === "Missing Language in filename";
-        if (!isMissingLanguageOnly && (!res.ok || res.statusLabel === "BROKEN" || res.statusLabel === "SIZE_MISMATCH" || res.statusLabel === "MISSING_FILENAME" || res.statusLabel === "MISSING_METADATA" || (res.mismatchWarnings && res.mismatchWarnings.length > 0))) {
-          setErrorLinks(prev => {
-            const errorDetail = (res.mismatchWarnings && res.mismatchWarnings.length > 0) ? res.mismatchWarnings.join(', ') : (res.message || res.statusLabel || "Unknown Error");
-            const newError: ErrorLinkInfo = {
-              ...item.info,
-              errorDetail: errorDetail,
-              errorCategory: categorizeError(errorDetail),
-              fetchedSize: res.fileSizeText?.split(' ')[0],
-              fetchedUnit: res.fileSizeText?.split(' ')[1] as 'MB' | 'GB',
-              createdAt: new Date().toISOString()
-            };
-            return [...prev, newError];
-          });
-        }
-      } catch (e) {
-        if (e instanceof Error && e.name === 'AbortError') return;
-        console.error("Scan error for", item.url, e);
-      } finally {
-        completed++;
-        setScanProgress(completed);
-        await processNext();
-      }
-    };
-
-    try {
-      const workers = Array.from({ length: Math.min(concurrency, queue.length) }, () => processNext());
-      await Promise.all(workers);
-      
-      if (!controller.signal.aborted) {
-        await handleScanResults(results);
-      }
-    } catch (e) {
-      console.error("Scan failed", e);
-      setScanStatus('error');
-    } finally {
-      if (!controller.signal.aborted) {
-        setScanning(false);
-        setAbortController(null);
-      }
-    }
+  const pauseScan = () => {
+    linkScannerManager.pauseScan();
   };
 
   const cancelScan = () => {
-    if (abortController) {
-      abortController.abort();
-      setAbortController(null);
-      setScanning(false);
-      setScanStatus('idle');
-    }
+    linkScannerManager.cancelScan();
   };
+
 
   const handleDeleteLink = async (info: ErrorLinkInfo) => {
     if (!window.confirm(`Are you sure you want to delete this link: ${info.link.name}?`)) return;
@@ -818,59 +733,69 @@ export default function ErrorLinks() {
               </span>
             )}
             
-            {scanning ? (
-              <div className="bg-zinc-100 dark:bg-zinc-800/50 px-4 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 flex items-center gap-3">
-                <div className="flex flex-col items-end">
-                  <div className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider">Scanning Progress</div>
-                  <div className="text-sm font-mono text-emerald-500">{scanProgress} / {scanTotal}</div>
+            {scanStatus === 'scanning' || scanStatus === 'paused' ? (
+              <div className="flex items-center gap-4 w-full justify-between lg:justify-end bg-zinc-100 dark:bg-zinc-800/50 p-2 rounded-lg border border-zinc-200 dark:border-zinc-800">
+                <div className="flex flex-col mx-2 min-w-[200px]">
+                  <div className="flex justify-between text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1">
+                    <span>{scanStatus === 'scanning' ? 'Scanning...' : 'Scan Paused'}</span>
+                    <span>{scanProgress} / {scanTotal} ({scanTotal > 0 ? Math.round((scanProgress / scanTotal) * 100) : 0}%)</span>
+                  </div>
+                  <div className="w-full bg-zinc-200 dark:bg-zinc-800 rounded-full h-1.5 overflow-hidden">
+                    <div 
+                      className={`h-full ${scanStatus === 'paused' ? 'bg-amber-500' : 'bg-emerald-500'} transition-all duration-300 ease-out`}
+                      style={{ width: `${scanTotal > 0 ? (scanProgress / scanTotal) * 100 : 0}%` }}
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {scanStatus === 'scanning' ? (
+                    <button
+                      onClick={pauseScan}
+                      className="bg-amber-500 hover:bg-amber-600 text-white p-2 rounded-md transition-all active:scale-95"
+                      title="Pause Scan"
+                    >
+                      <StopCircle className="w-4 h-4" />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={resumeScan}
+                      className="bg-emerald-500 hover:bg-emerald-600 text-white p-2 rounded-md transition-all active:scale-95"
+                      title="Resume Scan"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                    </button>
+                  )}
+                  <button
+                    onClick={cancelScan}
+                    className="bg-red-500 hover:bg-red-600 text-white p-2 rounded-md transition-all active:scale-95"
+                    title="Cancel Scan"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
-            ) : (
-              <button
-                onClick={() => scanLinks(false)}
-                disabled={loading}
-                className="bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-500/50 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-all active:scale-95 whitespace-nowrap shadow-lg shadow-emerald-500/20"
-              >
-                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                {scanStatus === 'idle' ? 'Start Deep Scan' : 'Restart Deep Scan'}
-              </button>
-            )}
-            
-            <button
-              onClick={() => {
-                setModalInput('');
-                setModalAutoStart(false);
-                setModalTitle('Manual Link Checker');
-                setIsLinkCheckerModalOpen(true);
-              }}
-              className="bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-all active:scale-95 whitespace-nowrap border border-zinc-300 dark:border-zinc-700"
-            >
-              <Search className="w-4 h-4" />
-              Manual Check
-            </button>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 w-full lg:justify-end">
-            {scanning ? (
-              <button
-                onClick={cancelScan}
-                className="bg-red-500/10 hover:bg-red-500/20 text-red-500 px-4 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-all active:scale-95 whitespace-nowrap border border-red-500/20"
-              >
-                <StopCircle className="w-4 h-4" />
-                Cancel Scan
-              </button>
-            ) : (
-              errorLinks.length > 0 && (
+            ) : scanStatus === 'completed' || scanStatus === 'error' || scanStatus === 'idle' ? (
+              <>
                 <button
-                  onClick={() => scanLinks(true)}
+                  onClick={() => scanLinks()}
                   disabled={loading}
-                  className="bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-all active:scale-95 whitespace-nowrap border border-zinc-300 dark:border-zinc-700"
+                  className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-all active:scale-95 whitespace-nowrap shadow-lg shadow-emerald-500/20"
                 >
-                  <RefreshCw className="w-4 h-4" />
-                  Re-check Filtered ({filteredAndSortedLinks.length})
+                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                  Start Deep Scan
                 </button>
-              )
-            )}
+                {errorLinks.length > 0 && (
+                  <button
+                    onClick={() => scanLinks(true)}
+                    disabled={loading}
+                    className="bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-all active:scale-95 whitespace-nowrap border border-zinc-300 dark:border-zinc-700"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    Re-check Filtered ({filteredAndSortedLinks.length})
+                  </button>
+                )}
+              </>
+            ) : null}
           </div>
         </div>
       </div>
@@ -895,38 +820,17 @@ export default function ErrorLinks() {
         </div>
       ) : (
         <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden">
-          {scanning && errorLinks.length > 0 && (
-            <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/80 backdrop-blur-sm">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <RefreshCw className="w-5 h-5 animate-spin text-emerald-500" />
-                  <div>
-                    <div className="text-zinc-900 dark:text-white font-medium">Scanning in progress...</div>
-                    <div className="text-xs text-zinc-500">Checking links: {scanProgress} / {scanTotal}</div>
-                  </div>
-                </div>
-                <div className="text-emerald-500 font-bold font-mono">{Math.round((scanProgress / scanTotal) * 100)}%</div>
-              </div>
-              <div className="w-full bg-zinc-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
-                <motion.div 
-                  className="bg-emerald-500 h-full"
-                  initial={{ width: 0 }}
-                  animate={{ width: `${(scanProgress / scanTotal) * 100}%` }}
-                />
-              </div>
-            </div>
-          )}
           {errorLinks.length === 0 ? (
             <div className="text-center py-20 text-zinc-500">
-              {scanning ? (
+              {(scanStatus === 'scanning' || scanStatus === 'paused') ? (
                 <div className="flex flex-col items-center">
                   <div className="relative w-24 h-24 mb-6">
-                    <RefreshCw className="w-24 h-24 animate-spin text-emerald-500/20" />
+                    <RefreshCw className={`w-24 h-24 text-emerald-500/20 ${scanStatus === 'scanning' ? 'animate-spin' : ''}`} />
                     <div className="absolute inset-0 flex items-center justify-center">
                       <span className="text-xl font-bold text-emerald-500">{Math.round((scanProgress / scanTotal) * 100)}%</span>
                     </div>
                   </div>
-                  <p className="text-xl text-zinc-900 dark:text-white font-medium">Scanning links... {scanProgress} / {scanTotal}</p>
+                  <p className="text-xl text-zinc-900 dark:text-white font-medium">{scanStatus === 'paused' ? 'Scanning paused...' : 'Scanning links...'} {scanProgress} / {scanTotal}</p>
                   <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-2">Checking all Pixeldrain links in your content library.</p>
                   
                   <div className="w-full max-w-md bg-zinc-100 dark:bg-zinc-800 h-2 rounded-full mt-8 overflow-hidden">

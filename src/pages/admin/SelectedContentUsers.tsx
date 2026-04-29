@@ -151,10 +151,19 @@ export default function SelectedContentUsers() {
     return result;
   }, [users, userSearchTerm, roleFilter, statusFilter]);
 
+  const sortedContentList = useMemo(() => {
+    return [...contentList].sort((a, b) => {
+      if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
+      if (a.order === undefined && b.order !== undefined) return -1;
+      if (a.order !== undefined && b.order === undefined) return 1;
+      return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+    });
+  }, [contentList]);
+
   const filteredContent = useMemo(() => {
-    if (!contentSearchTerm) return contentList;
-    return smartSearch(contentList, contentSearchTerm);
-  }, [contentList, contentSearchTerm]);
+    if (!contentSearchTerm) return sortedContentList;
+    return smartSearch(sortedContentList, contentSearchTerm);
+  }, [sortedContentList, contentSearchTerm]);
 
   return (
     <div className="p-4 md:p-8">
@@ -269,7 +278,7 @@ export default function SelectedContentUsers() {
                   const isPartiallyAssigned = !isFullyAssigned && seasons.some((s: any) => assignedIds.has(`${content.id}:${s.id}`));
 
                   return (
-                    <div key={content.id} className="bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden transition-colors duration-300">
+                    <div key={content.id} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden transition-colors duration-300">
                       <label
                         className={`flex items-center gap-4 p-4 cursor-pointer transition-colors ${
                           isFullyAssigned
@@ -290,18 +299,21 @@ export default function SelectedContentUsers() {
                           {!isFullyAssigned && isPartiallyAssigned && <div className="w-3 h-3 bg-emerald-500 rounded-sm" />}
                         </div>
                         <div className="flex-1 flex items-center justify-between">
-                          <div>
-                            <h4 className="font-medium text-zinc-900 dark:text-white transition-colors duration-300">{content.title}</h4>
-                            <p className="text-xs text-zinc-500 dark:text-zinc-500 capitalize transition-colors duration-300">{content.type} • {content.year}</p>
-                          </div>
-                          {content.status === 'draft' && (
+                            <div className="flex items-center gap-3">
+                              <img src={content.posterUrl} className="w-8 h-12 object-cover rounded" referrerPolicy="no-referrer" />
+                              <div>
+                                <h4 className="font-medium">{content.title}</h4>
+                                <p className="text-xs text-zinc-500 capitalize">{content.type} • {content.year}</p>
+                              </div>
+                            </div>
+                            {content.status === 'draft' && (
                             <span className="bg-yellow-500/20 text-yellow-500 text-xs px-2 py-1 rounded font-medium">Draft</span>
                           )}
                         </div>
                       </label>
                       
                       {isSeries && seasons.length > 0 && (
-                        <div className="border-t border-zinc-100 dark:border-zinc-800/50 bg-zinc-100/30 dark:bg-zinc-900/30 p-2 pl-14 space-y-1 transition-colors duration-300">
+                        <div className="border-t border-zinc-200 dark:border-zinc-800/50 bg-zinc-50 dark:bg-zinc-900/30 p-2 pl-14 space-y-1">
                           {seasons.map((season: any) => {
                             const isSeasonAssigned = isFullyAssigned || assignedIds.has(`${content.id}:${season.id}`);
                             return (
