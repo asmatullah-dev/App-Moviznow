@@ -1089,7 +1089,7 @@ export default function ErrorLinks() {
                                   rel="noopener noreferrer" 
                                   className="text-[10px] text-zinc-500 hover:text-emerald-500 transition-colors truncate max-w-md inline-block font-mono"
                                 >
-                                  {info.link.url}
+                                  {info.link.url.length > 40 ? info.link.url.substring(0, 40) + '...' : info.link.url}
                                 </a>
                               </div>
                               <div>
@@ -1199,12 +1199,29 @@ export default function ErrorLinks() {
                               setAddUnit(unit as 'MB' | 'GB');
                             }
                             
-                            if (result.qualityLabel) {
-                              setAddName(result.qualityLabel);
-                            } else if (result.fileName) {
-                              const lowerName = result.fileName.toLowerCase();
-                              const foundQuality = qualities.find(q => lowerName.includes(q.name.toLowerCase()));
-                              if (foundQuality) setAddName(foundQuality.name);
+                            if (result.ok) {
+                              const simpleQualities = ['480p', '720p', '1080p', '2160p', '4k'];
+                              let foundName = '';
+                              
+                              if (result.fileName) {
+                                const lowerFile = result.fileName.toLowerCase();
+                                const match = simpleQualities.find(q => lowerFile.includes(q.toLowerCase()));
+                                if (match) foundName = match.toUpperCase();
+                              }
+
+                              if (!foundName && result.qualityLabel) {
+                                const lowerQual = result.qualityLabel.toLowerCase();
+                                const match = simpleQualities.find(q => lowerQual.includes(q.toLowerCase()));
+                                if (match) foundName = match.toUpperCase();
+                              }
+
+                              if (foundName) setAddName(foundName);
+                              else if (result.qualityLabel) setAddName(result.qualityLabel);
+                              else if (result.fileName) {
+                                const lowerName = result.fileName.toLowerCase();
+                                const foundQuality = qualities.find(q => lowerName.includes(q.name.toLowerCase()));
+                                if (foundQuality) setAddName(foundQuality.name);
+                              }
                             }
 
                             if (result.ok) {
@@ -1219,7 +1236,24 @@ export default function ErrorLinks() {
                             
                             // Auto-fill name if empty
                             if (!addName) {
-                              if (result.qualityLabel) {
+                              const simpleQualities = ['480p', '720p', '1080p', '2160p', '4k'];
+                              let foundName = '';
+                              
+                              if (result.fileName) {
+                                const lowerFile = result.fileName.toLowerCase();
+                                const match = simpleQualities.find(q => lowerFile.includes(q.toLowerCase()));
+                                if (match) foundName = match.toUpperCase();
+                              }
+
+                              if (!foundName && result.qualityLabel) {
+                                const lowerQual = result.qualityLabel.toLowerCase();
+                                const match = simpleQualities.find(q => lowerQual.includes(q.toLowerCase()));
+                                if (match) foundName = match.toUpperCase();
+                              }
+
+                              if (foundName) {
+                                setAddName(foundName);
+                              } else if (result.qualityLabel) {
                                 setAddName(result.qualityLabel);
                               } else if (result.fileName) {
                                 const lowerName = result.fileName.toLowerCase();

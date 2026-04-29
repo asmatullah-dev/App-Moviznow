@@ -9,7 +9,7 @@ class LinkScannerManager {
   public scannedCount: number = 0;
   public totalCount: number = 0;
   public status: ScanStatus = 'idle';
-  private concurrency: number = 20;
+  private concurrency: number = 10;
   private controller: AbortController | null = null;
   private languages: Language[] = [];
   private qualities: Quality[] = [];
