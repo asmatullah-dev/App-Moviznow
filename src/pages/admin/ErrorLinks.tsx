@@ -10,6 +10,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { performFullLinkScan, LinkCheckResult } from '../../utils/linkScanner';
 import { linkScannerManager } from '../../utils/linkScannerManager';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
+import { clsx } from 'clsx';
 
 const parseLinks = (linksStr: string | undefined): QualityLinks => {
   if (!linksStr) return [];
@@ -33,6 +34,7 @@ const parseLinks = (linksStr: string | undefined): QualityLinks => {
 
 export default function ErrorLinks() {
   const { contentList, languages, qualities, loading: contentLoading } = useContent();
+  const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   
   // Client-side/Deep Scan State
@@ -74,6 +76,12 @@ export default function ErrorLinks() {
   const [isAddLinksModalOpen, setIsAddLinksModalOpen] = useState(false);
   const [addLinksContent, setAddLinksContent] = useState<Content | null>(null);
   const [addLinksInput, setAddLinksInput] = useState('');
+  const [addName, setAddName] = useState('');
+  const [addUrl, setAddUrl] = useState('');
+  const [addSize, setAddSize] = useState('');
+  const [addUnit, setAddUnit] = useState<'MB' | 'GB'>('MB');
+  const [addLinkStatus, setAddLinkStatus] = useState<string | null>(null);
+  const [addLinkError, setAddLinkError] = useState<string | null>(null);
   const [addingLinks, setAddingLinks] = useState(false);
 
   useModalBehavior(isLinkCheckerModalOpen, () => setIsLinkCheckerModalOpen(false));
@@ -96,10 +104,17 @@ export default function ErrorLinks() {
     return 'Unknown';
   };
 
+  // Optimization: use a map for content lookup
+  const contentMap = React.useMemo(() => {
+    const map = new Map<string, Content>();
+    contentList.forEach(c => map.set(c.id, c));
+    return map;
+  }, [contentList]);
+
   const liveErrorLinks = React.useMemo(() => {
     return errorLinks.map(info => {
-      const content = contentList.find(c => c.id === info.contentId);
-      if (!content) return info;
+      const content = contentMap.get(info.contentId);
+      if (!content) return { ...info, errorCategory: categorizeError(info.errorDetail) };
 
       let currentLink = info.link;
       try {
@@ -126,7 +141,7 @@ export default function ErrorLinks() {
               if (links[info.linkIndex]) currentLink = links[info.linkIndex];
             } else if (info.listType === 'episode') {
               const eIdx = info.episodeIndex!;
-              if (seasons[sIdx].episodes && seasons[seasons[sIdx].episodes ? eIdx : -1]) {
+              if (seasons[sIdx].episodes && seasons[sIdx].episodes[eIdx]) {
                 const links = parseLinks(JSON.stringify(seasons[sIdx].episodes[eIdx].links));
                 if (links[info.linkIndex]) currentLink = links[info.linkIndex];
               }
@@ -137,27 +152,50 @@ export default function ErrorLinks() {
         console.error("Error getting current link", e);
       }
 
-      return { ...info, link: currentLink, errorCategory: categorizeError(info.errorDetail) };
+      return { 
+        ...info, 
+        contentYear: content.year,
+        link: currentLink, 
+        errorCategory: categorizeError(info.errorDetail) 
+      };
     });
-  }, [errorLinks, contentList]);
+  }, [errorLinks, contentMap]);
 
-  const uniqueErrorTypes = Array.from(new Set(liveErrorLinks.map(link => link.errorCategory || 'Unknown'))).sort();
-
-  const filteredAndSortedLinks = [...liveErrorLinks]
-    .filter(link => filterErrorType === 'all' || link.errorDetail === filterErrorType)
-    .sort((a, b) => {
-      let comparison = 0;
-      if (sortBy === 'title') {
-        comparison = a.contentTitle.localeCompare(b.contentTitle);
-      } else if (sortBy === 'error') {
-        comparison = a.errorDetail.localeCompare(b.errorDetail);
-      } else if (sortBy === 'date') {
-        const dateA = new Date(a.createdAt || 0).getTime();
-        const dateB = new Date(b.createdAt || 0).getTime();
-        comparison = dateA - dateB;
-      }
-      return sortOrder === 'asc' ? comparison : -comparison;
+  const stats = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    liveErrorLinks.forEach(link => {
+      const cat = link.errorCategory || 'Unknown';
+      counts[cat] = (counts[cat] || 0) + 1;
     });
+    return counts;
+  }, [liveErrorLinks]);
+
+  const uniqueErrorTypes = React.useMemo(() => 
+    Object.keys(stats).sort()
+  , [stats]);
+
+  const filteredAndSortedLinks = React.useMemo(() => {
+    return [...liveErrorLinks]
+      .filter(link => {
+        const matchesType = filterErrorType === 'all' || link.errorCategory === filterErrorType;
+        const matchesSearch = !searchTerm || 
+          link.contentTitle.toLowerCase().includes(searchTerm.toLowerCase());
+        return matchesType && matchesSearch;
+      })
+      .sort((a, b) => {
+        let comparison = 0;
+        if (sortBy === 'title') {
+          comparison = a.contentTitle.localeCompare(b.contentTitle);
+        } else if (sortBy === 'error') {
+          comparison = (a.errorCategory || '').localeCompare(b.errorCategory || '');
+        } else if (sortBy === 'date') {
+          const dateA = new Date(a.createdAt || 0).getTime();
+          const dateB = new Date(b.createdAt || 0).getTime();
+          comparison = dateA - dateB;
+        }
+        return sortOrder === 'asc' ? comparison : -comparison;
+      });
+  }, [liveErrorLinks, filterErrorType, searchTerm, sortBy, sortOrder]);
 
   useEffect(() => {
     setLoading(contentLoading);
@@ -423,23 +461,46 @@ export default function ErrorLinks() {
     if (!window.confirm(`Are you sure you want to delete this link: ${info.link.name}?`)) return;
     
     const content = contentList.find(c => c.id === info.contentId);
-    if (!content) return;
+    if (!content) {
+      console.error("Content not found for deletion", info.contentId);
+      return;
+    }
 
     try {
       const updatedContent = { ...content };
+      let deleted = false;
+      
       if (info.contentType === 'movie') {
         if (info.listType === 'movie') {
           const links = parseLinks(content.movieLinks);
-          links.splice(info.linkIndex, 1);
-          updatedContent.movieLinks = JSON.stringify(links);
+          const idx = links.findIndex(l => l.url === info.link.url) !== -1 
+            ? links.findIndex(l => l.url === info.link.url)
+            : info.linkIndex;
+          if (idx !== -1 && links[idx]) {
+            links.splice(idx, 1);
+            updatedContent.movieLinks = JSON.stringify(links);
+            deleted = true;
+          }
         } else if (info.listType === 'zip') {
           const links = parseLinks(content.fullSeasonZip);
-          links.splice(info.linkIndex, 1);
-          updatedContent.fullSeasonZip = JSON.stringify(links);
+          const idx = links.findIndex(l => l.url === info.link.url) !== -1 
+            ? links.findIndex(l => l.url === info.link.url)
+            : info.linkIndex;
+          if (idx !== -1 && links[idx]) {
+            links.splice(idx, 1);
+            updatedContent.fullSeasonZip = JSON.stringify(links);
+            deleted = true;
+          }
         } else if (info.listType === 'mkv') {
           const links = parseLinks(content.fullSeasonMkv);
-          links.splice(info.linkIndex, 1);
-          updatedContent.fullSeasonMkv = JSON.stringify(links);
+          const idx = links.findIndex(l => l.url === info.link.url) !== -1 
+            ? links.findIndex(l => l.url === info.link.url)
+            : info.linkIndex;
+          if (idx !== -1 && links[idx]) {
+            links.splice(idx, 1);
+            updatedContent.fullSeasonMkv = JSON.stringify(links);
+            deleted = true;
+          }
         }
       } else if (content.type === 'series' && content.seasons) {
         try {
@@ -448,31 +509,54 @@ export default function ErrorLinks() {
           if (seasons[sIdx]) {
             if (info.listType === 'zip') {
               const links = parseLinks(JSON.stringify(seasons[sIdx].zipLinks));
-              links.splice(info.linkIndex, 1);
-              seasons[sIdx].zipLinks = links;
+              const idx = links.findIndex(l => l.url === info.link.url) !== -1 
+                ? links.findIndex(l => l.url === info.link.url)
+                : info.linkIndex;
+              if (idx !== -1 && links[idx]) {
+                links.splice(idx, 1);
+                seasons[sIdx].zipLinks = links;
+                deleted = true;
+              }
             } else if (info.listType === 'mkv') {
               const links = parseLinks(JSON.stringify(seasons[sIdx].mkvLinks || []));
-              links.splice(info.linkIndex, 1);
-              seasons[sIdx].mkvLinks = links;
+              const idx = links.findIndex(l => l.url === info.link.url) !== -1 
+                ? links.findIndex(l => l.url === info.link.url)
+                : info.linkIndex;
+              if (idx !== -1 && links[idx]) {
+                links.splice(idx, 1);
+                seasons[sIdx].mkvLinks = links;
+                deleted = true;
+              }
             } else if (info.listType === 'episode') {
               const eIdx = info.episodeIndex!;
               if (seasons[sIdx].episodes && seasons[sIdx].episodes[eIdx]) {
                 const links = parseLinks(JSON.stringify(seasons[sIdx].episodes[eIdx].links));
-                links.splice(info.linkIndex, 1);
-                seasons[sIdx].episodes[eIdx].links = links;
+                const idx = links.findIndex(l => l.url === info.link.url) !== -1 
+                  ? links.findIndex(l => l.url === info.link.url)
+                  : info.linkIndex;
+                if (idx !== -1 && links[idx]) {
+                  links.splice(idx, 1);
+                  seasons[sIdx].episodes[eIdx].links = links;
+                  deleted = true;
+                }
               }
             }
-            updatedContent.seasons = JSON.stringify(seasons);
+            if (deleted) {
+              updatedContent.seasons = JSON.stringify(seasons);
+            }
           }
         } catch (e) {
           console.error("Error parsing seasons for delete", e);
         }
       }
 
-      await updateDoc(doc(db, 'content', content.id), updatedContent);
-      
-      // Update local error links state to remove the deleted link
-      setErrorLinks(prev => prev.filter(l => !(l.contentId === info.contentId && l.link.url === info.link.url)));
+      if (deleted) {
+        await updateDoc(doc(db, 'content', content.id), updatedContent);
+        // Update local error links state to remove the deleted link
+        setErrorLinks(prev => prev.filter(l => !(l.contentId === info.contentId && l.link.url === info.link.url && l.listType === info.listType)));
+      } else {
+        alert("Could not find the link to delete. It may have already been removed.");
+      }
     } catch (error) {
       console.error("Error deleting link:", error);
       alert("Failed to delete link.");
@@ -488,10 +572,27 @@ export default function ErrorLinks() {
   };
 
   const handleAddLinks = async () => {
-    if (!addLinksContent || !addLinksInput.trim()) return;
+    if (!addLinksContent) return;
+    
+    let newLinks: QualityLinks = [];
+    
+    // If single link fields are filled, use them
+    if (addUrl.trim() && addName.trim()) {
+      newLinks = [{
+        id: Math.random().toString(36).substr(2, 9),
+        name: addName,
+        url: addUrl,
+        size: addSize,
+        unit: addUnit
+      }];
+    } else if (addLinksInput.trim()) {
+      newLinks = parseLinks(addLinksInput);
+    }
+
+    if (newLinks.length === 0) return;
+
     setAddingLinks(true);
     try {
-      const newLinks = parseLinks(addLinksInput);
       const updatedContent = { ...addLinksContent };
       
       if (updatedContent.type === 'movie') {
@@ -499,7 +600,8 @@ export default function ErrorLinks() {
         updatedContent.movieLinks = JSON.stringify(sortLinksBySize([...existing, ...newLinks]));
       } else if (updatedContent.type === 'series' && updatedContent.seasons) {
         try {
-          const seasons: Season[] = JSON.parse(updatedContent.seasons);
+          const seasons: Season[] = Array.isArray(updatedContent.seasons) ? updatedContent.seasons : JSON.parse(updatedContent.seasons);
+          // Add to Season 1 Episode 1 by default if it's series and no episode specified in context (usually Add Links is for whole content or first ep)
           if (seasons.length > 0 && seasons[0].episodes && seasons[0].episodes.length > 0) {
             const existing = parseLinks(JSON.stringify(seasons[0].episodes[0].links));
             seasons[0].episodes[0].links = sortLinksBySize([...existing, ...newLinks]);
@@ -513,6 +615,12 @@ export default function ErrorLinks() {
       await updateDoc(doc(db, 'content', updatedContent.id), updatedContent);
       setIsAddLinksModalOpen(false);
       setAddLinksInput('');
+      setAddName('');
+      setAddUrl('');
+      setAddSize('');
+      setAddUnit('MB');
+      setAddLinkStatus(null);
+      setAddLinkError(null);
     } catch (error) {
       console.error("Error adding links:", error);
       alert("Failed to add links.");
@@ -800,6 +908,7 @@ export default function ErrorLinks() {
         </div>
       </div>
 
+      {/* Links Table */}
       <LinkCheckerModal 
         isOpen={isLinkCheckerModalOpen} 
         onClose={() => {
@@ -813,14 +922,13 @@ export default function ErrorLinks() {
         languages={languages}
         qualities={qualities}
       />
-
-      {loading ? (
-        <div className="flex justify-center items-center py-20">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-emerald-500"></div>
-        </div>
-      ) : (
-        <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden">
-          {errorLinks.length === 0 ? (
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-sm">
+        {loading ? (
+          <div className="p-12 text-center">
+            <RefreshCw className="w-8 h-8 text-zinc-400 animate-spin mx-auto mb-4" />
+            <p className="text-zinc-500">Loading error links...</p>
+          </div>
+        ) : errorLinks.length === 0 ? (
             <div className="text-center py-20 text-zinc-500">
               {(scanStatus === 'scanning' || scanStatus === 'paused') ? (
                 <div className="flex flex-col items-center">
@@ -863,19 +971,49 @@ export default function ErrorLinks() {
             </div>
           ) : (
             <div className="flex flex-col">
-              <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 flex flex-col sm:flex-row gap-4 justify-between items-center">
-                <div className="flex items-center gap-2 w-full sm:w-auto">
-                  <Filter className="w-4 h-4 text-zinc-500 dark:text-zinc-400" />
-                  <select
-                    value={filterErrorType}
-                    onChange={(e) => setFilterErrorType(e.target.value)}
-                    className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500 w-full sm:w-auto"
-                  >
-                    <option value="all">All Errors</option>
-                    {uniqueErrorTypes.map(type => (
-                      <option key={type} value={type}>{type}</option>
-                    ))}
-                  </select>
+              <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/40 grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-white dark:bg-zinc-900 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
+                  <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1">Total Errors</p>
+                  <p className="text-xl font-bold text-zinc-900 dark:text-white">{liveErrorLinks.length}</p>
+                </div>
+                <div className="bg-white dark:bg-zinc-900 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
+                  <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1">Searching</p>
+                  <p className="text-xl font-bold text-zinc-900 dark:text-white">{filteredAndSortedLinks.length}</p>
+                </div>
+                <div className="bg-white dark:bg-zinc-900 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
+                  <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1">Movies</p>
+                  <p className="text-xl font-bold text-blue-500">{liveErrorLinks.filter(l => l.contentType === 'movie').length}</p>
+                </div>
+                <div className="bg-white dark:bg-zinc-900 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
+                  <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1">Series</p>
+                  <p className="text-xl font-bold text-purple-500">{liveErrorLinks.filter(l => l.contentType === 'series').length}</p>
+                </div>
+              </div>
+              <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 flex flex-col md:flex-row gap-4 justify-between items-center">
+                <div className="flex flex-col sm:flex-row items-center gap-2 w-full md:w-auto">
+                  <div className="relative w-full sm:w-64">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                    <input
+                      type="text"
+                      placeholder="Search title..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg pl-9 pr-3 py-2 text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500 transition-all"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <Filter className="w-4 h-4 text-zinc-500 dark:text-zinc-400" />
+                    <select
+                      value={filterErrorType}
+                      onChange={(e) => setFilterErrorType(e.target.value)}
+                      className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500 w-full sm:w-auto"
+                    >
+                      <option value="all">All Errors ({liveErrorLinks.length})</option>
+                      {uniqueErrorTypes.map(type => (
+                        <option key={type} value={type}>{type} ({stats[type] || 0})</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 w-full sm:w-auto">
                   <ArrowUpDown className="w-4 h-4 text-zinc-500 dark:text-zinc-400" />
@@ -900,88 +1038,118 @@ export default function ErrorLinks() {
                 <table className="w-full text-left text-sm">
                   <thead className="bg-white dark:bg-zinc-950 text-zinc-500 dark:text-zinc-400">
                     <tr>
-                      <th className="px-6 py-4 font-medium whitespace-nowrap">Date</th>
                       <th className="px-6 py-4 font-medium whitespace-nowrap">Content</th>
-                      <th className="px-6 py-4 font-medium whitespace-nowrap">Location</th>
-                      <th className="px-6 py-4 font-medium whitespace-nowrap">Link Name</th>
-                      <th className="px-6 py-4 font-medium whitespace-nowrap">Error Type</th>
+                      <th className="px-6 py-4 font-medium whitespace-nowrap">Details</th>
                       <th className="px-6 py-4 font-medium text-right whitespace-nowrap">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-zinc-800">
-                    {filteredAndSortedLinks.map((info, i) => (
-                      <tr key={i} className="hover:bg-zinc-200 dark:hover:bg-zinc-800/50 transition-colors">
-                      <td className="px-6 py-4">
-                        <div className="text-zinc-600 dark:text-zinc-300">
-                          {info.createdAt ? new Date(info.createdAt).toLocaleDateString() : 'N/A'}
-                        </div>
-                        <div className="text-[10px] text-zinc-500">
-                          {info.createdAt ? new Date(info.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="font-medium text-zinc-900 dark:text-white">{info.contentTitle}</div>
-                        <div className="text-xs text-zinc-500 uppercase">{info.contentType}</div>
-                      </td>
-                      <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{info.location}</td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <span className="text-zinc-600 dark:text-zinc-300">{info.link.name}</span>
-                          <span className="text-xs text-zinc-500">({info.link.size}{info.link.unit})</span>
-                        </div>
-                        <a href={info.link.url} target="_blank" rel="noopener noreferrer" className="text-xs text-emerald-500 hover:underline flex items-center gap-1 mt-1 truncate max-w-[200px]">
-                          {info.link.url} <ExternalLink className="w-3 h-3" />
-                        </a>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="text-red-400 font-medium">{info.errorCategory}</div>
-                        <div className="text-[10px] text-zinc-500 mt-1">{info.errorDetail}</div>
-                        {info.fetchedSize && (
-                          <div className="text-[10px] text-zinc-500 mt-1 flex items-center gap-1">
-                            <RefreshCw className="w-3 h-3" /> Server reports: {info.fetchedSize} {info.fetchedUnit}
+                  <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                    {filteredAndSortedLinks.length === 0 ? (
+                      <tr>
+                        <td colSpan={3} className="px-6 py-12 text-center text-zinc-500">
+                          <div className="flex flex-col items-center gap-2">
+                            <Search className="w-8 h-8 opacity-20" />
+                            <p>No error links match your search or filters.</p>
+                            {(searchTerm || filterErrorType !== 'all') && (
+                              <button 
+                                onClick={() => { setSearchTerm(''); setFilterErrorType('all'); }}
+                                className="text-emerald-500 hover:underline text-xs"
+                              >
+                                Clear all filters
+                              </button>
+                            )}
                           </div>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <button
-                            onClick={() => {
-                              const content = contentList.find(c => c.id === info.contentId);
-                              if (content) {
-                                setAddLinksContent(content);
-                                setIsAddLinksModalOpen(true);
-                              }
-                            }}
-                            className="bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white p-1.5 rounded-lg transition-colors"
-                            title="Add Links"
-                          >
-                            <Plus className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => handleEditClick(info)}
-                            className="bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white p-1.5 rounded-lg transition-colors"
-                            title="Edit"
-                          >
-                            <Edit2 className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteLink(info)}
-                            className="bg-red-500/10 hover:bg-red-500/20 text-red-500 p-1.5 rounded-lg transition-colors"
-                            title="Delete Link"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredAndSortedLinks.map((info) => (
+                        <tr key={`${info.contentId}-${info.listType}-${info.linkIndex}-${info.seasonIndex || 'no'}-${info.episodeIndex || 'no'}`} className="hover:bg-zinc-200 dark:hover:bg-zinc-800/10 transition-colors">
+                          <td className="px-6 py-4 align-top">
+                            <div className="font-bold text-zinc-900 dark:text-white">
+                              {info.contentTitle}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center gap-2 text-zinc-600 dark:text-zinc-400 font-medium">
+                                {info.contentYear && <span>{info.contentYear}</span>}
+                                <span className={clsx(
+                                  "text-[10px] font-bold uppercase tracking-wider",
+                                  info.contentType === 'movie' ? 'text-blue-500' : 'text-purple-500'
+                                )}>
+                                  {info.contentType}
+                                </span>
+                                <span className="text-emerald-500 truncate whitespace-nowrap">{info.link.name.substring(0, 6)}</span>
+                                <span className="text-zinc-500 text-xs whitespace-nowrap">({info.link.size}{info.link.unit})</span>
+                              </div>
+                              <div>
+                                <a 
+                                  href={info.link.url} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer" 
+                                  className="text-[10px] text-zinc-500 hover:text-emerald-500 transition-colors truncate max-w-md inline-block font-mono"
+                                >
+                                  {info.link.url}
+                                </a>
+                              </div>
+                              <div>
+                                <div className={clsx(
+                                  "text-[10px] font-bold px-2 py-0.5 rounded-full inline-block",
+                                  info.errorCategory === 'Broken' ? "bg-red-500/10 text-red-500" :
+                                  info.errorCategory === 'Protected' ? "bg-amber-500/10 text-amber-500" :
+                                  info.errorCategory === 'Size Mismatch' ? "bg-orange-500/10 text-orange-500" :
+                                  "bg-zinc-500/10 text-zinc-500"
+                                )}>
+                                  {info.errorCategory}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-right align-top">
+                            <div className="flex flex-col items-end gap-2 mt-1">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => {
+                                    const content = contentList.find(c => c.id === info.contentId);
+                                    if (content) {
+                                      setAddLinksContent(content);
+                                      setIsAddLinksModalOpen(true);
+                                    }
+                                  }}
+                                  className="bg-zinc-100 dark:bg-zinc-800 hover:bg-emerald-500/10 hover:text-emerald-500 text-zinc-500 dark:text-zinc-400 p-2 rounded-lg transition-all"
+                                  title="Add Links"
+                                >
+                                  <Plus className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleEditClick(info)}
+                                  className="bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-500 dark:text-zinc-400 p-2 rounded-lg transition-all"
+                                  title="Edit"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteLink(info)}
+                                  className="bg-red-500/5 hover:bg-red-500/10 text-red-400 p-2 rounded-lg transition-all"
+                                  title="Delete"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                              <div className="text-[10px] text-zinc-400 dark:text-zinc-500 font-medium truncate max-w-[120px]" title={info.location}>
+                                {info.location}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
               </table>
             </div>
             </div>
           )}
         </div>
-      )}
 
       {/* Add Links Modal */}
       <AnimatePresence>
@@ -1006,30 +1174,140 @@ export default function ErrorLinks() {
               </div>
 
               <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-2">Paste Links (JSON or Name:URL format)</label>
-                  <textarea
-                    value={addLinksInput}
-                    onChange={(e) => setAddLinksInput(e.target.value)}
-                    placeholder='[{"name":"720p","url":"..."},...]'
-                    className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500 h-40 font-mono text-sm"
-                  />
+                <div className="space-y-4 p-4 bg-zinc-100 dark:bg-zinc-800/50 rounded-xl border border-zinc-200 dark:border-zinc-700">
+                  <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Link Details</p>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">Link URL</label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={addUrl}
+                        onChange={(e) => setAddUrl(e.target.value)}
+                        onBlur={async (e) => {
+                          const url = e.target.value;
+                          if (!url) return;
+                          setAddingLinks(true);
+                          setAddLinkStatus(null);
+                          setAddLinkError(null);
+                          try {
+                            const result = await performFullLinkScan(url, {}, languages, qualities);
+                            
+                            if (result.fileSizeText) {
+                              const [val, unit] = result.fileSizeText.split(' ');
+                              setAddSize(val);
+                              setAddUnit(unit as 'MB' | 'GB');
+                            }
+                            
+                            if (result.qualityLabel) {
+                              setAddName(result.qualityLabel);
+                            } else if (result.fileName) {
+                              const lowerName = result.fileName.toLowerCase();
+                              const foundQuality = qualities.find(q => lowerName.includes(q.name.toLowerCase()));
+                              if (foundQuality) setAddName(foundQuality.name);
+                            }
+
+                            if (result.ok) {
+                              if (result.statusLabel === "MISSING_FILENAME" || result.statusLabel === "MISSING_METADATA") {
+                                setAddLinkStatus("Available (Missing metadata)");
+                              } else {
+                                setAddLinkStatus("Available");
+                              }
+                            } else {
+                              setAddLinkError(result.message || result.statusLabel || "Unavailable");
+                            }
+                            
+                            // Auto-fill name if empty
+                            if (!addName) {
+                              if (result.qualityLabel) {
+                                setAddName(result.qualityLabel);
+                              } else if (result.fileName) {
+                                const lowerName = result.fileName.toLowerCase();
+                                const foundQuality = qualities.find(q => lowerName.includes(q.name.toLowerCase()));
+                                if (foundQuality) setAddName(foundQuality.name);
+                                else setAddName(result.fileName.substring(0, 30));
+                              }
+                            }
+                          } catch (e) {
+                            console.error("Failed to check link info", e);
+                            setAddLinkError("Failed to check link");
+                          } finally {
+                            setAddingLinks(false);
+                          }
+                        }}
+                        placeholder="https://pixeldrain.com/u/..."
+                        className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2 pr-10 focus:outline-none focus:border-emerald-500 text-sm"
+                      />
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                        {addingLinks && <RefreshCw className="w-4 h-4 text-emerald-500 animate-spin" />}
+                        {!addingLinks && addLinkStatus && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
+                        {!addingLinks && addLinkError && <AlertTriangle className="w-4 h-4 text-red-500" />}
+                      </div>
+                    </div>
+                    {addLinkError && <p className="text-[10px] text-red-500 mt-1 font-medium">{addLinkError}</p>}
+                    {addLinkStatus && <p className="text-[10px] text-emerald-500 mt-1 font-medium">{addLinkStatus}</p>}
+                  </div>
+
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">Name / Quality</label>
+                      <input
+                        type="text"
+                        value={addName}
+                        onChange={(e) => setAddName(e.target.value)}
+                        placeholder="e.g. 720p HEVC, 1080p Atmos"
+                        className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2 focus:outline-none focus:border-emerald-500 text-sm font-medium"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">Size</label>
+                      <input
+                        type="number"
+                        value={addSize}
+                        onChange={(e) => setAddSize(e.target.value)}
+                        placeholder="0.00"
+                        className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2 focus:outline-none focus:border-emerald-500 text-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">Unit</label>
+                      <select
+                        value={addUnit}
+                        onChange={(e) => setAddUnit(e.target.value as 'MB' | 'GB')}
+                        className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2 focus:outline-none focus:border-emerald-500 text-sm font-bold"
+                      >
+                        <option value="MB">MB</option>
+                        <option value="GB">GB</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="flex gap-3 pt-2">
+                <div className="flex gap-3 pt-4">
                   <button
-                    onClick={() => setIsAddLinksModalOpen(false)}
+                    onClick={() => {
+                      setIsAddLinksModalOpen(false);
+                      setAddName('');
+                      setAddUrl('');
+                      setAddSize('');
+                      setAddUnit('MB');
+                      setAddLinksInput('');
+                      setAddLinkStatus(null);
+                      setAddLinkError(null);
+                    }}
                     className="flex-1 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white py-3 rounded-xl font-bold transition-colors"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleAddLinks}
-                    disabled={addingLinks || !addLinksInput.trim()}
+                    disabled={addingLinks || (!addUrl.trim() || !addName.trim())}
                     className="flex-1 bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-500/50 text-white py-3 rounded-xl font-bold transition-colors flex items-center justify-center gap-2"
                   >
                     {addingLinks ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
-                    {addingLinks ? 'Adding...' : 'Add Links'}
+                    {addingLinks ? 'Adding...' : 'Add Link'}
                   </button>
                 </div>
               </div>
@@ -1063,7 +1341,10 @@ export default function ErrorLinks() {
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">Content</label>
-                  <div className="text-zinc-900 dark:text-white font-medium">{editingLink.contentTitle} <span className="text-zinc-500 text-sm">({editingLink.location})</span></div>
+                  <div className="text-zinc-900 dark:text-white font-medium flex flex-wrap items-center gap-2">
+                    <span>{editingLink.contentTitle} {editingLink.contentYear && <span className="text-zinc-500 font-normal">({editingLink.contentYear})</span>}</span>
+                    <span className="text-[10px] text-zinc-500 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full font-normal">{editingLink.location}</span>
+                  </div>
                 </div>
                 
                 <div>

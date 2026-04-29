@@ -88,10 +88,16 @@ class LinkScannerManager {
     };
   }
 
+  private notifyTimeout: any = null;
   private notifyListeners() {
-    for (const listener of this.listeners) {
-      listener();
-    }
+    if (this.notifyTimeout) return;
+    
+    this.notifyTimeout = setTimeout(() => {
+      for (const listener of this.listeners) {
+        listener();
+      }
+      this.notifyTimeout = null;
+    }, 100); // Batch notifications every 100ms
   }
 
   public async startScan(linksToScan: { info: ErrorLinkInfo, url: string }[]) {

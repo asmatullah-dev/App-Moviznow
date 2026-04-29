@@ -251,8 +251,10 @@ export interface AppSettings {
 }
 
 export interface ErrorLinkInfo {
+  uid?: string;
   contentId: string;
   contentTitle: string;
+  contentYear?: number;
   contentType: 'movie' | 'series';
   location: string;
   link: any;
