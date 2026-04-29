@@ -24,6 +24,14 @@ class LinkScannerManager {
       window.addEventListener('beforeunload', () => {
         this.saveState();
       });
+
+      // Auto-pause on offline
+      window.addEventListener('offline', () => {
+        if (this.status === 'scanning') {
+          this.pauseScan();
+          console.warn("Scanner paused due to offline status");
+        }
+      });
     }
   }
 
@@ -166,6 +174,12 @@ class LinkScannerManager {
 
     const processNext = async () => {
       if (this.queue.length === 0 || !this.controller || this.controller.signal.aborted) return;
+      
+      // Safety check for online status
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        this.pauseScan();
+        return;
+      }
 
       const item = this.queue.shift()!;
       try {
