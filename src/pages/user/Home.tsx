@@ -1,14 +1,15 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { db } from '../../firebase';
-import { doc, updateDoc, collection, onSnapshot } from 'firebase/firestore';
+import { doc, updateDoc, collection, onSnapshot, query, where, getDocs } from 'firebase/firestore';
 import { Content, Role, Collection as AppCollection } from '../../types';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../../contexts/AuthContext';
 import { useContent } from '../../contexts/ContentContext';
 import { useCart } from '../../contexts/CartContext';
 import { usePWA } from '../../contexts/PWAContext';
-import { Film, Search, Filter, MessageCircle, Clock, Heart, LogOut, User, Users, Lock, LayoutDashboard, X, ShoppingCart, Plus, ChevronLeft, ChevronRight, Download, TrendingUp, Zap } from 'lucide-react';
+import { standardizePhone } from '../../contexts/AuthContext';
+import { Film, Search, Filter, MessageCircle, Clock, Heart, LogOut, User, Users, Lock, LayoutDashboard, X, ShoppingCart, Plus, ChevronLeft, ChevronRight, Download, TrendingUp, Zap, AlertCircle } from 'lucide-react';
 import { clsx } from 'clsx';
 import { format } from 'date-fns';
 import ConfirmModal from '../../components/ConfirmModal';
@@ -68,6 +69,8 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const [showWhatsappPrompt, setShowWhatsappPrompt] = useState(false);
   const [whatsappNumber, setWhatsappNumber] = useState('');
+  const [whatsappError, setWhatsappError] = useState<string | null>(null);
+  const [isSavingWhatsapp, setIsSavingWhatsapp] = useState(false);
   const [hasDismissedSession, setHasDismissedSession] = useState(false);
   
   const [selectedCollection, setSelectedCollection] = useState<AppCollection | null>(() => {
@@ -130,39 +133,53 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
   const hideScrollingTabs = hasActiveFilters || currentPage > 1;
 
   useEffect(() => {
-    if (profile && !profile.phone && profile.role !== 'admin' && profile.role !== 'content_manager' && profile.role !== 'manager' && profile.role !== 'owner' && !hasDismissedSession) {
-      // Check if we just came back from MovieDetails
-      const cameFromDetails = sessionStorage.getItem('from_movie_details') === 'true';
-      if (cameFromDetails) {
-        setShowWhatsappPrompt(true);
-        sessionStorage.removeItem('from_movie_details');
-      } else if (profile.phone === undefined) {
-        // Initial prompt for new users who haven't even dismissed it once
-        setShowWhatsappPrompt(true);
-      }
+    if (profile && !profile.phone && profile.role !== 'admin' && profile.role !== 'owner' && !hasDismissedSession) {
+      setShowWhatsappPrompt(true);
     }
   }, [profile, hasDismissedSession]);
 
-  const handleSaveWhatsapp = () => {
-    if (!profile) return;
-    setShowWhatsappPrompt(false);
-    updateDoc(doc(db, 'users', profile.uid), {
-      phone: whatsappNumber
-    }).catch(error => console.error("Failed to save WhatsApp number", error));
+  const handleSaveWhatsapp = async () => {
+    if (!profile || !whatsappNumber.trim()) return;
+    
+    setWhatsappError(null);
+    setIsSavingWhatsapp(true);
+
+    try {
+      const standardized = standardizePhone(whatsappNumber);
+      if (!standardized) {
+        setWhatsappError("Please enter a valid phone number");
+        setIsSavingWhatsapp(false);
+        return;
+      }
+
+      // Check for duplicates
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('phone', '==', standardized));
+      const querySnapshot = await getDocs(q);
+      
+      const otherUsers = querySnapshot.docs.filter(d => d.id !== profile.uid);
+      
+      if (otherUsers.length > 0) {
+        setWhatsappError("This WhatsApp number is already registered with another account.");
+        setIsSavingWhatsapp(false);
+        return;
+      }
+
+      await updateDoc(doc(db, 'users', profile.uid), {
+        phone: standardized
+      });
+      setShowWhatsappPrompt(false);
+    } catch (error) {
+      console.error("Failed to save WhatsApp number", error);
+      setWhatsappError("Failed to save number. Please try again.");
+    } finally {
+      setIsSavingWhatsapp(false);
+    }
   };
 
   const handleDismissWhatsapp = () => {
     setShowWhatsappPrompt(false);
     setHasDismissedSession(true);
-  };
-
-  const handleNeverShowAgain = () => {
-    if (!profile) return;
-    setShowWhatsappPrompt(false);
-    setHasDismissedSession(true);
-    updateDoc(doc(db, 'users', profile.uid), {
-      phone: '' // Save empty string to indicate never show again
-    }).catch(error => console.error("Failed to dismiss WhatsApp prompt", error));
   };
 
 
@@ -885,40 +902,52 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
                 <MessageCircle className="w-8 h-8 text-emerald-500" />
               </div>
             </div>
-            <h3 className="text-xl font-bold mb-2 text-center">Add WhatsApp / Phone Number</h3>
+            <h3 className="text-xl font-bold mb-2 text-center text-emerald-500">WhatsApp Number is Required</h3>
             <p className="text-zinc-500 dark:text-zinc-400 mb-6 text-center text-sm">
-              Please provide your WhatsApp number so we can contact you regarding your membership and updates.
+              Please enter your WhatsApp number to continue. This is required for membership updates and support.
             </p>
             <div className="space-y-4">
+              {whatsappError && (
+                <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                  <p className="text-xs text-red-500">{whatsappError}</p>
+                </div>
+              )}
               <input
                 type="tel"
-                placeholder="e.g. +923001234567"
+                placeholder="e.g. 03001234567"
                 value={whatsappNumber}
-                onChange={(e) => setWhatsappNumber(e.target.value)}
+                onChange={(e) => {
+                  setWhatsappNumber(e.target.value);
+                  setWhatsappError(null);
+                }}
                 className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500 text-zinc-900 dark:text-white placeholder-zinc-500 dark:placeholder-zinc-400 transition-colors duration-300"
               />
               <div className="flex flex-col gap-2">
                 <div className="flex gap-3">
-                  <button
-                    onClick={handleDismissWhatsapp}
-                    className="flex-1 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white font-bold py-3 px-4 rounded-xl transition-colors"
-                  >
-                    Cancel
-                  </button>
+                  {!isSavingWhatsapp && (
+                    <button
+                      onClick={handleDismissWhatsapp}
+                      className="flex-1 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white font-bold py-3 px-4 rounded-xl transition-colors"
+                    >
+                      Later
+                    </button>
+                  )}
                   <button
                     onClick={handleSaveWhatsapp}
-                    disabled={!whatsappNumber.trim()}
-                    className="flex-1 bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-500/50 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-xl transition-colors"
+                    disabled={!whatsappNumber.trim() || isSavingWhatsapp}
+                    className="flex-1 bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-500/50 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2"
                   >
-                    Save
+                    {isSavingWhatsapp ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      'Save Number'
+                    )}
                   </button>
                 </div>
-                <button
-                  onClick={handleNeverShowAgain}
-                  className="text-[10px] text-zinc-500 hover:text-zinc-500 dark:text-zinc-400 transition-colors"
-                >
-                  Don't show again
-                </button>
               </div>
             </div>
           </div>

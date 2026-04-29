@@ -11,7 +11,7 @@ import ConfirmModal from '../../components/ConfirmModal';
 import { Button } from '../../components/Button';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
 import { formatDateToMonthDDYYYY } from '../../utils/contentUtils';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth, standardizePhone } from '../../contexts/AuthContext';
 import { smartSearch } from '../../utils/searchUtils';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
 import { useSettings } from '../../contexts/SettingsContext';
@@ -24,24 +24,6 @@ import { useUsers } from '../../contexts/UsersContext';
 
 type SortField = 'createdAt' | 'displayName' | 'phone' | 'expiryDate' | 'lastActive';
 type SortOrder = 'asc' | 'desc';
-
-const standardizePhone = (phone: string) => {
-  const digits = phone.replace(/\D/g, '');
-  if (!digits) return '';
-  
-  // Pakistan specific standardization
-  let base = digits;
-  if (base.startsWith('92') && base.length >= 12) base = base.substring(2);
-  else if (base.startsWith('0') && base.length >= 11) base = base.substring(1);
-  
-  // If it's a 10-digit number (standard Pak mobile length without prefix)
-  if (base.length === 10) {
-    return `+92${base}`;
-  }
-  
-  // Fallback for other lengths or formats
-  return phone.startsWith('+') ? `+${digits}` : digits;
-};
 
 export default function UserManagement() {
   const { profile, findUsersByEmailOrPhone } = useAuth();

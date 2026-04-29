@@ -81,26 +81,39 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const standardizePhone = (phone: string) => {
   if (!phone) return "";
-  // Remove all non-digits except for a possible leading +
+  // Remove all non-digits
   const cleaned = phone.trim();
-  const digits = cleaned.replace(/\D/g, "");
+  let digits = cleaned.replace(/\D/g, "");
   if (!digits) return "";
 
-  // Pakistan specific standardization
+  // Pakistan specific standardization: target is +923XXXXXXXXX (13 chars)
+  // Standard mobile number in PK is 10 digits starting with 3 (e.g. 3001234567)
+  
   let base = digits;
-  if (base.startsWith("92") && base.length >= 11) {
+  
+  // Repeatedly remove prefixes that are common in Pakistan
+  // 1. Remove 92 if it's there and leaves at least 10 digits
+  if (base.startsWith("92") && base.length > 10) {
     base = base.substring(2);
-  } else if (base.startsWith("0") && base.length >= 10) {
+  }
+  
+  // 2. Remove 0 if it's there and leaves exactly 10 digits (e.g. 0300... -> 300...)
+  if (base.startsWith("0") && base.length === 11) {
     base = base.substring(1);
   }
 
-  // standard Pak mobile length is 10 digits
-  if (base.length === 10) {
+  // Final check: if we have 10 digits starting with 3, it's a standard PK mobile
+  if (base.length === 10 && base.startsWith("3")) {
     return `+92${base}`;
   }
 
-  // Fallback for other countries or formats: keep the plus if it was originally there
+  // Fallback for already correct format or other international numbers
   if (cleaned.startsWith("+")) {
+    return `+${digits}`;
+  }
+
+  // If it's 12 digits starting with 923, it's likely already standardized without the plus
+  if (digits.length === 12 && digits.startsWith("923")) {
     return `+${digits}`;
   }
 

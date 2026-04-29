@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth, standardizePhone } from '../../contexts/AuthContext';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Lock, User, Mail, Phone, Loader2 } from 'lucide-react';
+import { ArrowLeft, Save, Lock, User, Mail, Phone, Loader2, AlertCircle } from 'lucide-react';
 import { clsx } from 'clsx';
 
 export default function Settings() {
@@ -16,6 +16,7 @@ export default function Settings() {
   const [name, setName] = useState(profile?.displayName || '');
   const [email, setEmail] = useState(profile?.email?.endsWith('@moviznow.com') ? '' : (profile?.email || ''));
   const [phone, setPhone] = useState(profile?.phone || '');
+  const [showPhoneWarning, setShowPhoneWarning] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -28,6 +29,16 @@ export default function Settings() {
     e.preventDefault();
     setError('');
     setSuccess('');
+
+    // WhatsApp number logic
+    if (!phone.trim()) {
+      if (!showPhoneWarning) {
+        setShowPhoneWarning(true);
+        return;
+      }
+    } else {
+      setShowPhoneWarning(false);
+    }
 
     if (newPassword && newPassword !== confirmPassword) {
       setError('New passwords do not match');
@@ -140,11 +151,23 @@ export default function Settings() {
                     <input
                       type="tel"
                       value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
+                      onChange={(e) => {
+                        setPhone(e.target.value);
+                        setError('');
+                      }}
                       className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-10 pr-4 py-2.5 focus:outline-none focus:border-emerald-500 transition-colors"
-                      placeholder="+923001234567"
+                      placeholder="e.g. 03001234567"
                     />
                   </div>
+                  {showPhoneWarning && !phone.trim() && (
+                    <div className="mt-2 flex items-center gap-2 text-amber-500">
+                      <AlertCircle className="w-4 h-4" />
+                      <p className="text-xs font-medium">WhatsApp number is required for support. Click Save again to skip.</p>
+                    </div>
+                  )}
+                  <p className="mt-1 text-[10px] text-zinc-500 dark:text-zinc-400">
+                    Required for membership.
+                  </p>
                 </div>
               </div>
 
