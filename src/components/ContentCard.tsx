@@ -1,4 +1,5 @@
 import React from 'react';
+import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { LazyLoadImage } from 'react-lazy-load-image-component';
 import { Heart, Clock, ShoppingCart, Play, X } from 'lucide-react';
@@ -137,7 +138,12 @@ const ContentCard = React.memo(({
   };
 
   return (
-    <div className="group relative transition-all hover:scale-[1.02] flex flex-col h-full transform-gpu">
+    <motion.div 
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+      className="group relative transition-all hover:scale-[1.02] flex flex-col h-full transform-gpu"
+    >
       {/* Color Gradient Layer (1px) */}
       <div className="relative rounded-[15.5px] p-[1px] bg-[linear-gradient(to_bottom_right,#ff0000,#ef4444,#f97316,#facc15,#4ade80,#06b6d4,#3b82f6,#a855f7)] z-10 flex flex-col h-full">
         {/* Gap Layer (0.5px gap) */}
@@ -395,7 +401,7 @@ const ContentCard = React.memo(({
           </div>
         </div>
       )}
-    </div>
+    </motion.div>
   );
 });
 

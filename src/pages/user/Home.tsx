@@ -16,7 +16,10 @@ import { formatContentTitle, getContrastColor } from '../../utils/contentUtils';
 import { smartSearch } from '../../utils/searchUtils';
 import { LazyLoadImage } from 'react-lazy-load-image-component';
 import ContentCard from '../../components/ContentCard';
+import { ScrollableRow } from '../../components/ScrollableRow';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
+import { useScrollRestoration } from '../../hooks/useScrollRestoration';
+import { memoryStore } from '../../utils/memoryStore';
 
 import { NotificationMenu } from '../../components/NotificationMenu';
 import { UserProfileMenu } from '../../components/UserProfileMenu';
@@ -27,6 +30,9 @@ import { ThemeToggle } from '../../components/ThemeToggle';
 import { useSettings } from '../../contexts/SettingsContext';
 
 export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => void }) {
+  useScrollRestoration('home_window_scroll', true);
+  const collectionScrollRef = useScrollRestoration<HTMLDivElement>('home_selected_collection_scroll');
+
   const { profile, logout, toggleFavorite, toggleWatchLater } = useAuth();
   const { contentList, genres, languages, qualities, collections, loading, isOffline } = useContent();
   const { cart } = useCart();
@@ -64,8 +70,18 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
   const [whatsappNumber, setWhatsappNumber] = useState('');
   const [hasDismissedSession, setHasDismissedSession] = useState(false);
   
-  const [selectedCollection, setSelectedCollection] = useState<AppCollection | null>(null);
+  const [selectedCollection, setSelectedCollection] = useState<AppCollection | null>(() => {
+    return memoryStore.get('home_selected_collection') || null;
+  });
   const [collectionSort, setCollectionSort] = useState<'default' | 'newest' | 'az'>('default');
+
+  useEffect(() => {
+    if (selectedCollection) {
+      memoryStore.set('home_selected_collection', selectedCollection);
+    } else {
+      memoryStore.delete('home_selected_collection');
+    }
+  }, [selectedCollection]);
 
   const trendingCollection = useMemo(() => collections.find(c => c.title.toLowerCase() === 'trending' && (c.contentIds?.length || 0) >= 2), [collections]);
   const newlyAddedCollection = useMemo(() => collections.find(c => c.title.toLowerCase() === 'newly added' && (c.contentIds?.length || 0) >= 2), [collections]);
@@ -149,39 +165,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
     }).catch(error => console.error("Failed to dismiss WhatsApp prompt", error));
   };
 
-  useEffect(() => {
-    let timeoutId: number | null = null;
-    const handleScroll = () => {
-      if (timeoutId) return;
-      timeoutId = window.setTimeout(() => {
-        sessionStorage.setItem('homeScrollPosition', window.scrollY.toString());
-        timeoutId = null;
-      }, 500); // Throttle to every 500ms
-    };
 
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    
-    return () => {
-      window.removeEventListener('scroll', handleScroll);
-      if (timeoutId) clearTimeout(timeoutId);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (contentList.length > 0) {
-      const savedScrollPosition = sessionStorage.getItem('homeScrollPosition');
-      if (savedScrollPosition) {
-        // Use a small delay to ensure the grid has rendered
-        const timer = setTimeout(() => {
-          window.scrollTo({
-            top: parseInt(savedScrollPosition, 10),
-            behavior: 'instant'
-          });
-        }, 100);
-        return () => clearTimeout(timer);
-      }
-    }
-  }, [contentList.length]);
 
   const [recentlyViewed, setRecentlyViewed] = useState<Content[]>([]);
 
@@ -498,7 +482,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
                   />
                 </div>
                 
-                <div className="flex gap-3 overflow-x-auto pb-2 md:pb-0 flex-nowrap relative">
+                <ScrollableRow scrollKey="scroll_filters_container" className="flex gap-3 overflow-x-auto pb-2 md:pb-0 flex-nowrap relative">
                   {hasActiveFilters && (
                     <button onClick={clearFilters} className="sticky left-0 z-10 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-lg px-2 py-1 text-xs flex items-center gap-1 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.1)] dark:shadow-[4px_0_8px_-4px_rgba(0,0,0,0.5)]">
                       <X className="w-3 h-3" />
@@ -560,7 +544,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
                     <option value="">Years</option>
                     {uniqueYears.map(y => <option key={y} value={y}>{y}</option>)}
                   </select>
-                </div>
+                </ScrollableRow>
               </div>
             </motion.div>
           )}
@@ -575,7 +559,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
               </h2>
             </div>
             <div className="relative group">
-              <div 
+              <ScrollableRow scrollKey="scroll_recently_viewed"
                 className="flex overflow-x-auto gap-4 pb-4 snap-x snap-mandatory flex-nowrap hide-scrollbar"
                 style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
               >
@@ -593,7 +577,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
                      />
                   </div>
                 ))}
-              </div>
+              </ScrollableRow>
             </div>
           </div>
         )}
@@ -614,7 +598,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
               </div>
             </div>
             <div className="relative group">
-              <div className="flex overflow-x-auto gap-4 pb-4 snap-x snap-mandatory flex-nowrap hide-scrollbar" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+              <ScrollableRow scrollKey="scroll_trending" className="flex overflow-x-auto gap-4 pb-4 snap-x snap-mandatory flex-nowrap hide-scrollbar" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                 {trendingCollection.contentIds.map(id => {
                    const content = contentList.find(c => c.id === id);
                    if (!content) return null;
@@ -632,7 +616,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
                      </div>
                    );
                 })}
-              </div>
+              </ScrollableRow>
             </div>
           </div>
         )}
@@ -653,7 +637,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
               </div>
             </div>
             <div className="relative group">
-              <div className="flex overflow-x-auto gap-4 pb-4 snap-x snap-mandatory flex-nowrap hide-scrollbar" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+              <ScrollableRow scrollKey="scroll_newly_added" className="flex overflow-x-auto gap-4 pb-4 snap-x snap-mandatory flex-nowrap hide-scrollbar" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                 {newlyAddedCollection.contentIds.map(id => {
                    const content = contentList.find(c => c.id === id);
                    if (!content) return null;
@@ -671,7 +655,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
                      </div>
                    );
                 })}
-              </div>
+              </ScrollableRow>
             </div>
           </div>
         )}
@@ -686,7 +670,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
               </h2>
             </div>
             <div className="relative group">
-              <div className="flex overflow-x-auto gap-4 pb-4 snap-x snap-mandatory flex-nowrap hide-scrollbar" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+              <ScrollableRow scrollKey="scroll_collections_overview" className="flex overflow-x-auto gap-4 pb-4 snap-x snap-mandatory flex-nowrap hide-scrollbar" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                 {otherCollections.map(collection => {
                   const firstContentId = collection.contentIds[0];
                   const firstContent = contentList.find(c => c.id === firstContentId);
@@ -729,7 +713,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
                     </button>
                   );
                 })}
-              </div>
+              </ScrollableRow>
             </div>
           </div>
         )}
@@ -945,6 +929,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
       <AnimatePresence>
         {selectedCollection && (
           <motion.div
+            ref={collectionScrollRef}
             initial={{ opacity: 0, y: '100%' }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: '100%' }}

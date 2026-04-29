@@ -21,6 +21,7 @@ import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorH
 import { generateTinyUrl } from '../../utils/tinyurl';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
 import { useSettings } from '../../contexts/SettingsContext';
+import { memoryStore } from '../../utils/memoryStore';
 
 interface QualityInputsProps {
   links: QualityLinks;
@@ -697,7 +698,7 @@ export default function ContentManagement() {
       if (scrollTimeout) return;
       scrollTimeout = setTimeout(() => {
         if (mainElement) {
-          sessionStorage.setItem('content_management_scroll_position', mainElement.scrollTop.toString());
+          memoryStore.set('content_management_scroll_position', mainElement.scrollTop);
         }
         scrollTimeout = null;
       }, 100);
@@ -718,11 +719,11 @@ export default function ContentManagement() {
   useEffect(() => {
     if (!loading && contentList.length > 0) {
       const mainElement = document.querySelector('main');
-      const savedPosition = sessionStorage.getItem('content_management_scroll_position');
+      const savedPosition = memoryStore.get('content_management_scroll_position');
       if (savedPosition && mainElement) {
         setTimeout(() => {
-          mainElement.scrollTop = parseInt(savedPosition, 10);
-        }, 100);
+          mainElement.scrollTop = savedPosition;
+        }, 50);
       }
     }
   }, [loading, contentList.length]);

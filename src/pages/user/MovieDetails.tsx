@@ -42,7 +42,10 @@ export default function MovieDetails() {
     return found;
   }, [contentList, id]);
   
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => {
+    const found = contentList.find(c => c.id === id);
+    return !found;
+  });
   const [alertConfig, setAlertConfig] = useState<{ isOpen: boolean; title: string; message: string }>({ isOpen: false, title: '', message: '' });
 
   useEffect(() => {
@@ -1178,7 +1181,12 @@ export default function MovieDetails() {
           </div>
         </div>
 
-        <div className="relative z-10 flex items-end justify-center p-8 pt-32 pb-4 w-full">
+        <motion.div 
+          initial={{ opacity: 0, y: 30 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, ease: 'easeOut' }}
+          className="relative z-10 flex items-end justify-center p-8 pt-32 pb-4 w-full"
+        >
           <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center md:items-end gap-8 text-center md:text-left w-full">
             <LazyLoadImage 
               src={mergedContent.posterUrl || settings?.defaultAppImage || 'https://picsum.photos/seed/movie/400/600'} 
@@ -1305,7 +1313,7 @@ export default function MovieDetails() {
               </div>
             </div>
           </div>
-        </div>
+        </motion.div>
       </div>
 
       {/* Main Content Area */}
