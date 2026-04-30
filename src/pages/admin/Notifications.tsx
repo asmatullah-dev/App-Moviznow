@@ -85,31 +85,59 @@ export default function Notifications() {
   useModalBehavior(!!selectedNotification, () => setSelectedNotification(null));
 
   useEffect(() => {
-    const q = query(
-      collection(db, "notifications"),
-      orderBy("createdAt", "desc"),
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs
-        .map((doc) => ({ id: doc.id, ...doc.data() }) as AppNotification);
-      setNotifications(data);
-      setLoading(false);
-    });
+    let isMounted = true;
+    const fetchNotifications = async () => {
+      try {
+        const q = query(
+          collection(db, "notifications"),
+          orderBy("createdAt", "desc"),
+        );
+        const snapshot = await getDocs(q);
+        if (isMounted) {
+          const data = snapshot.docs
+             .map((doc) => ({ id: doc.id, ...doc.data() }) as AppNotification);
+          setNotifications(data);
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error("Error fetching notifications:", error);
+      }
+    };
 
-    return () => unsubscribe();
+    fetchNotifications();
+    const intervalId = setInterval(fetchNotifications, 5 * 60 * 1000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+    };
   }, []);
 
   useEffect(() => {
-    const q = query(
-      collection(db, "notification_templates"),
-      orderBy("createdAt", "desc"),
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as NotificationTemplate);
-      setTemplates(data);
-    });
+    let isMounted = true;
+    const fetchTemplates = async () => {
+      try {
+        const q = query(
+          collection(db, "notification_templates"),
+          orderBy("createdAt", "desc"),
+        );
+        const snapshot = await getDocs(q);
+        if (isMounted) {
+          const data = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as NotificationTemplate);
+          setTemplates(data);
+        }
+      } catch (error) {
+        console.error("Error fetching notification templates:", error);
+      }
+    };
 
-    return () => unsubscribe();
+    fetchTemplates();
+    const intervalId = setInterval(fetchTemplates, 5 * 60 * 1000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+    };
   }, []);
 
   useEffect(() => {

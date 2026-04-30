@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { db } from '../../firebase';
-import { collection, onSnapshot, query, orderBy, deleteDoc, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, orderBy, deleteDoc, doc, updateDoc, getDocs } from 'firebase/firestore';
 import { useAuth } from '../../contexts/AuthContext';
 import { useContent } from '../../contexts/ContentContext';
 import { Film, Search, Clock, CheckCircle2, XCircle, MessageCircle, Trash2, Tv, Filter, User, Mail, Calendar, ArrowUp, ArrowDown, Plus, X, Eye, MessageSquare } from 'lucide-react';
@@ -57,18 +57,33 @@ export default function MovieRequestsManagement() {
   useModalBehavior(!!requestToComment, () => setRequestToComment(null));
 
   useEffect(() => {
-    const q = query(collection(db, 'movie_requests'), orderBy(sortBy === 'count' ? 'requestCount' : 'createdAt', sortOrder));
-    const unsub = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MovieRequest));
-      setRequests(data);
-      setLoading(false);
-    }, (error) => {
-      console.error("Requests snapshot error:", error);
-      setLoading(false);
-      handleFirestoreError(error, OperationType.LIST, 'movie_requests');
-    });
+    let isMounted = true;
+    
+    const fetchRequests = async () => {
+      try {
+        const q = query(collection(db, 'movie_requests'), orderBy(sortBy === 'count' ? 'requestCount' : 'createdAt', sortOrder));
+        const snapshot = await getDocs(q);
+        if (isMounted) {
+          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MovieRequest));
+          setRequests(data);
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error("Requests snapshot error:", error);
+        if (isMounted) {
+          setLoading(false);
+          handleFirestoreError(error, OperationType.LIST, 'movie_requests');
+        }
+      }
+    };
 
-    return () => unsub();
+    fetchRequests();
+    const intervalId = setInterval(fetchRequests, 5 * 60 * 1000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+    };
   }, [sortBy, sortOrder]);
 
   const handleUpdateStatus = async (requestId: string, status: 'completed' | 'rejected' | 'pending') => {

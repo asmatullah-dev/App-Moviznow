@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
-import { collection, query, orderBy, onSnapshot, doc, updateDoc, getDoc, arrayUnion, deleteDoc, writeBatch } from 'firebase/firestore';
+import { collection, query, orderBy, doc, updateDoc, getDoc, arrayUnion, deleteDoc, writeBatch, getDocs } from 'firebase/firestore';
 import { Order, UserProfile } from '../../types';
 import { Check, X, Clock, Search, Filter, Eye, Loader2, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
@@ -117,19 +117,34 @@ export default function OrdersManagement() {
   };
 
   useEffect(() => {
-    const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const ordersData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Order[];
-      
-      safeStorage.setItem(CACHE_KEY, JSON.stringify(ordersData));
-      setOrders(ordersData);
-      setLoading(false);
-    });
+    let isMounted = true;
+    
+    const fetchOrders = async () => {
+      try {
+        const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
+        const snapshot = await getDocs(q);
+        if (isMounted) {
+          const ordersData = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          })) as Order[];
+          
+          safeStorage.setItem(CACHE_KEY, JSON.stringify(ordersData));
+          setOrders(ordersData);
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error("Error fetching orders:", error);
+      }
+    };
 
-    return () => unsubscribe();
+    fetchOrders();
+    const intervalId = setInterval(fetchOrders, 5 * 60 * 1000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+    };
   }, []);
 
   // Separate effect for auto-deletion to avoid blocking the main snapshot listener

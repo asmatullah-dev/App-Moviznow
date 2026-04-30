@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Bell, X } from 'lucide-react';
-import { collection, query, orderBy, onSnapshot, doc, updateDoc, limit } from 'firebase/firestore';
+import { collection, query, orderBy, doc, updateDoc, limit, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { AppNotification } from '../types';
@@ -23,25 +23,35 @@ export const NotificationMenu = React.memo(() => {
   
   // Reset localLastCheck when profile updates
   useEffect(() => {
-    setLocalLastCheck(null);
+    return () => {
+      setLocalLastCheck(null);
+    };
   }, [profile?.lastNotificationCheck]);
 
-  useEffect(() => {
+  const fetchNotifications = async () => {
     if (!profile) return;
-    const q = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'), limit(50));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    try {
+      const q = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'), limit(50));
+      const snapshot = await getDocs(q);
       const notifs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AppNotification))
         .filter(n => !n.targetUserId && (!n.targetUserIds || n.targetUserIds.length === 0) || (n.targetUserId === profile.uid) || (n.targetUserIds?.includes(profile.uid)));
       setNotifications(notifs);
-    });
+    } catch (e) {
+      console.error("Failed to fetch notifications:", e);
+    }
+  };
 
-    return () => unsubscribe();
+  useEffect(() => {
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 10 * 60 * 1000);
+    return () => clearInterval(interval);
   }, [profile]);
 
   const handleOpen = async () => {
     const willOpen = !isOpen;
     setIsOpen(willOpen);
     if (willOpen && profile?.uid) {
+      fetchNotifications();
       const now = new Date();
       setLocalLastCheck(now);
       // Update lastNotificationCheck when opening the menu

@@ -135,71 +135,88 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
           }
         });
       } else {
-        unsubContent = onSnapshot(doc(db, 'metadata', 'search_index'), async (indexDoc) => {
-          if (indexDoc.exists()) {
-            const data = indexDoc.data().data as string[];
-            const parsedContent: Content[] = data.map(item => {
-              const [id, title, year, posterUrl, type, qualityId, langIds, genreIds, createdAt, order, seasonsInfo] = item.split('|');
-              const seasons = seasonsInfo ? seasonsInfo.split(',').map(s => {
-                const [sNum, lastEp] = s.split(':');
-                return {
-                  id: `s${sNum}`,
-                  seasonNumber: parseInt(sNum, 10),
-                  episodes: lastEp ? [{ id: 'last', episodeNumber: parseInt(lastEp, 10), title: '', url: '' }] : []
-                };
-              }) : [];
+        let isMounted = true;
+        
+        const fetchUserContent = async () => {
+          try {
+            const indexDoc = await getDoc(doc(db, 'metadata', 'search_index'));
+            if (indexDoc.exists()) {
+              const data = indexDoc.data().data as string[];
+              const parsedContent: Content[] = data.map(item => {
+                const [id, title, year, posterUrl, type, qualityId, langIds, genreIds, createdAt, order, seasonsInfo] = item.split('|');
+                const seasons = seasonsInfo ? seasonsInfo.split(',').map(s => {
+                  const [sNum, lastEp] = s.split(':');
+                  return {
+                    id: `s${sNum}`,
+                    seasonNumber: parseInt(sNum, 10),
+                    episodes: lastEp ? [{ id: 'last', episodeNumber: parseInt(lastEp, 10), title: '', url: '' }] : []
+                  };
+                }) : [];
 
-              return {
-                id, title, year, posterUrl, type: type as 'movie' | 'series', qualityId,
-                languageIds: langIds ? langIds.split(',') : [],
-                genreIds: genreIds ? genreIds.split(',') : [],
-                createdAt, order: (order !== undefined && order !== '') ? parseInt(order, 10) : undefined,
-                seasons, status: 'published', description: '', trailerUrl: '', cast: [], updatedAt: createdAt
-              } as unknown as Content;
-            });
-            try {
-              safeStorage.setItem('content_cache', JSON.stringify(parsedContent));
-            } catch (e) {
-              console.error("Failed to save content cache", e);
-            }
-            setContentList(parsedContent);
-            setLoading(false);
-          } else {
-            try {
-              const q = query(collection(db, 'content'), where('status', '==', 'published'), orderBy('createdAt', 'desc'), limit(50));
-              const snapshot = await getDocs(q);
-              const rawContent = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Content));
-              const sanitizedContent = rawContent.map(c => {
-                let minimalSeasons: any[] = [];
-                if (c.seasons) {
-                  try {
-                    const parsedSeasons = Array.isArray(c.seasons) ? c.seasons : JSON.parse(c.seasons as string);
-                    minimalSeasons = parsedSeasons.map((s: any) => ({
-                      seasonNumber: s.seasonNumber,
-                      episodes: s.episodes && s.episodes.length > 0 ? [{ episodeNumber: s.episodes[s.episodes.length - 1].episodeNumber }] : []
-                    }));
-                  } catch (e) {}
-                }
                 return {
-                  ...c, movieLinks: undefined, fullSeasonZip: undefined, fullSeasonMkv: undefined,
-                  seasons: minimalSeasons.length > 0 ? minimalSeasons : undefined
-                };
+                  id, title, year, posterUrl, type: type as 'movie' | 'series', qualityId,
+                  languageIds: langIds ? langIds.split(',') : [],
+                  genreIds: genreIds ? genreIds.split(',') : [],
+                  createdAt, order: (order !== undefined && order !== '') ? parseInt(order, 10) : undefined,
+                  seasons, status: 'published', description: '', trailerUrl: '', cast: [], updatedAt: createdAt
+                } as unknown as Content;
               });
               try {
-                safeStorage.setItem('content_cache', JSON.stringify(sanitizedContent));
+                safeStorage.setItem('content_cache', JSON.stringify(parsedContent));
               } catch (e) {
                 console.error("Failed to save content cache", e);
               }
-              setContentList(rawContent);
-            } catch (error) {
-              console.error("Error fetching fallback content", error);
+              if (isMounted) {
+                setContentList(parsedContent);
+                setLoading(false);
+              }
+            } else {
+              try {
+                const q = query(collection(db, 'content'), where('status', '==', 'published'), orderBy('createdAt', 'desc'), limit(50));
+                const snapshot = await getDocs(q);
+                if (isMounted) {
+                  const rawContent = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Content));
+                  const sanitizedContent = rawContent.map(c => {
+                    let minimalSeasons: any[] = [];
+                    if (c.seasons) {
+                      try {
+                        const parsedSeasons = Array.isArray(c.seasons) ? c.seasons : JSON.parse(c.seasons as string);
+                        minimalSeasons = parsedSeasons.map((s: any) => ({
+                          seasonNumber: s.seasonNumber,
+                          episodes: s.episodes && s.episodes.length > 0 ? [{ episodeNumber: s.episodes[s.episodes.length - 1].episodeNumber }] : []
+                        }));
+                      } catch (e) {}
+                    }
+                    return {
+                      ...c, movieLinks: undefined, fullSeasonZip: undefined, fullSeasonMkv: undefined,
+                      seasons: minimalSeasons.length > 0 ? minimalSeasons : undefined
+                    };
+                  });
+                  try {
+                    safeStorage.setItem('content_cache', JSON.stringify(sanitizedContent));
+                  } catch (e) {
+                    console.error("Failed to save content cache", e);
+                  }
+                  setContentList(rawContent);
+                  setLoading(false);
+                }
+              } catch (error) {
+                console.error("Error fetching fallback content", error);
+                if (isMounted) setLoading(false);
+              }
             }
-            setLoading(false);
+          } catch (error) {
+            console.error("Search index fetch error:", error);
+            if (isMounted) setLoading(false);
           }
-        }, (error) => {
-          console.error("Search index snapshot error:", error);
-          setLoading(false);
-        });
+        };
+
+        fetchUserContent();
+        const intervalId = setInterval(fetchUserContent, 10 * 60 * 1000); // 10 mins backoff for users
+        unsubContent = () => {
+          isMounted = false;
+          clearInterval(intervalId);
+        };
       }
     };
 
@@ -210,51 +227,111 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     let unsubQualities: () => void;
     let unsubCollections: () => void;
 
-    const setupStaticDataListeners = () => {
+    const setupStaticDataListeners = async () => {
       if (!navigator.onLine) return;
 
-      unsubGenres = onSnapshot(collection(db, 'genres'), (snapshot) => {
-        const genresData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Genre));
-        genresData.sort((a, b) => {
-          if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
-          if (a.order !== undefined) return -1;
-          if (b.order !== undefined) return 1;
-          return a.name.localeCompare(b.name);
-        });
-        safeStorage.setItem('genres_cache', JSON.stringify(genresData));
-        setGenres(genresData);
-      });
+      const isAdminOrEditor = profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'content_manager' || profile?.role === 'manager';
 
-      unsubLanguages = onSnapshot(collection(db, 'languages'), (snapshot) => {
-        const langsData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Language));
-        langsData.sort((a, b) => {
-          if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
-          if (a.order !== undefined) return -1;
-          if (b.order !== undefined) return 1;
-          return a.name.localeCompare(b.name);
+      if (isAdminOrEditor) {
+        unsubGenres = onSnapshot(collection(db, 'genres'), (snapshot) => {
+          const genresData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Genre));
+          genresData.sort((a, b) => {
+            if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
+            if (a.order !== undefined) return -1;
+            if (b.order !== undefined) return 1;
+            return a.name.localeCompare(b.name);
+          });
+          safeStorage.setItem('genres_cache', JSON.stringify(genresData));
+          setGenres(genresData);
         });
-        safeStorage.setItem('languages_cache', JSON.stringify(langsData));
-        setLanguages(langsData);
-      });
 
-      unsubQualities = onSnapshot(collection(db, 'qualities'), (snapshot) => {
-        const qualitiesData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Quality));
-        qualitiesData.sort((a, b) => {
-          if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
-          if (a.order !== undefined) return -1;
-          if (b.order !== undefined) return 1;
-          return a.name.localeCompare(b.name);
+        unsubLanguages = onSnapshot(collection(db, 'languages'), (snapshot) => {
+          const langsData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Language));
+          langsData.sort((a, b) => {
+            if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
+            if (a.order !== undefined) return -1;
+            if (b.order !== undefined) return 1;
+            return a.name.localeCompare(b.name);
+          });
+          safeStorage.setItem('languages_cache', JSON.stringify(langsData));
+          setLanguages(langsData);
         });
-        safeStorage.setItem('qualities_cache', JSON.stringify(qualitiesData));
-        setQualities(qualitiesData);
-      });
 
-      unsubCollections = onSnapshot(collection(db, 'collections'), (snapshot) => {
-        const collectionsData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as AppCollection));
-        collectionsData.sort((a, b) => (a.order || 0) - (b.order || 0));
-        safeStorage.setItem('collections_cache', JSON.stringify(collectionsData));
-        setCollections(collectionsData);
-      });
+        unsubQualities = onSnapshot(collection(db, 'qualities'), (snapshot) => {
+          const qualitiesData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Quality));
+          qualitiesData.sort((a, b) => {
+            if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
+            if (a.order !== undefined) return -1;
+            if (b.order !== undefined) return 1;
+            return a.name.localeCompare(b.name);
+          });
+          safeStorage.setItem('qualities_cache', JSON.stringify(qualitiesData));
+          setQualities(qualitiesData);
+        });
+
+        unsubCollections = onSnapshot(collection(db, 'collections'), (snapshot) => {
+          const collectionsData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as AppCollection));
+          collectionsData.sort((a, b) => (a.order || 0) - (b.order || 0));
+          safeStorage.setItem('collections_cache', JSON.stringify(collectionsData));
+          setCollections(collectionsData);
+        });
+      } else {
+        // For regular users, only fetch if cache is older than 24 hours or missing
+        const lastSync = parseInt(safeStorage.getItem('static_data_synced_at') || '0', 10);
+        const hasCache = safeStorage.getItem('genres_cache') && safeStorage.getItem('collections_cache');
+        const now = Date.now();
+        const needFetch = !hasCache || (now - lastSync > 24 * 60 * 60 * 1000);
+
+        if (needFetch) {
+          try {
+            const [genresSnap, langsSnap, qualsSnap, collsSnap] = await Promise.all([
+              getDocs(collection(db, 'genres')),
+              getDocs(collection(db, 'languages')),
+              getDocs(collection(db, 'qualities')),
+              getDocs(collection(db, 'collections'))
+            ]);
+
+            const genresData = genresSnap.docs.map(d => ({ id: d.id, ...d.data() } as Genre));
+            genresData.sort((a, b) => {
+              if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
+              if (a.order !== undefined) return -1;
+              if (b.order !== undefined) return 1;
+              return a.name.localeCompare(b.name);
+            });
+            safeStorage.setItem('genres_cache', JSON.stringify(genresData));
+            setGenres(genresData);
+
+            const langsData = langsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Language));
+            langsData.sort((a, b) => {
+              if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
+              if (a.order !== undefined) return -1;
+              if (b.order !== undefined) return 1;
+              return a.name.localeCompare(b.name);
+            });
+            safeStorage.setItem('languages_cache', JSON.stringify(langsData));
+            setLanguages(langsData);
+
+            const qualitiesData = qualsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Quality));
+            qualitiesData.sort((a, b) => {
+              if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
+              if (a.order !== undefined) return -1;
+              if (b.order !== undefined) return 1;
+              return a.name.localeCompare(b.name);
+            });
+            safeStorage.setItem('qualities_cache', JSON.stringify(qualitiesData));
+            setQualities(qualitiesData);
+
+            const collectionsData = collsSnap.docs.map(d => ({ id: d.id, ...d.data() } as AppCollection));
+            collectionsData.sort((a, b) => (a.order || 0) - (b.order || 0));
+            safeStorage.setItem('collections_cache', JSON.stringify(collectionsData));
+            setCollections(collectionsData);
+
+            safeStorage.setItem('static_data_synced_at', now.toString());
+          } catch (e) {
+            console.error("Failed to fetch static data", e);
+          }
+        }
+      }
     };
 
     setupStaticDataListeners();

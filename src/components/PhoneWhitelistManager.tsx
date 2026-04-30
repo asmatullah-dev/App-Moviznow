@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, onSnapshot, doc, setDoc, deleteDoc, query } from 'firebase/firestore';
+import { collection, doc, setDoc, deleteDoc, query, getDocs } from 'firebase/firestore';
 import { Plus, Trash2, Loader2 } from 'lucide-react';
 import { Button } from './Button';
 import { standardizePhone } from '../contexts/AuthContext';
@@ -12,11 +12,25 @@ export function PhoneWhitelistManager() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const q = query(collection(db, 'whitelisted_phones'));
-    const unsub = onSnapshot(q, (snap) => {
-      setPhones(snap.docs.map(doc => doc.id));
-    });
-    return unsub;
+    let isMounted = true;
+    const fetchPhones = async () => {
+      try {
+        const q = query(collection(db, 'whitelisted_phones'));
+        const { getDocs } = await import('firebase/firestore');
+        const snap = await getDocs(q);
+        if (isMounted) {
+          setPhones(snap.docs.map(doc => doc.id));
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    fetchPhones();
+    const interval = setInterval(fetchPhones, 5 * 60 * 1000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    }
   }, []);
 
   const handleAdd = async () => {

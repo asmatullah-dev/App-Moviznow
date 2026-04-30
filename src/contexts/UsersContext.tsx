@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { collection, onSnapshot, query } from 'firebase/firestore';
+import { collection, query, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { UserProfile } from '../types';
 import { useAuth } from './AuthContext';
@@ -32,25 +32,32 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const q = query(collection(db, 'users'));
+    const fetchUsers = async () => {
+      try {
+        const q = query(collection(db, 'users'));
+        const snapshot = await getDocs(q);
+        const usersData = snapshot.docs.map(doc => ({
+          ...doc.data(),
+          uid: doc.id
+        })) as UserProfile[];
+        
+        setUsers(usersData);
+        safeStorage.setItem('cached_all_users', JSON.stringify(usersData));
+        setLoading(false);
+        setError(null);
+      } catch (err: any) {
+        console.error('Error fetching users:', err);
+        setError(err.message);
+        setLoading(false);
+      }
+    };
     
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const usersData = snapshot.docs.map(doc => ({
-        ...doc.data(),
-        uid: doc.id
-      })) as UserProfile[];
-      
-      setUsers(usersData);
-      safeStorage.setItem('cached_all_users', JSON.stringify(usersData));
-      setLoading(false);
-      setError(null);
-    }, (err) => {
-      console.error('Error fetching users:', err);
-      setError(err.message);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
+    fetchUsers();
+    
+    // Refresh every 5 minutes
+    const intervalId = setInterval(fetchUsers, 5 * 60 * 1000);
+    
+    return () => clearInterval(intervalId);
   }, [profile?.role]);
 
   return (

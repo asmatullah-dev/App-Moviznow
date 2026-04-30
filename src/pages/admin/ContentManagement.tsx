@@ -15,6 +15,7 @@ import { MediaModal, findTMDBByImdb, searchTMDBByTitle, fetchTMDBDetails, fetchS
 import { LinkCheckerModal } from '../../components/LinkCheckerModal';
 import { AdjustContentsModal } from '../../components/AdjustContentsModal';
 import ManageModal from '../../components/ManageModal';
+import { Button } from '../../components/Button';
 import { formatContentTitle, formatReleaseDate, formatRuntime, formatDateToMonthDDYYYY } from '../../utils/contentUtils';
 import { smartSearch } from '../../utils/searchUtils';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
@@ -434,6 +435,15 @@ const ContentCard = memo(({
       </div>
     </div>
   );
+}, (prevProps, nextProps) => {
+  return prevProps.content === nextProps.content &&
+         prevProps.profile === nextProps.profile &&
+         prevProps.isSelected === nextProps.isSelected &&
+         prevProps.anySelected === nextProps.anySelected &&
+         prevProps.isActiveDropdown === nextProps.isActiveDropdown &&
+         prevProps.isDuplicate === nextProps.isDuplicate &&
+         prevProps.isShareLoading === nextProps.isShareLoading &&
+         prevProps.isWhatsappLoading === nextProps.isWhatsappLoading;
 });
 
 export default function ContentManagement() {
@@ -566,6 +576,11 @@ export default function ContentManagement() {
   const [filterAddedBy, setFilterAddedBy] = useState<string>(() => sessionStorage.getItem('content_mgmt_added_by') || 'all');
   const [filterSort, setFilterSort] = useState<'default' | 'newest' | 'oldest'>(() => (sessionStorage.getItem('content_mgmt_sort') as any) || 'default');
   const [selectedContent, setSelectedContent] = useState<string[]>([]);
+  const [visibleCount, setVisibleCount] = useState(50);
+
+  useEffect(() => {
+    setVisibleCount(50); // Reset visible count on filter/search change
+  }, [debouncedSearchTerm, filterType, filterGenre, filterLanguage, filterQuality, filterYear, filterStatus, filterAddedBy, filterSort, showDuplicates, showMissing]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -1541,51 +1556,15 @@ export default function ContentManagement() {
                 // Update title, description, duration, keep links
                 existingSeason.episodes[existingEpIndex] = {
                   ...existingSeason.episodes[existingEpIndex],
-                  title: fetchedEp.title || existingSeason.episodes[existingEpIndex].title,
+                  title: (!existingSeason.episodes[existingEpIndex].title || /^Episode\s+\d+$/i.test(existingSeason.episodes[existingEpIndex].title)) && fetchedEp.title
+                    ? fetchedEp.title : existingSeason.episodes[existingEpIndex].title,
                   description: fetchedEp.description || existingSeason.episodes[existingEpIndex].description,
                   duration: fetchedEp.duration || existingSeason.episodes[existingEpIndex].duration,
                 };
-              } else {
-                // Add new episode with pre-filled 720p link
-                existingSeason.episodes.push({
-                  id: Math.random().toString(36).substr(2, 9),
-                  episodeNumber: fetchedEp.episodeNumber,
-                  title: fetchedEp.title || `Episode ${fetchedEp.episodeNumber}`,
-                  description: fetchedEp.description || '',
-                  duration: fetchedEp.duration || '',
-                  links: [{ id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'MB' }],
-                });
               }
             });
             // Sort episodes
             existingSeason.episodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
-          } else {
-            // Add new season with pre-filled links
-            updatedSeasons.push({
-              id: Math.random().toString(36).substr(2, 9),
-              seasonNumber: fetchedSeason.seasonNumber,
-              year: fetchedSeason.seasonYear,
-              title: fetchedSeason.title,
-              trailerUrl: fetchedSeason.trailerUrl || '',
-              zipLinks: [
-                { id: Math.random().toString(36).substr(2, 9), name: '480p', url: '', size: '', unit: 'GB' },
-                { id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'GB' },
-                { id: Math.random().toString(36).substr(2, 9), name: '1080p', url: '', size: '', unit: 'GB' }
-              ],
-              mkvLinks: [
-                { id: Math.random().toString(36).substr(2, 9), name: '480p', url: '', size: '', unit: 'GB' },
-                { id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'GB' },
-                { id: Math.random().toString(36).substr(2, 9), name: '1080p', url: '', size: '', unit: 'GB' }
-              ],
-              episodes: fetchedSeason.episodes.map((ep: any) => ({
-                id: Math.random().toString(36).substr(2, 9),
-                episodeNumber: ep.episodeNumber,
-                title: ep.title || `Episode ${ep.episodeNumber}`,
-                description: ep.description || '',
-                duration: ep.duration || '',
-                links: [{ id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'MB' }],
-              })).sort((a: any, b: any) => a.episodeNumber - b.episodeNumber)
-            });
           }
         });
         
@@ -2953,12 +2932,12 @@ export default function ContentManagement() {
     }
   };
 
-  const handleSelectContent = (id: string, e?: React.SyntheticEvent) => {
+  const handleSelectContent = useCallback((id: string, e?: React.SyntheticEvent) => {
     if (e) e.stopPropagation();
     setSelectedContent(prev => 
       prev.includes(id) ? prev.filter(cId => cId !== id) : [...prev, id]
     );
-  };
+  }, []);
 
   const handleBulkStatusChange = async (status: 'published' | 'draft' | 'selected_content') => {
     if (!window.confirm(`Are you sure you want to change the status of ${selectedContent.length} items to ${status}?`)) return;
@@ -3557,30 +3536,43 @@ export default function ContentManagement() {
           <p className="text-xl">No content found matching your filters.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-6">
-          {filteredContent.map((content) => (
-            <ContentCard
-              key={content.id}
-              content={content}
-              profile={profile}
-              isSelected={selectedContent.includes(content.id)}
-              anySelected={selectedContent.length > 0}
-              isActiveDropdown={activeDropdownId === content.id}
-              isDuplicate={duplicateIds.has(content.id)}
-              isShareLoading={loadingShareId === content.id}
-              isWhatsappLoading={loadingWhatsappShareId === content.id}
-              handleSelectContent={handleSelectContent}
-              handleShare={handleShare}
-              handleEdit={handleEdit}
-              handleCopyData={handleCopyData}
-              setDeleteId={setDeleteId}
-              setNotificationModal={setNotificationModal}
-              setActiveDropdownId={setActiveDropdownId}
-              getMissingLabels={getMissingLabels}
-              handleAddToSpecialCollection={handleAddToSpecialCollection}
-            />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-6">
+            {filteredContent.slice(0, visibleCount).map((content) => (
+              <ContentCard
+                key={content.id}
+                content={content}
+                profile={profile}
+                isSelected={selectedContent.includes(content.id)}
+                anySelected={selectedContent.length > 0}
+                isActiveDropdown={activeDropdownId === content.id}
+                isDuplicate={duplicateIds.has(content.id)}
+                isShareLoading={loadingShareId === content.id}
+                isWhatsappLoading={loadingWhatsappShareId === content.id}
+                handleSelectContent={handleSelectContent}
+                handleShare={handleShare}
+                handleEdit={handleEdit}
+                handleCopyData={handleCopyData}
+                setDeleteId={setDeleteId}
+                setNotificationModal={setNotificationModal}
+                setActiveDropdownId={setActiveDropdownId}
+                getMissingLabels={getMissingLabels}
+                handleAddToSpecialCollection={handleAddToSpecialCollection}
+              />
+            ))}
+          </div>
+          {visibleCount < filteredContent.length && (
+            <div className="mt-8 flex justify-center">
+              <Button 
+                variant="secondary" 
+                onClick={() => setVisibleCount(prev => prev + 50)}
+                className="px-8"
+              >
+                Load More
+              </Button>
+            </div>
+          )}
+        </>
       )}
 
       <AnimatePresence>

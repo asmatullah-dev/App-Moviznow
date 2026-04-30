@@ -185,8 +185,20 @@ export default function MovieDetails() {
            (content.type === 'series' && !hasFullSeasons);
   }, [content]);
 
+  const isStale = useMemo(() => {
+    if (!content || !fullContent) return false;
+    // Compare updatedAt strings or timestamps to detect changes from the search index (contentList)
+    const getUpdateStr = (t: any) => {
+      if (!t) return 'none';
+      if (typeof t === 'object' && t.seconds) return t.seconds.toString();
+      if (typeof t === 'string' || typeof t === 'number') return t.toString();
+      return JSON.stringify(t);
+    };
+    return getUpdateStr(content.updatedAt) !== getUpdateStr(fullContent.updatedAt);
+  }, [content, fullContent]);
+
   useEffect(() => {
-    if (isMinimal && id && !fetchFailed && !isOffline && !hasFetchedFull.current[id]) {
+    if ((isMinimal || isStale) && id && !fetchFailed && !isOffline && !hasFetchedFull.current[id]) {
       hasFetchedFull.current[id] = true;
       const fetchFullContent = async () => {
         try {
@@ -206,7 +218,7 @@ export default function MovieDetails() {
       };
       fetchFullContent();
     }
-  }, [isMinimal, id, fetchFailed, isOffline]);
+  }, [isMinimal, isStale, id, fetchFailed, isOffline]);
 
   const mergedContent = useMemo(() => {
     if (!content && !fullContent) return null;
@@ -467,7 +479,11 @@ export default function MovieDetails() {
     } catch (e) {
       console.error("Error parsing seasons in fetchMissingData:", e);
     }
-    const needsEpisodeData = mergedContent?.type === 'series' && seasons.some((s: any) => !s.episodes || s.episodes.length <= 1 || s.episodes.some((ep: any) => !ep.description || !ep.duration));
+    const needsEpisodeData = mergedContent?.type === 'series' && seasons.some((s: any) => 
+      s.episodes && s.episodes.some((ep: any) => 
+        !ep.description || !ep.duration || !ep.title || /^Episode\s+\d+$/i.test(ep.title)
+      )
+    );
     
     const needsStaticData = force || !mergedContent.runtime || !mergedContent.description || (!mergedContent.cast || mergedContent.cast.length === 0) || !mergedContent.releaseDate || !mergedContent.posterUrl || !mergedContent.country || !mergedContent.trailerUrl || !mergedContent.imdbLink || (!mergedContent.genreIds || mergedContent.genreIds.length === 0) || needsEpisodeData;
 
@@ -616,27 +632,30 @@ export default function MovieDetails() {
 
               if (seasonData.episodes) {
                 const existingEpisodes = season.episodes || [];
-                const mergedEpisodes = seasonData.episodes.map((tmdbEp: any) => {
-                  const existingEp = existingEpisodes.find((ep: any) => ep.episodeNumber === tmdbEp.episode_number);
-                  if (existingEp) {
-                    return {
-                      ...existingEp,
-                      description: existingEp.description || tmdbEp.overview || '',
-                      duration: existingEp.duration || (tmdbEp.runtime ? `${tmdbEp.runtime} min` : '')
-                    };
+                let episodeUpdated = false;
+                season.episodes = existingEpisodes.map((existingEp: any) => {
+                  const tmdbEp = seasonData.episodes.find((ep: any) => ep.episode_number === existingEp.episodeNumber);
+                  if (tmdbEp) {
+                    const newTitle = (!existingEp.title || /^Episode\s+\d+$/i.test(existingEp.title)) && tmdbEp.name ? tmdbEp.name : existingEp.title;
+                    const newDesc = existingEp.description || tmdbEp.overview || '';
+                    const newDur = existingEp.duration || (tmdbEp.runtime ? `${tmdbEp.runtime} min` : '');
+                    
+                    if (newTitle !== existingEp.title || newDesc !== existingEp.description || newDur !== existingEp.duration) {
+                      episodeUpdated = true;
+                      return {
+                        ...existingEp,
+                        title: newTitle,
+                        description: newDesc,
+                        duration: newDur
+                      };
+                    }
                   }
-                  return {
-                    id: `e${tmdbEp.episode_number}`,
-                    episodeNumber: tmdbEp.episode_number,
-                    title: tmdbEp.name || `Episode ${tmdbEp.episode_number}`,
-                    description: tmdbEp.overview || '',
-                    duration: tmdbEp.runtime ? `${tmdbEp.runtime} min` : '',
-                    links: []
-                  };
+                  return existingEp;
                 });
-                const existingOnly = existingEpisodes.filter((ep: any) => !seasonData.episodes.some((te: any) => te.episode_number === ep.episodeNumber));
-                season.episodes = [...mergedEpisodes, ...existingOnly].sort((a, b) => a.episodeNumber - b.episodeNumber);
-                seasonsUpdated = true;
+                
+                if (episodeUpdated) {
+                  seasonsUpdated = true;
+                }
               }
             }
 
@@ -2141,46 +2160,14 @@ export default function MovieDetails() {
                       if (existingEpIndex !== -1) {
                         existingSeason.episodes[existingEpIndex] = {
                           ...existingSeason.episodes[existingEpIndex],
-                          title: fetchedEp.title || existingSeason.episodes[existingEpIndex].title,
+                          title: (!existingSeason.episodes[existingEpIndex].title || /^Episode\s+\d+$/i.test(existingSeason.episodes[existingEpIndex].title)) && fetchedEp.title 
+                            ? fetchedEp.title : existingSeason.episodes[existingEpIndex].title,
                           description: fetchedEp.description || existingSeason.episodes[existingEpIndex].description,
                           duration: fetchedEp.duration || existingSeason.episodes[existingEpIndex].duration,
                         };
-                      } else {
-                        existingSeason.episodes.push({
-                          id: Math.random().toString(36).substr(2, 9),
-                          episodeNumber: fetchedEp.episodeNumber,
-                          title: fetchedEp.title || `Episode ${fetchedEp.episodeNumber}`,
-                          description: fetchedEp.description || '',
-                          duration: fetchedEp.duration || '',
-                          links: [{ id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'MB' }],
-                        });
                       }
                     });
                     existingSeason.episodes.sort((a: any, b: any) => a.episodeNumber - b.episodeNumber);
-                  } else {
-                    currentSeasons.push({
-                      id: Math.random().toString(36).substr(2, 9),
-                      seasonNumber: fetchedSeason.seasonNumber,
-                      year: fetchedSeason.seasonYear,
-                      zipLinks: [
-                        { id: Math.random().toString(36).substr(2, 9), name: '480p', url: '', size: '', unit: 'GB' },
-                        { id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'GB' },
-                        { id: Math.random().toString(36).substr(2, 9), name: '1080p', url: '', size: '', unit: 'GB' }
-                      ],
-                      mkvLinks: [
-                        { id: Math.random().toString(36).substr(2, 9), name: '480p', url: '', size: '', unit: 'GB' },
-                        { id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'GB' },
-                        { id: Math.random().toString(36).substr(2, 9), name: '1080p', url: '', size: '', unit: 'GB' }
-                      ],
-                      episodes: fetchedSeason.episodes.map((ep: any) => ({
-                        id: Math.random().toString(36).substr(2, 9),
-                        episodeNumber: ep.episodeNumber,
-                        title: ep.title || `Episode ${ep.episodeNumber}`,
-                        description: ep.description || '',
-                        duration: ep.duration || '',
-                        links: [{ id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'MB' }],
-                      })).sort((a: any, b: any) => a.episodeNumber - b.episodeNumber)
-                    });
                   }
                 });
                 updateData.seasons = JSON.stringify(currentSeasons.sort((a: any, b: any) => a.seasonNumber - b.seasonNumber));

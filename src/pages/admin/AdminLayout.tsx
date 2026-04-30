@@ -28,21 +28,29 @@ export default function AdminLayout() {
     const qReported = query(collection(db, 'reported_links'), where('status', '==', 'pending'));
     const qOrders = query(collection(db, 'orders'), where('status', '==', 'pending'));
     
-    const unsubReported = onSnapshot(qReported, (snap) => {
-      setReportedLinksCount(snap.size);
-    }, (error) => {
-      console.error("Error fetching reported links count:", error);
-    });
+    let isMounted = true;
+    
+    const fetchCounts = async () => {
+      try {
+        const [reportedSnap, ordersSnap] = await Promise.all([
+          getDocs(qReported),
+          getDocs(qOrders)
+        ]);
+        if (isMounted) {
+          setReportedLinksCount(reportedSnap.size);
+          setPendingOrdersCount(ordersSnap.size);
+        }
+      } catch (error) {
+        console.error("Error fetching admin counts:", error);
+      }
+    };
 
-    const unsubOrders = onSnapshot(qOrders, (snap) => {
-      setPendingOrdersCount(snap.size);
-    }, (error) => {
-      console.error("Error fetching pending orders count:", error);
-    });
+    fetchCounts();
+    const intervalId = setInterval(fetchCounts, 5 * 60 * 1000); // 5 mins
 
     return () => {
-      unsubReported();
-      unsubOrders();
+      isMounted = false;
+      clearInterval(intervalId);
     };
   }, [profile]);
 
