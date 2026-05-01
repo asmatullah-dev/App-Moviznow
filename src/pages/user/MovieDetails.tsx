@@ -222,26 +222,78 @@ export default function MovieDetails() {
 
   const mergedContent = useMemo(() => {
     if (!content && !fullContent) return null;
-    // Prioritize cachedMetadata (TMDB updates/local edits), then fresh fullContent from DB, then partial content from list
+    
     const metadata = cachedMetadata.id === id ? cachedMetadata.data : {};
-    const validFullContent = fullContent?.id === id ? fullContent : {};
-    return {
-      ...(content || {}),
-      ...validFullContent,
-      ...metadata
-    } as Content;
+    const validFullContent = fullContent?.id === id ? fullContent : null;
+    const baseContent = content || {};
+
+    // Combine them carefully. validFullContent > content > metadata
+    // But we want metadata to fill in MISSING gaps in the others.
+    
+    // Start with metadata, then override with baseContent, then override with validFullContent
+    // However, baseContent/validFullContent might have empty strings for fields they don't have.
+    // We want to be smart about it.
+
+    const result = { ...metadata, ...baseContent, ...(validFullContent || {}) } as Content;
+
+    // Fix: Fill in specifically missing metadata from cache if not in result
+    const fieldsToEnsure = ['description', 'runtime', 'cast', 'releaseDate', 'posterUrl', 'country', 'trailerUrl', 'imdbLink', 'imdbRating', 'director'];
+    fieldsToEnsure.forEach(field => {
+      const val = (result as any)[field];
+      const cacheVal = (metadata as any)[field];
+      if ((!val || (Array.isArray(val) && val.length === 0)) && cacheVal) {
+        (result as any)[field] = cacheVal;
+      }
+    });
+
+    return result;
   }, [content, cachedMetadata, fullContent, id]);
 
   const seasons = useMemo(() => {
-    if (!mergedContent || mergedContent.type !== 'series' || !mergedContent.seasons) return [] as Season[];
+    if (!mergedContent || mergedContent.type !== 'series') return [] as Season[];
+    
     try {
-      const sData = mergedContent.seasons;
-      return (Array.isArray(sData) ? sData : JSON.parse(sData || '[]')) as Season[];
+      // Prioritize seasons from database (fullContent or content)
+      const dbContent = (fullContent?.id === id ? fullContent : null) || content;
+      const dbSeasonsStr = dbContent?.seasons;
+      const dbSeasons: Season[] = dbSeasonsStr ? (Array.isArray(dbSeasonsStr) ? dbSeasonsStr : JSON.parse(dbSeasonsStr || '[]')) : [];
+
+      // If we have database seasons, use them as the primary structure
+      // Then fill in details (descriptions/titles) from cachedMetadata (TMDB)
+      if (dbSeasons.length > 0) {
+        const metadata = cachedMetadata.id === id ? cachedMetadata.data : {};
+        const cacheSeasons: Season[] = metadata.seasons ? (Array.isArray(metadata.seasons) ? metadata.seasons : JSON.parse(metadata.seasons || '[]')) : [];
+
+        return dbSeasons.map(ds => {
+          const cs = cacheSeasons.find(s => s.seasonNumber === ds.seasonNumber);
+          if (!cs) return ds;
+
+          return {
+            ...ds,
+            episodes: (ds.episodes || []).map(de => {
+              const ce = (cs.episodes || []).find(e => e.episodeNumber === de.episodeNumber);
+              if (!ce) return de;
+
+              return {
+                ...de,
+                // Only use metadata if the database version is missing these fields or has generic title
+                title: (!de.title || de.title === `Episode ${de.episodeNumber}`) ? (ce.title || de.title) : de.title,
+                description: !de.description ? (ce.description || de.description) : de.description,
+                duration: !de.duration ? (ce.duration || de.duration) : de.duration
+              };
+            })
+          };
+        });
+      }
+
+      // Fallback: If no database seasons yet, but we are a series (rare), maybe show TMDB seasons ONLY if admin?
+      // Actually, for consistency, if nothing in DB, we should show nothing until added.
+      return [] as Season[];
     } catch (e) {
       console.error("Error parsing seasons:", e);
       return [] as Season[];
     }
-  }, [mergedContent]);
+  }, [mergedContent, fullContent, content, cachedMetadata, id]);
 
   const allTrailers = useMemo(() => {
     const list: Trailer[] = [];

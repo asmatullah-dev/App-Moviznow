@@ -731,8 +731,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const twelveHoursMs = 12 * 60 * 60 * 1000;
             const forceSync = Date.now() - lastSyncTime >= twelveHoursMs;
 
-            // Sync to Firestore every 5 minutes (300 seconds) or every 12 hours to reduce write operations
-            if ((accSeconds >= 300 || forceSync) && navigator.onLine) {
+            // Sync to Firestore every 20 minutes (1200 seconds) or every 12 hours to reduce write operations
+            if ((accSeconds >= 1200 || forceSync) && navigator.onLine) {
               let minutesToSync = Math.floor(accSeconds / 60);
 
               // If forced by 12 hours and we have less than 1 minute, round up so we don't drop the time

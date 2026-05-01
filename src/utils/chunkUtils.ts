@@ -26,6 +26,25 @@ export async function fetchAllFromChunks<T>(collectionName: string, mergeFn: (da
 }
 
 /**
+ * Updates the sync metadata to trigger clients to refresh their cache
+ */
+async function updateSyncMetadata(): Promise<void> {
+  try {
+    const chunksSnap = await getDocs(collection(db, 'content_chunks'));
+    const searchSnap = await getDocs(collection(db, 'search_index_chunks'));
+    
+    await setDoc(doc(db, 'metadata', 'content_sync'), {
+      lastUpdated: new Date().toISOString(),
+      updatedBy: 'system',
+      contentChunkCount: chunksSnap.docs.length,
+      searchShardCount: searchSnap.docs.length
+    }, { merge: true });
+  } catch (e) {
+    console.error("Failed to update sync metadata", e);
+  }
+}
+
+/**
  * Saves or updates a single content item in the appropriate chunk
  */
 export async function saveContentToChunk(content: Content): Promise<void> {
@@ -47,7 +66,8 @@ export async function saveContentToChunk(content: Content): Promise<void> {
     // Update existing
     const docRef = targetDoc.ref;
     batch.update(docRef, {
-      [`items.${content.id}`]: content
+      [`items.${content.id}`]: content,
+      updatedAt: new Date().toISOString()
     });
   } else {
     // Add new - Find first chunk with space
@@ -58,7 +78,8 @@ export async function saveContentToChunk(content: Content): Promise<void> {
       const items = doc.data().items || {};
       if (Object.keys(items).length < CONTENT_CHUNK_SIZE) {
         batch.update(doc.ref, {
-          [`items.${content.id}`]: content
+          [`items.${content.id}`]: content,
+          updatedAt: new Date().toISOString()
         });
         foundSpace = true;
         break;
@@ -70,12 +91,14 @@ export async function saveContentToChunk(content: Content): Promise<void> {
       const nextId = `chunk_${chunksSnap.docs.length}`;
       const newRef = doc(db, 'content_chunks', nextId);
       batch.set(newRef, {
-        items: { [content.id]: content }
+        items: { [content.id]: content },
+        updatedAt: new Date().toISOString()
       });
     }
   }
 
   await batch.commit();
+  await updateSyncMetadata();
 }
 
 /**
@@ -128,11 +151,15 @@ export async function saveContentsToChunks(contents: Content[]): Promise<void> {
   for (const chunkId of updatedChunkIds) {
     const chunk = currentChunks.find(c => c.id === chunkId);
     if (chunk) {
-      batch.set(doc(db, 'content_chunks', chunkId), { items: chunk.items });
+      batch.set(doc(db, 'content_chunks', chunkId), { 
+        items: chunk.items,
+        updatedAt: new Date().toISOString()
+      });
     }
   }
 
   await batch.commit();
+  await updateSyncMetadata();
 }
 
 /**
@@ -190,8 +217,10 @@ export async function deleteContentFromChunk(contentId: string): Promise<void> {
     const items = chunkDoc.data().items || {};
     if (items[contentId]) {
       await updateDoc(chunkDoc.ref, {
-        [`items.${contentId}`]: deleteField()
+        [`items.${contentId}`]: deleteField(),
+        updatedAt: new Date().toISOString()
       });
+      await updateSyncMetadata();
       return;
     }
   }
@@ -213,7 +242,10 @@ export async function saveSearchIndexToChunks(entries: string[]): Promise<void> 
     const chunkData = entries.slice(start, end);
     
     const docRef = doc(db, 'search_index_chunks', `shard_${i}`);
-    batch.set(docRef, { data: chunkData });
+    batch.set(docRef, { 
+      data: chunkData,
+      updatedAt: new Date().toISOString()
+    });
   }
   
   // Cleanup extra shards if any (e.g. if content decreased)
@@ -226,4 +258,5 @@ export async function saveSearchIndexToChunks(entries: string[]): Promise<void> 
   });
 
   await batch.commit();
+  await updateSyncMetadata();
 }
