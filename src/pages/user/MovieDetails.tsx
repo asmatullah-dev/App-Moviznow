@@ -1759,22 +1759,30 @@ export default function MovieDetails() {
                                         {season.episodes.filter(ep => ep.links && ep.links.length > 0).map(ep => (
                                           <div key={ep.id} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 flex flex-col gap-4">
                                             <div className="flex flex-col gap-2">
-                                              <div className="flex items-center flex-wrap gap-2">
-                                                <span className="text-emerald-500 font-bold">E{ep.episodeNumber}</span>
-                                                <span className="font-medium">{ep.title}</span>
-                                                {ep.description && (
-                                                  <button
-                                                    onClick={() => setExpandedEpisodes(prev => ({ ...prev, [ep.id]: !prev[ep.id] }))}
-                                                    className="text-xs text-zinc-500 dark:text-zinc-400 hover:text-emerald-500 transition-colors"
-                                                  >
-                                                    {expandedEpisodes[ep.id] ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                                                  </button>
-                                                )}
-                                                {ep.duration && (
-                                                  <span className="text-xs text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded whitespace-nowrap">
-                                                    {ep.duration}
-                                                  </span>
-                                                )}
+                                              <div className="flex flex-col gap-2">
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                  <span className="text-emerald-500 font-bold whitespace-nowrap">E{ep.episodeNumber}:</span>
+                                                  <span className="font-medium text-zinc-900 dark:text-zinc-100">{ep.title}</span>
+                                                </div>
+                                                
+                                                <div className="flex items-center flex-wrap gap-3">
+                                                  {ep.duration && (
+                                                    <span className="text-[10px] sm:text-xs font-semibold text-zinc-500 dark:text-zinc-500 bg-zinc-100 dark:bg-zinc-900 px-2 py-0.5 rounded whitespace-nowrap flex items-center gap-1 border border-zinc-200 dark:border-zinc-800">
+                                                      <Clock className="w-3 h-3" />
+                                                      {ep.duration}
+                                                    </span>
+                                                  )}
+                                                  
+                                                  {ep.description && (
+                                                    <button
+                                                      onClick={() => setExpandedEpisodes(prev => ({ ...prev, [ep.id]: !prev[ep.id] }))}
+                                                      className="flex items-center gap-1 text-[10px] sm:text-xs font-bold text-emerald-500 hover:text-emerald-600 transition-colors uppercase tracking-wider"
+                                                    >
+                                                      {expandedEpisodes[ep.id] ? "Hide Info" : "View Info"}
+                                                      {expandedEpisodes[ep.id] ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                                    </button>
+                                                  )}
+                                                </div>
                                               </div>
                                               
                                               {ep.description && expandedEpisodes[ep.id] && (

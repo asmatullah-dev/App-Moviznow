@@ -163,49 +163,91 @@ export async function saveContentsToChunks(contents: Content[]): Promise<void> {
 }
 
 /**
- * Migrates data from legacy 'content' collection to 'content_chunks'
- * Moves data and then deletes from the legacy collection
+ * Repairs chunks by ensuring required fields like updatedAt are present and items are consistent.
+ * Also performs any necessary cleanups.
  */
-export async function migrateLegacyContent(onProgress?: (count: number) => void): Promise<{ migrated: number, errors: number }> {
-    console.log("Starting legacy data migration from 'content' collection...");
-    const legacySnap = await getDocs(collection(db, 'content'));
-    const legacyDocs = legacySnap.docs.map(d => ({ id: d.id, ...d.data() } as Content));
+export async function repairChunks(
+    onProgress?: (count: number) => void,
+    localChunks?: Record<string, any>
+): Promise<{ repaired: number, errors: number }> {
+    console.log("Starting chunk repair process...");
     
-    console.log(`Found ${legacyDocs.length} legacy content items.`);
-    if (legacyDocs.length === 0) return { migrated: 0, errors: 0 };
-
-    let migrated = 0;
+    let repaired = 0;
     let errors = 0;
+    const batch = writeBatch(db);
+    let needsCommit = false;
 
-    // Process in smaller batches for Firestore stability
-    const batchSize = 50;
-    for (let i = 0; i < legacyDocs.length; i += batchSize) {
-        const batch = legacyDocs.slice(i, i + batchSize);
-        try {
-            console.log(`Processing batch of ${batch.length} items (${migrated + batch.length}/${legacyDocs.length})...`);
+    if (localChunks && Object.keys(localChunks).length > 0) {
+        // Use provided local data for check
+        for (const [id, data] of Object.entries(localChunks)) {
+            let chunkNeedsUpdate = false;
             
-            // 1. Save to chunks
-            await saveContentsToChunks(batch);
+            // Fix chunk itself
+            if (!data.updatedAt) chunkNeedsUpdate = true;
             
-            // 2. Delete legacy docs from batch
-            const deleteBatch = writeBatch(db);
-            batch.forEach(docItem => {
-                deleteBatch.delete(doc(db, 'content', docItem.id));
-            });
-            await deleteBatch.commit();
+            // Fix items
+            const items = data.items || {};
+            for (const [itemId, item] of Object.entries(items)) {
+                if (!(item as any).id) {
+                    (items[itemId] as any).id = itemId;
+                    chunkNeedsUpdate = true;
+                }
+            }
+            
+            if (chunkNeedsUpdate) {
+                batch.update(doc(db, 'content_chunks', id), {
+                    items,
+                    updatedAt: new Date().toISOString()
+                });
+                needsCommit = true;
+                repaired++;
+            }
+            if (onProgress) onProgress(repaired);
+        }
+    } else {
+        // Fallback to fetching fresh snapshot if no local data
+        const chunksSnap = await getDocs(collection(db, 'content_chunks'));
+        for (const chunkDoc of chunksSnap.docs) {
+            const data = chunkDoc.data();
+            let chunkNeedsUpdate = false;
+            
+            if (!data.updatedAt) chunkNeedsUpdate = true;
+            
+            const items = data.items || {};
+            for (const [id, item] of Object.entries(items)) {
+                if (!(item as any).id) {
+                    (items[id] as any).id = id;
+                    chunkNeedsUpdate = true;
+                }
+            }
 
-            migrated += batch.length;
-            if (onProgress) onProgress(migrated);
-            console.log(`Batch successful. Total migrated: ${migrated}`);
-        } catch (e) {
-            console.error("Migration batch error:", e);
-            errors += batch.length;
+            if (chunkNeedsUpdate) {
+                batch.update(chunkDoc.ref, {
+                    items,
+                    updatedAt: new Date().toISOString()
+                });
+                needsCommit = true;
+                repaired++;
+            }
+            if (onProgress) onProgress(repaired);
         }
     }
 
-    console.log(`Migration finished. Migrated: ${migrated}, Errors: ${errors}`);
-    return { migrated, errors };
+    if (needsCommit) {
+        try {
+            await batch.commit();
+            await updateSyncMetadata();
+        } catch (e) {
+            console.error("Repair commit error:", e);
+            errors = repaired;
+            repaired = 0;
+        }
+    }
+
+    console.log(`Repair finished. Repaired: ${repaired}, Errors: ${errors}`);
+    return { repaired, errors };
 }
+
 
 /**
  * Deletes a content item from its chunk

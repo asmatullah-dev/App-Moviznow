@@ -7,7 +7,7 @@ import { useAuth } from './AuthContext';
 import { useUsers } from './UsersContext';
 import { Content, Genre, Language, Quality, Collection as AppCollection } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
-import { saveSearchIndexToChunks } from '../utils/chunkUtils';
+import { saveSearchIndexToChunks, repairChunks } from '../utils/chunkUtils';
 
 interface ContentContextType {
   contentList: Content[];
@@ -490,6 +490,28 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       if (timer) clearTimeout(timer);
     };
   }, [contentList, profile?.role]); // Changed from length to contentList for deeper check
+
+  // Automatic chunk health check for owners
+  useEffect(() => {
+    if (profile?.role === 'owner' && contentList.length > 0 && !loading) {
+      const hasAutoRepaired = sessionStorage.getItem('auto_repair_done');
+      if (!hasAutoRepaired) {
+        // Run after a short delay to not interfere with initial load
+        const timer = setTimeout(async () => {
+          console.log("Running automatic chunk health check using local storage...");
+          try {
+            const cachedChunksRaw = safeStorage.getItem('content_chunks_cache') || '{}';
+            const cachedChunks = JSON.parse(cachedChunksRaw);
+            await repairChunks(undefined, cachedChunks);
+            sessionStorage.setItem('auto_repair_done', 'true');
+          } catch (e) {
+            console.error("Auto repair error:", e);
+          }
+        }, 5000);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [profile?.role, contentList.length, loading]);
 
   return (
     <ContentContext.Provider value={{ contentList: augmentedContentList, genres, languages, qualities, collections, loading, isOffline, updateSearchIndex }}>
