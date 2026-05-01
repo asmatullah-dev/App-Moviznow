@@ -481,11 +481,11 @@ export default function MovieDetails() {
     }
     const needsEpisodeData = mergedContent?.type === 'series' && seasons.some((s: any) => 
       s.episodes && s.episodes.some((ep: any) => 
-        !ep.description || !ep.duration || !ep.title || /^Episode\s+\d+$/i.test(ep.title)
+        ep.links && ep.links.length > 0 && (!ep.description || !ep.duration || !ep.title || /^Episode\s+\d+$/i.test(ep.title))
       )
     );
     
-    const needsStaticData = force || !mergedContent.runtime || !mergedContent.description || (!mergedContent.cast || mergedContent.cast.length === 0) || !mergedContent.releaseDate || !mergedContent.posterUrl || !mergedContent.country || !mergedContent.trailerUrl || !mergedContent.imdbLink || (!mergedContent.genreIds || mergedContent.genreIds.length === 0) || needsEpisodeData;
+    const needsStaticData = force || !mergedContent.runtime || !mergedContent.description || (!mergedContent.cast || (Array.isArray(mergedContent.cast) && mergedContent.cast.length === 0)) || !mergedContent.releaseDate || !mergedContent.posterUrl || !mergedContent.country || !mergedContent.trailerUrl || !mergedContent.imdbLink || (!mergedContent.genreIds || mergedContent.genreIds.length === 0) || needsEpisodeData;
 
     if (!needsStaticData) {
       return;
@@ -637,10 +637,10 @@ export default function MovieDetails() {
                   const tmdbEp = seasonData.episodes.find((ep: any) => ep.episode_number === existingEp.episodeNumber);
                   if (tmdbEp) {
                     const newTitle = (!existingEp.title || /^Episode\s+\d+$/i.test(existingEp.title)) && tmdbEp.name ? tmdbEp.name : existingEp.title;
-                    const newDesc = existingEp.description || tmdbEp.overview || '';
-                    const newDur = existingEp.duration || (tmdbEp.runtime ? `${tmdbEp.runtime} min` : '');
+                    const newDesc = (existingEp.description && !/^episode/i.test(existingEp.description)) ? existingEp.description : (tmdbEp.overview || '');
+                    const newDur = existingEp.duration || (tmdbEp.runtime ? `${tmdbEp.runtime}m` : '');
                     
-                    if (newTitle !== existingEp.title || newDesc !== existingEp.description || newDur !== existingEp.duration) {
+                    if (newTitle !== existingEp.title || newDesc !== existingEp.description || (newDur && newDur !== existingEp.duration)) {
                       episodeUpdated = true;
                       return {
                         ...existingEp,
@@ -1700,11 +1700,11 @@ export default function MovieDetails() {
                                     </div>
                                   )}
                                   
-                                  {season.episodes && season.episodes.length > 0 && (
+                                  {season.episodes && season.episodes.filter(ep => ep.links && ep.links.length > 0).length > 0 && (
                                     <div>
                                       <h4 className="font-semibold text-zinc-500 dark:text-zinc-400 mb-4 text-sm uppercase tracking-wider">Episodes</h4>
                                       <div className="space-y-4">
-                                        {season.episodes.map(ep => (
+                                        {season.episodes.filter(ep => ep.links && ep.links.length > 0).map(ep => (
                                           <div key={ep.id} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 flex flex-col gap-4">
                                             <div className="flex flex-col gap-2">
                                               <div className="flex items-center flex-wrap gap-2">
