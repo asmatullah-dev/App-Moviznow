@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
 import { collection, doc, updateDoc, getDoc, onSnapshot, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit } from 'firebase/firestore';
-import { UserProfile, Role, Status, AnalyticsEvent } from '../../types';
+import { UserProfile, Role, Status, AnalyticsEvent, Content } from '../../types';
 import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import clsx from 'clsx';
@@ -798,15 +798,26 @@ export default function UserManagement() {
         });
       }
 
-      // Re-assign any content they added (for Content Management Tab)
-      const contentSnapshot = await getDocs(query(collection(db, 'content'), where('addedBy', '==', user2.uid)));
-      contentSnapshot.docs.forEach(docSnap => {
-        batch.update(docSnap.ref, { 
-          addedBy: user1.uid,
-          addedByName: user1.displayName || user1.email || 'Unknown',
-          addedByRole: user1.role
+      // Re-assign any content they added (for Content Management Tab) - WORKING WITH CHUNKS
+      const chunksSnapshot = await getDocs(collection(db, 'content_chunks'));
+      for (const chunkDoc of chunksSnapshot.docs) {
+        const items = chunkDoc.data().items as Record<string, Content>;
+        let chunkChanged = false;
+        const updatedItems = { ...items };
+
+        Object.keys(updatedItems).forEach(contentId => {
+          if (updatedItems[contentId].addedBy === user2.uid) {
+            updatedItems[contentId].addedBy = user1.uid;
+            updatedItems[contentId].addedByName = user1.displayName || user1.email || 'Unknown';
+            updatedItems[contentId].addedByRole = user1.role;
+            chunkChanged = true;
+          }
         });
-      });
+
+        if (chunkChanged) {
+          batch.update(chunkDoc.ref, { items: updatedItems });
+        }
+      }
 
       await batch.commit();
 

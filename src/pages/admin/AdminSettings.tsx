@@ -4,7 +4,8 @@ import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { db, storage, auth } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useContent } from '../../contexts/ContentContext';
-import { Save, AlertCircle, GripVertical, Plus, Trash2, Layout, Wallet, Phone, Image as ImageIcon, Settings as SettingsIcon, RefreshCw, ShieldCheck, X, Eye, EyeOff, Database } from 'lucide-react';
+import { migrateLegacyContent } from '../../utils/chunkUtils';
+import { Save, AlertCircle, GripVertical, Plus, Trash2, Layout, Wallet, Phone, Image as ImageIcon, Settings as SettingsIcon, RefreshCw, ShieldCheck, X, Eye, EyeOff, Database, Rocket, Loader2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { Navigate } from 'react-router-dom';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
@@ -54,6 +55,8 @@ export default function AdminSettings() {
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isUpdatingIndex, setIsUpdatingIndex] = useState(false);
+  const [isMigrating, setIsMigrating] = useState(false);
+  const [migrationProgress, setMigrationProgress] = useState(0);
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -130,6 +133,44 @@ export default function AdminSettings() {
       setError('Failed to update search index.');
     } finally {
       setIsUpdatingIndex(false);
+    }
+  };
+
+  const [showConfirmMigrate, setShowConfirmMigrate] = useState(false);
+  const [migrationResult, setMigrationResult] = useState<{ migrated: number; errors: number } | null>(null);
+
+  const handleMigrateData = async () => {
+    console.log("Migration process started");
+    setShowConfirmMigrate(false); // Hide the confirmation UI immediately
+    setIsMigrating(true);
+    setMigrationProgress(0);
+    setError(null);
+    setSuccess(false);
+    setMigrationResult(null);
+
+    try {
+      console.log("Calling migrateLegacyContent utility...");
+      const result = await migrateLegacyContent((count) => {
+        console.log(`Migration progress update: ${count}`);
+        setMigrationProgress(count);
+      });
+      
+      console.log("Migration utility result:", result);
+      setMigrationResult(result);
+      
+      if (result.migrated === 0 && result.errors === 0) {
+        // No data found
+      } else {
+        setSuccess(true);
+      }
+    } catch (err: any) {
+      console.error('Migration execution error:', err);
+      const errorMessage = err.message || 'Unknown error occurred during migration';
+      setError('Migration failed: ' + errorMessage);
+    } finally {
+      setIsMigrating(false);
+      setShowConfirmMigrate(false);
+      console.log("Migration process finished");
     }
   };
 
@@ -239,20 +280,56 @@ export default function AdminSettings() {
 
   return (
     <div className="max-w-4xl mx-auto pb-20">
-      <div className="mb-8 flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold text-zinc-900 dark:text-white">App Settings</h1>
-          <p className="text-zinc-500 dark:text-zinc-400 mt-1">Manage global application settings</p>
+      <div className="mb-8 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
+          <div>
+            <h1 className="text-2xl font-bold text-zinc-900 dark:text-white">App Settings</h1>
+            <p className="text-zinc-500 dark:text-zinc-400 mt-1">Manage global application settings</p>
+          </div>
+          
+          <div className="flex flex-wrap items-center gap-2">
+            {!showConfirmMigrate ? (
+              <button
+                type="button"
+                onClick={() => setShowConfirmMigrate(true)}
+                disabled={isMigrating}
+                className="flex items-center justify-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-300 text-white rounded-lg transition-colors text-sm font-medium shadow-sm whitespace-nowrap"
+              >
+                {isMigrating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Rocket className="w-4 h-4" />}
+                {isMigrating ? `Migrating (${migrationProgress})...` : 'Migrate Legacy Content'}
+              </button>
+            ) : (
+              <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-900/20 p-1.5 rounded-lg border border-amber-200 dark:border-amber-800">
+                <span className="text-xs font-semibold text-amber-800 dark:text-amber-200 px-2">Are you sure?</span>
+                <button
+                  type="button"
+                  onClick={handleMigrateData}
+                  disabled={isMigrating}
+                  className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded text-xs font-bold"
+                >
+                  Yes, Start
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmMigrate(false)}
+                  disabled={isMigrating}
+                  className="px-3 py-1 bg-zinc-200 dark:bg-zinc-700 hover:bg-zinc-300 dark:hover:bg-zinc-600 text-zinc-700 dark:text-zinc-200 rounded text-xs font-bold"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={handleUpdateIndex}
+              disabled={isUpdatingIndex}
+              className="flex items-center justify-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-300 text-white rounded-lg transition-colors text-sm font-medium shadow-sm whitespace-nowrap"
+            >
+              {isUpdatingIndex ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+              {isUpdatingIndex ? 'Updating Index...' : 'Update Search Index'}
+            </button>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={handleUpdateIndex}
-          disabled={isUpdatingIndex}
-          className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-300 text-white rounded-lg transition-colors text-sm font-medium shadow-sm"
-        >
-          <RefreshCw className={clsx("w-4 h-4", isUpdatingIndex && "animate-spin")} />
-          {isUpdatingIndex ? 'Updating Index...' : 'Update Search Index'}
-        </button>
       </div>
 
       <form onSubmit={handleSave} className="space-y-8">
@@ -263,7 +340,7 @@ export default function AdminSettings() {
           </div>
         )}
 
-        {success && (
+        {success && !migrationResult && (
           <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 rounded-xl flex items-center gap-3">
             <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0">
               <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -271,6 +348,29 @@ export default function AdminSettings() {
               </svg>
             </div>
             <p>Settings saved successfully!</p>
+          </div>
+        )}
+
+        {migrationResult && (
+          <div className={clsx(
+            "p-4 rounded-xl flex items-start gap-3",
+            migrationResult.errors > 0 ? "bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800" : "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800"
+          )}>
+            <Rocket className="w-5 h-5 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold">Migration Complete</p>
+              <p className="text-sm mt-1 whitespace-pre-line">
+                {migrationResult.migrated === 0 && migrationResult.errors === 0 
+                  ? "No legacy content found to migrate." 
+                  : `- ${migrationResult.migrated} items moved to chunks\n- ${migrationResult.errors} items failed\n\nLegacy items have been removed from the old collection.`}
+              </p>
+              <button 
+                onClick={() => setMigrationResult(null)}
+                className="mt-3 text-xs font-bold underline opacity-70 hover:opacity-100"
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         )}
 

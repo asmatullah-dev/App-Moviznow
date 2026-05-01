@@ -238,6 +238,24 @@
     "/notification_templates/{templateId}": {
       "schema": { "$ref": "#/entities/NotificationTemplate" },
       "description": "Stores notification templates."
+    },
+    "/content_chunks/{chunkId}": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "items": { "type": "object", "additionalProperties": { "$ref": "#/entities/Content" } }
+        }
+      },
+      "description": "Stores content in chunks to optimize reads."
+    },
+    "/search_index_chunks/{chunkId}": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "data": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "description": "Stores search index metadata in chunks."
     }
   }
 }

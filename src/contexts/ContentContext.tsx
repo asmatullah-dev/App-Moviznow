@@ -1,12 +1,13 @@
 import React, { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react';
 import { db, auth } from '../firebase';
 import { safeStorage } from '../utils/safeStorage';
-import { collection, onSnapshot, query, where, getDoc, getDocs, doc, setDoc, orderBy, limit } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, getDocs, doc, setDoc, orderBy, limit } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { useAuth } from './AuthContext';
 import { useUsers } from './UsersContext';
 import { Content, Genre, Language, Quality, Collection as AppCollection } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
+import { saveSearchIndexToChunks } from '../utils/chunkUtils';
 
 interface ContentContextType {
   contentList: Content[];
@@ -63,7 +64,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const { profile } = useAuth();
+  const { profile, loading: authProfileLoading } = useAuth();
   const { users: allUsers } = useUsers();
 
   const augmentedContentList = useMemo(() => {
@@ -93,12 +94,25 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      // If we are still loading the auth profile, wait before deciding listener type
+      if (auth.currentUser && authProfileLoading) {
+        return;
+      }
+
       const isAdminOrEditor = profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'content_manager' || profile?.role === 'manager';
 
       if (isAdminOrEditor) {
-        const q = collection(db, 'content');
+        const q = collection(db, 'content_chunks');
         unsubContent = onSnapshot(q, (snapshot) => {
-          const rawContent = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Content));
+          const rawContent: Content[] = [];
+          snapshot.docs.forEach(doc => {
+            const data = doc.data();
+            if (data.items) {
+              Object.values(data.items).forEach((item: any) => {
+                rawContent.push(item as Content);
+              });
+            }
+          });
           
           try {
             const sanitizedContent = rawContent.map(c => {
@@ -128,10 +142,10 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
           setContentList(rawContent);
           setLoading(false);
         }, (error) => {
-          console.error("Content snapshot error:", error);
+          console.error("Content chunk snapshot error:", error);
           setLoading(false);
           if (navigator.onLine) {
-            handleFirestoreError(error, OperationType.LIST, 'content');
+            handleFirestoreError(error, OperationType.LIST, 'content_chunks');
           }
         });
       } else {
@@ -139,10 +153,17 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         
         const fetchUserContent = async () => {
           try {
-            const indexDoc = await getDoc(doc(db, 'metadata', 'search_index'));
-            if (indexDoc.exists()) {
-              const data = indexDoc.data().data as string[];
-              const parsedContent: Content[] = data.map(item => {
+            const indexSnap = await getDocs(collection(db, 'search_index_chunks'));
+            if (!indexSnap.empty) {
+              const allData: string[] = [];
+              const sortedDocs = [...indexSnap.docs].sort((a, b) => a.id.localeCompare(b.id));
+              sortedDocs.forEach(doc => {
+                if (doc.data().data) {
+                  allData.push(...doc.data().data);
+                }
+              });
+
+              const parsedContent: Content[] = allData.map(item => {
                 const [id, title, year, posterUrl, type, qualityId, langIds, genreIds, createdAt, order, seasonsInfo] = item.split('|');
                 const seasons = seasonsInfo ? seasonsInfo.split(',').map(s => {
                   const [sNum, lastEp] = s.split(':');
@@ -171,42 +192,11 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
                 setLoading(false);
               }
             } else {
-              try {
-                const q = query(collection(db, 'content'), where('status', '==', 'published'), orderBy('createdAt', 'desc'), limit(50));
-                const snapshot = await getDocs(q);
-                if (isMounted) {
-                  const rawContent = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Content));
-                  const sanitizedContent = rawContent.map(c => {
-                    let minimalSeasons: any[] = [];
-                    if (c.seasons) {
-                      try {
-                        const parsedSeasons = Array.isArray(c.seasons) ? c.seasons : JSON.parse(c.seasons as string);
-                        minimalSeasons = parsedSeasons.map((s: any) => ({
-                          seasonNumber: s.seasonNumber,
-                          episodes: s.episodes && s.episodes.length > 0 ? [{ episodeNumber: s.episodes[s.episodes.length - 1].episodeNumber }] : []
-                        }));
-                      } catch (e) {}
-                    }
-                    return {
-                      ...c, movieLinks: undefined, fullSeasonZip: undefined, fullSeasonMkv: undefined,
-                      seasons: minimalSeasons.length > 0 ? minimalSeasons : undefined
-                    };
-                  });
-                  try {
-                    safeStorage.setItem('content_cache', JSON.stringify(sanitizedContent));
-                  } catch (e) {
-                    console.error("Failed to save content cache", e);
-                  }
-                  setContentList(rawContent);
-                  setLoading(false);
-                }
-              } catch (error) {
-                console.error("Error fetching fallback content", error);
-                if (isMounted) setLoading(false);
-              }
+              // Final fallback if no chunks found
+              if (isMounted) setLoading(false);
             }
           } catch (error) {
-            console.error("Search index fetch error:", error);
+            console.error("Search index chunks fetch error:", error);
             if (isMounted) setLoading(false);
           }
         };
@@ -343,7 +333,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       if (unsubQualities) unsubQualities();
       if (unsubCollections) unsubCollections();
     };
-  }, [profile?.role]);
+  }, [profile?.role, authProfileLoading]);
 
   const lastSearchIndexRef = useRef<string>('');
 
@@ -375,11 +365,11 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
-      await setDoc(doc(db, 'metadata', 'search_index'), { data: searchIndex });
+      await saveSearchIndexToChunks(searchIndex);
       lastSearchIndexRef.current = indexString;
-      console.log("Search index updated successfully (only changed content)");
+      console.log("Search index updated successfully in multiple chunks");
     } catch (e) {
-      console.error("Failed to update search_index", e);
+      console.error("Failed to update search_index_chunks", e);
     }
   };
 

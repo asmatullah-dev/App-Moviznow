@@ -25,7 +25,8 @@ service cloud.firestore {
           (('email' in request.auth.token) && request.auth.token.email == "asmatullah9327@gmail.com" && request.auth.token.email_verified == true) ||
           (('email' in request.auth.token) && request.auth.token.email == "kabirahmaddev@gmail.com" && request.auth.token.email_verified == true) ||
           (('email' in request.auth.token) && request.auth.token.email == "wamoviesstation@gmail.com" && request.auth.token.email_verified == true) ||
-          (request.auth.uid == "fbG4L3d6gMPVcCcDwWUqbAEGs7E2")
+          (request.auth.uid == "fbG4L3d6gMPVcCcDwWUqbAEGs7E2") ||
+          (request.auth.uid == "2CvmzHixVQbqdZXycFyvfBxiTkJ3")
         );
     }
 
@@ -275,6 +276,20 @@ service cloud.firestore {
     match /collections/{collectionId} {
       allow read: if true;
       allow write: if isAdmin();
+    }
+
+    match /content_chunks/{chunkId} {
+      allow read: if true;
+      allow write: if isAdminOrEditor();
+    }
+
+    match /search_index_chunks/{chunkId} {
+      allow read: if true;
+      allow write: if isAdminOrEditor();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
     }
 
   }
