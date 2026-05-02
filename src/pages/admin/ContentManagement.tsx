@@ -795,7 +795,7 @@ export default function ContentManagement() {
 
       if (currentEditingId && initialStatus === 'draft' && finalStatus === 'published') {
         data.createdAt = new Date().toISOString();
-        data.order = deleteField() as any; // using deleteField to reset order
+        delete data.order; // Remove order to reset it when publishing
       }
 
       if (type === 'movie') {
