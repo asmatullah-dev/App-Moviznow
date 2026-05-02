@@ -6,6 +6,7 @@ import { LinkCheckResult, performFullLinkScan, guessLinkType } from '../utils/li
 import { searchTMDBByTitle, fetchTMDBDetails, fetchSeriesSeasons, fetchIMDbRating, getBestTrailer, searchYouTubeTrailer, fetchKinoCheckTrailer } from './MediaModal';
 import { db } from '../firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { getContentFromChunks, updateContentFieldsInChunks } from '../utils/chunkUtils';
 
 interface Props {
   isOpen: boolean;
@@ -82,12 +83,11 @@ export const BatchFetchModal: React.FC<Props> = ({
        if (!isOpen || isCancelled) return;
 
        try {
-         const d = await getDoc(doc(db, 'content', id));
-         if (!d.exists()) {
+         const data = await getContentFromChunks(id);
+         if (!data) {
            updateResult(id, 'error', 'Not found');
            return;
          }
-         const data = d.data();
          updateTitle(id, data.title || 'Unknown');
 
          let searchTitle = data.title;
@@ -344,7 +344,7 @@ export const BatchFetchModal: React.FC<Props> = ({
 
             if (Object.keys(updates).length > 0) {
               try {
-                await updateDoc(doc(db, 'content', id), updates);
+                await updateContentFieldsInChunks([{ id, ...updates }]);
                 updateResult(id, 'success', 'Updated');
               } catch (e: any) {
                 console.error(`Update Error for doc ${id}:`, updates, e);

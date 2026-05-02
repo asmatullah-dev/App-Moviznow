@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../firebase';
 import { useContent } from '../../contexts/ContentContext';
+import { getContentFromChunks, updateContentFieldsInChunks } from '../../utils/chunkUtils';
 import { collection, onSnapshot, doc, updateDoc, getDoc } from 'firebase/firestore';
 import { Content, Season, QualityLinks, LinkDef, ErrorLinkInfo, Language, Quality } from '../../types';
 import { AlertTriangle, Edit2, ExternalLink, RefreshCw, X, Save, CheckCircle2, Filter, ArrowUpDown, Search, Trash2, Plus, ClipboardPaste, StopCircle } from 'lucide-react';
@@ -551,7 +552,7 @@ export default function ErrorLinks() {
       }
 
       if (deleted) {
-        await updateDoc(doc(db, 'content', content.id), updatedContent);
+        await updateContentFieldsInChunks([{ id: content.id, ...updatedContent }]);
         // Update local error links state to remove the deleted link
         setErrorLinks(prev => prev.filter(l => !(l.contentId === info.contentId && l.link.url === info.link.url && l.listType === info.listType)));
       } else {
@@ -612,7 +613,7 @@ export default function ErrorLinks() {
         }
       }
 
-      await updateDoc(doc(db, 'content', updatedContent.id), updatedContent);
+      await updateContentFieldsInChunks([{ id: updatedContent.id, ...updatedContent }]);
       setIsAddLinksModalOpen(false);
       setAddLinksInput('');
       setAddName('');
@@ -769,7 +770,7 @@ export default function ErrorLinks() {
         }
       }
 
-      await updateDoc(doc(db, 'content', editingLink.contentId), updateData);
+      await updateContentFieldsInChunks([{ id: editingLink.contentId, ...updateData }]);
       
       // Re-check the link after saving
       const checkRes = await fetch("/api/check-link", {

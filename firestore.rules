@@ -283,6 +283,11 @@ service cloud.firestore {
       allow write: if isAdminOrEditor();
     }
 
+    match /chunk_meta/{docId} {
+      allow read: if true;
+      allow write: if isAdminOrEditor();
+    }
+
     match /search_index_chunks/{chunkId} {
       allow read: if true;
       allow write: if isAdminOrEditor();

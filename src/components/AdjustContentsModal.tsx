@@ -6,6 +6,7 @@ import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea
 import { Content } from '../types';
 import { db } from '../firebase';
 import { writeBatch, doc } from 'firebase/firestore';
+import { updateContentFieldsInChunks } from '../utils/chunkUtils';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
 import { useModalBehavior } from '../hooks/useModalBehavior';
 
@@ -206,25 +207,13 @@ export const AdjustContentsModal: React.FC<Props> = ({ isOpen, onClose, contentL
         return;
       }
 
-      const commitPromises = [];
-      const chunkSize = 500; // max batch size
+      const updates = itemsToUpdate.map(({ id, newOrder }) => ({
+        id,
+        order: newOrder,
+        updatedAt: new Date().toISOString() // Track when it was last reordered
+      }));
       
-      for (let i = 0; i < itemsToUpdate.length; i += chunkSize) {
-        const batch = writeBatch(db);
-        const chunk = itemsToUpdate.slice(i, i + chunkSize);
-        
-        chunk.forEach(({ id, newOrder }) => {
-          const contentRef = doc(db, 'content', id);
-          batch.update(contentRef, { 
-            order: newOrder,
-            updatedAt: new Date().toISOString() // Track when it was last reordered
-          });
-        });
-        
-        commitPromises.push(batch.commit());
-      }
-      
-      await Promise.all(commitPromises);
+      await updateContentFieldsInChunks(updates);
       onClose();
     } catch (error) {
       console.error("Error saving content order:", error);

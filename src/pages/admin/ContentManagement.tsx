@@ -24,7 +24,7 @@ import { useModalBehavior } from '../../hooks/useModalBehavior';
 import { useSettings } from '../../contexts/SettingsContext';
 import { memoryStore } from '../../utils/memoryStore';
 import { ContentFormModal } from '../../components/ContentFormModal';
-import { saveContentToChunk, deleteContentFromChunk, saveContentsToChunks } from '../../utils/chunkUtils';
+import { saveContentToChunk, deleteContentFromChunk, saveContentsToChunks, updateContentFieldsInChunks, deleteContentsFromChunks, getContentFromChunks } from '../../utils/chunkUtils';
 
 import { BatchFetchModal } from '../../components/BatchFetchModal';
 
@@ -660,45 +660,64 @@ export default function ContentManagement() {
     return [];
   };
 
-  const handleEdit = (content: Content) => {
-    const normalizedType = (content.type.toLowerCase() === 'series' || content.type.toLowerCase() === 'tv') ? 'series' : 'movie';
-    setType(normalizedType);
-    setStatus(content.status || 'published');
-    setInitialStatus(content.status || 'published');
-    setTitle(content.title || '');
-    setDescription(content.description || '');
-    setPosterUrl(content.posterUrl || '');
-    setTrailerUrl(content.trailerUrl || '');
-    setTrailerTitle(content.trailerTitle || '');
-    setTrailerYoutubeTitle(content.trailerYoutubeTitle || '');
-    setTrailerSeasonNumber(content.trailerSeasonNumber || undefined);
-    setTrailers(content.trailers ? (Array.isArray(content.trailers) ? content.trailers : JSON.parse(content.trailers || '[]')) : []);
-    setSampleUrl(content.sampleUrl || '');
-    setImdbLink(content.imdbLink || '');
-    setImdbRating(content.imdbRating || '');
-    setSelectedGenres(content.genreIds || []);
-    setSelectedLanguages(content.languageIds || []);
-    setSelectedQuality(content.qualityId || '');
-    setSubtitles(content.subtitles || false);
-    setCast((content.cast || []).join(', '));
-    setCountry(content.country || '');
-    setYear(content.year || new Date().getFullYear());
-    setReleaseDate(content.releaseDate || '');
-    setRuntime(content.runtime || '');
+  const handleEdit = async (content: Content) => {
+    let contentToUse = content;
     
-    if (content.type === 'movie') {
-      setMovieLinks(parseLinks(content.movieLinks));
+    // Check if the content object is "minimal" (from the sanitized cache) 
+    // and fetch the full version if needed for editing
+    const minimal = (content as any)._isMinimal || 
+                     (content.type === 'movie' && content.movieLinks === undefined) || 
+                     (content.type === 'series' && (content.seasons === undefined || content.seasons === '[]'));
+
+    if (minimal) {
+      try {
+        const fullData = await getContentFromChunks(content.id);
+        if (fullData) {
+          contentToUse = fullData;
+        }
+      } catch (e) {
+        console.error("Error fetching full content for edit", e);
+      }
+    }
+
+    const normalizedType = (contentToUse.type.toLowerCase() === 'series' || contentToUse.type.toLowerCase() === 'tv') ? 'series' : 'movie';
+    setType(normalizedType);
+    setStatus(contentToUse.status || 'published');
+    setInitialStatus(contentToUse.status || 'published');
+    setTitle(contentToUse.title || '');
+    setDescription(contentToUse.description || '');
+    setPosterUrl(contentToUse.posterUrl || '');
+    setTrailerUrl(contentToUse.trailerUrl || '');
+    setTrailerTitle(contentToUse.trailerTitle || '');
+    setTrailerYoutubeTitle(contentToUse.trailerYoutubeTitle || '');
+    setTrailerSeasonNumber(contentToUse.trailerSeasonNumber || undefined);
+    setTrailers(contentToUse.trailers ? (Array.isArray(contentToUse.trailers) ? contentToUse.trailers : JSON.parse(contentToUse.trailers || '[]')) : []);
+    setSampleUrl(contentToUse.sampleUrl || '');
+    setImdbLink(contentToUse.imdbLink || '');
+    setImdbRating(contentToUse.imdbRating || '');
+    setSelectedGenres(contentToUse.genreIds || []);
+    setSelectedLanguages(contentToUse.languageIds || []);
+    setSelectedQuality(contentToUse.qualityId || '');
+    setSubtitles(contentToUse.subtitles || false);
+    setCast((contentToUse.cast || []).join(', '));
+    setCountry(contentToUse.country || '');
+    setYear(contentToUse.year || new Date().getFullYear());
+    setReleaseDate(contentToUse.releaseDate || '');
+    setRuntime(contentToUse.runtime || '');
+    
+    if (contentToUse.type === 'movie') {
+      setMovieLinks(parseLinks(contentToUse.movieLinks));
     } else {
       setMovieLinks([]);
     }
     
-    if (content.type === 'series' && content.seasons) {
+    if (contentToUse.type === 'series' && contentToUse.seasons) {
       try {
-        const parsedSeasons = Array.isArray(content.seasons) ? content.seasons : JSON.parse(content.seasons || '[]');
+        const parsedSeasons = Array.isArray(contentToUse.seasons) ? contentToUse.seasons : JSON.parse(contentToUse.seasons || '[]');
         const normalizedSeasons = parsedSeasons.map((s: any) => ({
           ...s,
           zipLinks: parseLinks(JSON.stringify(s.zipLinks)),
-          episodes: s.episodes.map((ep: any) => ({
+          episodes: (s.episodes || []).map((ep: any) => ({
             ...ep,
             links: parseLinks(JSON.stringify(ep.links))
           }))
@@ -711,7 +730,7 @@ export default function ContentManagement() {
       setSeasons([]);
     }
     
-    setEditingId(content.id);
+    setEditingId(contentToUse.id);
     setIsModalOpen(true);
   };
 
@@ -765,6 +784,8 @@ export default function ContentManagement() {
       }));
 
       const currentEditingId = editingId;
+      const existingContent = currentEditingId ? contentList.find(c => c.id === currentEditingId) : null;
+      const initialStatus = existingContent?.status;
       const finalStatus = (profile?.role === 'content_manager' || profile?.role === 'manager') ? 'draft' : status;
       
       const data: Partial<Content> = {
@@ -1979,10 +2000,11 @@ export default function ContentManagement() {
 
     if (hasUpdates) {
       try {
-        await updateDoc(doc(db, 'content', updatedContent.id), {
+        await updateContentFieldsInChunks([{
+          id: updatedContent.id,
           movieLinks: JSON.stringify(updatedContent.movieLinks || []),
           seasons: JSON.stringify(updatedContent.seasons || [])
-        });
+        }]);
       } catch (error) {
         console.error("Error saving tinyUrls to db:", error);
       }
@@ -2422,7 +2444,7 @@ export default function ContentManagement() {
   const getMissingLabels = useCallback((content: Content, profile: any) => {
     const labels: string[] = [];
     const isStaff = profile?.role === 'owner' || profile?.role === 'admin' || profile?.role === 'manager' || profile?.role === 'content_manager';
-    if (!isStaff) return [];
+    if (!isStaff || (content as any)._isMinimal) return [];
 
     const safeParse = (data: any) => {
         if (!data) return [];
@@ -2731,9 +2753,7 @@ export default function ContentManagement() {
     const currentSelected = [...selectedContent];
     setSelectedContent([]);
     
-    let batches = [writeBatch(db)];
-    let currentBatchIndex = 0;
-    let operationCount = 0;
+    const updates: { id: string, [key: string]: any }[] = [];
 
     currentSelected.forEach(id => {
       const content = contentList.find(c => c.id === id);
@@ -2742,15 +2762,8 @@ export default function ContentManagement() {
         if ((profile?.role === 'content_manager' || profile?.role === 'manager') && content.status === 'published') {
           return;
         }
-        const contentRef = doc(db, 'content', id);
-        
-        if (operationCount === 500) {
-          batches.push(writeBatch(db));
-          currentBatchIndex++;
-          operationCount = 0;
-        }
 
-        const updateData: any = { status };
+        const updateData: any = { id, status };
         
         // When moving from draft to published, consider it as new
         if (content.status === 'draft' && status === 'published') {
@@ -2758,13 +2771,14 @@ export default function ContentManagement() {
           updateData.order = deleteField();
         }
 
-        batches[currentBatchIndex].update(contentRef, updateData);
-        operationCount++;
+        updates.push(updateData);
       }
     });
 
     try {
-      await Promise.all(batches.map(b => b.commit()));
+      if (updates.length > 0) {
+        await updateContentFieldsInChunks(updates);
+      }
     } catch (error) {
       console.error('Error updating content:', error);
       setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to update content' });
@@ -2777,24 +2791,8 @@ export default function ContentManagement() {
     
     const currentSelected = [...selectedContent];
     
-    let batches = [writeBatch(db)];
-    let currentBatchIndex = 0;
-    let operationCount = 0;
-
-    currentSelected.forEach(id => {
-      const contentRef = doc(db, 'content', id);
-      
-      if (operationCount === 500) {
-        batches.push(writeBatch(db));
-        currentBatchIndex++;
-        operationCount = 0;
-      }
-      batches[currentBatchIndex].delete(contentRef);
-      operationCount++;
-    });
-
     try {
-      await Promise.all(batches.map(b => b.commit()));
+      await deleteContentsFromChunks(currentSelected);
       setSelectedContent([]);
       setAlertConfig({ isOpen: true, title: 'Success', message: `Successfully deleted ${currentSelected.length} items` });
     } catch (error) {
@@ -2955,10 +2953,8 @@ export default function ContentManagement() {
       });
       combinedSeasons.sort((a, b) => a.seasonNumber - b.seasonNumber);
 
-      const batchOp = writeBatch(db);
-      const targetRef = doc(db, 'content', targetItem.id);
-      
-      batchOp.update(targetRef, {
+      const updateData = {
+        id: targetItem.id,
         title: finalTitle,
         year: finalYear,
         movieLinks: JSON.stringify(combinedMovieLinks),
@@ -2981,13 +2977,15 @@ export default function ContentManagement() {
         runtime: finalRuntime || '',
         imdbRating: finalImdbRating || '',
         updatedAt: Date.now()
-      });
+      };
       
-      otherItems.forEach(item => {
-        batchOp.delete(doc(db, 'content', item.id));
-      });
+      await updateContentFieldsInChunks([updateData]);
       
-      await batchOp.commit();
+      const idsToDelete = otherItems.map(item => item.id);
+      if (idsToDelete.length > 0) {
+        await deleteContentsFromChunks(idsToDelete);
+      }
+      
       setSelectedContent([]);
       setShowMergeConfirm(false);
       setAlertConfig({ isOpen: true, title: 'Success', message: `Successfully merged ${items.length} items into "${finalTitle}"` });

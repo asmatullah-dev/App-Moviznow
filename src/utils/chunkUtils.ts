@@ -1,9 +1,18 @@
-import { doc, getDoc, getDocs, collection, writeBatch, setDoc, updateDoc, deleteField, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
+import { doc, getDoc, getDocs, collection, writeBatch, setDoc, updateDoc, deleteField, QueryDocumentSnapshot, DocumentData, WriteBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Content } from '../types';
 
 export const CONTENT_CHUNK_SIZE = 100; 
 export const SEARCH_CHUNK_SIZE = 1000; 
+
+function registerChunkUpdates(chunkIds: string[], batch: WriteBatch) {
+  const metaRef = doc(db, 'chunk_meta', 'versions');
+  const updates: Record<string, number> = {};
+  chunkIds.forEach(id => {
+    updates[id] = Date.now();
+  });
+  batch.set(metaRef, updates, { merge: true });
+}
 
 export interface ContentChunk {
   items: Record<string, Content>;
@@ -49,6 +58,7 @@ export async function saveContentToChunk(content: Content): Promise<void> {
     batch.update(docRef, {
       [`items.${content.id}`]: content
     });
+    registerChunkUpdates([targetDoc.id], batch);
   } else {
     // Add new - Find first chunk with space
     let foundSpace = false;
@@ -60,6 +70,7 @@ export async function saveContentToChunk(content: Content): Promise<void> {
         batch.update(doc.ref, {
           [`items.${content.id}`]: content
         });
+        registerChunkUpdates([doc.id], batch);
         foundSpace = true;
         break;
       }
@@ -72,6 +83,7 @@ export async function saveContentToChunk(content: Content): Promise<void> {
       batch.set(newRef, {
         items: { [content.id]: content }
       });
+      registerChunkUpdates([nextId], batch);
     }
   }
 
@@ -132,69 +144,158 @@ export async function saveContentsToChunks(contents: Content[]): Promise<void> {
     }
   }
 
+  registerChunkUpdates(Array.from(updatedChunkIds), batch);
+
   await batch.commit();
 }
 
 /**
- * Migrates data from legacy 'content' collection to 'content_chunks'
- * Moves data and then deletes from the legacy collection
+ * Updates specific fields for multiple content items in their respective chunks
  */
-export async function migrateLegacyContent(onProgress?: (count: number) => void): Promise<{ migrated: number, errors: number }> {
-    console.log("Starting legacy data migration from 'content' collection...");
-    const legacySnap = await getDocs(collection(db, 'content'));
-    const legacyDocs = legacySnap.docs.map(d => ({ id: d.id, ...d.data() } as Content));
-    
-    console.log(`Found ${legacyDocs.length} legacy content items.`);
-    if (legacyDocs.length === 0) return { migrated: 0, errors: 0 };
+export async function updateContentFieldsInChunks(updates: { id: string, [key: string]: any }[]): Promise<void> {
+  const chunksSnap = await getDocs(collection(db, 'content_chunks'));
+  
+  // We may need multiple batches if updates exceed 500
+  let batches = [writeBatch(db)];
+  let operationCount = 0;
+  
+  const chunkUpdatesByBatch: Set<string>[] = [new Set()];
 
-    let migrated = 0;
-    let errors = 0;
-
-    // Process in smaller batches for Firestore stability
-    const batchSize = 50;
-    for (let i = 0; i < legacyDocs.length; i += batchSize) {
-        const batch = legacyDocs.slice(i, i + batchSize);
-        try {
-            console.log(`Processing batch of ${batch.length} items (${migrated + batch.length}/${legacyDocs.length})...`);
-            
-            // 1. Save to chunks
-            await saveContentsToChunks(batch);
-            
-            // 2. Delete legacy docs from batch
-            const deleteBatch = writeBatch(db);
-            batch.forEach(docItem => {
-                deleteBatch.delete(doc(db, 'content', docItem.id));
-            });
-            await deleteBatch.commit();
-
-            migrated += batch.length;
-            if (onProgress) onProgress(migrated);
-            console.log(`Batch successful. Total migrated: ${migrated}`);
-        } catch (e) {
-            console.error("Migration batch error:", e);
-            errors += batch.length;
+  for (const updateObj of updates) {
+    const contentId = updateObj.id;
+    for (const chunkDoc of chunksSnap.docs) {
+      const items = chunkDoc.data().items || {};
+      if (items[contentId]) {
+        const docUpdates: Record<string, any> = {};
+        for (const [key, value] of Object.entries(updateObj)) {
+          if (key !== 'id') {
+            docUpdates[`items.${contentId}.${key}`] = value;
+          }
         }
+        
+        if (operationCount >= 490) {
+          batches.push(writeBatch(db));
+          chunkUpdatesByBatch.push(new Set());
+          operationCount = 0;
+        }
+        
+        batches[batches.length - 1].update(chunkDoc.ref, docUpdates);
+        chunkUpdatesByBatch[batches.length - 1].add(chunkDoc.id);
+        operationCount++;
+        break;
+      }
     }
+  }
 
-    console.log(`Migration finished. Migrated: ${migrated}, Errors: ${errors}`);
-    return { migrated, errors };
+  for (let i = 0; i < batches.length; i++) {
+    if (chunkUpdatesByBatch[i].size > 0) {
+      registerChunkUpdates(Array.from(chunkUpdatesByBatch[i]), batches[i]);
+    }
+  }
+
+  await Promise.all(batches.map(b => b.commit()));
 }
+
 
 /**
  * Deletes a content item from its chunk
  */
 export async function deleteContentFromChunk(contentId: string): Promise<void> {
+  return deleteContentsFromChunks([contentId]);
+}
+
+/**
+ * Deletes multiple content items from chunks efficiently
+ */
+export async function deleteContentsFromChunks(contentIds: string[]): Promise<void> {
+  const chunksSnap = await getDocs(collection(db, 'content_chunks'));
+  
+  let batches = [writeBatch(db)];
+  let operationCount = 0;
+  const chunkUpdatesByBatch: Set<string>[] = [new Set()];
+
+  for (const chunkDoc of chunksSnap.docs) {
+    const items = chunkDoc.data().items || {};
+    let chunkHasDeletes = false;
+    const docUpdates: Record<string, any> = {};
+
+    for (const id of contentIds) {
+      if (items[id]) {
+        docUpdates[`items.${id}`] = deleteField();
+        chunkHasDeletes = true;
+      }
+    }
+
+    if (chunkHasDeletes) {
+      if (operationCount >= 490) {
+        batches.push(writeBatch(db));
+        chunkUpdatesByBatch.push(new Set());
+        operationCount = 0;
+      }
+      batches[batches.length - 1].update(chunkDoc.ref, docUpdates);
+      chunkUpdatesByBatch[batches.length - 1].add(chunkDoc.id);
+      operationCount++;
+    }
+  }
+
+  for (let i = 0; i < batches.length; i++) {
+    if (chunkUpdatesByBatch[i].size > 0) {
+      registerChunkUpdates(Array.from(chunkUpdatesByBatch[i]), batches[i]);
+    }
+  }
+
+  await Promise.all(batches.map(b => b.commit()));
+}
+
+export async function getContentFromChunks(contentId: string): Promise<Content | null> {
   const chunksSnap = await getDocs(collection(db, 'content_chunks'));
   
   for (const chunkDoc of chunksSnap.docs) {
     const items = chunkDoc.data().items || {};
     if (items[contentId]) {
-      await updateDoc(chunkDoc.ref, {
-        [`items.${contentId}`]: deleteField()
-      });
-      return;
+      return items[contentId] as Content;
     }
   }
+  return null;
+}
+
+/**
+ * Scans all chunks in Firestore and ensures chunk_meta/versions is up to date
+ */
+export async function repairChunkMetadata(): Promise<{ repairedContent: number, repairedSearch: number }> {
+  const batch = writeBatch(db);
+  const now = Date.now();
+
+  // 1. Repair content_chunks
+  const contentSnap = await getDocs(collection(db, 'content_chunks'));
+  const contentVersions: Record<string, number> = {};
+  contentSnap.docs.forEach(d => {
+    contentVersions[d.id] = now;
+  });
+  batch.set(doc(db, 'chunk_meta', 'versions'), contentVersions);
+
+  // 2. Repair search_index_chunks
+  const searchSnap = await getDocs(collection(db, 'search_index_chunks'));
+  const searchVersions: Record<string, number> = {};
+  searchSnap.docs.forEach(d => {
+    searchVersions[d.id] = now;
+  });
+  batch.set(doc(db, 'chunk_meta', 'search_index_versions'), searchVersions);
+
+  await batch.commit();
+  return { 
+    repairedContent: contentSnap.size, 
+    repairedSearch: searchSnap.size 
+  };
+}
+
+function registerSearchIndexUpdates(shardIds: string[], batch: WriteBatch) {
+  const metaRef = doc(db, 'chunk_meta', 'search_index_versions');
+  const updates: Record<string, number> = {};
+  shardIds.forEach(id => {
+    updates[id] = Date.now();
+  });
+  batch.set(metaRef, updates, { merge: true });
 }
 
 /**
@@ -206,14 +307,17 @@ export async function saveSearchIndexToChunks(entries: string[]): Promise<void> 
   // Clear old chunks first? Or just overwrite.
   // Overwriting is safer if we know the total shards.
   const shardsCount = Math.ceil(entries.length / SEARCH_CHUNK_SIZE);
+  const updatedShardIds: string[] = [];
   
   for (let i = 0; i < shardsCount; i++) {
     const start = i * SEARCH_CHUNK_SIZE;
     const end = start + SEARCH_CHUNK_SIZE;
     const chunkData = entries.slice(start, end);
+    const shardId = `shard_${i}`;
     
-    const docRef = doc(db, 'search_index_chunks', `shard_${i}`);
+    const docRef = doc(db, 'search_index_chunks', shardId);
     batch.set(docRef, { data: chunkData });
+    updatedShardIds.push(shardId);
   }
   
   // Cleanup extra shards if any (e.g. if content decreased)
@@ -224,6 +328,8 @@ export async function saveSearchIndexToChunks(entries: string[]): Promise<void> 
       batch.delete(d.ref);
     }
   });
+
+  registerSearchIndexUpdates(updatedShardIds, batch);
 
   await batch.commit();
 }

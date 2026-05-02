@@ -3,6 +3,7 @@ import { db } from '../../firebase';
 import { collection, onSnapshot, doc, updateDoc, deleteDoc, getDoc, addDoc, getDocs } from 'firebase/firestore';
 import { AlertTriangle, Edit2, Trash2, Bell, CheckCircle2, X, Save } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
+import { getContentFromChunks, updateContentFieldsInChunks } from '../../utils/chunkUtils';
 import { Content, QualityLinks, Season } from '../../types';
 import { LinkCheckerModal } from '../../components/LinkCheckerModal';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
@@ -119,12 +120,11 @@ export default function ReportedLinks() {
 
   const handleEditClick = async (report: ReportedLink) => {
     try {
-      const contentDoc = await getDoc(doc(db, 'content', report.contentId));
-      if (!contentDoc.exists()) {
+      const content = await getContentFromChunks(report.contentId);
+      if (!content) {
         alert("Content not found");
         return;
       }
-      const content = contentDoc.data() as Content;
       
       let foundLink: any = null;
 
@@ -206,14 +206,11 @@ export default function ReportedLinks() {
     setSaving(true);
 
     try {
-      const contentRef = doc(db, 'content', editingReport.contentId);
-      const contentDoc = await getDoc(contentRef);
+      const content = await getContentFromChunks(editingReport.contentId);
       
-      if (!contentDoc.exists()) {
+      if (!content) {
         throw new Error("Content not found");
       }
-
-      const content = contentDoc.data() as Content;
       let updated = false;
 
       if (content.type === 'movie' && content.movieLinks) {
@@ -221,7 +218,7 @@ export default function ReportedLinks() {
         const linkIndex = links.findIndex(l => l.id === editingReport.linkId);
         if (linkIndex !== -1) {
           links[linkIndex] = { ...links[linkIndex], url: editUrl, size: editSize, unit: editUnit, name: editName };
-          await updateDoc(contentRef, { movieLinks: JSON.stringify(links) });
+          await updateContentFieldsInChunks([{ id: editingReport.contentId, movieLinks: JSON.stringify(links) }]);
           updated = true;
         }
       } else if (content.type === 'series' && content.seasons) {
@@ -261,7 +258,7 @@ export default function ReportedLinks() {
           }
         }
         if (updated) {
-          await updateDoc(contentRef, { seasons: JSON.stringify(seasons) });
+          await updateContentFieldsInChunks([{ id: editingReport.contentId, seasons: JSON.stringify(seasons) }]);
         }
       }
 

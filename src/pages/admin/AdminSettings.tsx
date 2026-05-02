@@ -4,7 +4,6 @@ import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { db, storage, auth } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useContent } from '../../contexts/ContentContext';
-import { migrateLegacyContent } from '../../utils/chunkUtils';
 import { Save, AlertCircle, GripVertical, Plus, Trash2, Layout, Wallet, Phone, Image as ImageIcon, Settings as SettingsIcon, RefreshCw, ShieldCheck, X, Eye, EyeOff, Database, Rocket, Loader2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { Navigate } from 'react-router-dom';
@@ -13,7 +12,7 @@ import { AppSettings, BankAccount } from '../../types';
 
 export default function AdminSettings() {
   const { profile } = useAuth();
-  const { updateSearchIndex } = useContent();
+  const { updateSearchIndex, contentList } = useContent();
   const [settings, setSettings] = useState<AppSettings>({
     headerText: 'MovizNow',
     membershipFee: 200,
@@ -136,41 +135,37 @@ export default function AdminSettings() {
     }
   };
 
-  const [showConfirmMigrate, setShowConfirmMigrate] = useState(false);
-  const [migrationResult, setMigrationResult] = useState<{ migrated: number; errors: number } | null>(null);
+  const [showConfirmUpdate, setShowConfirmUpdate] = useState(false);
+  const [updateResult, setUpdateResult] = useState<{ updated: number, repairedContent?: number, repairedSearch?: number } | null>(null);
 
-  const handleMigrateData = async () => {
-    console.log("Migration process started");
-    setShowConfirmMigrate(false); // Hide the confirmation UI immediately
+  const handleUpdateChunks = async () => {
+    console.log("Chunk update process started");
+    setShowConfirmUpdate(false);
     setIsMigrating(true);
-    setMigrationProgress(0);
     setError(null);
     setSuccess(false);
-    setMigrationResult(null);
+    setUpdateResult(null);
 
     try {
-      console.log("Calling migrateLegacyContent utility...");
-      const result = await migrateLegacyContent((count) => {
-        console.log(`Migration progress update: ${count}`);
-        setMigrationProgress(count);
+      const { processChunkMaintenance } = await import('../../utils/maintenanceUtils');
+      const { updatedCount, repairResult } = await processChunkMaintenance(contentList, true);
+      
+      console.log("Chunk update result:", updatedCount, repairResult);
+      setUpdateResult({ 
+        updated: updatedCount,
+        repairedContent: repairResult?.repairedContent,
+        repairedSearch: repairResult?.repairedSearch
       });
       
-      console.log("Migration utility result:", result);
-      setMigrationResult(result);
-      
-      if (result.migrated === 0 && result.errors === 0) {
-        // No data found
-      } else {
-        setSuccess(true);
-      }
+      setSuccess(true);
     } catch (err: any) {
-      console.error('Migration execution error:', err);
-      const errorMessage = err.message || 'Unknown error occurred during migration';
-      setError('Migration failed: ' + errorMessage);
+      console.error('Update execution error:', err);
+      const errorMessage = err.message || 'Unknown error occurred during update';
+      setError('Update failed: ' + errorMessage);
     } finally {
       setIsMigrating(false);
-      setShowConfirmMigrate(false);
-      console.log("Migration process finished");
+      setShowConfirmUpdate(false);
+      console.log("Chunk update process finished");
     }
   };
 
@@ -288,22 +283,22 @@ export default function AdminSettings() {
           </div>
           
           <div className="flex flex-wrap items-center gap-2">
-            {!showConfirmMigrate ? (
+            {!showConfirmUpdate ? (
               <button
                 type="button"
-                onClick={() => setShowConfirmMigrate(true)}
+                onClick={() => setShowConfirmUpdate(true)}
                 disabled={isMigrating}
                 className="flex items-center justify-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-300 text-white rounded-lg transition-colors text-sm font-medium shadow-sm whitespace-nowrap"
               >
-                {isMigrating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Rocket className="w-4 h-4" />}
-                {isMigrating ? `Migrating (${migrationProgress})...` : 'Migrate Legacy Content'}
+                {isMigrating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                {isMigrating ? `Updating...` : 'Update Chunks'}
               </button>
             ) : (
               <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-900/20 p-1.5 rounded-lg border border-amber-200 dark:border-amber-800">
                 <span className="text-xs font-semibold text-amber-800 dark:text-amber-200 px-2">Are you sure?</span>
                 <button
                   type="button"
-                  onClick={handleMigrateData}
+                  onClick={handleUpdateChunks}
                   disabled={isMigrating}
                   className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded text-xs font-bold"
                 >
@@ -311,7 +306,7 @@ export default function AdminSettings() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShowConfirmMigrate(false)}
+                  onClick={() => setShowConfirmUpdate(false)}
                   disabled={isMigrating}
                   className="px-3 py-1 bg-zinc-200 dark:bg-zinc-700 hover:bg-zinc-300 dark:hover:bg-zinc-600 text-zinc-700 dark:text-zinc-200 rounded text-xs font-bold"
                 >
@@ -340,7 +335,7 @@ export default function AdminSettings() {
           </div>
         )}
 
-        {success && !migrationResult && (
+        {success && (
           <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 rounded-xl flex items-center gap-3">
             <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0">
               <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -351,21 +346,25 @@ export default function AdminSettings() {
           </div>
         )}
 
-        {migrationResult && (
+        {updateResult && (
           <div className={clsx(
             "p-4 rounded-xl flex items-start gap-3",
-            migrationResult.errors > 0 ? "bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800" : "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800"
+            "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800"
           )}>
-            <Rocket className="w-5 h-5 flex-shrink-0 mt-0.5" />
+            <RefreshCw className="w-5 h-5 flex-shrink-0 mt-0.5" />
             <div>
-              <p className="font-bold">Migration Complete</p>
-              <p className="text-sm mt-1 whitespace-pre-line">
-                {migrationResult.migrated === 0 && migrationResult.errors === 0 
-                  ? "No legacy content found to migrate." 
-                  : `- ${migrationResult.migrated} items moved to chunks\n- ${migrationResult.errors} items failed\n\nLegacy items have been removed from the old collection.`}
-              </p>
+              <p className="font-bold">Maintenance Complete</p>
+              <div className="text-sm mt-1 space-y-1">
+                {updateResult.repairedContent !== undefined && (
+                  <p>• Verified {updateResult.repairedContent} content chunks in metadata</p>
+                )}
+                {updateResult.repairedSearch !== undefined && (
+                  <p>• Verified {updateResult.repairedSearch} search shards in metadata</p>
+                )}
+                <p>• {updateResult.updated} items updated with missing fields</p>
+              </div>
               <button 
-                onClick={() => setMigrationResult(null)}
+                onClick={() => setUpdateResult(null)}
                 className="mt-3 text-xs font-bold underline opacity-70 hover:opacity-100"
               >
                 Dismiss

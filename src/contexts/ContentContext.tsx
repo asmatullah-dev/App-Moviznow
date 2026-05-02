@@ -1,8 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react';
 import { db, auth } from '../firebase';
 import { safeStorage } from '../utils/safeStorage';
-import { collection, onSnapshot, query, where, getDocs, doc, setDoc, orderBy, limit } from 'firebase/firestore';
-import { onAuthStateChanged } from 'firebase/auth';
+import { collection, onSnapshot, query, where, getDocs, doc, setDoc, orderBy, limit, getDoc } from 'firebase/firestore';
 import { useAuth } from './AuthContext';
 import { useUsers } from './UsersContext';
 import { Content, Genre, Language, Quality, Collection as AppCollection } from '../types';
@@ -83,256 +82,207 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     });
   }, [contentList, allUsers]);
 
+  // Main listener for content
   useEffect(() => {
-    let unsubContent: () => void;
-    
-    const setupContentListener = async () => {
-      if (unsubContent) unsubContent();
+    if (authProfileLoading) return;
+    if (!navigator.onLine) {
+      setLoading(false);
+      return;
+    }
 
-      if (!navigator.onLine) {
-        setLoading(false);
-        return;
-      }
+    const isAdminOrEditor = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
+    let unsubContent: (() => void) | undefined = undefined;
 
-      // If we are still loading the auth profile, wait before deciding listener type
-      if (auth.currentUser && authProfileLoading) {
-        return;
-      }
-
-      const isAdminOrEditor = profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'content_manager' || profile?.role === 'manager';
-
+    const setupListener = async () => {
       if (isAdminOrEditor) {
-        const q = collection(db, 'content_chunks');
-        unsubContent = onSnapshot(q, (snapshot) => {
-          const rawContent: Content[] = [];
-          snapshot.docs.forEach(doc => {
-            const data = doc.data();
-            if (data.items) {
-              Object.values(data.items).forEach((item: any) => {
-                rawContent.push(item as Content);
+        const q = doc(db, 'chunk_meta', 'versions');
+        unsubContent = onSnapshot(q, async (snapshot) => {
+          let versions = snapshot.data() || {};
+          
+          if (Object.keys(versions).length === 0) {
+            try {
+              const chunksSnap = await getDocs(collection(db, 'content_chunks'));
+              const newVersions: Record<string, number> = {};
+              chunksSnap.docs.forEach(d => {
+                newVersions[d.id] = Date.now();
+                safeStorage.setItem('content_chunk_' + d.id, JSON.stringify(d.data().items || {}));
               });
+              versions = newVersions;
+            } catch(e) {
+              console.error("Failed to bootstrap chunks", e);
             }
-          });
+          }
+
+          let localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+          let localMeta: Record<string, number> = {};
+          try {
+             localMeta = JSON.parse(localMetaString);
+          } catch(e) {}
+          
+          const chunksToFetch: string[] = [];
+          for (const [chunkId, version] of Object.entries(versions)) {
+            const hasData = !!safeStorage.getItem('content_chunk_' + chunkId);
+            if (!hasData || !localMeta[chunkId] || localMeta[chunkId] < (version as number)) {
+              chunksToFetch.push(chunkId);
+            }
+          }
+          
+          if (chunksToFetch.length > 0) {
+              await Promise.all(chunksToFetch.map(async (chunkId) => {
+                 try {
+                     const chunkDoc = await getDoc(doc(db, 'content_chunks', chunkId));
+                     if (chunkDoc.exists()) {
+                         const items = chunkDoc.data().items || {};
+                         safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(items));
+                         localMeta[chunkId] = versions[chunkId] as number;
+                     }
+                 } catch(e) { console.error(e); }
+              }));
+              
+              safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+          }
+          
+          const rawContent: Content[] = [];
+          for (const chunkId of Object.keys(versions)) {
+              const chunkStr = safeStorage.getItem('content_chunk_' + chunkId);
+              if (chunkStr) {
+                  try {
+                      const items = JSON.parse(chunkStr);
+                      Object.values(items).forEach((item: any) => {
+                          rawContent.push(item as Content);
+                      });
+                  } catch(e) {}
+              }
+          }
           
           try {
-            const sanitizedContent = rawContent.map(c => {
+            // Priority: save FULL data in cache for admins
+            if (isAdminOrEditor) {
+              safeStorage.setItem('content_cache', JSON.stringify(rawContent));
+            } else {
+              // For non-admins, always prefer sanitized version to save space
+              throw new Error("Force sanitization for non-admins");
+            }
+          } catch (e) {
+            // Failover to sanitized cache if localStorage is full or if user is not admin
+            const sanitized = rawContent.map(c => {
               let minimalSeasons: any[] = [];
               if (c.seasons) {
                 try {
-                  const parsedSeasons = Array.isArray(c.seasons) ? c.seasons : JSON.parse(c.seasons as string);
-                  minimalSeasons = parsedSeasons.map((s: any) => ({
+                  const parsed = Array.isArray(c.seasons) ? c.seasons : JSON.parse(c.seasons as string);
+                  minimalSeasons = parsed.map((s: any) => ({
                     seasonNumber: s.seasonNumber,
                     episodes: s.episodes && s.episodes.length > 0 ? [{ episodeNumber: s.episodes[s.episodes.length - 1].episodeNumber }] : []
                   }));
-                } catch (e) {}
+                } catch(err) {}
               }
-              return {
-                ...c,
-                movieLinks: undefined,
-                fullSeasonZip: undefined,
-                fullSeasonMkv: undefined,
-                seasons: minimalSeasons.length > 0 ? minimalSeasons : undefined
+              // For admins, we try to preserve links if we can, but if we reached here it means it's full.
+              return { 
+                ...c, 
+                movieLinks: undefined, 
+                seasons: minimalSeasons.length > 0 ? minimalSeasons : undefined,
+                _isMinimal: true
               };
             });
-            safeStorage.setItem('content_cache', JSON.stringify(sanitizedContent));
-          } catch (e) {
-            console.error("Failed to save content cache", e);
+            safeStorage.setItem('content_cache', JSON.stringify(sanitized));
           }
           
           setContentList(rawContent);
           setLoading(false);
         }, (error) => {
-          console.error("Content chunk snapshot error:", error);
+          console.error("Admin content error:", error);
+          handleFirestoreError(error, OperationType.GET, 'chunk_meta');
           setLoading(false);
-          if (navigator.onLine) {
-            handleFirestoreError(error, OperationType.LIST, 'content_chunks');
-          }
         });
       } else {
-        let isMounted = true;
-        
+        // User Path
         const fetchUserContent = async () => {
           try {
             const indexSnap = await getDocs(collection(db, 'search_index_chunks'));
             if (!indexSnap.empty) {
               const allData: string[] = [];
-              const sortedDocs = [...indexSnap.docs].sort((a, b) => a.id.localeCompare(b.id));
-              sortedDocs.forEach(doc => {
-                if (doc.data().data) {
-                  allData.push(...doc.data().data);
-                }
-              });
-
-              const parsedContent: Content[] = allData.map(item => {
+              const docs = [...indexSnap.docs].sort((a, b) => a.id.localeCompare(b.id));
+              docs.forEach(d => { if (d.data().data) allData.push(...d.data().data); });
+              
+              const parsed = allData.map(item => {
                 const [id, title, year, posterUrl, type, qualityId, langIds, genreIds, createdAt, order, seasonsInfo] = item.split('|');
-                const seasons = seasonsInfo ? seasonsInfo.split(',').map(s => {
-                  const [sNum, lastEp] = s.split(':');
-                  return {
-                    id: `s${sNum}`,
-                    seasonNumber: parseInt(sNum, 10),
-                    episodes: lastEp ? [{ id: 'last', episodeNumber: parseInt(lastEp, 10), title: '', url: '' }] : []
-                  };
-                }) : [];
-
                 return {
-                  id, title, year, posterUrl, type: type as 'movie' | 'series', qualityId,
-                  languageIds: langIds ? langIds.split(',') : [],
+                  id, title, year: parseInt(year), posterUrl, type: type as 'movie' | 'series', 
+                  qualityId, languageIds: langIds ? langIds.split(',') : [],
                   genreIds: genreIds ? genreIds.split(',') : [],
-                  createdAt, order: (order !== undefined && order !== '') ? parseInt(order, 10) : undefined,
-                  seasons, status: 'published', description: '', trailerUrl: '', cast: [], updatedAt: createdAt
+                  createdAt, order: order ? parseInt(order) : undefined,
+                  status: 'published'
                 } as unknown as Content;
               });
-              try {
-                safeStorage.setItem('content_cache', JSON.stringify(parsedContent));
-              } catch (e) {
-                console.error("Failed to save content cache", e);
-              }
-              if (isMounted) {
-                setContentList(parsedContent);
-                setLoading(false);
-              }
-            } else {
-              // Final fallback if no chunks found
-              if (isMounted) setLoading(false);
+
+              safeStorage.setItem('content_cache', JSON.stringify(parsed));
+              setContentList(parsed);
+              setLoading(false);
             }
-          } catch (error) {
-            console.error("Search index chunks fetch error:", error);
-            if (isMounted) setLoading(false);
-          }
-        };
-
-        fetchUserContent();
-        const intervalId = setInterval(fetchUserContent, 10 * 60 * 1000); // 10 mins backoff for users
-        unsubContent = () => {
-          isMounted = false;
-          clearInterval(intervalId);
-        };
-      }
-    };
-
-    setupContentListener();
-
-    let unsubGenres: () => void;
-    let unsubLanguages: () => void;
-    let unsubQualities: () => void;
-    let unsubCollections: () => void;
-
-    const setupStaticDataListeners = async () => {
-      if (!navigator.onLine) return;
-
-      const isAdminOrEditor = profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'content_manager' || profile?.role === 'manager';
-
-      if (isAdminOrEditor) {
-        unsubGenres = onSnapshot(collection(db, 'genres'), (snapshot) => {
-          const genresData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Genre));
-          genresData.sort((a, b) => {
-            if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
-            if (a.order !== undefined) return -1;
-            if (b.order !== undefined) return 1;
-            return a.name.localeCompare(b.name);
-          });
-          safeStorage.setItem('genres_cache', JSON.stringify(genresData));
-          setGenres(genresData);
-        });
-
-        unsubLanguages = onSnapshot(collection(db, 'languages'), (snapshot) => {
-          const langsData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Language));
-          langsData.sort((a, b) => {
-            if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
-            if (a.order !== undefined) return -1;
-            if (b.order !== undefined) return 1;
-            return a.name.localeCompare(b.name);
-          });
-          safeStorage.setItem('languages_cache', JSON.stringify(langsData));
-          setLanguages(langsData);
-        });
-
-        unsubQualities = onSnapshot(collection(db, 'qualities'), (snapshot) => {
-          const qualitiesData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Quality));
-          qualitiesData.sort((a, b) => {
-            if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
-            if (a.order !== undefined) return -1;
-            if (b.order !== undefined) return 1;
-            return a.name.localeCompare(b.name);
-          });
-          safeStorage.setItem('qualities_cache', JSON.stringify(qualitiesData));
-          setQualities(qualitiesData);
-        });
-
-        unsubCollections = onSnapshot(collection(db, 'collections'), (snapshot) => {
-          const collectionsData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as AppCollection));
-          collectionsData.sort((a, b) => (a.order || 0) - (b.order || 0));
-          safeStorage.setItem('collections_cache', JSON.stringify(collectionsData));
-          setCollections(collectionsData);
-        });
-      } else {
-        // For regular users, only fetch if cache is older than 24 hours or missing
-        const lastSync = parseInt(safeStorage.getItem('static_data_synced_at') || '0', 10);
-        const hasCache = safeStorage.getItem('genres_cache') && safeStorage.getItem('collections_cache');
-        const now = Date.now();
-        const needFetch = !hasCache || (now - lastSync > 24 * 60 * 60 * 1000);
-
-        if (needFetch) {
-          try {
-            const [genresSnap, langsSnap, qualsSnap, collsSnap] = await Promise.all([
-              getDocs(collection(db, 'genres')),
-              getDocs(collection(db, 'languages')),
-              getDocs(collection(db, 'qualities')),
-              getDocs(collection(db, 'collections'))
-            ]);
-
-            const genresData = genresSnap.docs.map(d => ({ id: d.id, ...d.data() } as Genre));
-            genresData.sort((a, b) => {
-              if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
-              if (a.order !== undefined) return -1;
-              if (b.order !== undefined) return 1;
-              return a.name.localeCompare(b.name);
-            });
-            safeStorage.setItem('genres_cache', JSON.stringify(genresData));
-            setGenres(genresData);
-
-            const langsData = langsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Language));
-            langsData.sort((a, b) => {
-              if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
-              if (a.order !== undefined) return -1;
-              if (b.order !== undefined) return 1;
-              return a.name.localeCompare(b.name);
-            });
-            safeStorage.setItem('languages_cache', JSON.stringify(langsData));
-            setLanguages(langsData);
-
-            const qualitiesData = qualsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Quality));
-            qualitiesData.sort((a, b) => {
-              if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
-              if (a.order !== undefined) return -1;
-              if (b.order !== undefined) return 1;
-              return a.name.localeCompare(b.name);
-            });
-            safeStorage.setItem('qualities_cache', JSON.stringify(qualitiesData));
-            setQualities(qualitiesData);
-
-            const collectionsData = collsSnap.docs.map(d => ({ id: d.id, ...d.data() } as AppCollection));
-            collectionsData.sort((a, b) => (a.order || 0) - (b.order || 0));
-            safeStorage.setItem('collections_cache', JSON.stringify(collectionsData));
-            setCollections(collectionsData);
-
-            safeStorage.setItem('static_data_synced_at', now.toString());
           } catch (e) {
-            console.error("Failed to fetch static data", e);
+            console.error("User content error:", e);
+            setLoading(false);
           }
-        }
+        };
+        fetchUserContent();
+        const tid = setInterval(fetchUserContent, 10 * 60 * 1000);
+        unsubContent = () => clearInterval(tid);
       }
     };
 
-    setupStaticDataListeners();
+    setupListener();
+    return () => { if (unsubContent) unsubContent(); };
+  }, [profile?.role, authProfileLoading]);
 
-    return () => { 
-      if (unsubContent) unsubContent();
-      if (unsubGenres) unsubGenres();
-      if (unsubLanguages) unsubLanguages();
-      if (unsubQualities) unsubQualities();
-      if (unsubCollections) unsubCollections();
-    };
+  // Static Data Listeners (Genres, Languages, etc.)
+  useEffect(() => {
+    if (authProfileLoading) return;
+    if (!navigator.onLine) return;
+
+    const isAdmin = ['owner', 'admin', 'content_manager', 'manager'].includes(profile?.role || '');
+    let unsubs: (() => void)[] = [];
+
+    if (isAdmin) {
+      unsubs.push(onSnapshot(collection(db, 'genres'), snap => {
+        const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Genre)).sort((a, b) => (a.order || 0) - (b.order || 0));
+        setGenres(data); safeStorage.setItem('genres_cache', JSON.stringify(data));
+      }));
+      unsubs.push(onSnapshot(collection(db, 'languages'), snap => {
+        const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Language)).sort((a, b) => (a.order || 0) - (b.order || 0));
+        setLanguages(data); safeStorage.setItem('languages_cache', JSON.stringify(data));
+      }));
+      unsubs.push(onSnapshot(collection(db, 'qualities'), snap => {
+        const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Quality)).sort((a, b) => (a.order || 0) - (b.order || 0));
+        setQualities(data); safeStorage.setItem('qualities_cache', JSON.stringify(data));
+      }));
+      unsubs.push(onSnapshot(collection(db, 'collections'), snap => {
+        const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as AppCollection)).sort((a, b) => (a.order || 0) - (b.order || 0));
+        setCollections(data); safeStorage.setItem('collections_cache', JSON.stringify(data));
+      }));
+    } else {
+      // Users just fetch once or use cache
+      const fetchStatic = async () => {
+        try {
+          const [g, l, q, c] = await Promise.all([
+            getDocs(collection(db, 'genres')), getDocs(collection(db, 'languages')),
+            getDocs(collection(db, 'qualities')), getDocs(collection(db, 'collections'))
+          ]);
+          const gd = g.docs.map(d => ({ id: d.id, ...d.data() } as Genre)).sort((a, b) => (a.order || 0) - (b.order || 0));
+          const ld = l.docs.map(d => ({ id: d.id, ...d.data() } as Language)).sort((a, b) => (a.order || 0) - (b.order || 0));
+          const qd = q.docs.map(d => ({ id: d.id, ...d.data() } as Quality)).sort((a, b) => (a.order || 0) - (b.order || 0));
+          const cd = c.docs.map(d => ({ id: d.id, ...d.data() } as AppCollection)).sort((a, b) => (a.order || 0) - (b.order || 0));
+          
+          setGenres(gd); setLanguages(ld); setQualities(qd); setCollections(cd);
+          safeStorage.setItem('genres_cache', JSON.stringify(gd));
+          safeStorage.setItem('languages_cache', JSON.stringify(ld));
+          safeStorage.setItem('qualities_cache', JSON.stringify(qd));
+          safeStorage.setItem('collections_cache', JSON.stringify(cd));
+        } catch(err) {}
+      };
+      fetchStatic();
+    }
+
+    return () => unsubs.forEach(u => u());
   }, [profile?.role, authProfileLoading]);
 
   const lastSearchIndexRef = useRef<string>('');
@@ -340,66 +290,48 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
   const updateSearchIndex = async () => {
     if (contentList.length === 0) return;
     
-    const searchIndex = contentList.filter(c => c.status === 'published').map(c => {
-      let seasons: any[] = [];
-      if (c.seasons) {
-        try {
-          seasons = Array.isArray(c.seasons) ? c.seasons : JSON.parse(c.seasons as string);
-        } catch (e) {
-          console.error("Failed to parse seasons for search index", e);
-        }
-      }
-      const seasonsInfo = seasons.map(s => {
-        const lastEp = s.episodes && s.episodes.length > 0 ? s.episodes[s.episodes.length - 1].episodeNumber : '';
-        return `${s.seasonNumber}:${lastEp}`;
-      }).join(',') || '';
-      
-      return `${c.id}|${c.title}|${c.year}|${c.posterUrl}|${c.type}|${c.qualityId || ''}|${c.languageIds?.join(',') || ''}|${c.genreIds?.join(',') || ''}|${c.createdAt}|${c.order ?? ''}|${seasonsInfo}`;
-    });
-
-    const indexString = JSON.stringify(searchIndex);
-    
-    // Only write if the index has actually changed
-    if (indexString === lastSearchIndexRef.current) {
-      return;
-    }
-
-    try {
-      await saveSearchIndexToChunks(searchIndex);
-      lastSearchIndexRef.current = indexString;
-      console.log("Search index updated successfully in multiple chunks");
-    } catch (e) {
-      console.error("Failed to update search_index_chunks", e);
-    }
-  };
-
-  // Debounced search index update to prevent excessive writes
-  useEffect(() => {
-    const userId = auth.currentUser?.uid;
-    // Don't trigger if offline or no user or empty list
-    if (!userId || contentList.length === 0 || !navigator.onLine) return;
-
-    let timer: NodeJS.Timeout;
-
-    const checkRoleAndUpdate = async () => {
+    // Safeguard: Do not update search index if the list is suspiciously small 
+    // compared to previous state, unless explicitly forced or empty initially.
+    const cachedStr = safeStorage.getItem('content_cache');
+    if (cachedStr) {
       try {
-        // Only the owner should update the index to minimize writes
-        // If no owner is online, the search index might lag, but most managing is done by owners.
-        const isUpdater = profile?.role === 'owner';
-        if (isUpdater) {
-          // Debounce the update by 30 minutes to consolidate multiple changes
-          timer = setTimeout(() => {
-            updateSearchIndex();
-          }, 30 * 60000);
+        const cached = JSON.parse(cachedStr);
+        if (Array.isArray(cached) && cached.length > 50 && contentList.length < cached.length * 0.5) {
+          console.warn(`[Safeguard] Potential index pruning detected. Current: ${contentList.length}, Cached: ${cached.length}. Skipping update.`);
+          return;
         }
       } catch (e) {}
-    };
+    }
 
-    checkRoleAndUpdate();
-    return () => {
-      if (timer) clearTimeout(timer);
-    };
-  }, [contentList, profile?.role]); // Changed from length to contentList for deeper check
+    const published = contentList.filter(c => c.status === 'published');
+    published.sort((a, b) => (a.order || 0) - (b.order || 0));
+    
+    const index = published.map(c => {
+      let seasonsInfo = '';
+      if (c.seasons) {
+        try {
+          const s = Array.isArray(c.seasons) ? c.seasons : JSON.parse(c.seasons as string);
+          seasonsInfo = s.map((si: any) => `${si.seasonNumber}:${si.episodes?.length || ''}`).join(',');
+        } catch(e) {}
+      }
+      return `${c.id}|${c.title}|${c.year}|${c.posterUrl || ''}|${c.type}|${c.qualityId || ''}|${c.languageIds?.join(',') || ''}|${c.genreIds?.join(',') || ''}|${c.createdAt}|${c.order || ''}|${seasonsInfo}`;
+    });
+
+    const indexStr = JSON.stringify(index);
+    if (indexStr === lastSearchIndexRef.current) return;
+
+    try {
+      await saveSearchIndexToChunks(index);
+      lastSearchIndexRef.current = indexStr;
+    } catch (e) {}
+  };
+
+  useEffect(() => {
+    if (profile?.role === 'owner' && contentList.length > 0 && navigator.onLine) {
+      const t = setTimeout(updateSearchIndex, 10000); // 10s debounce
+      return () => clearTimeout(t);
+    }
+  }, [contentList, profile?.role]);
 
   return (
     <ContentContext.Provider value={{ contentList: augmentedContentList, genres, languages, qualities, collections, loading, isOffline, updateSearchIndex }}>
@@ -410,8 +342,6 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
 export const useContent = () => {
   const context = useContext(ContentContext);
-  if (context === undefined) {
-    throw new Error('useContent must be used within a ContentProvider');
-  }
+  if (context === undefined) throw new Error('useContent must be used within a ContentProvider');
   return context;
-}
+};

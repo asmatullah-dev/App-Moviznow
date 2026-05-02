@@ -14,6 +14,7 @@ import ConfirmModal from '../../components/ConfirmModal';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatContentTitle, formatReleaseDate, formatRuntime, getContrastColor } from '../../utils/contentUtils';
+import { getContentFromChunks, updateContentFieldsInChunks, deleteContentFromChunk } from '../../utils/chunkUtils';
 import { generateTinyUrl } from '../../utils/tinyurl';
 import { MediaModal } from '../../components/MediaModal';
 import ContentCard from '../../components/ContentCard';
@@ -202,10 +203,8 @@ export default function MovieDetails() {
       hasFetchedFull.current[id] = true;
       const fetchFullContent = async () => {
         try {
-          const docRef = doc(db, 'content', id);
-          const docSnap = await getDoc(docRef);
-          if (docSnap.exists()) {
-            const data = { id: docSnap.id, ...docSnap.data() } as Content;
+          const data = await getContentFromChunks(id);
+          if (data) {
             setFullContent(data);
             localStorage.setItem(`movie_details_${id}`, JSON.stringify(data));
           } else {
@@ -755,7 +754,7 @@ export default function MovieDetails() {
   const handleDelete = async () => {
     if (!id) return;
     try {
-      await deleteDoc(doc(db, 'content', id));
+      await deleteContentFromChunk(id);
       navigate('/admin/content');
     } catch (error) {
       console.error('Error deleting content:', error);
@@ -2118,7 +2117,6 @@ export default function MovieDetails() {
           onClose={() => setIsMediaModalOpen(false)}
           onApply={async (data) => {
             try {
-              const contentRef = doc(db, 'content', mergedContent.id);
               const updateData: any = { ...data };
               
               // Map genre names to IDs if genres are provided
@@ -2173,7 +2171,7 @@ export default function MovieDetails() {
                 updateData.seasons = JSON.stringify(currentSeasons.sort((a: any, b: any) => a.seasonNumber - b.seasonNumber));
               }
 
-              await updateDoc(contentRef, updateData);
+              await updateContentFieldsInChunks([{ id: mergedContent.id, ...updateData }]);
               
               if (fullContent) {
                 const updatedFullContent = { ...fullContent, ...updateData };
