@@ -222,78 +222,26 @@ export default function MovieDetails() {
 
   const mergedContent = useMemo(() => {
     if (!content && !fullContent) return null;
-    
+    // Prioritize cachedMetadata (TMDB updates/local edits), then fresh fullContent from DB, then partial content from list
     const metadata = cachedMetadata.id === id ? cachedMetadata.data : {};
-    const validFullContent = fullContent?.id === id ? fullContent : null;
-    const baseContent = content || {};
-
-    // Combine them carefully. validFullContent > content > metadata
-    // But we want metadata to fill in MISSING gaps in the others.
-    
-    // Start with metadata, then override with baseContent, then override with validFullContent
-    // However, baseContent/validFullContent might have empty strings for fields they don't have.
-    // We want to be smart about it.
-
-    const result = { ...metadata, ...baseContent, ...(validFullContent || {}) } as Content;
-
-    // Fix: Fill in specifically missing metadata from cache if not in result
-    const fieldsToEnsure = ['description', 'runtime', 'cast', 'releaseDate', 'posterUrl', 'country', 'trailerUrl', 'imdbLink', 'imdbRating', 'director'];
-    fieldsToEnsure.forEach(field => {
-      const val = (result as any)[field];
-      const cacheVal = (metadata as any)[field];
-      if ((!val || (Array.isArray(val) && val.length === 0)) && cacheVal) {
-        (result as any)[field] = cacheVal;
-      }
-    });
-
-    return result;
+    const validFullContent = fullContent?.id === id ? fullContent : {};
+    return {
+      ...(content || {}),
+      ...validFullContent,
+      ...metadata
+    } as Content;
   }, [content, cachedMetadata, fullContent, id]);
 
   const seasons = useMemo(() => {
-    if (!mergedContent || mergedContent.type !== 'series') return [] as Season[];
-    
+    if (!mergedContent || mergedContent.type !== 'series' || !mergedContent.seasons) return [] as Season[];
     try {
-      // Prioritize seasons from database (fullContent or content)
-      const dbContent = (fullContent?.id === id ? fullContent : null) || content;
-      const dbSeasonsStr = dbContent?.seasons;
-      const dbSeasons: Season[] = dbSeasonsStr ? (Array.isArray(dbSeasonsStr) ? dbSeasonsStr : JSON.parse(dbSeasonsStr || '[]')) : [];
-
-      // If we have database seasons, use them as the primary structure
-      // Then fill in details (descriptions/titles) from cachedMetadata (TMDB)
-      if (dbSeasons.length > 0) {
-        const metadata = cachedMetadata.id === id ? cachedMetadata.data : {};
-        const cacheSeasons: Season[] = metadata.seasons ? (Array.isArray(metadata.seasons) ? metadata.seasons : JSON.parse(metadata.seasons || '[]')) : [];
-
-        return dbSeasons.map(ds => {
-          const cs = cacheSeasons.find(s => s.seasonNumber === ds.seasonNumber);
-          if (!cs) return ds;
-
-          return {
-            ...ds,
-            episodes: (ds.episodes || []).map(de => {
-              const ce = (cs.episodes || []).find(e => e.episodeNumber === de.episodeNumber);
-              if (!ce) return de;
-
-              return {
-                ...de,
-                // Only use metadata if the database version is missing these fields or has generic title
-                title: (!de.title || de.title === `Episode ${de.episodeNumber}`) ? (ce.title || de.title) : de.title,
-                description: !de.description ? (ce.description || de.description) : de.description,
-                duration: !de.duration ? (ce.duration || de.duration) : de.duration
-              };
-            })
-          };
-        });
-      }
-
-      // Fallback: If no database seasons yet, but we are a series (rare), maybe show TMDB seasons ONLY if admin?
-      // Actually, for consistency, if nothing in DB, we should show nothing until added.
-      return [] as Season[];
+      const sData = mergedContent.seasons;
+      return (Array.isArray(sData) ? sData : JSON.parse(sData || '[]')) as Season[];
     } catch (e) {
       console.error("Error parsing seasons:", e);
       return [] as Season[];
     }
-  }, [mergedContent, fullContent, content, cachedMetadata, id]);
+  }, [mergedContent]);
 
   const allTrailers = useMemo(() => {
     const list: Trailer[] = [];
@@ -1759,30 +1707,22 @@ export default function MovieDetails() {
                                         {season.episodes.filter(ep => ep.links && ep.links.length > 0).map(ep => (
                                           <div key={ep.id} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 flex flex-col gap-4">
                                             <div className="flex flex-col gap-2">
-                                              <div className="flex flex-col gap-2">
-                                                <div className="flex items-center gap-2 flex-wrap">
-                                                  <span className="text-emerald-500 font-bold whitespace-nowrap">E{ep.episodeNumber}:</span>
-                                                  <span className="font-medium text-zinc-900 dark:text-zinc-100">{ep.title}</span>
-                                                </div>
-                                                
-                                                <div className="flex items-center flex-wrap gap-3">
-                                                  {ep.duration && (
-                                                    <span className="text-[10px] sm:text-xs font-semibold text-zinc-500 dark:text-zinc-500 bg-zinc-100 dark:bg-zinc-900 px-2 py-0.5 rounded whitespace-nowrap flex items-center gap-1 border border-zinc-200 dark:border-zinc-800">
-                                                      <Clock className="w-3 h-3" />
-                                                      {ep.duration}
-                                                    </span>
-                                                  )}
-                                                  
-                                                  {ep.description && (
-                                                    <button
-                                                      onClick={() => setExpandedEpisodes(prev => ({ ...prev, [ep.id]: !prev[ep.id] }))}
-                                                      className="flex items-center gap-1 text-[10px] sm:text-xs font-bold text-emerald-500 hover:text-emerald-600 transition-colors uppercase tracking-wider"
-                                                    >
-                                                      {expandedEpisodes[ep.id] ? "Hide Info" : "View Info"}
-                                                      {expandedEpisodes[ep.id] ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                                                    </button>
-                                                  )}
-                                                </div>
+                                              <div className="flex items-center flex-wrap gap-2">
+                                                <span className="text-emerald-500 font-bold">E{ep.episodeNumber}</span>
+                                                <span className="font-medium">{ep.title}</span>
+                                                {ep.description && (
+                                                  <button
+                                                    onClick={() => setExpandedEpisodes(prev => ({ ...prev, [ep.id]: !prev[ep.id] }))}
+                                                    className="text-xs text-zinc-500 dark:text-zinc-400 hover:text-emerald-500 transition-colors"
+                                                  >
+                                                    {expandedEpisodes[ep.id] ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                                                  </button>
+                                                )}
+                                                {ep.duration && (
+                                                  <span className="text-xs text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded whitespace-nowrap">
+                                                    {ep.duration}
+                                                  </span>
+                                                )}
                                               </div>
                                               
                                               {ep.description && expandedEpisodes[ep.id] && (

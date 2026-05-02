@@ -7,7 +7,7 @@ import { useAuth } from './AuthContext';
 import { useUsers } from './UsersContext';
 import { Content, Genre, Language, Quality, Collection as AppCollection } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
-import { saveSearchIndexToChunks, repairChunks } from '../utils/chunkUtils';
+import { saveSearchIndexToChunks } from '../utils/chunkUtils';
 
 interface ContentContextType {
   contentList: Content[];
@@ -85,11 +85,9 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let unsubContent: () => void;
-    let unsubSync: () => void;
     
     const setupContentListener = async () => {
       if (unsubContent) unsubContent();
-      if (unsubSync) unsubSync();
 
       if (!navigator.onLine) {
         setLoading(false);
@@ -103,201 +101,113 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
       const isAdminOrEditor = profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'content_manager' || profile?.role === 'manager';
 
-      const fetchAdminContent = async () => {
-        try {
-          const localLastSync = safeStorage.getItem('content_last_sync') || '';
-          const q = localLastSync ? 
-            query(collection(db, 'content_chunks'), where('updatedAt', '>', localLastSync)) :
-            collection(db, 'content_chunks');
-          
-          const snapshot = await getDocs(q);
-          const cachedChunksRaw = safeStorage.getItem('content_chunks_cache') || '{}';
-          const cachedChunks: Record<string, any> = JSON.parse(cachedChunksRaw);
-          
-          let hasChanges = false;
+      if (isAdminOrEditor) {
+        const q = collection(db, 'content_chunks');
+        unsubContent = onSnapshot(q, (snapshot) => {
+          const rawContent: Content[] = [];
           snapshot.docs.forEach(doc => {
-            cachedChunks[doc.id] = doc.data();
-            hasChanges = true;
-          });
-
-          if (hasChanges || contentList.length === 0) {
-            const rawContent: Content[] = [];
-            Object.values(cachedChunks).forEach((chunk: any) => {
-              if (chunk.items) {
-                Object.values(chunk.items).forEach((item: any) => {
-                  rawContent.push(item as Content);
-                });
-              }
-            });
-
-            try {
-              const sanitizedContent = rawContent.map(c => {
-                let minimalSeasons: any[] = [];
-                if (c.seasons) {
-                  try {
-                    const parsedSeasons = Array.isArray(c.seasons) ? c.seasons : JSON.parse(c.seasons as string);
-                    minimalSeasons = parsedSeasons.map((s: any) => ({
-                      seasonNumber: s.seasonNumber,
-                      episodes: s.episodes && s.episodes.length > 0 ? [{ episodeNumber: s.episodes[s.episodes.length - 1].episodeNumber }] : []
-                    }));
-                  } catch (e) {}
-                }
-                return {
-                  ...c,
-                  movieLinks: undefined,
-                  fullSeasonZip: undefined,
-                  fullSeasonMkv: undefined,
-                  seasons: minimalSeasons.length > 0 ? minimalSeasons : undefined
-                };
+            const data = doc.data();
+            if (data.items) {
+              Object.values(data.items).forEach((item: any) => {
+                rawContent.push(item as Content);
               });
-              safeStorage.setItem('content_cache', JSON.stringify(sanitizedContent));
-              safeStorage.setItem('content_chunks_cache', JSON.stringify(cachedChunks));
-            } catch (e) {
-              console.error("Failed to save content cache", e);
             }
-            
-            setContentList(rawContent);
-          }
-          setLoading(false);
-        } catch (error) {
-          console.error("Admin content fetch error:", error);
-          setLoading(false);
-        }
-      };
-
-      const fetchUserContent = async () => {
-        try {
-          const localLastSync = safeStorage.getItem('content_last_sync') || '';
-          const q = localLastSync ?
-            query(collection(db, 'search_index_chunks'), where('updatedAt', '>', localLastSync)) :
-            collection(db, 'search_index_chunks');
-
-          const snapshot = await getDocs(q);
-          const cachedShardsRaw = safeStorage.getItem('search_shards_cache') || '{}';
-          const cachedShards: Record<string, any> = JSON.parse(cachedShardsRaw);
-
-          let hasChanges = false;
-          snapshot.docs.forEach(doc => {
-            cachedShards[doc.id] = doc.data();
-            hasChanges = true;
           });
-
-          if (hasChanges || contentList.length === 0) {
-            const allData: string[] = [];
-            const sortedShardIds = Object.keys(cachedShards).sort((a, b) => a.localeCompare(b));
-            sortedShardIds.forEach(id => {
-              if (cachedShards[id].data) {
-                allData.push(...cachedShards[id].data);
+          
+          try {
+            const sanitizedContent = rawContent.map(c => {
+              let minimalSeasons: any[] = [];
+              if (c.seasons) {
+                try {
+                  const parsedSeasons = Array.isArray(c.seasons) ? c.seasons : JSON.parse(c.seasons as string);
+                  minimalSeasons = parsedSeasons.map((s: any) => ({
+                    seasonNumber: s.seasonNumber,
+                    episodes: s.episodes && s.episodes.length > 0 ? [{ episodeNumber: s.episodes[s.episodes.length - 1].episodeNumber }] : []
+                  }));
+                } catch (e) {}
               }
-            });
-
-            const parsedContent: Content[] = allData.map(item => {
-              const [id, title, year, posterUrl, type, qualityId, langIds, genreIds, createdAt, order, seasonsInfo] = item.split('|');
-              const seasons = seasonsInfo ? seasonsInfo.split(',').map(s => {
-                const [sNum, lastEp] = s.split(':');
-                return {
-                  id: `s${sNum}`,
-                  seasonNumber: parseInt(sNum, 10),
-                  episodes: lastEp ? [{ id: 'last', episodeNumber: parseInt(lastEp, 10), title: '', url: '' }] : []
-                };
-              }) : [];
-
               return {
-                id, title, year, posterUrl, type: type as 'movie' | 'series', qualityId,
-                languageIds: langIds ? langIds.split(',') : [],
-                genreIds: genreIds ? genreIds.split(',') : [],
-                createdAt, order: (order !== undefined && order !== '') ? parseInt(order, 10) : undefined,
-                seasons, status: 'published', description: '', trailerUrl: '', cast: [], updatedAt: createdAt
-              } as unknown as Content;
+                ...c,
+                movieLinks: undefined,
+                fullSeasonZip: undefined,
+                fullSeasonMkv: undefined,
+                seasons: minimalSeasons.length > 0 ? minimalSeasons : undefined
+              };
             });
-            try {
-              safeStorage.setItem('content_cache', JSON.stringify(parsedContent));
-              safeStorage.setItem('search_shards_cache', JSON.stringify(cachedShards));
-            } catch (e) {
-              console.error("Failed to save content cache", e);
-            }
-            setContentList(parsedContent);
+            safeStorage.setItem('content_cache', JSON.stringify(sanitizedContent));
+          } catch (e) {
+            console.error("Failed to save content cache", e);
           }
+          
+          setContentList(rawContent);
           setLoading(false);
-        } catch (error) {
-          console.error("User content fetch error:", error);
+        }, (error) => {
+          console.error("Content chunk snapshot error:", error);
           setLoading(false);
-        }
-      };
-
-      // Listen to sync metadata for triggers
-      unsubSync = onSnapshot(doc(db, 'metadata', 'content_sync'), async (snapshot) => {
-        const data = snapshot.data();
-        const lastUpdated = data?.lastUpdated;
-        const localLastSync = safeStorage.getItem('content_last_sync');
+          if (navigator.onLine) {
+            handleFirestoreError(error, OperationType.LIST, 'content_chunks');
+          }
+        });
+      } else {
+        let isMounted = true;
         
-        // Handle counts for pruning
-        const currentContentChunkCount = data?.contentChunkCount || 0;
-        const currentSearchShardCount = data?.searchShardCount || 0;
+        const fetchUserContent = async () => {
+          try {
+            const indexSnap = await getDocs(collection(db, 'search_index_chunks'));
+            if (!indexSnap.empty) {
+              const allData: string[] = [];
+              const sortedDocs = [...indexSnap.docs].sort((a, b) => a.id.localeCompare(b.id));
+              sortedDocs.forEach(doc => {
+                if (doc.data().data) {
+                  allData.push(...doc.data().data);
+                }
+              });
 
-        if (lastUpdated && lastUpdated !== localLastSync) {
-           // Proceed to fetch changes
-        } else if (contentList.length > 0) {
-           // Potentially prune if counts changed but no other updates (rare)
-           const cachedChunksRaw = safeStorage.getItem('content_chunks_cache') || '{}';
-           const cachedChunks = JSON.parse(cachedChunksRaw);
-           const cachedShardsRaw = safeStorage.getItem('search_shards_cache') || '{}';
-           const cachedShards = JSON.parse(cachedShardsRaw);
+              const parsedContent: Content[] = allData.map(item => {
+                const [id, title, year, posterUrl, type, qualityId, langIds, genreIds, createdAt, order, seasonsInfo] = item.split('|');
+                const seasons = seasonsInfo ? seasonsInfo.split(',').map(s => {
+                  const [sNum, lastEp] = s.split(':');
+                  return {
+                    id: `s${sNum}`,
+                    seasonNumber: parseInt(sNum, 10),
+                    episodes: lastEp ? [{ id: 'last', episodeNumber: parseInt(lastEp, 10), title: '', url: '' }] : []
+                  };
+                }) : [];
 
-           let pruned = false;
-           if (isAdminOrEditor) {
-             const chunkIds = Object.keys(cachedChunks);
-             if (chunkIds.length > currentContentChunkCount) {
-                chunkIds.forEach(id => {
-                  const idx = parseInt(id.replace('chunk_', ''), 10);
-                  if (idx >= currentContentChunkCount) {
-                    delete cachedChunks[id];
-                    pruned = true;
-                  }
-                });
-                if (pruned) safeStorage.setItem('content_chunks_cache', JSON.stringify(cachedChunks));
-             }
-           } else {
-             const shardIds = Object.keys(cachedShards);
-             if (shardIds.length > currentSearchShardCount) {
-                shardIds.forEach(id => {
-                  const idx = parseInt(id.replace('shard_', ''), 10);
-                  if (idx >= currentSearchShardCount) {
-                    delete cachedShards[id];
-                    pruned = true;
-                  }
-                });
-                if (pruned) safeStorage.setItem('search_shards_cache', JSON.stringify(cachedShards));
-             }
-           }
-           
-           if (!pruned) {
-             setLoading(false);
-             return;
-           }
-        } else {
-           // First time or no content, proceed to fetch
-        }
+                return {
+                  id, title, year, posterUrl, type: type as 'movie' | 'series', qualityId,
+                  languageIds: langIds ? langIds.split(',') : [],
+                  genreIds: genreIds ? genreIds.split(',') : [],
+                  createdAt, order: (order !== undefined && order !== '') ? parseInt(order, 10) : undefined,
+                  seasons, status: 'published', description: '', trailerUrl: '', cast: [], updatedAt: createdAt
+                } as unknown as Content;
+              });
+              try {
+                safeStorage.setItem('content_cache', JSON.stringify(parsedContent));
+              } catch (e) {
+                console.error("Failed to save content cache", e);
+              }
+              if (isMounted) {
+                setContentList(parsedContent);
+                setLoading(false);
+              }
+            } else {
+              // Final fallback if no chunks found
+              if (isMounted) setLoading(false);
+            }
+          } catch (error) {
+            console.error("Search index chunks fetch error:", error);
+            if (isMounted) setLoading(false);
+          }
+        };
 
-        // Data changed or pruning needed, fetch fresh chunks
-        console.log("Content sync trigger detected...");
-        if (isAdminOrEditor) {
-          await fetchAdminContent();
-        } else {
-          await fetchUserContent();
-        }
-        if (lastUpdated) safeStorage.setItem('content_last_sync', lastUpdated);
-      }, (err) => {
-        console.error("Sync metadata listener error:", err);
-        // Fallback to fetch once if listener fails (e.g. permission issues or first time)
-        if (contentList.length === 0) {
-          isAdminOrEditor ? fetchAdminContent() : fetchUserContent();
-        }
-      });
-
-      unsubContent = () => {
-        if (unsubSync) unsubSync();
-      };
+        fetchUserContent();
+        const intervalId = setInterval(fetchUserContent, 10 * 60 * 1000); // 10 mins backoff for users
+        unsubContent = () => {
+          isMounted = false;
+          clearInterval(intervalId);
+        };
+      }
     };
 
     setupContentListener();
@@ -490,28 +400,6 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       if (timer) clearTimeout(timer);
     };
   }, [contentList, profile?.role]); // Changed from length to contentList for deeper check
-
-  // Automatic chunk health check for owners
-  useEffect(() => {
-    if (profile?.role === 'owner' && contentList.length > 0 && !loading) {
-      const hasAutoRepaired = sessionStorage.getItem('auto_repair_done');
-      if (!hasAutoRepaired) {
-        // Run after a short delay to not interfere with initial load
-        const timer = setTimeout(async () => {
-          console.log("Running automatic chunk health check using local storage...");
-          try {
-            const cachedChunksRaw = safeStorage.getItem('content_chunks_cache') || '{}';
-            const cachedChunks = JSON.parse(cachedChunksRaw);
-            await repairChunks(undefined, cachedChunks);
-            sessionStorage.setItem('auto_repair_done', 'true');
-          } catch (e) {
-            console.error("Auto repair error:", e);
-          }
-        }, 5000);
-        return () => clearTimeout(timer);
-      }
-    }
-  }, [profile?.role, contentList.length, loading]);
 
   return (
     <ContentContext.Provider value={{ contentList: augmentedContentList, genres, languages, qualities, collections, loading, isOffline, updateSearchIndex }}>

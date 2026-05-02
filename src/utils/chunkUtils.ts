@@ -26,25 +26,6 @@ export async function fetchAllFromChunks<T>(collectionName: string, mergeFn: (da
 }
 
 /**
- * Updates the sync metadata to trigger clients to refresh their cache
- */
-async function updateSyncMetadata(): Promise<void> {
-  try {
-    const chunksSnap = await getDocs(collection(db, 'content_chunks'));
-    const searchSnap = await getDocs(collection(db, 'search_index_chunks'));
-    
-    await setDoc(doc(db, 'metadata', 'content_sync'), {
-      lastUpdated: new Date().toISOString(),
-      updatedBy: 'system',
-      contentChunkCount: chunksSnap.docs.length,
-      searchShardCount: searchSnap.docs.length
-    }, { merge: true });
-  } catch (e) {
-    console.error("Failed to update sync metadata", e);
-  }
-}
-
-/**
  * Saves or updates a single content item in the appropriate chunk
  */
 export async function saveContentToChunk(content: Content): Promise<void> {
@@ -66,8 +47,7 @@ export async function saveContentToChunk(content: Content): Promise<void> {
     // Update existing
     const docRef = targetDoc.ref;
     batch.update(docRef, {
-      [`items.${content.id}`]: content,
-      updatedAt: new Date().toISOString()
+      [`items.${content.id}`]: content
     });
   } else {
     // Add new - Find first chunk with space
@@ -78,8 +58,7 @@ export async function saveContentToChunk(content: Content): Promise<void> {
       const items = doc.data().items || {};
       if (Object.keys(items).length < CONTENT_CHUNK_SIZE) {
         batch.update(doc.ref, {
-          [`items.${content.id}`]: content,
-          updatedAt: new Date().toISOString()
+          [`items.${content.id}`]: content
         });
         foundSpace = true;
         break;
@@ -91,14 +70,12 @@ export async function saveContentToChunk(content: Content): Promise<void> {
       const nextId = `chunk_${chunksSnap.docs.length}`;
       const newRef = doc(db, 'content_chunks', nextId);
       batch.set(newRef, {
-        items: { [content.id]: content },
-        updatedAt: new Date().toISOString()
+        items: { [content.id]: content }
       });
     }
   }
 
   await batch.commit();
-  await updateSyncMetadata();
 }
 
 /**
@@ -151,103 +128,57 @@ export async function saveContentsToChunks(contents: Content[]): Promise<void> {
   for (const chunkId of updatedChunkIds) {
     const chunk = currentChunks.find(c => c.id === chunkId);
     if (chunk) {
-      batch.set(doc(db, 'content_chunks', chunkId), { 
-        items: chunk.items,
-        updatedAt: new Date().toISOString()
-      });
+      batch.set(doc(db, 'content_chunks', chunkId), { items: chunk.items });
     }
   }
 
   await batch.commit();
-  await updateSyncMetadata();
 }
 
 /**
- * Repairs chunks by ensuring required fields like updatedAt are present and items are consistent.
- * Also performs any necessary cleanups.
+ * Migrates data from legacy 'content' collection to 'content_chunks'
+ * Moves data and then deletes from the legacy collection
  */
-export async function repairChunks(
-    onProgress?: (count: number) => void,
-    localChunks?: Record<string, any>
-): Promise<{ repaired: number, errors: number }> {
-    console.log("Starting chunk repair process...");
+export async function migrateLegacyContent(onProgress?: (count: number) => void): Promise<{ migrated: number, errors: number }> {
+    console.log("Starting legacy data migration from 'content' collection...");
+    const legacySnap = await getDocs(collection(db, 'content'));
+    const legacyDocs = legacySnap.docs.map(d => ({ id: d.id, ...d.data() } as Content));
     
-    let repaired = 0;
+    console.log(`Found ${legacyDocs.length} legacy content items.`);
+    if (legacyDocs.length === 0) return { migrated: 0, errors: 0 };
+
+    let migrated = 0;
     let errors = 0;
-    const batch = writeBatch(db);
-    let needsCommit = false;
 
-    if (localChunks && Object.keys(localChunks).length > 0) {
-        // Use provided local data for check
-        for (const [id, data] of Object.entries(localChunks)) {
-            let chunkNeedsUpdate = false;
-            
-            // Fix chunk itself
-            if (!data.updatedAt) chunkNeedsUpdate = true;
-            
-            // Fix items
-            const items = data.items || {};
-            for (const [itemId, item] of Object.entries(items)) {
-                if (!(item as any).id) {
-                    (items[itemId] as any).id = itemId;
-                    chunkNeedsUpdate = true;
-                }
-            }
-            
-            if (chunkNeedsUpdate) {
-                batch.update(doc(db, 'content_chunks', id), {
-                    items,
-                    updatedAt: new Date().toISOString()
-                });
-                needsCommit = true;
-                repaired++;
-            }
-            if (onProgress) onProgress(repaired);
-        }
-    } else {
-        // Fallback to fetching fresh snapshot if no local data
-        const chunksSnap = await getDocs(collection(db, 'content_chunks'));
-        for (const chunkDoc of chunksSnap.docs) {
-            const data = chunkDoc.data();
-            let chunkNeedsUpdate = false;
-            
-            if (!data.updatedAt) chunkNeedsUpdate = true;
-            
-            const items = data.items || {};
-            for (const [id, item] of Object.entries(items)) {
-                if (!(item as any).id) {
-                    (items[id] as any).id = id;
-                    chunkNeedsUpdate = true;
-                }
-            }
-
-            if (chunkNeedsUpdate) {
-                batch.update(chunkDoc.ref, {
-                    items,
-                    updatedAt: new Date().toISOString()
-                });
-                needsCommit = true;
-                repaired++;
-            }
-            if (onProgress) onProgress(repaired);
-        }
-    }
-
-    if (needsCommit) {
+    // Process in smaller batches for Firestore stability
+    const batchSize = 50;
+    for (let i = 0; i < legacyDocs.length; i += batchSize) {
+        const batch = legacyDocs.slice(i, i + batchSize);
         try {
-            await batch.commit();
-            await updateSyncMetadata();
+            console.log(`Processing batch of ${batch.length} items (${migrated + batch.length}/${legacyDocs.length})...`);
+            
+            // 1. Save to chunks
+            await saveContentsToChunks(batch);
+            
+            // 2. Delete legacy docs from batch
+            const deleteBatch = writeBatch(db);
+            batch.forEach(docItem => {
+                deleteBatch.delete(doc(db, 'content', docItem.id));
+            });
+            await deleteBatch.commit();
+
+            migrated += batch.length;
+            if (onProgress) onProgress(migrated);
+            console.log(`Batch successful. Total migrated: ${migrated}`);
         } catch (e) {
-            console.error("Repair commit error:", e);
-            errors = repaired;
-            repaired = 0;
+            console.error("Migration batch error:", e);
+            errors += batch.length;
         }
     }
 
-    console.log(`Repair finished. Repaired: ${repaired}, Errors: ${errors}`);
-    return { repaired, errors };
+    console.log(`Migration finished. Migrated: ${migrated}, Errors: ${errors}`);
+    return { migrated, errors };
 }
-
 
 /**
  * Deletes a content item from its chunk
@@ -259,10 +190,8 @@ export async function deleteContentFromChunk(contentId: string): Promise<void> {
     const items = chunkDoc.data().items || {};
     if (items[contentId]) {
       await updateDoc(chunkDoc.ref, {
-        [`items.${contentId}`]: deleteField(),
-        updatedAt: new Date().toISOString()
+        [`items.${contentId}`]: deleteField()
       });
-      await updateSyncMetadata();
       return;
     }
   }
@@ -284,10 +213,7 @@ export async function saveSearchIndexToChunks(entries: string[]): Promise<void> 
     const chunkData = entries.slice(start, end);
     
     const docRef = doc(db, 'search_index_chunks', `shard_${i}`);
-    batch.set(docRef, { 
-      data: chunkData,
-      updatedAt: new Date().toISOString()
-    });
+    batch.set(docRef, { data: chunkData });
   }
   
   // Cleanup extra shards if any (e.g. if content decreased)
@@ -300,5 +226,4 @@ export async function saveSearchIndexToChunks(entries: string[]): Promise<void> 
   });
 
   await batch.commit();
-  await updateSyncMetadata();
 }

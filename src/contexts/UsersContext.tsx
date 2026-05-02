@@ -54,8 +54,8 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     
     fetchUsers();
     
-    // Refresh every 20 minutes
-    const intervalId = setInterval(fetchUsers, 20 * 60 * 1000);
+    // Refresh every 5 minutes
+    const intervalId = setInterval(fetchUsers, 5 * 60 * 1000);
     
     return () => clearInterval(intervalId);
   }, [profile?.role]);
