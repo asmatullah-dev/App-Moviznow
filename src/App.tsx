@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { Suspense, lazy, useState, useEffect } from 'react';
+import { Analytics as VercelAnalytics } from '@vercel/analytics/react';
 import { AuthProvider } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { ContentProvider } from './contexts/ContentContext';
@@ -127,6 +128,7 @@ export default function App() {
                   </Routes>
                 </Suspense>
               </BrowserRouter>
+              <VercelAnalytics />
             </PWAProvider>
             </CartProvider>
           </ContentProvider>
