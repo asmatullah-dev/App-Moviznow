@@ -14,7 +14,7 @@ import ConfirmModal from '../../components/ConfirmModal';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatContentTitle, formatReleaseDate, formatRuntime, getContrastColor } from '../../utils/contentUtils';
-import { getContentFromChunks, updateContentFieldsInChunks, deleteContentFromChunk } from '../../utils/chunkUtils';
+import { updateContentFieldsInChunks, deleteContentFromChunk } from '../../utils/chunkUtils';
 import { generateTinyUrl } from '../../utils/tinyurl';
 import { MediaModal } from '../../components/MediaModal';
 import ContentCard from '../../components/ContentCard';
@@ -25,7 +25,7 @@ import { useSettings } from '../../contexts/SettingsContext';
 export default function MovieDetails() {
   const { id } = useParams<{ id: string }>();
   const { profile, loading: profileLoading, toggleFavorite: authToggleFavorite, toggleWatchLater: authToggleWatchLater } = useAuth();
-  const { contentList, genres, languages, qualities, loading: contentLoading, isOffline } = useContent();
+  const { contentList, genres, languages, qualities, loading: contentLoading, isOffline, getContent } = useContent();
   const { cart, addToCart } = useCart();
   const { settings } = useSettings();
   const content = useMemo(() => {
@@ -203,7 +203,7 @@ export default function MovieDetails() {
       hasFetchedFull.current[id] = true;
       const fetchFullContent = async () => {
         try {
-          const data = await getContentFromChunks(id);
+          const data = await getContent(id);
           if (data) {
             setFullContent(data);
             localStorage.setItem(`movie_details_${id}`, JSON.stringify(data));

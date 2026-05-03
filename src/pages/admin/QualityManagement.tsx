@@ -13,7 +13,7 @@ import { useModalBehavior } from '../../hooks/useModalBehavior';
 import { useContent } from '../../contexts/ContentContext';
 
 export default function QualityManagement() {
-  const { qualities, updateSearchIndex } = useContent();
+  const { qualities } = useContent();
   const [newQuality, setNewQuality] = useState('');
   const [newColor, setNewColor] = useState('#10b981');
   const [editingId, setEditingId] = useState<string | null>(null);

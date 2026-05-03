@@ -4,30 +4,25 @@ import { Content } from '../types';
 
 export const CONTENT_CHUNK_MOVIE_SIZE = 800;
 export const CONTENT_CHUNK_SERIES_SIZE = 300;
-export const SEARCH_CHUNK_SIZE = 1000; 
+// No search chunk size needed anymore as we use only content chunks
 
 const FIELD_MAP: Record<string, string> = {
-  originalTitle: 'oti',
   year: 'yea',
-  duration: 'dur',
   qualityId: 'qua',
-  trailerYoutubeId: 'tra',
   languageIds: 'lan',
   genreIds: 'gen',
   posterUrl: 'pos',
-  backdropUrl: 'bac',
-  contentUrl: 'url',
   seasons: 'sea',
-  director: 'dir',
-  rating: 'rat',
-  tags: 'tag',
   status: 'sta',
   createdAt: 'cre',
   updatedAt: 'upd',
-  addedBy: 'add',
+  addedBy: 'uid',
   title: 'tit',
-  imdbLink: 'imd',
+  imdbLink: 'imdb',
   movieLinks: 'lik',
+  trailerUrl: 'trai',
+  runtime: 'run',
+  releaseDate: 'rdte',
 };
 
 const REVERSE_FIELD_MAP: Record<string, string> = Object.fromEntries(
@@ -83,7 +78,11 @@ export function minifyContent(content: any): any {
     }
     
     const shortKey = FIELD_MAP[key] || key;
-    minified[shortKey] = value;
+    if (['genreIds', 'languageIds'].includes(key) && Array.isArray(value)) {
+      minified[shortKey] = value.join(',');
+    } else {
+      minified[shortKey] = value;
+    }
   }
   return minified;
 }
@@ -94,6 +93,7 @@ export function expandContent(minified: any, chunkId?: string): Content {
   if (chunkId) {
       if (chunkId.startsWith('movie_')) expanded.type = 'movie';
       if (chunkId.startsWith('series_')) expanded.type = 'series';
+      expanded.chunkId = chunkId;
   } else {
       expanded.type = minified.sea ? 'series' : 'movie';
   }
@@ -139,7 +139,11 @@ export function expandContent(minified: any, chunkId?: string): Content {
         continue;
     }
     
-    expanded[longKey] = value;
+    if (['genreIds', 'languageIds'].includes(longKey) && typeof value === 'string') {
+        expanded[longKey] = value ? value.split(',') : [];
+    } else {
+        expanded[longKey] = value;
+    }
   }
   return expanded as Content;
 }
@@ -157,13 +161,9 @@ export interface ContentChunk {
   items: Record<string, Content>;
 }
 
-export interface SearchIndexChunk {
-  data: string[];
-}
-
 export function cleanContentForChunk(content: Content): Content {
   const cleaned: any = { ...content };
-  delete cleaned.order;
+  // delete cleaned.order; // PRESERVE ORDER
   delete cleaned.trailerYoutubeTitle;
   delete cleaned.type;
 
@@ -434,7 +434,7 @@ export async function getContentFromChunks(contentId: string): Promise<Content |
 /**
  * Scans all chunks in Firestore and ensures chunk_meta/versions is up to date
  */
-export async function repairChunkMetadata(): Promise<{ repairedContent: number, repairedSearch: number }> {
+export async function repairChunkMetadata(): Promise<{ repairedContent: number }> {
   const batch = writeBatch(db);
   const now = Date.now();
 
@@ -446,64 +446,10 @@ export async function repairChunkMetadata(): Promise<{ repairedContent: number, 
   });
   batch.set(doc(db, 'chunk_meta', 'versions'), contentVersions);
 
-  // 2. Repair search_index_chunks
-  const searchSnap = await getDocs(collection(db, 'search_index_chunks'));
-  const searchVersions: Record<string, number> = {};
-  searchSnap.docs.forEach(d => {
-    searchVersions[d.id] = now;
-  });
-  batch.set(doc(db, 'chunk_meta', 'search_index_versions'), searchVersions);
-
   await batch.commit();
   return { 
-    repairedContent: contentSnap.size, 
-    repairedSearch: searchSnap.size 
+    repairedContent: contentSnap.size
   };
-}
-
-function registerSearchIndexUpdates(shardIds: string[], batch: WriteBatch) {
-  const metaRef = doc(db, 'chunk_meta', 'search_index_versions');
-  const updates: Record<string, number> = {};
-  shardIds.forEach(id => {
-    updates[id] = Date.now();
-  });
-  batch.set(metaRef, updates, { merge: true });
-}
-
-/**
- * Updates the search index chunks with a fresh list of entries
- */
-export async function saveSearchIndexToChunks(entries: string[]): Promise<void> {
-  const batch = writeBatch(db);
-  
-  // Clear old chunks first? Or just overwrite.
-  // Overwriting is safer if we know the total shards.
-  const shardsCount = Math.ceil(entries.length / SEARCH_CHUNK_SIZE);
-  const updatedShardIds: string[] = [];
-  
-  for (let i = 0; i < shardsCount; i++) {
-    const start = i * SEARCH_CHUNK_SIZE;
-    const end = start + SEARCH_CHUNK_SIZE;
-    const chunkData = entries.slice(start, end);
-    const shardId = `shard_${i}`;
-    
-    const docRef = doc(db, 'search_index_chunks', shardId);
-    batch.set(docRef, { data: chunkData });
-    updatedShardIds.push(shardId);
-  }
-  
-  // Cleanup extra shards if any (e.g. if content decreased)
-  const existingShards = await getDocs(collection(db, 'search_index_chunks'));
-  existingShards.docs.forEach(d => {
-    const index = parseInt(d.id.replace('shard_', ''), 10);
-    if (index >= shardsCount) {
-      batch.delete(d.ref);
-    }
-  });
-
-  registerSearchIndexUpdates(updatedShardIds, batch);
-
-  await batch.commit();
 }
 
 /**
@@ -526,8 +472,19 @@ export async function rebuildAllChunks(contents: Content[]): Promise<number> {
   }
 
   // 2. Prepare new chunks
-  const movies = contents.filter(c => c.type === 'movie').map(cleanContentForChunk);
-  const series = contents.filter(c => c.type === 'series').map(cleanContentForChunk);
+  // Sort global content by order then by createdAt (added time)
+  const sortedContent = [...contents].sort((a, b) => {
+    const orderA = a.order ?? Number.MAX_SAFE_INTEGER;
+    const orderB = b.order ?? Number.MAX_SAFE_INTEGER;
+    if (orderA !== orderB) return orderA - orderB;
+    
+    const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    return timeA - timeB;
+  });
+
+  const movies = sortedContent.filter(c => c.type === 'movie').map(cleanContentForChunk);
+  const series = sortedContent.filter(c => c.type === 'series').map(cleanContentForChunk);
 
   const chunkDocs: Record<string, any> = {};
 

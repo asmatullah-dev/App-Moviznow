@@ -1,7 +1,16 @@
 import { Content, Season } from '../types';
 
 export const formatContentTitle = (content: Content) => {
-  if (content.type === 'movie' || !content.seasons) {
+  if (content.type === 'movie') {
+    return content.title;
+  }
+
+  // Use the pre-formatted seasonsCountText from search index if available and seasons are not loaded
+  if (!content.seasons && (content as any).seasonsCountText) {
+    return `${content.title} (${(content as any).seasonsCountText})`;
+  }
+
+  if (!content.seasons) {
     return content.title;
   }
 

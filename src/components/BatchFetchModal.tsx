@@ -6,7 +6,8 @@ import { LinkCheckResult, performFullLinkScan, guessLinkType } from '../utils/li
 import { searchTMDBByTitle, fetchTMDBDetails, fetchSeriesSeasons, fetchIMDbRating, getBestTrailer, searchYouTubeTrailer, fetchKinoCheckTrailer } from './MediaModal';
 import { db } from '../firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { getContentFromChunks, updateContentFieldsInChunks } from '../utils/chunkUtils';
+import { useContent } from '../contexts/ContentContext';
+import { updateContentFieldsInChunks } from '../utils/chunkUtils';
 
 interface Props {
   isOpen: boolean;
@@ -23,6 +24,7 @@ export const BatchFetchModal: React.FC<Props> = ({
   mode,
   genres,
 }) => {
+  const { getContent } = useContent();
   const [progress, setProgress] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [results, setResults] = useState<{ id: string; title: string; status: 'success' | 'error' | 'pending'; message?: string }[]>([]);
@@ -83,7 +85,7 @@ export const BatchFetchModal: React.FC<Props> = ({
        if (!isOpen || isCancelled) return;
 
        try {
-         const data = await getContentFromChunks(id);
+         const data = await getContent(id);
          if (!data) {
            updateResult(id, 'error', 'Not found');
            return;

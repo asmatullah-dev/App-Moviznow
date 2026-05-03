@@ -13,7 +13,7 @@ import { useModalBehavior } from '../../hooks/useModalBehavior';
 import { useContent } from '../../contexts/ContentContext';
 
 export default function GenreManagement() {
-  const { genres, updateSearchIndex } = useContent();
+  const { genres } = useContent();
   const [newGenre, setNewGenre] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');

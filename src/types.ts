@@ -181,6 +181,7 @@ export interface Content {
   subtitles?: boolean; // Added subtitles
   country?: string; // Added country
   order?: number; // Added order for sorting
+  chunkId?: string; // Added chunkId for lazy loading
 }
 
 export interface CartItem {

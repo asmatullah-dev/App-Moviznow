@@ -13,7 +13,7 @@ import { useModalBehavior } from '../../hooks/useModalBehavior';
 import { useContent } from '../../contexts/ContentContext';
 
 export default function LanguageManagement() {
-  const { languages, updateSearchIndex } = useContent();
+  const { languages } = useContent();
   const [newLanguage, setNewLanguage] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');

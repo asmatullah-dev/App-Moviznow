@@ -7,7 +7,6 @@ import { useAuth } from './AuthContext';
 import { useUsers } from './UsersContext';
 import { Content, Genre, Language, Quality, Collection as AppCollection } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
-import { saveSearchIndexToChunks } from '../utils/chunkUtils';
 
 interface ContentContextType {
   contentList: Content[];
@@ -17,8 +16,8 @@ interface ContentContextType {
   collections: AppCollection[];
   loading: boolean;
   isOffline: boolean;
-  updateSearchIndex: () => Promise<void>;
   updateOrder: (updates: {id: string, order: number}[]) => void;
+  getContent: (id: string) => Promise<Content | null>;
 }
 
 const ContentContext = createContext<ContentContextType | undefined>(undefined);
@@ -92,173 +91,113 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const isAdminOrEditor = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
     let unsubContent: (() => void) | undefined = undefined;
 
     const setupListener = async () => {
-      if (isAdminOrEditor) {
-        const q = doc(db, 'chunk_meta', 'versions');
-        unsubContent = onSnapshot(q, async (snapshot) => {
-          let versions = snapshot.data() || {};
-          
-          if (Object.keys(versions).length === 0) {
-            try {
-              const chunksSnap = await getDocs(collection(db, 'content_chunks'));
-              const newVersions: Record<string, number> = {};
-              chunksSnap.docs.forEach(d => {
-                newVersions[d.id] = Date.now();
-                safeStorage.setItem('content_chunk_' + d.id, JSON.stringify(d.data().items || {}));
-              });
-              versions = newVersions;
-            } catch(e) {
-              console.error("Failed to bootstrap chunks", e);
-            }
-          }
-
-          let localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
-          let localMeta: Record<string, number> = {};
+      const q = doc(db, 'chunk_meta', 'versions');
+      unsubContent = onSnapshot(q, async (snapshot) => {
+        let versions = snapshot.data() || {};
+        
+        if (Object.keys(versions).length === 0) {
           try {
-             localMeta = JSON.parse(localMetaString);
-          } catch(e) {}
-          
-          const chunksToFetch: string[] = [];
-          for (const [chunkId, version] of Object.entries(versions)) {
-            const hasData = !!safeStorage.getItem('content_chunk_' + chunkId);
-            if (!hasData || !localMeta[chunkId] || localMeta[chunkId] < (version as number)) {
-              chunksToFetch.push(chunkId);
-            }
-          }
-          
-          if (chunksToFetch.length > 0) {
-              await Promise.all(chunksToFetch.map(async (chunkId) => {
-                 try {
-                     const chunkDoc = await getDoc(doc(db, 'content_chunks', chunkId));
-                     if (chunkDoc.exists()) {
-                         const items = chunkDoc.data().items || {};
-                         safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(items));
-                         localMeta[chunkId] = versions[chunkId] as number;
-                     }
-                 } catch(e) { console.error(e); }
-              }));
-              
-              safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
-          }
-          
-          const rawContentMap: Record<string, Content> = {};
-          for (const chunkId of Object.keys(versions)) {
-              const chunkStr = safeStorage.getItem('content_chunk_' + chunkId);
-              if (chunkStr) {
-                  try {
-                      const items = JSON.parse(chunkStr);
-                      Object.values(items).forEach((item: any) => {
-                          const expanded = expandContent(item, chunkId);
-                          rawContentMap[expanded.id] = expanded;
-                      });
-                  } catch(e) {}
-              }
-          }
-          const rawContent = Object.values(rawContentMap);
-          
-          // Merge order from search index into chunks since it's removed from chunks
-          try {
-            const indexSnap = await getDocs(collection(db, 'search_index_chunks'));
-            if (!indexSnap.empty) {
-              const allData: string[] = [];
-              const docs = [...indexSnap.docs].sort((a, b) => a.id.localeCompare(b.id));
-              docs.forEach(d => { if (d.data().data) allData.push(...d.data().data); });
-              
-              const orderMap: Record<string, number> = {};
-              allData.forEach(item => {
-                const parts = item.split('|');
-                const id = parts[0];
-                const order = parts[9];
-                if (order) orderMap[id] = parseInt(order, 10);
-              });
-              
-              rawContent.forEach(c => {
-                if (orderMap[c.id] !== undefined) {
-                  c.order = orderMap[c.id];
-                }
-              });
-            }
-          } catch(e) {
-             console.error("Error merging order from search index", e);
-          }
-          
-          try {
-            // Priority: save FULL data in cache for admins
-            if (isAdminOrEditor) {
-              safeStorage.setItem('content_cache', JSON.stringify(rawContent));
-            } else {
-              // For non-admins, always prefer sanitized version to save space
-              throw new Error("Force sanitization for non-admins");
-            }
-          } catch (e) {
-            // Failover to sanitized cache if localStorage is full or if user is not admin
-            const sanitized = rawContent.map(c => {
-              let minimalSeasons: any[] = [];
-              if (c.seasons) {
-                try {
-                  const parsed = Array.isArray(c.seasons) ? c.seasons : JSON.parse(c.seasons as string);
-                  minimalSeasons = parsed.map((s: any) => ({
-                    seasonNumber: s.seasonNumber,
-                    episodes: s.episodes && s.episodes.length > 0 ? [{ episodeNumber: s.episodes[s.episodes.length - 1].episodeNumber }] : []
-                  }));
-                } catch(err) {}
-              }
-              // For admins, we try to preserve links if we can, but if we reached here it means it's full.
-              return { 
-                ...c, 
-                movieLinks: undefined, 
-                seasons: minimalSeasons.length > 0 ? minimalSeasons : undefined,
-                _isMinimal: true
-              };
+            const chunksSnap = await getDocs(collection(db, 'content_chunks'));
+            const newVersions: Record<string, number> = {};
+            chunksSnap.docs.forEach(d => {
+              newVersions[d.id] = Date.now();
+              safeStorage.setItem('content_chunk_' + d.id, JSON.stringify(d.data().items || {}));
             });
-            safeStorage.setItem('content_cache', JSON.stringify(sanitized));
+            versions = newVersions;
+          } catch(e) {
+            console.error("Failed to bootstrap chunks", e);
           }
-          
-          setContentList(rawContent);
-          setLoading(false);
-        }, (error) => {
-          console.error("Admin content error:", error);
-          handleFirestoreError(error, OperationType.GET, 'chunk_meta');
-          setLoading(false);
-        });
-      } else {
-        // User Path
-        const fetchUserContent = async () => {
-          try {
-            const indexSnap = await getDocs(collection(db, 'search_index_chunks'));
-            if (!indexSnap.empty) {
-              const allData: string[] = [];
-              const docs = [...indexSnap.docs].sort((a, b) => a.id.localeCompare(b.id));
-              docs.forEach(d => { if (d.data().data) allData.push(...d.data().data); });
-              
-              const parsed = allData.map(item => {
-                const [id, title, year, posterUrl, type, qualityId, langIds, genreIds, createdAt, order, seasonsInfo] = item.split('|');
-                return {
-                  id, title, year: parseInt(year), posterUrl, type: type as 'movie' | 'series', 
-                  qualityId, languageIds: langIds ? langIds.split(',') : [],
-                  genreIds: genreIds ? genreIds.split(',') : [],
-                  createdAt, order: order ? parseInt(order) : undefined,
-                  seasonsCountText: seasonsInfo, 
-                  status: 'published'
-                } as unknown as Content;
-              });
+        }
 
-              safeStorage.setItem('content_cache', JSON.stringify(parsed));
-              setContentList(parsed);
-              setLoading(false);
-            }
-          } catch (e) {
-            console.error("User content error:", e);
-            setLoading(false);
+        let localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+        let localMeta: Record<string, number> = {};
+        try {
+           localMeta = JSON.parse(localMetaString);
+        } catch(e) {}
+        
+        const chunksToFetch: string[] = [];
+        for (const [chunkId, version] of Object.entries(versions)) {
+          const hasData = !!safeStorage.getItem('content_chunk_' + chunkId);
+          if (!hasData || !localMeta[chunkId] || localMeta[chunkId] < (version as number)) {
+            chunksToFetch.push(chunkId);
           }
-        };
-        fetchUserContent();
-        const tid = setInterval(fetchUserContent, 10 * 60 * 1000);
-        unsubContent = () => clearInterval(tid);
-      }
+        }
+        
+        if (chunksToFetch.length > 0) {
+            await Promise.all(chunksToFetch.map(async (chunkId) => {
+               try {
+                   const chunkDoc = await getDoc(doc(db, 'content_chunks', chunkId));
+                   if (chunkDoc.exists()) {
+                       const items = chunkDoc.data().items || {};
+                       safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(items));
+                       localMeta[chunkId] = versions[chunkId] as number;
+                   }
+               } catch(e) { console.error(e); }
+            }));
+            
+            safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+        }
+        
+        const rawContentMap: Record<string, Content> = {};
+        for (const chunkId of Object.keys(versions)) {
+            const chunkStr = safeStorage.getItem('content_chunk_' + chunkId);
+            if (chunkStr) {
+                try {
+                    const items = JSON.parse(chunkStr);
+                    Object.values(items).forEach((item: any) => {
+                        const expanded = expandContent(item, chunkId);
+                        rawContentMap[expanded.id] = expanded;
+                    });
+                } catch(e) {}
+            }
+        }
+        const rawContent = Object.values(rawContentMap);
+        rawContent.sort((a, b) => (a.order || 0) - (b.order || 0));
+
+        const isAdminOrEditor = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
+        
+        try {
+          if (isAdminOrEditor) {
+            safeStorage.setItem('content_cache', JSON.stringify(rawContent));
+          } else {
+            throw new Error("Sanitize for users");
+          }
+        } catch (e) {
+          const sanitized = rawContent.map(c => {
+            let minimalSeasons: any[] = [];
+            if (c.seasons) {
+              try {
+                const parsed = Array.isArray(c.seasons) ? c.seasons : JSON.parse(c.seasons as string);
+                minimalSeasons = parsed.map((s: any) => ({
+                  seasonNumber: s.seasonNumber,
+                  episodes: s.episodes && s.episodes.length > 0 ? [{ episodeNumber: s.episodes[s.episodes.length - 1].episodeNumber }] : []
+                }));
+              } catch(err) {}
+            }
+            return { 
+              ...c, 
+              movieLinks: undefined, 
+              seasons: minimalSeasons.length > 0 ? minimalSeasons : undefined,
+              _isMinimal: true
+            };
+          });
+          safeStorage.setItem('content_cache', JSON.stringify(sanitized));
+          // If the user isn't an admin, we might want to serve them the sanitized list to save memory, 
+          // but the instruction says "use chunks... parse them and use in Every where", 
+          // so I will keep rawContent as long as it fits in memory.
+          // Actually, setContentList(rawContent) is fine.
+        }
+        
+        setContentList(rawContent);
+        setLoading(false);
+      }, (error) => {
+        console.error("Content listener error:", error);
+        handleFirestoreError(error, OperationType.GET, 'chunk_meta');
+        setLoading(false);
+      });
     };
 
     setupListener();
@@ -316,71 +255,6 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     return () => unsubs.forEach(u => u());
   }, [profile?.role, authProfileLoading]);
 
-  const lastSearchIndexRef = useRef<string>('');
-
-  const updateSearchIndex = async () => {
-    if (contentList.length === 0) return;
-    
-    // Safeguard: Do not update search index if the list is suspiciously small 
-    // compared to previous state, unless explicitly forced or empty initially.
-    const cachedStr = safeStorage.getItem('content_cache');
-    if (cachedStr) {
-      try {
-        const cached = JSON.parse(cachedStr);
-        if (Array.isArray(cached) && cached.length > 50 && contentList.length < cached.length * 0.5) {
-          console.warn(`[Safeguard] Potential index pruning detected. Current: ${contentList.length}, Cached: ${cached.length}. Skipping update.`);
-          return;
-        }
-      } catch (e) {}
-    }
-
-    const published = contentList.filter(c => c.status === 'published');
-    
-    let maxOrder = -1;
-    published.forEach(c => {
-      if (c.order !== undefined && c.order > maxOrder) maxOrder = c.order;
-    });
-
-    published.forEach(c => {
-      if (c.order === undefined) {
-        maxOrder++;
-        c.order = maxOrder;
-      }
-    });
-
-    published.sort((a, b) => (a.order || 0) - (b.order || 0));
-    
-    const index = published.map(c => {
-      let seasonsInfoStr = '';
-      if (c.type === 'series' && c.seasons) {
-        try {
-          const s = Array.isArray(c.seasons) ? c.seasons : JSON.parse(c.seasons as string);
-          if (s.length > 1) {
-            seasonsInfoStr = `S:${s.length}`;
-          } else if (s.length === 1 && s[0].episodes) {
-            seasonsInfoStr = `E:${s[0].episodes.length}`;
-          }
-        } catch(e) {}
-      }
-      return `${c.id}|${c.title}|${c.year}||${c.type}|${c.qualityId || ''}|${c.languageIds?.join(',') || ''}|${c.genreIds?.join(',') || ''}|${c.createdAt}|${c.order || 0}|${seasonsInfoStr}`;
-    });
-
-    const indexStr = JSON.stringify(index);
-    if (indexStr === lastSearchIndexRef.current) return;
-
-    try {
-      await saveSearchIndexToChunks(index);
-      lastSearchIndexRef.current = indexStr;
-    } catch (e) {}
-  };
-
-  useEffect(() => {
-    if (profile?.role === 'owner' && contentList.length > 0 && navigator.onLine) {
-      const t = setTimeout(updateSearchIndex, 10000); // 10s debounce
-      return () => clearTimeout(t);
-    }
-  }, [contentList, profile?.role]);
-
   const updateOrder = (updates: {id: string, order: number}[]) => {
     setContentList(prev => {
       const newList = [...prev];
@@ -394,8 +268,73 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
+  const getContent = async (id: string): Promise<Content | null> => {
+    const item = contentList.find(c => c.id === id);
+    if (!item) return null;
+
+    // If it has links or seasons, it's already full
+    const isFull = !!item.movieLinks || (item.type === 'series' && item.seasons);
+    if (isFull) return item;
+
+    // Check localStorage for the chunk
+    let chunkId = item.chunkId;
+    
+    // If chunkId is missing (e.g. from old index), we have to find it
+    if (!chunkId) {
+      // Fallback: try to find it by loading metadata or all chunks (admins only usually)
+      // For users, it's better if the index has it.
+      // If missing, we do a one-off scan of chunks (expensive but localized)
+      const chunksSnap = await getDocs(collection(db, 'content_chunks'));
+      for (const d of chunksSnap.docs) {
+        if (d.data().items[id]) {
+          chunkId = d.id;
+          break;
+        }
+      }
+    }
+
+    if (!chunkId) return item; // Return lite if not found
+
+    try {
+      const chunkStr = safeStorage.getItem('content_chunk_' + chunkId);
+      let items: any = null;
+      if (chunkStr) {
+        items = JSON.parse(chunkStr);
+      } else {
+        const chunkDoc = await getDoc(doc(db, 'content_chunks', chunkId));
+        if (chunkDoc.exists()) {
+          items = chunkDoc.data().items || {};
+          safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(items));
+        }
+      }
+
+      if (items && items[id]) {
+        const expanded = expandContent(items[id], chunkId);
+        // Merge order from Lite item
+        expanded.order = item.order;
+        
+        // Update the list if needed
+        setContentList(prev => {
+          const idx = prev.findIndex(c => c.id === id);
+          if (idx !== -1) {
+            const newList = [...prev];
+            newList[idx] = expanded;
+            return newList;
+          }
+          return prev;
+        });
+        
+        return expanded;
+      }
+    } catch (e) {
+      console.error("Lazy load failed", e);
+    }
+
+    return item;
+  };
+
   return (
-    <ContentContext.Provider value={{ contentList: augmentedContentList, genres, languages, qualities, collections, loading, isOffline, updateSearchIndex, updateOrder }}>
+    <ContentContext.Provider value={{ contentList: augmentedContentList, genres, languages, qualities, collections, loading, isOffline, updateOrder, getContent }}>
       {children}
     </ContentContext.Provider>
   );

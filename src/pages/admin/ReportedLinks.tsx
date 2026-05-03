@@ -3,7 +3,8 @@ import { db } from '../../firebase';
 import { collection, onSnapshot, doc, updateDoc, deleteDoc, getDoc, addDoc, getDocs } from 'firebase/firestore';
 import { AlertTriangle, Edit2, Trash2, Bell, CheckCircle2, X, Save } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
-import { getContentFromChunks, updateContentFieldsInChunks } from '../../utils/chunkUtils';
+import { useContent } from '../../contexts/ContentContext';
+import { updateContentFieldsInChunks } from '../../utils/chunkUtils';
 import { Content, QualityLinks, Season } from '../../types';
 import { LinkCheckerModal } from '../../components/LinkCheckerModal';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
@@ -23,6 +24,7 @@ interface ReportedLink {
 }
 
 export default function ReportedLinks() {
+  const { getContent } = useContent();
   const [reports, setReports] = useState<ReportedLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingReport, setEditingReport] = useState<ReportedLink | null>(null);
@@ -120,7 +122,7 @@ export default function ReportedLinks() {
 
   const handleEditClick = async (report: ReportedLink) => {
     try {
-      const content = await getContentFromChunks(report.contentId);
+      const content = await getContent(report.contentId);
       if (!content) {
         alert("Content not found");
         return;
@@ -206,7 +208,7 @@ export default function ReportedLinks() {
     setSaving(true);
 
     try {
-      const content = await getContentFromChunks(editingReport.contentId);
+      const content = await getContent(editingReport.contentId);
       
       if (!content) {
         throw new Error("Content not found");

@@ -12,7 +12,7 @@ import { AppSettings, BankAccount } from '../../types';
 
 export default function AdminSettings() {
   const { profile } = useAuth();
-  const { updateSearchIndex, contentList } = useContent();
+  const { contentList } = useContent();
   const [settings, setSettings] = useState<AppSettings>({
     headerText: 'MovizNow',
     membershipFee: 200,
@@ -118,20 +118,6 @@ export default function AdminSettings() {
       setError('Failed to save settings.');
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleUpdateIndex = async () => {
-    setIsUpdatingIndex(true);
-    try {
-      await updateSearchIndex();
-      setSuccess(true);
-      setTimeout(() => setSuccess(false), 3000);
-    } catch (err) {
-      console.error('Error updating search index:', err);
-      setError('Failed to update search index.');
-    } finally {
-      setIsUpdatingIndex(false);
     }
   };
 
@@ -315,15 +301,6 @@ export default function AdminSettings() {
                 </button>
               </div>
             )}
-            <button
-              type="button"
-              onClick={handleUpdateIndex}
-              disabled={isUpdatingIndex}
-              className="flex items-center justify-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-300 text-white rounded-lg transition-colors text-sm font-medium shadow-sm whitespace-nowrap"
-            >
-              {isUpdatingIndex ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-              {isUpdatingIndex ? 'Updating Index...' : 'Update Search Index'}
-            </button>
           </div>
         </div>
       </div>
@@ -361,9 +338,6 @@ export default function AdminSettings() {
                 )}
                 {updateResult.repairedContent !== undefined && (
                   <p>• Verified {updateResult.repairedContent} content chunks in metadata</p>
-                )}
-                {updateResult.repairedSearch !== undefined && (
-                  <p>• Verified {updateResult.repairedSearch} search shards in metadata</p>
                 )}
                 <p>• {updateResult.updated} items updated with missing fields</p>
               </div>

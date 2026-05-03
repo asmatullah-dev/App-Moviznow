@@ -237,7 +237,7 @@ export default function ContentManagement() {
   const { profile, user } = useAuth();
   const { users: allUsers } = useUsers();
   const { settings } = useSettings();
-  const { contentList, genres, languages, qualities, loading: contextLoading, updateSearchIndex } = useContent();
+  const { contentList, genres, languages, qualities, loading: contextLoading, getContent } = useContent();
   const [loading, setLoading] = useState(contextLoading);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -671,7 +671,7 @@ export default function ContentManagement() {
 
     if (minimal) {
       try {
-        const fullData = await getContentFromChunks(content.id);
+        const fullData = await getContent(content.id);
         if (fullData) {
           contentToUse = fullData;
         }

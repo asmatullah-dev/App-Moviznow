@@ -49,8 +49,24 @@ const ManageModal: React.FC<Props> = ({ isOpen, title, onClose, type, items: ini
 
   const handleAddItem = () => {
     if (!newItemName.trim()) return;
+    
+    // Generate a 4-character ID from the name or random if too short
+    let baseId = newItemName.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (baseId.length > 4) baseId = baseId.substring(0, 4);
+    while (baseId.length < 4) {
+      baseId += Math.random().toString(36).substring(2, 3).toUpperCase();
+    }
+    
+    // Check for collisions within the current list
+    let finalId = baseId;
+    let attempts = 0;
+    while (items.some(item => item.id === finalId) && attempts < 10) {
+      finalId = baseId.substring(0, 3) + Math.random().toString(36).substring(2, 3).toUpperCase();
+      attempts++;
+    }
+
     const newItem: Item = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: finalId,
       name: newItemName.trim(),
       order: items.length
     };
