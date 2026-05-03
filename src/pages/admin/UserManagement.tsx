@@ -808,8 +808,6 @@ export default function UserManagement() {
         Object.keys(updatedItems).forEach(contentId => {
           if (updatedItems[contentId].addedBy === user2.uid) {
             updatedItems[contentId].addedBy = user1.uid;
-            updatedItems[contentId].addedByName = user1.displayName || user1.email || 'Unknown';
-            updatedItems[contentId].addedByRole = user1.role;
             chunkChanged = true;
           }
         });

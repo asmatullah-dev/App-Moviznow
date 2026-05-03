@@ -136,7 +136,7 @@ export default function AdminSettings() {
   };
 
   const [showConfirmUpdate, setShowConfirmUpdate] = useState(false);
-  const [updateResult, setUpdateResult] = useState<{ updated: number, repairedContent?: number, repairedSearch?: number } | null>(null);
+  const [updateResult, setUpdateResult] = useState<{ updated: number, repairedContent?: number, repairedSearch?: number, newChunksCount?: number } | null>(null);
 
   const handleUpdateChunks = async () => {
     console.log("Chunk update process started");
@@ -148,13 +148,14 @@ export default function AdminSettings() {
 
     try {
       const { processChunkMaintenance } = await import('../../utils/maintenanceUtils');
-      const { updatedCount, repairResult } = await processChunkMaintenance(contentList, true);
+      const { updatedCount, repairResult, newChunksCount } = await processChunkMaintenance(contentList, true);
       
       console.log("Chunk update result:", updatedCount, repairResult);
       setUpdateResult({ 
         updated: updatedCount,
         repairedContent: repairResult?.repairedContent,
-        repairedSearch: repairResult?.repairedSearch
+        repairedSearch: repairResult?.repairedSearch,
+        newChunksCount
       });
       
       setSuccess(true);
@@ -355,6 +356,9 @@ export default function AdminSettings() {
             <div>
               <p className="font-bold">Maintenance Complete</p>
               <div className="text-sm mt-1 space-y-1">
+                {updateResult.newChunksCount !== undefined && (
+                  <p>• Built {updateResult.newChunksCount} categorized chunks (movie/series)</p>
+                )}
                 {updateResult.repairedContent !== undefined && (
                   <p>• Verified {updateResult.repairedContent} content chunks in metadata</p>
                 )}

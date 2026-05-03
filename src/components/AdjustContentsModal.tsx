@@ -10,6 +10,8 @@ import { updateContentFieldsInChunks } from '../utils/chunkUtils';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
 import { useModalBehavior } from '../hooks/useModalBehavior';
 
+import { useContent } from '../contexts/ContentContext';
+
 interface Props {
   isOpen: boolean;
   onClose: () => void;
@@ -100,6 +102,7 @@ const ContentItem = memo(({
 ContentItem.displayName = 'ContentItem';
 
 export const AdjustContentsModal: React.FC<Props> = ({ isOpen, onClose, contentList }) => {
+  const { updateOrder } = useContent();
   const [items, setItems] = useState<Content[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [multiSelectMode, setMultiSelectMode] = useState(false);
@@ -112,9 +115,9 @@ export const AdjustContentsModal: React.FC<Props> = ({ isOpen, onClose, contentL
   useEffect(() => {
     if (isOpen) {
       const sorted = [...contentList].sort((a, b) => {
-        if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
-        if (a.order === undefined && b.order !== undefined) return -1;
-        if (a.order !== undefined && b.order === undefined) return 1;
+        if (a.order !== undefined && b.order !== undefined) return b.order - a.order;
+        if (a.order === undefined && b.order !== undefined) return 1;
+        if (a.order !== undefined && b.order === undefined) return -1;
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       });
       setItems(sorted);
@@ -199,7 +202,7 @@ export const AdjustContentsModal: React.FC<Props> = ({ isOpen, onClose, contentL
       // Find only items that have actually changed their position
       // Using an optimized check to avoid updating everything if only a few moved
       const itemsToUpdate = items
-        .map((item, index) => ({ id: item.id, currentOrder: item.order, newOrder: index }))
+        .map((item, index) => ({ id: item.id, currentOrder: item.order, newOrder: items.length - 1 - index }))
         .filter(change => change.currentOrder !== change.newOrder);
       
       if (itemsToUpdate.length === 0) {
@@ -209,11 +212,13 @@ export const AdjustContentsModal: React.FC<Props> = ({ isOpen, onClose, contentL
 
       const updates = itemsToUpdate.map(({ id, newOrder }) => ({
         id,
-        order: newOrder,
-        updatedAt: new Date().toISOString() // Track when it was last reordered
+        order: newOrder
       }));
       
-      await updateContentFieldsInChunks(updates);
+      // We only update the order in memory, and let Context debounce-save it to search index
+      // We do NOT save the order back to chunks to save massive bandwidth.
+      updateOrder(updates);
+      
       onClose();
     } catch (error) {
       console.error("Error saving content order:", error);

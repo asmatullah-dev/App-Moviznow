@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../firebase';
-import { collection, addDoc, deleteDoc, doc, updateDoc, writeBatch } from 'firebase/firestore';
+import { collection, setDoc, deleteDoc, doc, updateDoc, writeBatch } from 'firebase/firestore';
+
+const generateShortId = () => Math.random().toString(36).substring(2, 6);
 import { Language } from '../../types';
 import { Plus, Edit2, Trash2, X, Check, Search, GripVertical, Loader2 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
@@ -33,7 +35,7 @@ export default function LanguageManagement() {
     setProcessing(prev => ({ ...prev, add: true }));
     try {
       const maxOrder = languages.length > 0 ? Math.max(...languages.map(l => l.order || 0)) : 0;
-      await addDoc(collection(db, 'languages'), { name: newLanguage.trim(), order: maxOrder + 1 });
+      await setDoc(doc(db, 'languages', generateShortId()), { name: newLanguage.trim(), order: maxOrder + 1 });
       setNewLanguage('');
     } finally {
       setProcessing(prev => ({ ...prev, add: false }));

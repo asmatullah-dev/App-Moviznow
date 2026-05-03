@@ -1,5 +1,5 @@
 import { Content } from '../types';
-import { updateContentFieldsInChunks, repairChunkMetadata } from './chunkUtils';
+import { updateContentFieldsInChunks, repairChunkMetadata, rebuildAllChunks, saveSearchIndexToChunks } from './chunkUtils';
 import { safeStorage } from './safeStorage';
 
 export async function checkAndUpdateChunksLocal(contentList: Content[]): Promise<{updatedCount: number, updatedItems: {id: string, [key: string]: any}[]}> {
@@ -26,19 +26,63 @@ export async function checkAndUpdateChunksLocal(contentList: Content[]): Promise
 }
 
 export async function processChunkMaintenance(contentList: Content[], executeSync = false) {
-  // 1. Repair Metadata first
-  let repairResult = null;
-  if (executeSync) {
-    repairResult = await repairChunkMetadata();
+  if (!executeSync) {
+    const { updatedCount, updatedItems } = await checkAndUpdateChunksLocal(contentList);
+    return { updatedCount, updatedItems, repairResult: null };
   }
 
-  // 2. Check for missing fields
+  // Check if anything needs updating locally
   const { updatedCount, updatedItems } = await checkAndUpdateChunksLocal(contentList);
-  
-  if (updatedCount > 0 && executeSync) {
-    console.log(`Maintenance: Found ${updatedCount} items needing updates. Updating chunks...`);
-    await updateContentFieldsInChunks(updatedItems);
+
+  // Apply updates to list in-memory first so we rebuild with correct data
+  const memoryList = [...contentList];
+  if (updatedCount > 0) {
+    const map = new Map(updatedItems.map(i => [i.id, i]));
+    for (let i = 0; i < memoryList.length; i++) {
+        if (map.has(memoryList[i].id)) {
+            memoryList[i] = { ...memoryList[i], ...map.get(memoryList[i].id) } as Content;
+        }
+    }
   }
+
+  // Rebuild chunks (extract in locally then create chunks separately)
+  const newChunksCount = await rebuildAllChunks(memoryList);
+
+  // Update search index to ensure search and order stays consistent
+  const published = memoryList.filter(c => c.status === 'published');
   
-  return { updatedCount, updatedItems, repairResult };
+  let maxOrder = -1;
+  published.forEach(c => {
+    if (c.order !== undefined && c.order > maxOrder) maxOrder = c.order;
+  });
+
+  published.forEach(c => {
+    if (c.order === undefined) {
+      maxOrder++;
+      c.order = maxOrder;
+    }
+  });
+
+  published.sort((a, b) => (a.order || 0) - (b.order || 0));
+  
+  const index = published.map(c => {
+    let seasonsInfoStr = '';
+    if (c.type === 'series' && c.seasons) {
+      try {
+        const s = Array.isArray(c.seasons) ? c.seasons : JSON.parse(c.seasons as string);
+        if (s.length > 1) {
+          seasonsInfoStr = `S:${s.length}`;
+        } else if (s.length === 1 && s[0].episodes) {
+          seasonsInfoStr = `E:${s[0].episodes.length}`;
+        }
+      } catch(e) {}
+    }
+    return `${c.id}|${c.title}|${c.year}||${c.type}|${c.qualityId || ''}|${c.languageIds?.join(',') || ''}|${c.genreIds?.join(',') || ''}|${c.createdAt}|${c.order || 0}|${seasonsInfoStr}`;
+  });
+
+  await saveSearchIndexToChunks(index);
+  
+  const repairResult = await repairChunkMetadata();
+  
+  return { updatedCount, updatedItems, repairResult, newChunksCount };
 }

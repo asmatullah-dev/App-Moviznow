@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react';
 import { db, auth } from '../firebase';
 import { safeStorage } from '../utils/safeStorage';
+import { expandContent } from '../utils/chunkUtils';
 import { collection, onSnapshot, query, where, getDocs, doc, setDoc, orderBy, limit, getDoc } from 'firebase/firestore';
 import { useAuth } from './AuthContext';
 import { useUsers } from './UsersContext';
@@ -17,6 +18,7 @@ interface ContentContextType {
   loading: boolean;
   isOffline: boolean;
   updateSearchIndex: () => Promise<void>;
+  updateOrder: (updates: {id: string, order: number}[]) => void;
 }
 
 const ContentContext = createContext<ContentContextType | undefined>(undefined);
@@ -142,17 +144,45 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
               safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
           }
           
-          const rawContent: Content[] = [];
+          const rawContentMap: Record<string, Content> = {};
           for (const chunkId of Object.keys(versions)) {
               const chunkStr = safeStorage.getItem('content_chunk_' + chunkId);
               if (chunkStr) {
                   try {
                       const items = JSON.parse(chunkStr);
                       Object.values(items).forEach((item: any) => {
-                          rawContent.push(item as Content);
+                          const expanded = expandContent(item, chunkId);
+                          rawContentMap[expanded.id] = expanded;
                       });
                   } catch(e) {}
               }
+          }
+          const rawContent = Object.values(rawContentMap);
+          
+          // Merge order from search index into chunks since it's removed from chunks
+          try {
+            const indexSnap = await getDocs(collection(db, 'search_index_chunks'));
+            if (!indexSnap.empty) {
+              const allData: string[] = [];
+              const docs = [...indexSnap.docs].sort((a, b) => a.id.localeCompare(b.id));
+              docs.forEach(d => { if (d.data().data) allData.push(...d.data().data); });
+              
+              const orderMap: Record<string, number> = {};
+              allData.forEach(item => {
+                const parts = item.split('|');
+                const id = parts[0];
+                const order = parts[9];
+                if (order) orderMap[id] = parseInt(order, 10);
+              });
+              
+              rawContent.forEach(c => {
+                if (orderMap[c.id] !== undefined) {
+                  c.order = orderMap[c.id];
+                }
+              });
+            }
+          } catch(e) {
+             console.error("Error merging order from search index", e);
           }
           
           try {
@@ -211,6 +241,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
                   qualityId, languageIds: langIds ? langIds.split(',') : [],
                   genreIds: genreIds ? genreIds.split(',') : [],
                   createdAt, order: order ? parseInt(order) : undefined,
+                  seasonsCountText: seasonsInfo, 
                   status: 'published'
                 } as unknown as Content;
               });
@@ -304,17 +335,34 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     }
 
     const published = contentList.filter(c => c.status === 'published');
+    
+    let maxOrder = -1;
+    published.forEach(c => {
+      if (c.order !== undefined && c.order > maxOrder) maxOrder = c.order;
+    });
+
+    published.forEach(c => {
+      if (c.order === undefined) {
+        maxOrder++;
+        c.order = maxOrder;
+      }
+    });
+
     published.sort((a, b) => (a.order || 0) - (b.order || 0));
     
     const index = published.map(c => {
-      let seasonsInfo = '';
-      if (c.seasons) {
+      let seasonsInfoStr = '';
+      if (c.type === 'series' && c.seasons) {
         try {
           const s = Array.isArray(c.seasons) ? c.seasons : JSON.parse(c.seasons as string);
-          seasonsInfo = s.map((si: any) => `${si.seasonNumber}:${si.episodes?.length || ''}`).join(',');
+          if (s.length > 1) {
+            seasonsInfoStr = `S:${s.length}`;
+          } else if (s.length === 1 && s[0].episodes) {
+            seasonsInfoStr = `E:${s[0].episodes.length}`;
+          }
         } catch(e) {}
       }
-      return `${c.id}|${c.title}|${c.year}|${c.posterUrl || ''}|${c.type}|${c.qualityId || ''}|${c.languageIds?.join(',') || ''}|${c.genreIds?.join(',') || ''}|${c.createdAt}|${c.order || ''}|${seasonsInfo}`;
+      return `${c.id}|${c.title}|${c.year}||${c.type}|${c.qualityId || ''}|${c.languageIds?.join(',') || ''}|${c.genreIds?.join(',') || ''}|${c.createdAt}|${c.order || 0}|${seasonsInfoStr}`;
     });
 
     const indexStr = JSON.stringify(index);
@@ -333,8 +381,21 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     }
   }, [contentList, profile?.role]);
 
+  const updateOrder = (updates: {id: string, order: number}[]) => {
+    setContentList(prev => {
+      const newList = [...prev];
+      const updateMap = new Map(updates.map(u => [u.id, u.order]));
+      newList.forEach(item => {
+        if (updateMap.has(item.id)) {
+          item.order = updateMap.get(item.id);
+        }
+      });
+      return newList;
+    });
+  };
+
   return (
-    <ContentContext.Provider value={{ contentList: augmentedContentList, genres, languages, qualities, collections, loading, isOffline, updateSearchIndex }}>
+    <ContentContext.Provider value={{ contentList: augmentedContentList, genres, languages, qualities, collections, loading, isOffline, updateSearchIndex, updateOrder }}>
       {children}
     </ContentContext.Provider>
   );

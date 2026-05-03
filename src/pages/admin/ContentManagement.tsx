@@ -838,8 +838,6 @@ export default function ContentManagement() {
         cleanedData.id = newDocId;
         cleanedData.createdAt = new Date().toISOString();
         cleanedData.addedBy = user?.uid;
-        cleanedData.addedByRole = profile?.role;
-        cleanedData.addedByName = profile?.displayName || profile?.email || 'Unknown';
         await saveContentToChunk(cleanedData as Content);
       }
       
@@ -1198,8 +1196,6 @@ export default function ContentManagement() {
            description: '',
            status: 'draft',
            addedBy: user?.uid || null,
-           addedByRole: profile?.role,
-           addedByName: profile?.displayName || profile?.email || 'Unknown',
            createdAt: new Date().toISOString(),
            updatedAt: new Date().toISOString(),
          };
@@ -2710,9 +2706,9 @@ export default function ContentManagement() {
     let sortedResult = [...result];
     sortedResult.sort((a, b) => {
         if (filterSort === 'default') {
-          if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
-          if (a.order === undefined && b.order !== undefined) return -1;
-          if (a.order !== undefined && b.order === undefined) return 1;
+          if (a.order !== undefined && b.order !== undefined) return b.order - a.order;
+          if (a.order === undefined && b.order !== undefined) return 1;
+          if (a.order !== undefined && b.order === undefined) return -1;
           return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
         }
         const timeA = new Date(a.createdAt).getTime();

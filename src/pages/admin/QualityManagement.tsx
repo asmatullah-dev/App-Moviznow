@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../firebase';
-import { collection, addDoc, deleteDoc, doc, updateDoc, writeBatch } from 'firebase/firestore';
+import { collection, setDoc, deleteDoc, doc, updateDoc, writeBatch } from 'firebase/firestore';
+
+const generateShortId = () => Math.random().toString(36).substring(2, 6);
 import { Quality } from '../../types';
 import { Plus, Edit2, Trash2, X, Check, Search, GripVertical, Loader2 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
@@ -35,7 +37,7 @@ export default function QualityManagement() {
     setProcessing(prev => ({ ...prev, add: true }));
     try {
       const maxOrder = qualities.length > 0 ? Math.max(...qualities.map(q => q.order || 0)) : 0;
-      await addDoc(collection(db, 'qualities'), { name: newQuality.trim(), order: maxOrder + 1, color: newColor });
+      await setDoc(doc(db, 'qualities', generateShortId()), { name: newQuality.trim(), order: maxOrder + 1, color: newColor });
       setNewQuality('');
       setNewColor('#10b981');
     } finally {
