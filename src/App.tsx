@@ -15,6 +15,7 @@ import { useModalBehavior } from './hooks/useModalBehavior';
 import { OfflineBanner } from './components/OfflineBanner';
 
 // Pages
+const MaintenancePage = lazy(() => import('./pages/MaintenancePage'));
 const Login = lazy(() => import('./pages/Login'));
 const Home = lazy(() => import('./pages/user/Home'));
 const MovieDetails = lazy(() => import('./pages/user/MovieDetails'));
@@ -87,6 +88,7 @@ export default function App() {
                 <Suspense fallback={<LoadingFallback />}>
                   <Routes>
                     <Route path="/login" element={<Login />} />
+                    <Route path="/maintenance" element={<MaintenancePage />} />
                     <Route path="/app" element={<InstallApp />} />
                     <Route path="/install" element={<InstallApp />} />
                     

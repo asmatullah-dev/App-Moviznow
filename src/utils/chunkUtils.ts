@@ -198,10 +198,10 @@ export async function fetchAllFromChunks<T>(collectionName: string, mergeFn: (da
  * Saves or updates a single content item in the appropriate chunk
  */
 export async function saveContentToChunk(rawContent: Content): Promise<void> {
+  const expectedPrefix = rawContent.type === 'movie' ? 'movie_chunk_' : 'series_chunk_';
   const content = cleanContentForChunk(rawContent);
   const chunksSnap = await getDocs(collection(db, 'content_chunks'));
   let targetDoc: QueryDocumentSnapshot<DocumentData> | null = null;
-  const expectedPrefix = content.type === 'movie' ? 'movie_chunk_' : 'series_chunk_';
   
   // 1. Check if item already exists in a chunk
   for (const doc of chunksSnap.docs) {
@@ -260,16 +260,19 @@ export async function saveContentToChunk(rawContent: Content): Promise<void> {
  * Saves multiple content items to chunks efficiently
  */
 export async function saveContentsToChunks(rawContents: Content[]): Promise<void> {
-  const contents = rawContents.map(cleanContentForChunk);
+  const contents = rawContents.map(raw => ({
+    content: cleanContentForChunk(raw),
+    rawType: raw.type
+  }));
   const chunksSnap = await getDocs(collection(db, 'content_chunks'));
   let currentChunks = chunksSnap.docs.map(d => ({ id: d.id, items: (d.data().items || {}) as Record<string, Content> }));
   
   const batch = writeBatch(db);
   const updatedChunkIds = new Set<string>();
 
-  for (const content of contents) {
+  for (const { content, rawType } of contents) {
     let found = false;
-    const expectedPrefix = content.type === 'movie' ? 'movie_chunk_' : 'series_chunk_';
+    const expectedPrefix = rawType === 'movie' ? 'movie_chunk_' : 'series_chunk_';
     
     // 1. Try to update existing if present
     for (const chunk of currentChunks) {

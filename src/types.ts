@@ -240,6 +240,7 @@ export interface AppSettings {
   isPaymentEnabled?: boolean;
   isMaintenanceModeEnabled?: boolean;
   maintenanceMessage?: string;
+  maintenanceEndTime?: string; // ISO string
   serviceAccounts?: {
     sourceKey?: string;
     targets?: {

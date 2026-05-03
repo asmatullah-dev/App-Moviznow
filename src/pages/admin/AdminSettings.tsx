@@ -484,17 +484,30 @@ export default function AdminSettings() {
                 </div>
                 
                 {settings.isMaintenanceModeEnabled && (
-                  <div>
-                    <label className="block text-sm font-medium text-red-900 dark:text-red-400 mb-2">
-                      Custom Maintenance Message
-                    </label>
-                    <textarea
-                      value={settings.maintenanceMessage || ''}
-                      onChange={(e) => setSettings({ ...settings, maintenanceMessage: e.target.value })}
-                      className="w-full bg-white dark:bg-black/20 border border-red-200 dark:border-red-900/30 rounded-lg p-3 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-red-500/50"
-                      rows={3}
-                      placeholder="Enter the message to show to users..."
-                    />
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-red-900 dark:text-red-400 mb-2">
+                        Custom Maintenance Message
+                      </label>
+                      <textarea
+                        value={settings.maintenanceMessage || ''}
+                        onChange={(e) => setSettings({ ...settings, maintenanceMessage: e.target.value })}
+                        className="w-full bg-white dark:bg-black/20 border border-red-200 dark:border-red-900/30 rounded-lg p-3 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-red-500/50"
+                        rows={3}
+                        placeholder="Enter the message to show to users..."
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-red-900 dark:text-red-400 mb-2">
+                        Maintenance End Time (Leave blank for infinite)
+                      </label>
+                      <input
+                        type="datetime-local"
+                        value={settings.maintenanceEndTime ? new Date(new Date(settings.maintenanceEndTime).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ''}
+                        onChange={(e) => setSettings({ ...settings, maintenanceEndTime: e.target.value ? new Date(e.target.value).toISOString() : undefined })}
+                        className="w-full bg-white dark:bg-black/20 border border-red-200 dark:border-red-900/30 rounded-lg p-3 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-red-500/50"
+                      />
+                    </div>
                   </div>
                 )}
               </div>

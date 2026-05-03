@@ -213,16 +213,16 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     let unsubs: (() => void)[] = [];
 
     if (isAdmin) {
-      unsubs.push(onSnapshot(collection(db, 'genres'), snap => {
-        const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Genre)).sort((a, b) => (a.order || 0) - (b.order || 0));
+      unsubs.push(onSnapshot(doc(db, 'genres', 'all'), snap => {
+        const data = (snap.data()?.list as Genre[] || []).sort((a, b) => (a.order || 0) - (b.order || 0));
         setGenres(data); safeStorage.setItem('genres_cache', JSON.stringify(data));
       }));
-      unsubs.push(onSnapshot(collection(db, 'languages'), snap => {
-        const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Language)).sort((a, b) => (a.order || 0) - (b.order || 0));
+      unsubs.push(onSnapshot(doc(db, 'languages', 'all'), snap => {
+        const data = (snap.data()?.list as Language[] || []).sort((a, b) => (a.order || 0) - (b.order || 0));
         setLanguages(data); safeStorage.setItem('languages_cache', JSON.stringify(data));
       }));
-      unsubs.push(onSnapshot(collection(db, 'qualities'), snap => {
-        const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Quality)).sort((a, b) => (a.order || 0) - (b.order || 0));
+      unsubs.push(onSnapshot(doc(db, 'qualities', 'all'), snap => {
+        const data = (snap.data()?.list as Quality[] || []).sort((a, b) => (a.order || 0) - (b.order || 0));
         setQualities(data); safeStorage.setItem('qualities_cache', JSON.stringify(data));
       }));
       unsubs.push(onSnapshot(collection(db, 'collections'), snap => {
@@ -234,12 +234,12 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       const fetchStatic = async () => {
         try {
           const [g, l, q, c] = await Promise.all([
-            getDocs(collection(db, 'genres')), getDocs(collection(db, 'languages')),
-            getDocs(collection(db, 'qualities')), getDocs(collection(db, 'collections'))
+            getDoc(doc(db, 'genres', 'all')), getDoc(doc(db, 'languages', 'all')),
+            getDoc(doc(db, 'qualities', 'all')), getDocs(collection(db, 'collections'))
           ]);
-          const gd = g.docs.map(d => ({ id: d.id, ...d.data() } as Genre)).sort((a, b) => (a.order || 0) - (b.order || 0));
-          const ld = l.docs.map(d => ({ id: d.id, ...d.data() } as Language)).sort((a, b) => (a.order || 0) - (b.order || 0));
-          const qd = q.docs.map(d => ({ id: d.id, ...d.data() } as Quality)).sort((a, b) => (a.order || 0) - (b.order || 0));
+          const gd = (g.data()?.list as Genre[] || []).sort((a, b) => (a.order || 0) - (b.order || 0));
+          const ld = (l.data()?.list as Language[] || []).sort((a, b) => (a.order || 0) - (b.order || 0));
+          const qd = ((q.data()?.list as Quality[]) || []).sort((a, b) => (a.order || 0) - (b.order || 0));
           const cd = c.docs.map(d => ({ id: d.id, ...d.data() } as AppCollection)).sort((a, b) => (a.order || 0) - (b.order || 0));
           
           setGenres(gd); setLanguages(ld); setQualities(qd); setCollections(cd);
