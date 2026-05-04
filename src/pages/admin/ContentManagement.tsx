@@ -24,7 +24,6 @@ import { useModalBehavior } from '../../hooks/useModalBehavior';
 import { useSettings } from '../../contexts/SettingsContext';
 import { memoryStore } from '../../utils/memoryStore';
 import { ContentFormModal } from '../../components/ContentFormModal';
-import { saveContentToChunk, deleteContentFromChunk, saveContentsToChunks, updateContentFieldsInChunks, deleteContentsFromChunks, getContentFromChunks } from '../../utils/chunkUtils';
 
 import { BatchFetchModal } from '../../components/BatchFetchModal';
 
@@ -237,7 +236,7 @@ export default function ContentManagement() {
   const { profile, user } = useAuth();
   const { users: allUsers } = useUsers();
   const { settings } = useSettings();
-  const { contentList, genres, languages, qualities, loading: contextLoading, getContent } = useContent();
+  const { contentList, genres, languages, qualities, loading: contextLoading, getContent, saveContent, deleteContent, updateContentFields, deleteMultipleContents, updateAuxiliaryCollection, finalizeChanges, hasPendingChanges } = useContent();
   const [loading, setLoading] = useState(contextLoading);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -832,13 +831,13 @@ export default function ContentManagement() {
 
       if (currentEditingId) {
         const fullContent = { ...cleanedData, id: currentEditingId } as Content;
-        await saveContentToChunk(fullContent);
+        await saveContent(fullContent);
       } else {
         newDocId = Math.random().toString(36).substr(2, 9); // Generate a unique ID
         cleanedData.id = newDocId;
         cleanedData.createdAt = new Date().toISOString();
         cleanedData.addedBy = user?.uid;
-        await saveContentToChunk(cleanedData as Content);
+        await saveContent(cleanedData as Content);
       }
       
       // Add to special collections if checked
@@ -1262,7 +1261,7 @@ export default function ContentManagement() {
          itemsToSave.push(cleanedData as Content);
       });
 
-      await saveContentsToChunks(itemsToSave);
+      await Promise.all(itemsToSave.map(item => saveContent(item)));
       setAlertConfig({ isOpen: true, title: 'Success', message: `Batch created ${itemsToSave.length} draft content entries.` });
     } catch (e: any) {
       console.error(e);
@@ -1379,8 +1378,9 @@ export default function ContentManagement() {
   const handleDelete = () => {
     if (!deleteId) return;
     const currentDeleteId = deleteId;
+    const content = contentList.find(c => c.id === currentDeleteId);
     setDeleteId(null);
-    deleteContentFromChunk(currentDeleteId).catch(error => {
+    deleteContent(currentDeleteId, content?.chunkId).catch(error => {
       console.error('Error deleting content:', error);
       setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to delete content' });
     });
@@ -1996,10 +1996,13 @@ export default function ContentManagement() {
 
     if (hasUpdates) {
       try {
-        await updateContentFieldsInChunks([{
+        await updateContentFields([{
           id: updatedContent.id,
-          movieLinks: JSON.stringify(updatedContent.movieLinks || []),
-          seasons: JSON.stringify(updatedContent.seasons || [])
+          chunkId: updatedContent.chunkId,
+          fields: {
+            movieLinks: JSON.stringify(updatedContent.movieLinks || []),
+            seasons: JSON.stringify(updatedContent.seasons || [])
+          }
         }]);
       } catch (error) {
         console.error("Error saving tinyUrls to db:", error);
@@ -2759,7 +2762,7 @@ export default function ContentManagement() {
           return;
         }
 
-        const updateData: any = { id, status };
+        const updateData: any = { id, chunkId: content.chunkId, status };
         
         // When moving from draft to published, consider it as new
         if (content.status === 'draft' && status === 'published') {
@@ -2773,7 +2776,11 @@ export default function ContentManagement() {
 
     try {
       if (updates.length > 0) {
-        await updateContentFieldsInChunks(updates);
+        await updateContentFields(updates.map(u => ({
+          id: u.id,
+          chunkId: u.chunkId,
+          fields: Object.fromEntries(Object.entries(u).filter(([k]) => k !== 'id' && k !== 'chunkId'))
+        })));
       }
     } catch (error) {
       console.error('Error updating content:', error);
@@ -2788,7 +2795,11 @@ export default function ContentManagement() {
     const currentSelected = [...selectedContent];
     
     try {
-      await deleteContentsFromChunks(currentSelected);
+      const deleteItems = currentSelected.map(id => {
+        const c = contentList.find(c => c.id === id);
+        return { id, chunkId: c?.chunkId };
+      });
+      await deleteMultipleContents(deleteItems);
       setSelectedContent([]);
       setAlertConfig({ isOpen: true, title: 'Success', message: `Successfully deleted ${currentSelected.length} items` });
     } catch (error) {
@@ -2951,6 +2962,7 @@ export default function ContentManagement() {
 
       const updateData = {
         id: targetItem.id,
+        chunkId: targetItem.chunkId,
         title: finalTitle,
         year: finalYear,
         movieLinks: JSON.stringify(combinedMovieLinks),
@@ -2975,11 +2987,15 @@ export default function ContentManagement() {
         updatedAt: Date.now()
       };
       
-      await updateContentFieldsInChunks([updateData]);
+      await updateContentFields([{
+        id: updateData.id,
+        chunkId: updateData.chunkId,
+        fields: Object.fromEntries(Object.entries(updateData).filter(([k]) => k !== 'id' && k !== 'chunkId'))
+      }]);
       
-      const idsToDelete = otherItems.map(item => item.id);
-      if (idsToDelete.length > 0) {
-        await deleteContentsFromChunks(idsToDelete);
+      const itemsToDelete = otherItems.map(item => ({ id: item.id, chunkId: item.chunkId }));
+      if (itemsToDelete.length > 0) {
+        await deleteMultipleContents(itemsToDelete);
       }
       
       setSelectedContent([]);
@@ -3212,6 +3228,34 @@ export default function ContentManagement() {
                   </>
                 )}
               </div>
+            )}
+            {(profile?.role === 'admin' || profile?.role === 'owner') && (
+               <div className="flex items-center gap-2">
+                 {hasPendingChanges && (
+                    <span className="flex h-2 w-2 rounded-full bg-red-500 animate-ping" />
+                 )}
+                 <button
+                   className={clsx(
+                     "px-6 py-3 rounded-xl font-medium flex items-center justify-center gap-2 transition-colors whitespace-nowrap text-white",
+                     hasPendingChanges ? "bg-orange-600 hover:bg-orange-700" : "bg-zinc-600 hover:bg-zinc-700"
+                   )}
+                   onClick={async () => {
+                      if (hasPendingChanges) {
+                         if(window.confirm('You have pending local changes. Sync to Firestore now?')) {
+                            await finalizeChanges();
+                            alert('Synced successfully!');
+                         }
+                      } else {
+                        if(window.confirm('Run chunk maintenance? (Re-index all)')) {
+                          const { processChunksUpdateMetadataAndIds } = await import('../../utils/maintenanceUtils');
+                          processChunksUpdateMetadataAndIds().then(r => alert('Success')).catch(alert)
+                        }
+                      }
+                   }}
+                 >
+                   {hasPendingChanges ? 'Finalize Sync' : 'Maintenance'}
+                 </button>
+               </div>
             )}
             <button
               onClick={() => { resetForm(); setIsModalOpen(true); }}
@@ -3878,22 +3922,7 @@ export default function ContentManagement() {
         }
         onSave={async (items) => {
           if (!manageModal.type) return;
-          const collectionName = manageModal.type === 'quality' ? 'qualities' : `${manageModal.type}s`;
-          const batch = writeBatch(db);
-          
-          // Delete all existing
-          const snapshot = await getDocs(collection(db, collectionName));
-          snapshot.docs.forEach(doc => batch.delete(doc.ref));
-          
-          // Add new
-          items.forEach((item, idx) => {
-            const docRef = doc(collection(db, collectionName), item.id);
-            const data: any = { name: item.name, order: idx };
-            if (manageModal.type === 'quality') data.color = item.color;
-            batch.set(docRef, data);
-          });
-          
-          await batch.commit();
+          await updateAuxiliaryCollection(manageModal.type, items);
           setManageModal({ isOpen: false, type: null });
         }}
       />

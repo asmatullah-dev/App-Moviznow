@@ -23,6 +23,12 @@ const FIELD_MAP: Record<string, string> = {
   trailerUrl: 'trai',
   runtime: 'run',
   releaseDate: 'rdte',
+  subtitles: 'sub',
+  description: 'dsc',
+  cast: 'cst',
+  country: 'cnt',
+  order: 'ord',
+  id: 'id'
 };
 
 const REVERSE_FIELD_MAP: Record<string, string> = Object.fromEntries(
@@ -30,12 +36,31 @@ const REVERSE_FIELD_MAP: Record<string, string> = Object.fromEntries(
 );
 
 export function minifyContent(content: any): any {
-  const minified: any = { id: content.id };
+  const minified: any = {};
   for (const [key, value] of Object.entries(content)) {
-    if (['id', 'trailerYoutubeTitle', 'addedByName', 'addedByRole', 'cast', 'country', 'description', 'type'].includes(key)) continue;
+    if (['trailerYoutubeTitle', 'addedByName', 'addedByRole', 'type'].includes(key)) continue;
+    
+    if (key === 'status') {
+      minified[FIELD_MAP[key] || key] = value === 'published' ? 'p' : (value === 'draft' ? 'd' : value);
+      continue;
+    }
+
+    if (key === 'movieLinks') {
+        const val = value as any;
+        if (!val || val === '[]' || (Array.isArray(val) && val.length === 0) || content.type === 'series') continue;
+        const parsed = typeof val === 'string' ? JSON.parse(val) : val;
+        minified[FIELD_MAP[key] || key] = parsed.map((l: any) => {
+             const ml: any = {};
+             if (l.url) ml.ur = l.url;
+             if (l.name) ml.nm = l.name;
+             if (l.size) ml.sz = l.size;
+             if (l.unit) ml.un = l.unit;
+             return ml;
+        });
+        continue;
+    }
     
     if (key === 'trailerYoutubeId' && (!value || value === '[]')) continue;
-    if (key === 'movieLinks' && (!value || value === '[]' || (Array.isArray(value) && value.length === 0) || content.type === 'series')) continue;
     
     if (key === 'seasons') {
         const val = value as any;
@@ -44,6 +69,9 @@ export function minifyContent(content: any): any {
         let parsedSeasons = typeof val === 'string' ? JSON.parse(val) : val;
         const minSeasons = parsedSeasons.map((s: any) => {
             const ms: any = { sn: s.seasonNumber };
+            if (s.title) ms.ti = s.title;
+            if (s.year) ms.yea = s.year;
+            if (s.trailerUrl) ms.trai = s.trailerUrl;
             if (s.isFullSeasonMKV) ms.fsm = 1;
             if (s.folderLink) ms.fl = s.folderLink;
             if (s.episodes && s.episodes.length > 0) {
@@ -52,7 +80,8 @@ export function minifyContent(content: any): any {
                    if (e.title) me.ti = e.title;
                    if (e.links && e.links.length > 0) {
                        me.lks = e.links.map((l: any) => {
-                           const ml: any = { ur: l.url };
+                           const ml: any = {};
+                           if (l.url) ml.ur = l.url;
                            if (l.name) ml.nm = l.name;
                            if (l.size) ml.sz = l.size;
                            if (l.unit) ml.un = l.unit;
@@ -62,9 +91,20 @@ export function minifyContent(content: any): any {
                    return me;
                });
             }
-            if (s.links && s.links.length > 0) {
-                 ms.lks = s.links.map((l: any) => {
-                     const ml: any = { ur: l.url };
+            if (s.zipLinks && s.zipLinks.length > 0) {
+                 ms.zl = s.zipLinks.map((l: any) => {
+                     const ml: any = {};
+                     if (l.url) ml.ur = l.url;
+                     if (l.name) ml.nm = l.name;
+                     if (l.size) ml.sz = l.size;
+                     if (l.unit) ml.un = l.unit;
+                     return ml;
+                 });
+            }
+            if (s.mkvLinks && s.mkvLinks.length > 0) {
+                 ms.ml = s.mkvLinks.map((l: any) => {
+                     const ml: any = {};
+                     if (l.url) ml.ur = l.url;
                      if (l.name) ml.nm = l.name;
                      if (l.size) ml.sz = l.size;
                      if (l.unit) ml.un = l.unit;
@@ -78,8 +118,10 @@ export function minifyContent(content: any): any {
     }
     
     const shortKey = FIELD_MAP[key] || key;
-    if (['genreIds', 'languageIds'].includes(key) && Array.isArray(value)) {
+    if (['genreIds', 'languageIds', 'cast'].includes(key) && Array.isArray(value)) {
       minified[shortKey] = value.join(',');
+    } else if (key === 'subtitles' && value === true) {
+      minified[shortKey] = 'yes';
     } else {
       minified[shortKey] = value;
     }
@@ -93,7 +135,6 @@ export function expandContent(minified: any, chunkId?: string): Content {
   if (chunkId) {
       if (chunkId.startsWith('movie_')) expanded.type = 'movie';
       if (chunkId.startsWith('series_')) expanded.type = 'series';
-      expanded.chunkId = chunkId;
   } else {
       expanded.type = minified.sea ? 'series' : 'movie';
   }
@@ -102,45 +143,73 @@ export function expandContent(minified: any, chunkId?: string): Content {
     if (key === 'id') continue;
     const longKey = REVERSE_FIELD_MAP[key] || key;
     
+    if (longKey === 'movieLinks') {
+        const minLinks = typeof value === 'string' ? JSON.parse(value) : value as any[];
+        expanded[longKey] = JSON.stringify(minLinks.map((ml: any) => {
+            const l: any = { url: ml.ur || ml.url };
+            if (ml.nm || ml.name) l.name = ml.nm || ml.name;
+            if (ml.sz || ml.size) l.size = ml.sz || ml.size;
+            if (ml.un || ml.unit) l.unit = ml.un || ml.unit;
+            return l;
+        }));
+        continue;
+    }
+
     if (longKey === 'seasons') {
         const minSeasons = value as any[];
         const expandedSeasons = minSeasons.map((ms: any) => {
-            const s: any = { seasonNumber: ms.sn };
+            const s: any = { id: `s${ms.sn}`, seasonNumber: ms.sn };
+            if (ms.ti) s.title = ms.ti;
+            if (ms.yea) s.year = ms.yea;
+            if (ms.trai) s.trailerUrl = ms.trai;
             if (ms.fsm) s.isFullSeasonMKV = true;
             if (ms.fl) s.folderLink = ms.fl;
             if (ms.eps) {
                 s.episodes = ms.eps.map((me: any) => {
-                    const e: any = { episodeNumber: me.en };
+                    const e: any = { id: `e${me.en}`, episodeNumber: me.en };
                     if (me.ti) e.title = me.ti;
                     if (me.lks) {
                         e.links = me.lks.map((ml: any) => {
-                            const l: any = { url: ml.ur };
-                            if (ml.nm) l.name = ml.nm;
-                            if (ml.sz) l.size = ml.sz;
-                            if (ml.un) l.unit = ml.un;
+                            const l: any = { url: ml.ur || ml.url };
+                            if (ml.nm || ml.name) l.name = ml.nm || ml.name;
+                            if (ml.sz || ml.size) l.size = ml.sz || ml.size;
+                            if (ml.un || ml.unit) l.unit = ml.un || ml.unit;
                             return l;
                         });
                     }
                     return e;
                 });
             }
-            if (ms.lks) {
-                s.links = ms.lks.map((ml: any) => {
-                    const l: any = { url: ml.ur };
-                    if (ml.nm) l.name = ml.nm;
-                    if (ml.sz) l.size = ml.sz;
-                    if (ml.un) l.unit = ml.un;
+            if (ms.zl) {
+                s.zipLinks = ms.zl.map((ml: any) => {
+                    const l: any = { url: ml.ur || ml.url };
+                    if (ml.nm || ml.name) l.name = ml.nm || ml.name;
+                    if (ml.sz || ml.size) l.size = ml.sz || ml.size;
+                    if (ml.un || ml.unit) l.unit = ml.un || ml.unit;
+                    return l;
+                });
+            }
+            if (ms.ml) {
+                s.mkvLinks = ms.ml.map((ml: any) => {
+                    const l: any = { url: ml.ur || ml.url };
+                    if (ml.nm || ml.name) l.name = ml.nm || ml.name;
+                    if (ml.sz || ml.size) l.size = ml.sz || ml.size;
+                    if (ml.un || ml.unit) l.unit = ml.un || ml.unit;
                     return l;
                 });
             }
             return s;
         });
-        expanded[longKey] = expandedSeasons;
+        expanded[longKey] = JSON.stringify(expandedSeasons);
         continue;
     }
     
-    if (['genreIds', 'languageIds'].includes(longKey) && typeof value === 'string') {
+    if (['genreIds', 'languageIds', 'cast'].includes(longKey) && typeof value === 'string') {
         expanded[longKey] = value ? value.split(',') : [];
+    } else if (longKey === 'subtitles') {
+        expanded[longKey] = (value === 'yes' || value === true);
+    } else if (longKey === 'status') {
+        expanded[longKey] = value === 'p' ? 'published' : (value === 'd' ? 'draft' : value);
     } else {
         expanded[longKey] = value;
     }
@@ -163,14 +232,14 @@ export interface ContentChunk {
 
 export function cleanContentForChunk(content: Content): Content {
   const cleaned: any = { ...content };
-  // delete cleaned.order; // PRESERVE ORDER
+  delete cleaned.chunkId; // Remove chunkId before saving to chunk
   delete cleaned.trailerYoutubeTitle;
   delete cleaned.type;
 
   // Remove empty values to save space
   Object.keys(cleaned).forEach(key => {
     const val = cleaned[key];
-    if (val === null || val === undefined || val === '') {
+    if (val === null || val === undefined || val === '' || val === false || val === '[]') {
       delete cleaned[key];
     } else if (Array.isArray(val) && val.length === 0) {
       delete cleaned[key];
@@ -200,10 +269,22 @@ export async function fetchAllFromChunks<T>(collectionName: string, mergeFn: (da
 export async function saveContentToChunk(rawContent: Content): Promise<void> {
   const expectedPrefix = rawContent.type === 'movie' ? 'movie_chunk_' : 'series_chunk_';
   const content = cleanContentForChunk(rawContent);
+  const batch = writeBatch(db);
+  
+  if (rawContent.chunkId) {
+    const docRef = doc(db, 'content_chunks', rawContent.chunkId);
+    batch.update(docRef, {
+      [`items.${content.id}`]: content
+    });
+    registerChunkUpdates([rawContent.chunkId], batch);
+    await batch.commit();
+    return;
+  }
+
+  // Fallback: search or find space
   const chunksSnap = await getDocs(collection(db, 'content_chunks'));
   let targetDoc: QueryDocumentSnapshot<DocumentData> | null = null;
   
-  // 1. Check if item already exists in a chunk
   for (const doc of chunksSnap.docs) {
     const items = doc.data().items || {};
     if (items[content.id]) {
@@ -212,11 +293,7 @@ export async function saveContentToChunk(rawContent: Content): Promise<void> {
     }
   }
 
-  const batch = writeBatch(db);
-
   if (targetDoc) {
-    // Update existing
-    // Consider: what if it changed type? Very rare for movie <-> series, but possible.
     const docRef = targetDoc.ref;
     batch.update(docRef, {
       [`items.${content.id}`]: content
@@ -243,7 +320,6 @@ export async function saveContentToChunk(rawContent: Content): Promise<void> {
     }
 
     if (!foundSpace) {
-      // Create new chunk
       const nextId = `${expectedPrefix}${sortedDocs.length}`;
       const newRef = doc(db, 'content_chunks', nextId);
       batch.set(newRef, {
@@ -262,7 +338,8 @@ export async function saveContentToChunk(rawContent: Content): Promise<void> {
 export async function saveContentsToChunks(rawContents: Content[]): Promise<void> {
   const contents = rawContents.map(raw => ({
     content: cleanContentForChunk(raw),
-    rawType: raw.type
+    rawType: raw.type,
+    chunkId: raw.chunkId
   }));
   const chunksSnap = await getDocs(collection(db, 'content_chunks'));
   let currentChunks = chunksSnap.docs.map(d => ({ id: d.id, items: (d.data().items || {}) as Record<string, Content> }));
@@ -270,18 +347,30 @@ export async function saveContentsToChunks(rawContents: Content[]): Promise<void
   const batch = writeBatch(db);
   const updatedChunkIds = new Set<string>();
 
-  for (const { content, rawType } of contents) {
+  for (const { content, rawType, chunkId } of contents) {
     let found = false;
     const expectedPrefix = rawType === 'movie' ? 'movie_chunk_' : 'series_chunk_';
     
-    // 1. Try to update existing if present
-    for (const chunk of currentChunks) {
-      if (chunk.items[content.id]) {
-        chunk.items[content.id] = content;
-        updatedChunkIds.add(chunk.id);
-        found = true;
-        break;
+    // 1. Try to update existing via chunkId if provided
+    if (chunkId) {
+      const chunk = currentChunks.find(c => c.id === chunkId);
+      if (chunk) {
+          chunk.items[content.id] = content;
+          updatedChunkIds.add(chunk.id);
+          found = true;
       }
+    }
+
+    if (!found) {
+        // Try to find if already present otherwise
+        for (const chunk of currentChunks) {
+            if (chunk.items[content.id]) {
+                chunk.items[content.id] = content;
+                updatedChunkIds.add(chunk.id);
+                found = true;
+                break;
+            }
+        }
     }
 
     if (!found) {
@@ -314,7 +403,7 @@ export async function saveContentsToChunks(rawContents: Content[]): Promise<void
   for (const chunkId of updatedChunkIds) {
     const chunk = currentChunks.find(c => c.id === chunkId);
     if (chunk) {
-      batch.set(doc(db, 'content_chunks', chunkId), { items: chunk.items });
+      batch.set(doc(db, 'content_chunks', chunkId), { items: chunk.items }, { merge: true });
     }
   }
 
@@ -326,37 +415,51 @@ export async function saveContentsToChunks(rawContents: Content[]): Promise<void
 /**
  * Updates specific fields for multiple content items in their respective chunks
  */
-export async function updateContentFieldsInChunks(updates: { id: string, [key: string]: any }[]): Promise<void> {
-  const chunksSnap = await getDocs(collection(db, 'content_chunks'));
+export async function updateContentFieldsInChunks(updates: { id: string, chunkId?: string, [key: string]: any }[]): Promise<void> {
+  const explicitUpdates = updates.filter(u => u.chunkId);
+  const unknownUpdates = updates.filter(u => !u.chunkId);
   
+  let chunksSnap: any = null;
+  if (unknownUpdates.length > 0) {
+      chunksSnap = await getDocs(collection(db, 'content_chunks'));
+  }
+
   // We may need multiple batches if updates exceed 500
   let batches = [writeBatch(db)];
   let operationCount = 0;
   
   const chunkUpdatesByBatch: Set<string>[] = [new Set()];
 
-  for (const updateObj of updates) {
+  const applyUpdateToBatch = (chunkId: string, contentId: string, updateObj: any) => {
+      const docUpdates: Record<string, any> = {};
+      for (const [key, value] of Object.entries(updateObj)) {
+          if (key !== 'id' && key !== 'chunkId') {
+              const shortKey = FIELD_MAP[key] || key;
+              docUpdates[`items.${contentId}.${shortKey}`] = value;
+          }
+      }
+      
+      if (operationCount >= 490) {
+          batches.push(writeBatch(db));
+          chunkUpdatesByBatch.push(new Set());
+          operationCount = 0;
+      }
+      
+      batches[batches.length - 1].update(doc(db, 'content_chunks', chunkId), docUpdates);
+      chunkUpdatesByBatch[batches.length - 1].add(chunkId);
+      operationCount++;
+  };
+
+  for (const updateObj of explicitUpdates) {
+      applyUpdateToBatch(updateObj.chunkId!, updateObj.id, updateObj);
+  }
+
+  for (const updateObj of unknownUpdates) {
     const contentId = updateObj.id;
     for (const chunkDoc of chunksSnap.docs) {
       const items = chunkDoc.data().items || {};
       if (items[contentId]) {
-        const docUpdates: Record<string, any> = {};
-        for (const [key, value] of Object.entries(updateObj)) {
-          if (key !== 'id') {
-            const shortKey = FIELD_MAP[key] || key;
-            docUpdates[`items.${contentId}.${shortKey}`] = value;
-          }
-        }
-        
-        if (operationCount >= 490) {
-          batches.push(writeBatch(db));
-          chunkUpdatesByBatch.push(new Set());
-          operationCount = 0;
-        }
-        
-        batches[batches.length - 1].update(chunkDoc.ref, docUpdates);
-        chunkUpdatesByBatch[batches.length - 1].add(chunkDoc.id);
-        operationCount++;
+        applyUpdateToBatch(chunkDoc.id, contentId, updateObj);
         break;
       }
     }
@@ -375,42 +478,53 @@ export async function updateContentFieldsInChunks(updates: { id: string, [key: s
 /**
  * Deletes a content item from its chunk
  */
-export async function deleteContentFromChunk(contentId: string): Promise<void> {
-  return deleteContentsFromChunks([contentId]);
+export async function deleteContentFromChunk(contentId: string, chunkId?: string): Promise<void> {
+  return deleteContentsFromChunks([{ id: contentId, chunkId }]);
 }
 
 /**
  * Deletes multiple content items from chunks efficiently
  */
-export async function deleteContentsFromChunks(contentIds: string[]): Promise<void> {
-  const chunksSnap = await getDocs(collection(db, 'content_chunks'));
+export async function deleteContentsFromChunks(itemsToRemove: {id: string, chunkId?: string}[]): Promise<void> {
+  const explicitRemovals = itemsToRemove.filter(i => i.chunkId);
+  const unknownRemovals = itemsToRemove.filter(i => !i.chunkId);
+
+  let chunksSnap: any = null;
+  if (unknownRemovals.length > 0) {
+     chunksSnap = await getDocs(collection(db, 'content_chunks'));
+  }
   
   let batches = [writeBatch(db)];
   let operationCount = 0;
   const chunkUpdatesByBatch: Set<string>[] = [new Set()];
 
-  for (const chunkDoc of chunksSnap.docs) {
-    const items = chunkDoc.data().items || {};
-    let chunkHasDeletes = false;
-    const docUpdates: Record<string, any> = {};
-
-    for (const id of contentIds) {
-      if (items[id]) {
-        docUpdates[`items.${id}`] = deleteField();
-        chunkHasDeletes = true;
-      }
-    }
-
-    if (chunkHasDeletes) {
+  const applyDeleteToBatch = (chunkId: string, contentId: string) => {
+      const docUpdates: Record<string, any> = {
+          [`items.${contentId}`]: deleteField()
+      };
       if (operationCount >= 490) {
-        batches.push(writeBatch(db));
-        chunkUpdatesByBatch.push(new Set());
-        operationCount = 0;
+          batches.push(writeBatch(db));
+          chunkUpdatesByBatch.push(new Set());
+          operationCount = 0;
       }
-      batches[batches.length - 1].update(chunkDoc.ref, docUpdates);
-      chunkUpdatesByBatch[batches.length - 1].add(chunkDoc.id);
+      batches[batches.length - 1].update(doc(db, 'content_chunks', chunkId), docUpdates);
+      chunkUpdatesByBatch[batches.length - 1].add(chunkId);
       operationCount++;
-    }
+  };
+
+  for (const item of explicitRemovals) {
+      applyDeleteToBatch(item.chunkId!, item.id);
+  }
+
+  if (chunksSnap) {
+      for (const chunkDoc of chunksSnap.docs) {
+        const items = chunkDoc.data().items || {};
+        for (const item of unknownRemovals) {
+          if (items[item.id]) {
+            applyDeleteToBatch(chunkDoc.id, item.id);
+          }
+        }
+      }
   }
 
   for (let i = 0; i < batches.length; i++) {
@@ -428,7 +542,7 @@ export async function getContentFromChunks(contentId: string): Promise<Content |
   for (const chunkDoc of chunksSnap.docs) {
     const items = chunkDoc.data().items || {};
     if (items[contentId]) {
-      return expandContent(items[contentId], chunkDoc.id);
+      return expandContent({ ...items[contentId], id: contentId }, chunkDoc.id);
     }
   }
   return null;

@@ -6,7 +6,6 @@ import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea
 import { Content } from '../types';
 import { db } from '../firebase';
 import { writeBatch, doc } from 'firebase/firestore';
-import { updateContentFieldsInChunks } from '../utils/chunkUtils';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
 import { useModalBehavior } from '../hooks/useModalBehavior';
 

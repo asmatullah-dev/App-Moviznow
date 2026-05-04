@@ -1,8 +1,4 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { db } from '../../firebase';
-import { collection, setDoc, deleteDoc, doc, updateDoc, writeBatch } from 'firebase/firestore';
-
-const generateShortId = () => Math.random().toString(36).substring(2, 6);
 import { Quality } from '../../types';
 import { Plus, Edit2, Trash2, X, Check, Search, GripVertical, Loader2 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
@@ -13,7 +9,7 @@ import { useModalBehavior } from '../../hooks/useModalBehavior';
 import { useContent } from '../../contexts/ContentContext';
 
 export default function QualityManagement() {
-  const { qualities } = useContent();
+  const { qualities, addAuxiliaryItem, updateAuxiliaryItem, deleteAuxiliaryItem } = useContent();
   const [newQuality, setNewQuality] = useState('');
   const [newColor, setNewColor] = useState('#10b981');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -37,7 +33,7 @@ export default function QualityManagement() {
     setProcessing(prev => ({ ...prev, add: true }));
     try {
       const maxOrder = qualities.length > 0 ? Math.max(...qualities.map(q => q.order || 0)) : 0;
-      await setDoc(doc(db, 'qualities', generateShortId()), { name: newQuality.trim(), order: maxOrder + 1, color: newColor });
+      await addAuxiliaryItem('quality', { name: newQuality.trim(), order: maxOrder + 1, color: newColor });
       setNewQuality('');
       setNewColor('#10b981');
     } finally {
@@ -49,7 +45,8 @@ export default function QualityManagement() {
     if (!deleteId) return;
     setProcessing(prev => ({ ...prev, delete: true }));
     try {
-      await deleteDoc(doc(db, 'qualities', deleteId));
+      await deleteAuxiliaryItem('quality', deleteId);
+      setDeleteId(null);
     } finally {
       setProcessing(prev => ({ ...prev, delete: false }));
     }
@@ -65,7 +62,7 @@ export default function QualityManagement() {
     if (!editName.trim() || !editingId) return;
     setProcessing(prev => ({ ...prev, edit: true }));
     try {
-      await updateDoc(doc(db, 'qualities', editingId), { name: editName.trim(), color: editColor });
+      await updateAuxiliaryItem('quality', editingId, { name: editName.trim(), color: editColor });
       setEditingId(null);
       setEditName('');
       setEditColor('#10b981');
@@ -78,17 +75,14 @@ export default function QualityManagement() {
     if (!result.destination) return;
     if (searchTerm) return; // Disable drag and drop when searching
 
-    const items = Array.from<Quality>(qualities);
+    const items = [...qualities];
     const [reorderedItem] = items.splice(result.source.index, 1);
     items.splice(result.destination.index, 0, reorderedItem);
 
-    // Batch update order in Firestore
-    const batch = writeBatch(db);
-    items.forEach((item, index) => {
-      const ref = doc(db, 'qualities', item.id);
-      batch.update(ref, { order: index });
-    });
-    await batch.commit();
+    // Batch update order using context
+    await Promise.all(items.map((item, index) => 
+      updateAuxiliaryItem('quality', item.id, { order: index })
+    ));
   };
 
   const filteredQualities = useMemo(() => {

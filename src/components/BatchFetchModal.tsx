@@ -7,7 +7,6 @@ import { searchTMDBByTitle, fetchTMDBDetails, fetchSeriesSeasons, fetchIMDbRatin
 import { db } from '../firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { useContent } from '../contexts/ContentContext';
-import { updateContentFieldsInChunks } from '../utils/chunkUtils';
 
 interface Props {
   isOpen: boolean;
@@ -24,7 +23,7 @@ export const BatchFetchModal: React.FC<Props> = ({
   mode,
   genres,
 }) => {
-  const { getContent } = useContent();
+  const { contentList, getContent, updateContentFields } = useContent();
   const [progress, setProgress] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [results, setResults] = useState<{ id: string; title: string; status: 'success' | 'error' | 'pending'; message?: string }[]>([]);
@@ -345,8 +344,9 @@ export const BatchFetchModal: React.FC<Props> = ({
             }
 
             if (Object.keys(updates).length > 0) {
+              const content = contentList.find(c => c.id === id);
               try {
-                await updateContentFieldsInChunks([{ id, ...updates }]);
+                await updateContentFields([{ id, chunkId: content?.chunkId, fields: updates }]);
                 updateResult(id, 'success', 'Updated');
               } catch (e: any) {
                 console.error(`Update Error for doc ${id}:`, updates, e);

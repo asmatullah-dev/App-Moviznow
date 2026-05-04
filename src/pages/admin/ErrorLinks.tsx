@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../firebase';
 import { useContent } from '../../contexts/ContentContext';
-import { updateContentFieldsInChunks } from '../../utils/chunkUtils';
 import { collection, onSnapshot, doc, updateDoc, getDoc } from 'firebase/firestore';
 import { Content, Season, QualityLinks, LinkDef, ErrorLinkInfo, Language, Quality } from '../../types';
 import { AlertTriangle, Edit2, ExternalLink, RefreshCw, X, Save, CheckCircle2, Filter, ArrowUpDown, Search, Trash2, Plus, ClipboardPaste, StopCircle } from 'lucide-react';
@@ -34,7 +33,7 @@ const parseLinks = (linksStr: string | undefined): QualityLinks => {
 };
 
 export default function ErrorLinks() {
-  const { contentList, languages, qualities, loading: contentLoading } = useContent();
+  const { contentList, languages, qualities, updateContentFields, loading: contentLoading } = useContent();
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   
@@ -552,7 +551,7 @@ export default function ErrorLinks() {
       }
 
       if (deleted) {
-        await updateContentFieldsInChunks([{ id: content.id, ...updatedContent }]);
+        await updateContentFields([{ id: content.id, chunkId: content.chunkId, fields: updatedContent }]);
         // Update local error links state to remove the deleted link
         setErrorLinks(prev => prev.filter(l => !(l.contentId === info.contentId && l.link.url === info.link.url && l.listType === info.listType)));
       } else {
@@ -613,7 +612,7 @@ export default function ErrorLinks() {
         }
       }
 
-      await updateContentFieldsInChunks([{ id: updatedContent.id, ...updatedContent }]);
+      await updateContentFields([{ id: updatedContent.id, chunkId: updatedContent.chunkId, fields: updatedContent }]);
       setIsAddLinksModalOpen(false);
       setAddLinksInput('');
       setAddName('');
@@ -770,7 +769,7 @@ export default function ErrorLinks() {
         }
       }
 
-      await updateContentFieldsInChunks([{ id: editingLink.contentId, ...updateData }]);
+      await updateContentFields([{ id: editingLink.contentId, chunkId: content.chunkId, fields: updateData }]);
       
       // Re-check the link after saving
       const checkRes = await fetch("/api/check-link", {

@@ -4,7 +4,6 @@ import { collection, onSnapshot, doc, updateDoc, deleteDoc, getDoc, addDoc, getD
 import { AlertTriangle, Edit2, Trash2, Bell, CheckCircle2, X, Save } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
 import { useContent } from '../../contexts/ContentContext';
-import { updateContentFieldsInChunks } from '../../utils/chunkUtils';
 import { Content, QualityLinks, Season } from '../../types';
 import { LinkCheckerModal } from '../../components/LinkCheckerModal';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
@@ -24,7 +23,7 @@ interface ReportedLink {
 }
 
 export default function ReportedLinks() {
-  const { getContent } = useContent();
+  const { getContent, updateContentFields } = useContent();
   const [reports, setReports] = useState<ReportedLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingReport, setEditingReport] = useState<ReportedLink | null>(null);
@@ -220,7 +219,7 @@ export default function ReportedLinks() {
         const linkIndex = links.findIndex(l => l.id === editingReport.linkId);
         if (linkIndex !== -1) {
           links[linkIndex] = { ...links[linkIndex], url: editUrl, size: editSize, unit: editUnit, name: editName };
-          await updateContentFieldsInChunks([{ id: editingReport.contentId, movieLinks: JSON.stringify(links) }]);
+          await updateContentFields([{ id: editingReport.contentId, chunkId: content?.chunkId, fields: { movieLinks: JSON.stringify(links) } }]);
           updated = true;
         }
       } else if (content.type === 'series' && content.seasons) {
@@ -260,7 +259,7 @@ export default function ReportedLinks() {
           }
         }
         if (updated) {
-          await updateContentFieldsInChunks([{ id: editingReport.contentId, seasons: JSON.stringify(seasons) }]);
+          await updateContentFields([{ id: editingReport.contentId, chunkId: content?.chunkId, fields: { seasons: JSON.stringify(seasons) } }]);
         }
       }
 

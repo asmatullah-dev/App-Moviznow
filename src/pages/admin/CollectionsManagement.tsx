@@ -1,6 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../../firebase';
-import { collection, doc, addDoc, updateDoc, deleteDoc, getDocs, onSnapshot, query, orderBy, writeBatch } from 'firebase/firestore';
 import { Plus, Trash2, Edit2, Save, X, Layers, Film, ChevronUp, ChevronDown, Loader2, TrendingUp, Zap } from 'lucide-react';
 import { Collection as AppCollection, Content } from '../../types';
 import { useContent } from '../../contexts/ContentContext';
@@ -10,7 +8,7 @@ import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorH
 import { formatContentTitle } from '../../utils/contentUtils';
 
 export default function CollectionsManagement() {
-  const { contentList, collections } = useContent();
+  const { contentList, collections, addCollection, updateCollection, deleteCollection } = useContent();
   const [isEditing, setIsEditing] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{ title: string; description: string; contentIds: string[] }>({ title: '', description: '', contentIds: [] });
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
@@ -19,28 +17,28 @@ export default function CollectionsManagement() {
 
   const handleAdd = async () => {
     try {
-      await addDoc(collection(db, 'collections'), {
+      await addCollection({
         title: 'New Collection',
         contentIds: [],
         createdAt: new Date().toISOString(),
         order: collections.length
       });
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'collections');
+      // Error handled in context
     }
   };
 
   const handleSave = async (id: string) => {
     try {
       setIsSaving(true);
-      await updateDoc(doc(db, 'collections', id), {
+      await updateCollection(id, {
         title: editForm.title,
         description: editForm.description,
         contentIds: editForm.contentIds
       });
       setIsEditing(null);
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `collections/${id}`);
+      // Error handled in context
     } finally {
       setIsSaving(false);
     }
@@ -49,10 +47,10 @@ export default function CollectionsManagement() {
   const handleDelete = async () => {
     if (!deleteConfirm) return;
     try {
-      await deleteDoc(doc(db, 'collections', deleteConfirm));
+      await deleteCollection(deleteConfirm);
       setDeleteConfirm(null);
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `collections/${deleteConfirm}`);
+      // Error handled in context
     }
   };
 
@@ -93,22 +91,22 @@ export default function CollectionsManagement() {
   // Reorder collections
   const moveUp = async (index: number) => {
     if (index === 0) return;
-    const batch = writeBatch(db);
     const curr = collections[index];
     const prev = collections[index - 1];
-    batch.update(doc(db, 'collections', curr.id), { order: index - 1 });
-    batch.update(doc(db, 'collections', prev.id), { order: index });
-    await batch.commit();
+    await Promise.all([
+      updateCollection(curr.id, { order: index - 1 }),
+      updateCollection(prev.id, { order: index })
+    ]);
   };
 
   const moveDown = async (index: number) => {
     if (index === collections.length - 1) return;
-    const batch = writeBatch(db);
     const curr = collections[index];
     const next = collections[index + 1];
-    batch.update(doc(db, 'collections', curr.id), { order: index + 1 });
-    batch.update(doc(db, 'collections', next.id), { order: index });
-    await batch.commit();
+    await Promise.all([
+      updateCollection(curr.id, { order: index + 1 }),
+      updateCollection(next.id, { order: index })
+    ]);
   };
 
   const searchResults = contentSearch.length > 2 

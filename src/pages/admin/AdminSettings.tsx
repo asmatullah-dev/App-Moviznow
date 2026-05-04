@@ -271,15 +271,73 @@ export default function AdminSettings() {
           
           <div className="flex flex-wrap items-center gap-2">
             {!showConfirmUpdate ? (
-              <button
-                type="button"
-                onClick={() => setShowConfirmUpdate(true)}
-                disabled={isMigrating}
-                className="flex items-center justify-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-300 text-white rounded-lg transition-colors text-sm font-medium shadow-sm whitespace-nowrap"
-              >
-                {isMigrating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                {isMigrating ? `Updating...` : 'Update Chunks'}
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setIsMigrating(true);
+                    setError(null);
+                    setSuccess(false);
+                    setUpdateResult(null);
+                    try {
+                      const { migrateFromLegacyContent } = await import('../../utils/maintenanceUtils');
+                      const result = await migrateFromLegacyContent();
+                      if (result.success) {
+                        setSuccess(true);
+                        setUpdateResult({ updated: result.migrated as number, newChunksCount: 0 });
+                      } else {
+                        setError('Migration failed: ' + result.error);
+                      }
+                    } catch (e) {
+                      setError('Migration failed: ' + String(e));
+                    } finally {
+                      setIsMigrating(false);
+                    }
+                  }}
+                  disabled={isMigrating}
+                  className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 text-white rounded-lg transition-colors text-sm font-medium shadow-sm whitespace-nowrap"
+                >
+                  {isMigrating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
+                  {isMigrating ? `Migrating...` : 'Migrate Legacy /content'}
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setIsMigrating(true);
+                    setError(null);
+                    setSuccess(false);
+                    setUpdateResult(null);
+                    try {
+                      const { processChunksUpdateMetadataAndIds } = await import('../../utils/maintenanceUtils');
+                      const result = await processChunksUpdateMetadataAndIds();
+                      if (result.success) {
+                        setSuccess(true);
+                        setUpdateResult({ updated: 0, newChunksCount: 0 }); // generic success
+                      } else {
+                        setError('Update failed: ' + result.error);
+                      }
+                    } catch (e) {
+                      setError('Update failed: ' + String(e));
+                    } finally {
+                      setIsMigrating(false);
+                    }
+                  }}
+                  disabled={isMigrating}
+                  className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-500 hover:bg-indigo-600 disabled:bg-indigo-300 text-white rounded-lg transition-colors text-sm font-medium shadow-sm whitespace-nowrap"
+                >
+                  {isMigrating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                  {isMigrating ? `Updating...` : 'Update IDs in Chunks'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmUpdate(true)}
+                  disabled={isMigrating}
+                  className="flex items-center justify-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-300 text-white rounded-lg transition-colors text-sm font-medium shadow-sm whitespace-nowrap"
+                >
+                  {isMigrating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                  {isMigrating ? `Updating...` : 'Update Chunks'}
+                </button>
+              </>
             ) : (
               <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-900/20 p-1.5 rounded-lg border border-amber-200 dark:border-amber-800">
                 <span className="text-xs font-semibold text-amber-800 dark:text-amber-200 px-2">Are you sure?</span>

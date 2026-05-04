@@ -1,8 +1,4 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { db } from '../../firebase';
-import { collection, setDoc, deleteDoc, doc, updateDoc, writeBatch } from 'firebase/firestore';
-
-const generateShortId = () => Math.random().toString(36).substring(2, 6);
 import { Language } from '../../types';
 import { Plus, Edit2, Trash2, X, Check, Search, GripVertical, Loader2 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
@@ -13,7 +9,7 @@ import { useModalBehavior } from '../../hooks/useModalBehavior';
 import { useContent } from '../../contexts/ContentContext';
 
 export default function LanguageManagement() {
-  const { languages } = useContent();
+  const { languages, addAuxiliaryItem, updateAuxiliaryItem, deleteAuxiliaryItem } = useContent();
   const [newLanguage, setNewLanguage] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
@@ -35,7 +31,7 @@ export default function LanguageManagement() {
     setProcessing(prev => ({ ...prev, add: true }));
     try {
       const maxOrder = languages.length > 0 ? Math.max(...languages.map(l => l.order || 0)) : 0;
-      await setDoc(doc(db, 'languages', generateShortId()), { name: newLanguage.trim(), order: maxOrder + 1 });
+      await addAuxiliaryItem('language', { name: newLanguage.trim(), order: maxOrder + 1 });
       setNewLanguage('');
     } finally {
       setProcessing(prev => ({ ...prev, add: false }));
@@ -46,7 +42,8 @@ export default function LanguageManagement() {
     if (!deleteId) return;
     setProcessing(prev => ({ ...prev, delete: true }));
     try {
-      await deleteDoc(doc(db, 'languages', deleteId));
+      await deleteAuxiliaryItem('language', deleteId);
+      setDeleteId(null);
     } finally {
       setProcessing(prev => ({ ...prev, delete: false }));
     }
@@ -61,7 +58,7 @@ export default function LanguageManagement() {
     if (!editName.trim() || !editingId) return;
     setProcessing(prev => ({ ...prev, edit: true }));
     try {
-      await updateDoc(doc(db, 'languages', editingId), { name: editName.trim() });
+      await updateAuxiliaryItem('language', editingId, { name: editName.trim() });
       setEditingId(null);
       setEditName('');
     } finally {
@@ -73,17 +70,14 @@ export default function LanguageManagement() {
     if (!result.destination) return;
     if (searchTerm) return; // Disable drag and drop when searching
 
-    const items = Array.from<Language>(languages);
+    const items = [...languages];
     const [reorderedItem] = items.splice(result.source.index, 1);
     items.splice(result.destination.index, 0, reorderedItem);
 
-    // Batch update order in Firestore
-    const batch = writeBatch(db);
-    items.forEach((item, index) => {
-      const ref = doc(db, 'languages', item.id);
-      batch.update(ref, { order: index });
-    });
-    await batch.commit();
+    // Batch update order using context
+    await Promise.all(items.map((item, index) => 
+      updateAuxiliaryItem('language', item.id, { order: index })
+    ));
   };
 
   const filteredLanguages = useMemo(() => {
