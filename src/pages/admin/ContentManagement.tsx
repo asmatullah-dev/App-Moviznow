@@ -326,6 +326,7 @@ export default function ContentManagement() {
     if (['480p', '720p', '1080p', 'trailer', 'genre', 'language', 'quality', 'poster', 'year', 'imdb', 'releaseDate', 'disabled'].includes(saved || '')) return saved as any;
     return 'none';
   });
+  const [missingThisOneOnly, setMissingThisOneOnly] = useState(() => sessionStorage.getItem('adminMissingThisOneOnly') === 'true');
   const [isMissingFilterOpen, setIsMissingFilterOpen] = useState(false);
   
   useEffect(() => {
@@ -386,9 +387,10 @@ export default function ContentManagement() {
       sessionStorage.setItem('content_mgmt_sort', filterSort);
       sessionStorage.setItem('adminShowDuplicates', showDuplicates.toString());
       sessionStorage.setItem('adminShowMissingOnly', showMissing.toString());
+      sessionStorage.setItem('adminMissingThisOneOnly', missingThisOneOnly.toString());
     }, 500);
     return () => clearTimeout(timer);
-  }, [searchTerm, filterType, filterGenre, filterLanguage, filterQuality, filterYear, filterStatus, filterAddedBy, filterSort, showDuplicates, showMissing]);
+  }, [searchTerm, filterType, filterGenre, filterLanguage, filterQuality, filterYear, filterStatus, filterAddedBy, filterSort, showDuplicates, showMissing, missingThisOneOnly]);
 
   const [genreSearchTerm, setGenreSearchTerm] = useState('');
   const [languageSearchTerm, setLanguageSearchTerm] = useState('');
@@ -2668,17 +2670,26 @@ export default function ContentManagement() {
         const labels = getMissingLabels(c, profile);
         if (labels.length === 0) return false;
 
-        let searchTag = (showMissing || '').toString();
-        if (showMissing === 'trailer') searchTag = 'Missing Trailer';
-        else if (showMissing === 'genre') searchTag = 'Missing Genre';
-        else if (showMissing === 'language') searchTag = 'Missing Language';
-        else if (showMissing === 'quality') searchTag = 'Missing Print Quality';
-        else if (showMissing === 'poster') searchTag = 'Missing Poster';
-        else if (showMissing === 'year') searchTag = 'Missing Year';
-        else if (showMissing === 'releaseDate') searchTag = 'Missing Release Date';
+        const searchTagLower = (showMissing || '').toString().toLowerCase();
+        const missingLabelMap: Record<string, string> = {
+          '480p': 'missing 480p',
+          '720p': 'missing 720p',
+          '1080p': 'missing 1080p',
+          'trailer': 'missing trailer',
+          'genre': 'missing genre',
+          'language': 'missing language',
+          'quality': 'missing print quality',
+          'poster': 'missing poster',
+          'year': 'missing year',
+          'releaseDate': 'missing release date',
+        };
+        const expectedLabel = missingLabelMap[showMissing as string] || `missing ${searchTagLower}`;
         
-        const searchTagLower = searchTag.toLowerCase();
-        return labels.some(l => l && typeof l === 'string' && l.toLowerCase().includes(searchTagLower));
+        const isMatch = missingThisOneOnly 
+          ? labels.every(l => l && typeof l === 'string' && l.toLowerCase() === expectedLabel)
+          : labels.some(l => l && typeof l === 'string' && l.toLowerCase().includes(searchTagLower));
+        
+        return isMatch;
       });
     }
 
@@ -2727,7 +2738,7 @@ export default function ContentManagement() {
         return filterSort === 'newest' ? timeB - timeA : timeA - timeB;
       });
     return sortedResult;
-  }, [contentList, debouncedSearchTerm, filterType, filterGenre, filterLanguage, filterQuality, filterYear, filterStatus, filterSort, filterAddedBy, profile, user, showDuplicates, showMissing, duplicateIds]);
+  }, [contentList, debouncedSearchTerm, filterType, filterGenre, filterLanguage, filterQuality, filterYear, filterStatus, filterSort, filterAddedBy, profile, user, showDuplicates, showMissing, duplicateIds, missingThisOneOnly]);
 
   const filteredGenres = useMemo(() => {
     if (!genreSearchTerm) return genres;
@@ -3097,6 +3108,7 @@ export default function ContentManagement() {
                             { label: 'All Content', value: 'none', icon: <Eye className="w-4 h-4" /> },
                             { label: 'Missing Info (All)', value: 'missing', icon: <AlertCircle className="w-4 h-4" />, color: 'text-red-500' },
                             { label: 'Complete Info', value: 'complete', icon: <Check className="w-4 h-4" />, color: 'text-emerald-500' },
+                            { type: 'checkbox', label: 'Missing This One Only', value: 'missing-this-one-only' },
                             { type: 'divider' },
                             { label: 'Missing 480p', value: '480p' },
                             { label: 'Missing 720p', value: '720p' },
@@ -3112,6 +3124,19 @@ export default function ContentManagement() {
                             { label: 'Disabled (Draft)', value: 'disabled', icon: <EyeOff className="w-4 h-4" /> }
                           ].map((item, idx) => {
                             if (item.type === 'divider') return <div key={`div-${idx}`} className="h-px bg-zinc-200 dark:bg-zinc-800 my-1 mx-2" />;
+                            if (item.type === 'checkbox') {
+                              return (
+                                <label key={item.value} className="flex items-center gap-2 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
+                                  <input 
+                                    type="checkbox" 
+                                    checked={missingThisOneOnly} 
+                                    onChange={e => setMissingThisOneOnly(e.target.checked)} 
+                                    className="rounded text-emerald-500 focus:ring-emerald-500" 
+                                  />
+                                  {item.label}
+                                </label>
+                              );
+                            }
                             
                             return (
                               <button
