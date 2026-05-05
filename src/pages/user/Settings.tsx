@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth, standardizePhone } from '../../contexts/AuthContext';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Lock, User, Mail, Phone, Loader2, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Save, Lock, User, Mail, Phone, Loader2, AlertCircle, Bell, BellOff, CheckCircle2 } from 'lucide-react';
 import { clsx } from 'clsx';
+import { requestNotificationPermission } from '../../firebase';
 
 export default function Settings() {
   const { profile, user, updateUserProfileData } = useAuth();
@@ -224,6 +225,54 @@ export default function Settings() {
                   </div>
                 </>
               )}
+
+              <div className="h-px bg-zinc-200 dark:bg-zinc-800 my-8"></div>
+
+              <div className="space-y-4">
+                <h3 className="text-lg font-bold mb-2">Push Notifications</h3>
+                <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                  Allow push notifications to get updates about new movies, orders, and more.
+                </p>
+                
+                <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800">
+                  <div className="flex items-center gap-3">
+                    <div className={clsx(
+                      "w-10 h-10 rounded-full flex items-center justify-center",
+                      Notification.permission === 'granted' ? "bg-emerald-500/10 text-emerald-500" : "bg-zinc-100 dark:bg-zinc-800 text-zinc-400"
+                    )}>
+                      {Notification.permission === 'granted' ? <Bell className="w-5 h-5" /> : <BellOff className="w-5 h-5" />}
+                    </div>
+                    <div>
+                      <p className="font-semibold text-sm">Status: {Notification.permission.charAt(0).toUpperCase() + Notification.permission.slice(1)}</p>
+                      <p className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                        {Notification.permission === 'granted' 
+                          ? 'You are receiving notifications' 
+                          : 'Notifications are currently blocked or not requested'}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setLoading(true);
+                      try {
+                        const token = await requestNotificationPermission(true);
+                        if (token) {
+                          setSuccess('Notifications registered successfully!');
+                        } else if (Notification.permission === 'denied') {
+                          setError('Notification permission denied. Please allow it in browser settings.');
+                        }
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                    className="px-4 py-2 text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-xl transition-colors"
+                  >
+                    {Notification.permission === 'granted' ? 'Refresh Token' : 'Enable Notifications'}
+                  </button>
+                </div>
+              </div>
 
               <div className="pt-6">
                 <button

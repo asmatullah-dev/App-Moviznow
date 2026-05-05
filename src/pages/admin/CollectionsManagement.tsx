@@ -1,27 +1,54 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit2, Save, X, Layers, Film, ChevronUp, ChevronDown, Loader2, TrendingUp, Zap } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Plus, Trash2, Edit2, Save, X, Layers, Film, ChevronUp, ChevronDown, Loader2, TrendingUp, Zap, Clock } from 'lucide-react';
 import { Collection as AppCollection, Content } from '../../types';
 import { useContent } from '../../contexts/ContentContext';
+import { Button } from '../../components/Button';
 import { clsx } from 'clsx';
 import ConfirmModal from '../../components/ConfirmModal';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
 import { formatContentTitle } from '../../utils/contentUtils';
 
 export default function CollectionsManagement() {
-  const { contentList, collections, addCollection, updateCollection, deleteCollection } = useContent();
+  const { 
+    contentList, 
+    collections, 
+    addCollection, 
+    updateCollection, 
+    deleteCollection, 
+    finalizeChanges, 
+    hasPendingChanges,
+    reorderCollections
+  } = useContent();
   const [isEditing, setIsEditing] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{ title: string; description: string; contentIds: string[] }>({ title: '', description: '', contentIds: [] });
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [contentSearch, setContentSearch] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  
+  const hasPendingRef = useRef(hasPendingChanges);
+  useEffect(() => {
+    hasPendingRef.current = hasPendingChanges;
+  }, [hasPendingChanges]);
+
+  useEffect(() => {
+    return () => {
+      // Sync on leave
+      if (hasPendingRef.current) {
+        console.log("Auto-syncing collections on exit...");
+        finalizeChanges().catch(err => console.error("Auto-sync failed:", err));
+      }
+    };
+  }, [finalizeChanges]);
 
   const handleAdd = async () => {
     try {
+      const maxOrder = collections.length > 0 ? Math.max(...collections.map(c => c.order || 0)) : 0;
       await addCollection({
         title: 'New Collection',
         contentIds: [],
         createdAt: new Date().toISOString(),
-        order: collections.length
+        order: maxOrder + 1
       });
     } catch (error) {
       // Error handled in context
@@ -93,20 +120,14 @@ export default function CollectionsManagement() {
     if (index === 0) return;
     const curr = collections[index];
     const prev = collections[index - 1];
-    await Promise.all([
-      updateCollection(curr.id, { order: index - 1 }),
-      updateCollection(prev.id, { order: index })
-    ]);
+    await reorderCollections(curr.id, prev.id);
   };
 
   const moveDown = async (index: number) => {
     if (index === collections.length - 1) return;
     const curr = collections[index];
     const next = collections[index + 1];
-    await Promise.all([
-      updateCollection(curr.id, { order: index + 1 }),
-      updateCollection(next.id, { order: index })
-    ]);
+    await reorderCollections(curr.id, next.id);
   };
 
   const searchResults = contentSearch.length > 2 
@@ -130,13 +151,33 @@ export default function CollectionsManagement() {
             <p className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5">Manage grouped content rows for the home page</p>
           </div>
         </div>
-        <button
-          onClick={handleAdd}
-          className="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg flex items-center gap-2 transition-all active:scale-95 shadow-lg shadow-emerald-500/20 text-xs font-bold"
-        >
-          <Plus className="w-4 h-4" />
-          <span className="hidden sm:inline">Add Collection</span>
-        </button>
+          <div className="flex items-center gap-2">
+            {hasPendingChanges && (
+              <Button
+                onClick={async () => {
+                  setIsSyncing(true);
+                  try {
+                    await finalizeChanges();
+                  } finally {
+                    setIsSyncing(false);
+                  }
+                }}
+                variant="secondary"
+                className="flex items-center gap-2 py-1.5 px-3 text-xs bg-orange-500 hover:bg-orange-600 border-none text-white animate-pulse"
+                disabled={isSyncing}
+              >
+                <Clock className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                {isSyncing ? 'Syncing...' : 'Sync to Server*'}
+              </Button>
+            )}
+            <button
+              onClick={handleAdd}
+              className="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg flex items-center gap-2 transition-all active:scale-95 shadow-lg shadow-emerald-500/20 text-xs font-bold"
+            >
+              <Plus className="w-4 h-4" />
+              <span className="hidden sm:inline">Add Collection</span>
+            </button>
+          </div>
       </div>
 
       <div className="grid grid-cols-1 gap-6">

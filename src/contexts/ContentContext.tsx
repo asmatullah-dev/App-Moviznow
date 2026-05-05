@@ -37,6 +37,7 @@ interface ContentContextType {
   addCollection: (collection: Omit<AppCollection, 'id'>) => Promise<void>;
   updateCollection: (id: string, updates: Partial<AppCollection>) => Promise<void>;
   deleteCollection: (id: string) => Promise<void>;
+  reorderCollections: (id1: string, id2: string) => Promise<void>;
   addAuxiliaryItem: (type: 'genre' | 'language' | 'quality', item: any) => Promise<void>;
   updateAuxiliaryItem: (type: 'genre' | 'language' | 'quality', id: string, updates: any) => Promise<void>;
   deleteAuxiliaryItem: (type: 'genre' | 'language' | 'quality', id: string) => Promise<void>;
@@ -50,33 +51,36 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
   const { profile, loading: authProfileLoading } = useAuth();
   const { users: allUsers } = useUsers();
 
-  const [contentList, setContentList] = useState<Content[]>(() => {
-    const cached = safeStorage.getItem('content_cache');
-    return cached ? JSON.parse(cached) : [];
-  });
-  const [genres, setGenres] = useState<Genre[]>(() => {
-    const cached = safeStorage.getItem('genres_cache');
-    return cached ? JSON.parse(cached) : [];
-  });
-  const [languages, setLanguages] = useState<Language[]>(() => {
-    const cached = safeStorage.getItem('languages_cache');
-    return cached ? JSON.parse(cached) : [];
-  });
-  const [qualities, setQualities] = useState<Quality[]>(() => {
-    const cached = safeStorage.getItem('qualities_cache');
-    return cached ? JSON.parse(cached) : [];
-  });
-  const [collections, setCollections] = useState<AppCollection[]>(() => {
-    const cached = safeStorage.getItem('collections_cache');
-    return cached ? JSON.parse(cached) : [];
-  });
-  const [loading, setLoading] = useState(() => {
-    const hasCache = safeStorage.getItem('content_cache');
-    return !hasCache;
-  });
+  const [contentList, setContentList] = useState<Content[]>([]);
+  const [genres, setGenres] = useState<Genre[]>([]);
+  const [languages, setLanguages] = useState<Language[]>([]);
+  const [qualities, setQualities] = useState<Quality[]>([]);
+  const [collections, setCollections] = useState<AppCollection[]>([]);
+  const [loading, setLoading] = useState(true);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  
+  const hasLoadedRef = useRef(false);
+
+  useEffect(() => {
+    if (hasLoadedRef.current) return;
+    hasLoadedRef.current = true;
+    
+    // Initial sync from local storage for IMMEDIATE UI feedback
+    refreshContentFromLocal();
+    refreshCollectionsFromLocal();
+    
+    // Load auxiliary from cache
+    const g = safeStorage.getItem('genres_cache');
+    if (g) setGenres(JSON.parse(g));
+    const l = safeStorage.getItem('languages_cache');
+    if (l) setLanguages(JSON.parse(l));
+    const q = safeStorage.getItem('qualities_cache');
+    if (q) setQualities(JSON.parse(q));
+    
+    setLoading(false);
+  }, []);
   const [hasPendingChanges, setHasPendingChanges] = useState(() => {
-    return !!safeStorage.getItem('pending_chunk_updates');
+    return !!safeStorage.getItem('pending_chunk_updates') || !!safeStorage.getItem('pending_collection_updates');
   });
 
   const COLLECTION_CHUNK_SIZE = 1000;
@@ -94,11 +98,83 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  const reorderCollections = async (id1: string, id2: string) => {
+    let coll1: AppCollection | undefined;
+    let coll2: AppCollection | undefined;
+
+    setCollections(prev => {
+        const next = [...prev];
+        const idx1 = next.findIndex(c => c.id === id1);
+        const idx2 = next.findIndex(c => c.id === id2);
+        
+        if (idx1 !== -1 && idx2 !== -1) {
+            const item1 = next[idx1];
+            const item2 = next[idx2];
+            
+            let order1 = item1.order ?? 0;
+            let order2 = item2.order ?? 0;
+
+            // If orders are same, we must force a difference to actually move them
+            if (order1 === order2) {
+                // Determine direction based on index. If idx1 < idx2, idx1 was higher in list.
+                // We want to swap them, so if we are moving one down, we want its order to be smaller.
+                if (idx1 < idx2) {
+                    // moving item1 down
+                    order1 = order2 - 1;
+                } else {
+                    // moving item1 up
+                    order1 = order2 + 1;
+                }
+            }
+
+            next[idx1] = { ...item1, order: order2, updatedAt: new Date().toISOString() };
+            next[idx2] = { ...item2, order: order1, updatedAt: new Date().toISOString() };
+            
+            coll1 = next[idx1];
+            coll2 = next[idx2];
+        }
+        return next.sort((a, b) => (b.order || 0) - (a.order || 0));
+    });
+
+    if (!coll1 || !coll2) return;
+
+    // Persist changes locally (synchronously to avoid race conditions with multiple clicks)
+    const pendingIds = new Set(JSON.parse(safeStorage.getItem('pending_collection_updates') || '[]'));
+    
+    [coll1, coll2].forEach(coll => {
+        const keys = Object.keys(localStorage).filter(k => k.startsWith('local_collection_chunk_'));
+        for (const key of keys) {
+            const chunkStr = safeStorage.getItem(key);
+            if (chunkStr && chunkStr.includes(`"${coll.id}"`)) {
+                const items = JSON.parse(chunkStr);
+                if (items[coll.id]) {
+                    items[coll.id] = coll;
+                    safeStorage.setItem(key, JSON.stringify(items));
+                    pendingIds.add(key.replace('local_collection_chunk_', ''));
+                    break;
+                }
+            }
+        }
+    });
+
+    const allCached = JSON.parse(safeStorage.getItem('collections_cache') || '[]');
+    [coll1, coll2].forEach(coll => {
+        const idx = allCached.findIndex((c: any) => c.id === coll.id);
+        if (idx !== -1) allCached[idx] = coll;
+        else allCached.push(coll);
+    });
+    
+    safeStorage.setItem('collections_cache', JSON.stringify(allCached.sort((a: any, b: any) => (b.order || 0) - (a.order || 0))));
+    safeStorage.setItem('pending_collection_updates', JSON.stringify(Array.from(pendingIds)));
+    setHasPendingChanges(true);
+  };
+
   const finalizeChanges = async () => {
     if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
     const contentPendingStr = safeStorage.getItem('pending_chunk_updates');
+    const collectionPendingStr = safeStorage.getItem('pending_collection_updates');
     
-    if (!contentPendingStr) {
+    if (!contentPendingStr && !collectionPendingStr) {
         setHasPendingChanges(false);
         return;
     }
@@ -111,16 +187,41 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         };
 
         // Handle content chunks
-        const pendingChunkIds = JSON.parse(contentPendingStr) as string[];
-        for (const cid of pendingChunkIds) {
-            const chunkStr = safeStorage.getItem('content_chunk_' + cid);
-            if (chunkStr) {
-                batch.set(doc(db, 'content_chunks', cid), { 
-                    items: JSON.parse(chunkStr),
-                    updatedAt: serverTimestamp()
-                });
-                versionsUpdate[cid] = now;
+        if (contentPendingStr) {
+            const pendingChunkIds = JSON.parse(contentPendingStr) as string[];
+            for (const cid of pendingChunkIds) {
+                const chunkStr = safeStorage.getItem('content_chunk_' + cid);
+                if (chunkStr) {
+                    batch.set(doc(db, 'content_chunks', cid), { 
+                        items: JSON.parse(chunkStr),
+                        updatedAt: serverTimestamp()
+                    });
+                    versionsUpdate[cid] = now;
+                }
             }
+        }
+
+        // Handle collection chunks
+        if (collectionPendingStr) {
+            const pendingCollChunkIds = JSON.parse(collectionPendingStr) as string[];
+            let maxCollIndex = 0;
+            for (const cid of pendingCollChunkIds) {
+                const chunkStr = safeStorage.getItem('local_collection_chunk_' + cid);
+                if (chunkStr) {
+                    batch.set(doc(db, 'collection_chunks', cid), {
+                        items: JSON.parse(chunkStr),
+                        updatedAt: serverTimestamp()
+                    });
+                    const match = cid.match(/(\d+)$/);
+                    if (match) maxCollIndex = Math.max(maxCollIndex, parseInt(match[1]));
+                }
+            }
+            
+            versionsUpdate.collections = {
+                version: now,
+                updatedAt: serverTimestamp(),
+                latestChunkId: COLLECTION_CHUNK_PREFIX + maxCollIndex
+            };
         }
 
         batch.set(doc(db, 'chunk_meta', 'versions'), versionsUpdate, { merge: true });
@@ -130,8 +231,15 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         let localMeta: Record<string, any> = {};
         try { localMeta = JSON.parse(localMetaString); } catch(e) {}
 
-        Object.assign(localMeta, versionsUpdate);
-        safeStorage.removeItem('pending_chunk_updates');
+        if (contentPendingStr) {
+            Object.assign(localMeta, versionsUpdate);
+            safeStorage.removeItem('pending_chunk_updates');
+        }
+
+        if (collectionPendingStr) {
+            safeStorage.removeItem('pending_collection_updates');
+            localMeta.collections = versionsUpdate.collections.version;
+        }
 
         safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
         setHasPendingChanges(false);
@@ -166,14 +274,19 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     try { localMeta = JSON.parse(localMetaString); } catch(e) {}
     
     const rawContentMap: Record<string, Content> = {};
-    for (const chunkId of Object.keys(localMeta)) {
-        if (chunkId === 'collections' || chunkId === 'notifications' || chunkId === 'lastGlobalUpdate') continue;
-        const chunkStr = safeStorage.getItem('content_chunk_' + chunkId);
+    const chunkKeys = Object.keys(localStorage).filter(k => 
+        k.startsWith('content_chunk_') || 
+        k.startsWith('movie_chunk_') || 
+        k.startsWith('series_chunk_')
+    );
+
+    for (const key of chunkKeys) {
+        const chunkStr = safeStorage.getItem(key);
         if (chunkStr) {
             try {
                 const items = JSON.parse(chunkStr);
                 Object.entries(items).forEach(([id, item]: [string, any]) => {
-                    const expanded = expandContent({ ...item, id }, chunkId);
+                    const expanded = expandContent({ ...item, id }, key);
                     rawContentMap[expanded.id] = expanded;
                 });
             } catch(e) {}
@@ -203,6 +316,27 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         setContentList(rawContent);
         safeStorage.setItem('content_cache', JSON.stringify(rawContent));
     }
+  };
+
+  const refreshCollectionsFromLocal = () => {
+    let allCollections: AppCollection[] = [];
+    const keys = Object.keys(localStorage).filter(k => k.startsWith('local_collection_chunk_'));
+    
+    for (const key of keys) {
+        const chunkStr = safeStorage.getItem(key);
+        if (chunkStr) {
+            try {
+                const items = JSON.parse(chunkStr);
+                const chunkList = Object.values(items) as AppCollection[];
+                allCollections = [...allCollections, ...chunkList];
+            } catch(e) {}
+        }
+    }
+    
+    const sorted = allCollections.sort((a, b) => (b.order || 0) - (a.order || 0));
+    setCollections(sorted);
+    safeStorage.setItem('collections_cache', JSON.stringify(sorted));
+    return sorted;
   };
 
   const syncWithServer = async () => {
@@ -256,8 +390,13 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     
     // Process chunks
     const chunksToFetch: string[] = [];
+    const pendingStr = safeStorage.getItem('pending_chunk_updates') || '[]';
+    const pendingChunkIds = new Set(JSON.parse(pendingStr));
+
     for (const [chunkId, versionMeta] of Object.entries(versions)) {
         if (chunkId === 'collections' || chunkId === 'notifications' || chunkId === 'lastGlobalUpdate') continue;
+        if (pendingChunkIds.has(chunkId)) continue; // SKIP pending chunks to avoid overwriting with old server data
+
         const version = typeof versionMeta === 'object' ? (versionMeta as any).version : versionMeta;
         const hasData = !!safeStorage.getItem('content_chunk_' + chunkId);
         if (!hasData || !localMeta[chunkId] || localMeta[chunkId] < (version as number)) {
@@ -493,12 +632,41 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         }
         if (!localMeta[chunkId]) localMeta[chunkId] = 0;
     }
+    // Scan all chunks to ensure the item is removed from any previous chunk it might have been in
+    Object.keys(localStorage).forEach(key => {
+        if (key.startsWith('content_chunk_') || key.startsWith('movie_chunk_') || key.startsWith('series_chunk_')) {
+            if (key !== 'content_chunk_' + chunkId) {
+                const s = safeStorage.getItem(key);
+                if (s && s.includes(`"${content.id}"`)) {
+                    try {
+                        const items = JSON.parse(s);
+                        if (items[content.id]) {
+                            delete items[content.id];
+                            safeStorage.setItem(key, JSON.stringify(items));
+                            // Mark this old chunk as needing sync too
+                            const cid = key.replace('content_chunk_', '');
+                            const pendingStr = safeStorage.getItem('pending_chunk_updates') || '[]';
+                            const pendingIds = new Set(JSON.parse(pendingStr));
+                            pendingIds.add(cid);
+                            safeStorage.setItem('pending_chunk_updates', JSON.stringify(Array.from(pendingIds)));
+                        }
+                    } catch(e) {}
+                }
+            }
+        }
+    });
+
     const chunkStr = safeStorage.getItem('content_chunk_' + chunkId) || '{}';
     const chunkItems = JSON.parse(chunkStr);
     delete chunkItems[content.id];
     // Always written first
     const newChunkItems = { [content.id]: minified, ...chunkItems };
     safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(newChunkItems));
+    
+    // Update local metadata immediately so refreshContentFromLocal can find the new version/chunk
+    localMeta[chunkId] = Date.now();
+    safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+
     if (isAdminOrEditor) {
         const pendingStr = safeStorage.getItem('pending_chunk_updates') || '[]';
         const pendingIds = new Set(JSON.parse(pendingStr));
@@ -575,6 +743,13 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
                 const minifiedPayload = minifyContent(update.fields);
                 items[update.id] = { ...items[update.id], ...minifiedPayload };
                 safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(items));
+                
+                // Update local metadata immediately
+                const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+                let localMeta: Record<string, number> = {};
+                try { localMeta = JSON.parse(localMetaString); } catch(e) {}
+                localMeta[chunkId] = Date.now();
+                safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
             }
         }
     }
@@ -684,9 +859,10 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     const isAdmin = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
     if (!isAdmin) return;
 
+    // Optimistically update collections state for immediate UI feedback
     setCollections(prev => {
-        const idx = prev.findIndex(c => c.id === coll.id);
         const next = [...prev];
+        const idx = next.findIndex(c => c.id === coll.id);
         if (idx !== -1) next[idx] = coll;
         else next.push(coll);
         return next.sort((a, b) => (b.order || 0) - (a.order || 0));
@@ -699,11 +875,12 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
     let chunkItems: Record<string, AppCollection> = {};
 
+    // Use local storage exclusively to find the chunk - avoid SLOW Firestore lookups in loop
     for (let i = 0; i <= latestIndex; i++) {
         const cid = COLLECTION_CHUNK_PREFIX + i;
-        const chunkDoc = await getDoc(doc(db, 'collection_chunks', cid));
-        if (chunkDoc.exists()) {
-            const items = chunkDoc.data().items || {};
+        const localStr = safeStorage.getItem('local_collection_chunk_' + cid);
+        if (localStr) {
+            const items = JSON.parse(localStr);
             if (items[coll.id]) {
                 chunkId = cid;
                 items[coll.id] = coll;
@@ -714,9 +891,12 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (!chunkId) {
+        // Find if it was recently added and not yet in a chunk list (but somehow has an ID)
+        // Default to latest chunk
         chunkId = COLLECTION_CHUNK_PREFIX + latestIndex;
-        const chunkDoc = await getDoc(doc(db, 'collection_chunks', chunkId));
-        const items = chunkDoc.exists() ? chunkDoc.data().items || {} : {};
+        const localStr = safeStorage.getItem('local_collection_chunk_' + chunkId) || '{}';
+        const items = JSON.parse(localStr);
+        
         if (Object.keys(items).length >= COLLECTION_CHUNK_SIZE) {
             latestIndex++;
             chunkId = COLLECTION_CHUNK_PREFIX + latestIndex;
@@ -728,35 +908,22 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         }
     }
 
-    try {
-        const batch = writeBatch(db);
-        batch.set(doc(db, 'collection_chunks', chunkId), {
-            items: chunkItems,
-            updatedAt: serverTimestamp()
-        });
+    // Save updated chunk back to local storage
+    safeStorage.setItem('local_collection_chunk_' + chunkId, JSON.stringify(chunkItems));
+    
+    // Update collections cache for persistence across reloads
+    const allCached = JSON.parse(safeStorage.getItem('collections_cache') || '[]');
+    const idx = allCached.findIndex((c: any) => c.id === coll.id);
+    if (idx !== -1) allCached[idx] = coll;
+    else allCached.push(coll);
+    safeStorage.setItem('collections_cache', JSON.stringify(allCached.sort((a: any, b: any) => (b.order || 0) - (a.order || 0))));
 
-        batch.set(doc(db, 'chunk_meta', 'versions'), {
-            collections: {
-                version: Date.now(),
-                updatedAt: serverTimestamp(),
-                latestChunkId: chunkId
-            },
-            lastGlobalUpdate: serverTimestamp()
-        }, { merge: true });
-
-        await batch.commit();
-        safeStorage.setItem('local_collection_chunk_' + chunkId, JSON.stringify(chunkItems));
-        
-        // Refresh local cache
-        const allCached = JSON.parse(safeStorage.getItem('collections_cache') || '[]');
-        const idx = allCached.findIndex((c: any) => c.id === coll.id);
-        if (idx !== -1) allCached[idx] = coll;
-        else allCached.push(coll);
-        safeStorage.setItem('collections_cache', JSON.stringify(allCached.sort((a: any, b: any) => (b.order || 0) - (a.order || 0))));
-        
-    } catch (e) {
-        console.error("Failed to save collection to server:", e);
-    }
+    // Mark as pending
+    const pendingStr = safeStorage.getItem('pending_collection_updates') || '[]';
+    const pendingIds = new Set(JSON.parse(pendingStr));
+    pendingIds.add(chunkId);
+    safeStorage.setItem('pending_collection_updates', JSON.stringify(Array.from(pendingIds)));
+    setHasPendingChanges(true);
   };
 
   const addCollection = async (collectionData: Omit<AppCollection, 'id'>) => {
@@ -777,58 +944,31 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     
     // Update local state
     setCollections(prev => prev.filter(c => c.id !== id));
+    const allCached = JSON.parse(safeStorage.getItem('collections_cache') || '[]');
+    safeStorage.setItem('collections_cache', JSON.stringify(allCached.filter((c: any) => c.id !== id)));
 
-    // Find and update chunk
-    try {
-        let foundChunkId: string | null = null;
-        let chunkItems: any = null;
-
-        const versionsDoc = await getDoc(doc(db, 'chunk_meta', 'versions'));
-        let latestIndex = 0;
-        if (versionsDoc.exists()) {
-            const vData = versionsDoc.data();
-            const lId = (vData.collections && vData.collections.latestChunkId) || 'collection_chunk_0';
-            const m = lId.match(/(\d+)$/);
-            if (m) latestIndex = parseInt(m[1]);
-        }
-
-        for (let i = 0; i <= latestIndex; i++) {
-            const cid = COLLECTION_CHUNK_PREFIX + i;
-            const cDoc = await getDoc(doc(db, 'collection_chunks', cid));
-            if (cDoc.exists()) {
-                const items = cDoc.data().items || {};
-                if (items[id]) {
-                    delete items[id];
-                    foundChunkId = cid;
-                    chunkItems = items;
-                    break;
-                }
+    // Find and update chunk locally
+    let foundChunkId: string | null = null;
+    const keys = Object.keys(localStorage).filter(k => k.startsWith('local_collection_chunk_'));
+    for (const key of keys) {
+        const chunkStr = safeStorage.getItem(key);
+        if (chunkStr) {
+            const items = JSON.parse(chunkStr);
+            if (items[id]) {
+                delete items[id];
+                safeStorage.setItem(key, JSON.stringify(items));
+                foundChunkId = key.replace('local_collection_chunk_', '');
+                break;
             }
         }
+    }
 
-        if (foundChunkId && chunkItems) {
-            const batch = writeBatch(db);
-            batch.set(doc(db, 'collection_chunks', foundChunkId), {
-                items: chunkItems,
-                updatedAt: serverTimestamp()
-            });
-            batch.set(doc(db, 'chunk_meta', 'versions'), { 
-                collections: {
-                    version: Date.now(),
-                    updatedAt: serverTimestamp()
-                },
-                lastGlobalUpdate: serverTimestamp()
-            }, { merge: true });
-
-            await batch.commit();
-            safeStorage.setItem('local_collection_chunk_' + foundChunkId, JSON.stringify(chunkItems));
-            
-            // Refresh local cache
-            const allCached = JSON.parse(safeStorage.getItem('collections_cache') || '[]');
-            safeStorage.setItem('collections_cache', JSON.stringify(allCached.filter((c: any) => c.id !== id)));
-        }
-    } catch (e) {
-        console.error("Failed to delete collection from server:", e);
+    if (foundChunkId) {
+        const pendingStr = safeStorage.getItem('pending_collection_updates') || '[]';
+        const pendingIds = new Set(JSON.parse(pendingStr));
+        pendingIds.add(foundChunkId);
+        safeStorage.setItem('pending_collection_updates', JSON.stringify(Array.from(pendingIds)));
+        setHasPendingChanges(true);
     }
   };
 
@@ -906,7 +1046,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     <ContentContext.Provider value={{ 
         contentList: augmentedContentList, genres, languages, qualities, collections, loading, isOffline, 
         updateOrder, getContent, saveContent, deleteContent, updateContentFields, deleteMultipleContents, 
-        updateAuxiliaryCollection, addCollection, updateCollection, deleteCollection, 
+        updateAuxiliaryCollection, addCollection, updateCollection, deleteCollection, reorderCollections,
         addAuxiliaryItem, updateAuxiliaryItem, deleteAuxiliaryItem, finalizeChanges, hasPendingChanges 
     }}>
       {children}

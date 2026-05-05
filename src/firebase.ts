@@ -49,7 +49,7 @@ if (typeof window !== 'undefined') {
 }
 
 // Function to request notification permission and get token
-export const requestNotificationPermission = async () => {
+export const requestNotificationPermission = async (force: boolean = false) => {
   if (!messaging || typeof window === 'undefined') return null;
   
   try {
@@ -81,7 +81,7 @@ export const requestNotificationPermission = async () => {
         const now = Date.now();
         const oneDay = 24 * 60 * 60 * 1000;
 
-        const needsUpdate = !lastUpdate || 
+        const needsUpdate = force || !lastUpdate || 
                             JSON.parse(lastUpdate).token !== token || 
                             (now - JSON.parse(lastUpdate).timestamp > oneDay);
 

@@ -72,6 +72,7 @@ export interface Collection {
   description?: string;
   contentIds: string[]; // Array of content IDs
   createdAt: string;
+  updatedAt?: string;
   order?: number;
 }
 

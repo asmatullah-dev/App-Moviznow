@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { db, storage, auth } from '../../firebase';
+import { db, storage, auth, requestNotificationPermission } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useContent } from '../../contexts/ContentContext';
-import { Save, AlertCircle, GripVertical, Plus, Trash2, Layout, Wallet, Phone, Image as ImageIcon, Settings as SettingsIcon, RefreshCw, ShieldCheck, X, Eye, EyeOff, Database, Rocket, Loader2 } from 'lucide-react';
+import { Save, AlertCircle, GripVertical, Plus, Trash2, Layout, Wallet, Phone, Image as ImageIcon, Settings as SettingsIcon, RefreshCw, ShieldCheck, X, Eye, EyeOff, Database, Rocket, Loader2, Bell, BellOff, Info } from 'lucide-react';
 import { clsx } from 'clsx';
 import { Navigate } from 'react-router-dom';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
@@ -672,9 +672,10 @@ export default function AdminSettings() {
             <Layout className="w-5 h-5 text-zinc-400" />
             <h2 className="text-lg font-semibold">Admin Panel Tabs Management</h2>
           </div>
-          <div className="p-6">
-            <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-6">
-              Drag and drop to reorder tabs. Use the eye icon to hide/show tabs for regular Admins (Owners always see all tabs).
+          <div className="p-6 text-sm text-zinc-500 dark:text-zinc-400">
+            <p className="mb-6 italic text-amber-600 dark:text-amber-400 flex items-center gap-2">
+              <Info className="w-4 h-4" />
+              Changes to tab names or removal must be done in code. These settings only handle order and Visibility for regular Admins.
             </p>
             <DragDropContext onDragEnd={onDragEnd}>
               <Droppable droppableId="admin-tabs">
@@ -732,6 +733,47 @@ export default function AdminSettings() {
                 )}
               </Droppable>
             </DragDropContext>
+          </div>
+        </div>
+
+        {/* Device & Notifications */}
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+          <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2">
+            <Bell className="w-5 h-5 text-zinc-400" />
+            <h2 className="text-lg font-semibold">Device & Notifications</h2>
+          </div>
+          <div className="p-6 space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-zinc-50 dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700">
+              <div className="flex items-center gap-4">
+                <div className={clsx(
+                  "w-12 h-12 rounded-full flex items-center justify-center text-xl shadow-lg",
+                  Notification.permission === 'granted' ? "bg-emerald-500/10 text-emerald-500" : "bg-zinc-100 dark:bg-zinc-700 text-zinc-400"
+                )}>
+                  {Notification.permission === 'granted' ? <Bell className="w-6 h-6" /> : <BellOff className="w-6 h-6" />}
+                </div>
+                <div>
+                  <h3 className="font-bold text-zinc-900 dark:text-white">FCM Status: {Notification.permission}</h3>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">Manage notification token for this admin device.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const token = await requestNotificationPermission(true);
+                    if (token) alert('Token refreshed successfully!');
+                  } catch (e) {
+                    alert('Error: ' + e);
+                  }
+                }}
+                className="px-6 py-2.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-xl font-bold text-sm hover:opacity-90 transition-opacity whitespace-nowrap active:scale-95"
+              >
+                {Notification.permission === 'granted' ? 'Refresh FCM Token' : 'Register Device'}
+              </button>
+            </div>
+            <p className="text-[10px] text-zinc-500 dark:text-zinc-400 italic">
+              * Note: Token refresh is useful if you are not receiving test notifications or if you cleared your browser cache.
+            </p>
           </div>
         </div>
 
