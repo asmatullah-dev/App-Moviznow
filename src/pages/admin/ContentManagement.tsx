@@ -2480,7 +2480,6 @@ export default function ContentManagement() {
       if (!content.posterUrl) labels.push('Missing Poster');
       if (!content.year) labels.push('Missing Year');
       if (!content.releaseDate) labels.push('Missing Release Date');
-      if (!content.imdbLink) labels.push('Missing IMDb Link');
       if (!content.genreIds || content.genreIds.length === 0) labels.push('Missing Genre');
       if (!content.languageIds || content.languageIds.length === 0) labels.push('Missing Language');
       if (!content.qualityId) labels.push('Missing Print Quality');
@@ -2675,11 +2674,10 @@ export default function ContentManagement() {
         else if (showMissing === 'poster') searchTag = 'Missing Poster';
         else if (showMissing === 'year') searchTag = 'Missing Year';
         else if (showMissing === 'releaseDate') searchTag = 'Missing Release Date';
-        else if (showMissing === 'imdb') searchTag = 'Missing IMDb Link';
         else searchTag = showMissing; // e.g. '480p', '720p', '1080p'
         
-        // For metadata fields (Poster, Year, Release Date, IMDb), show ANY item missing that field
-        if (['poster', 'year', 'releaseDate', 'imdb'].includes(showMissing)) {
+        // For metadata fields (Poster, Year, Release Date), show ANY item missing that field
+        if (['poster', 'year', 'releaseDate'].includes(showMissing)) {
           return labels.some(l => l.toLowerCase().includes(searchTag.toLowerCase()));
         }
 
@@ -3115,7 +3113,6 @@ export default function ContentManagement() {
                             { label: 'Missing Poster', value: 'poster' },
                             { label: 'Missing Year', value: 'year' },
                             { label: 'Missing Release Date', value: 'releaseDate' },
-                            { label: 'Missing IMDb Link', value: 'imdb' },
                             { type: 'divider' },
                             { label: 'Disabled (Draft)', value: 'disabled', icon: <EyeOff className="w-4 h-4" /> }
                           ].map((item, idx) => {
