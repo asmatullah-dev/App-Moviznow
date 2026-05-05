@@ -188,6 +188,19 @@
         "seasonFee": { "type": "number" },
         "paymentDetails": { "type": "string" }
       }
+    },
+    "Collection": {
+      "title": "Collection",
+      "description": "A collection of content.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "contentIds": { "type": "array", "items": { "type": "string" } },
+        "order": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "contentIds"]
     }
   },
   "firestore": {
@@ -231,13 +244,29 @@
       "schema": { "$ref": "#/entities/Quality" },
       "description": "Stores movie and series qualities."
     },
-    "/fcm_tokens/{tokenId}": {
-      "schema": { "$ref": "#/entities/FCMToken" },
-      "description": "Stores FCM tokens for push notifications."
+    "/fcm_tokens/{chunkId}": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "items": { "type": "object", "additionalProperties": { "$ref": "#/entities/FCMToken" } },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "description": "Stores FCM tokens for push notifications in chunks of 2000."
     },
     "/notification_templates/{templateId}": {
       "schema": { "$ref": "#/entities/NotificationTemplate" },
       "description": "Stores notification templates."
+    },
+    "/notification_chunks/{chunkId}": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "items": { "type": "object", "additionalProperties": { "$ref": "#/entities/Notification" } },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "description": "Stores notifications in chunks of 500 to optimize reads."
     },
     "/content_chunks/{chunkId}": {
       "schema": {
@@ -256,6 +285,16 @@
         }
       },
       "description": "Stores search index metadata in chunks."
+    },
+    "/collection_chunks/{chunkId}": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "items": { "type": "object", "additionalProperties": { "$ref": "#/entities/Collection" } },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "description": "Stores collections in chunks to optimize reads."
     }
   }
 }

@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { initializeFirestore, doc, getDocFromServer, setDoc, collection, enableIndexedDbPersistence } from 'firebase/firestore';
+import { initializeFirestore, doc, getDoc, updateDoc, setDoc, collection, enableIndexedDbPersistence, serverTimestamp } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 import { getAnalytics, isSupported } from 'firebase/analytics';
@@ -86,21 +86,76 @@ export const requestNotificationPermission = async () => {
                             (now - JSON.parse(lastUpdate).timestamp > oneDay);
 
         if (needsUpdate) {
-          // Store token in Firestore
-          await setDoc(doc(collection(db, 'fcm_tokens'), token), {
-            token,
-            updatedAt: new Date().toISOString(),
-            userId: auth.currentUser?.uid || 'anonymous'
-          });
-          
-          localStorage.setItem(CACHE_KEY, JSON.stringify({ token, timestamp: now }));
-          
-          // Also register with server for topic subscription
-          await fetch('/api/notifications/subscribe', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token })
-          });
+          try {
+            // 1. Get the current chunk ID from meta
+            const metaRef = doc(db, 'chunk_meta', 'versions');
+            const metaDoc = await getDoc(metaRef);
+            let latestChunkId = 'fcm_chunk_0';
+            
+            if (metaDoc.exists()) {
+              const metaData = metaDoc.data();
+              if (metaData.fcm_tokens && metaData.fcm_tokens.latestChunkId) {
+                latestChunkId = metaData.fcm_tokens.latestChunkId;
+              }
+            }
+
+            const chunkRef = doc(db, 'fcm_tokens', latestChunkId);
+            const chunkDoc = await getDoc(chunkRef);
+            
+            let targetChunkId = latestChunkId;
+            const tokenData = {
+              token,
+              updatedAt: new Date().toISOString(),
+              userId: auth.currentUser?.uid || 'anonymous'
+            };
+
+            if (chunkDoc.exists()) {
+              const items = chunkDoc.data() || {};
+              // Limit of 2000 tokens per document as requested
+              if (Object.keys(items).length >= 2000 && !items[token]) {
+                const match = latestChunkId.match(/(\d+)$/);
+                const nextIndex = match ? parseInt(match[1]) + 1 : 1;
+                targetChunkId = 'fcm_chunk_' + nextIndex;
+                
+                // Create new chunk
+                await setDoc(doc(db, 'fcm_tokens', targetChunkId), {
+                  [token]: tokenData
+                });
+                
+                // Update meta
+                await updateDoc(metaRef, {
+                  'fcm_tokens.latestChunkId': targetChunkId,
+                  'fcm_tokens.version': Date.now(),
+                  'lastGlobalUpdate': serverTimestamp()
+                });
+              } else {
+                // Use setDoc with merge to treat the token key as a literal string, avoiding dot-path issues
+                await setDoc(chunkRef, {
+                   [token]: tokenData
+                }, { merge: true });
+              }
+            } else {
+              // Create first chunk
+              await setDoc(chunkRef, { [token]: tokenData });
+              await setDoc(metaRef, {
+                fcm_tokens: {
+                  latestChunkId: targetChunkId,
+                  version: Date.now()
+                }
+              }, { merge: true });
+            }
+
+            localStorage.setItem(CACHE_KEY, JSON.stringify({ token, timestamp: now }));
+            
+            // Also register with server for topic subscription
+            await fetch('/api/notifications/subscribe', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token })
+            });
+          } catch (e) {
+            console.warn('Error saving FCM token:', e);
+          }
         }
         
         return token;

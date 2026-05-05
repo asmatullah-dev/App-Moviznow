@@ -4,6 +4,7 @@ import { db } from '../../firebase';
 import { collection, addDoc, deleteDoc, doc, updateDoc, onSnapshot, writeBatch, getDocs, query, where, arrayUnion, deleteField } from 'firebase/firestore';
 import { useAuth } from '../../contexts/AuthContext';
 import { useContent } from '../../contexts/ContentContext';
+import { useNotifications } from '../../contexts/NotificationContext';
 import { useUsers } from '../../contexts/UsersContext';
 import { Content, Genre, Language, Quality, QualityLinks, Season, Episode, LinkDef, Role, Trailer } from '../../types';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -237,6 +238,7 @@ export default function ContentManagement() {
   const { users: allUsers } = useUsers();
   const { settings } = useSettings();
   const { contentList, genres, languages, qualities, loading: contextLoading, getContent, saveContent, deleteContent, updateContentFields, deleteMultipleContents, updateAuxiliaryCollection, finalizeChanges, hasPendingChanges } = useContent();
+  const { sendNotification } = useNotifications();
   const [loading, setLoading] = useState(contextLoading);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSyncConfirmOpen, setIsSyncConfirmOpen] = useState(false);
@@ -1451,26 +1453,29 @@ export default function ContentManagement() {
         contentId: content.id,
         posterUrl: content.posterUrl,
         type: content.type,
-        createdAt: new Date().toISOString(),
         createdBy: 'admin' // In a real app, this would be the admin's UID
-      };
+      } as any;
 
-      // Add to Firestore for in-app history
-      await addDoc(collection(db, 'notifications'), notification);
+      // Add to Firestore for in-app history using chunks
+      await sendNotification(notification);
       
       // Send push notification via backend
-      await fetch('/api/notifications/send', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          title,
-          body,
-          imageUrl: content.posterUrl,
-          url: `/movie/${content.id}`
-        })
-      });
+      try {
+        await fetch('/api/notifications/send', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            title,
+            body,
+            imageUrl: content.posterUrl,
+            url: `/movie/${content.id}`
+          })
+        });
+      } catch (fcmError) {
+        console.warn("FCM Send failed, but stored in Firestore", fcmError);
+      }
       
       setNotificationModal(prev => ({ ...prev, status: 'success' }));
       
@@ -2764,6 +2769,7 @@ export default function ContentManagement() {
     
     const updates: { id: string, [key: string]: any }[] = [];
 
+    let currentMax = Math.max(0, ...contentList.map(c => c.order || 0));
     currentSelected.forEach(id => {
       const content = contentList.find(c => c.id === id);
       if (content) {
@@ -2774,10 +2780,11 @@ export default function ContentManagement() {
 
         const updateData: any = { id, chunkId: content.chunkId, status };
         
-        // When moving from draft to published, consider it as new
+        // When moving from draft to published, consider it as new and increment order
         if (content.status === 'draft' && status === 'published') {
           updateData.createdAt = new Date().toISOString();
-          updateData.order = deleteField();
+          currentMax += 1;
+          updateData.order = currentMax;
         }
 
         updates.push(updateData);

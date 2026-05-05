@@ -4,6 +4,7 @@ import { collection, onSnapshot, doc, updateDoc, deleteDoc, getDoc, addDoc, getD
 import { AlertTriangle, Edit2, Trash2, Bell, CheckCircle2, X, Save } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
 import { useContent } from '../../contexts/ContentContext';
+import { useNotifications } from '../../contexts/NotificationContext';
 import { Content, QualityLinks, Season } from '../../types';
 import { LinkCheckerModal } from '../../components/LinkCheckerModal';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
@@ -24,6 +25,7 @@ interface ReportedLink {
 
 export default function ReportedLinks() {
   const { getContent, updateContentFields } = useContent();
+  const { sendNotification } = useNotifications();
   const [reports, setReports] = useState<ReportedLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingReport, setEditingReport] = useState<ReportedLink | null>(null);
@@ -86,13 +88,12 @@ export default function ReportedLinks() {
       setReports(reports.map(r => r.id === report.id ? { ...r, status: 'resolved' } : r));
       
       if (report.userId) {
-        // Add a notification to the user's notifications collection
-        await addDoc(collection(db, 'notifications'), {
+        // Add a notification using chunks
+        await sendNotification({
           title: 'Reported Link Fixed',
           body: `The link "${report.linkName}" for ${report.contentTitle} has been fixed and is now working.`,
           contentId: report.contentId,
           type: report.contentType,
-          createdAt: new Date().toISOString(),
           createdBy: 'system',
           targetUserId: report.userId // This already targets the specific user
         });

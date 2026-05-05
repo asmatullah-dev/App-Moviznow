@@ -3,6 +3,7 @@ import { Bell, X } from 'lucide-react';
 import { collection, query, orderBy, doc, updateDoc, limit, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { useNotifications } from '../contexts/NotificationContext';
 import { AppNotification } from '../types';
 import { formatDistanceToNow } from 'date-fns';
 import { Link } from 'react-router-dom';
@@ -13,7 +14,7 @@ interface NotificationMenuProps {}
 
 export const NotificationMenu = React.memo(() => {
   const { profile } = useAuth();
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const { notifications, loading } = useNotifications();
   const [isOpen, setIsOpen] = useState(false);
   const [localLastCheck, setLocalLastCheck] = useState<Date | null>(null);
   const mountTime = useRef(new Date());
@@ -28,34 +29,15 @@ export const NotificationMenu = React.memo(() => {
     };
   }, [profile?.lastNotificationCheck]);
 
-  const fetchNotifications = async () => {
-    if (!profile) return;
-    try {
-      const q = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'), limit(50));
-      const snapshot = await getDocs(q);
-      const notifs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AppNotification))
-        .filter(n => !n.targetUserId && (!n.targetUserIds || n.targetUserIds.length === 0) || (n.targetUserId === profile.uid) || (n.targetUserIds?.includes(profile.uid)));
-      setNotifications(notifs);
-    } catch (e) {
-      console.error("Failed to fetch notifications:", e);
-    }
-  };
-
-  useEffect(() => {
-    fetchNotifications();
-    const interval = setInterval(fetchNotifications, 10 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [profile]);
-
   const handleOpen = async () => {
     const willOpen = !isOpen;
     setIsOpen(willOpen);
     if (willOpen && profile?.uid) {
-      fetchNotifications();
       const now = new Date();
       setLocalLastCheck(now);
       // Update lastNotificationCheck when opening the menu
       try {
+        const { doc, updateDoc } = await import('firebase/firestore');
         const userRef = doc(db, 'users', profile.uid);
         await updateDoc(userRef, {
           lastNotificationCheck: now.toISOString()

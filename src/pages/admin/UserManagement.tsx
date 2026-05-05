@@ -471,14 +471,14 @@ export default function UserManagement() {
           ordersSnap,
           requestsSnap,
           joinedRequestsSnap,
-          tokensSnap,
-          notificationsSnap
+          notificationsSnap,
+          metaDoc
         ] = await Promise.all([
           getDocs(query(collection(db, 'orders'), where('userId', '==', currentDeleteConfirm))),
           getDocs(query(collection(db, 'movie_requests'), where('userId', '==', currentDeleteConfirm))),
           getDocs(query(collection(db, 'movie_requests'), where('requestedBy', 'array-contains', currentDeleteConfirm))),
-          getDocs(query(collection(db, 'fcm_tokens'), where('userId', '==', currentDeleteConfirm))),
-          getDocs(query(collection(db, 'notifications'), where('targetUserId', '==', currentDeleteConfirm)))
+          getDocs(query(collection(db, 'notifications'), where('targetUserId', '==', currentDeleteConfirm))),
+          getDoc(doc(db, 'chunk_meta', 'versions'))
         ]);
         
         // 2. Delete orders
@@ -499,8 +499,32 @@ export default function UserManagement() {
           }
         });
         
-        // 4. Delete FCM tokens
-        tokensSnap.forEach(d => batch.delete(d.ref));
+        // 4. Update consolidated FCM tokens document across chunks
+        if (metaDoc.exists()) {
+          const metaData = metaDoc.data();
+          const latestId = (metaData.fcm_tokens && metaData.fcm_tokens.latestChunkId) || 'fcm_chunk_0';
+          const match = latestId.match(/(\d+)$/);
+          const maxIndex = match ? parseInt(match[1]) : 0;
+
+          // Process all chunks
+          for (let i = 0; i <= maxIndex; i++) {
+            const cid = 'fcm_chunk_' + i;
+            const cDoc = await getDoc(doc(db, 'fcm_tokens', cid));
+            if (cDoc.exists()) {
+              const tokensData = cDoc.data() || {};
+              let changed = false;
+              Object.keys(tokensData).forEach(token => {
+                if (tokensData[token].userId === currentDeleteConfirm) {
+                  delete tokensData[token];
+                  changed = true;
+                }
+              });
+              if (changed) {
+                batch.set(doc(db, 'fcm_tokens', cid), tokensData);
+              }
+            }
+          }
+        }
 
         // 5. Delete notifications targeted to this user
         notificationsSnap.forEach(d => batch.delete(d.ref));

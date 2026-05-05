@@ -48,8 +48,14 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'manager';
     }
 
+    function isEditor() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'editor';
+    }
+
     function isAdminOrEditor() {
-      return isAdmin() || isContentManager() || isManager();
+      return isAdmin() || isContentManager() || isManager() || isEditor();
     }
 
     // ===============================================================
@@ -204,12 +210,10 @@ service cloud.firestore {
              data.updatedAt is string;
     }
 
-    match /fcm_tokens/{tokenId} {
+    match /fcm_tokens/{chunkId} {
       allow read: if isAdmin();
-      allow create: if (isAuthenticated() && isValidFCMToken(request.resource.data) && request.resource.data.userId == request.auth.uid) ||
-                       (!isAuthenticated() && isValidFCMToken(request.resource.data) && request.resource.data.userId == 'anonymous');
-      allow update: if (isAuthenticated() && isValidFCMToken(request.resource.data) && request.resource.data.userId == request.auth.uid && (resource.data.userId == request.auth.uid || resource.data.userId == 'anonymous')) ||
-                       (!isAuthenticated() && isValidFCMToken(request.resource.data) && request.resource.data.userId == 'anonymous' && resource.data.userId == 'anonymous');
+      allow create: if isAuthenticated() || isAdmin();
+      allow update: if isAuthenticated() || isAdmin();
       allow delete: if isAdmin();
     }
 
@@ -279,6 +283,16 @@ service cloud.firestore {
     }
 
     match /content_chunks/{chunkId} {
+      allow read: if true;
+      allow write: if isAdminOrEditor();
+    }
+
+    match /notification_chunks/{chunkId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdminOrEditor();
+    }
+
+    match /collection_chunks/{chunkId} {
       allow read: if true;
       allow write: if isAdminOrEditor();
     }

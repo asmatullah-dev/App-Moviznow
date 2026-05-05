@@ -1,17 +1,15 @@
 import React, { useState, useEffect } from "react";
 import { useUsers } from "../../contexts/UsersContext";
+import { useNotifications } from "../../contexts/NotificationContext";
 import {
   collection,
   query,
   orderBy,
-  onSnapshot,
   deleteDoc,
   doc,
   addDoc,
   updateDoc,
   getDocs,
-  where,
-  limit,
 } from "firebase/firestore";
 import { db } from "../../firebase";
 import { AppNotification, NotificationTemplate, UserProfile } from "../../types";
@@ -38,8 +36,13 @@ const USER_CACHE_EXPIRY = 1000 * 60 * 60; // 1 hour
 
 export default function Notifications() {
   const { users: allUsers } = useUsers();
+  const { 
+    notifications, 
+    sendNotification, 
+    deleteNotification: deleteNotifInternal, 
+    loading: notificationsLoading 
+  } = useNotifications();
   const [activeTab, setActiveTab] = useState<'history' | 'templates'>('history');
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [templates, setTemplates] = useState<NotificationTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -85,33 +88,10 @@ export default function Notifications() {
   useModalBehavior(!!selectedNotification, () => setSelectedNotification(null));
 
   useEffect(() => {
-    let isMounted = true;
-    const fetchNotifications = async () => {
-      try {
-        const q = query(
-          collection(db, "notifications"),
-          orderBy("createdAt", "desc"),
-        );
-        const snapshot = await getDocs(q);
-        if (isMounted) {
-          const data = snapshot.docs
-             .map((doc) => ({ id: doc.id, ...doc.data() }) as AppNotification);
-          setNotifications(data);
-          setLoading(false);
-        }
-      } catch (error) {
-        console.error("Error fetching notifications:", error);
-      }
-    };
-
-    fetchNotifications();
-    const intervalId = setInterval(fetchNotifications, 5 * 60 * 1000);
-
-    return () => {
-      isMounted = false;
-      clearInterval(intervalId);
-    };
-  }, []);
+    if (!notificationsLoading) {
+      setLoading(false);
+    }
+  }, [notificationsLoading]);
 
   useEffect(() => {
     let isMounted = true;
@@ -165,7 +145,7 @@ export default function Notifications() {
     if (!deleteId) return;
     setProcessing(prev => ({ ...prev, delete: true }));
     try {
-      await deleteDoc(doc(db, "notifications", deleteId));
+      await deleteNotifInternal(deleteId);
     } catch (error) {
       console.error("Error deleting notification:", error);
     } finally {
@@ -222,7 +202,6 @@ export default function Notifications() {
         targetUserNames: sendForm.targetType === 'specific' ? sendForm.targetUserNames : null,
         buttonLabel: sendForm.buttonLabel || null,
         buttonUrl: sendForm.buttonUrl || null,
-        createdAt: new Date().toISOString(),
         createdBy: 'admin'
       };
 
@@ -231,20 +210,24 @@ export default function Notifications() {
         notificationData.targetUserId = sendForm.targetUserIds[0];
       }
 
-      await addDoc(collection(db, "notifications"), notificationData);
+      await sendNotification(notificationData);
 
       // Send push notification via API
-      await fetch('/api/notifications/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: sendForm.title,
-          body: sendForm.body,
-          targetUserIds: sendForm.targetType === 'specific' ? sendForm.targetUserIds : undefined,
-          buttonLabel: sendForm.buttonLabel,
-          buttonUrl: sendForm.buttonUrl
-        })
-      });
+      try {
+        await fetch('/api/notifications/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: sendForm.title,
+            body: sendForm.body,
+            targetUserIds: sendForm.targetType === 'specific' ? sendForm.targetUserIds : undefined,
+            buttonLabel: sendForm.buttonLabel,
+            buttonUrl: sendForm.buttonUrl
+          })
+        });
+      } catch (fcmError) {
+        console.warn("FCM Send failed, but stored in Firestore", fcmError);
+      }
 
       setIsSendModalOpen(false);
       setSendForm({ 

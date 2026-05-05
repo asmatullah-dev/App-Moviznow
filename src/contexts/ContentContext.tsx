@@ -1,4 +1,16 @@
 import React, { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react';
+import { 
+  doc, 
+  getDoc, 
+  getDocs, 
+  collection, 
+  writeBatch, 
+  setDoc, 
+  updateDoc, 
+  deleteDoc, 
+  serverTimestamp,
+  deleteField
+} from 'firebase/firestore';
 import { db } from '../firebase';
 import { safeStorage } from '../utils/safeStorage';
 import { expandContent } from '../utils/chunkUtils';
@@ -67,6 +79,10 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     return !!safeStorage.getItem('pending_chunk_updates');
   });
 
+  const COLLECTION_CHUNK_SIZE = 1000;
+  const COLLECTION_CHUNK_PREFIX = 'collection_chunk_';
+  const latestCollChunkIdRef = useRef<string>('collection_chunk_0');
+
   useEffect(() => {
     const handleOnline = () => setIsOffline(false);
     const handleOffline = () => setIsOffline(true);
@@ -80,49 +96,46 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
   const finalizeChanges = async () => {
     if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
-    const pendingStr = safeStorage.getItem('pending_chunk_updates');
-    if (!pendingStr) return;
+    const contentPendingStr = safeStorage.getItem('pending_chunk_updates');
     
-    const pendingChunkIds = JSON.parse(pendingStr) as string[];
-    if (pendingChunkIds.length === 0) return;
-
+    if (!contentPendingStr) {
+        setHasPendingChanges(false);
+        return;
+    }
+    
     try {
-        const { writeBatch, doc, serverTimestamp } = await import('firebase/firestore');
         const batch = writeBatch(db);
         const now = Date.now();
-        const versions: Record<string, any> = { 
+        const versionsUpdate: Record<string, any> = { 
             lastGlobalUpdate: serverTimestamp() 
         };
 
-        let updatedCount = 0;
+        // Handle content chunks
+        const pendingChunkIds = JSON.parse(contentPendingStr) as string[];
         for (const cid of pendingChunkIds) {
             const chunkStr = safeStorage.getItem('content_chunk_' + cid);
             if (chunkStr) {
-                // The storage format already uses { [id]: item, ...rest }
-                // which puts the newest/modified item first in the JSON string.
                 batch.set(doc(db, 'content_chunks', cid), { 
                     items: JSON.parse(chunkStr),
                     updatedAt: serverTimestamp()
                 });
-                versions[cid] = now;
-                updatedCount++;
+                versionsUpdate[cid] = now;
             }
         }
-        
-        if (updatedCount > 0) {
-            batch.set(doc(db, 'chunk_meta', 'versions'), versions, { merge: true });
-            await batch.commit();
-            
-            const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
-            let localMeta: Record<string, number> = {};
-            try { localMeta = JSON.parse(localMetaString); } catch(e) {}
-            Object.assign(localMeta, versions);
-            safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
 
-            safeStorage.removeItem('pending_chunk_updates');
-            setHasPendingChanges(false);
-            console.log(`Sync successful: ${updatedCount} chunks updated.`);
-        }
+        batch.set(doc(db, 'chunk_meta', 'versions'), versionsUpdate, { merge: true });
+        await batch.commit();
+        
+        const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+        let localMeta: Record<string, any> = {};
+        try { localMeta = JSON.parse(localMetaString); } catch(e) {}
+
+        Object.assign(localMeta, versionsUpdate);
+        safeStorage.removeItem('pending_chunk_updates');
+
+        safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+        setHasPendingChanges(false);
+        console.log(`Sync successful.`);
     } catch (e) {
         console.error("Sync failed", e);
         throw e;
@@ -149,11 +162,12 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
   const refreshContentFromLocal = () => {
     const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
-    let localMeta: Record<string, number> = {};
+    let localMeta: Record<string, any> = {};
     try { localMeta = JSON.parse(localMetaString); } catch(e) {}
     
     const rawContentMap: Record<string, Content> = {};
     for (const chunkId of Object.keys(localMeta)) {
+        if (chunkId === 'collections' || chunkId === 'notifications' || chunkId === 'lastGlobalUpdate') continue;
         const chunkStr = safeStorage.getItem('content_chunk_' + chunkId);
         if (chunkStr) {
             try {
@@ -196,28 +210,43 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         setLoading(false);
         return;
     }
-    const { doc, getDoc, getDocs, collection, writeBatch } = await import('firebase/firestore');
-
     const isAdmin = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
 
-    let versions: Record<string, number> = {};
+    let versions: Record<string, any> = {};
     try {
         const metaDoc = await getDoc(doc(db, 'chunk_meta', 'versions'));
         if (metaDoc.exists()) {
             versions = metaDoc.data() || {};
         } else if (isAdmin) {
-            // First time setup
+            // First time setup or recovery
             const chunksSnap = await getDocs(collection(db, 'content_chunks'));
-            const newVersions: Record<string, number> = {};
-            const batch = writeBatch(db);
-            chunksSnap.docs.forEach(d => {
-                const now = Date.now();
-                newVersions[d.id] = now;
-                safeStorage.setItem('content_chunk_' + d.id, JSON.stringify(d.data().items || {}));
-            });
-            batch.set(doc(db, 'chunk_meta', 'versions'), newVersions);
-            await batch.commit();
-            versions = newVersions;
+            if (chunksSnap.empty) {
+                // Check for legacy individual content to migrate
+                const contentSnap = await getDocs(collection(db, 'content'));
+                if (!contentSnap.empty) {
+                    console.log(`Migrating ${contentSnap.size} legacy content items to chunks...`);
+                    const allContent = contentSnap.docs.map(d => ({ id: d.id, ...d.data() } as Content));
+                    const { rebuildAllChunks } = await import('../utils/chunkUtils');
+                    await rebuildAllChunks(allContent);
+                    const newMetaDoc = await getDoc(doc(db, 'chunk_meta', 'versions'));
+                    versions = newMetaDoc.data() || {};
+                    // Optional: delete legacy individual content
+                    // const delBatch = writeBatch(db);
+                    // contentSnap.docs.forEach(d => delBatch.delete(d.ref));
+                    // await delBatch.commit();
+                }
+            } else {
+                const newVersions: Record<string, number> = {};
+                const batch = writeBatch(db);
+                chunksSnap.docs.forEach(d => {
+                    const now = Date.now();
+                    newVersions[d.id] = now;
+                    safeStorage.setItem('content_chunk_' + d.id, JSON.stringify(d.data().items || {}));
+                });
+                batch.set(doc(db, 'chunk_meta', 'versions'), newVersions, { merge: true });
+                await batch.commit();
+                versions = newVersions;
+            }
         }
     } catch(e) { console.error("Error fetching chunk_meta", e); }
 
@@ -227,8 +256,9 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     
     // Process chunks
     const chunksToFetch: string[] = [];
-    for (const [chunkId, version] of Object.entries(versions)) {
-        if (chunkId === 'collections') continue;
+    for (const [chunkId, versionMeta] of Object.entries(versions)) {
+        if (chunkId === 'collections' || chunkId === 'notifications' || chunkId === 'lastGlobalUpdate') continue;
+        const version = typeof versionMeta === 'object' ? (versionMeta as any).version : versionMeta;
         const hasData = !!safeStorage.getItem('content_chunk_' + chunkId);
         if (!hasData || !localMeta[chunkId] || localMeta[chunkId] < (version as number)) {
             chunksToFetch.push(chunkId);
@@ -252,7 +282,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     // Always refresh content to catch any changes
     refreshContentFromLocal();
 
-    // Handle auxiliary data and collections
+    // Handle auxiliary data
     try {
         const fetchAux = async (name: string, setFn: any, cacheKey: string) => {
             const snap = await getDocs(collection(db, name));
@@ -274,14 +304,122 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         if (!safeStorage.getItem('languages_cache')) await fetchAux('languages', setLanguages, 'languages_cache');
         if (!safeStorage.getItem('qualities_cache')) await fetchAux('qualities', setQualities, 'qualities_cache');
 
-        // Handle collections with versioning
-        const collectionsVersion = versions.collections || 0;
+        // Handle collections with versioning and chunks
+        let collectionsMeta = versions.collections;
+        const isAdmin = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
+
+        // Migration logic: If no collection chunks exist but legacy collections do, migrate them
+        if (!collectionsMeta && isAdmin) {
+            try {
+                const legacySnap = await getDocs(collection(db, 'collections'));
+                if (!legacySnap.empty) {
+                    console.log(`Migrating ${legacySnap.size} legacy collections to chunks...`);
+                    const legacyItems: Record<string, AppCollection> = {};
+                    legacySnap.docs.forEach(d => {
+                        legacyItems[d.id] = { id: d.id, ...d.data() } as AppCollection;
+                    });
+
+                    const batch = writeBatch(db);
+                    const now = Date.now();
+                    const cid = COLLECTION_CHUNK_PREFIX + '0';
+                    
+                    batch.set(doc(db, 'collection_chunks', cid), {
+                        items: legacyItems,
+                        updatedAt: serverTimestamp()
+                    });
+
+                    collectionsMeta = {
+                        version: now,
+                        updatedAt: serverTimestamp(),
+                        latestChunkId: cid
+                    };
+
+                    batch.set(doc(db, 'chunk_meta', 'versions'), { 
+                        collections: collectionsMeta,
+                        lastGlobalUpdate: serverTimestamp()
+                    }, { merge: true });
+
+                    await batch.commit();
+                    
+                    // Cleanup legacy collections to complete the "replacement"
+                    const delBatch = writeBatch(db);
+                    legacySnap.docs.forEach(d => delBatch.delete(d.ref));
+                    await delBatch.commit();
+                    console.log("Legacy collections deleted.");
+                }
+            } catch(e) { console.error("Migration failed", e); }
+        }
+
+        // Migration logic for FCM tokens
+        if (isAdmin) {
+            try {
+                const metaDoc = await getDoc(doc(db, 'chunk_meta', 'versions'));
+                const metaData = metaDoc.exists() ? metaDoc.data() : {};
+                if (!metaData.fcm_tokens) {
+                    const legacyTokensSnap = await getDocs(collection(db, 'fcm_tokens'));
+                    // Only migrate if we have many individual docs and no chunking yet
+                    const individualDocs = legacyTokensSnap.docs.filter(d => !d.id.startsWith('fcm_chunk_'));
+                    if (individualDocs.length > 0) {
+                        console.log(`Migrating ${individualDocs.length} legacy FCM tokens to chunks...`);
+                        const tokensMap: Record<string, any> = {};
+                        individualDocs.forEach(d => {
+                            const data = d.data();
+                            tokensMap[d.id] = data;
+                        });
+
+                        const batch = writeBatch(db);
+                        const cid = 'fcm_chunk_0';
+                        batch.set(doc(db, 'fcm_tokens', cid), tokensMap, { merge: true });
+                        batch.set(doc(db, 'chunk_meta', 'versions'), {
+                            fcm_tokens: {
+                                latestChunkId: cid,
+                                version: Date.now(),
+                                updatedAt: serverTimestamp()
+                            }
+                        }, { merge: true });
+
+                        await batch.commit();
+                        
+                        // Cleanup individual tokens
+                        const delBatch = writeBatch(db);
+                        individualDocs.forEach(d => delBatch.delete(d.ref));
+                        await delBatch.commit();
+                        console.log("Legacy FCM tokens cleaned up.");
+                    }
+                }
+            } catch (e) {
+                console.error("FCM Token migration failed:", e);
+            }
+        }
+
+        const collectionsVersion = (collectionsMeta && typeof collectionsMeta === 'object' ? collectionsMeta.version : collectionsMeta) || 0;
         const localCollectionsVersion = localMeta.collections || 0;
+        
+        const latestCollChunkId = (collectionsMeta && typeof collectionsMeta === 'object' ? collectionsMeta.latestChunkId : null) || 'collection_chunk_0';
+        latestCollChunkIdRef.current = latestCollChunkId;
+
         if (!safeStorage.getItem('collections_cache') || localCollectionsVersion < collectionsVersion) {
-            const cSnap = await getDocs(collection(db, 'collections'));
-            const cd = cSnap.docs.map(d => ({ id: d.id, ...d.data() } as AppCollection)).sort((a, b) => (b.order || 0) - (a.order || 0));
-            setCollections(cd);
-            safeStorage.setItem('collections_cache', JSON.stringify(cd));
+            let allCollections: AppCollection[] = [];
+            
+            const matchIndex = latestCollChunkId.match(/(\d+)$/);
+            const maxIndex = matchIndex ? parseInt(matchIndex[1]) : 0;
+            
+            for (let i = 0; i <= maxIndex; i++) {
+                try {
+                    const cid = COLLECTION_CHUNK_PREFIX + i;
+                    const cDoc = await getDoc(doc(db, 'collection_chunks', cid));
+                    if (cDoc.exists()) {
+                        const items = cDoc.data().items || {};
+                        const chunkList = Object.values(items) as AppCollection[];
+                        allCollections = [...allCollections, ...chunkList];
+                        safeStorage.setItem('local_collection_chunk_' + cid, JSON.stringify(items));
+                    }
+                } catch(e) { console.error(e); }
+            }
+            
+            const sorted = allCollections.sort((a, b) => (b.order || 0) - (a.order || 0));
+            setCollections(sorted);
+            safeStorage.setItem('collections_cache', JSON.stringify(sorted));
             
             localMeta.collections = collectionsVersion;
             safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
@@ -516,7 +654,6 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
   const updateAuxiliaryCollection = async (type: 'genre' | 'language' | 'quality', items: any[]) => {
     if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
     try {
-        const { writeBatch, collection, getDocs, doc } = await import('firebase/firestore');
         const collectionName = type === 'quality' ? 'qualities' : `${type}s`;
         const batch = writeBatch(db);
         
@@ -539,42 +676,159 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
   };
 
   const bumpCollectionsVersion = async () => {
+    // No longer bumping directly to server, handled via finalizeChanges for consistency
+    setHasPendingChanges(true);
+  };
+
+  const saveCollectionInternal = async (coll: AppCollection) => {
+    const isAdmin = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
+    if (!isAdmin) return;
+
+    setCollections(prev => {
+        const idx = prev.findIndex(c => c.id === coll.id);
+        const next = [...prev];
+        if (idx !== -1) next[idx] = coll;
+        else next.push(coll);
+        return next.sort((a, b) => (b.order || 0) - (a.order || 0));
+    });
+
+    let chunkId: string | null = null;
+    let latestIndex = 0;
+    const match = latestCollChunkIdRef.current.match(/(\d+)$/);
+    if (match) latestIndex = parseInt(match[1]);
+
+    let chunkItems: Record<string, AppCollection> = {};
+
+    for (let i = 0; i <= latestIndex; i++) {
+        const cid = COLLECTION_CHUNK_PREFIX + i;
+        const chunkDoc = await getDoc(doc(db, 'collection_chunks', cid));
+        if (chunkDoc.exists()) {
+            const items = chunkDoc.data().items || {};
+            if (items[coll.id]) {
+                chunkId = cid;
+                items[coll.id] = coll;
+                chunkItems = items;
+                break;
+            }
+        }
+    }
+
+    if (!chunkId) {
+        chunkId = COLLECTION_CHUNK_PREFIX + latestIndex;
+        const chunkDoc = await getDoc(doc(db, 'collection_chunks', chunkId));
+        const items = chunkDoc.exists() ? chunkDoc.data().items || {} : {};
+        if (Object.keys(items).length >= COLLECTION_CHUNK_SIZE) {
+            latestIndex++;
+            chunkId = COLLECTION_CHUNK_PREFIX + latestIndex;
+            latestCollChunkIdRef.current = chunkId;
+            chunkItems = { [coll.id]: coll };
+        } else {
+            items[coll.id] = coll;
+            chunkItems = items;
+        }
+    }
+
     try {
-        const { doc, setDoc } = await import('firebase/firestore');
-        await setDoc(doc(db, 'chunk_meta', 'versions'), { collections: Date.now() }, { merge: true });
-    } catch(e) {}
+        const batch = writeBatch(db);
+        batch.set(doc(db, 'collection_chunks', chunkId), {
+            items: chunkItems,
+            updatedAt: serverTimestamp()
+        });
+
+        batch.set(doc(db, 'chunk_meta', 'versions'), {
+            collections: {
+                version: Date.now(),
+                updatedAt: serverTimestamp(),
+                latestChunkId: chunkId
+            },
+            lastGlobalUpdate: serverTimestamp()
+        }, { merge: true });
+
+        await batch.commit();
+        safeStorage.setItem('local_collection_chunk_' + chunkId, JSON.stringify(chunkItems));
+        
+        // Refresh local cache
+        const allCached = JSON.parse(safeStorage.getItem('collections_cache') || '[]');
+        const idx = allCached.findIndex((c: any) => c.id === coll.id);
+        if (idx !== -1) allCached[idx] = coll;
+        else allCached.push(coll);
+        safeStorage.setItem('collections_cache', JSON.stringify(allCached.sort((a: any, b: any) => (b.order || 0) - (a.order || 0))));
+        
+    } catch (e) {
+        console.error("Failed to save collection to server:", e);
+    }
   };
 
   const addCollection = async (collectionData: Omit<AppCollection, 'id'>) => {
-    if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
-    try {
-        const { addDoc, collection } = await import('firebase/firestore');
-        await addDoc(collection(db, 'collections'), collectionData);
-        await bumpCollectionsVersion();
-    } catch (error) {
-        handleFirestoreError(error, OperationType.CREATE, 'collections');
-    }
+    const id = Math.random().toString(36).substring(2, 15);
+    const newColl = { ...collectionData, id, updatedAt: new Date().toISOString() } as AppCollection;
+    await saveCollectionInternal(newColl);
   };
 
   const updateCollection = async (id: string, updates: Partial<AppCollection>) => {
-    if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
-    try {
-        const { updateDoc, doc } = await import('firebase/firestore');
-        await updateDoc(doc(db, 'collections', id), updates);
-        await bumpCollectionsVersion();
-    } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, `collections/${id}`);
-    }
+    const existing = collections.find(c => c.id === id);
+    if (!existing) return;
+    const updated = { ...existing, ...updates, updatedAt: new Date().toISOString() };
+    await saveCollectionInternal(updated);
   };
 
   const deleteCollection = async (id: string) => {
     if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
+    
+    // Update local state
+    setCollections(prev => prev.filter(c => c.id !== id));
+
+    // Find and update chunk
     try {
-        const { deleteDoc, doc } = await import('firebase/firestore');
-        await deleteDoc(doc(db, 'collections', id));
-        await bumpCollectionsVersion();
-    } catch (error) {
-        handleFirestoreError(error, OperationType.DELETE, `collections/${id}`);
+        let foundChunkId: string | null = null;
+        let chunkItems: any = null;
+
+        const versionsDoc = await getDoc(doc(db, 'chunk_meta', 'versions'));
+        let latestIndex = 0;
+        if (versionsDoc.exists()) {
+            const vData = versionsDoc.data();
+            const lId = (vData.collections && vData.collections.latestChunkId) || 'collection_chunk_0';
+            const m = lId.match(/(\d+)$/);
+            if (m) latestIndex = parseInt(m[1]);
+        }
+
+        for (let i = 0; i <= latestIndex; i++) {
+            const cid = COLLECTION_CHUNK_PREFIX + i;
+            const cDoc = await getDoc(doc(db, 'collection_chunks', cid));
+            if (cDoc.exists()) {
+                const items = cDoc.data().items || {};
+                if (items[id]) {
+                    delete items[id];
+                    foundChunkId = cid;
+                    chunkItems = items;
+                    break;
+                }
+            }
+        }
+
+        if (foundChunkId && chunkItems) {
+            const batch = writeBatch(db);
+            batch.set(doc(db, 'collection_chunks', foundChunkId), {
+                items: chunkItems,
+                updatedAt: serverTimestamp()
+            });
+            batch.set(doc(db, 'chunk_meta', 'versions'), { 
+                collections: {
+                    version: Date.now(),
+                    updatedAt: serverTimestamp()
+                },
+                lastGlobalUpdate: serverTimestamp()
+            }, { merge: true });
+
+            await batch.commit();
+            safeStorage.setItem('local_collection_chunk_' + foundChunkId, JSON.stringify(chunkItems));
+            
+            // Refresh local cache
+            const allCached = JSON.parse(safeStorage.getItem('collections_cache') || '[]');
+            safeStorage.setItem('collections_cache', JSON.stringify(allCached.filter((c: any) => c.id !== id)));
+        }
+    } catch (e) {
+        console.error("Failed to delete collection from server:", e);
     }
   };
 
