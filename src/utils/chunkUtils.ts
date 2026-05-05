@@ -132,11 +132,14 @@ export function minifyContent(content: any): any {
 export function expandContent(minified: any, chunkId?: string): Content {
   const expanded: any = { id: minified.id };
   
-  if (chunkId) {
-      if (chunkId.startsWith('movie_')) expanded.type = 'movie';
-      if (chunkId.startsWith('series_')) expanded.type = 'series';
+  const normalizedChunkId = chunkId ? chunkId.replace('content_chunk_', '') : undefined;
+  if (normalizedChunkId) {
+    expanded.chunkId = normalizedChunkId;
+    if (normalizedChunkId.startsWith('movie_')) expanded.type = 'movie';
+    else if (normalizedChunkId.startsWith('series_')) expanded.type = 'series';
+    else expanded.type = minified.sea ? 'series' : 'movie';
   } else {
-      expanded.type = minified.sea ? 'series' : 'movie';
+    expanded.type = minified.sea ? 'series' : 'movie';
   }
 
   for (const [key, value] of Object.entries(minified)) {

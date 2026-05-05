@@ -73,7 +73,7 @@ const QualityInputs: React.FC<QualityInputsProps> = ({ links, onChange, droppabl
             className="space-y-3"
           >
             {safeLinks.map((link, idx) => (
-              <Draggable key={link.id} draggableId={link.id} index={idx}>
+              <Draggable key={link.id || `safe-id-${idx}`} draggableId={link.id || `safe-id-${idx}`} index={idx}>
                 {(provided, snapshot) => (
                   <div 
                     ref={provided.innerRef}

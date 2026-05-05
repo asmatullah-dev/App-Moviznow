@@ -681,7 +681,9 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         const newList = [...prev];
         if (idx !== -1) newList[idx] = { ...content, chunkId };
         else newList.push({ ...content, chunkId });
-        return newList.sort((a, b) => (b.order || 0) - (a.order || 0));
+        const sorted = newList.sort((a, b) => (b.order || 0) - (a.order || 0));
+        safeStorage.setItem('content_cache', JSON.stringify(sorted));
+        return sorted;
     });
     if (!localOnly && !isAdminOrEditor) {
         const { saveContentToChunk } = await import('../utils/chunkUtils');
@@ -770,6 +772,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
             const idx = next.findIndex(c => c.id === u.id);
             if (idx !== -1) next[idx] = { ...next[idx], ...u.fields };
         });
+        safeStorage.setItem('content_cache', JSON.stringify(next));
         return next;
     });
 

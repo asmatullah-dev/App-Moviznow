@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, memo, useCallback } from 'react';
 import { useSearchParams, Link, useLocation, useNavigate } from 'react-router-dom';
 import { db } from '../../firebase';
+import { safeStorage } from '../../utils/safeStorage';
 import { collection, addDoc, deleteDoc, doc, updateDoc, onSnapshot, writeBatch, getDocs, query, where, arrayUnion, deleteField } from 'firebase/firestore';
 import { useAuth } from '../../contexts/AuthContext';
 import { useContent } from '../../contexts/ContentContext';
@@ -683,7 +684,7 @@ export default function ContentManagement() {
       }
     }
 
-    const normalizedType = (contentToUse.type.toLowerCase() === 'series' || contentToUse.type.toLowerCase() === 'tv') ? 'series' : 'movie';
+    const normalizedType = (contentToUse.type?.toLowerCase() === 'series' || contentToUse.type?.toLowerCase() === 'tv') ? 'series' : 'movie';
     setType(normalizedType);
     setStatus(contentToUse.status || 'published');
     setInitialStatus(contentToUse.status || 'published');
@@ -835,8 +836,9 @@ export default function ContentManagement() {
       let newDocId = currentEditingId;
 
       if (currentEditingId) {
-        const fullContent = { ...cleanedData, id: currentEditingId } as Content;
+        const fullContent = { ...existingContent, ...cleanedData, id: currentEditingId } as Content;
         await saveContent(fullContent);
+        safeStorage.removeItem(`movie_details_${currentEditingId}`);
       } else {
         newDocId = Math.random().toString(36).substr(2, 9); // Generate a unique ID
         cleanedData.id = newDocId;
@@ -980,7 +982,7 @@ export default function ContentManagement() {
       }
 
       if (metadata.type) {
-        const normalizedType = (metadata.type.toLowerCase() === 'series' || metadata.type.toLowerCase() === 'tv') ? 'series' : 'movie';
+        const normalizedType = (metadata.type?.toLowerCase() === 'series' || metadata.type?.toLowerCase() === 'tv') ? 'series' : 'movie';
         setType(normalizedType);
         activeType = normalizedType;
       }
@@ -1051,7 +1053,7 @@ export default function ContentManagement() {
 
         if (targetEpisode === undefined || link.isFullSeasonMKV || link.isFullSeasonZIP) {
           // Full season
-          const isZip = link.isFullSeasonZIP || link.url.toLowerCase().includes('.zip');
+          const isZip = link.isFullSeasonZIP || (link.url && link.url.toLowerCase().includes('.zip'));
           
           const updatedSeason = { ...updatedSeasons[seasonIdx] };
           const targetLinks = isZip ? [...updatedSeason.zipLinks] : [...(updatedSeason.mkvLinks || [])];
@@ -1290,7 +1292,7 @@ export default function ContentManagement() {
       if (!isNaN(parsedYear)) setYear(parsedYear);
     }
     if (data.type) {
-        const normalizedType = (data.type.toLowerCase() === 'series' || data.type.toLowerCase() === 'tv') ? 'series' : 'movie';
+        const normalizedType = (data.type?.toLowerCase() === 'series' || data.type?.toLowerCase() === 'tv') ? 'series' : 'movie';
         setType(normalizedType);
     }
     if (data.description) setDescription(data.description);
@@ -1838,11 +1840,11 @@ export default function ContentManagement() {
       if (!link.url) return link;
       
       // If the original URL is HTML, it's broken
-      if (link.url.toLowerCase().includes('<html')) {
+      if (link.url && link.url.toLowerCase().includes('<html')) {
         return { ...link, url: '', tinyUrl: '' };
       }
 
-      const isBadTinyUrl = link.tinyUrl && link.tinyUrl.toLowerCase().includes('<html');
+      const isBadTinyUrl = link.tinyUrl && typeof link.tinyUrl === 'string' && link.tinyUrl.toLowerCase().includes('<html');
       
       if (!link.url.includes('pixeldrain.com') && !link.url.includes('pixeldrain.dev') && !link.url.includes('pixeldrain.net') && (!link.tinyUrl || isBadTinyUrl)) {
         const tinyUrl = await generateTinyUrl(link.url, true, settings?.supportNumber || '3363284466');
@@ -2666,7 +2668,7 @@ export default function ContentManagement() {
         const labels = getMissingLabels(c, profile);
         if (labels.length === 0) return false;
 
-        let searchTag = '';
+        let searchTag = (showMissing || '').toString();
         if (showMissing === 'trailer') searchTag = 'Missing Trailer';
         else if (showMissing === 'genre') searchTag = 'Missing Genre';
         else if (showMissing === 'language') searchTag = 'Missing Language';
@@ -2674,16 +2676,9 @@ export default function ContentManagement() {
         else if (showMissing === 'poster') searchTag = 'Missing Poster';
         else if (showMissing === 'year') searchTag = 'Missing Year';
         else if (showMissing === 'releaseDate') searchTag = 'Missing Release Date';
-        else searchTag = showMissing; // e.g. '480p', '720p', '1080p'
         
-        // For metadata fields (Poster, Year, Release Date), show ANY item missing that field
-        if (['poster', 'year', 'releaseDate'].includes(showMissing)) {
-          return labels.some(l => l.toLowerCase().includes(searchTag.toLowerCase()));
-        }
-
-        // For link qualities and metadata tags, use strict filtering: 
-        // Show items missing ONLY that selected category to focus work
-        return labels.every(l => l.toLowerCase().includes(searchTag.toLowerCase()));
+        const searchTagLower = searchTag.toLowerCase();
+        return labels.some(l => l && typeof l === 'string' && l.toLowerCase().includes(searchTagLower));
       });
     }
 
