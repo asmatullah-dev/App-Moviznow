@@ -319,11 +319,11 @@ export default function ContentManagement() {
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showDuplicates, setShowDuplicates] = useState(() => sessionStorage.getItem('adminShowDuplicates') === 'true');
-  const [showMissing, setShowMissing] = useState<'none' | 'missing' | 'complete' | '480p' | '720p' | '1080p' | 'trailer' | 'genre' | 'language' | 'quality' | 'poster' | 'year' | 'imdb' | 'releaseDate' | 'disabled'>(() => {
+  const [showMissing, setShowMissing] = useState<'none' | 'missing' | 'complete' | '480p' | '720p' | '1080p' | 'genre' | 'language' | 'quality' | 'poster' | 'year' | 'imdb' | 'disabled'>(() => {
     const saved = sessionStorage.getItem('adminShowMissingOnly');
     if (saved === 'true') return 'missing';
     if (saved === 'complete') return 'complete';
-    if (['480p', '720p', '1080p', 'trailer', 'genre', 'language', 'quality', 'poster', 'year', 'imdb', 'releaseDate', 'disabled'].includes(saved || '')) return saved as any;
+    if (['480p', '720p', '1080p', 'genre', 'language', 'quality', 'poster', 'year', 'imdb', 'disabled'].includes(saved || '')) return saved as any;
     return 'none';
   });
   const [missingThisOneOnly, setMissingThisOneOnly] = useState(() => sessionStorage.getItem('adminMissingThisOneOnly') === 'true');
@@ -2483,11 +2483,10 @@ export default function ContentManagement() {
     if (isStaff) {
       if (!content.posterUrl) labels.push('Missing Poster');
       if (!content.year) labels.push('Missing Year');
-      if (!content.releaseDate) labels.push('Missing Release Date');
+      // Removed Missing Release Date
       if (!content.genreIds || content.genreIds.length === 0) labels.push('Missing Genre');
       if (!content.languageIds || content.languageIds.length === 0) labels.push('Missing Language');
       if (!content.qualityId) labels.push('Missing Print Quality');
-      if (!content.trailerUrl && (!content.trailers || content.trailers === '[]' || (Array.isArray(content.trailers) && content.trailers.length === 0))) labels.push('Missing Trailer');
       if (content.type === 'movie') {
           try {
               let has480 = false, has720 = false, has1080 = false;
@@ -2675,13 +2674,11 @@ export default function ContentManagement() {
           '480p': 'missing 480p',
           '720p': 'missing 720p',
           '1080p': 'missing 1080p',
-          'trailer': 'missing trailer',
           'genre': 'missing genre',
           'language': 'missing language',
           'quality': 'missing print quality',
           'poster': 'missing poster',
           'year': 'missing year',
-          'releaseDate': 'missing release date',
         };
         const expectedLabel = missingLabelMap[showMissing as string] || `missing ${searchTagLower}`;
         
@@ -3113,13 +3110,11 @@ export default function ContentManagement() {
                             { label: 'Missing 480p', value: '480p' },
                             { label: 'Missing 720p', value: '720p' },
                             { label: 'Missing 1080p', value: '1080p' },
-                            { label: 'Missing Trailer', value: 'trailer' },
-                            { label: 'Missing Genre', value: 'genre' },
+                             { label: 'Missing Genre', value: 'genre' },
                             { label: 'Missing Language', value: 'language' },
                             { label: 'Missing Print Quality', value: 'quality' },
                             { label: 'Missing Poster', value: 'poster' },
                             { label: 'Missing Year', value: 'year' },
-                            { label: 'Missing Release Date', value: 'releaseDate' },
                             { type: 'divider' },
                             { label: 'Disabled (Draft)', value: 'disabled', icon: <EyeOff className="w-4 h-4" /> }
                           ].map((item, idx) => {
