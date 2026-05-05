@@ -644,7 +644,9 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
                             delete items[content.id];
                             safeStorage.setItem(key, JSON.stringify(items));
                             // Mark this old chunk as needing sync too
-                            const cid = key.replace('content_chunk_', '');
+                            // Extract actual chunk ID from key (handling both legacy and new formats)
+                            const cid = key.startsWith('content_chunk_') ? key.replace('content_chunk_', '') : key;
+                            
                             const pendingStr = safeStorage.getItem('pending_chunk_updates') || '[]';
                             const pendingIds = new Set(JSON.parse(pendingStr));
                             pendingIds.add(cid);
@@ -860,11 +862,12 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     if (!isAdmin) return;
 
     // Optimistically update collections state for immediate UI feedback
+    const updatedColl = { ...coll, updatedAt: new Date().toISOString() };
     setCollections(prev => {
         const next = [...prev];
-        const idx = next.findIndex(c => c.id === coll.id);
-        if (idx !== -1) next[idx] = coll;
-        else next.push(coll);
+        const idx = next.findIndex(c => c.id === updatedColl.id);
+        if (idx !== -1) next[idx] = updatedColl;
+        else next.push(updatedColl);
         return next.sort((a, b) => (b.order || 0) - (a.order || 0));
     });
 
@@ -881,9 +884,9 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         const localStr = safeStorage.getItem('local_collection_chunk_' + cid);
         if (localStr) {
             const items = JSON.parse(localStr);
-            if (items[coll.id]) {
+            if (items[updatedColl.id]) {
                 chunkId = cid;
-                items[coll.id] = coll;
+                items[updatedColl.id] = updatedColl;
                 chunkItems = items;
                 break;
             }
@@ -901,9 +904,9 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
             latestIndex++;
             chunkId = COLLECTION_CHUNK_PREFIX + latestIndex;
             latestCollChunkIdRef.current = chunkId;
-            chunkItems = { [coll.id]: coll };
+            chunkItems = { [updatedColl.id]: updatedColl };
         } else {
-            items[coll.id] = coll;
+            items[updatedColl.id] = updatedColl;
             chunkItems = items;
         }
     }
@@ -913,9 +916,9 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     
     // Update collections cache for persistence across reloads
     const allCached = JSON.parse(safeStorage.getItem('collections_cache') || '[]');
-    const idx = allCached.findIndex((c: any) => c.id === coll.id);
-    if (idx !== -1) allCached[idx] = coll;
-    else allCached.push(coll);
+    const idx = allCached.findIndex((c: any) => c.id === updatedColl.id);
+    if (idx !== -1) allCached[idx] = updatedColl;
+    else allCached.push(updatedColl);
     safeStorage.setItem('collections_cache', JSON.stringify(allCached.sort((a: any, b: any) => (b.order || 0) - (a.order || 0))));
 
     // Mark as pending
