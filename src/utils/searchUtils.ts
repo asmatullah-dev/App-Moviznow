@@ -212,9 +212,9 @@ export const smartSearch = <T extends Record<string, any>>(
       const orderB = b.item.order;
       
       if (orderA !== orderB) {
-        if (orderA === undefined) return -1;
-        if (orderB === undefined) return 1;
-        return orderA - orderB;
+        if (orderA === undefined) return 1;
+        if (orderB === undefined) return -1;
+        return orderB - orderA;
       }
 
       // Tertiary sort by createdAt descending (if available)

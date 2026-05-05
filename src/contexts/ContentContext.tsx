@@ -79,7 +79,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const finalizeChanges = async () => {
-    if (!['owner', 'admin'].includes(profile?.role || '')) return;
+    if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
     const pendingStr = safeStorage.getItem('pending_chunk_updates');
     if (!pendingStr) return;
     
@@ -87,52 +87,49 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     if (pendingChunkIds.length === 0) return;
 
     try {
-        const { writeBatch, doc } = await import('firebase/firestore');
+        const { writeBatch, doc, serverTimestamp } = await import('firebase/firestore');
         const batch = writeBatch(db);
         const now = Date.now();
-        const versions: Record<string, number> = {};
+        const versions: Record<string, any> = { 
+            lastGlobalUpdate: serverTimestamp() 
+        };
 
+        let updatedCount = 0;
         for (const cid of pendingChunkIds) {
             const chunkStr = safeStorage.getItem('content_chunk_' + cid);
             if (chunkStr) {
-                batch.set(doc(db, 'content_chunks', cid), { items: JSON.parse(chunkStr) }, { merge: true });
+                // The storage format already uses { [id]: item, ...rest }
+                // which puts the newest/modified item first in the JSON string.
+                batch.set(doc(db, 'content_chunks', cid), { 
+                    items: JSON.parse(chunkStr),
+                    updatedAt: serverTimestamp()
+                });
                 versions[cid] = now;
+                updatedCount++;
             }
         }
         
-        batch.set(doc(db, 'chunk_meta', 'versions'), versions, { merge: true });
-        await batch.commit();
-        
-        const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
-        let localMeta: Record<string, number> = {};
-        try { localMeta = JSON.parse(localMetaString); } catch(e) {}
-        Object.assign(localMeta, versions);
-        safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+        if (updatedCount > 0) {
+            batch.set(doc(db, 'chunk_meta', 'versions'), versions, { merge: true });
+            await batch.commit();
+            
+            const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+            let localMeta: Record<string, number> = {};
+            try { localMeta = JSON.parse(localMetaString); } catch(e) {}
+            Object.assign(localMeta, versions);
+            safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
 
-        safeStorage.removeItem('pending_chunk_updates');
-        setHasPendingChanges(false);
-        console.log("Sync successful.");
+            safeStorage.removeItem('pending_chunk_updates');
+            setHasPendingChanges(false);
+            console.log(`Sync successful: ${updatedCount} chunks updated.`);
+        }
     } catch (e) {
         console.error("Sync failed", e);
+        throw e;
     }
   };
 
-  useEffect(() => {
-    if (!profile || !['owner', 'admin'].includes(profile.role)) return;
-    const interval = setInterval(() => {
-        const pending = safeStorage.getItem('pending_chunk_updates');
-        if (pending) {
-            finalizeChanges();
-        }
-    }, 30 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [profile?.role]);
 
-  useEffect(() => {
-    if (profile?.role === 'owner' && hasPendingChanges) {
-        finalizeChanges();
-    }
-  }, [profile?.role, hasPendingChanges]);
 
   const augmentedContentList = useMemo(() => {
     return contentList.map(c => {
@@ -169,7 +166,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         }
     }
     const rawContent = Object.values(rawContentMap);
-    rawContent.sort((a, b) => (a.order || 0) - (b.order || 0));
+    rawContent.sort((a, b) => (b.order || 0) - (a.order || 0));
     
     const isAdminOrEditor = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
     if (!isAdminOrEditor) {
@@ -194,166 +191,127 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  useEffect(() => {
-    if (authProfileLoading) return;
+  const syncWithServer = async () => {
     if (!navigator.onLine) {
-      setLoading(false);
-      return;
+        setLoading(false);
+        return;
     }
+    const { doc, getDoc, getDocs, collection, writeBatch } = await import('firebase/firestore');
 
-    let unsubContent: (() => void) | undefined = undefined;
+    const isAdmin = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
 
-    const setupListener = async () => {
-      const { onSnapshot, doc, getDocs, collection, writeBatch, getDoc } = await import('firebase/firestore');
-      const q = doc(db, 'chunk_meta', 'versions');
-      unsubContent = onSnapshot(q, async (snapshot) => {
-        let versions = snapshot.data() || {};
-        
-        if (Object.keys(versions).length === 0 && ['owner', 'admin'].includes(profile?.role || '')) {
-           try {
+    let versions: Record<string, number> = {};
+    try {
+        const metaDoc = await getDoc(doc(db, 'chunk_meta', 'versions'));
+        if (metaDoc.exists()) {
+            versions = metaDoc.data() || {};
+        } else if (isAdmin) {
+            // First time setup
             const chunksSnap = await getDocs(collection(db, 'content_chunks'));
             const newVersions: Record<string, number> = {};
             const batch = writeBatch(db);
             chunksSnap.docs.forEach(d => {
-              const now = Date.now();
-              newVersions[d.id] = now;
-              safeStorage.setItem('content_chunk_' + d.id, JSON.stringify(d.data().items || {}));
+                const now = Date.now();
+                newVersions[d.id] = now;
+                safeStorage.setItem('content_chunk_' + d.id, JSON.stringify(d.data().items || {}));
             });
             batch.set(doc(db, 'chunk_meta', 'versions'), newVersions);
             await batch.commit();
             versions = newVersions;
-          } catch(e) { console.error(e); }
         }
+    } catch(e) { console.error("Error fetching chunk_meta", e); }
 
-        let localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
-        let localMeta: Record<string, number> = {};
-        try { localMeta = JSON.parse(localMetaString); } catch(e) {}
-        
-        const chunksToFetch: string[] = [];
-        for (const [chunkId, version] of Object.entries(versions)) {
-          const hasData = !!safeStorage.getItem('content_chunk_' + chunkId);
-          if (!hasData || !localMeta[chunkId] || localMeta[chunkId] < (version as number)) {
+    let localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+    let localMeta: Record<string, number> = {};
+    try { localMeta = JSON.parse(localMetaString); } catch(e) {}
+    
+    // Process chunks
+    const chunksToFetch: string[] = [];
+    for (const [chunkId, version] of Object.entries(versions)) {
+        if (chunkId === 'collections') continue;
+        const hasData = !!safeStorage.getItem('content_chunk_' + chunkId);
+        if (!hasData || !localMeta[chunkId] || localMeta[chunkId] < (version as number)) {
             chunksToFetch.push(chunkId);
-          }
         }
-        
-        if (chunksToFetch.length > 0) {
-            await Promise.all(chunksToFetch.map(async (chunkId) => {
-               try {
-                   const chunkDoc = await getDoc(doc(db, 'content_chunks', chunkId));
-                   if (chunkDoc.exists()) {
-                       const items = chunkDoc.data().items || {};
-                       safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(items));
-                       localMeta[chunkId] = versions[chunkId] as number;
-                   }
-               } catch(e) { console.error(e); }
-            }));
-            safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
-        }
-        
-        refreshContentFromLocal();
-        setLoading(false);
-      }, (error) => {
-        console.error("Content listener error:", error);
-        handleFirestoreError(error, OperationType.GET, 'chunk_meta');
-        setLoading(false);
-      });
-    };
+    }
+    
+    if (chunksToFetch.length > 0) {
+        await Promise.all(chunksToFetch.map(async (chunkId) => {
+            try {
+                const chunkDoc = await getDoc(doc(db, 'content_chunks', chunkId));
+                if (chunkDoc.exists()) {
+                    const items = chunkDoc.data().items || {};
+                    safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(items));
+                    localMeta[chunkId] = versions[chunkId] as number;
+                }
+            } catch(e) { console.error(e); }
+        }));
+        safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+    }
+    
+    // Always refresh content to catch any changes
+    refreshContentFromLocal();
 
-    setupListener();
-    return () => { if (unsubContent) unsubContent(); };
-  }, [profile?.role, authProfileLoading]);
-
-  useEffect(() => {
-    if (authProfileLoading) return;
-    if (!navigator.onLine) return;
-    const isAdmin = ['owner', 'admin', 'content_manager', 'manager'].includes(profile?.role || '');
-    let unsubs: (() => void)[] = [];
-    const setupStaticListeners = async () => {
-        const { onSnapshot, collection, getDocs } = await import('firebase/firestore');
-        if (isAdmin) {
-          unsubs.push(onSnapshot(collection(db, 'genres'), snap => {
-            const raw = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+    // Handle auxiliary data and collections
+    try {
+        const fetchAux = async (name: string, setFn: any, cacheKey: string) => {
+            const snap = await getDocs(collection(db, name));
+            const raw = snap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
             let items: any[] = [];
-            const allDoc = raw.find(d => d.id === 'all');
+            const allDoc = raw.find((d: any) => d.id === 'all');
             if (allDoc && allDoc.list) items = [...allDoc.list];
-            raw.filter(d => d.id !== 'all').forEach(newItem => {
-              const idx = items.findIndex(i => i.id === newItem.id);
-              if (idx !== -1) items[idx] = newItem;
-              else items.push(newItem);
-            });
-            const sorted = items.sort((a, b) => (a.order || 0) - (b.order || 0));
-            setGenres(sorted); safeStorage.setItem('genres_cache', JSON.stringify(sorted));
-          }));
-          unsubs.push(onSnapshot(collection(db, 'languages'), snap => {
-            const raw = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
-            let items: any[] = [];
-            const allDoc = raw.find(d => d.id === 'all');
-            if (allDoc && allDoc.list) items = [...allDoc.list];
-            raw.filter(d => d.id !== 'all').forEach(newItem => {
-              const idx = items.findIndex(i => i.id === newItem.id);
-              if (idx !== -1) items[idx] = newItem;
-              else items.push(newItem);
-            });
-            const sorted = items.sort((a, b) => (a.order || 0) - (b.order || 0));
-            setLanguages(sorted); safeStorage.setItem('languages_cache', JSON.stringify(sorted));
-          }));
-          unsubs.push(onSnapshot(collection(db, 'qualities'), snap => {
-            const raw = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
-            let items: any[] = [];
-            const allDoc = raw.find(d => d.id === 'all');
-            if (allDoc && allDoc.list) items = [...allDoc.list];
-            raw.filter(d => d.id !== 'all').forEach(newItem => {
-              const idx = items.findIndex(i => i.id === newItem.id);
-              if (idx !== -1) items[idx] = newItem;
-              else items.push(newItem);
-            });
-            const sorted = items.sort((a, b) => (a.order || 0) - (b.order || 0));
-            setQualities(sorted); safeStorage.setItem('qualities_cache', JSON.stringify(sorted));
-          }));
-          unsubs.push(onSnapshot(collection(db, 'collections'), snap => {
-            const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as AppCollection)).sort((a, b) => (a.order || 0) - (b.order || 0));
-            setCollections(data); safeStorage.setItem('collections_cache', JSON.stringify(data));
-          }));
-        } else {
-          try {
-            const [g, l, q, c] = await Promise.all([
-              getDocs(collection(db, 'genres')), getDocs(collection(db, 'languages')),
-              getDocs(collection(db, 'qualities')), getDocs(collection(db, 'collections'))
-            ]);
-            
-            const process = (snap: any) => {
-              const raw = snap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
-              let items: any[] = [];
-              const allDoc = raw.find((d: any) => d.id === 'all');
-              if (allDoc && allDoc.list) items = [...allDoc.list];
-              raw.filter((d: any) => d.id !== 'all').forEach((newItem: any) => {
+            raw.filter((d: any) => d.id !== 'all').forEach((newItem: any) => {
                 const idx = items.findIndex(i => i.id === newItem.id);
                 if (idx !== -1) items[idx] = newItem;
                 else items.push(newItem);
-              });
-              return items.sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
-            };
+            });
+            const sorted = items.sort((a: any, b: any) => (b.order || 0) - (a.order || 0));
+            setFn(sorted);
+            safeStorage.setItem(cacheKey, JSON.stringify(sorted));
+        };
 
-            const gd = process(g);
-            const ld = process(l);
-            const qd = process(q);
-            const cd = c.docs.map(d => ({ id: d.id, ...d.data() } as AppCollection)).sort((a, b) => (a.order || 0) - (b.order || 0));
-            
-            setGenres(gd); setLanguages(ld); setQualities(qd); setCollections(cd);
-            safeStorage.setItem('genres_cache', JSON.stringify(gd));
-            safeStorage.setItem('languages_cache', JSON.stringify(ld));
-            safeStorage.setItem('qualities_cache', JSON.stringify(qd));
+        if (!safeStorage.getItem('genres_cache')) await fetchAux('genres', setGenres, 'genres_cache');
+        if (!safeStorage.getItem('languages_cache')) await fetchAux('languages', setLanguages, 'languages_cache');
+        if (!safeStorage.getItem('qualities_cache')) await fetchAux('qualities', setQualities, 'qualities_cache');
+
+        // Handle collections with versioning
+        const collectionsVersion = versions.collections || 0;
+        const localCollectionsVersion = localMeta.collections || 0;
+        if (!safeStorage.getItem('collections_cache') || localCollectionsVersion < collectionsVersion) {
+            const cSnap = await getDocs(collection(db, 'collections'));
+            const cd = cSnap.docs.map(d => ({ id: d.id, ...d.data() } as AppCollection)).sort((a, b) => (b.order || 0) - (a.order || 0));
+            setCollections(cd);
             safeStorage.setItem('collections_cache', JSON.stringify(cd));
-          } catch(err) {}
+            
+            localMeta.collections = collectionsVersion;
+            safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
         }
-    };
-    setupStaticListeners();
-    return () => unsubs.forEach(u => u());
+    } catch(e) {}
+    
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    if (authProfileLoading) return;
+    if (!navigator.onLine) {
+        setLoading(false);
+        return;
+    }
+    syncWithServer();
+
+    const interval = setInterval(() => {
+        syncWithServer();
+        if (['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) {
+            const pending = safeStorage.getItem('pending_chunk_updates');
+            if (pending) finalizeChanges();
+        }
+    }, 30 * 60 * 1000);
+
+    return () => clearInterval(interval);
   }, [profile?.role, authProfileLoading]);
 
   const saveContentInternal = async (content: Content, localOnly = false) => {
-    const isOwnerOrAdmin = ['owner', 'admin'].includes(profile?.role || '');
+    const isAdminOrEditor = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
     const { cleanContentForChunk } = await import('../utils/chunkUtils');
     const minified = cleanContentForChunk(content);
     let chunkId = content.chunkId;
@@ -371,15 +329,39 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     }
     if (!chunkId) {
         const prefix = content.type === 'movie' ? 'movie_chunk_' : 'series_chunk_';
-        const matching = Object.keys(localMeta).filter(k => k.startsWith(prefix)).sort();
-        chunkId = matching.length > 0 ? matching[matching.length - 1] : `${prefix}0`;
+        const maxSize = content.type === 'movie' ? 800 : 300;
+        let matching = Object.keys(localMeta).filter(k => k.startsWith(prefix));
+        
+        // Sort by the chunk index so we can confidently pick the *first* defined chunk. e.g. move_chunk_0
+        matching.sort((a, b) => {
+            const numA = parseInt(a.replace(prefix, '')) || 0;
+            const numB = parseInt(b.replace(prefix, '')) || 0;
+            return numA - numB;
+        });
+
+        // Find first chunk with space
+        for (const cid of matching) {
+            const chunkStr = safeStorage.getItem('content_chunk_' + cid) || '{}';
+            const items = JSON.parse(chunkStr);
+            if (Object.keys(items).length < maxSize) {
+                chunkId = cid;
+                break;
+            }
+        }
+
+        if (!chunkId) {
+            // All existing chunks are full or no chunks exist, create new one
+            chunkId = `${prefix}${matching.length}`;
+        }
         if (!localMeta[chunkId]) localMeta[chunkId] = 0;
     }
     const chunkStr = safeStorage.getItem('content_chunk_' + chunkId) || '{}';
     const chunkItems = JSON.parse(chunkStr);
-    chunkItems[content.id] = minified;
-    safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(chunkItems));
-    if (isOwnerOrAdmin) {
+    delete chunkItems[content.id];
+    // Always written first
+    const newChunkItems = { [content.id]: minified, ...chunkItems };
+    safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(newChunkItems));
+    if (isAdminOrEditor) {
         const pendingStr = safeStorage.getItem('pending_chunk_updates') || '[]';
         const pendingIds = new Set(JSON.parse(pendingStr));
         pendingIds.add(chunkId);
@@ -391,9 +373,9 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         const newList = [...prev];
         if (idx !== -1) newList[idx] = { ...content, chunkId };
         else newList.push({ ...content, chunkId });
-        return newList.sort((a, b) => (a.order || 0) - (b.order || 0));
+        return newList.sort((a, b) => (b.order || 0) - (a.order || 0));
     });
-    if (!localOnly && !isOwnerOrAdmin) {
+    if (!localOnly && !isAdminOrEditor) {
         const { saveContentToChunk } = await import('../utils/chunkUtils');
         await saveContentToChunk(content);
     }
@@ -410,8 +392,9 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         }
      });
      if (changed) {
+        newList.sort((a, b) => (b.order || 0) - (a.order || 0));
         setContentList(newList);
-        if (['owner', 'admin'].includes(profile?.role || '')) {
+        if (['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) {
             const affectedItems = newList.filter(item => updateMap.has(item.id));
             for (const item of affectedItems) {
                 await saveContentInternal(item, true); 
@@ -423,7 +406,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
   const saveContent = (content: Content) => saveContentInternal(content);
 
   const updateContentFields = async (updates: { id: string, fields: Partial<Content>, chunkId?: string }[]) => {
-    const isOwnerOrAdmin = ['owner', 'admin'].includes(profile?.role || '');
+    const isAdminOrEditor = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
     const affectedChunkIds = new Set<string>();
     const { minifyContent } = await import('../utils/chunkUtils');
 
@@ -431,6 +414,18 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         let chunkId = update.chunkId;
         if (!chunkId) {
             chunkId = contentList.find(c => c.id === update.id)?.chunkId;
+        }
+        if (!chunkId) {
+            const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+            let localMeta: Record<string, number> = {};
+            try { localMeta = JSON.parse(localMetaString); } catch(e) {}
+            for (const cid of Object.keys(localMeta)) {
+                const chunkStr = safeStorage.getItem('content_chunk_' + cid);
+                if (chunkStr && chunkStr.includes(`"${update.id}"`)) {
+                    chunkId = cid;
+                    break;
+                }
+            }
         }
         if (!chunkId) continue;
         
@@ -446,7 +441,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         }
     }
 
-    if (isOwnerOrAdmin && affectedChunkIds.size > 0) {
+    if (isAdminOrEditor && affectedChunkIds.size > 0) {
         const pendingStr = safeStorage.getItem('pending_chunk_updates') || '[]';
         const pendingIds = new Set(JSON.parse(pendingStr));
         affectedChunkIds.forEach(cid => pendingIds.add(cid));
@@ -463,20 +458,32 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         return next;
     });
 
-    if (!isOwnerOrAdmin) {
+    if (!isAdminOrEditor) {
         const { updateContentFieldsInChunks } = await import('../utils/chunkUtils');
         await updateContentFieldsInChunks(updates);
     }
   };
 
   const deleteMultipleContents = async (items: { id: string, chunkId?: string }[]) => {
-    const isOwnerOrAdmin = ['owner', 'admin'].includes(profile?.role || '');
+    const isAdminOrEditor = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
     const affectedChunkIds = new Set<string>();
 
     for (const item of items) {
         let chunkId = item.chunkId;
         if (!chunkId) {
             chunkId = contentList.find(c => c.id === item.id)?.chunkId;
+        }
+        if (!chunkId) {
+            const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+            let localMeta: Record<string, number> = {};
+            try { localMeta = JSON.parse(localMetaString); } catch(e) {}
+            for (const cid of Object.keys(localMeta)) {
+                const chunkStr = safeStorage.getItem('content_chunk_' + cid);
+                if (chunkStr && chunkStr.includes(`"${item.id}"`)) {
+                    chunkId = cid;
+                    break;
+                }
+            }
         }
         if (!chunkId) continue;
         
@@ -489,7 +496,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         }
     }
 
-    if (isOwnerOrAdmin && affectedChunkIds.size > 0) {
+    if (isAdminOrEditor && affectedChunkIds.size > 0) {
         const pendingStr = safeStorage.getItem('pending_chunk_updates') || '[]';
         const pendingIds = new Set(JSON.parse(pendingStr));
         affectedChunkIds.forEach(cid => pendingIds.add(cid));
@@ -500,14 +507,14 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     const idsToDelete = new Set(items.map(i => i.id));
     setContentList(prev => prev.filter(c => !idsToDelete.has(c.id)));
 
-    if (!isOwnerOrAdmin) {
+    if (!isAdminOrEditor) {
         const { deleteContentsFromChunks } = await import('../utils/chunkUtils');
         await deleteContentsFromChunks(items);
     }
   };
 
   const updateAuxiliaryCollection = async (type: 'genre' | 'language' | 'quality', items: any[]) => {
-    if (!['owner', 'admin'].includes(profile?.role || '')) return;
+    if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
     try {
         const { writeBatch, collection, getDocs, doc } = await import('firebase/firestore');
         const collectionName = type === 'quality' ? 'qualities' : `${type}s`;
@@ -531,38 +538,48 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const bumpCollectionsVersion = async () => {
+    try {
+        const { doc, setDoc } = await import('firebase/firestore');
+        await setDoc(doc(db, 'chunk_meta', 'versions'), { collections: Date.now() }, { merge: true });
+    } catch(e) {}
+  };
+
   const addCollection = async (collectionData: Omit<AppCollection, 'id'>) => {
-    if (!['owner', 'admin'].includes(profile?.role || '')) return;
+    if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
     try {
         const { addDoc, collection } = await import('firebase/firestore');
         await addDoc(collection(db, 'collections'), collectionData);
+        await bumpCollectionsVersion();
     } catch (error) {
         handleFirestoreError(error, OperationType.CREATE, 'collections');
     }
   };
 
   const updateCollection = async (id: string, updates: Partial<AppCollection>) => {
-    if (!['owner', 'admin'].includes(profile?.role || '')) return;
+    if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
     try {
         const { updateDoc, doc } = await import('firebase/firestore');
         await updateDoc(doc(db, 'collections', id), updates);
+        await bumpCollectionsVersion();
     } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, `collections/${id}`);
     }
   };
 
   const deleteCollection = async (id: string) => {
-    if (!['owner', 'admin'].includes(profile?.role || '')) return;
+    if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
     try {
         const { deleteDoc, doc } = await import('firebase/firestore');
         await deleteDoc(doc(db, 'collections', id));
+        await bumpCollectionsVersion();
     } catch (error) {
         handleFirestoreError(error, OperationType.DELETE, `collections/${id}`);
     }
   };
 
   const addAuxiliaryItem = async (type: 'genre' | 'language' | 'quality', item: any) => {
-    if (!['owner', 'admin'].includes(profile?.role || '')) return;
+    if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
     try {
         const { setDoc, doc, collection } = await import('firebase/firestore');
         const collectionName = type === 'quality' ? 'qualities' : `${type}s`;
@@ -575,7 +592,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
   };
 
   const updateAuxiliaryItem = async (type: 'genre' | 'language' | 'quality', id: string, updates: any) => {
-    if (!['owner', 'admin'].includes(profile?.role || '')) return;
+    if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
     try {
         const { updateDoc, doc, collection } = await import('firebase/firestore');
         const collectionName = type === 'quality' ? 'qualities' : `${type}s`;
@@ -586,7 +603,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
   };
 
   const deleteAuxiliaryItem = async (type: 'genre' | 'language' | 'quality', id: string) => {
-    if (!['owner', 'admin'].includes(profile?.role || '')) return;
+    if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
     try {
         const { deleteDoc, doc, collection } = await import('firebase/firestore');
         const collectionName = type === 'quality' ? 'qualities' : `${type}s`;

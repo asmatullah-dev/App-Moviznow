@@ -403,7 +403,7 @@ export async function saveContentsToChunks(rawContents: Content[]): Promise<void
   for (const chunkId of updatedChunkIds) {
     const chunk = currentChunks.find(c => c.id === chunkId);
     if (chunk) {
-      batch.set(doc(db, 'content_chunks', chunkId), { items: chunk.items }, { merge: true });
+      batch.set(doc(db, 'content_chunks', chunkId), { items: chunk.items });
     }
   }
 
@@ -591,13 +591,13 @@ export async function rebuildAllChunks(contents: Content[]): Promise<number> {
   // 2. Prepare new chunks
   // Sort global content by order then by createdAt (added time)
   const sortedContent = [...contents].sort((a, b) => {
-    const orderA = a.order ?? Number.MAX_SAFE_INTEGER;
-    const orderB = b.order ?? Number.MAX_SAFE_INTEGER;
-    if (orderA !== orderB) return orderA - orderB;
+    const orderA = a.order ?? Number.MIN_SAFE_INTEGER;
+    const orderB = b.order ?? Number.MIN_SAFE_INTEGER;
+    if (orderA !== orderB) return orderB - orderA;
     
     const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
     const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-    return timeA - timeB;
+    return timeB - timeA;
   });
 
   const movies = sortedContent.filter(c => c.type === 'movie').map(cleanContentForChunk);

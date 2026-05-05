@@ -239,6 +239,8 @@ export default function ContentManagement() {
   const { contentList, genres, languages, qualities, loading: contextLoading, getContent, saveContent, deleteContent, updateContentFields, deleteMultipleContents, updateAuxiliaryCollection, finalizeChanges, hasPendingChanges } = useContent();
   const [loading, setLoading] = useState(contextLoading);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSyncConfirmOpen, setIsSyncConfirmOpen] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -815,7 +817,8 @@ export default function ContentManagement() {
 
       if (currentEditingId && initialStatus === 'draft' && finalStatus === 'published') {
         data.createdAt = new Date().toISOString();
-        delete data.order; // Remove order to reset it when publishing
+        const maxOrder = Math.max(0, ...contentList.map(c => c.order || 0));
+        data.order = maxOrder + 1;
       }
 
       if (type === 'movie') {
@@ -837,6 +840,10 @@ export default function ContentManagement() {
         cleanedData.id = newDocId;
         cleanedData.createdAt = new Date().toISOString();
         cleanedData.addedBy = user?.uid;
+        
+        const maxOrder = Math.max(0, ...contentList.map(c => c.order || 0));
+        cleanedData.order = maxOrder + 1;
+
         await saveContent(cleanedData as Content);
       }
       
@@ -1185,7 +1192,9 @@ export default function ContentManagement() {
     try {
       console.log("Starting batch save for", batches.length, "batches");
       const itemsToSave: Content[] = [];
-      batches.forEach((b) => {
+      const currentMaxOrder = Math.max(0, ...contentList.map(c => c.order || 0));
+
+      batches.forEach((b, index) => {
          const newId = Math.random().toString(36).substr(2, 9);
          const contentData: any = {
            id: newId,
@@ -1197,6 +1206,7 @@ export default function ContentManagement() {
            addedBy: user?.uid || null,
            createdAt: new Date().toISOString(),
            updatedAt: new Date().toISOString(),
+           order: currentMaxOrder + index + 1,
          };
          
          if (b.metadata.type === 'movie' || !b.metadata.type) {
@@ -3239,21 +3249,9 @@ export default function ContentManagement() {
                      "px-6 py-3 rounded-xl font-medium flex items-center justify-center gap-2 transition-colors whitespace-nowrap text-white",
                      hasPendingChanges ? "bg-orange-600 hover:bg-orange-700" : "bg-zinc-600 hover:bg-zinc-700"
                    )}
-                   onClick={async () => {
-                      if (hasPendingChanges) {
-                         if(window.confirm('You have pending local changes. Sync to Firestore now?')) {
-                            await finalizeChanges();
-                            alert('Synced successfully!');
-                         }
-                      } else {
-                        if(window.confirm('Run chunk maintenance? (Re-index all)')) {
-                          const { processChunksUpdateMetadataAndIds } = await import('../../utils/maintenanceUtils');
-                          processChunksUpdateMetadataAndIds().then(r => alert('Success')).catch(alert)
-                        }
-                      }
-                   }}
+                   onClick={() => setIsSyncConfirmOpen(true)}
                  >
-                   {hasPendingChanges ? 'Finalize Sync' : 'Maintenance'}
+                   {hasPendingChanges ? 'Update Changes to Server*' : 'Update Changes to Server'}
                  </button>
                </div>
             )}
@@ -3497,6 +3495,35 @@ export default function ContentManagement() {
         onBatchAddLinks={handleBatchAddLinks}
         languages={languages}
         qualities={qualities}
+      />
+
+      <ConfirmModal
+        isOpen={isSyncConfirmOpen}
+        title="Update Changes to Server"
+        message="Are you sure you want to sync all pending local changes to the server? This will make the changes visible to all users."
+        confirmText="Sync Now"
+        loading={isSyncing}
+        onConfirm={async () => {
+          setIsSyncing(true);
+          try {
+            await finalizeChanges();
+            setAlertConfig({
+              isOpen: true,
+              title: "Sync Successful",
+              message: "All changes have been synced to the server successfully."
+            });
+            setIsSyncConfirmOpen(false);
+          } catch (error) {
+            setAlertConfig({
+              isOpen: true,
+              title: "Sync Failed",
+              message: "An error occurred while syncing changes. Please try again."
+            });
+          } finally {
+            setIsSyncing(false);
+          }
+        }}
+        onCancel={() => setIsSyncConfirmOpen(false)}
       />
 
       <ConfirmModal

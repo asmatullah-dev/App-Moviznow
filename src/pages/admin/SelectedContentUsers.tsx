@@ -153,9 +153,9 @@ export default function SelectedContentUsers() {
 
   const sortedContentList = useMemo(() => {
     return [...contentList].sort((a, b) => {
-      if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
-      if (a.order === undefined && b.order !== undefined) return -1;
-      if (a.order !== undefined && b.order === undefined) return 1;
+      if (a.order !== undefined && b.order !== undefined) return b.order - a.order;
+      if (a.order === undefined && b.order !== undefined) return 1;
+      if (a.order !== undefined && b.order === undefined) return -1;
       return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
     });
   }, [contentList]);

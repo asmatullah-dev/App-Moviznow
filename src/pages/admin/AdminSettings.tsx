@@ -121,40 +121,7 @@ export default function AdminSettings() {
     }
   };
 
-  const [showConfirmUpdate, setShowConfirmUpdate] = useState(false);
-  const [updateResult, setUpdateResult] = useState<{ updated: number, repairedContent?: number, repairedSearch?: number, newChunksCount?: number } | null>(null);
 
-  const handleUpdateChunks = async () => {
-    console.log("Chunk update process started");
-    setShowConfirmUpdate(false);
-    setIsMigrating(true);
-    setError(null);
-    setSuccess(false);
-    setUpdateResult(null);
-
-    try {
-      const { processChunkMaintenance } = await import('../../utils/maintenanceUtils');
-      const { updatedCount, repairResult, newChunksCount } = await processChunkMaintenance(contentList, true);
-      
-      console.log("Chunk update result:", updatedCount, repairResult);
-      setUpdateResult({ 
-        updated: updatedCount,
-        repairedContent: repairResult?.repairedContent,
-        repairedSearch: repairResult?.repairedSearch,
-        newChunksCount
-      });
-      
-      setSuccess(true);
-    } catch (err: any) {
-      console.error('Update execution error:', err);
-      const errorMessage = err.message || 'Unknown error occurred during update';
-      setError('Update failed: ' + errorMessage);
-    } finally {
-      setIsMigrating(false);
-      setShowConfirmUpdate(false);
-      console.log("Chunk update process finished");
-    }
-  };
 
   const onDragEnd = (result: any) => {
     if (!result.destination) return;
@@ -268,98 +235,6 @@ export default function AdminSettings() {
             <h1 className="text-2xl font-bold text-zinc-900 dark:text-white">App Settings</h1>
             <p className="text-zinc-500 dark:text-zinc-400 mt-1">Manage global application settings</p>
           </div>
-          
-          <div className="flex flex-wrap items-center gap-2">
-            {!showConfirmUpdate ? (
-              <>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setIsMigrating(true);
-                    setError(null);
-                    setSuccess(false);
-                    setUpdateResult(null);
-                    try {
-                      const { migrateFromLegacyContent } = await import('../../utils/maintenanceUtils');
-                      const result = await migrateFromLegacyContent();
-                      if (result.success) {
-                        setSuccess(true);
-                        setUpdateResult({ updated: result.migrated as number, newChunksCount: 0 });
-                      } else {
-                        setError('Migration failed: ' + result.error);
-                      }
-                    } catch (e) {
-                      setError('Migration failed: ' + String(e));
-                    } finally {
-                      setIsMigrating(false);
-                    }
-                  }}
-                  disabled={isMigrating}
-                  className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 text-white rounded-lg transition-colors text-sm font-medium shadow-sm whitespace-nowrap"
-                >
-                  {isMigrating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
-                  {isMigrating ? `Migrating...` : 'Migrate Legacy /content'}
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setIsMigrating(true);
-                    setError(null);
-                    setSuccess(false);
-                    setUpdateResult(null);
-                    try {
-                      const { processChunksUpdateMetadataAndIds } = await import('../../utils/maintenanceUtils');
-                      const result = await processChunksUpdateMetadataAndIds();
-                      if (result.success) {
-                        setSuccess(true);
-                        setUpdateResult({ updated: 0, newChunksCount: 0 }); // generic success
-                      } else {
-                        setError('Update failed: ' + result.error);
-                      }
-                    } catch (e) {
-                      setError('Update failed: ' + String(e));
-                    } finally {
-                      setIsMigrating(false);
-                    }
-                  }}
-                  disabled={isMigrating}
-                  className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-500 hover:bg-indigo-600 disabled:bg-indigo-300 text-white rounded-lg transition-colors text-sm font-medium shadow-sm whitespace-nowrap"
-                >
-                  {isMigrating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                  {isMigrating ? `Updating...` : 'Update IDs in Chunks'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmUpdate(true)}
-                  disabled={isMigrating}
-                  className="flex items-center justify-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-300 text-white rounded-lg transition-colors text-sm font-medium shadow-sm whitespace-nowrap"
-                >
-                  {isMigrating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                  {isMigrating ? `Updating...` : 'Update Chunks'}
-                </button>
-              </>
-            ) : (
-              <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-900/20 p-1.5 rounded-lg border border-amber-200 dark:border-amber-800">
-                <span className="text-xs font-semibold text-amber-800 dark:text-amber-200 px-2">Are you sure?</span>
-                <button
-                  type="button"
-                  onClick={handleUpdateChunks}
-                  disabled={isMigrating}
-                  className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded text-xs font-bold"
-                >
-                  Yes, Start
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmUpdate(false)}
-                  disabled={isMigrating}
-                  className="px-3 py-1 bg-zinc-200 dark:bg-zinc-700 hover:bg-zinc-300 dark:hover:bg-zinc-600 text-zinc-700 dark:text-zinc-200 rounded text-xs font-bold"
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
-          </div>
         </div>
       </div>
 
@@ -382,32 +257,7 @@ export default function AdminSettings() {
           </div>
         )}
 
-        {updateResult && (
-          <div className={clsx(
-            "p-4 rounded-xl flex items-start gap-3",
-            "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800"
-          )}>
-            <RefreshCw className="w-5 h-5 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold">Maintenance Complete</p>
-              <div className="text-sm mt-1 space-y-1">
-                {updateResult.newChunksCount !== undefined && (
-                  <p>• Built {updateResult.newChunksCount} categorized chunks (movie/series)</p>
-                )}
-                {updateResult.repairedContent !== undefined && (
-                  <p>• Verified {updateResult.repairedContent} content chunks in metadata</p>
-                )}
-                <p>• {updateResult.updated} items updated with missing fields</p>
-              </div>
-              <button 
-                onClick={() => setUpdateResult(null)}
-                className="mt-3 text-xs font-bold underline opacity-70 hover:opacity-100"
-              >
-                Dismiss
-              </button>
-            </div>
-          </div>
-        )}
+
 
         {/* General Settings */}
         <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
