@@ -220,11 +220,16 @@ export function expandContent(minified: any, chunkId?: string): Content {
   return expanded as Content;
 }
 
-function registerChunkUpdates(chunkIds: string[], batch: WriteBatch) {
+function registerChunkUpdates(chunkIds: string[], batch: WriteBatch, sizes?: Record<string, number>) {
   const metaRef = doc(db, 'chunk_meta', 'versions');
-  const updates: Record<string, number> = {};
+  const updates: Record<string, any> = {};
+  const now = Date.now();
   chunkIds.forEach(id => {
-    updates[id] = Date.now();
+    if (sizes && sizes[id] !== undefined) {
+      updates[id] = { version: now, count: sizes[id] };
+    } else {
+      updates[id] = { version: now };
+    }
   });
   batch.set(metaRef, updates, { merge: true });
 }
@@ -270,69 +275,7 @@ export async function fetchAllFromChunks<T>(collectionName: string, mergeFn: (da
  * Saves or updates a single content item in the appropriate chunk
  */
 export async function saveContentToChunk(rawContent: Content): Promise<void> {
-  const expectedPrefix = rawContent.type === 'movie' ? 'movie_chunk_' : 'series_chunk_';
-  const content = cleanContentForChunk(rawContent);
-  const batch = writeBatch(db);
-  
-  if (rawContent.chunkId) {
-    const docRef = doc(db, 'content_chunks', rawContent.chunkId);
-    batch.update(docRef, {
-      [`items.${content.id}`]: content
-    });
-    registerChunkUpdates([rawContent.chunkId], batch);
-    await batch.commit();
-    return;
-  }
-
-  // Fallback: search or find space
-  const chunksSnap = await getDocs(collection(db, 'content_chunks'));
-  let targetDoc: QueryDocumentSnapshot<DocumentData> | null = null;
-  
-  for (const doc of chunksSnap.docs) {
-    const items = doc.data().items || {};
-    if (items[content.id]) {
-      targetDoc = doc;
-      break;
-    }
-  }
-
-  if (targetDoc) {
-    const docRef = targetDoc.ref;
-    batch.update(docRef, {
-      [`items.${content.id}`]: content
-    });
-    registerChunkUpdates([targetDoc.id], batch);
-  } else {
-    // Add new - Find first chunk with space and matching prefix
-    let foundSpace = false;
-    const sortedDocs = [...chunksSnap.docs]
-      .filter(d => d.id.startsWith(expectedPrefix))
-      .sort((a, b) => a.id.localeCompare(b.id));
-    
-    for (const doc of sortedDocs) {
-      const items = doc.data().items || {};
-      const maxSize = expectedPrefix === 'movie_chunk_' ? CONTENT_CHUNK_MOVIE_SIZE : CONTENT_CHUNK_SERIES_SIZE;
-      if (Object.keys(items).length < maxSize) {
-        batch.update(doc.ref, {
-          [`items.${content.id}`]: content
-        });
-        registerChunkUpdates([doc.id], batch);
-        foundSpace = true;
-        break;
-      }
-    }
-
-    if (!foundSpace) {
-      const nextId = `${expectedPrefix}${sortedDocs.length}`;
-      const newRef = doc(db, 'content_chunks', nextId);
-      batch.set(newRef, {
-        items: { [content.id]: content }
-      });
-      registerChunkUpdates([nextId], batch);
-    }
-  }
-
-  await batch.commit();
+  return saveContentsToChunks([rawContent]);
 }
 
 /**
@@ -344,81 +287,108 @@ export async function saveContentsToChunks(rawContents: Content[]): Promise<void
     rawType: raw.type,
     chunkId: raw.chunkId
   }));
-  const chunksSnap = await getDocs(collection(db, 'content_chunks'));
-  let currentChunks = chunksSnap.docs.map(d => ({ id: d.id, items: (d.data().items || {}) as Record<string, Content> }));
   
   const batch = writeBatch(db);
   const updatedChunkIds = new Set<string>();
 
+  const unknownContents = contents.filter(c => !c.chunkId);
+  let maxMovieIndex = -1;
+  let maxSeriesIndex = -1;
+
+  if (unknownContents.length > 0) {
+    const metaDoc = await getDoc(doc(db, 'chunk_meta', 'versions'));
+    const metaData = metaDoc.exists() ? metaDoc.data() : {};
+    for (const key of Object.keys(metaData)) {
+      if (key.startsWith('movie_chunk_')) {
+        const idx = parseInt(key.replace('movie_chunk_', ''), 10);
+        if (!isNaN(idx) && idx > maxMovieIndex) maxMovieIndex = idx;
+      } else if (key.startsWith('series_chunk_')) {
+        const idx = parseInt(key.replace('series_chunk_', ''), 10);
+        if (!isNaN(idx) && idx > maxSeriesIndex) maxSeriesIndex = idx;
+      }
+    }
+  }
+
+  const fetchedChunks: Record<string, { id: string, items: Record<string, Content>, isNew: boolean, refSize: number }> = {};
+  
+  const getChunkData = async (chunkId: string) => {
+    if (fetchedChunks[chunkId]) return fetchedChunks[chunkId];
+    const docSnap = await getDoc(doc(db, 'content_chunks', chunkId));
+    if (docSnap.exists()) {
+      const items = docSnap.data().items || {};
+      fetchedChunks[chunkId] = { id: chunkId, items, isNew: false, refSize: Object.keys(items).length };
+    } else {
+      fetchedChunks[chunkId] = { id: chunkId, items: {}, isNew: true, refSize: 0 };
+    }
+    return fetchedChunks[chunkId];
+  };
+
+  const chunkUpdatesMap = new Map<string, Record<string, any>>();
+
   for (const { content, rawType, chunkId } of contents) {
-    let found = false;
     const expectedPrefix = rawType === 'movie' ? 'movie_chunk_' : 'series_chunk_';
-    
-    // 1. Try to update existing via chunkId if provided
+    const maxSize = expectedPrefix === 'movie_chunk_' ? CONTENT_CHUNK_MOVIE_SIZE : CONTENT_CHUNK_SERIES_SIZE;
+
+    // 1. Try to update existing via chunkId
     if (chunkId) {
-      const chunk = currentChunks.find(c => c.id === chunkId);
-      if (chunk) {
-          chunk.items[content.id] = content;
-          updatedChunkIds.add(chunk.id);
-          found = true;
-      }
+      const u = chunkUpdatesMap.get(chunkId) || {};
+      u[content.id] = content;
+      chunkUpdatesMap.set(chunkId, u);
+      continue;
     }
 
-    if (!found) {
-        // Try to find if already present otherwise
-        for (const chunk of currentChunks) {
-            if (chunk.items[content.id]) {
-                chunk.items[content.id] = content;
-                updatedChunkIds.add(chunk.id);
-                found = true;
-                break;
-            }
-        }
-    }
+    // 2. Fallback to add to latest
+    let targetChunkId = '';
+    let maxIdx = expectedPrefix === 'movie_chunk_' ? maxMovieIndex : maxSeriesIndex;
+    let foundSpace = false;
 
-    if (!found) {
-      // 2. Add to first chunk with space and matching prefix
-      let foundSpace = false;
-      const matchingChunks = currentChunks.filter(c => c.id.startsWith(expectedPrefix));
-      const sortedChunks = [...matchingChunks].sort((a, b) => a.id.localeCompare(b.id));
-      
-      for (const chunk of sortedChunks) {
-        const maxSize = expectedPrefix === 'movie_chunk_' ? CONTENT_CHUNK_MOVIE_SIZE : CONTENT_CHUNK_SERIES_SIZE;
-        if (Object.keys(chunk.items).length < maxSize) {
-          chunk.items[content.id] = content;
-          updatedChunkIds.add(chunk.id);
+    if (maxIdx >= 0) {
+       targetChunkId = `${expectedPrefix}${maxIdx}`;
+       const cData = await getChunkData(targetChunkId);
+       if (cData.items[content.id] || cData.refSize < maxSize) {
+          if (!cData.items[content.id]) cData.refSize++;
+          cData.items[content.id] = content;
+          const u = chunkUpdatesMap.get(targetChunkId) || {};
+          u[content.id] = content;
+          chunkUpdatesMap.set(targetChunkId, u);
           foundSpace = true;
-          break;
-        }
-      }
+       }
+    }
 
-      if (!foundSpace) {
-        // 3. Create new chunk
-        const nextId = `${expectedPrefix}${matchingChunks.length}`;
-        const newChunk = { id: nextId, items: { [content.id]: content } };
-        currentChunks.push(newChunk);
-        updatedChunkIds.add(nextId);
-      }
+    if (!foundSpace) {
+       // Create new chunk
+       maxIdx = Math.max(0, maxIdx + 1);
+       if (expectedPrefix === 'movie_chunk_') maxMovieIndex = maxIdx;
+       else maxSeriesIndex = maxIdx;
+       
+       targetChunkId = `${expectedPrefix}${maxIdx}`;
+       
+       fetchedChunks[targetChunkId] = { id: targetChunkId, items: { [content.id]: content }, isNew: true, refSize: 1 };
+       const u = chunkUpdatesMap.get(targetChunkId) || {};
+       u[content.id] = content;
+       chunkUpdatesMap.set(targetChunkId, u);
     }
   }
 
-  // Commit all affected chunks
-  for (const chunkId of updatedChunkIds) {
-    const chunk = currentChunks.find(c => c.id === chunkId);
-    if (chunk) {
-      batch.set(doc(db, 'content_chunks', chunkId), { items: chunk.items });
-    }
+  const updatedChunkIdsArr = Array.from(chunkUpdatesMap.keys());
+  for (const [chunkId, items] of chunkUpdatesMap.entries()) {
+      batch.set(doc(db, 'content_chunks', chunkId), { items }, { merge: true });
   }
 
-  registerChunkUpdates(Array.from(updatedChunkIds), batch);
-
-  await batch.commit();
+  if (updatedChunkIdsArr.length > 0) {
+     const sizes: Record<string, number> = {};
+     updatedChunkIdsArr.forEach(id => {
+         if (fetchedChunks[id]) sizes[id] = fetchedChunks[id].refSize;
+     });
+     registerChunkUpdates(updatedChunkIdsArr, batch, sizes);
+     await batch.commit();
+  }
 }
 
 /**
  * Updates specific fields for multiple content items in their respective chunks
  */
-export async function updateContentFieldsInChunks(updates: { id: string, chunkId?: string, [key: string]: any }[]): Promise<void> {
+export async function updateContentFieldsInChunks(updates: { id: string, chunkId?: string, fields?: any, [key: string]: any }[]): Promise<void> {
   const explicitUpdates = updates.filter(u => u.chunkId);
   const unknownUpdates = updates.filter(u => !u.chunkId);
   
@@ -427,21 +397,40 @@ export async function updateContentFieldsInChunks(updates: { id: string, chunkId
       chunksSnap = await getDocs(collection(db, 'content_chunks'));
   }
 
-  // We may need multiple batches if updates exceed 500
-  let batches = [writeBatch(db)];
-  let operationCount = 0;
+  const chunkUpdatesMap = new Map<string, Record<string, any>>();
   
-  const chunkUpdatesByBatch: Set<string>[] = [new Set()];
-
-  const applyUpdateToBatch = (chunkId: string, contentId: string, updateObj: any) => {
-      const docUpdates: Record<string, any> = {};
-      for (const [key, value] of Object.entries(updateObj)) {
-          if (key !== 'id' && key !== 'chunkId') {
+  const aggregateUpdate = (chunkId: string, contentId: string, updateObj: any) => {
+      const docUpdates = chunkUpdatesMap.get(chunkId) || {};
+      const fieldsObj = updateObj.fields || updateObj;
+      for (const [key, value] of Object.entries(fieldsObj)) {
+          if (key !== 'id' && key !== 'chunkId' && key !== 'fields') {
               const shortKey = FIELD_MAP[key] || key;
               docUpdates[`items.${contentId}.${shortKey}`] = value;
           }
       }
-      
+      chunkUpdatesMap.set(chunkId, docUpdates);
+  };
+
+  for (const updateObj of explicitUpdates) {
+      aggregateUpdate(updateObj.chunkId!, updateObj.id, updateObj);
+  }
+
+  for (const updateObj of unknownUpdates) {
+    const contentId = updateObj.id;
+    for (const chunkDoc of chunksSnap.docs) {
+      const items = chunkDoc.data().items || {};
+      if (items[contentId]) {
+        aggregateUpdate(chunkDoc.id, contentId, updateObj);
+        break;
+      }
+    }
+  }
+
+  let batches = [writeBatch(db)];
+  let operationCount = 0;
+  const chunkUpdatesByBatch: Set<string>[] = [new Set()];
+
+  for (const [chunkId, docUpdates] of chunkUpdatesMap.entries()) {
       if (operationCount >= 490) {
           batches.push(writeBatch(db));
           chunkUpdatesByBatch.push(new Set());
@@ -451,21 +440,6 @@ export async function updateContentFieldsInChunks(updates: { id: string, chunkId
       batches[batches.length - 1].update(doc(db, 'content_chunks', chunkId), docUpdates);
       chunkUpdatesByBatch[batches.length - 1].add(chunkId);
       operationCount++;
-  };
-
-  for (const updateObj of explicitUpdates) {
-      applyUpdateToBatch(updateObj.chunkId!, updateObj.id, updateObj);
-  }
-
-  for (const updateObj of unknownUpdates) {
-    const contentId = updateObj.id;
-    for (const chunkDoc of chunksSnap.docs) {
-      const items = chunkDoc.data().items || {};
-      if (items[contentId]) {
-        applyUpdateToBatch(chunkDoc.id, contentId, updateObj);
-        break;
-      }
-    }
   }
 
   for (let i = 0; i < batches.length; i++) {
@@ -497,14 +471,34 @@ export async function deleteContentsFromChunks(itemsToRemove: {id: string, chunk
      chunksSnap = await getDocs(collection(db, 'content_chunks'));
   }
   
+  const chunkDeletesMap = new Map<string, Record<string, any>>();
+
+  const aggregateDelete = (chunkId: string, contentId: string) => {
+      const docUpdates = chunkDeletesMap.get(chunkId) || {};
+      docUpdates[`items.${contentId}`] = deleteField();
+      chunkDeletesMap.set(chunkId, docUpdates);
+  };
+
+  for (const item of explicitRemovals) {
+      aggregateDelete(item.chunkId!, item.id);
+  }
+
+  if (chunksSnap) {
+      for (const chunkDoc of chunksSnap.docs) {
+        const items = chunkDoc.data().items || {};
+        for (const item of unknownRemovals) {
+          if (items[item.id]) {
+            aggregateDelete(chunkDoc.id, item.id);
+          }
+        }
+      }
+  }
+
   let batches = [writeBatch(db)];
   let operationCount = 0;
   const chunkUpdatesByBatch: Set<string>[] = [new Set()];
 
-  const applyDeleteToBatch = (chunkId: string, contentId: string) => {
-      const docUpdates: Record<string, any> = {
-          [`items.${contentId}`]: deleteField()
-      };
+  for (const [chunkId, docUpdates] of chunkDeletesMap.entries()) {
       if (operationCount >= 490) {
           batches.push(writeBatch(db));
           chunkUpdatesByBatch.push(new Set());
@@ -513,21 +507,6 @@ export async function deleteContentsFromChunks(itemsToRemove: {id: string, chunk
       batches[batches.length - 1].update(doc(db, 'content_chunks', chunkId), docUpdates);
       chunkUpdatesByBatch[batches.length - 1].add(chunkId);
       operationCount++;
-  };
-
-  for (const item of explicitRemovals) {
-      applyDeleteToBatch(item.chunkId!, item.id);
-  }
-
-  if (chunksSnap) {
-      for (const chunkDoc of chunksSnap.docs) {
-        const items = chunkDoc.data().items || {};
-        for (const item of unknownRemovals) {
-          if (items[item.id]) {
-            applyDeleteToBatch(chunkDoc.id, item.id);
-          }
-        }
-      }
   }
 
   for (let i = 0; i < batches.length; i++) {
@@ -560,11 +539,12 @@ export async function repairChunkMetadata(): Promise<{ repairedContent: number }
 
   // 1. Repair content_chunks
   const contentSnap = await getDocs(collection(db, 'content_chunks'));
-  const contentVersions: Record<string, number> = {};
+  const contentVersions: Record<string, any> = {};
   contentSnap.docs.forEach(d => {
-    contentVersions[d.id] = now;
+    const items = d.data().items || {};
+    contentVersions[d.id] = { version: now, count: Object.keys(items).length };
   });
-  batch.set(doc(db, 'chunk_meta', 'versions'), contentVersions);
+  batch.set(doc(db, 'chunk_meta', 'versions'), contentVersions, { merge: true });
 
   await batch.commit();
   return { 
@@ -642,9 +622,10 @@ export async function rebuildAllChunks(contents: Content[]): Promise<number> {
     batches.push(writeBatch(db));
     opCount = 0;
   }
-  const metaUpdates: Record<string, number> = {};
-  Object.keys(chunkDocs).forEach(id => {
-    metaUpdates[id] = Date.now();
+  const metaUpdates: Record<string, any> = {};
+  const now = Date.now();
+  Object.entries(chunkDocs).forEach(([id, itemsObj]) => {
+    metaUpdates[id] = { version: now, count: Object.keys(itemsObj as object).length };
   });
   batches[batches.length - 1].set(doc(db, 'chunk_meta', 'versions'), metaUpdates);
 

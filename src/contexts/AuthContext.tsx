@@ -164,89 +164,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Sync offline/pending actions periodically
   useEffect(() => {
-    if (isOnline && user) {
-      const syncPendingActions = async () => {
-        const pendingFavorites = JSON.parse(
-          safeStorage.getItem("pending_favorites") || "[]",
-        );
-        const pendingWatchLater = JSON.parse(
-          safeStorage.getItem("pending_watch_later") || "[]",
-        );
-
-        if (pendingFavorites.length > 0 || pendingWatchLater.length > 0) {
-          const userRef = doc(db, "users", user.uid);
-          try {
-            const docSnap = await getDoc(userRef);
-            if (docSnap.exists()) {
-              const currentProfile = docSnap.data() as UserProfile;
-              let newFavorites = [...(currentProfile.favorites || [])];
-              let newWatchLater = [...(currentProfile.watchLater || [])];
-
-              pendingFavorites.forEach((id: string) => {
-                if (newFavorites.includes(id)) {
-                  newFavorites = newFavorites.filter((fid) => fid !== id);
-                } else {
-                  newFavorites.push(id);
-                }
-              });
-
-              pendingWatchLater.forEach((id: string) => {
-                if (newWatchLater.includes(id)) {
-                  newWatchLater = newWatchLater.filter((wid) => wid !== id);
-                } else {
-                  newWatchLater.push(id);
-                }
-              });
-
-              await updateDoc(userRef, {
-                favorites: newFavorites,
-                watchLater: newWatchLater,
-              });
-
-              safeStorage.removeItem("pending_favorites");
-              safeStorage.removeItem("pending_watch_later");
-            }
-          } catch (error) {
-            console.error("Background sync failed:", error);
-          }
-        }
-      };
-
-      // Sync immediately when coming online
-      syncPendingActions();
-
-      // Also sync periodically (every 30 seconds)
-      const syncInterval = setInterval(syncPendingActions, 30000);
-
-      // Sync on visibility change (tab switch)
-      const handleVisibilityChange = () => {
-        if (document.visibilityState === "hidden") {
-          syncPendingActions();
-        }
-      };
-      document.addEventListener("visibilitychange", handleVisibilityChange);
-
-      return () => {
-        clearInterval(syncInterval);
-        document.removeEventListener(
-          "visibilitychange",
-          handleVisibilityChange,
-        );
-      };
-    }
-  }, [isOnline, user]);
-
-  useEffect(() => {
-    let unsubProfile: (() => void) | undefined;
-
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (unsubProfile) {
-        unsubProfile();
-        unsubProfile = undefined;
-      }
-
       setUser(currentUser);
       setAuthLoading(false);
 
@@ -254,15 +173,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const userRef = doc(db, "users", currentUser.uid);
 
         const sessionKey = `last_session_start_${currentUser.uid}`;
+        const dailySyncKey = `last_daily_sync_${currentUser.uid}`;
         const lastSessionStart = localStorage.getItem(sessionKey);
+        const lastDailySync = localStorage.getItem(dailySyncKey);
         const now = Date.now();
         const twelveHours = 12 * 60 * 60 * 1000;
+        const oneDay = 24 * 60 * 60 * 1000;
+        let isDailySync = !lastDailySync || now - parseInt(lastDailySync) > oneDay;
 
         // Always initialize the ref for this React lifecycle to ensure interval tracking works
         if (!sessionStartTimeRef.current) {
           sessionStartTimeRef.current = now;
         }
 
+        let pendingUpdates: any = {};
         if (!sessionStorage.getItem("session_started")) {
           sessionStorage.setItem("session_started", "true");
 
@@ -270,29 +194,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             !lastSessionStart ||
             now - parseInt(lastSessionStart) > twelveHours
           ) {
-            // Merged write: increment session count and update lastActive in ONE call
             logEvent("session_start", currentUser.uid, {}, true); // Log to GA, skip individual Firestore write
             localStorage.setItem(sessionKey, now.toString());
-
-            updateDoc(userRef, {
-              sessionsCount: increment(1),
-              lastActive: new Date().toISOString(),
-            }).catch(console.error);
+            
+            pendingUpdates.sessionsCount = increment(1);
+            pendingUpdates.lastActive = new Date().toISOString();
           }
         }
+        
+        // Add pending local state lists if daily sync applies or needs_user_sync flag is on
+        const needsSync = safeStorage.getItem("needs_user_sync") === "true";
+        if (isDailySync || needsSync) {
+            const pendingFavorites = safeStorage.getItem("pending_favorites_array");
+            if (pendingFavorites) pendingUpdates.favorites = JSON.parse(pendingFavorites);
 
-        // Listen to profile changes
-        unsubProfile = onSnapshot(
-          userRef,
-          async (docSnap) => {
+            const pendingWatchLater = safeStorage.getItem("pending_watch_later_array");
+            if (pendingWatchLater) pendingUpdates.watchLater = JSON.parse(pendingWatchLater);
+        }
+
+        if (Object.keys(pendingUpdates).length > 0) {
             try {
+                const { writeBatch } = await import('firebase/firestore');
+                const batch = writeBatch(db);
+                batch.update(userRef, pendingUpdates);
+                batch.set(doc(db, 'user_meta', 'versions'), { [currentUser.uid]: Date.now() }, { merge: true });
+                await batch.commit();
+
+                if (isDailySync) localStorage.setItem(dailySyncKey, now.toString());
+                safeStorage.setItem("needs_user_sync", "false");
+                safeStorage.removeItem("pending_favorites_array");
+                safeStorage.removeItem("pending_watch_later_array");
+            } catch (err) {
+                console.error("Daily sync failed:", err);
+                handleFirestoreError(err, OperationType.WRITE, `users/${currentUser.uid} and user_meta/versions`);
+            }
+        }
+
+        // Fetch profile changes once
+        const fetchProfile = async () => {
+            try {
+              const docSnap = await getDoc(userRef);
               if (docSnap.exists()) {
                 const data = docSnap.data() as UserProfile;
                 safeStorage.setItem("profile_cache", JSON.stringify(data));
 
-                const isOwner = currentUser.email === "asmatn628@gmail.com";
-                const isAdmin =
-                  currentUser.email === "asmatullah9327@gmail.com";
+                const userEmailLower = currentUser.email?.toLowerCase();
+                const isOwner = userEmailLower === "asmatn628@gmail.com";
+                const isAdmin = [
+                  "asmatullah9327@gmail.com",
+                  "kabirahmaddev@gmail.com",
+                  "wamoviesstation@gmail.com"
+                ].includes(userEmailLower || "");
                 const hasAdminPrivileges =
                   isOwner ||
                   isAdmin ||
@@ -318,7 +270,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 }
 
                 // Auto-expire logic
-                const now = new Date();
+                const expiryNow = new Date();
                 if (
                   data.status === "active" &&
                   data.expiryDate &&
@@ -326,7 +278,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 ) {
                   const expiryDate = new Date(data.expiryDate);
                   expiryDate.setDate(expiryDate.getDate() + 1);
-                  if (expiryDate < now) {
+                  if (expiryDate < expiryNow) {
                     updates.status = "expired";
                     data.status = "expired";
                   }
@@ -366,8 +318,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 // Perform consolidated update if needed
                 if (Object.keys(updates).length > 0) {
                   try {
-                    await updateDoc(userRef, updates);
+                    const { writeBatch } = await import('firebase/firestore');
+                    const batch = writeBatch(db);
+                    batch.update(userRef, updates);
+                    batch.set(doc(db, 'user_meta', 'versions'), { [currentUser.uid]: Date.now() }, { merge: true });
+                    await batch.commit();
                   } catch (err) {
+                    handleFirestoreError(err, OperationType.WRITE, `users/${currentUser.uid}`);
                     console.error(
                       "Failed to perform consolidated profile update:",
                       err,
@@ -378,9 +335,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 setProfile(data);
               } else {
                 // Create new user profile
-                const isOwner = currentUser.email === "asmatn628@gmail.com";
-                const isAdmin =
-                  currentUser.email === "asmatullah9327@gmail.com";
+                const userEmailLower = currentUser.email?.toLowerCase();
+                const isOwner = userEmailLower === "asmatn628@gmail.com";
+                const isAdmin = [
+                  "asmatullah9327@gmail.com",
+                  "kabirahmaddev@gmail.com",
+                  "wamoviesstation@gmail.com"
+                ].includes(userEmailLower || "");
                 const defaultRoleToSet = isOwner
                   ? "owner"
                   : isAdmin
@@ -635,12 +596,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   batch.set(userRef, newProfile);
 
                   // Delete all old records that were merged
+                  const metaUpdates: Record<string, number> = { [currentUser.uid]: Date.now() };
                   oldDocIds.forEach((oldId) => {
                     batch.delete(doc(db, "users", oldId));
+                    metaUpdates[oldId] = -1;
                     console.log(
                       `Merged and scheduled deletion of old profile: ${oldId}`,
                     );
                   });
+                  batch.set(doc(db, 'user_meta', 'versions'), metaUpdates, { merge: true });
 
                   await batch.commit();
                   console.log(
@@ -650,7 +614,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   console.error("Failed to merge/create user profile:", err);
                   // Fallback attempt if batch fails
                   try {
-                    await setDoc(userRef, newProfile);
+                    const { writeBatch } = await import('firebase/firestore');
+                    const fbBatch = writeBatch(db);
+                    fbBatch.set(userRef, newProfile);
+                    fbBatch.set(doc(db, 'user_meta', 'versions'), { [currentUser.uid]: Date.now() }, { merge: true });
+                    await fbBatch.commit();
                   } catch (e) {}
                 }
                 safeStorage.setItem(
@@ -661,29 +629,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               }
             } catch (error) {
               console.error("Error updating/creating profile:", error);
+              handleFirestoreError(
+                error,
+                OperationType.GET,
+                `users/${currentUser.uid}`,
+              );
             } finally {
               setLoading(false);
             }
-          },
-          (error) => {
-            console.error(
-              "Profile snapshot error for UID:",
-              currentUser.uid,
-              error,
-            );
-            setLoading(false);
-            handleFirestoreError(
-              error,
-              OperationType.GET,
-              `users/${currentUser.uid}`,
-            );
-          },
-        );
+        };
+
+        fetchProfile();
       } else {
-        if (unsubProfile) {
-          unsubProfile();
-          unsubProfile = undefined;
-        }
         safeStorage.removeItem("profile_cache");
         setProfile(null);
         setLoading(false);
@@ -774,7 +731,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   timeSpent: increment(minutesToSync),
                 };
 
-                updateDoc(userRef, updates)
+                import('firebase/firestore').then(({ writeBatch }) => {
+                  const batch = writeBatch(db);
+                  batch.update(userRef, updates);
+                  batch.set(doc(db, 'user_meta', 'versions'), { [uid]: Date.now() }, { merge: true });
+                  return batch.commit();
+                })
                   .then(() => {
                     logEvent("time_spent", uid, { duration: minutesToSync });
                   })
@@ -851,7 +813,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             timeSpent: increment(minutesToSync),
           };
 
-          updateDoc(userRef, updates)
+          import('firebase/firestore').then(({ writeBatch }) => {
+            const batch = writeBatch(db);
+            batch.update(userRef, updates);
+            batch.set(doc(db, 'user_meta', 'versions'), { [uid]: Date.now() }, { merge: true });
+            return batch.commit();
+          })
             .then(() => {
               logEvent("time_spent", uid, { duration: minutesToSync });
             })
@@ -907,7 +874,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           updates.email = result.user.email;
         }
         try {
-          await updateDoc(userRef, updates);
+          const { writeBatch } = await import('firebase/firestore');
+          const batch = writeBatch(db);
+          batch.update(userRef, updates);
+          batch.set(doc(db, 'user_meta', 'versions'), { [result.user.uid]: Date.now() }, { merge: true });
+          await batch.commit();
         } catch (e) {}
       }
       setTimeout(() => {
@@ -926,9 +897,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       justLoggedInRef.current = true;
       const result = await signInWithEmailAndPassword(auth, email, password);
       try {
-        await updateDoc(doc(db, "users", result.user.uid), {
+        const { writeBatch } = await import('firebase/firestore');
+        const batch = writeBatch(db);
+        batch.update(doc(db, "users", result.user.uid), {
           sessionId: getLocalSessionId(),
         });
+        batch.set(doc(db, 'user_meta', 'versions'), { [result.user.uid]: Date.now() }, { merge: true });
+        await batch.commit();
       } catch (e) {}
       setTimeout(() => {
         justLoggedInRef.current = false;
@@ -1269,7 +1244,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Update Firestore
       const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, data);
+      const { writeBatch } = await import('firebase/firestore');
+      const batch = writeBatch(db);
+      batch.update(userRef, data);
+      batch.set(doc(db, 'user_meta', 'versions'), { [user.uid]: Date.now() }, { merge: true });
+      await batch.commit();
 
       setProfile({ ...profile, ...data });
     } catch (err: any) {
@@ -1284,7 +1263,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await updatePassword(auth.currentUser, newPassword);
       const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, { hasPassword: true });
+      const { writeBatch } = await import('firebase/firestore');
+      const batch = writeBatch(db);
+      batch.update(userRef, { hasPassword: true });
+      batch.set(doc(db, 'user_meta', 'versions'), { [user.uid]: Date.now() }, { merge: true });
+      await batch.commit();
       if (profile) {
         setProfile({ ...profile, hasPassword: true });
       }
@@ -1311,27 +1294,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setProfile(updatedProfile);
     safeStorage.setItem("profile_cache", JSON.stringify(updatedProfile));
 
-    if (isOnline) {
-      try {
-        await updateDoc(doc(db, "users", user.uid), {
-          favorites: newFavorites,
-        });
-      } catch (err) {
-        console.error("Failed to update favorites online:", err);
-        // If it failed despite being online, queue it
-        const pending = JSON.parse(
-          safeStorage.getItem("pending_favorites") || "[]",
-        );
-        pending.push(contentId);
-        safeStorage.setItem("pending_favorites", JSON.stringify(pending));
-      }
-    } else {
-      const pending = JSON.parse(
-        safeStorage.getItem("pending_favorites") || "[]",
-      );
-      pending.push(contentId);
-      safeStorage.setItem("pending_favorites", JSON.stringify(pending));
-    }
+    // Save pending change array
+    safeStorage.setItem("pending_favorites_array", JSON.stringify(newFavorites));
+    safeStorage.setItem("needs_user_sync", "true");
   };
 
   const toggleWatchLater = async (contentId: string) => {
@@ -1346,26 +1311,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setProfile(updatedProfile);
     safeStorage.setItem("profile_cache", JSON.stringify(updatedProfile));
 
-    if (isOnline) {
-      try {
-        await updateDoc(doc(db, "users", user.uid), {
-          watchLater: newWatchLater,
-        });
-      } catch (err) {
-        console.error("Failed to update watch later online:", err);
-        const pending = JSON.parse(
-          safeStorage.getItem("pending_watch_later") || "[]",
-        );
-        pending.push(contentId);
-        safeStorage.setItem("pending_watch_later", JSON.stringify(pending));
-      }
-    } else {
-      const pending = JSON.parse(
-        safeStorage.getItem("pending_watch_later") || "[]",
-      );
-      pending.push(contentId);
-      safeStorage.setItem("pending_watch_later", JSON.stringify(pending));
-    }
+    // Save pending change array
+    safeStorage.setItem("pending_watch_later_array", JSON.stringify(newWatchLater));
+    safeStorage.setItem("needs_user_sync", "true");
   };
 
   return (

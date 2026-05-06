@@ -15,7 +15,7 @@ import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatContentTitle, formatReleaseDate, formatRuntime, getContrastColor } from '../../utils/contentUtils';
 import { generateTinyUrl } from '../../utils/tinyurl';
-import { MediaModal } from '../../components/MediaModal';
+import { MediaModal, findTMDBByImdb, searchTMDBByTitle, fetchTMDBDetails, fetchIMDbRating, fetchKinoCheckTrailer, getBestTrailer, searchYouTubeTrailer, fetchSeriesSeasons } from '../../components/MediaModal';
 import ContentCard from '../../components/ContentCard';
 import { LazyLoadImage } from 'react-lazy-load-image-component';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
@@ -202,6 +202,22 @@ export default function MovieDetails() {
       hasFetchedFull.current[id] = true;
       const fetchFullContent = async () => {
         try {
+          if (content && (content as any).chunkId) {
+             const { safeStorage } = await import('../../utils/safeStorage');
+             const { expandContent } = await import('../../utils/chunkUtils');
+             const chunkStr = safeStorage.getItem('content_chunk_' + (content as any).chunkId);
+             if (chunkStr) {
+                const items = JSON.parse(chunkStr);
+                if (items[id]) {
+                   const expanded = expandContent({ ...items[id], id }, (content as any).chunkId);
+                   expanded.order = content.order;
+                   setFullContent(expanded);
+                   localStorage.setItem(`movie_details_${id}`, JSON.stringify(expanded));
+                   return; // STOP! Don't fetch from Firestore
+                }
+             }
+          }
+
           const data = await getContent(id);
           if (data) {
             setFullContent(data);
@@ -216,7 +232,7 @@ export default function MovieDetails() {
       };
       fetchFullContent();
     }
-  }, [isMinimal, isStale, id, fetchFailed, isOffline]);
+  }, [isMinimal, isStale, id, fetchFailed, isOffline, content]);
 
   const mergedContent = useMemo(() => {
     if (!content && !fullContent) return null;
@@ -483,7 +499,7 @@ export default function MovieDetails() {
       )
     );
     
-    const needsStaticData = force || !mergedContent.runtime || !mergedContent.description || (!mergedContent.cast || (Array.isArray(mergedContent.cast) && mergedContent.cast.length === 0)) || !mergedContent.releaseDate || !mergedContent.posterUrl || !mergedContent.country || !mergedContent.trailerUrl || !mergedContent.imdbLink || (!mergedContent.genreIds || mergedContent.genreIds.length === 0) || needsEpisodeData;
+    const needsStaticData = force || !mergedContent.runtime || !mergedContent.description || (!mergedContent.cast || (Array.isArray(mergedContent.cast) && mergedContent.cast.length === 0)) || !mergedContent.releaseDate || !mergedContent.posterUrl || !mergedContent.country || !mergedContent.trailerUrl || !mergedContent.imdbLink || !mergedContent.imdbRating || (!mergedContent.genreIds || mergedContent.genreIds.length === 0) || needsEpisodeData;
 
     if (!needsStaticData) {
       return;
@@ -493,89 +509,66 @@ export default function MovieDetails() {
     setFetchingImdb(true);
 
     try {
-      const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || 'f71c2391161526fa9d19bd0b2759efaf';
+      let tmdbId = '';
+      let tmdbType = '';
+      let imdbId = mergedContent.imdbLink?.match(/tt\d+/)?.[0] || '';
       
-      let tmdbData: any = null;
-      let imdbId = mergedContent.imdbLink?.match(/tt\d+/)?.[0];
+      const searchForceType = mergedContent.type === 'series' ? 'tv' : 'movie';
 
-      // 1. Try IMDb ID first
+      // 1. Try IMDb ID first via MediaModal
       if (imdbId) {
-        const findRes = await fetch(`https://api.themoviedb.org/3/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`);
-        const findData = await findRes.json();
-        // Try the expected type first, but fall back to the other type if not found
-        let results = mergedContent.type === 'series' ? findData.tv_results : findData.movie_results;
-        let foundType = mergedContent.type === 'series' ? 'tv' : 'movie';
-        
-        if (!results || results.length === 0) {
-          results = mergedContent.type === 'series' ? findData.movie_results : findData.tv_results;
-          foundType = mergedContent.type === 'series' ? 'movie' : 'tv';
-        }
-        
-        if (results && results.length > 0) {
-          tmdbData = results[0];
-          tmdbData.media_type = foundType; // Store the actual found type
+        const found = await findTMDBByImdb(imdbId, searchForceType);
+        if (found) {
+           tmdbId = found.item.id;
+           tmdbType = found.type;
+        } else {
+           const fallbackFind = await findTMDBByImdb(imdbId, searchForceType === 'movie' ? 'tv' : 'movie');
+           if (fallbackFind) {
+               tmdbId = fallbackFind.item.id;
+               tmdbType = fallbackFind.type;
+           }
         }
       }
 
-      // 2. Try Title + Year if not found
-      if (!tmdbData && mergedContent.title) {
-        const searchType = mergedContent.type === 'series' ? 'tv' : 'movie';
-        let searchUrl = `https://api.themoviedb.org/3/search/${searchType}?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(mergedContent.title)}`;
-        if (mergedContent.year) {
-          searchUrl += mergedContent.type === 'series' ? `&first_air_date_year=${mergedContent.year}` : `&primary_release_year=${mergedContent.year}`;
+      // 2. Try Title + Year if not found via MediaModal search
+      if (!tmdbId && mergedContent.title) {
+        const results = await searchTMDBByTitle(mergedContent.title, mergedContent.year?.toString() || '', searchForceType);
+        if (results && results.length > 0) {
+           const normalizeStr = (str: string) => (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+           const searchTitleNorm = normalizeStr(mergedContent.title);
+           const exactMatches = results.filter((r: any) => {
+                const titleNorm = normalizeStr(r.item.title || r.item.name || r.item.original_title || r.item.original_name);
+                return titleNorm === searchTitleNorm;
+           });
+           
+           if (exactMatches.length > 0) {
+               tmdbId = exactMatches[0].item.id;
+               tmdbType = exactMatches[0].type;
+           }
         }
-        const searchRes = await fetch(searchUrl);
-        const searchData = await searchRes.json();
-        if (searchData.results && searchData.results.length > 0) {
-          tmdbData = searchData.results[0];
-          tmdbData.media_type = searchType;
-          // If we found it by title, try to get the IMDb ID for OMDB
-          const detailsRes = await fetch(`https://api.themoviedb.org/3/${searchType}/${tmdbData.id}?api_key=${TMDB_API_KEY}&append_to_response=external_ids`);
-          const detailsData = await detailsRes.json();
-          if (detailsData.external_ids?.imdb_id) {
-            imdbId = detailsData.external_ids.imdb_id;
-          }
-        } else {
-          // Fallback to the other type if title search fails
-          const fallbackType = searchType === 'tv' ? 'movie' : 'tv';
-          let fallbackUrl = `https://api.themoviedb.org/3/search/${fallbackType}?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(mergedContent.title)}`;
-          if (mergedContent.year) {
-            fallbackUrl += fallbackType === 'tv' ? `&first_air_date_year=${mergedContent.year}` : `&primary_release_year=${mergedContent.year}`;
-          }
-          const fallbackRes = await fetch(fallbackUrl);
-          const fallbackData = await fallbackRes.json();
-          if (fallbackData.results && fallbackData.results.length > 0) {
-            tmdbData = fallbackData.results[0];
-            tmdbData.media_type = fallbackType;
-            const detailsRes = await fetch(`https://api.themoviedb.org/3/${fallbackType}/${tmdbData.id}?api_key=${TMDB_API_KEY}&append_to_response=external_ids`);
-            const detailsData = await detailsRes.json();
-            if (detailsData.external_ids?.imdb_id) {
-              imdbId = detailsData.external_ids.imdb_id;
-            }
-          }
-        }
+      }
+
+      if (!tmdbId) {
+        setFetchingImdb(false);
+        return;
       }
 
       const updates: Partial<Content> = {};
       let hasUpdates = false;
 
-      if (tmdbData) {
-        const typePath = tmdbData.media_type || (mergedContent.type === 'series' ? 'tv' : 'movie');
-        const detailsRes = await fetch(`https://api.themoviedb.org/3/${typePath}/${tmdbData.id}?api_key=${TMDB_API_KEY}&append_to_response=credits,external_ids,videos`);
-        const details = await detailsRes.json();
+      // 3. Fetch Full Details strictly using MediaModal 
+      let details: any = null;
+      try {
+         details = await fetchTMDBDetails(tmdbId, tmdbType);
+      } catch (e) {
+         console.error("Failed to fetch full tmdb details", e);
+      }
 
+      if (details) {
         if ((force || !mergedContent.description) && details.overview) { updates.description = details.overview; hasUpdates = true; }
         if ((force || !mergedContent.releaseDate) && (details.release_date || details.first_air_date)) { updates.releaseDate = details.release_date || details.first_air_date; hasUpdates = true; }
         if ((force || !mergedContent.posterUrl) && details.poster_path) { updates.posterUrl = `https://image.tmdb.org/t/p/w500${details.poster_path}`; hasUpdates = true; }
         
-        if ((force || !mergedContent.trailerUrl) && details.videos?.results) {
-          const trailer = details.videos.results.find((v: any) => v.site === 'YouTube' && v.type === 'Trailer');
-          if (trailer) {
-            updates.trailerUrl = `https://www.youtube.com/watch?v=${trailer.key}`;
-            hasUpdates = true;
-          }
-        }
-
         if (force || !mergedContent.runtime) {
           if (details.runtime) { updates.runtime = `${details.runtime} min`; hasUpdates = true; }
           else if (details.episode_run_time && details.episode_run_time.length > 0) { updates.runtime = `${details.episode_run_time[0]} min/episode`; hasUpdates = true; }
@@ -589,7 +582,7 @@ export default function MovieDetails() {
           }
         }
 
-        if ((force || !mergedContent.cast || mergedContent.cast.length === 0) && details.credits?.cast) {
+        if ((force || !mergedContent.cast || (Array.isArray(mergedContent.cast) && mergedContent.cast.length === 0)) && details.credits?.cast) {
           updates.cast = details.credits.cast.slice(0, 5).map((a: any) => a.name);
           hasUpdates = true;
         }
@@ -599,7 +592,7 @@ export default function MovieDetails() {
           imdbId = details.external_ids.imdb_id;
           hasUpdates = true;
         }
-        
+
         if ((force || !mergedContent.genreIds || mergedContent.genreIds.length === 0) && details.genres) {
           const matchedGenreIds: string[] = [];
           details.genres.forEach((tg: any) => {
@@ -611,48 +604,88 @@ export default function MovieDetails() {
             hasUpdates = true;
           }
         }
+        
+        // Fetch IMDB Rating using MediaModal logic
+        if ((force || !mergedContent.imdbRating) && imdbId) {
+            const ratingData = await fetchIMDbRating(imdbId);
+            if (ratingData && ratingData.rating && ratingData.rating !== 'N/A') {
+                updates.imdbRating = `${ratingData.rating}/10`;
+                hasUpdates = true;
+            }
+        }
+        
+        // Fetch Trailer using MediaModal logic (getBestTrailer -> KinoCheck -> YouTube)
+        if (force || !mergedContent.trailerUrl) {
+          let trailerUrl = getBestTrailer(details.videos) || '';
+          if (!trailerUrl) {
+               trailerUrl = await fetchKinoCheckTrailer(tmdbId, tmdbType) || '';
+          }
+          if (!trailerUrl) {
+               const ytResults = await searchYouTubeTrailer(mergedContent.title || details.name || details.title, tmdbType);
+               if (ytResults && ytResults.length > 0) {
+                    ytResults.sort((a: any, b: any) => {
+                        const tA = a.title.toLowerCase();
+                        const tB = b.title.toLowerCase();
+                        const p = (t: string) => {
+                            if (t.includes('official') && t.includes('trailer')) return 1;
+                            if (t.includes('trailer')) return 2;
+                            if (t.includes('teaser')) return 3;
+                            if (t.includes('clip')) return 4;
+                            return 5;
+                        };
+                        return p(tA) - p(tB);
+                    });
+                    trailerUrl = ytResults[0].url;
+               }
+          }
+          if (trailerUrl) {
+              updates.trailerUrl = trailerUrl;
+              try {
+                 const res = await fetch(`https://www.youtube.com/oembed?url=${trailerUrl}&format=json`);
+                 if (res.ok) {
+                   const ytData = await res.json();
+                   if (ytData.title) updates.trailerTitle = ytData.title;
+                 }
+              } catch(e){}
+              hasUpdates = true;
+          }
+        }
 
         // Episode Data Fetching for Series
         if (mergedContent.type === 'series' && mergedContent.seasons) {
           try {
+            const existingSeasonsData = details.seasons || [];
+            const seasonsDataFromTMDB = await fetchSeriesSeasons(tmdbId, existingSeasonsData);
+            
             let seasonsUpdated = false;
             const currentSeasons = [...seasons];
 
             for (let i = 0; i < currentSeasons.length; i++) {
               const season = currentSeasons[i];
-              const seasonRes = await fetch(`https://api.themoviedb.org/3/tv/${tmdbData.id}/season/${season.seasonNumber}?api_key=${TMDB_API_KEY}`);
-              const seasonData = await seasonRes.json();
-
-              if (seasonData.air_date && !season.year) {
-                season.year = parseInt(seasonData.air_date.split('-')[0]);
-                seasonsUpdated = true;
-              }
-
-              if (seasonData.episodes) {
-                const existingEpisodes = season.episodes || [];
-                let episodeUpdated = false;
-                season.episodes = existingEpisodes.map((existingEp: any) => {
-                  const tmdbEp = seasonData.episodes.find((ep: any) => ep.episode_number === existingEp.episodeNumber);
-                  if (tmdbEp) {
-                    const newTitle = (!existingEp.title || /^Episode\s+\d+$/i.test(existingEp.title)) && tmdbEp.name ? tmdbEp.name : existingEp.title;
-                    const newDesc = (existingEp.description && !/^episode/i.test(existingEp.description)) ? existingEp.description : (tmdbEp.overview || '');
-                    const newDur = existingEp.duration || (tmdbEp.runtime ? `${tmdbEp.runtime}m` : '');
-                    
-                    if (newTitle !== existingEp.title || newDesc !== existingEp.description || (newDur && newDur !== existingEp.duration)) {
-                      episodeUpdated = true;
-                      return {
-                        ...existingEp,
-                        title: newTitle,
-                        description: newDesc,
-                        duration: newDur
-                      };
-                    }
-                  }
-                  return existingEp;
-                });
-                
-                if (episodeUpdated) {
+              const tmdbSeason = seasonsDataFromTMDB.find((s: any) => parseInt(s.season) === parseInt(season.seasonNumber.toString()));
+              if (tmdbSeason) {
+                if (tmdbSeason.year && tmdbSeason.year !== 'N/A' && !season.year) {
+                  season.year = parseInt(tmdbSeason.year);
                   seasonsUpdated = true;
+                }
+                if (tmdbSeason.episodes) {
+                  const existingEpisodes = season.episodes || [];
+                  let episodeUpdated = false;
+                  season.episodes = existingEpisodes.map((existingEp: any) => {
+                    const tmdbEp = tmdbSeason.episodes.find((ep: any) => parseInt(ep.episode) === parseInt(existingEp.episodeNumber.toString()));
+                    if (tmdbEp) {
+                      const newTitle = (!existingEp.title || /^Episode\s+\d+$/i.test(existingEp.title)) && tmdbEp.name ? tmdbEp.name : existingEp.title;
+                      const newDesc = (existingEp.description && !/^episode/i.test(existingEp.description)) ? existingEp.description : (tmdbEp.description || '');
+                      const newDur = existingEp.duration || (tmdbEp.runtime ? `${tmdbEp.runtime}m` : '');
+                      
+                      if (newTitle !== existingEp.title || newDesc !== existingEp.description || (newDur && newDur !== existingEp.duration)) {
+                        episodeUpdated = true;
+                        return { ...existingEp, title: newTitle, description: newDesc, duration: newDur };
+                      }
+                    }
+                    return existingEp;
+                  });
+                  if (episodeUpdated) seasonsUpdated = true;
                 }
               }
             }

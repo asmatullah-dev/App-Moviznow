@@ -140,7 +140,26 @@ export default function UserManagement() {
     setEditingId(null);
   });
 
-  const { users: allUsers, loading: usersLoading } = useUsers();
+  const { users: allUsers, loading: usersLoading, updateUserFields, finalizeUserChanges, hasPendingChanges } = useUsers();
+  
+  useEffect(() => {
+    return () => {
+      // Best effort to save on unmount
+      finalizeUserChanges().catch(console.error);
+    };
+  }, [finalizeUserChanges]);
+
+  // Handle page unload for hard refreshes
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasPendingChanges) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasPendingChanges]);
   
   const users = useMemo(() => {
     if ((profile?.role as string) === 'user_manager' || (profile?.role as string) === 'manager') {
@@ -164,10 +183,6 @@ export default function UserManagement() {
     const runAutoUpdates = async () => {
       hasRunAutoUpdates.current = true;
       const now = new Date();
-      let batches = [writeBatch(db)];
-      let currentBatchIndex = 0;
-      let operationCount = 0;
-      let hasUpdates = false;
 
       users.forEach((user: UserProfile) => {
         let needsUpdate = false;
@@ -191,25 +206,9 @@ export default function UserManagement() {
         }
 
         if (needsUpdate) {
-          if (operationCount === 500) {
-            batches.push(writeBatch(db));
-            currentBatchIndex++;
-            operationCount = 0;
-          }
-          batches[currentBatchIndex].update(doc(db, 'users', user.uid), updates);
-          operationCount++;
-          hasUpdates = true;
+          updateUserFields(user.uid, updates);
         }
       });
-
-      if (hasUpdates) {
-        try {
-          await Promise.all(batches.map(b => b.commit()));
-          console.log("Auto-updates committed successfully");
-        } catch (error) {
-          console.error("Error committing auto-updates batch:", error);
-        }
-      }
     };
 
     const timer = setTimeout(runAutoUpdates, 3000); // Wait 3s after load/change
@@ -331,7 +330,7 @@ export default function UserManagement() {
   const handleResetPassword = async (userId: string) => {
     try {
       setProcessing(prev => ({ ...prev, [`reset_${userId}`]: true }));
-      await updateDoc(doc(db, 'users', userId), {
+      updateUserFields(userId, {
         requirePasswordReset: true
       });
       setAlertConfig({ isOpen: true, title: 'Success', message: 'User has been flagged for password reset on next login.' });
@@ -395,7 +394,7 @@ export default function UserManagement() {
       const previousRole = selectedUser.role;
       const newRole = editForm.role;
 
-      await updateDoc(doc(db, 'users', currentEditingId), updateData);
+      updateUserFields(currentEditingId, updateData);
 
       // Handle Manager role changes
       const wasManager = previousRole === 'user_manager' || previousRole === 'manager' || selectedUser.isUserManager;
@@ -404,31 +403,27 @@ export default function UserManagement() {
         // Expire all managed users
         const managedUsers = allUsers.filter(u => u.managedBy === currentEditingId);
         if (managedUsers.length > 0) {
-          const batch = writeBatch(db);
           managedUsers.forEach(userData => {
             if (userData.status !== 'pending') {
-              batch.update(doc(db, 'users', userData.uid), {
+              updateUserFields(userData.uid, {
                 status: 'expired',
                 previousStatus: userData.status || 'active'
               });
             }
           });
-          await batch.commit();
         }
       } else if (!wasManager && isNowManager) {
         // Restore all managed users
         const managedUsers = allUsers.filter(u => u.managedBy === currentEditingId);
         if (managedUsers.length > 0) {
-          const batch = writeBatch(db);
           managedUsers.forEach(userData => {
             if (userData.previousStatus) {
-              batch.update(doc(db, 'users', userData.uid), {
+              updateUserFields(userData.uid, {
                 status: userData.previousStatus,
                 previousStatus: null
               });
             }
           });
-          await batch.commit();
         }
       }
 
@@ -465,6 +460,7 @@ export default function UserManagement() {
         
         // 1. Delete user document
         batch.delete(doc(db, 'users', currentDeleteConfirm));
+        batch.set(doc(db, 'user_meta', 'versions'), { [currentDeleteConfirm]: -1 }, { merge: true });
         
         // Parallelize all data fetches
         const [
@@ -533,7 +529,7 @@ export default function UserManagement() {
         setAlertConfig({ isOpen: true, title: 'Success', message: 'User and all associated data deleted successfully' });
       } else {
         // First time: suspend
-        await updateDoc(doc(db, 'users', currentDeleteConfirm), {
+        updateUserFields(currentDeleteConfirm, {
           status: 'suspended'
         });
         setAlertConfig({ isOpen: true, title: 'Success', message: 'User suspended successfully' });
@@ -594,7 +590,7 @@ export default function UserManagement() {
       if (currentAssigned.includes(contentId)) return;
       
       const nextAssigned = [...currentAssigned, contentId];
-      await updateDoc(doc(db, 'users', selectedUser.uid), {
+      updateUserFields(selectedUser.uid, {
         assignedContent: nextAssigned
       });
       
@@ -610,7 +606,7 @@ export default function UserManagement() {
     if (!selectedUser || selectedUser.role === 'owner') return;
     try {
       const nextAssigned = (selectedUser.assignedContent || []).filter(id => id !== contentId);
-      await updateDoc(doc(db, 'users', selectedUser.uid), {
+      updateUserFields(selectedUser.uid, {
         assignedContent: nextAssigned
       });
       
@@ -626,7 +622,7 @@ export default function UserManagement() {
     setProcessing(prev => ({ ...prev, saveAccess: true }));
     try {
       const nextAssigned = Array.from(assignedIds);
-      await updateDoc(doc(db, 'users', selectedUser.uid), {
+      updateUserFields(selectedUser.uid, {
         assignedContent: nextAssigned
       });
       
@@ -862,15 +858,12 @@ export default function UserManagement() {
     setSelectedUsers([]);
     
     try {
-      const batch = writeBatch(db);
       currentSelected.forEach(uid => {
         const user = users.find(u => u.uid === uid);
         if (user?.role !== 'owner') {
-          const userRef = doc(db, 'users', uid);
-          batch.update(userRef, { status });
+          updateUserFields(uid, { status });
         }
       });
-      await batch.commit();
     } catch (error) {
       console.error('Error updating users:', error);
       setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to update users' });
@@ -963,7 +956,7 @@ export default function UserManagement() {
           updateData.expiryDate = new Date(newUserForm.expiryDate).toISOString();
         }
         
-        await updateDoc(doc(db, 'users', (foundUser as any).id), updateData);
+        updateUserFields((foundUser as any).id, updateData);
         setAlertConfig({ isOpen: true, title: 'Success', message: 'Pending user claimed successfully.' });
       } else {
         const standardizedPhone = newUserForm.phone ? standardizePhone(newUserForm.phone) : '';
@@ -1522,7 +1515,7 @@ export default function UserManagement() {
                               <button 
                                 onClick={async () => {
                                   const nextAssigned = (selectedUser.assignedContent || []).filter(cid => cid !== id);
-                                  await updateDoc(doc(db, 'users', selectedUser.uid), {
+                                  updateUserFields(selectedUser.uid, {
                                     assignedContent: nextAssigned
                                   });
                                   setSelectedUser({ ...selectedUser, assignedContent: nextAssigned });

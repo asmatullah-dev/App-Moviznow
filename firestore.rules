@@ -15,47 +15,52 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function getUserRole() {
+      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) 
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role 
+        : 'none';
+    }
+
+    function hasAnyRole(roles) {
+      return getUserRole() in roles;
+    }
+
     function isAdmin() {
+      let email = ('email' in request.auth.token) ? request.auth.token.email.lower() : '';
+      let isVerified = ('email_verified' in request.auth.token) && request.auth.token.email_verified == true;
+      let uid = request.auth.uid;
+      
       return isAuthenticated() &&
         (
-          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-           (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'owner')) ||
-          (('email' in request.auth.token) && request.auth.token.email == "asmatn628@gmail.com" && request.auth.token.email_verified == true) ||
-          (('email' in request.auth.token) && request.auth.token.email == "asmatullah9327@gmail.com" && request.auth.token.email_verified == true) ||
-          (('email' in request.auth.token) && request.auth.token.email == "kabirahmaddev@gmail.com" && request.auth.token.email_verified == true) ||
-          (('email' in request.auth.token) && request.auth.token.email == "wamoviesstation@gmail.com" && request.auth.token.email_verified == true) ||
-          (request.auth.uid == "fbG4L3d6gMPVcCcDwWUqbAEGs7E2") ||
-          (request.auth.uid == "2CvmzHixVQbqdZXycFyvfBxiTkJ3")
+          (isVerified && email in [
+            "asmatn628@gmail.com",
+            "asmatullah9327@gmail.com",
+            "kabirahmaddev@gmail.com",
+            "wamoviesstation@gmail.com"
+          ]) ||
+          (uid in ["fbG4L3d6gMPVcCcDwWUqbAEGs7E2", "2CvmzHixVQbqdZXycFyvfBxiTkJ3"]) ||
+          hasAnyRole(['admin', 'owner'])
         );
     }
 
     function isContentManager() {
-      return isAuthenticated() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'content_manager';
+      return hasAnyRole(['content_manager']);
     }
 
     function isUserManager() {
-      return isAuthenticated() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'user_manager';
+      return hasAnyRole(['user_manager']);
     }
 
     function isManager() {
-      return isAuthenticated() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'manager';
+      return hasAnyRole(['manager']);
     }
 
     function isEditor() {
-      return isAuthenticated() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'editor';
+      return hasAnyRole(['editor']);
     }
 
     function isAdminOrEditor() {
-      return isAdmin() || isContentManager() || isManager() || isEditor();
+      return isAdmin() || hasAnyRole(['content_manager', 'manager', 'editor', 'user_manager']);
     }
 
     // ===============================================================
@@ -305,6 +310,15 @@ service cloud.firestore {
     match /search_index_chunks/{chunkId} {
       allow read: if true;
       allow write: if isAdminOrEditor();
+    }
+
+    match /user_meta/{docId} {
+      allow read: if isAdminOrEditor();
+      allow write: if isAdminOrEditor() || (isAuthenticated() && (
+        !exists(/databases/$(database)/documents/user_meta/$(docId)) ||
+        (request.resource.data.keys().hasOnly([request.auth.uid]) && docId == 'versions') ||
+        (resource != null && request.resource.data.diff(resource.data).affectedKeys().hasOnly([request.auth.uid]))
+      ));
     }
 
     match /{document=**} {
