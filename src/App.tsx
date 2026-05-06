@@ -72,6 +72,12 @@ function MediaModalController({ isOpen, onClose }: { isOpen: boolean; onClose: (
 export default function App() {
   const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
 
+  useEffect(() => {
+    if (window.history.scrollRestoration) {
+      window.history.scrollRestoration = 'manual';
+    }
+  }, []);
+
   useModalBehavior(isMediaModalOpen, () => setIsMediaModalOpen(false));
 
   return (

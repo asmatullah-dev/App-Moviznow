@@ -652,7 +652,7 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                       <button type="button" onClick={() => setManageModal({ isOpen: true, type: 'genre' })} className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-2 py-0.5 rounded hover:bg-zinc-300 dark:hover:bg-zinc-700">Manage</button>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {genres.map(g => {
+                      {genres.map((g, idx) => {
                         const isSelected = selectedGenres.includes(g.id);
                         return (
                           <button
@@ -685,7 +685,7 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                       <button type="button" onClick={() => setManageModal({ isOpen: true, type: 'language' })} className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-2 py-0.5 rounded hover:bg-zinc-300 dark:hover:bg-zinc-700">Manage</button>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {languages.map(l => {
+                      {languages.map((l, idx) => {
                         const isSelected = selectedLanguages.includes(l.id);
                         return (
                           <button
@@ -718,7 +718,7 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                       <button type="button" onClick={() => setManageModal({ isOpen: true, type: 'quality' })} className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-2 py-0.5 rounded hover:bg-zinc-300 dark:hover:bg-zinc-700">Manage</button>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {qualities.map(q => (
+                      {qualities.map((q, idx) => (
                         <button
                           key={q.id}
                           type="button"

@@ -4,11 +4,12 @@ import { useScrollRestoration } from '../hooks/useScrollRestoration';
 interface ScrollableRowProps extends React.HTMLAttributes<HTMLDivElement> {
   scrollKey: string;
   children: React.ReactNode;
+  ready?: boolean;
 }
 
 export const ScrollableRow = React.forwardRef<HTMLDivElement, ScrollableRowProps>(
-  ({ scrollKey, children, className, style, ...props }, forwardedRef) => {
-    const internalRef = useScrollRestoration<HTMLDivElement>(scrollKey);
+  ({ scrollKey, children, className, style, ready = true, ...props }, forwardedRef) => {
+    const internalRef = useScrollRestoration<HTMLDivElement>(scrollKey, false, ready);
     
     // Merge refs if needed (simple implementation)
     const setRefs = React.useCallback(

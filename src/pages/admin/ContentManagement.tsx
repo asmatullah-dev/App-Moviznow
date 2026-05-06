@@ -49,6 +49,8 @@ interface ContentCardProps {
   handleAddToSpecialCollection: (contentId: string, type: 'trending' | 'newly_added') => void;
 }
 
+import { useScrollRestoration } from '../../hooks/useScrollRestoration';
+
 const ContentCard = memo(({ 
   content, profile, isSelected, anySelected, handleSelectContent, handleShare, handleEdit, 
   handleCopyData, setDeleteId, setNotificationModal, isActiveDropdown, 
@@ -241,6 +243,8 @@ export default function ContentManagement() {
   const { contentList, genres, languages, qualities, loading: contextLoading, getContent, saveContent, deleteContent, updateContentFields, deleteMultipleContents, updateAuxiliaryCollection, finalizeChanges, hasPendingChanges } = useContent();
   const { sendNotification } = useNotifications();
   const [loading, setLoading] = useState(contextLoading);
+
+  useScrollRestoration('admin_content_mgmt_window', true, !loading);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSyncConfirmOpen, setIsSyncConfirmOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -368,9 +372,21 @@ export default function ContentManagement() {
   const [filterAddedBy, setFilterAddedBy] = useState<string>(() => sessionStorage.getItem('content_mgmt_added_by') || 'all');
   const [filterSort, setFilterSort] = useState<'default' | 'newest' | 'oldest'>(() => (sessionStorage.getItem('content_mgmt_sort') as any) || 'default');
   const [selectedContent, setSelectedContent] = useState<string[]>([]);
-  const [visibleCount, setVisibleCount] = useState(50);
+  const [visibleCount, setVisibleCount] = useState(() => {
+    const saved = sessionStorage.getItem('admin_content_mgmt_visible_count');
+    return saved ? parseInt(saved, 10) : 50;
+  });
 
   useEffect(() => {
+    sessionStorage.setItem('admin_content_mgmt_visible_count', visibleCount.toString());
+  }, [visibleCount]);
+
+  const isFirstMount = useRef(true);
+  useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
     setVisibleCount(50); // Reset visible count on filter/search change
   }, [debouncedSearchTerm, filterType, filterGenre, filterLanguage, filterQuality, filterYear, filterStatus, filterAddedBy, filterSort, showDuplicates, showMissing]);
 
@@ -497,44 +513,6 @@ export default function ContentManagement() {
     });
     setManagers(managersData);
   }, [allUsers]);
-
-  useEffect(() => {
-    const mainElement = document.querySelector('main');
-    let scrollTimeout: any;
-    
-    const handleScroll = () => {
-      if (scrollTimeout) return;
-      scrollTimeout = setTimeout(() => {
-        if (mainElement) {
-          memoryStore.set('content_management_scroll_position', mainElement.scrollTop);
-        }
-        scrollTimeout = null;
-      }, 100);
-    };
-
-    if (mainElement) {
-      mainElement.addEventListener('scroll', handleScroll, { passive: true });
-    }
-
-    return () => {
-      if (mainElement) {
-        mainElement.removeEventListener('scroll', handleScroll);
-      }
-      if (scrollTimeout) clearTimeout(scrollTimeout);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!loading && contentList.length > 0) {
-      const mainElement = document.querySelector('main');
-      const savedPosition = memoryStore.get('content_management_scroll_position');
-      if (savedPosition && mainElement) {
-        setTimeout(() => {
-          mainElement.scrollTop = savedPosition;
-        }, 50);
-      }
-    }
-  }, [loading, contentList.length]);
 
   const clearFilters = () => {
     setFilterType('all');
@@ -3311,15 +3289,15 @@ export default function ContentManagement() {
           <div className="flex flex-row flex-nowrap gap-1">
             <select value={filterGenre} onChange={(e) => setFilterGenre(e.target.value)} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500">
               <option value="all">Genres</option>
-              {genres.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+              {[...genres].sort((a,b) => a.name.localeCompare(b.name)).map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
             </select>
             <select value={filterLanguage} onChange={(e) => setFilterLanguage(e.target.value)} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500">
               <option value="all">Languages</option>
-              {languages.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+              {[...languages].sort((a,b) => a.name.localeCompare(b.name)).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
             </select>
             <select value={filterQuality} onChange={(e) => setFilterQuality(e.target.value)} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500">
               <option value="all">Qualities</option>
-              {qualities.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+              {[...qualities].sort((a,b) => a.name.localeCompare(b.name)).map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
             </select>
           </div>
           {/* Line 3 */}

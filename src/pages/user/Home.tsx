@@ -31,17 +31,14 @@ import { ThemeToggle } from '../../components/ThemeToggle';
 import { useSettings } from '../../contexts/SettingsContext';
 
 export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => void }) {
-  useScrollRestoration('home_window_scroll', true);
-  const collectionScrollRef = useScrollRestoration<HTMLDivElement>('home_selected_collection_scroll');
-
   const { profile, logout, toggleFavorite, toggleWatchLater } = useAuth();
   const { contentList, genres, languages, qualities, collections, loading, isOffline } = useContent();
   const { cart } = useCart();
   const { settings } = useSettings();
   const { isInstallable, installApp } = usePWA();
   const navigate = useNavigate();
-  
-  const [search, setSearch] = useState('');
+
+  const [search, setSearch] = useState(() => sessionStorage.getItem('home_search') || '');
   const [debouncedSearch, setDebouncedSearch] = useState(search);
   
   useEffect(() => {
@@ -55,17 +52,26 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
   
   // ... (rest of the component)
 
-  const [sort, setSort] = useState<'default' | 'newest' | 'year' | 'az'>('default');
-  const [selectedGenre, setSelectedGenre] = useState<string>('');
-  const [selectedLanguage, setSelectedLanguage] = useState<string>('');
-  const [selectedType, setSelectedType] = useState<string>('');
-  const [selectedQuality, setSelectedQuality] = useState<string>('');
-  const [selectedYear, setSelectedYear] = useState<string>('');
-  const [currentPage, setCurrentPage] = useState(1);
+  const [sort, setSort] = useState<'default' | 'newest' | 'year' | 'az'>(() => (sessionStorage.getItem('home_sort') as any) || 'default');
+  const [selectedGenre, setSelectedGenre] = useState<string>(() => sessionStorage.getItem('home_genre') || '');
+  const [selectedLanguage, setSelectedLanguage] = useState<string>(() => sessionStorage.getItem('home_language') || '');
+  const [selectedType, setSelectedType] = useState<string>(() => sessionStorage.getItem('home_type') || '');
+  const [selectedQuality, setSelectedQuality] = useState<string>(() => sessionStorage.getItem('home_quality') || '');
+  const [selectedYear, setSelectedYear] = useState<string>(() => sessionStorage.getItem('home_year') || '');
+  const [currentPage, setCurrentPage] = useState(() => Number(sessionStorage.getItem('home_page')) || 1);
   const firstPageSize = 10;
   const pageSizeAfterFirst = settings?.itemsPerPage || 20;
 
-  const [showFilters, setShowFilters] = useState(false);
+  const [showFilters, setShowFilters] = useState(() => {
+    const hasSearch = !!sessionStorage.getItem('home_search');
+    const hasSort = (sessionStorage.getItem('home_sort') || 'default') !== 'default';
+    const hasGenre = !!sessionStorage.getItem('home_genre');
+    const hasLang = !!sessionStorage.getItem('home_language');
+    const hasType = !!sessionStorage.getItem('home_type');
+    const hasQual = !!sessionStorage.getItem('home_quality');
+    const hasYear = !!sessionStorage.getItem('home_year');
+    return hasSearch || hasSort || hasGenre || hasLang || hasType || hasQual || hasYear;
+  });
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const [showWhatsappPrompt, setShowWhatsappPrompt] = useState(false);
   const [whatsappNumber, setWhatsappNumber] = useState('');
@@ -78,6 +84,9 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
   });
   const [collectionSort, setCollectionSort] = useState<'default' | 'newest' | 'az'>('default');
 
+  useScrollRestoration('home_window_scroll', true, !loading);
+  const collectionScrollRef = useScrollRestoration<HTMLDivElement>('home_selected_collection_scroll', false, !!selectedCollection);
+
   useEffect(() => {
     if (selectedCollection) {
       memoryStore.set('home_selected_collection', selectedCollection);
@@ -85,6 +94,18 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
       memoryStore.delete('home_selected_collection');
     }
   }, [selectedCollection]);
+
+  // Sync filters and page to sessionStorage
+  useEffect(() => {
+    sessionStorage.setItem('home_search', search);
+    sessionStorage.setItem('home_sort', sort);
+    sessionStorage.setItem('home_genre', selectedGenre);
+    sessionStorage.setItem('home_language', selectedLanguage);
+    sessionStorage.setItem('home_type', selectedType);
+    sessionStorage.setItem('home_quality', selectedQuality);
+    sessionStorage.setItem('home_year', selectedYear);
+    sessionStorage.setItem('home_page', currentPage.toString());
+  }, [search, sort, selectedGenre, selectedLanguage, selectedType, selectedQuality, selectedYear, currentPage]);
 
   const trendingCollection = useMemo(() => collections.find(c => c.title.toLowerCase() === 'trending' && (c.contentIds?.length || 0) >= 2), [collections]);
   const newlyAddedCollection = useMemo(() => collections.find(c => c.title.toLowerCase() === 'newly added' && (c.contentIds?.length || 0) >= 2), [collections]);
@@ -532,7 +553,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
                     className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
                   >
                     <option value="">Genres</option>
-                    {genres.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                    {[...genres].sort((a, b) => a.name.localeCompare(b.name)).map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                   </select>
       
                   <select
@@ -541,7 +562,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
                     className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
                   >
                     <option value="">Languages</option>
-                    {languages.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                    {[...languages].sort((a, b) => a.name.localeCompare(b.name)).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
                   </select>
       
                   <select
@@ -550,7 +571,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
                     className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
                   >
                     <option value="">Qualities</option>
-                    {qualities.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+                    {[...qualities].sort((a, b) => a.name.localeCompare(b.name)).map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
                   </select>
       
                   <select

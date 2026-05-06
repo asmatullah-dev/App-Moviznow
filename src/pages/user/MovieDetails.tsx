@@ -1112,10 +1112,11 @@ export default function MovieDetails() {
 
     return (
       <div className="flex flex-wrap gap-3 justify-center">
-        {sortedLinks.map((link) => {
+        {sortedLinks.map((link, idx) => {
           const fullName = contextName ? `${contextName} - ${link.name}` : link.name;
+          const linkKey = link.id || `link-${idx}-${link.name}`;
           return (
-            <div key={link.id} className={`flex flex-col sm:flex-row items-stretch sm:items-center bg-zinc-100 dark:bg-zinc-800 rounded-xl overflow-hidden border border-zinc-300 dark:border-zinc-700 flex-1 min-w-[200px] max-w-sm ${isLocked ? 'opacity-60 grayscale-[0.5]' : ''}`}>
+            <div key={linkKey} className={`flex flex-col sm:flex-row items-stretch sm:items-center bg-zinc-100 dark:bg-zinc-800 rounded-xl overflow-hidden border border-zinc-300 dark:border-zinc-700 flex-1 min-w-[200px] max-w-sm ${isLocked ? 'opacity-60 grayscale-[0.5]' : ''}`}>
               <button
                 onClick={() => handlePlayClick(link.url, fullName, link.id, isZip, link.tinyUrl, isLocked, seasonInfo)}
                 className="flex-1 flex items-center justify-center gap-2 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-6 py-3 text-sm sm:text-base font-medium transition-colors border-b sm:border-b-0 sm:border-r border-zinc-300 dark:border-zinc-700"
@@ -1538,7 +1539,7 @@ export default function MovieDetails() {
                         <h4 className="text-sm font-bold text-cyan-700 dark:text-cyan-400 mb-2 uppercase tracking-wider opacity-70">Cast</h4>
                         <div className="flex flex-wrap gap-1.5">
                           {displayData.castArray.map((actor, idx) => (
-                            <span key={idx} className="bg-cyan-500/5 border border-cyan-500/10 px-2 py-1 rounded-md text-[11px] text-zinc-500 dark:text-zinc-400">
+                            <span key={`display-cast-${actor}-${idx}`} className="bg-cyan-500/5 border border-cyan-500/10 px-2 py-1 rounded-md text-[11px] text-zinc-500 dark:text-zinc-400">
                               {actor}
                             </span>
                           ))}
@@ -1601,7 +1602,7 @@ export default function MovieDetails() {
                         <h3 className="text-sm font-bold text-cyan-700 dark:text-cyan-400 mb-2 uppercase tracking-wider opacity-70">Cast</h3>
                         <div className="flex flex-wrap gap-1.5">
                           {mergedContent.cast.map((actor, idx) => (
-                            <span key={idx} className="bg-cyan-500/5 border border-cyan-500/10 px-2 py-1 rounded-md text-[11px] text-zinc-500 dark:text-zinc-400">
+                            <span key={`cast-${actor}-${idx}`} className="bg-cyan-500/5 border border-cyan-500/10 px-2 py-1 rounded-md text-[11px] text-zinc-500 dark:text-zinc-400">
                               {actor}
                             </span>
                           ))}
@@ -1989,7 +1990,7 @@ export default function MovieDetails() {
                   const label = trailer.title || (trailer.seasonNumber ? `Season ${trailer.seasonNumber} Trailer` : (trailer.youtubeTitle || `Trailer ${idx + 1}`));
                   return (
                     <button
-                      key={trailer.id}
+                      key={`trailer-select-${trailer.id}-${idx}`}
                       onClick={() => {
                         setActiveTrailerUrl(trailer.url);
                         setIsTrailerSelectionOpen(false);

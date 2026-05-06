@@ -3,23 +3,34 @@ import { useEffect, useRef } from 'react';
 // In-memory store that resets on page refresh but persists across React Router navigations (SPA)
 export const globalScrollState = new Map<string, number>();
 
-export function useScrollRestoration<T extends HTMLElement>(key: string, isWindow: boolean = false) {
+export function useScrollRestoration<T extends HTMLElement>(key: string, isWindow: boolean = false, ready: boolean = true) {
   const ref = useRef<T>(null);
 
   useEffect(() => {
+    if (!ready) return;
+
     // Restore scroll position
     const savedPosition = globalScrollState.get(key) || 0;
     
     if (savedPosition > 0) {
-      setTimeout(() => {
+      const restore = () => {
         if (isWindow) {
           window.scrollTo({ top: savedPosition, behavior: 'instant' } as any);
         } else if (ref.current) {
           ref.current.scrollLeft = savedPosition;
         }
-      }, 50);
-    }
+      };
 
+      // Try once immediately (if ready is already true)
+      restore();
+      
+      // And again after a short delay to account for layout shifts
+      const timer = setTimeout(restore, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [key, isWindow, ready]);
+
+  useEffect(() => {
     let timeoutId: any;
     const handleScroll = () => {
       if (timeoutId) clearTimeout(timeoutId);

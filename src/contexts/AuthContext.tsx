@@ -845,9 +845,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       unsubscribe();
-      if (unsubProfile) {
-        unsubProfile();
-      }
       clearInterval(timeTrackerInterval);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };

@@ -446,6 +446,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
                 if (idx !== -1) items[idx] = newItem;
                 else items.push(newItem);
             });
+            // Sort by order ascending as requested
             const sorted = items.sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
             setFn(sorted);
             safeStorage.setItem(cacheKey, JSON.stringify(sorted));
