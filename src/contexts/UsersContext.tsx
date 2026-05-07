@@ -10,9 +10,9 @@ interface UsersContextType {
   users: UserProfile[];
   loading: boolean;
   error: string | null;
-  refreshUsers: () => Promise<void>;
+  refreshUsers: (force?: boolean) => Promise<UserProfile[]>;
   updateUserFields: (userId: string, fields: Partial<UserProfile>) => void;
-  finalizeUserChanges: () => Promise<void>;
+  finalizeUserChanges: (force?: boolean) => Promise<void>;
   hasPendingChanges: boolean;
 }
 
@@ -45,9 +45,19 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     setHasPendingChanges(true);
   }, []);
 
-  const finalizeUserChanges = useCallback(async () => {
+  const finalizeUserChanges = useCallback(async (force: boolean = false) => {
     const pendingStr = safeStorage.getItem('pending_user_updates');
     if (!pendingStr) return;
+    
+    // Check 9AM restriction for auto-syncs
+    const now = Date.now();
+    const pktTime = new Date(now + (5 * 60 * 60 * 1000));
+    const isPast9AM = pktTime.getUTCHours() >= 9;
+    
+    if (!isPast9AM && !force) {
+        console.log("Users sync deferred: Before 9 AM PKT and group sync not forced.");
+        return;
+    }
     
     let pending: Record<string, Partial<UserProfile>> = {};
     try { pending = JSON.parse(pendingStr); } catch(e) {}
@@ -60,7 +70,6 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       let batches = [writeBatch(db)];
       let opCount = 0;
       
-      const now = Date.now();
       const metaUpdates: Record<string, number> = {};
 
       for (const uid of userIds) {
@@ -94,12 +103,32 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const fetchUsers = useCallback(async () => {
+  const fetchUsers = useCallback(async (force = false) => {
+    const isPrivilegedUser = profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'manager' || profile?.role === 'user_manager';
+    if (!isPrivilegedUser) {
+        setLoading(false);
+        return [];
+    }
+
+    const now = Date.now();
+    const pktTime = new Date(now + (5 * 60 * 60 * 1000));
+    const isPast9AM = pktTime.getUTCHours() >= 9;
+    const pktDate = `${pktTime.getUTCFullYear()}-${pktTime.getUTCMonth() + 1}-${pktTime.getUTCDate()}`;
+    const checkPeriod = isPast9AM ? pktDate : `before-9am-${pktDate}`;
+
+    // Period check to avoid redundant fetches
+    const lastCheckPeriod = safeStorage.getItem('last_user_meta_check_period');
+    if (!force && lastCheckPeriod === checkPeriod && users.length > 0) {
+        setLoading(false);
+        return users;
+    }
+
+    setLoading(true);
     try {
       // 1. Fetch chunk_meta/versions
       let serverVersions = {};
       try {
-        const meta = await import('../utils/chunkMeta').then(m => m.getChunkMeta());
+        const meta = await import('../utils/chunkMeta').then(m => m.getChunkMeta(force));
         serverVersions = meta.users || {};
       } catch (err) {
         handleFirestoreError(err, OperationType.GET, 'chunk_meta/versions');
@@ -122,9 +151,6 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      // If missing completely in user_meta... well, we can't magically find them unless we did a full pull once.
-      // But standard protocol is if the cache has it, we keep it, otherwise fetch newbies.
-      
       let currentUsers = [...users];
       
       // Handle deleted users
@@ -138,7 +164,6 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         for (let i = 0; i < usersToFetch.length; i += 30) {
             const batchIds = usersToFetch.slice(i, i + 30);
             
-            // wait, since we don't have indexes guaranteed, let's just use getDoc inside Promise.all
             const fetches = batchIds.map(id => getDoc(doc(db, 'users', id)).catch(err => {
               handleFirestoreError(err, OperationType.GET, `users/${id}`);
               throw err;
@@ -173,7 +198,6 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
             try { 
               await setDoc(doc(db, 'chunk_meta', 'versions'), { users: initialMeta }, { merge: true }); 
             } catch(e) {
-              // Non-critical, but log if fail
               console.warn("Failed to set chunk_meta versions singleton:", e);
             }
             Object.assign(serverVersions, initialMeta);
@@ -184,13 +208,22 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       safeStorage.setItem('cached_all_users', JSON.stringify(currentUsers));
       safeStorage.setItem('cached_user_meta_versions', JSON.stringify(serverVersions));
       
+      // Mark as checked in this period
+      const now = Date.now();
+      const pktTime = new Date(now + (5 * 60 * 60 * 1000));
+      const isPast9AM = pktTime.getUTCHours() >= 9;
+      const pktDate = `${pktTime.getUTCFullYear()}-${pktTime.getUTCMonth() + 1}-${pktTime.getUTCDate()}`;
+      const checkPeriod = isPast9AM ? pktDate : `before-9am-${pktDate}`;
+      safeStorage.setItem('last_user_meta_check_period', checkPeriod);
+      
       setLoading(false);
       setError(null);
+      return currentUsers;
     } catch (err: any) {
       console.error('Error fetching users:', err);
-      // Wait, fallback to cached if fail.
       setError(err.message);
       setLoading(false);
+      return users;
     }
   }, [users]);
 

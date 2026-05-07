@@ -49,8 +49,8 @@ interface ContentContextType {
 const ContentContext = createContext<ContentContextType | undefined>(undefined);
 
 export function ContentProvider({ children }: { children: React.ReactNode }) {
-  const { profile, loading: authProfileLoading } = useAuth();
-  const { users: allUsers } = useUsers();
+  const { profile, loading: authProfileLoading, refreshProfile } = useAuth();
+  const { users: allUsers, refreshUsers, finalizeUserChanges } = useUsers();
 
   const [contentList, setContentList] = useState<Content[]>([]);
   const [genres, setGenres] = useState<Genre[]>([]);
@@ -669,12 +669,19 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         setLoading(false);
         return;
     }
-    const isAdmin = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
-    checkForUpdates(isAdmin);
+    // Auto-check should NOT be forced (force=false)
+    checkForUpdates(false);
   }, [profile?.role, authProfileLoading]);
 
   const checkForUpdates = async (force: boolean = false) => {
-    if (!navigator.onLine) return;
+    if (authProfileLoading || !profile) {
+        if (!authProfileLoading && !profile) setLoading(false);
+        return;
+    }
+    if (!navigator.onLine) {
+        setLoading(false);
+        return;
+    }
     
     const isAdmin = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
     
@@ -682,35 +689,41 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     // PKT is UTC+5. 
     const pktTime = new Date(now.getTime() + (5 * 60 * 60 * 1000));
     const isPast9AMPKT = pktTime.getUTCHours() >= 9;
+    const pktDate = `${pktTime.getUTCFullYear()}-${pktTime.getUTCMonth() + 1}-${pktTime.getUTCDate()}`;
+    const checkPeriod = isPast9AMPKT ? pktDate : `before-9am-${pktDate}`;
 
-    // The user requested: "Verify that the user only after chunk_meta after 9AM and by pressing refresh button in ProfileMenu"
-    // This implies that for regular users:
-    // 1. They must be past 9 AM PKT.
-    // 2. They must have pressed the refresh button (force = true) OR have absolutely no content.
-    
-    const hasAnyContent = contentList.length > 0;
-    
-    if (!isAdmin) {
-        // Strict restriction for regular users
-        if (!isPast9AMPKT) {
-            console.log("Sync skipped: Before 9 AM PKT.");
-            setLoading(false);
-            return;
-        }
+    // Period check to avoid redundant auto-checks
+    const lastCheckPeriod = safeStorage.getItem('last_meta_check_period');
+    if (!force && lastCheckPeriod === checkPeriod) {
+        // Already checked for this period (either before 9AM or for the 9AM cycle)
+        setLoading(false);
+        return;
+    }
 
-        if (hasAnyContent && !force) {
-            // Already has content and this is an auto-call (not from refresh button)
-            console.log("Sync skipped: Manual refresh required after 9 AM.");
-            setLoading(false);
-            return;
-        }
+    // The user requested: "Ensure it will automatically do all process like refresh app data after 9AM or manually pressing button"
+    // This implies that for ALL users:
+    // 1. Auto-sync if it's past 9AM and not checked yet for this period.
+    // 2. Manual sync if button is pressed (force=true).
+    if (!force && !isPast9AMPKT) {
+        console.log("Auto-sync deferred: Before 9 AM PKT.");
+        setLoading(false);
+        return;
     }
     
-    // For admins OR (regular users past 9AM AND (no content OR manual refresh))
+    // Proceed with sync
+    if (force) {
+        // Trigger profile refresh (will sync pending changes because force=true)
+        refreshProfile(true).catch(console.error);
+        // Refresh users list if admin and push pending user changes
+        if (isAdmin) {
+          finalizeUserChanges(true).catch(console.error);
+          refreshUsers(true).catch(console.error);
+        }
+    }
+
     await syncWithServer(force);
     
     // Record that we checked in this period
-    const checkPeriod = `${pktTime.getUTCFullYear()}-${pktTime.getUTCMonth() + 1}-${pktTime.getUTCDate()}`;
     safeStorage.setItem('last_meta_check_period', checkPeriod);
   };
 

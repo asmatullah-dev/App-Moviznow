@@ -179,25 +179,70 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(true);
 
     try {
-      // Optimization: Check chunk_meta version
-      const { getChunkMeta } = await import('../utils/chunkMeta');
-      const meta = await getChunkMeta(force);
-      const serverVersion = meta.users?.[currentUser.uid] || 0;
-      
       const localVersionKey = `profile_version_${currentUser.uid}`;
       const localVersion = parseInt(safeStorage.getItem(localVersionKey) || "0", 10);
-      
       const cachedProfile = safeStorage.getItem("profile_cache");
-      const now = new Date();
-      const dailySyncKey = `last_daily_sync_${currentUser.uid}`;
-      const lastSyncTime = parseInt(localStorage.getItem(dailySyncKey) || "0", 10);
-      const lastSyncDate = new Date(lastSyncTime);
       
-      const nineAMToday = new Date(now);
-      nineAMToday.setHours(9, 0, 0, 0);
+      const now = Date.now();
+      const dailySyncKey = `last_daily_sync_${currentUser.uid}`;
+      const lastSyncDateStr = localStorage.getItem(dailySyncKey);
+      
+      const pktTime = new Date(now + (5 * 60 * 60 * 1000));
+      const isAfterNine = pktTime.getUTCHours() >= 9;
+      const pktDate = `${pktTime.getUTCFullYear()}-${pktTime.getUTCMonth() + 1}-${pktTime.getUTCDate()}`;
+      const isDailySync = isAfterNine && lastSyncDateStr !== pktDate;
 
-      const isAfterNine = now >= nineAMToday;
-      const alreadySyncedAfterNine = lastSyncDate >= nineAMToday;
+      // Before 9 AM PKT and not forced: use cache only
+      if (!isAfterNine && !force && cachedProfile) {
+        console.log("Profile Sync skipped: Before 9 AM PKT and not forced.");
+        const data = JSON.parse(cachedProfile);
+        setProfile(data);
+        setLoading(false);
+        return;
+      }
+
+      // Optimization: Check chunk_meta version if allowed
+      let serverVersion = localVersion;
+      if (force || isAfterNine) {
+        try {
+          const { getChunkMeta } = await import('../utils/chunkMeta');
+          const meta = await getChunkMeta(force);
+          serverVersion = meta.users?.[currentUser.uid] || 0;
+        } catch (e) {
+          console.error("Failed to fetch chunk_meta for profile:", e);
+        }
+      }
+
+      // Handle pushing pending changes first if forced or it's the daily sync after 9AM
+      const needsSync = safeStorage.getItem("needs_user_sync") === "true";
+      if ((isDailySync || force) && needsSync) {
+        try {
+          const pendingUpdates: any = {};
+          const pendingFavorites = safeStorage.getItem("pending_favorites_array");
+          if (pendingFavorites) pendingUpdates.favorites = JSON.parse(pendingFavorites);
+
+          const pendingWatchLater = safeStorage.getItem("pending_watch_later_array");
+          if (pendingWatchLater) pendingUpdates.watchLater = JSON.parse(pendingWatchLater);
+
+          if (Object.keys(pendingUpdates).length > 0) {
+            const { writeBatch } = await import('firebase/firestore');
+            const batch = writeBatch(db);
+            batch.update(userRef, pendingUpdates);
+            batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentUser.uid]: Date.now() } }, { merge: true });
+            await batch.commit();
+
+            if (isDailySync) localStorage.setItem(dailySyncKey, pktDate);
+            safeStorage.setItem("needs_user_sync", "false");
+            safeStorage.removeItem("pending_favorites_array");
+            safeStorage.removeItem("pending_watch_later_array");
+            console.log("Profile changes synced to Firestore");
+          }
+        } catch (err) {
+          console.error("Manual/Daily profile sync failed:", err);
+        }
+      }
+
+      const alreadySyncedAfterNine = isAfterNine && lastSyncDateStr === pktDate;
 
       if (alreadySyncedAfterNine && !force && cachedProfile && serverVersion <= localVersion && serverVersion !== 0) {
         console.log("Profile is up to date according to chunk_meta and already synced after 9AM");
@@ -625,22 +670,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const sessionKey = `last_session_start_${currentUser.uid}`;
         const dailySyncKey = `last_daily_sync_${currentUser.uid}`;
+        const lastSyncDateStr = localStorage.getItem(dailySyncKey);
         const lastSessionStart = localStorage.getItem(sessionKey);
         const now = Date.now();
-        const nowDate = new Date(now);
-        const nineAMToday = new Date(nowDate);
-        nineAMToday.setHours(9, 0, 0, 0);
+        const pktTime = new Date(now + (5 * 60 * 60 * 1000));
+        const isPast9AM = pktTime.getUTCHours() >= 9;
+        const pktDate = `${pktTime.getUTCFullYear()}-${pktTime.getUTCMonth() + 1}-${pktTime.getUTCDate()}`;
 
-        const lastDailySync = localStorage.getItem(dailySyncKey);
-        const lastSyncDate = lastDailySync ? new Date(parseInt(lastDailySync)) : null;
-
-        let isDailySync = false;
-        if (nowDate >= nineAMToday) {
-            // If it's past 9 AM today, check if last sync was before this 9 AM
-            if (!lastSyncDate || lastSyncDate < nineAMToday) {
-                isDailySync = true;
-            }
-        }
+        const isDailySync = isPast9AM && lastSyncDateStr !== pktDate;
 
         const twelveHours = 12 * 60 * 60 * 1000;
 
@@ -665,9 +702,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
         
-        // Add pending local state lists if daily sync applies or needs_user_sync flag is on
+        // Add pending local state lists if daily sync applies or it's past 9AM and needs sync
         const needsSync = safeStorage.getItem("needs_user_sync") === "true";
-        if (isDailySync || needsSync) {
+        if (isDailySync || (isPast9AM && needsSync)) {
             const pendingFavorites = safeStorage.getItem("pending_favorites_array");
             if (pendingFavorites) pendingUpdates.favorites = JSON.parse(pendingFavorites);
 
@@ -683,7 +720,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentUser.uid]: Date.now() } }, { merge: true });
                 await batch.commit();
 
-                if (isDailySync) localStorage.setItem(dailySyncKey, now.toString());
+                if (isDailySync) localStorage.setItem(dailySyncKey, pktDate);
                 safeStorage.setItem("needs_user_sync", "false");
                 safeStorage.removeItem("pending_favorites_array");
                 safeStorage.removeItem("pending_watch_later_array");

@@ -222,15 +222,14 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
               <button 
                 onClick={async () => {
                   setIsOpen(false);
+                  // checkForUpdates(true) is our master sync function that handles profile, content, and users sync
                   await Promise.all([
                     checkForUpdates(true),
-                    refreshSettings(),
-                    refreshUsers && refreshUsers(),
-                    refreshProfile(true)
+                    refreshSettings()
                   ]);
                 }} 
                 className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                title="Check for Content Updates"
+                title="Refresh Content & Account Sync"
               >
                 <RefreshCw className="w-4 h-4 text-zinc-400" /> Refresh App Data
               </button>

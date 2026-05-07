@@ -56,7 +56,7 @@ export default function UserManagement() {
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [isEditingOverlay, setIsEditingOverlay] = useState(false);
   const [isAnalyticsLoading, setIsAnalyticsLoading] = useState(false);
-  const [userAnalytics, setUserAnalytics] = useState<{ timeSpent: number, favoritesCount: number, watchLaterCount: number, lastActive: string | null, hasScanned: boolean }>({ timeSpent: 0, favoritesCount: 0, watchLaterCount: 0, lastActive: null, hasScanned: false });
+  const [scannedAnalytics, setScannedAnalytics] = useState<Record<string, { timeSpent: number, favoritesCount: number, watchLaterCount: number, lastActive: string | null, hasScanned: boolean }>>({});
   const [userRequests, setUserRequests] = useState<any[]>([]);
   const [assignedContentTitles, setAssignedContentTitles] = useState<string[]>([]);
   const [allContent, setAllContent] = useState<any[]>([]);
@@ -140,7 +140,7 @@ export default function UserManagement() {
     setEditingId(null);
   });
 
-  const { users: allUsers, loading: usersLoading, updateUserFields, finalizeUserChanges, hasPendingChanges } = useUsers();
+  const { users: allUsers, loading: usersLoading, updateUserFields, finalizeUserChanges, hasPendingChanges, refreshUsers } = useUsers();
   
   useEffect(() => {
     return () => {
@@ -242,21 +242,18 @@ export default function UserManagement() {
 
   const fetchUserAnalytics = async (user: UserProfile) => {
     setIsAnalyticsLoading(true);
-    // Note: movie requests and assigned content titles are still fetched here as they are part of the detailed view
     setUserRequests([]);
     setAssignedContentTitles([]);
     try {
-      // Fetch latest user data from Firestore to get fresh counts
-      const userRef = doc(db, 'users', user.uid);
-      const userSnap = await getDoc(userRef);
-      const freshUser = userSnap.exists() ? userSnap.data() as UserProfile : user;
+      // 1. Find the fresh user in the local allUsers list (already managed by UsersContext)
+      const freshUser = allUsers.find(u => u.uid === user.uid) || user;
 
-      // Fetch movie requests
+      // 2. Fetch latest movie requests (always fresh as they aren't versioned in context yet)
       const requestsSnapshot = await getDocs(query(collection(db, 'movie_requests'), where('userId', '==', user.uid)));
       const requestsData = requestsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setUserRequests(requestsData);
 
-      // Process Assigned Content Titles using contentList from context
+      // 3. Update assigned content titles
       if (freshUser.role === 'selected_content' && freshUser.assignedContent && freshUser.assignedContent.length > 0) {
         const contentMap = new Map<string, string>();
         contentList.forEach(c => {
@@ -268,7 +265,7 @@ export default function UserManagement() {
         setAssignedContentTitles([]);
       }
 
-      // Process Analytics (Enhanced counting from fresh doc)
+      // 4. Process Analytics from LOCAL data
       const newAnalytics = { 
         timeSpent: freshUser.timeSpent || 0,
         favoritesCount: (freshUser.favorites || []).length,
@@ -276,15 +273,24 @@ export default function UserManagement() {
         lastActive: freshUser.lastActive || null,
         hasScanned: true
       };
-      setUserAnalytics(newAnalytics);
+      
+      setScannedAnalytics(prev => ({
+        ...prev,
+        [user.uid]: newAnalytics
+      }));
+      
+      // Also cache for quick reload
       safeStorage.setItem(`user_analytics_${user.uid}`, JSON.stringify(newAnalytics));
 
     } catch (error) {
       console.error("Error fetching user analytics:", error);
-      handleFirestoreError(error, OperationType.LIST, 'analytics/content');
     } finally {
       setIsAnalyticsLoading(false);
     }
+  };
+
+  const getUserAnalytics = (uid: string) => {
+    return scannedAnalytics[uid] || { timeSpent: 0, favoritesCount: 0, watchLaterCount: 0, lastActive: null, hasScanned: false };
   };
 
   const handleRowClick = (user: UserProfile, e: React.MouseEvent) => {
@@ -298,12 +304,19 @@ export default function UserManagement() {
     const cached = safeStorage.getItem(`user_analytics_${user.uid}`);
     if (cached) {
       try {
-        setUserAnalytics(JSON.parse(cached));
+        const parsed = JSON.parse(cached);
+        setScannedAnalytics(prev => ({ ...prev, [user.uid]: parsed }));
       } catch (e) {
-        setUserAnalytics({ timeSpent: 0, favoritesCount: 0, watchLaterCount: 0, lastActive: null, hasScanned: false });
+        setScannedAnalytics(prev => ({ 
+          ...prev, 
+          [user.uid]: { timeSpent: 0, favoritesCount: 0, watchLaterCount: 0, lastActive: null, hasScanned: false } 
+        }));
       }
     } else {
-      setUserAnalytics({ timeSpent: 0, favoritesCount: 0, watchLaterCount: 0, lastActive: null, hasScanned: false });
+      setScannedAnalytics(prev => ({ 
+        ...prev, 
+        [user.uid]: { timeSpent: 0, favoritesCount: 0, watchLaterCount: 0, lastActive: null, hasScanned: false } 
+      }));
     }
     
     setUserRequests([]);
@@ -395,6 +408,9 @@ export default function UserManagement() {
       const newRole = editForm.role;
 
       updateUserFields(currentEditingId, updateData);
+      
+      // Ensure changes are pushed to Firestore immediately for admins
+      await finalizeUserChanges(true);
 
       // Handle Manager role changes
       const wasManager = previousRole === 'user_manager' || previousRole === 'manager' || selectedUser.isUserManager;
@@ -532,6 +548,7 @@ export default function UserManagement() {
         updateUserFields(currentDeleteConfirm, {
           status: 'suspended'
         });
+        await finalizeUserChanges(true);
         setAlertConfig({ isOpen: true, title: 'Success', message: 'User suspended successfully' });
       }
       setDeleteConfirm(null);
@@ -1623,77 +1640,114 @@ export default function UserManagement() {
                           )}
                         </div>
                         <div className="space-y-2">
-                          <div className="flex items-center justify-between bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
-                            <div className="flex items-center gap-3 text-zinc-600 dark:text-zinc-300">
-                              <Calendar className="w-4 h-4 text-emerald-500" />
-                              <span className="text-xs font-medium">Last Active</span>
-                            </div>
-                            <div className="text-right">
-                              <div className="flex items-center justify-end gap-2">
-                                {isUserOnline(userAnalytics.lastActive || selectedUser.lastActive) && (
-                                  <span className="relative flex h-2 w-2">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                          {(() => {
+                            const userAna = getUserAnalytics(selectedUser.uid);
+                            return (
+                              <>
+                                <div className="flex items-center justify-between bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
+                                  <div className="flex items-center gap-3 text-zinc-600 dark:text-zinc-300">
+                                    <Calendar className="w-4 h-4 text-emerald-500" />
+                                    <span className="text-xs font-medium">Last Active</span>
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="flex items-center justify-end gap-2">
+                                      {isUserOnline(userAna.lastActive) && (
+                                        <span className="relative flex h-2 w-2">
+                                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                        </span>
+                                      )}
+                                      <div className={`font-bold text-xs ${isUserOnline(userAna.lastActive) ? 'text-emerald-500' : 'text-zinc-900 dark:text-white'}`}>
+                                        {!userAna.hasScanned ? (
+                                          <span className="text-zinc-400 italic font-normal">Not Scanned</span>
+                                        ) : (
+                                          isUserOnline(userAna.lastActive) ? 'Online' : (userAna.lastActive ? format(new Date(userAna.lastActive), 'MMM dd, HH:mm') : 'Never')
+                                        )}
+                                      </div>
+                                    </div>
+                                    {userAna.hasScanned && userAna.lastActive && (
+                                      <div className="text-[10px] text-zinc-500">
+                                        {formatDistanceToNow(new Date(userAna.lastActive), { addSuffix: true })}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex items-center justify-between bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
+                                  <div className="flex items-center gap-3 text-zinc-600 dark:text-zinc-300">
+                                    <Clock className="w-4 h-4 text-emerald-500" />
+                                    <span className="text-xs font-medium">Time in App</span>
+                                  </div>
+                                  <span className="font-bold text-zinc-900 dark:text-white text-xs">
+                                    {!userAna.hasScanned ? (
+                                      <span className="text-zinc-400 italic font-normal">Not Scanned</span>
+                                    ) : (
+                                      `${userAna.timeSpent || 0} mins`
+                                    )}
                                   </span>
-                                )}
-                                <div className={`font-bold text-xs ${isUserOnline(userAnalytics.lastActive || selectedUser.lastActive) ? 'text-emerald-500' : 'text-zinc-900 dark:text-white'}`}>
-                                  {!userAnalytics.hasScanned ? (
-                                    <span className="text-zinc-400 italic font-normal">Not Scanned</span>
-                                  ) : (
-                                    isUserOnline(userAnalytics.lastActive) ? 'Online' : (userAnalytics.lastActive ? format(new Date(userAnalytics.lastActive), 'MMM dd, HH:mm') : 'Never')
+                                </div>
+                                <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-3 text-zinc-600 dark:text-zinc-300">
+                                      <Heart className="w-4 h-4 text-emerald-500" />
+                                      <span className="text-xs font-medium">Favorites</span>
+                                    </div>
+                                    <span className="font-bold text-zinc-900 dark:text-white text-xs">
+                                      {!userAna.hasScanned ? (
+                                        <span className="text-zinc-400 italic font-normal">Not Scanned</span>
+                                      ) : (
+                                        userAna.favoritesCount || 0
+                                      )}
+                                    </span>
+                                  </div>
+                                  {userAna.hasScanned && (selectedUser.favorites || []).length > 0 && (
+                                    <div className="mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-900 max-h-24 overflow-y-auto custom-scrollbar">
+                                      <div className="text-[10px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+                                        {selectedUser.favorites!.map((id, idx) => {
+                                          const content = contentList.find(c => c.id === id);
+                                          const title = content ? content.title : `Deleted (${id})`;
+                                          return (
+                                            <span key={id}>
+                                              {title}{idx < selectedUser.favorites!.length - 1 ? ', ' : ''}
+                                            </span>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
                                   )}
                                 </div>
-                              </div>
-                              {userAnalytics.hasScanned && userAnalytics.lastActive && (
-                                <div className="text-[10px] text-zinc-500">
-                                  {formatDistanceToNow(new Date(userAnalytics.lastActive), { addSuffix: true })}
+                                <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-3 text-zinc-600 dark:text-zinc-300">
+                                      <Bookmark className="w-4 h-4 text-emerald-500" />
+                                      <span className="text-xs font-medium">Watch Later</span>
+                                    </div>
+                                    <span className="font-bold text-zinc-900 dark:text-white text-xs">
+                                      {!userAna.hasScanned ? (
+                                        <span className="text-zinc-400 italic font-normal">Not Scanned</span>
+                                      ) : (
+                                        userAna.watchLaterCount || 0
+                                      )}
+                                    </span>
+                                  </div>
+                                  {userAna.hasScanned && (selectedUser.watchLater || []).length > 0 && (
+                                    <div className="mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-900 max-h-24 overflow-y-auto custom-scrollbar">
+                                      <div className="text-[10px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+                                        {selectedUser.watchLater!.map((id, idx) => {
+                                          const content = contentList.find(c => c.id === id);
+                                          const title = content ? content.title : `Deleted (${id})`;
+                                          return (
+                                            <span key={id}>
+                                              {title}{idx < selectedUser.watchLater!.length - 1 ? ', ' : ''}
+                                            </span>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
-                              )}
-                            </div>
-                          </div>
-                          <div className="flex items-center justify-between bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
-                            <div className="flex items-center gap-3 text-zinc-600 dark:text-zinc-300">
-                              <Clock className="w-4 h-4 text-emerald-500" />
-                              <span className="text-xs font-medium">Time in App</span>
-                            </div>
-                            <span className="font-bold text-zinc-900 dark:text-white text-xs">
-                              {!userAnalytics.hasScanned ? (
-                                <span className="text-zinc-400 italic font-normal">Not Scanned</span>
-                              ) : (
-                                `${userAnalytics.timeSpent || 0} mins`
-                              )}
-                            </span>
-                          </div>
-                          <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
-                            <div className="flex items-center justify-between mb-1">
-                              <div className="flex items-center gap-3 text-zinc-600 dark:text-zinc-300">
-                                <Heart className="w-4 h-4 text-emerald-500" />
-                                <span className="text-xs font-medium">Favorites</span>
-                              </div>
-                              <span className="font-bold text-zinc-900 dark:text-white text-xs">
-                                {!userAnalytics.hasScanned ? (
-                                  <span className="text-zinc-400 italic font-normal">Not Scanned</span>
-                                ) : (
-                                  userAnalytics.favoritesCount || 0
-                                )}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
-                            <div className="flex items-center justify-between mb-1">
-                              <div className="flex items-center gap-3 text-zinc-600 dark:text-zinc-300">
-                                <Bookmark className="w-4 h-4 text-emerald-500" />
-                                <span className="text-xs font-medium">Watch Later</span>
-                              </div>
-                              <span className="font-bold text-zinc-900 dark:text-white text-xs">
-                                {!userAnalytics.hasScanned ? (
-                                  <span className="text-zinc-400 italic font-normal">Not Scanned</span>
-                                ) : (
-                                  userAnalytics.watchLaterCount || 0
-                                )}
-                              </span>
-                            </div>
-                          </div>
+                              </>
+                            );
+                          })()}
                         </div>
                       </div>
                     </>
