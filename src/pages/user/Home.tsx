@@ -52,7 +52,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
   
   // ... (rest of the component)
 
-  const [sort, setSort] = useState<'default' | 'newest' | 'year' | 'az'>(() => (sessionStorage.getItem('home_sort') as any) || 'newest');
+  const [sort, setSort] = useState<'default' | 'newest' | 'year' | 'az'>(() => (sessionStorage.getItem('home_sort') as any) || 'default');
   const [selectedGenre, setSelectedGenre] = useState<string>(() => sessionStorage.getItem('home_genre') || '');
   const [selectedLanguage, setSelectedLanguage] = useState<string>(() => sessionStorage.getItem('home_language') || '');
   const [selectedType, setSelectedType] = useState<string>(() => sessionStorage.getItem('home_type') || '');
@@ -120,7 +120,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
   useModalBehavior(!!selectedCollection, () => setSelectedCollection(null));
 
   const clearFilters = () => {
-    setSort('newest');
+    setSort('default');
     setSelectedType('');
     setSelectedGenre('');
     setSelectedLanguage('');
@@ -129,6 +129,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
     setSearch('');
     setCurrentPage(1);
     setShowFilters(false);
+    setSelectedCollection(null);
     
     // Also clear session storage explicitly to be safe
     sessionStorage.removeItem('home_sort');
@@ -139,10 +140,12 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
     sessionStorage.removeItem('home_year');
     sessionStorage.removeItem('home_page');
     sessionStorage.removeItem('home_search');
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const hasActiveFilters = 
-    (sort !== 'newest') || 
+    (sort !== 'default') || 
     selectedType !== '' || 
     selectedGenre !== '' || 
     selectedLanguage !== '' || 

@@ -4,6 +4,7 @@ import React, {
   useEffect,
   useState,
   useRef,
+  useCallback,
 } from "react";
 import { auth, db } from "../firebase";
 import { safeStorage } from "../utils/safeStorage";
@@ -75,6 +76,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   toggleFavorite: (contentId: string) => Promise<void>;
   toggleWatchLater: (contentId: string) => Promise<void>;
+  refreshProfile: (force?: boolean) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -164,6 +166,455 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  const refreshProfile = useCallback(async (force = false) => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      safeStorage.removeItem("profile_cache");
+      setProfile(null);
+      setLoading(false);
+      return;
+    }
+
+    const userRef = doc(db, "users", currentUser.uid);
+    setLoading(true);
+
+    try {
+      // Optimization: Check chunk_meta version
+      const { getChunkMeta } = await import('../utils/chunkMeta');
+      const meta = await getChunkMeta(force);
+      const serverVersion = meta.users?.[currentUser.uid] || 0;
+      
+      const localVersionKey = `profile_version_${currentUser.uid}`;
+      const localVersion = parseInt(safeStorage.getItem(localVersionKey) || "0", 10);
+      
+      const cachedProfile = safeStorage.getItem("profile_cache");
+      const now = new Date();
+      const dailySyncKey = `last_daily_sync_${currentUser.uid}`;
+      const lastSyncTime = parseInt(localStorage.getItem(dailySyncKey) || "0", 10);
+      const lastSyncDate = new Date(lastSyncTime);
+      
+      const nineAMToday = new Date(now);
+      nineAMToday.setHours(9, 0, 0, 0);
+
+      const isAfterNine = now >= nineAMToday;
+      const alreadySyncedAfterNine = lastSyncDate >= nineAMToday;
+
+      if (alreadySyncedAfterNine && !force && cachedProfile && serverVersion <= localVersion && serverVersion !== 0) {
+        console.log("Profile is up to date according to chunk_meta and already synced after 9AM");
+        const data = JSON.parse(cachedProfile);
+        setProfile(data);
+        setLoading(false);
+        return;
+      }
+
+      const docSnap = await getDoc(userRef);
+      if (docSnap.exists()) {
+        const data = docSnap.data() as UserProfile;
+        safeStorage.setItem("profile_cache", JSON.stringify(data));
+        safeStorage.setItem(localVersionKey, serverVersion.toString());
+
+        const userEmailLower = currentUser.email?.toLowerCase();
+        const isOwner = userEmailLower === "asmatn628@gmail.com";
+        const isAdmin = [
+          "asmatullah9327@gmail.com",
+          "kabirahmaddev@gmail.com",
+          "wamoviesstation@gmail.com"
+        ].includes(userEmailLower || "");
+        const hasAdminPrivileges =
+          isOwner ||
+          isAdmin ||
+          data.role === "owner" ||
+          data.role === "admin";
+
+        const updates: any = {};
+        const localSessionId = getLocalSessionId();
+
+        // 1-Device Lock Check
+        if (!hasAdminPrivileges && !justLoggedInRef.current) {
+          if (data.sessionId && data.sessionId !== localSessionId) {
+            console.log("Logged in from another device. Logging out.");
+            signOut(auth);
+            setError(
+              "You have been logged out because your account was accessed from another device.",
+            );
+            return;
+          } else if (!data.sessionId) {
+            updates.sessionId = localSessionId;
+            data.sessionId = localSessionId;
+          }
+        }
+
+        // Auto-expire logic
+        const expiryNow = new Date();
+        if (
+          data.status === "active" &&
+          data.expiryDate &&
+          data.role !== "owner"
+        ) {
+          const expiryDate = new Date(data.expiryDate);
+          expiryDate.setDate(expiryDate.getDate() + 1);
+          if (expiryDate < expiryNow) {
+            updates.status = "expired";
+            data.status = "expired";
+          }
+        }
+
+        // Role enforcement
+        if (
+          isOwner &&
+          (data.role !== "owner" ||
+            data.status !== "active" ||
+            data.expiryDate !== "Lifetime")
+        ) {
+          updates.role = "owner";
+          updates.status = "active";
+          updates.expiryDate = "Lifetime";
+          data.role = "owner";
+          data.status = "active";
+          data.expiryDate = "Lifetime";
+        } else if (
+          isAdmin &&
+          (data.role !== "admin" || data.status !== "active")
+        ) {
+          updates.role = "admin";
+          updates.status = "active";
+          data.role = "admin";
+          data.status = "active";
+        }
+
+        const hasPassword = currentUser.providerData.some(
+          (p) => p.providerId === "password",
+        );
+        if (!data.hasPassword && hasPassword) {
+          updates.hasPassword = true;
+          data.hasPassword = true;
+        }
+
+        // Perform consolidated update if needed
+        if (Object.keys(updates).length > 0) {
+          try {
+            const { writeBatch } = await import('firebase/firestore');
+            const batch = writeBatch(db);
+            batch.update(userRef, updates);
+            batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentUser.uid]: Date.now() } }, { merge: true });
+            await batch.commit();
+          } catch (err) {
+            handleFirestoreError(err, OperationType.WRITE, `users/${currentUser.uid}`);
+            console.error(
+              "Failed to perform consolidated profile update:",
+              err,
+            );
+          }
+        }
+
+        setProfile(data);
+      } else {
+        // Create new user profile
+        const userEmailLower = currentUser.email?.toLowerCase();
+        const isOwner = userEmailLower === "asmatn628@gmail.com";
+        const isAdmin = [
+          "asmatullah9327@gmail.com",
+          "kabirahmaddev@gmail.com",
+          "wamoviesstation@gmail.com"
+        ].includes(userEmailLower || "");
+        const defaultRoleToSet = isOwner
+          ? "owner"
+          : isAdmin
+            ? "admin"
+            : "user";
+        const defaultStatusToSet =
+          isOwner || isAdmin ? "active" : "pending";
+        const hasPassword = currentUser.providerData.some(
+          (p) => p.providerId === "password",
+        );
+
+        // Extract phone from dummy email if available
+        let extractedPhone = "";
+        if (currentUser.email?.endsWith("@moviznow.com")) {
+          const phonePart = currentUser.email.replace(
+            "@moviznow.com",
+            "",
+          );
+          extractedPhone = standardizePhone(phonePart);
+        }
+        const pendingPhone = sessionStorage.getItem('pending_signup_phone');
+        if (pendingPhone) {
+          sessionStorage.removeItem('pending_signup_phone');
+        }
+        const standardizedUserPhone = standardizePhone(
+          currentUser.phoneNumber || extractedPhone || pendingPhone || "",
+        );
+
+        let mergedOldData: any = {};
+        let oldDocIds: string[] = [];
+
+        try {
+          const searchRef = collection(db, "users");
+          const findMatches = async (field: string, value: string) => {
+            if (!value) return [];
+            const q = query(
+              searchRef,
+              where(field, "==", value),
+              limit(5),
+            );
+            const snap = await getDocs(q);
+            return snap.docs.filter((d) => d.id !== currentUser.uid);
+          };
+
+          let matchDocs: any[] = [];
+          if (
+            currentUser.email &&
+            !currentUser.email.endsWith("@moviznow.com")
+          ) {
+            // Try exact match
+            const emailMatches = await findMatches(
+              "email",
+              currentUser.email,
+            );
+            matchDocs = [...matchDocs, ...emailMatches];
+
+            // Try lowercase match
+            const lowerEmail = currentUser.email.toLowerCase();
+            if (lowerEmail !== currentUser.email) {
+              const lowerEmailMatches = await findMatches(
+                "email",
+                lowerEmail,
+              );
+              matchDocs = [...matchDocs, ...lowerEmailMatches];
+            }
+          }
+
+          if (standardizedUserPhone) {
+            // Try standardized
+            const phoneMatches = await findMatches(
+              "phone",
+              standardizedUserPhone,
+            );
+            matchDocs = [...matchDocs, ...phoneMatches];
+
+            // Try raw digits if different
+            const rawDigits = standardizedUserPhone.replace(/\D/g, "");
+            if (rawDigits && rawDigits !== standardizedUserPhone) {
+              const rawMatches = await findMatches("phone", rawDigits);
+              matchDocs = [...matchDocs, ...rawMatches];
+            }
+
+            // Try without leading 0 or +92 if present
+            let baseNumber = rawDigits;
+            if (baseNumber.startsWith("92"))
+              baseNumber = baseNumber.substring(2);
+            if (baseNumber.startsWith("0"))
+              baseNumber = baseNumber.substring(1);
+            if (baseNumber && baseNumber !== rawDigits) {
+              const baseMatches = await findMatches(
+                "phone",
+                baseNumber,
+              );
+              const zeroPrefixMatches = await findMatches(
+                "phone",
+                `0${baseNumber}`,
+              );
+              const plus92Matches = await findMatches(
+                "phone",
+                `+92${baseNumber}`,
+              );
+              matchDocs = [
+                ...matchDocs,
+                ...baseMatches,
+                ...zeroPrefixMatches,
+                ...plus92Matches,
+              ];
+            }
+          }
+
+          // Deduplicate by ID
+          const uniqueMatchDocs = matchDocs.filter(
+            (doc, index, self) =>
+              index === self.findIndex((t) => t.id === doc.id),
+          );
+
+          if (uniqueMatchDocs.length > 0) {
+            oldDocIds = uniqueMatchDocs.map((d) => d.id);
+            mergedOldData = uniqueMatchDocs.reduce((acc, doc) => {
+              const data = doc.data() as UserProfile;
+
+              // Role Priority: owner > admin > manager > ... > user
+              const rolePriority: Record<string, number> = {
+                owner: 100,
+                admin: 90,
+                manager: 80,
+                user_manager: 75,
+                content_manager: 70,
+                selected_content: 60,
+                user: 10,
+                trial: 5,
+              };
+              const getRoleRank = (r: string) => rolePriority[r] || 0;
+              const betterRole =
+                getRoleRank(data.role) > getRoleRank(acc.role || "")
+                  ? data.role
+                  : acc.role || data.role;
+
+              // Status Priority: active > pending > expired > suspended
+              const statusPriority: Record<string, number> = {
+                active: 100,
+                pending: 50,
+                expired: 20,
+                suspended: 0,
+              };
+              const getStatusRank = (s: string) =>
+                statusPriority[s] || 0;
+              const betterStatus =
+                getStatusRank(data.status) >
+                getStatusRank(acc.status || "")
+                  ? data.status
+                  : acc.status || data.status;
+
+              // Expiry Date Logic: "Lifetime" wins, otherwise latest date
+              let betterExpiry = acc.expiryDate;
+              if (
+                data.expiryDate === "Lifetime" ||
+                acc.expiryDate === "Lifetime"
+              ) {
+                betterExpiry = "Lifetime";
+              } else if (
+                data.expiryDate &&
+                (!acc.expiryDate || data.expiryDate > acc.expiryDate)
+              ) {
+                betterExpiry = data.expiryDate;
+              }
+
+              return {
+                ...acc,
+                ...data,
+                role: betterRole,
+                status: betterStatus,
+                expiryDate: betterExpiry,
+                favorites: [
+                  ...new Set([
+                    ...(acc.favorites || []),
+                    ...(data.favorites || []),
+                  ]),
+                ],
+                watchLater: [
+                  ...new Set([
+                    ...(acc.watchLater || []),
+                    ...(data.watchLater || []),
+                  ]),
+                ],
+                assignedContent: [
+                  ...new Set([
+                    ...(acc.assignedContent || []),
+                    ...(data.assignedContent || []),
+                  ]),
+                ],
+                sessionsCount:
+                  (acc.sessionsCount || 0) + (data.sessionsCount || 0),
+                timeSpent: (acc.timeSpent || 0) + (data.timeSpent || 0),
+                createdAt:
+                  acc.createdAt && acc.createdAt < data.createdAt
+                    ? acc.createdAt
+                    : data.createdAt,
+                lastActive:
+                  acc.lastActive &&
+                  acc.lastActive > (data.lastActive || "")
+                    ? acc.lastActive
+                    : data.lastActive || acc.lastActive,
+              };
+            }, {} as any);
+          }
+        } catch (e) {
+          console.error("Failed to check for existing accounts:", e);
+        }
+
+        const newProfile: UserProfile = {
+          // Start with all aggregated data from old accounts
+          ...mergedOldData,
+          // Ensure identity fields match exactly what was used for this successful login
+          uid: currentUser.uid,
+          email: currentUser.email || mergedOldData.email || "",
+          phone: standardizedUserPhone || mergedOldData.phone || "",
+          displayName:
+            currentUser.displayName || mergedOldData.displayName || "",
+          photoURL:
+            currentUser.photoURL || mergedOldData.photoURL || "",
+          // Increment session data for the current session
+          sessionsCount: (mergedOldData.sessionsCount || 0) + 1,
+          hasPassword: hasPassword,
+          sessionId: getLocalSessionId(),
+          // Enforce roles based on the high-privileged list or the old data
+          role: isOwner
+            ? "owner"
+            : isAdmin
+              ? "admin"
+              : mergedOldData.role || defaultRoleToSet,
+          status:
+            isOwner || isAdmin
+              ? "active"
+              : mergedOldData.status || defaultStatusToSet,
+          expiryDate: isOwner
+            ? "Lifetime"
+            : mergedOldData.expiryDate || null,
+          // Ensure we have a creation date
+          createdAt:
+            mergedOldData.createdAt || new Date().toISOString(),
+          lastActive: new Date().toISOString(),
+          // Ensure arrays are initialized if missing
+          favorites: mergedOldData.favorites || [],
+          watchLater: mergedOldData.watchLater || [],
+          assignedContent: mergedOldData.assignedContent || [],
+        };
+
+        try {
+          const batch = writeBatch(db);
+          // Set the new user record
+          batch.set(userRef, newProfile);
+
+          // Delete all old records that were merged
+          const metaUpdates: Record<string, number> = { [currentUser.uid]: Date.now() };
+          oldDocIds.forEach((oldId) => {
+            batch.delete(doc(db, "users", oldId));
+            metaUpdates[oldId] = -1;
+            console.log(
+              `Merged and scheduled deletion of old profile: ${oldId}`,
+            );
+          });
+          batch.set(doc(db, 'chunk_meta', 'versions'), { users: metaUpdates }, { merge: true });
+
+          await batch.commit();
+          console.log(
+            `Successfully combined ${oldDocIds.length} accounts into new UID ${currentUser.uid}`,
+          );
+        } catch (err) {
+          console.error("Failed to merge/create user profile:", err);
+          // Fallback attempt if batch fails
+          try {
+            const { writeBatch } = await import('firebase/firestore');
+            const fbBatch = writeBatch(db);
+            fbBatch.set(userRef, newProfile);
+            fbBatch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentUser.uid]: Date.now() } }, { merge: true });
+            await fbBatch.commit();
+          } catch (e) {}
+        }
+        safeStorage.setItem(
+          "profile_cache",
+          JSON.stringify(newProfile),
+        );
+        safeStorage.setItem(localVersionKey, (serverVersion || Date.now()).toString());
+        setProfile(newProfile);
+      }
+    } catch (error) {
+      console.error("Error updating/creating profile:", error);
+      handleFirestoreError(
+        error,
+        OperationType.GET,
+        `users/${currentUser.uid}`,
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
@@ -192,7 +643,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         const twelveHours = 12 * 60 * 60 * 1000;
-        const oneDay = 24 * 60 * 60 * 1000;
 
         // Always initialize the ref for this React lifecycle to ensure interval tracking works
         if (!sessionStartTimeRef.current) {
@@ -243,416 +693,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
         }
 
-        // Fetch profile changes once
-        const fetchProfile = async () => {
-            try {
-              const docSnap = await getDoc(userRef);
-              if (docSnap.exists()) {
-                const data = docSnap.data() as UserProfile;
-                safeStorage.setItem("profile_cache", JSON.stringify(data));
-
-                const userEmailLower = currentUser.email?.toLowerCase();
-                const isOwner = userEmailLower === "asmatn628@gmail.com";
-                const isAdmin = [
-                  "asmatullah9327@gmail.com",
-                  "kabirahmaddev@gmail.com",
-                  "wamoviesstation@gmail.com"
-                ].includes(userEmailLower || "");
-                const hasAdminPrivileges =
-                  isOwner ||
-                  isAdmin ||
-                  data.role === "owner" ||
-                  data.role === "admin";
-
-                const updates: any = {};
-                const localSessionId = getLocalSessionId();
-
-                // 1-Device Lock Check
-                if (!hasAdminPrivileges && !justLoggedInRef.current) {
-                  if (data.sessionId && data.sessionId !== localSessionId) {
-                    console.log("Logged in from another device. Logging out.");
-                    signOut(auth);
-                    setError(
-                      "You have been logged out because your account was accessed from another device.",
-                    );
-                    return;
-                  } else if (!data.sessionId) {
-                    updates.sessionId = localSessionId;
-                    data.sessionId = localSessionId;
-                  }
-                }
-
-                // Auto-expire logic
-                const expiryNow = new Date();
-                if (
-                  data.status === "active" &&
-                  data.expiryDate &&
-                  data.role !== "owner"
-                ) {
-                  const expiryDate = new Date(data.expiryDate);
-                  expiryDate.setDate(expiryDate.getDate() + 1);
-                  if (expiryDate < expiryNow) {
-                    updates.status = "expired";
-                    data.status = "expired";
-                  }
-                }
-
-                // Role enforcement
-                if (
-                  isOwner &&
-                  (data.role !== "owner" ||
-                    data.status !== "active" ||
-                    data.expiryDate !== "Lifetime")
-                ) {
-                  updates.role = "owner";
-                  updates.status = "active";
-                  updates.expiryDate = "Lifetime";
-                  data.role = "owner";
-                  data.status = "active";
-                  data.expiryDate = "Lifetime";
-                } else if (
-                  isAdmin &&
-                  (data.role !== "admin" || data.status !== "active")
-                ) {
-                  updates.role = "admin";
-                  updates.status = "active";
-                  data.role = "admin";
-                  data.status = "active";
-                }
-
-                const hasPassword = currentUser.providerData.some(
-                  (p) => p.providerId === "password",
-                );
-                if (!data.hasPassword && hasPassword) {
-                  updates.hasPassword = true;
-                  data.hasPassword = true;
-                }
-
-                // Perform consolidated update if needed
-                if (Object.keys(updates).length > 0) {
-                  try {
-                    const { writeBatch } = await import('firebase/firestore');
-                    const batch = writeBatch(db);
-                    batch.update(userRef, updates);
-                    batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentUser.uid]: Date.now() } }, { merge: true });
-                    await batch.commit();
-                  } catch (err) {
-                    handleFirestoreError(err, OperationType.WRITE, `users/${currentUser.uid}`);
-                    console.error(
-                      "Failed to perform consolidated profile update:",
-                      err,
-                    );
-                  }
-                }
-
-                setProfile(data);
-              } else {
-                // Create new user profile
-                const userEmailLower = currentUser.email?.toLowerCase();
-                const isOwner = userEmailLower === "asmatn628@gmail.com";
-                const isAdmin = [
-                  "asmatullah9327@gmail.com",
-                  "kabirahmaddev@gmail.com",
-                  "wamoviesstation@gmail.com"
-                ].includes(userEmailLower || "");
-                const defaultRoleToSet = isOwner
-                  ? "owner"
-                  : isAdmin
-                    ? "admin"
-                    : "user";
-                const defaultStatusToSet =
-                  isOwner || isAdmin ? "active" : "pending";
-                const hasPassword = currentUser.providerData.some(
-                  (p) => p.providerId === "password",
-                );
-
-                // Extract phone from dummy email if available
-                let extractedPhone = "";
-                if (currentUser.email?.endsWith("@moviznow.com")) {
-                  const phonePart = currentUser.email.replace(
-                    "@moviznow.com",
-                    "",
-                  );
-                  extractedPhone = standardizePhone(phonePart);
-                }
-                const pendingPhone = sessionStorage.getItem('pending_signup_phone');
-                if (pendingPhone) {
-                  sessionStorage.removeItem('pending_signup_phone');
-                }
-                const standardizedUserPhone = standardizePhone(
-                  currentUser.phoneNumber || extractedPhone || pendingPhone || "",
-                );
-
-                let mergedOldData: any = {};
-                let oldDocIds: string[] = [];
-
-                try {
-                  const searchRef = collection(db, "users");
-                  const findMatches = async (field: string, value: string) => {
-                    if (!value) return [];
-                    const q = query(
-                      searchRef,
-                      where(field, "==", value),
-                      limit(5),
-                    );
-                    const snap = await getDocs(q);
-                    return snap.docs.filter((d) => d.id !== currentUser.uid);
-                  };
-
-                  let matchDocs: any[] = [];
-                  if (
-                    currentUser.email &&
-                    !currentUser.email.endsWith("@moviznow.com")
-                  ) {
-                    // Try exact match
-                    const emailMatches = await findMatches(
-                      "email",
-                      currentUser.email,
-                    );
-                    matchDocs = [...matchDocs, ...emailMatches];
-
-                    // Try lowercase match
-                    const lowerEmail = currentUser.email.toLowerCase();
-                    if (lowerEmail !== currentUser.email) {
-                      const lowerEmailMatches = await findMatches(
-                        "email",
-                        lowerEmail,
-                      );
-                      matchDocs = [...matchDocs, ...lowerEmailMatches];
-                    }
-                  }
-
-                  if (standardizedUserPhone) {
-                    // Try standardized
-                    const phoneMatches = await findMatches(
-                      "phone",
-                      standardizedUserPhone,
-                    );
-                    matchDocs = [...matchDocs, ...phoneMatches];
-
-                    // Try raw digits if different
-                    const rawDigits = standardizedUserPhone.replace(/\D/g, "");
-                    if (rawDigits && rawDigits !== standardizedUserPhone) {
-                      const rawMatches = await findMatches("phone", rawDigits);
-                      matchDocs = [...matchDocs, ...rawMatches];
-                    }
-
-                    // Try without leading 0 or +92 if present
-                    let baseNumber = rawDigits;
-                    if (baseNumber.startsWith("92"))
-                      baseNumber = baseNumber.substring(2);
-                    if (baseNumber.startsWith("0"))
-                      baseNumber = baseNumber.substring(1);
-                    if (baseNumber && baseNumber !== rawDigits) {
-                      const baseMatches = await findMatches(
-                        "phone",
-                        baseNumber,
-                      );
-                      const zeroPrefixMatches = await findMatches(
-                        "phone",
-                        `0${baseNumber}`,
-                      );
-                      const plus92Matches = await findMatches(
-                        "phone",
-                        `+92${baseNumber}`,
-                      );
-                      matchDocs = [
-                        ...matchDocs,
-                        ...baseMatches,
-                        ...zeroPrefixMatches,
-                        ...plus92Matches,
-                      ];
-                    }
-                  }
-
-                  // Deduplicate by ID
-                  const uniqueMatchDocs = matchDocs.filter(
-                    (doc, index, self) =>
-                      index === self.findIndex((t) => t.id === doc.id),
-                  );
-
-                  if (uniqueMatchDocs.length > 0) {
-                    oldDocIds = uniqueMatchDocs.map((d) => d.id);
-                    mergedOldData = uniqueMatchDocs.reduce((acc, doc) => {
-                      const data = doc.data() as UserProfile;
-
-                      // Role Priority: owner > admin > manager > ... > user
-                      const rolePriority: Record<string, number> = {
-                        owner: 100,
-                        admin: 90,
-                        manager: 80,
-                        user_manager: 75,
-                        content_manager: 70,
-                        selected_content: 60,
-                        user: 10,
-                        trial: 5,
-                      };
-                      const getRoleRank = (r: string) => rolePriority[r] || 0;
-                      const betterRole =
-                        getRoleRank(data.role) > getRoleRank(acc.role || "")
-                          ? data.role
-                          : acc.role || data.role;
-
-                      // Status Priority: active > pending > expired > suspended
-                      const statusPriority: Record<string, number> = {
-                        active: 100,
-                        pending: 50,
-                        expired: 20,
-                        suspended: 0,
-                      };
-                      const getStatusRank = (s: string) =>
-                        statusPriority[s] || 0;
-                      const betterStatus =
-                        getStatusRank(data.status) >
-                        getStatusRank(acc.status || "")
-                          ? data.status
-                          : acc.status || data.status;
-
-                      // Expiry Date Logic: "Lifetime" wins, otherwise latest date
-                      let betterExpiry = acc.expiryDate;
-                      if (
-                        data.expiryDate === "Lifetime" ||
-                        acc.expiryDate === "Lifetime"
-                      ) {
-                        betterExpiry = "Lifetime";
-                      } else if (
-                        data.expiryDate &&
-                        (!acc.expiryDate || data.expiryDate > acc.expiryDate)
-                      ) {
-                        betterExpiry = data.expiryDate;
-                      }
-
-                      return {
-                        ...acc,
-                        ...data,
-                        role: betterRole,
-                        status: betterStatus,
-                        expiryDate: betterExpiry,
-                        favorites: [
-                          ...new Set([
-                            ...(acc.favorites || []),
-                            ...(data.favorites || []),
-                          ]),
-                        ],
-                        watchLater: [
-                          ...new Set([
-                            ...(acc.watchLater || []),
-                            ...(data.watchLater || []),
-                          ]),
-                        ],
-                        assignedContent: [
-                          ...new Set([
-                            ...(acc.assignedContent || []),
-                            ...(data.assignedContent || []),
-                          ]),
-                        ],
-                        sessionsCount:
-                          (acc.sessionsCount || 0) + (data.sessionsCount || 0),
-                        timeSpent: (acc.timeSpent || 0) + (data.timeSpent || 0),
-                        createdAt:
-                          acc.createdAt && acc.createdAt < data.createdAt
-                            ? acc.createdAt
-                            : data.createdAt,
-                        lastActive:
-                          acc.lastActive &&
-                          acc.lastActive > (data.lastActive || "")
-                            ? acc.lastActive
-                            : data.lastActive || acc.lastActive,
-                      };
-                    }, {} as any);
-                  }
-                } catch (e) {
-                  console.error("Failed to check for existing accounts:", e);
-                }
-
-                const newProfile: UserProfile = {
-                  // Start with all aggregated data from old accounts
-                  ...mergedOldData,
-                  // Ensure identity fields match exactly what was used for this successful login
-                  uid: currentUser.uid,
-                  email: currentUser.email || mergedOldData.email || "",
-                  phone: standardizedUserPhone || mergedOldData.phone || "",
-                  displayName:
-                    currentUser.displayName || mergedOldData.displayName || "",
-                  photoURL:
-                    currentUser.photoURL || mergedOldData.photoURL || "",
-                  // Increment session data for the current session
-                  sessionsCount: (mergedOldData.sessionsCount || 0) + 1,
-                  hasPassword: hasPassword,
-                  sessionId: getLocalSessionId(),
-                  // Enforce roles based on the high-privileged list or the old data
-                  role: isOwner
-                    ? "owner"
-                    : isAdmin
-                      ? "admin"
-                      : mergedOldData.role || defaultRoleToSet,
-                  status:
-                    isOwner || isAdmin
-                      ? "active"
-                      : mergedOldData.status || defaultStatusToSet,
-                  expiryDate: isOwner
-                    ? "Lifetime"
-                    : mergedOldData.expiryDate || null,
-                  // Ensure we have a creation date
-                  createdAt:
-                    mergedOldData.createdAt || new Date().toISOString(),
-                  lastActive: new Date().toISOString(),
-                  // Ensure arrays are initialized if missing
-                  favorites: mergedOldData.favorites || [],
-                  watchLater: mergedOldData.watchLater || [],
-                  assignedContent: mergedOldData.assignedContent || [],
-                };
-
-                try {
-                  const batch = writeBatch(db);
-                  // Set the new user record
-                  batch.set(userRef, newProfile);
-
-                  // Delete all old records that were merged
-                  const metaUpdates: Record<string, number> = { [currentUser.uid]: Date.now() };
-                  oldDocIds.forEach((oldId) => {
-                    batch.delete(doc(db, "users", oldId));
-                    metaUpdates[oldId] = -1;
-                    console.log(
-                      `Merged and scheduled deletion of old profile: ${oldId}`,
-                    );
-                  });
-                  batch.set(doc(db, 'chunk_meta', 'versions'), { users: metaUpdates }, { merge: true });
-
-                  await batch.commit();
-                  console.log(
-                    `Successfully combined ${oldDocIds.length} accounts into new UID ${currentUser.uid}`,
-                  );
-                } catch (err) {
-                  console.error("Failed to merge/create user profile:", err);
-                  // Fallback attempt if batch fails
-                  try {
-                    const { writeBatch } = await import('firebase/firestore');
-                    const fbBatch = writeBatch(db);
-                    fbBatch.set(userRef, newProfile);
-                    fbBatch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentUser.uid]: Date.now() } }, { merge: true });
-                    await fbBatch.commit();
-                  } catch (e) {}
-                }
-                safeStorage.setItem(
-                  "profile_cache",
-                  JSON.stringify(newProfile),
-                );
-                setProfile(newProfile);
-              }
-            } catch (error) {
-              console.error("Error updating/creating profile:", error);
-              handleFirestoreError(
-                error,
-                OperationType.GET,
-                `users/${currentUser.uid}`,
-              );
-            } finally {
-              setLoading(false);
-            }
-        };
-
-        fetchProfile();
+        refreshProfile();
       } else {
         safeStorage.removeItem("profile_cache");
         setProfile(null);
@@ -1346,6 +1387,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         logout,
         toggleFavorite,
         toggleWatchLater,
+        refreshProfile,
       }}
     >
       {children}

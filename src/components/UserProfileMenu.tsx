@@ -16,7 +16,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useContent } from '../contexts/ContentContext';
 
 export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogoutModal?: () => void }) => {
-  const { profile, logout } = useAuth();
+  const { profile, logout, refreshProfile } = useAuth();
   const { theme, setTheme } = useTheme();
   const { isInstallable, installApp } = usePWA();
   const { checkForUpdates } = useContent();
@@ -225,7 +225,8 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                   await Promise.all([
                     checkForUpdates(true),
                     refreshSettings(),
-                    refreshUsers && refreshUsers()
+                    refreshUsers && refreshUsers(),
+                    refreshProfile(true)
                   ]);
                 }} 
                 className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
