@@ -10,12 +10,6 @@ import ConfirmModal from './ConfirmModal';
 export default function PreviousOrders() {
   const { profile } = useAuth();
   const { settings } = useSettings();
-  const CACHE_KEY = `user_orders_cache_${profile?.uid}`;
-  const [orders, setOrders] = useState<any[]>(() => {
-    const cached = localStorage.getItem(CACHE_KEY);
-    return cached ? JSON.parse(cached) : [];
-  });
-  const [loading, setLoading] = useState(orders.length === 0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
@@ -30,51 +24,27 @@ export default function PreviousOrders() {
     onConfirm: () => {},
   });
 
-  useEffect(() => {
-    const fetchOrders = async () => {
-      if (!profile?.uid) return;
-      try {
-        const q = query(
-          collection(db, 'orders'),
-          where('userId', '==', profile.uid),
-          orderBy('createdAt', 'desc')
-        );
-        const snapshot = await getDocs(q);
-        const fetchedOrders = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        localStorage.setItem(CACHE_KEY, JSON.stringify(fetchedOrders));
-        setOrders(fetchedOrders);
-      } catch (error) {
-        console.error('Error fetching orders:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchOrders();
-  }, [profile?.uid, CACHE_KEY]);
+  const orders = React.useMemo(() => {
+    if (!profile?.orders) return [];
+    return [...profile.orders].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [profile?.orders]);
 
   const handleCancelOrder = async (orderId: string) => {
     try {
-      await updateDoc(doc(db, 'orders', orderId), {
-        status: 'cancelled'
+      const { updateDoc, doc } = await import('firebase/firestore');
+      const updatedOrders = orders.map(o => o.id === orderId ? { ...o, status: 'cancelled' } : o);
+      
+      await updateDoc(doc(db, 'users', profile!.uid), {
+        orders: updatedOrders
       });
-      setOrders(prevOrders => {
-        const updated = prevOrders.map(o => o.id === orderId ? { ...o, status: 'cancelled' } : o);
-        localStorage.setItem(CACHE_KEY, JSON.stringify(updated));
-        return updated;
-      });
+      // Admin might need to be notified about cancellation too, but usually it's just user canceling pending
+      
       setConfirmModal(prev => ({ ...prev, isOpen: false }));
     } catch (error) {
       console.error('Error cancelling order:', error);
       alert('Failed to cancel order');
     }
   };
-
-  if (loading) {
-    return <div className="text-zinc-500 text-sm animate-pulse">Loading previous orders...</div>;
-  }
 
   if (orders.length === 0) {
     return null;
@@ -167,7 +137,7 @@ export default function PreviousOrders() {
                         </ul>
                       </div>
                     )}
-                    <p><span className="text-zinc-500">Date:</span> {order.createdAt?.toDate ? order.createdAt.toDate().toLocaleString() : 'Just now'}</p>
+                    <p><span className="text-zinc-500">Date:</span> {order.createdAt ? (typeof order.createdAt === 'string' ? new Date(order.createdAt).toLocaleString() : (order.createdAt as any).toDate?.()?.toLocaleString() || new Date(order.createdAt).toLocaleString()) : 'Just now'}</p>
                   </div>
                 </motion.div>
               )}

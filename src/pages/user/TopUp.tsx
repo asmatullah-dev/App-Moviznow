@@ -64,7 +64,10 @@ export default function TopUp() {
     try {
       const newOrderId = Math.floor(10000000 + Math.random() * 90000000).toString();
 
-      await setDoc(doc(db, 'orders', newOrderId), {
+      const { updateDoc, arrayUnion } = await import('firebase/firestore');
+
+      const orderData = {
+        id: newOrderId,
         userId: profile.uid,
         userName: profile.displayName || 'Unknown',
         userEmail: profile.email,
@@ -73,7 +76,11 @@ export default function TopUp() {
         amount: months * (settings?.membershipFee || 200),
         months,
         status: 'pending',
-        createdAt: serverTimestamp(),
+        createdAt: new Date().toISOString(),
+      };
+
+      await updateDoc(doc(db, 'users', profile.uid), {
+        orders: arrayUnion(orderData)
       });
       setOrderId(newOrderId);
       setConfirmed(true);

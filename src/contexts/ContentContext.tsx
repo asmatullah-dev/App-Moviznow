@@ -43,6 +43,7 @@ interface ContentContextType {
   deleteAuxiliaryItem: (type: 'genre' | 'language' | 'quality', id: string) => Promise<void>;
   finalizeChanges: () => Promise<void>;
   hasPendingChanges: boolean;
+  checkForUpdates: (force?: boolean) => Promise<void>;
 }
 
 const ContentContext = createContext<ContentContextType | undefined>(undefined);
@@ -80,7 +81,9 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     setLoading(false);
   }, []);
   const [hasPendingChanges, setHasPendingChanges] = useState(() => {
-    return !!safeStorage.getItem('pending_chunk_updates') || !!safeStorage.getItem('pending_collection_updates');
+    return !!safeStorage.getItem('pending_chunk_updates') || 
+           !!safeStorage.getItem('pending_collection_updates') || 
+           !!safeStorage.getItem('pending_metadata_updates');
   });
 
   const COLLECTION_CHUNK_SIZE = 1000;
@@ -173,8 +176,9 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
     const contentPendingStr = safeStorage.getItem('pending_chunk_updates');
     const collectionPendingStr = safeStorage.getItem('pending_collection_updates');
+    const metadataPending = safeStorage.getItem('pending_metadata_updates') === 'true';
     
-    if (!contentPendingStr && !collectionPendingStr) {
+    if (!contentPendingStr && !collectionPendingStr && !metadataPending) {
         setHasPendingChanges(false);
         return;
     }
@@ -228,6 +232,24 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
             };
         }
 
+        if (metadataPending) {
+            const mGenres = JSON.parse(safeStorage.getItem('genres_cache') || '[]');
+            const mLanguages = JSON.parse(safeStorage.getItem('languages_cache') || '[]');
+            const mQualities = JSON.parse(safeStorage.getItem('qualities_cache') || '[]');
+            
+            batch.set(doc(db, 'content_chunks', 'metadata'), {
+                genres: mGenres,
+                languages: mLanguages,
+                qualities: mQualities,
+                updatedAt: serverTimestamp()
+            });
+            
+            versionsUpdate.metadata = {
+                version: now,
+                updatedAt: serverTimestamp()
+            };
+        }
+
         batch.set(doc(db, 'chunk_meta', 'versions'), versionsUpdate, { merge: true });
         await batch.commit();
         
@@ -237,7 +259,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
         if (contentPendingStr) {
             for (const key of Object.keys(versionsUpdate)) {
-                if (key !== 'collections' && key !== 'lastGlobalUpdate') {
+                if (key !== 'collections' && key !== 'lastGlobalUpdate' && key !== 'metadata') {
                     localMeta[key] = versionsUpdate[key];
                 }
             }
@@ -247,6 +269,11 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         if (collectionPendingStr) {
             safeStorage.removeItem('pending_collection_updates');
             localMeta.collections = versionsUpdate.collections.version;
+        }
+
+        if (metadataPending) {
+            safeStorage.removeItem('pending_metadata_updates');
+            localMeta.metadata = versionsUpdate.metadata.version;
         }
 
         safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
@@ -347,7 +374,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     return sorted;
   };
 
-  const syncWithServer = async () => {
+  const syncWithServer = async (force: boolean = false) => {
     if (!navigator.onLine) {
         setLoading(false);
         return;
@@ -356,9 +383,9 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
     let versions: Record<string, any> = {};
     try {
-        const metaDoc = await getDoc(doc(db, 'chunk_meta', 'versions'));
-        if (metaDoc.exists()) {
-            versions = metaDoc.data() || {};
+        const metaData = await import('../utils/chunkMeta').then(m => m.getChunkMeta(force));
+        if (Object.keys(metaData).length > 0) {
+            versions = metaData;
         } else if (isAdmin) {
             // First time setup or recovery
             const chunksSnap = await getDocs(collection(db, 'content_chunks'));
@@ -370,8 +397,8 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
                     const allContent = contentSnap.docs.map(d => ({ id: d.id, ...d.data() } as Content));
                     const { rebuildAllChunks } = await import('../utils/chunkUtils');
                     await rebuildAllChunks(allContent);
-                    const newMetaDoc = await getDoc(doc(db, 'chunk_meta', 'versions'));
-                    versions = newMetaDoc.data() || {};
+                    const newMetaData = await import('../utils/chunkMeta').then(m => m.getChunkMeta(true));
+                    versions = newMetaData;
                     // Optional: delete legacy individual content
                     // const delBatch = writeBatch(db);
                     // contentSnap.docs.forEach(d => delBatch.delete(d.ref));
@@ -403,7 +430,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     const pendingChunkIds = new Set(JSON.parse(pendingStr));
 
     for (const [chunkId, versionMeta] of Object.entries(versions)) {
-        if (chunkId === 'collections' || chunkId === 'notifications' || chunkId === 'lastGlobalUpdate') continue;
+        if (chunkId === 'collections' || chunkId === 'notifications' || chunkId === 'lastGlobalUpdate' || chunkId === 'metadata') continue;
         if (pendingChunkIds.has(chunkId)) continue; // SKIP pending chunks to avoid overwriting with old server data
 
         const version = typeof versionMeta === 'object' ? (versionMeta as any).version : versionMeta;
@@ -433,9 +460,12 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     // Always refresh content to catch any changes
     refreshContentFromLocal();
 
-    // Handle auxiliary data
+    // Handle auxiliary data (Metadata chunk)
     try {
-        const fetchAux = async (name: string, setFn: any, cacheKey: string) => {
+        const isAdmin = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
+        let metadataMeta = versions.metadata;
+
+        const fetchLegacy = async (name: string, setFn: any, cacheKey: string) => {
             const snap = await getDocs(collection(db, name));
             const raw = snap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
             let items: any[] = [];
@@ -446,19 +476,72 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
                 if (idx !== -1) items[idx] = newItem;
                 else items.push(newItem);
             });
-            // Sort by order ascending as requested
             const sorted = items.sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
             setFn(sorted);
             safeStorage.setItem(cacheKey, JSON.stringify(sorted));
+            return sorted;
         };
 
-        if (!safeStorage.getItem('genres_cache')) await fetchAux('genres', setGenres, 'genres_cache');
-        if (!safeStorage.getItem('languages_cache')) await fetchAux('languages', setLanguages, 'languages_cache');
-        if (!safeStorage.getItem('qualities_cache')) await fetchAux('qualities', setQualities, 'qualities_cache');
+        if (!metadataMeta && isAdmin) {
+            console.log("Migrating legacy metadata to chunks...");
+            const mGenres = await fetchLegacy('genres', setGenres, 'genres_cache');
+            const mLanguages = await fetchLegacy('languages', setLanguages, 'languages_cache');
+            const mQualities = await fetchLegacy('qualities', setQualities, 'qualities_cache');
+            
+            const batch = writeBatch(db);
+            const now = Date.now();
+            
+            batch.set(doc(db, 'content_chunks', 'metadata'), {
+                genres: mGenres,
+                languages: mLanguages,
+                qualities: mQualities,
+                updatedAt: serverTimestamp()
+            });
+
+            metadataMeta = {
+                version: now,
+                updatedAt: serverTimestamp()
+            };
+
+            batch.set(doc(db, 'chunk_meta', 'versions'), { 
+                metadata: metadataMeta
+            }, { merge: true });
+
+            await batch.commit();
+            localMeta.metadata = metadataMeta.version;
+            safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+        } else if (metadataMeta) {
+            const metadataVersion = typeof metadataMeta === 'object' ? metadataMeta.version : metadataMeta;
+            const localMetaV = localMeta.metadata;
+            const localMetaVersion = typeof localMetaV === 'object' ? localMetaV.version : localMetaV;
+            const hasMetadata = !!safeStorage.getItem('genres_cache');
+            const hasPendingMetadata = !!safeStorage.getItem('pending_metadata_updates');
+            
+            if (!hasPendingMetadata && (!hasMetadata || !localMetaVersion || localMetaVersion < metadataVersion)) {
+                try {
+                    const metaDoc = await getDoc(doc(db, 'content_chunks', 'metadata'));
+                    if (metaDoc.exists()) {
+                        const data = metaDoc.data();
+                        safeStorage.setItem('genres_cache', JSON.stringify(data.genres || []));
+                        safeStorage.setItem('languages_cache', JSON.stringify(data.languages || []));
+                        safeStorage.setItem('qualities_cache', JSON.stringify(data.qualities || []));
+                        localMeta.metadata = metadataVersion;
+                        safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+                        setGenres(data.genres || []);
+                        setLanguages(data.languages || []);
+                        setQualities(data.qualities || []);
+                    }
+                } catch(e) { console.error("Error fetching metadata chunk", e) }
+            }
+        } else if (!hasLoadedRef.current) {
+            // fallback if metadata doesn't exist and not admin
+            if (!safeStorage.getItem('genres_cache')) await fetchLegacy('genres', setGenres, 'genres_cache');
+            if (!safeStorage.getItem('languages_cache')) await fetchLegacy('languages', setLanguages, 'languages_cache');
+            if (!safeStorage.getItem('qualities_cache')) await fetchLegacy('qualities', setQualities, 'qualities_cache');
+        }
 
         // Handle collections with versioning and chunks
         let collectionsMeta = versions.collections;
-        const isAdmin = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
 
         // Migration logic: If no collection chunks exist but legacy collections do, migrate them
         if (!collectionsMeta && isAdmin) {
@@ -505,8 +588,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         // Migration logic for FCM tokens
         if (isAdmin) {
             try {
-                const metaDoc = await getDoc(doc(db, 'chunk_meta', 'versions'));
-                const metaData = metaDoc.exists() ? metaDoc.data() : {};
+                const metaData = await import('../utils/chunkMeta').then(m => m.getChunkMeta());
                 if (!metaData.fcm_tokens) {
                     const legacyTokensSnap = await getDocs(collection(db, 'fcm_tokens'));
                     // Only migrate if we have many individual docs and no chunking yet
@@ -587,18 +669,50 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         setLoading(false);
         return;
     }
-    syncWithServer();
-
-    const interval = setInterval(() => {
-        syncWithServer();
-        if (['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) {
-            const pending = safeStorage.getItem('pending_chunk_updates');
-            if (pending) finalizeChanges();
-        }
-    }, 30 * 60 * 1000);
-
-    return () => clearInterval(interval);
+    const isAdmin = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
+    checkForUpdates(isAdmin);
   }, [profile?.role, authProfileLoading]);
+
+  const checkForUpdates = async (force: boolean = false) => {
+    if (!navigator.onLine) return;
+    
+    const isAdmin = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
+    
+    const now = new Date();
+    // PKT is UTC+5. 
+    const pktTime = new Date(now.getTime() + (5 * 60 * 60 * 1000));
+    const isPast9AMPKT = pktTime.getUTCHours() >= 9;
+
+    // The user requested: "Verify that the user only after chunk_meta after 9AM and by pressing refresh button in ProfileMenu"
+    // This implies that for regular users:
+    // 1. They must be past 9 AM PKT.
+    // 2. They must have pressed the refresh button (force = true) OR have absolutely no content.
+    
+    const hasAnyContent = contentList.length > 0;
+    
+    if (!isAdmin) {
+        // Strict restriction for regular users
+        if (!isPast9AMPKT) {
+            console.log("Sync skipped: Before 9 AM PKT.");
+            setLoading(false);
+            return;
+        }
+
+        if (hasAnyContent && !force) {
+            // Already has content and this is an auto-call (not from refresh button)
+            console.log("Sync skipped: Manual refresh required after 9 AM.");
+            setLoading(false);
+            return;
+        }
+    }
+    
+    // For admins OR (regular users past 9AM AND (no content OR manual refresh))
+    await syncWithServer(force);
+    
+    // Record that we checked in this period
+    const checkPeriod = `${pktTime.getUTCFullYear()}-${pktTime.getUTCMonth() + 1}-${pktTime.getUTCDate()}`;
+    safeStorage.setItem('last_meta_check_period', checkPeriod);
+  };
 
   const saveContentInternal = async (content: Content, localOnly = false) => {
     const isAdminOrEditor = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
@@ -877,26 +991,16 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
   const updateAuxiliaryCollection = async (type: 'genre' | 'language' | 'quality', items: any[]) => {
     if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
-    try {
-        const collectionName = type === 'quality' ? 'qualities' : `${type}s`;
-        const batch = writeBatch(db);
-        
-        // Delete all existing
-        const snapshot = await getDocs(collection(db, collectionName));
-        snapshot.docs.forEach(d => batch.delete(d.ref));
-        
-        // Add new
-        items.forEach((item, idx) => {
-          const docRef = doc(collection(db, collectionName), item.id || Math.random().toString(36).substr(2, 9));
-          const data: any = { name: item.name, order: idx };
-          if (type === 'quality') data.color = item.color;
-          batch.set(docRef, data);
-        });
-        
-        await batch.commit();
-    } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, type);
-    }
+    const cacheKey = type === 'quality' ? 'qualities_cache' : `${type}s_cache`;
+    
+    // items should already correctly have their 'order' values adjusted by the caller
+    safeStorage.setItem(cacheKey, JSON.stringify(items));
+    if (type === 'genre') setGenres(items);
+    if (type === 'language') setLanguages(items);
+    if (type === 'quality') setQualities(items);
+    
+    safeStorage.setItem('pending_metadata_updates', 'true');
+    setHasPendingChanges(true);
   };
 
   const bumpCollectionsVersion = async () => {
@@ -1024,37 +1128,51 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
   const addAuxiliaryItem = async (type: 'genre' | 'language' | 'quality', item: any) => {
     if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
-    try {
-        const { setDoc, doc, collection } = await import('firebase/firestore');
-        const collectionName = type === 'quality' ? 'qualities' : `${type}s`;
-        const colRef = collection(db, collectionName);
-        const newDocRef = item.id ? doc(colRef, item.id) : doc(colRef);
-        await setDoc(newDocRef, { ...item, id: newDocRef.id });
-    } catch (error) {
-        handleFirestoreError(error, OperationType.CREATE, type);
-    }
+    const cacheKey = type === 'quality' ? 'qualities_cache' : `${type}s_cache`;
+    let current = JSON.parse(safeStorage.getItem(cacheKey) || '[]');
+    const newItem = { ...item, id: item.id || Date.now().toString() };
+    current.push(newItem);
+    
+    safeStorage.setItem(cacheKey, JSON.stringify(current));
+    if (type === 'genre') setGenres(current);
+    if (type === 'language') setLanguages(current);
+    if (type === 'quality') setQualities(current);
+    
+    safeStorage.setItem('pending_metadata_updates', 'true');
+    setHasPendingChanges(true);
   };
 
   const updateAuxiliaryItem = async (type: 'genre' | 'language' | 'quality', id: string, updates: any) => {
     if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
-    try {
-        const { updateDoc, doc, collection } = await import('firebase/firestore');
-        const collectionName = type === 'quality' ? 'qualities' : `${type}s`;
-        await updateDoc(doc(collection(db, collectionName), id), updates);
-    } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, `${type}/${id}`);
+    const cacheKey = type === 'quality' ? 'qualities_cache' : `${type}s_cache`;
+    let current = JSON.parse(safeStorage.getItem(cacheKey) || '[]');
+    const idx = current.findIndex((i: any) => i.id === id);
+    if (idx !== -1) {
+        current[idx] = { ...current[idx], ...updates };
+        safeStorage.setItem(cacheKey, JSON.stringify(current));
+        
+        if (type === 'genre') setGenres(current);
+        if (type === 'language') setLanguages(current);
+        if (type === 'quality') setQualities(current);
+        
+        safeStorage.setItem('pending_metadata_updates', 'true');
+        setHasPendingChanges(true);
     }
   };
 
   const deleteAuxiliaryItem = async (type: 'genre' | 'language' | 'quality', id: string) => {
     if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
-    try {
-        const { deleteDoc, doc, collection } = await import('firebase/firestore');
-        const collectionName = type === 'quality' ? 'qualities' : `${type}s`;
-        await deleteDoc(doc(collection(db, collectionName), id));
-    } catch (error) {
-        handleFirestoreError(error, OperationType.DELETE, `${type}/${id}`);
-    }
+    const cacheKey = type === 'quality' ? 'qualities_cache' : `${type}s_cache`;
+    let current = JSON.parse(safeStorage.getItem(cacheKey) || '[]');
+    current = current.filter((i: any) => i.id !== id);
+    
+    safeStorage.setItem(cacheKey, JSON.stringify(current));
+    if (type === 'genre') setGenres(current);
+    if (type === 'language') setLanguages(current);
+    if (type === 'quality') setQualities(current);
+    
+    safeStorage.setItem('pending_metadata_updates', 'true');
+    setHasPendingChanges(true);
   };
 
   const deleteContent = async (id: string, chunkId?: string) => {
@@ -1097,7 +1215,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         contentList: augmentedContentList, genres, languages, qualities, collections, loading, isOffline, 
         updateOrder, getContent, saveContent, deleteContent, updateContentFields, deleteMultipleContents, 
         updateAuxiliaryCollection, addCollection, updateCollection, deleteCollection, reorderCollections,
-        addAuxiliaryItem, updateAuxiliaryItem, deleteAuxiliaryItem, finalizeChanges, hasPendingChanges 
+        addAuxiliaryItem, updateAuxiliaryItem, deleteAuxiliaryItem, finalizeChanges, hasPendingChanges, checkForUpdates
     }}>
       {children}
     </ContentContext.Provider>

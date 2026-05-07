@@ -84,7 +84,7 @@ export default function ContentSync() {
     const loadTargets = async () => {
       addLog("Loading targets from cloud...");
       try {
-        const settingsDoc = await getDoc(doc(sourceDb, 'admin_settings', 'app_settings'));
+        const settingsDoc = await getDoc(doc(sourceDb, 'settings', 'app_settings'));
         if (settingsDoc.exists()) {
           const data = settingsDoc.data();
           const targets = data?.serviceAccounts?.targets || [];

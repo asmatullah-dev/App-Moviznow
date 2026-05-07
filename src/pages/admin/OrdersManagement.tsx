@@ -117,37 +117,15 @@ export default function OrdersManagement() {
   };
 
   useEffect(() => {
-    let isMounted = true;
-    
-    const fetchOrders = async () => {
-      try {
-        const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
-        const snapshot = await getDocs(q);
-        if (isMounted) {
-          const ordersData = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          })) as Order[];
-          
-          safeStorage.setItem(CACHE_KEY, JSON.stringify(ordersData));
-          setOrders(ordersData);
-          setLoading(false);
-        }
-      } catch (error) {
-        console.error("Error fetching orders:", error);
-      }
-    };
+    const allOrders = allUsers.flatMap(u => u.orders || []);
+    allOrders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    safeStorage.setItem(CACHE_KEY, JSON.stringify(allOrders));
+    setOrders(allOrders);
+    setLoading(false);
+  }, [allUsers]);
 
-    fetchOrders();
-    const intervalId = setInterval(fetchOrders, 5 * 60 * 1000);
+  // Separate effect for auto-deletion
 
-    return () => {
-      isMounted = false;
-      clearInterval(intervalId);
-    };
-  }, []);
-
-  // Separate effect for auto-deletion to avoid blocking the main snapshot listener
   useEffect(() => {
     if (loading || orders.length === 0) return;
 
@@ -229,13 +207,13 @@ export default function OrdersManagement() {
           updates.status = 'active';
           updates.role = 'selected_content';
         }
+        
+        batch.update(userRef, updates); // Apply the content updates
+      } // <--- This closes the else if block!
 
-        batch.update(userRef, updates);
-      }
-
-      batch.update(doc(db, 'orders', order.id), {
-        status: 'approved'
-      });
+      const updatedOrders = userData.orders?.map(o => o.id === order.id ? { ...o, status: 'approved' } : o) || [];
+      batch.update(userRef, { orders: updatedOrders });
+      batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [order.userId]: Date.now() } }, { merge: true });
 
       // Record in Income Management
       batch.set(doc(collection(db, 'income')), {
@@ -256,9 +234,15 @@ export default function OrdersManagement() {
   const handleDecline = async (orderId: string) => {
     setProcessingId(orderId);
     try {
-      await updateDoc(doc(db, 'orders', orderId), {
-        status: 'declined'
-      });
+      const orderUser = allUsers.find(u => u.orders?.some(o => o.id === orderId));
+      if (!orderUser) throw new Error("User not found");
+
+      const updatedOrders = orderUser.orders!.map(o => o.id === orderId ? { ...o, status: 'declined' } : o);
+      
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'users', orderUser.uid), { orders: updatedOrders });
+      batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [orderUser.uid]: Date.now() } }, { merge: true });
+      await batch.commit();
     } catch (error) {
       console.error('Error declining order:', error);
     } finally {
@@ -269,7 +253,15 @@ export default function OrdersManagement() {
   const handleDelete = async (orderId: string) => {
     setProcessingId(orderId);
     try {
-      await deleteDoc(doc(db, 'orders', orderId));
+      const orderUser = allUsers.find(u => u.orders?.some(o => o.id === orderId));
+      if (!orderUser) throw new Error("User not found");
+
+      const updatedOrders = orderUser.orders!.filter(o => o.id !== orderId);
+      
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'users', orderUser.uid), { orders: updatedOrders });
+      batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [orderUser.uid]: Date.now() } }, { merge: true });
+      await batch.commit();
     } catch (error) {
       console.error('Error deleting order:', error);
     } finally {

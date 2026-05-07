@@ -1015,20 +1015,15 @@ export default function MovieDetails() {
   };
 
   const handleReportLink = async () => {
-    if (!profile || !linkPopup || !content) return;
+    if (!profile || !linkPopup || !mergedContent) return;
     
     setIsReporting(true);
     try {
-      // Check if already reported by this user
-      const q = query(
-        collection(db, 'reported_links'),
-        where('userId', '==', profile.uid),
-        where('linkId', '==', linkPopup.id),
-        where('status', '==', 'pending')
+      const alreadyReported = profile.reported_links?.some((r: any) => 
+        r.linkId === linkPopup.id && r.status === 'pending'
       );
-      const snapshot = await getDocs(q);
-      
-      if (!snapshot.empty) {
+
+      if (alreadyReported) {
         setAlertConfig({ 
           isOpen: true, 
           title: 'Already Reported', 
@@ -1038,7 +1033,11 @@ export default function MovieDetails() {
         return;
       }
 
-      await addDoc(collection(db, 'reported_links'), {
+      const { updateDoc, arrayUnion } = await import('firebase/firestore');
+      const reportId = Math.floor(10000000 + Math.random() * 90000000).toString();
+      
+      const reportData = {
+        id: reportId,
         userId: profile.uid,
         userName: profile.displayName || profile.email || 'Unknown User',
         contentId: mergedContent.id,
@@ -1048,7 +1047,11 @@ export default function MovieDetails() {
         linkName: linkPopup.name,
         linkUrl: linkPopup.url,
         status: 'pending',
-        createdAt: serverTimestamp(),
+        createdAt: new Date().toISOString()
+      };
+
+      await updateDoc(doc(db, 'users', profile.uid), {
+        reported_links: arrayUnion(reportData)
       });
       setAlertConfig({ isOpen: true, title: 'Report Submitted', message: 'Thank you for reporting. We will check and fix this link soon.' });
       closeLinkPopup();

@@ -3,19 +3,25 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { usePWA } from '../contexts/PWAContext';
+import { useSettings } from '../contexts/SettingsContext';
+import { useUsers } from '../contexts/UsersContext';
 import { 
   User, Settings, LogOut, Heart, Clock, MessageCircle, 
-  Sun, Moon, Monitor, LayoutDashboard, Film, Users, Plus, Download
+  Sun, Moon, Monitor, LayoutDashboard, Film, Users, Plus, Download, RefreshCw
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { format } from 'date-fns';
 import ConfirmModal from './ConfirmModal';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useContent } from '../contexts/ContentContext';
 
 export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogoutModal?: () => void }) => {
   const { profile, logout } = useAuth();
   const { theme, setTheme } = useTheme();
   const { isInstallable, installApp } = usePWA();
+  const { checkForUpdates } = useContent();
+  const { refreshSettings } = useSettings();
+  const { refreshUsers } = useUsers();
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
@@ -212,6 +218,21 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
               <Link to="/settings" onClick={() => setIsOpen(false)} className="flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
                 <Settings className="w-4 h-4 text-zinc-400" /> Settings
               </Link>
+              
+              <button 
+                onClick={async () => {
+                  setIsOpen(false);
+                  await Promise.all([
+                    checkForUpdates(true),
+                    refreshSettings(),
+                    refreshUsers && refreshUsers()
+                  ]);
+                }} 
+                className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                title="Check for Content Updates"
+              >
+                <RefreshCw className="w-4 h-4 text-zinc-400" /> Refresh App Data
+              </button>
 
               <button 
                 onClick={triggerLogout} 

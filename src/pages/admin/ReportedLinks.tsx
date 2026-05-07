@@ -5,6 +5,7 @@ import { AlertTriangle, Edit2, Trash2, Bell, CheckCircle2, X, Save } from 'lucid
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
 import { useContent } from '../../contexts/ContentContext';
 import { useNotifications } from '../../contexts/NotificationContext';
+import { useUsers } from '../../contexts/UsersContext';
 import { Content, QualityLinks, Season } from '../../types';
 import { LinkCheckerModal } from '../../components/LinkCheckerModal';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
@@ -39,35 +40,51 @@ export default function ReportedLinks() {
   useModalBehavior(!!editingReport, () => setEditingReport(null));
   useModalBehavior(isLinkCheckerModalOpen, () => setIsLinkCheckerModalOpen(false));
 
+  const { users: allUsers } = useUsers();
+  
   useEffect(() => {
-    const fetchReports = async () => {
-      try {
-        const snapshot = await getDocs(collection(db, 'reported_links'));
-        const data = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as ReportedLink));
-        // Sort by status (pending first) then by date
-        data.sort((a, b) => {
-          if (a.status === 'pending' && b.status === 'resolved') return -1;
-          if (a.status === 'resolved' && b.status === 'pending') return 1;
-          const aTime = a.createdAt?.toMillis?.() || 0;
-          const bTime = b.createdAt?.toMillis?.() || 0;
-          return bTime - aTime;
+    const data: ReportedLink[] = [];
+    allUsers.forEach(u => {
+      if (u.reported_links) {
+        u.reported_links.forEach((r: any) => {
+          data.push({
+            id: r.id,
+            userId: u.uid,
+            userName: u.displayName || u.email || 'Unknown',
+            contentId: r.contentId,
+            contentTitle: r.contentTitle,
+            contentType: r.contentType,
+            linkId: r.linkId,
+            linkName: r.linkName,
+            linkUrl: r.linkUrl,
+            status: r.status,
+            createdAt: r.createdAt
+          } as ReportedLink);
         });
-        setReports(data);
-        setLoading(false);
-      } catch (error) {
-        console.error("Reported links fetch error:", error);
-        setLoading(false);
-        handleFirestoreError(error, OperationType.LIST, 'reported_links');
       }
-    };
-    fetchReports();
-  }, []);
+    });
 
-  const handleDelete = async (id: string) => {
+    data.sort((a, b) => {
+      if (a.status === 'pending' && b.status === 'resolved') return -1;
+      if (a.status === 'resolved' && b.status === 'pending') return 1;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+    setReports(data);
+    setLoading(false);
+  }, [allUsers]);
+
+  const handleDelete = async (id: string, userId: string) => {
     if (!window.confirm('Are you sure you want to delete this report?')) return;
     try {
-      await deleteDoc(doc(db, 'reported_links', id));
-      setReports(reports.filter(r => r.id !== id));
+      const user = allUsers.find(u => u.uid === userId);
+      if (user && user.reported_links) {
+        const updated = user.reported_links.filter(r => r.id !== id);
+        const { writeBatch } = await import('firebase/firestore');
+        const batch = writeBatch(db);
+        batch.update(doc(db, 'users', userId), { reported_links: updated });
+        batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [userId]: Date.now() } }, { merge: true });
+        await batch.commit();
+      }
     } catch (error) {
       console.error("Error deleting report:", error);
       alert("Failed to delete report");
@@ -81,11 +98,15 @@ export default function ReportedLinks() {
   const handleNotify = async (report: ReportedLink) => {
     setNotifying(report.id);
     try {
-      // Create a notification for the user
-      await updateDoc(doc(db, 'reported_links', report.id), {
-        status: 'resolved'
-      });
-      setReports(reports.map(r => r.id === report.id ? { ...r, status: 'resolved' } : r));
+      const user = allUsers.find(u => u.uid === report.userId);
+      if (user && user.reported_links) {
+        const updated = user.reported_links.map(r => r.id === report.id ? { ...r, status: 'resolved' } : r);
+        const { writeBatch } = await import('firebase/firestore');
+        const batch = writeBatch(db);
+        batch.update(doc(db, 'users', report.userId), { reported_links: updated });
+        batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [report.userId]: Date.now() } }, { merge: true });
+        await batch.commit();
+      }
       
       if (report.userId) {
         // Add a notification using chunks
@@ -377,7 +398,7 @@ export default function ReportedLinks() {
                           <Edit2 className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => handleDelete(report.id)}
+                          onClick={() => handleDelete(report.id, report.userId)}
                           className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
                           title="Delete Report"
                         >

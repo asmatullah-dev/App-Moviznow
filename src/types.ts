@@ -25,6 +25,9 @@ export interface UserProfile {
   requirePasswordReset?: boolean;
   hasPassword?: boolean;
   sessionId?: string;
+  orders?: Order[];
+  reported_links?: any[];
+  movieRequests?: any[];
 }
 
 export interface AppNotification {

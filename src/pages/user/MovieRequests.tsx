@@ -43,30 +43,11 @@ export default function MovieRequests() {
 
   useEffect(() => {
     if (!profile) return;
-
-    const fetchRequests = async () => {
-      try {
-        const q = query(
-          collection(db, 'movie_requests'), 
-          where('userId', '==', profile.uid),
-          orderBy('createdAt', 'desc')
-        );
-        const snapshot = await getDocs(q);
-        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MovieRequest));
-        setRequests(data);
-        setLoading(false);
-
-        if (profile) {
-          const count = data.filter(r => r.userId === profile.uid).length;
-          setUserRequestCount(count);
-        }
-      } catch (error) {
-        console.error("Requests fetch error:", error);
-        setLoading(false);
-        handleFirestoreError(error, OperationType.LIST, 'movie_requests');
-      }
-    };
-    fetchRequests();
+    
+    const userRequests = [...(profile.movieRequests || [])].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    setRequests(userRequests);
+    setLoading(false);
+    setUserRequestCount(userRequests.length);
   }, [profile]);
 
   const handleSubmitRequest = async (e: React.FormEvent) => {
@@ -80,32 +61,29 @@ export default function MovieRequests() {
 
     setSubmitting(true);
     try {
-      // Check if this movie is already requested
-      const existingRequest = requests.find(r => r.title.toLowerCase() === newRequest.title.toLowerCase() && r.type === newRequest.type);
+      const { updateDoc, arrayUnion } = await import('firebase/firestore');
 
-      if (existingRequest) {
-        if (existingRequest.requestedBy.includes(profile.uid)) {
-          alert("You have already requested this movie.");
-        } else {
-          // Add user to existing request
-          await updateDoc(doc(db, 'movie_requests', existingRequest.id), {
-            requestedBy: arrayUnion(profile.uid),
-            requestCount: increment(1)
-          });
-          alert("Your vote has been added to this request!");
-        }
+      // Check if user already requested this exact movie locally
+      const alreadyRequested = profile.movieRequests?.some((r: any) => 
+        r.title.toLowerCase() === newRequest.title.trim().toLowerCase()
+      );
+
+      if (alreadyRequested) {
+        alert("You have already requested this movie.");
       } else {
-        // Create new request
-        await addDoc(collection(db, 'movie_requests'), {
+        const requestId = Math.floor(10000000 + Math.random() * 90000000).toString();
+        const requestData = {
+          id: requestId,
           title: newRequest.title.trim(),
           type: newRequest.type,
-          userId: profile.uid,
-          userEmail: profile.email,
-          userName: profile.displayName || 'User',
           status: 'pending',
           createdAt: new Date().toISOString(),
-          requestedBy: [profile.uid],
+          requestedBy: [profile.uid], // Keep for compatibility with admin aggregation
           requestCount: 1
+        };
+
+        await updateDoc(doc(db, 'users', profile.uid), {
+          movieRequests: arrayUnion(requestData)
         });
         alert("Request submitted successfully!");
       }
@@ -117,21 +95,6 @@ export default function MovieRequests() {
       alert("Failed to submit request. Please try again.");
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const handleUpvote = async (requestId: string) => {
-    if (!profile) return;
-    const request = requests.find(r => r.id === requestId);
-    if (!request || request.requestedBy.includes(profile.uid)) return;
-
-    try {
-      await updateDoc(doc(db, 'movie_requests', requestId), {
-        requestedBy: arrayUnion(profile.uid),
-        requestCount: increment(1)
-      });
-    } catch (error) {
-      console.error("Error upvoting:", error);
     }
   };
 
@@ -182,9 +145,9 @@ export default function MovieRequests() {
             <AlertCircle className="w-5 h-5 text-emerald-500" />
           </div>
           <div>
-            <h3 className="font-bold text-zinc-900 dark:text-zinc-200">How it works</h3>
+            <h3 className="font-bold text-zinc-900 dark:text-zinc-200">My Requests</h3>
             <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-              Can't find what you're looking for? Request it here!
+              Can't find what you're looking for? Request it here! We'll notify you once it's available.
             </p>
             <div className="mt-3 flex items-center gap-4">
               <span className="text-xs font-medium px-2 py-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700">
@@ -199,7 +162,7 @@ export default function MovieRequests() {
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-500" />
           <input
             type="text"
-            placeholder="Search existing requests..."
+            placeholder="Search your requests..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-12 pr-4 py-3 focus:outline-none focus:border-emerald-500 text-zinc-900 dark:text-white placeholder-zinc-500 dark:placeholder-zinc-400 transition-colors duration-300"
@@ -273,30 +236,6 @@ export default function MovieRequests() {
                       <Eye className="w-4 h-4" />
                       View
                     </Link>
-                  )}
-                  {request.status === 'pending' && (
-                    <button
-                      onClick={() => handleUpvote(request.id)}
-                      disabled={request.requestedBy.includes(profile?.uid || '')}
-                      className={clsx(
-                        "px-4 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-2",
-                        request.requestedBy.includes(profile?.uid || '')
-                          ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 cursor-default"
-                          : "bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500 hover:text-white"
-                      )}
-                    >
-                      {request.requestedBy.includes(profile?.uid || '') ? (
-                        <>
-                          <CheckCircle2 className="w-4 h-4" />
-                          Requested
-                        </>
-                      ) : (
-                        <>
-                          <Plus className="w-4 h-4" />
-                          Me Too
-                        </>
-                      )}
-                    </button>
                   )}
                 </div>
               </div>

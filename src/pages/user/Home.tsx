@@ -128,6 +128,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
     setSelectedYear('');
     setSearch('');
     setCurrentPage(1);
+    setShowFilters(false);
     
     // Also clear session storage explicitly to be safe
     sessionStorage.removeItem('home_sort');
@@ -141,7 +142,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
   };
 
   const hasActiveFilters = 
-    sort !== 'default' || 
+    (sort !== 'newest') || 
     selectedType !== '' || 
     selectedGenre !== '' || 
     selectedLanguage !== '' || 
@@ -519,8 +520,20 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
                     onChange={(e) => {
                       setSearch(e.target.value);
                     }}
-                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-12 pr-4 py-3 focus:outline-none focus:border-emerald-500 text-zinc-900 dark:text-white placeholder-zinc-500 dark:placeholder-zinc-400 transition-colors duration-300"
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-12 pr-12 py-3 focus:outline-none focus:border-emerald-500 text-zinc-900 dark:text-white placeholder-zinc-500 dark:placeholder-zinc-400 transition-colors duration-300"
                   />
+                  {search && (
+                    <button
+                      onClick={() => {
+                        setSearch('');
+                        searchInputRef.current?.focus();
+                      }}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center border border-red-500/20 hover:bg-red-500/20 transition-colors"
+                      title="Clear search"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
                 
                 <ScrollableRow scrollKey="scroll_filters_container" className="flex gap-3 overflow-x-auto pb-2 md:pb-0 flex-nowrap relative">

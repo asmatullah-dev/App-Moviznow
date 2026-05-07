@@ -73,9 +73,9 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         opCount++;
       }
 
-      // Add user_meta update
+      // Add chunk_meta update
       if (opCount >= 490) batches.push(writeBatch(db));
-      batches[batches.length - 1].set(doc(db, 'user_meta', 'versions'), metaUpdates, { merge: true });
+      batches[batches.length - 1].set(doc(db, 'chunk_meta', 'versions'), { users: metaUpdates }, { merge: true });
 
       for (const b of batches) await b.commit();
       
@@ -96,16 +96,15 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
 
   const fetchUsers = useCallback(async () => {
     try {
-      // 1. Fetch user_meta/versions
-      let metaDoc;
+      // 1. Fetch chunk_meta/versions
+      let serverVersions = {};
       try {
-        metaDoc = await getDoc(doc(db, 'user_meta', 'versions'));
+        const meta = await import('../utils/chunkMeta').then(m => m.getChunkMeta());
+        serverVersions = meta.users || {};
       } catch (err) {
-        handleFirestoreError(err, OperationType.GET, 'user_meta/versions');
+        handleFirestoreError(err, OperationType.GET, 'chunk_meta/versions');
         throw err;
       }
-      
-      const serverVersions = metaDoc.exists() ? metaDoc.data() : {};
       
       const cachedMetaStr = safeStorage.getItem('cached_user_meta_versions');
       const localVersions = cachedMetaStr ? JSON.parse(cachedMetaStr) : {};
@@ -168,14 +167,14 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         }
         
         // Populate meta logic locally if it's missing on server
-        if (!metaDoc.exists()) {
+        if (Object.keys(serverVersions).length === 0) {
             const initialMeta: Record<string, number> = {};
             currentUsers.forEach(u => initialMeta[u.uid] = Date.now());
             try { 
-              await setDoc(doc(db, 'user_meta', 'versions'), initialMeta); 
+              await setDoc(doc(db, 'chunk_meta', 'versions'), { users: initialMeta }, { merge: true }); 
             } catch(e) {
               // Non-critical, but log if fail
-              console.warn("Failed to set user_meta versions singleton:", e);
+              console.warn("Failed to set chunk_meta versions singleton:", e);
             }
             Object.assign(serverVersions, initialMeta);
         }

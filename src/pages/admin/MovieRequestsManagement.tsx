@@ -3,6 +3,7 @@ import { db } from '../../firebase';
 import { collection, query, orderBy, deleteDoc, doc, updateDoc, getDocs } from 'firebase/firestore';
 import { useAuth } from '../../contexts/AuthContext';
 import { useContent } from '../../contexts/ContentContext';
+import { useUsers } from '../../contexts/UsersContext';
 import { Film, Search, Clock, CheckCircle2, XCircle, MessageCircle, Trash2, Tv, Filter, User, Mail, Calendar, ArrowUp, ArrowDown, Plus, X, Eye, MessageSquare } from 'lucide-react';
 import { clsx } from 'clsx';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
@@ -21,6 +22,7 @@ interface MovieRequest {
   status: 'pending' | 'completed' | 'rejected';
   createdAt: string;
   requestedBy: string[];
+  userIds?: string[];
   requestCount: number;
   adminComment?: string;
 }
@@ -56,48 +58,98 @@ export default function MovieRequestsManagement() {
   useModalBehavior(isPickerOpen, () => setIsPickerOpen(false));
   useModalBehavior(!!requestToComment, () => setRequestToComment(null));
 
+  const { users: allUsers } = useUsers();
+
   useEffect(() => {
-    let isMounted = true;
-    
-    const fetchRequests = async () => {
-      try {
-        const q = query(collection(db, 'movie_requests'), orderBy(sortBy === 'count' ? 'requestCount' : 'createdAt', sortOrder));
-        const snapshot = await getDocs(q);
-        if (isMounted) {
-          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MovieRequest));
-          setRequests(data);
-          setLoading(false);
-        }
-      } catch (error) {
-        console.error("Requests snapshot error:", error);
-        if (isMounted) {
-          setLoading(false);
-          handleFirestoreError(error, OperationType.LIST, 'movie_requests');
-        }
+    const aggregated = new Map<string, MovieRequest>();
+
+    allUsers.forEach(user => {
+      if (user.movieRequests) {
+        user.movieRequests.forEach((req: any) => {
+          const key = `${req.title.toLowerCase().trim()}-${req.type}`;
+          if (aggregated.has(key)) {
+            const existing = aggregated.get(key)!;
+            existing.requestCount += 1;
+            existing.requestedBy.push(user.uid);
+            existing.userIds.push(user.uid);
+          } else {
+            aggregated.set(key, {
+              id: key,
+              title: req.title,
+              type: req.type,
+              userId: user.uid,
+              userEmail: user.email || '',
+              userName: user.displayName || 'User',
+              status: req.status,
+              createdAt: req.createdAt,
+              requestedBy: [user.uid],
+              userIds: [user.uid],
+              requestCount: 1,
+              adminComment: req.adminComment
+            });
+          }
+        });
       }
-    };
+    });
 
-    fetchRequests();
-    const intervalId = setInterval(fetchRequests, 5 * 60 * 1000);
+    const data = Array.from(aggregated.values());
+    data.sort((a, b) => {
+      if (sortBy === 'count') {
+        return sortOrder === 'desc' ? b.requestCount - a.requestCount : a.requestCount - b.requestCount;
+      } else {
+        return sortOrder === 'desc' 
+          ? new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          : new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      }
+    });
 
-    return () => {
-      isMounted = false;
-      clearInterval(intervalId);
-    };
-  }, [sortBy, sortOrder]);
+    setRequests(data);
+    setLoading(false);
+  }, [allUsers, sortBy, sortOrder]);
 
-  const handleUpdateStatus = async (requestId: string, status: 'completed' | 'rejected' | 'pending') => {
+  const updateRequestsForUsers = async (requestTitle: string, requestType: string, updates: any, action: 'update' | 'delete' = 'update') => {
+    const requestKey = `${requestTitle.toLowerCase().trim()}-${requestType}`;
+    const targetRequest = requests.find(r => r.id === requestKey);
+    if (!targetRequest) return;
+
+    const { writeBatch } = await import('firebase/firestore');
+    const batch = writeBatch(db);
+
+    targetRequest.requestedBy.forEach(uid => {
+      const user = allUsers.find(u => u.uid === uid);
+      if (user && user.movieRequests) {
+        let updatedReqs = user.movieRequests;
+        if (action === 'delete') {
+          updatedReqs = user.movieRequests.filter((r: any) => 
+            !(r.title.toLowerCase().trim() === requestTitle.toLowerCase().trim() && r.type === requestType)
+          );
+        } else {
+          updatedReqs = user.movieRequests.map((r: any) => 
+            (r.title.toLowerCase().trim() === requestTitle.toLowerCase().trim() && r.type === requestType)
+              ? { ...r, ...updates } 
+              : r
+          );
+        }
+        batch.update(doc(db, 'users', uid), { movieRequests: updatedReqs });
+        batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [uid]: Date.now() } }, { merge: true });
+      }
+    });
+
+    await batch.commit();
+  };
+
+  const handleUpdateStatus = async (request: MovieRequest, status: 'completed' | 'rejected' | 'pending') => {
     try {
-      await updateDoc(doc(db, 'movie_requests', requestId), { status });
+      await updateRequestsForUsers(request.title, request.type, { status });
     } catch (error) {
       console.error("Error updating status:", error);
       alert("Failed to update status.");
     }
   };
 
-  const handleUpdateComment = async (requestId: string, comment: string) => {
+  const handleUpdateComment = async (request: MovieRequest, comment: string) => {
     try {
-      await updateDoc(doc(db, 'movie_requests', requestId), { adminComment: comment });
+      await updateRequestsForUsers(request.title, request.type, { adminComment: comment });
     } catch (error) {
       console.error("Error updating comment:", error);
       alert("Failed to update comment.");
@@ -107,7 +159,10 @@ export default function MovieRequestsManagement() {
   const handleDeleteRequest = async () => {
     if (!requestToDelete) return;
     try {
-      await deleteDoc(doc(db, 'movie_requests', requestToDelete));
+      const req = requests.find(r => r.id === requestToDelete);
+      if (req) {
+        await updateRequestsForUsers(req.title, req.type, {}, 'delete');
+      }
       setIsDeleteModalOpen(false);
       setRequestToDelete(null);
     } catch (error) {
@@ -120,10 +175,13 @@ export default function MovieRequestsManagement() {
     if (!selectedRequestId) return;
     setIsSelecting(contentId);
     try {
-      await updateDoc(doc(db, 'movie_requests', selectedRequestId), { 
-        status: 'completed',
-        linkedContentId: contentId 
-      });
+      const req = requests.find(r => r.id === selectedRequestId);
+      if (req) {
+        await updateRequestsForUsers(req.title, req.type, { 
+          status: 'completed',
+          linkedContentId: contentId 
+        });
+      }
       setIsPickerOpen(false);
       setSelectedRequestId(null);
       setContentSearch('');
@@ -288,7 +346,7 @@ export default function MovieRequestsManagement() {
                     <td className="px-6 py-4">
                       <select
                         value={request.status}
-                        onChange={(e) => handleUpdateStatus(request.id, e.target.value as any)}
+                        onChange={(e) => handleUpdateStatus(request, e.target.value as any)}
                         className={clsx(
                           "text-xs font-bold px-3 py-1.5 rounded-lg border focus:outline-none transition-colors w-20 text-zinc-100",
                           request.status === 'pending' && "bg-yellow-500/10 text-yellow-500 border-yellow-500/20",
@@ -368,7 +426,7 @@ export default function MovieRequestsManagement() {
         <CommentModal
           isOpen={!!requestToComment}
           onClose={() => setRequestToComment(null)}
-          onSave={(comment) => handleUpdateComment(requestToComment.id, comment)}
+          onSave={(comment) => handleUpdateComment(requestToComment, comment)}
           initialComment={requestToComment.adminComment || ''}
         />
       )}

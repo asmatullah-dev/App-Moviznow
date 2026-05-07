@@ -39,7 +39,10 @@ export default function Cart() {
     try {
       const newOrderId = Math.floor(10000000 + Math.random() * 90000000).toString();
 
-      await setDoc(doc(db, 'orders', newOrderId), {
+      const { updateDoc, arrayUnion } = await import('firebase/firestore');
+      
+      const orderData = {
+        id: newOrderId,
         userId: profile.uid,
         userName: profile.displayName || 'Unknown',
         userEmail: profile.email,
@@ -48,7 +51,11 @@ export default function Cart() {
         amount: totalPrice,
         items: cart,
         status: 'pending',
-        createdAt: serverTimestamp(),
+        createdAt: new Date().toISOString(),
+      };
+
+      await updateDoc(doc(db, 'users', profile.uid), {
+        orders: arrayUnion(orderData)
       });
       setOrderId(newOrderId);
       setConfirmed(true);
@@ -76,16 +83,9 @@ export default function Cart() {
           if (!currentOrderId) return; // Failed to create order
       }
 
-      // Fetch the last content order
-      const q = query(
-        collection(db, 'orders'),
-        where('userId', '==', profile.uid),
-        where('type', '==', 'content'),
-        orderBy('createdAt', 'desc'),
-        limit(1)
-      );
-      const snapshot = await getDocs(q);
-      const lastOrder = snapshot.docs[0]?.data();
+      // Get last order from profile
+      const orders = profile.orders || [];
+      const lastOrder = orders.length > 0 ? [...orders].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] : null;
 
       const message = `Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nPlease approve my order. Order ID: ${currentOrderId}\nItems: ${lastOrder?.items?.length || 0}\nTotal Amount: Rs ${lastOrder?.amount || totalPrice}`;
       

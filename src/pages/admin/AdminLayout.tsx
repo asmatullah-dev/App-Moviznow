@@ -1,12 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Outlet, Link, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSettings } from '../../contexts/SettingsContext';
+import { useUsers } from '../../contexts/UsersContext';
 import { Film, Users, Tags, Languages, Clock, LogOut, Menu, X, MonitorPlay, BarChart3, DollarSign, AlertTriangle, Bell, MessageCircle, Settings, LayoutDashboard, RefreshCw, Layers } from 'lucide-react';
 import { clsx } from 'clsx';
 import ConfirmModal from '../../components/ConfirmModal';
-import { collection, onSnapshot, query, where, getDocs } from 'firebase/firestore';
-import { db } from '../../firebase';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
 
 export default function AdminLayout() {
@@ -16,43 +15,19 @@ export default function AdminLayout() {
   const navigate = useNavigate();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
-  const [reportedLinksCount, setReportedLinksCount] = useState(0);
-  const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
+  const { users } = useUsers();
+  
+  const reportedLinksCount = useMemo(() => {
+    return users.reduce((total, user) => 
+      total + (user.reported_links?.filter(r => r.status === 'pending').length || 0), 0);
+  }, [users]);
+  
+  const pendingOrdersCount = useMemo(() => {
+    return users.reduce((total, user) => 
+      total + (user.orders?.filter(o => o.status === 'pending').length || 0), 0);
+  }, [users]);
 
-  useModalBehavior(isLogoutModalOpen, () => setIsLogoutModalOpen(false));
-  useModalBehavior(isMobileMenuOpen, () => setIsMobileMenuOpen(false));
-
-  useEffect(() => {
-    if (profile?.role !== 'admin' && profile?.role !== 'owner' && profile?.role !== 'content_manager' && profile?.role !== 'manager') return;
-
-    const qReported = query(collection(db, 'reported_links'), where('status', '==', 'pending'));
-    const qOrders = query(collection(db, 'orders'), where('status', '==', 'pending'));
-    
-    let isMounted = true;
-    
-    const fetchCounts = async () => {
-      try {
-        const [reportedSnap, ordersSnap] = await Promise.all([
-          getDocs(qReported),
-          getDocs(qOrders)
-        ]);
-        if (isMounted) {
-          setReportedLinksCount(reportedSnap.size);
-          setPendingOrdersCount(ordersSnap.size);
-        }
-      } catch (error) {
-        console.error("Error fetching admin counts:", error);
-      }
-    };
-
-    fetchCounts();
-    const intervalId = setInterval(fetchCounts, 5 * 60 * 1000); // 5 mins
-
-    return () => {
-      isMounted = false;
-      clearInterval(intervalId);
-    };
-  }, [profile]);
+  // fetchCounts logic removed since we observe users array directly
 
   const allNavItems = [
     { id: 'Dashboard', path: '/admin', label: 'Dashboard', icon: LayoutDashboard },

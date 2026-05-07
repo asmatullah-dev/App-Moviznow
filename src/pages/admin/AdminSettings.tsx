@@ -61,33 +61,21 @@ export default function AdminSettings() {
     const fetchSettings = async () => {
       try {
         const docRef = doc(db, 'settings', 'app_settings');
-        const adminDocRef = doc(db, 'admin_settings', 'app_settings');
-        const [docSnap, adminDocSnap] = await Promise.all([
-          getDoc(docRef),
-          getDoc(adminDocRef)
-        ]);
+        const docSnap = await getDoc(docRef);
 
-        let mergedData: Partial<AppSettings> = {};
+        let ObjectData: Partial<AppSettings> = {};
 
         if (docSnap.exists()) {
-          mergedData = { ...docSnap.data() };
-        }
-        
-        if (adminDocSnap.exists()) {
-          const adminData = adminDocSnap.data();
-          if (adminData.serviceAccounts) {
-            mergedData.serviceAccounts = adminData.serviceAccounts;
-          }
+          ObjectData = { ...docSnap.data() };
         }
 
         setSettings({
           ...settings,
-          ...mergedData,
-          // Ensure arrays exist
-          bankAccounts: mergedData.bankAccounts || settings.bankAccounts,
-          adminTabsOrder: mergedData.adminTabsOrder || settings.adminTabsOrder,
-          hiddenAdminTabs: mergedData.hiddenAdminTabs || [],
-          serviceAccounts: mergedData.serviceAccounts || { sourceKey: '', targets: [] }
+          ...ObjectData,
+          bankAccounts: ObjectData.bankAccounts || settings.bankAccounts,
+          adminTabsOrder: ObjectData.adminTabsOrder || settings.adminTabsOrder,
+          hiddenAdminTabs: ObjectData.hiddenAdminTabs || [],
+          serviceAccounts: ObjectData.serviceAccounts || { sourceKey: '', targets: [] }
         });
       } catch (err) {
         console.error('Error fetching settings:', err);
@@ -106,11 +94,12 @@ export default function AdminSettings() {
     setSuccess(false);
 
     try {
-      const { serviceAccounts, ...publicSettings } = settings;
-      await Promise.all([
-        setDoc(doc(db, 'settings', 'app_settings'), publicSettings),
-        setDoc(doc(db, 'admin_settings', 'app_settings'), { serviceAccounts })
-      ]);
+      const { writeBatch } = await import('firebase/firestore');
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'settings', 'app_settings'), settings);
+      batch.set(doc(db, 'chunk_meta', 'versions'), { settings: Date.now() }, { merge: true });
+      await batch.commit();
+
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err) {
