@@ -52,7 +52,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
   
   // ... (rest of the component)
 
-  const [sort, setSort] = useState<'default' | 'newest' | 'year' | 'az'>(() => (sessionStorage.getItem('home_sort') as any) || 'default');
+  const [sort, setSort] = useState<'default' | 'newest' | 'year' | 'az'>(() => (sessionStorage.getItem('home_sort') as any) || 'newest');
   const [selectedGenre, setSelectedGenre] = useState<string>(() => sessionStorage.getItem('home_genre') || '');
   const [selectedLanguage, setSelectedLanguage] = useState<string>(() => sessionStorage.getItem('home_language') || '');
   const [selectedType, setSelectedType] = useState<string>(() => sessionStorage.getItem('home_type') || '');
@@ -120,7 +120,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
   useModalBehavior(!!selectedCollection, () => setSelectedCollection(null));
 
   const clearFilters = () => {
-    setSort('default');
+    setSort('newest');
     setSelectedType('');
     setSelectedGenre('');
     setSelectedLanguage('');
@@ -310,29 +310,32 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
       });
     }
 
-    if (!debouncedSearch || sort === 'default') {
-      result.sort((a, b) => {
-        // For selected_content users, prioritize assigned content
-        if (profile?.role === 'selected_content') {
-          const aAssigned = profile.assignedContent?.some(id => id === a.id || id.startsWith(`${a.id}:`)) ? 1 : 0;
-          const bAssigned = profile.assignedContent?.some(id => id === b.id || id.startsWith(`${b.id}:`)) ? 1 : 0;
-          if (aAssigned !== bAssigned) return bAssigned - aAssigned;
-        }
-
-        if (sort === 'default') {
-          if (a.order !== undefined && b.order !== undefined) return b.order - a.order;
-          if (a.order === undefined && b.order !== undefined) return 1;
-          if (a.order !== undefined && b.order === undefined) return -1;
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-        } else if (sort === 'newest') {
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-        } else if (sort === 'year') {
-          return b.year - a.year;
-        } else {
-          return a.title.localeCompare(b.title);
-        }
-      });
+    // If searching and default or newest sort, use the score-based sort from smartSearch
+    if (debouncedSearch && (sort === 'default' || sort === 'newest')) {
+      return result;
     }
+
+    result.sort((a, b) => {
+      // For selected_content users, prioritize assigned content
+      if (profile?.role === 'selected_content') {
+        const aAssigned = profile.assignedContent?.some(id => id === a.id || id.startsWith(`${a.id}:`)) ? 1 : 0;
+        const bAssigned = profile.assignedContent?.some(id => id === b.id || id.startsWith(`${b.id}:`)) ? 1 : 0;
+        if (aAssigned !== bAssigned) return bAssigned - aAssigned;
+      }
+
+      if (sort === 'default') {
+        if (a.order !== undefined && b.order !== undefined) return b.order - a.order;
+        if (a.order === undefined && b.order !== undefined) return 1;
+        if (a.order !== undefined && b.order === undefined) return -1;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      } else if (sort === 'newest') {
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      } else if (sort === 'year') {
+        return (b.year || 0) - (a.year || 0);
+      } else {
+        return (a.title || '').localeCompare(b.title || '');
+      }
+    });
 
     return result;
   }, [contentList, debouncedSearch, sort, selectedType, selectedGenre, selectedLanguage, selectedQuality, selectedYear, profile]);

@@ -370,7 +370,7 @@ export default function ContentManagement() {
   const [filterYear, setFilterYear] = useState<string>(() => sessionStorage.getItem('content_mgmt_year') || 'all');
   const [filterStatus, setFilterStatus] = useState<'all' | 'published' | 'draft' | 'selected_content'>(() => (sessionStorage.getItem('content_mgmt_status') as any) || 'all');
   const [filterAddedBy, setFilterAddedBy] = useState<string>(() => sessionStorage.getItem('content_mgmt_added_by') || 'all');
-  const [filterSort, setFilterSort] = useState<'default' | 'newest' | 'oldest'>(() => (sessionStorage.getItem('content_mgmt_sort') as any) || 'default');
+  const [filterSort, setFilterSort] = useState<'default' | 'newest' | 'oldest'>(() => (sessionStorage.getItem('content_mgmt_sort') as any) || 'newest');
   const [selectedContent, setSelectedContent] = useState<string[]>([]);
   const [visibleCount, setVisibleCount] = useState(() => {
     const saved = sessionStorage.getItem('admin_content_mgmt_visible_count');
@@ -2701,6 +2701,13 @@ export default function ContentManagement() {
     
     // Sort according to user preference, just like Home page
     let sortedResult = [...result];
+    
+    // If we're searching and the sort is default or newest, we SHOULD NOT re-sort,
+    // because smartSearch already sorted by relevance score.
+    if (debouncedSearchTerm && (filterSort === 'default' || filterSort === 'newest')) {
+      return result;
+    }
+
     sortedResult.sort((a, b) => {
         if (filterSort === 'default') {
           if (a.order !== undefined && b.order !== undefined) return b.order - a.order;

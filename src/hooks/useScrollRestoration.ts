@@ -17,16 +17,21 @@ export function useScrollRestoration<T extends HTMLElement>(key: string, isWindo
         if (isWindow) {
           window.scrollTo({ top: savedPosition, behavior: 'instant' } as any);
         } else if (ref.current) {
-          ref.current.scrollLeft = savedPosition;
+          if (ref.current.scrollWidth >= savedPosition) {
+            ref.current.scrollLeft = savedPosition;
+          }
         }
       };
 
-      // Try once immediately (if ready is already true)
+      // Try multiple times as content might load/render in chunks
       restore();
-      
-      // And again after a short delay to account for layout shifts
-      const timer = setTimeout(restore, 100);
-      return () => clearTimeout(timer);
+      const timers = [
+        setTimeout(restore, 50),
+        setTimeout(restore, 150),
+        setTimeout(restore, 300),
+        setTimeout(restore, 1000)
+      ];
+      return () => timers.forEach(clearTimeout);
     }
   }, [key, isWindow, ready]);
 

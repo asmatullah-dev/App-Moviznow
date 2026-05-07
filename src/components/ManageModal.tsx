@@ -35,7 +35,7 @@ const ManageModal: React.FC<Props> = ({ isOpen, title, onClose, type, items: ini
 
   useEffect(() => {
     if (isOpen) {
-      setItems([...initialItems].sort((a, b) => (b.order ?? 0) - (a.order ?? 0)));
+      setItems([...initialItems].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)));
       setNewItemName('');
       setSearchTerm('');
       setEditingId(null);
@@ -102,7 +102,7 @@ const ManageModal: React.FC<Props> = ({ isOpen, title, onClose, type, items: ini
     const newItems = Array.from(items);
     const [reorderedItem] = newItems.splice(result.source.index, 1);
     newItems.splice(result.destination.index, 0, reorderedItem);
-    setItems(newItems.map((item, idx) => ({ ...item, order: newItems.length - 1 - idx })));
+    setItems(newItems.map((item, idx) => ({ ...item, order: idx })));
   };
 
   const handleSaveAll = async () => {
