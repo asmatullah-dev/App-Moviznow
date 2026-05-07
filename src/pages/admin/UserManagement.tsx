@@ -244,28 +244,17 @@ export default function UserManagement() {
     setIsAnalyticsLoading(true);
     setUserRequests([]);
     setAssignedContentTitles([]);
+    
     try {
       // 1. Find the fresh user in the local allUsers list (already managed by UsersContext)
       const freshUser = allUsers.find(u => u.uid === user.uid) || user;
-
-      // 2. Fetch latest movie requests (always fresh as they aren't versioned in context yet)
-      const requestsSnapshot = await getDocs(query(collection(db, 'movie_requests'), where('userId', '==', user.uid)));
-      const requestsData = requestsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setUserRequests(requestsData);
-
-      // 3. Update assigned content titles
-      if (freshUser.role === 'selected_content' && freshUser.assignedContent && freshUser.assignedContent.length > 0) {
-        const contentMap = new Map<string, string>();
-        contentList.forEach(c => {
-          contentMap.set(c.id, c.title);
-        });
-        const titles = freshUser.assignedContent.map(id => contentMap.get(id) || 'Unknown Content');
-        setAssignedContentTitles(titles);
-      } else {
-        setAssignedContentTitles([]);
+      
+      // Update selectedUser if fresh data found, to ensure the UI shows latest counts
+      if (selectedUser?.uid === freshUser.uid) {
+        setSelectedUser(freshUser);
       }
 
-      // 4. Process Analytics from LOCAL data
+      // 2. Process Analytics IMMEDIATELY from LOCAL data (no network wait)
       const newAnalytics = { 
         timeSpent: freshUser.timeSpent || 0,
         favoritesCount: (freshUser.favorites || []).length,
@@ -279,11 +268,28 @@ export default function UserManagement() {
         [user.uid]: newAnalytics
       }));
       
-      // Also cache for quick reload
+      // Cache for quick reload
       safeStorage.setItem(`user_analytics_${user.uid}`, JSON.stringify(newAnalytics));
 
+      // 3. Update assigned content titles
+      if (freshUser.role === 'selected_content' && freshUser.assignedContent && freshUser.assignedContent.length > 0) {
+        const contentMap = new Map<string, string>();
+        contentList.forEach(c => {
+          contentMap.set(c.id, c.title);
+        });
+        const titles = freshUser.assignedContent.map(id => contentMap.get(id) || 'Unknown Content');
+        setAssignedContentTitles(titles);
+      } else {
+        setAssignedContentTitles([]);
+      }
+
+      // 4. Fetch latest movie requests in the background (completes scan)
+      const requestsSnapshot = await getDocs(query(collection(db, 'movie_requests'), where('userId', '==', user.uid)));
+      const requestsData = requestsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setUserRequests(requestsData);
+
     } catch (error) {
-      console.error("Error fetching user analytics:", error);
+      console.error("Error scanning user:", error);
     } finally {
       setIsAnalyticsLoading(false);
     }
