@@ -694,7 +694,11 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
     // Period check to avoid redundant auto-checks
     const lastCheckPeriod = safeStorage.getItem('last_meta_check_period');
-    if (!force && lastCheckPeriod === checkPeriod) {
+    
+    // Always refresh if content list is empty locally
+    const noLocalData = contentList.length === 0;
+
+    if (!force && lastCheckPeriod === checkPeriod && !noLocalData) {
         // Already checked for this period (either before 9AM or for the 9AM cycle)
         setLoading(false);
         return;
@@ -704,7 +708,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     // This implies that for ALL users:
     // 1. Auto-sync if it's past 9AM and not checked yet for this period.
     // 2. Manual sync if button is pressed (force=true).
-    if (!force && !isPast9AMPKT) {
+    if (!force && !isPast9AMPKT && !noLocalData) {
         console.log("Auto-sync deferred: Before 9 AM PKT.");
         setLoading(false);
         return;

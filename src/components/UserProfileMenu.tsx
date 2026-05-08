@@ -235,7 +235,7 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
               </button>
 
               <button 
-                onClick={triggerLogout} 
+                onClick={handleLogout} 
                 className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
               >
                 <LogOut className="w-4 h-4" /> Sign Out
@@ -244,15 +244,6 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
           </motion.div>
         )}
       </AnimatePresence>
-
-      <ConfirmModal
-        isOpen={isLogoutModalOpen}
-        onCancel={() => setIsLogoutModalOpen(false)}
-        onConfirm={handleLogout}
-        title="Sign Out"
-        message="Are you sure you want to sign out?"
-        confirmText="Sign Out"
-      />
     </div>
   );
 });

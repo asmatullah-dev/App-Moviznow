@@ -426,7 +426,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
       if (detectedS !== undefined) linkItem.season = detectedS;
       if (detectedE !== undefined) linkItem.episode = detectedE;
-      if (/full season|all episodes|complete/i.test(source) && !detectedE) linkItem.isFullSeasonMKV = true;
+      if (source.includes('.zip')) linkItem.isFullSeasonZIP = true;
+      else if (/full season|all episodes|complete/i.test(source) && !detectedE) linkItem.isFullSeasonMKV = true;
       if (source.toLowerCase().includes('sample')) linkItem.isSample = true;
 
       return linkItem;

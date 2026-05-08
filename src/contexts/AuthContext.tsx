@@ -816,39 +816,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 safeStorage.setItem(cacheKey, remainingSeconds.toString());
                 safeStorage.setItem(lastSyncKey, optimisticSyncTime);
 
-                const userRef = doc(db, "users", uid);
-                const updates: any = {
-                  lastActive: new Date().toISOString(),
-                  timeSpent: increment(minutesToSync),
-                };
+                // Deferred local write for time tracking (avoids constant Firestore writes)
+                const lastActiveStr = new Date().toISOString();
+                
+                // Update local cached_all_users
+                const cachedUsersStr = safeStorage.getItem('cached_all_users') || '[]';
+                let cachedUsers: any[] = [];
+                try { cachedUsers = JSON.parse(cachedUsersStr); } catch (e) {}
+                const userIndex = cachedUsers.findIndex(u => u.uid === uid);
+                let currentTotalMinutes = 0;
+                
+                if (userIndex !== -1) {
+                  currentTotalMinutes = cachedUsers[userIndex].timeSpent || 0;
+                  cachedUsers[userIndex].timeSpent = currentTotalMinutes + minutesToSync;
+                  cachedUsers[userIndex].lastActive = lastActiveStr;
+                  safeStorage.setItem('cached_all_users', JSON.stringify(cachedUsers));
+                  
+                  // Only dispatch custom event if user is currently loaded
+                  window.dispatchEvent(new CustomEvent('user_local_update', { 
+                    detail: { uid, fields: { timeSpent: cachedUsers[userIndex].timeSpent, lastActive: lastActiveStr } }
+                  }));
+                }
 
-                import('firebase/firestore').then(({ writeBatch }) => {
-                  const batch = writeBatch(db);
-                  batch.update(userRef, updates);
-                  batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [uid]: Date.now() } }, { merge: true });
-                  return batch.commit();
-                })
-                  .then(() => {
-                    logEvent("time_spent", uid, { duration: minutesToSync });
-                  })
+                // Add absolute value to pending_user_updates to defer Firestore write
+                const pendingStr = safeStorage.getItem('pending_user_updates') || '{}';
+                let pending: any = {};
+                try { pending = JSON.parse(pendingStr); } catch(e) {}
+                
+                pending[uid] = pending[uid] || {};
+                const baseTime = typeof pending[uid].timeSpent === 'number' ? pending[uid].timeSpent : currentTotalMinutes;
+                pending[uid].timeSpent = baseTime + minutesToSync;
+                pending[uid].lastActive = lastActiveStr;
+                
+                safeStorage.setItem('pending_user_updates', JSON.stringify(pending));
+                
+                // Dispatch event so that UsersContext or other observing context can trigger setHasPendingChanges
+                window.dispatchEvent(new Event('pending_user_updates_changed'));
+
+                logEvent("time_spent", uid, { duration: minutesToSync })
                   .catch((err) => {
-                    console.error("Failed to sync time spent:", err);
-                    // Revert strictly what was consumed on failure
-                    let revertSafeSeconds = parseInt(
-                      safeStorage.getItem(cacheKey) || "0",
-                      10,
-                    );
-                    if (isNaN(revertSafeSeconds)) revertSafeSeconds = 0;
-                    safeStorage.setItem(
-                      cacheKey,
-                      (revertSafeSeconds + actualSecondsToConsume).toString(),
-                    );
-                    // Only revert sync timer if another tab hasn't already successfully synced in the meantime
-                    if (
-                      safeStorage.getItem(lastSyncKey) === optimisticSyncTime
-                    ) {
-                      safeStorage.setItem(lastSyncKey, lastSyncTime.toString());
-                    }
+                    console.error("Failed to sync time spent to analytics:", err);
                   });
               }
             }
@@ -898,36 +905,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           safeStorage.setItem(cacheKey, remainingSeconds.toString());
           safeStorage.setItem(lastSyncKey, optimisticSyncTime);
 
-          const userRef = doc(db, "users", uid);
-          const updates: any = {
-            lastActive: new Date().toISOString(),
-            timeSpent: increment(minutesToSync),
-          };
+          const lastActiveStr = new Date().toISOString();
+          
+          // Update local cached_all_users
+          const cachedUsersStr = safeStorage.getItem('cached_all_users') || '[]';
+          let cachedUsers: any[] = [];
+          try { cachedUsers = JSON.parse(cachedUsersStr); } catch (e) {}
+          const userIndex = cachedUsers.findIndex(u => u.uid === uid);
+          let currentTotalMinutes = 0;
+          
+          if (userIndex !== -1) {
+            currentTotalMinutes = cachedUsers[userIndex].timeSpent || 0;
+            cachedUsers[userIndex].timeSpent = currentTotalMinutes + minutesToSync;
+            cachedUsers[userIndex].lastActive = lastActiveStr;
+            safeStorage.setItem('cached_all_users', JSON.stringify(cachedUsers));
+            
+            // Only dispatch custom event if user is currently loaded
+            window.dispatchEvent(new CustomEvent('user_local_update', { 
+              detail: { uid, fields: { timeSpent: cachedUsers[userIndex].timeSpent, lastActive: lastActiveStr } }
+            }));
+          }
 
-          import('firebase/firestore').then(({ writeBatch }) => {
-            const batch = writeBatch(db);
-            batch.update(userRef, updates);
-            batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [uid]: Date.now() } }, { merge: true });
-            return batch.commit();
-          })
-            .then(() => {
-              logEvent("time_spent", uid, { duration: minutesToSync });
-            })
-            .catch((err) => {
-              console.error("Failed to sync closing time spent:", err);
-              // Revert safely
-              let revertSafeSeconds = parseInt(
-                safeStorage.getItem(cacheKey) || "0",
-                10,
-              );
-              if (isNaN(revertSafeSeconds)) revertSafeSeconds = 0;
-              safeStorage.setItem(
-                cacheKey,
-                (revertSafeSeconds + actualSecondsToConsume).toString(),
-              );
+          // Add absolute value to pending_user_updates to defer Firestore write
+          const pendingStr = safeStorage.getItem('pending_user_updates') || '{}';
+          let pending: any = {};
+          try { pending = JSON.parse(pendingStr); } catch(e) {}
+          
+          pending[uid] = pending[uid] || {};
+          const baseTime = typeof pending[uid].timeSpent === 'number' ? pending[uid].timeSpent : currentTotalMinutes;
+          pending[uid].timeSpent = baseTime + minutesToSync;
+          pending[uid].lastActive = lastActiveStr;
+          
+          safeStorage.setItem('pending_user_updates', JSON.stringify(pending));
+          
+          // Dispatch event
+          window.dispatchEvent(new Event('pending_user_updates_changed'));
 
-              // Let lastSyncKey naturally wait instead of complex revert parsing since the tab is hidden
-            });
+          logEvent("time_spent", uid, { duration: minutesToSync }).catch(err => console.error(err));
         }
       }
     };
@@ -949,6 +963,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       justLoggedInRef.current = true;
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
+
+      // Force refresh app data
+      safeStorage.removeItem("profile_cache");
+      safeStorage.removeItem("cached_user_meta_versions");
+      safeStorage.removeItem("cached_all_users");
+      localStorage.removeItem(`last_daily_sync_${result.user.uid}`);
 
       // Check if we need to link phone/email in Firestore
       const userRef = doc(db, "users", result.user.uid);
@@ -984,6 +1004,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setError(null);
       justLoggedInRef.current = true;
       const result = await signInWithEmailAndPassword(auth, email, password);
+      
+      // Force refresh app data
+      safeStorage.removeItem("profile_cache");
+      safeStorage.removeItem("cached_user_meta_versions");
+      safeStorage.removeItem("cached_all_users");
+      localStorage.removeItem(`last_daily_sync_${result.user.uid}`);
+      
       try {
         const { writeBatch } = await import('firebase/firestore');
         const batch = writeBatch(db);
@@ -1367,6 +1394,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
+    try {
+      await refreshProfile(true);
+      window.dispatchEvent(new Event('force_flush_all_data'));
+      // give listeners a brief moment to catch up
+      await new Promise(r => setTimeout(r, 500));
+    } catch(e) {
+      console.error("Flush before logout error", e);
+    }
     await signOut(auth);
   };
 

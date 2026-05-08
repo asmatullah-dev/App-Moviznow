@@ -27,6 +27,11 @@ export default function AdminLayout() {
       total + (user.orders?.filter(o => o.status === 'pending').length || 0), 0);
   }, [users]);
 
+  const movieRequestsCount = useMemo(() => {
+    return users.reduce((total, user) => 
+      total + (user.movieRequests?.filter(r => r.status === 'pending').length || 0), 0);
+  }, [users]);
+
   // fetchCounts logic removed since we observe users array directly
 
   const allNavItems = [
@@ -42,7 +47,7 @@ export default function AdminLayout() {
     { id: 'ErrorLinks', path: '/admin/error-links', label: 'Error Links', icon: AlertTriangle },
     { id: 'ReportedLinks', path: '/admin/reported-links', label: `Reported Links${reportedLinksCount > 0 ? ` (${reportedLinksCount})` : ''}`, icon: AlertTriangle },
     { id: 'Notifications', path: '/admin/notifications', label: 'Notifications', icon: Bell },
-    { id: 'Requests', path: '/admin/requests', label: 'Movie Requests', icon: MessageCircle },
+    { id: 'Requests', path: '/admin/requests', label: `Movie Requests${movieRequestsCount > 0 ? ` (${movieRequestsCount})` : ''}`, icon: MessageCircle },
     { id: 'Sync', path: '/admin/sync', label: 'Content Sync', icon: RefreshCw },
   ];
 

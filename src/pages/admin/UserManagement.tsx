@@ -142,12 +142,14 @@ export default function UserManagement() {
 
   const { users: allUsers, loading: usersLoading, updateUserFields, finalizeUserChanges, hasPendingChanges, refreshUsers } = useUsers();
   
+  // Fetch fresh data on mount and force sync on unmount
   useEffect(() => {
+    refreshUsers(true).catch(console.error);
     return () => {
       // Best effort to save on unmount
-      finalizeUserChanges().catch(console.error);
+      finalizeUserChanges(true).catch(console.error);
     };
-  }, [finalizeUserChanges]);
+  }, [refreshUsers, finalizeUserChanges]);
 
   // Handle page unload for hard refreshes
   useEffect(() => {
@@ -283,10 +285,8 @@ export default function UserManagement() {
         setAssignedContentTitles([]);
       }
 
-      // 4. Fetch latest movie requests in the background (completes scan)
-      const requestsSnapshot = await getDocs(query(collection(db, 'movie_requests'), where('userId', '==', user.uid)));
-      const requestsData = requestsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setUserRequests(requestsData);
+      // 4. Load movie requests from local user data
+      setUserRequests(freshUser.movieRequests || []);
 
     } catch (error) {
       console.error("Error scanning user:", error);
@@ -719,9 +719,11 @@ export default function UserManagement() {
 
   const handleUpdateRequestStatus = async (requestId: string, status: string) => {
     try {
-      await updateDoc(doc(db, 'movie_requests', requestId), { status });
-      // Refresh user requests
-      setUserRequests(prev => prev.map(r => r.id === requestId ? { ...r, status } : r));
+      const updatedRequests = userRequests.map(r => r.id === requestId ? { ...r, status } : r);
+      if (selectedUser) {
+        updateUserFields(selectedUser.uid, { movieRequests: updatedRequests });
+      }
+      setUserRequests(updatedRequests);
     } catch (error) {
       console.error("Error updating request status:", error);
     }
@@ -730,8 +732,11 @@ export default function UserManagement() {
   const handleDeleteRequest = async (requestId: string) => {
     if (!window.confirm("Are you sure you want to delete this request?")) return;
     try {
-      await deleteDoc(doc(db, 'movie_requests', requestId));
-      setUserRequests(prev => prev.filter(r => r.id !== requestId));
+      const updatedRequests = userRequests.filter(r => r.id !== requestId);
+      if (selectedUser) {
+        updateUserFields(selectedUser.uid, { movieRequests: updatedRequests });
+      }
+      setUserRequests(updatedRequests);
     } catch (error) {
       console.error("Error deleting request:", error);
     }
@@ -1440,6 +1445,7 @@ export default function UserManagement() {
                       <h3 className="text-lg font-bold text-zinc-900 dark:text-white">{selectedUser.displayName || 'No Name'}</h3>
                       <p className="text-zinc-500 dark:text-zinc-400 text-sm">{selectedUser.email?.endsWith('@moviznow.com') ? 'No Email' : selectedUser.email}</p>
                       <p className="text-zinc-500 dark:text-zinc-400 text-sm">{selectedUser.phone || 'No WhatsApp / Phone Number'}</p>
+                      <p className="text-zinc-500 dark:text-zinc-400 mt-1 font-mono text-[10px] break-all border border-zinc-200 dark:border-zinc-800 rounded px-1.5 py-0.5 inline-block">ID: {selectedUser.uid}</p>
                     </div>
                   </div>
 

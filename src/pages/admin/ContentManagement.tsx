@@ -1214,7 +1214,7 @@ export default function ContentManagement() {
              }
              const s = seasonMap.get(sNum)!;
              
-             if (l.episode !== undefined) {
+             if (l.episode !== undefined && !l.isFullSeasonZIP && !l.isFullSeasonMKV) {
                let ep = s.episodes.find(e => e.episodeNumber === l.episode);
                if (!ep) {
                  ep = {

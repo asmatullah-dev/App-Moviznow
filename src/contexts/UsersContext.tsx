@@ -116,11 +116,14 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     const pktDate = `${pktTime.getUTCFullYear()}-${pktTime.getUTCMonth() + 1}-${pktTime.getUTCDate()}`;
     const checkPeriod = isPast9AM ? pktDate : `before-9am-${pktDate}`;
 
+    const cachedStr = safeStorage.getItem('cached_all_users');
+    const locallyCachedUsers = cachedStr ? JSON.parse(cachedStr) : [];
+
     // Period check to avoid redundant fetches
     const lastCheckPeriod = safeStorage.getItem('last_user_meta_check_period');
-    if (!force && lastCheckPeriod === checkPeriod && users.length > 0) {
+    if (!force && lastCheckPeriod === checkPeriod && locallyCachedUsers.length > 0) {
         setLoading(false);
-        return users;
+        return locallyCachedUsers;
     }
 
     setLoading(true);
@@ -151,7 +154,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      let currentUsers = [...users];
+      let currentUsers = [...locallyCachedUsers];
       
       // Handle deleted users
       if (deletedUserIds.length > 0) {
@@ -223,9 +226,9 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       console.error('Error fetching users:', err);
       setError(err.message);
       setLoading(false);
-      return users;
+      return locallyCachedUsers;
     }
-  }, [users]);
+  }, []);
 
   useEffect(() => {
     // Only fetch users if the current user is an admin, owner, manager, or user_manager
@@ -239,6 +242,26 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
 
     fetchUsers();
   }, [profile?.role]);
+
+  useEffect(() => {
+    const handlePendingChanges = () => {
+      setHasPendingChanges(true);
+      const cached = safeStorage.getItem('cached_all_users');
+      if (cached) setUsers(JSON.parse(cached));
+    };
+    
+    // Using an async wrapper function allows us to cleanly handle the Promise
+    const handleForceFlush = () => {
+       finalizeUserChanges(true).catch(e => console.error("Force flush error", e));
+    };
+    
+    window.addEventListener('pending_user_updates_changed', handlePendingChanges);
+    window.addEventListener('force_flush_all_data', handleForceFlush);
+    return () => {
+      window.removeEventListener('pending_user_updates_changed', handlePendingChanges);
+      window.removeEventListener('force_flush_all_data', handleForceFlush);
+    };
+  }, [finalizeUserChanges]);
 
   return (
     <UsersContext.Provider value={{ users, loading, error, refreshUsers: fetchUsers, updateUserFields, finalizeUserChanges, hasPendingChanges }}>

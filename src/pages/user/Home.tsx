@@ -1047,7 +1047,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
                   {(() => {
                     let items = selectedCollection.contentIds
                       .map(id => contentList.find(c => c.id === id))
-                      .filter((c): c is Content => !!c);
+                      .filter((c): c is Content => !!c && c.status !== 'draft');
                     
                     if (collectionSort === 'newest') {
                       items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
