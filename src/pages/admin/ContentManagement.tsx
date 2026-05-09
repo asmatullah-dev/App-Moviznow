@@ -240,7 +240,7 @@ export default function ContentManagement() {
   const { profile, user } = useAuth();
   const { users: allUsers } = useUsers();
   const { settings } = useSettings();
-  const { contentList, genres, languages, qualities, loading: contextLoading, getContent, saveContent, deleteContent, updateContentFields, deleteMultipleContents, updateAuxiliaryCollection, finalizeChanges, hasPendingChanges } = useContent();
+  const { contentList, collections, updateCollection, addCollection, genres, languages, qualities, loading: contextLoading, getContent, saveContent, deleteContent, updateContentFields, deleteMultipleContents, updateAuxiliaryCollection, finalizeChanges, hasPendingChanges } = useContent();
   const { sendNotification } = useNotifications();
   const [loading, setLoading] = useState(contextLoading);
 
@@ -1475,28 +1475,19 @@ export default function ContentManagement() {
   const handleAddToSpecialCollection = async (contentId: string, type: 'trending' | 'newly_added') => {
     try {
       const title = type === 'trending' ? 'Trending' : 'Newly Added';
-      const q = query(collection(db, 'collections'), where('title', '==', title));
-      const snapshot = await getDocs(q);
+      const existing = collections.find(c => c.title === title);
 
-      if (!snapshot.empty) {
-        // Collection exists, update it
-        const docRef = doc(db, 'collections', snapshot.docs[0].id);
-        const currentIds = snapshot.docs[0].data().contentIds || [];
-        
-        // Remove if already exists to move it to the front
+      if (existing) {
+        const currentIds = existing.contentIds || [];
         const newIds = [contentId, ...currentIds.filter((id: string) => id !== contentId)];
-        
-        await updateDoc(docRef, {
-          contentIds: newIds
-        });
+        await updateCollection(existing.id, { contentIds: newIds });
       } else {
-        // Create new collection
-        const allColls = await getDocs(collection(db, 'collections'));
-        await addDoc(collection(db, 'collections'), {
+        await addCollection({
           title,
+          description: '',
           contentIds: [contentId],
           createdAt: new Date().toISOString(),
-          order: allColls.size // Put new at the end
+          order: collections.length
         });
       }
       triggerAlert('Success', `Added to ${title}`, 'success');

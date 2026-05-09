@@ -10,7 +10,7 @@ interface UsersContextType {
   users: UserProfile[];
   loading: boolean;
   error: string | null;
-  refreshUsers: (force?: boolean) => Promise<UserProfile[]>;
+  refreshUsers: (force?: boolean) => Promise<{ users: UserProfile[], updatedSomething: boolean }>;
   updateUserFields: (userId: string, fields: Partial<UserProfile>) => void;
   finalizeUserChanges: (force?: boolean) => Promise<void>;
   hasPendingChanges: boolean;
@@ -24,7 +24,10 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     const cached = safeStorage.getItem('cached_all_users');
     return cached ? JSON.parse(cached) : [];
   });
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => {
+    const cached = safeStorage.getItem('cached_all_users');
+    return cached ? JSON.parse(cached).length === 0 : true;
+  });
   const [error, setError] = useState<string | null>(null);
   const [hasPendingChanges, setHasPendingChanges] = useState(false);
 
@@ -107,7 +110,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     const isPrivilegedUser = profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'manager' || profile?.role === 'user_manager';
     if (!isPrivilegedUser) {
         setLoading(false);
-        return [];
+        return { users: [], updatedSomething: false };
     }
 
     const now = Date.now();
@@ -123,10 +126,15 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     const lastCheckPeriod = safeStorage.getItem('last_user_meta_check_period');
     if (!force && lastCheckPeriod === checkPeriod && locallyCachedUsers.length > 0) {
         setLoading(false);
-        return locallyCachedUsers;
+        return { users: locallyCachedUsers, updatedSomething: false };
     }
 
-    setLoading(true);
+    if (locallyCachedUsers.length === 0) {
+        setLoading(true);
+    }
+    
+    let updatedSomething = false;
+
     try {
       // 1. Fetch chunk_meta/versions
       let serverVersions = {};
@@ -159,9 +167,11 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       // Handle deleted users
       if (deletedUserIds.length > 0) {
         currentUsers = currentUsers.filter(u => !deletedUserIds.includes(u.uid));
+        updatedSomething = true;
       }
 
       if (usersToFetch.length > 0) {
+        updatedSomething = true;
         // Fetch up to 30 users per query (Firestore IN limit)
         const newFetchedUsers: UserProfile[] = [];
         for (let i = 0; i < usersToFetch.length; i += 30) {
@@ -221,14 +231,16 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       
       setLoading(false);
       setError(null);
-      return currentUsers;
+      
+      return { users: currentUsers, updatedSomething };
     } catch (err: any) {
       console.error('Error fetching users:', err);
       setError(err.message);
       setLoading(false);
-      return locallyCachedUsers;
+      
+      return { users: locallyCachedUsers, updatedSomething: false };
     }
-  }, []);
+  }, [profile]);
 
   useEffect(() => {
     // Only fetch users if the current user is an admin, owner, manager, or user_manager

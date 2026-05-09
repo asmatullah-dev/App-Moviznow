@@ -14,6 +14,7 @@ import { SystemNotificationWrapper } from './components/SystemNotificationWrappe
 import { MediaModal } from './components/MediaModal';
 import { useModalBehavior } from './hooks/useModalBehavior';
 import { OfflineBanner } from './components/OfflineBanner';
+import { SyncBanner } from './components/SyncBanner';
 
 // Pages
 const MaintenancePage = lazy(() => import('./pages/MaintenancePage'));
@@ -90,6 +91,7 @@ export default function App() {
                 <CartProvider>
                   <PWAProvider>
                     <OfflineBanner />
+                    <SyncBanner />
                     <SystemNotificationWrapper />
                     <BrowserRouter>
                     <MediaModalController isOpen={isMediaModalOpen} onClose={() => setIsMediaModalOpen(false)} />

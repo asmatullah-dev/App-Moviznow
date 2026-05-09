@@ -38,14 +38,14 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     if (!profile) return;
     setLoading(true);
     try {
-      const versionsDoc = await getDoc(doc(db, 'chunk_meta', 'versions'));
       let latestChunkId = 'notification_chunk_0';
-      if (versionsDoc.exists()) {
-        const versionsData = versionsDoc.data();
-        if (versionsData.notifications && versionsData.notifications.latestChunkId) {
-          latestChunkId = versionsData.notifications.latestChunkId;
+      try {
+        const { getChunkMeta } = await import('../utils/chunkMeta');
+        const meta = await getChunkMeta();
+        if (meta && meta.notifications && meta.notifications.latestChunkId) {
+            latestChunkId = meta.notifications.latestChunkId;
         }
-      }
+      } catch (err) { }
       
       latestChunkIdRef.current = latestChunkId;
 
@@ -142,10 +142,10 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         let foundChunkId: string | null = null;
         let chunkItems: any = null;
 
-        const versionsDoc = await getDoc(doc(db, 'chunk_meta', 'versions'));
+        const { getChunkMeta } = await import('../utils/chunkMeta');
+        const versionsData = await getChunkMeta();
         let latestIndex = 0;
-        if (versionsDoc.exists()) {
-            const versionsData = versionsDoc.data();
+        if (versionsData) {
             const latestId = (versionsData.notifications && versionsData.notifications.latestChunkId) || 'notification_chunk_0';
             const match = latestId.match(/(\d+)$/);
             if (match) latestIndex = parseInt(match[1]);

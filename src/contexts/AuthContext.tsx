@@ -76,7 +76,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   toggleFavorite: (contentId: string) => Promise<void>;
   toggleWatchLater: (contentId: string) => Promise<void>;
-  refreshProfile: (force?: boolean) => Promise<void>;
+  refreshProfile: (force?: boolean) => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -166,22 +166,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const refreshProfile = useCallback(async (force = false) => {
+  const refreshProfile = useCallback(async (force = false): Promise<boolean> => {
+    let updatedSomething = false;
     const currentUser = auth.currentUser;
     if (!currentUser) {
       safeStorage.removeItem("profile_cache");
       setProfile(null);
       setLoading(false);
-      return;
+      return false;
     }
 
     const userRef = doc(db, "users", currentUser.uid);
-    setLoading(true);
+    const cachedProfileStr = safeStorage.getItem("profile_cache");
+    let localProfile = cachedProfileStr ? JSON.parse(cachedProfileStr) : null;
+    
+    // Only show loading if we have no profile data to show
+    if (!profile && !localProfile) setLoading(true);
 
     try {
       const localVersionKey = `profile_version_${currentUser.uid}`;
       const localVersion = parseInt(safeStorage.getItem(localVersionKey) || "0", 10);
-      const cachedProfile = safeStorage.getItem("profile_cache");
       
       const now = Date.now();
       const dailySyncKey = `last_daily_sync_${currentUser.uid}`;
@@ -192,18 +196,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const pktDate = `${pktTime.getUTCFullYear()}-${pktTime.getUTCMonth() + 1}-${pktTime.getUTCDate()}`;
       const isDailySync = isAfterNine && lastSyncDateStr !== pktDate;
 
-      // Before 9 AM PKT and not forced: use cache only
-      if (!isAfterNine && !force && cachedProfile) {
-        console.log("Profile Sync skipped: Before 9 AM PKT and not forced.");
-        const data = JSON.parse(cachedProfile);
-        setProfile(data);
-        setLoading(false);
-        return;
+      if (localProfile && !profile) {
+         setProfile(localProfile);
       }
 
-      // Optimization: Check chunk_meta version if allowed
+      // 1. Firstly read chunk_meta
       let serverVersion = localVersion;
-      if (force || isAfterNine) {
+      if (force || isDailySync || !localProfile) {
         try {
           const { getChunkMeta } = await import('../utils/chunkMeta');
           const meta = await getChunkMeta(force);
@@ -213,50 +212,97 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      // Handle pushing pending changes first if forced or it's the daily sync after 9AM
-      const needsSync = safeStorage.getItem("needs_user_sync") === "true";
-      if ((isDailySync || force) && needsSync) {
+      // 2. If version changes found
+      const versionChanged = serverVersion > localVersion || localVersion === 0;
+
+      let serverProfile: UserProfile | null = null;
+      let docSnap;
+      
+      // 7. Before updating user data, first check version from content_meta, if different new version first read the user data doc
+      if (versionChanged || !localProfile) {
+        docSnap = await getDoc(userRef);
+        if (docSnap.exists()) {
+          serverProfile = docSnap.data() as UserProfile;
+          updatedSomething = true;
+        }
+      } else {
+        // Just checking if we need to retrieve snapshot for later (legacy checks)
+         const cachedDocSnapStr = safeStorage.getItem("profile_doc_snap");
+         if (!cachedDocSnapStr && !localProfile) {
+              docSnap = await getDoc(userRef);
+              if (docSnap.exists()) {
+                 serverProfile = docSnap.data() as UserProfile;
+              }
+         }
+      }
+
+      // 3. Update user data if changed versions then sync it with local storage version like time in app, favorites, watch later... merge data intelligently first in local storage
+      let mergedProfile = { ...localProfile } as UserProfile;
+      if (serverProfile) {
+        mergedProfile = {
+            ...localProfile,
+            ...serverProfile,
+            favorites: safeStorage.getItem("needs_user_sync") === "true" && safeStorage.getItem("pending_favorites_array") 
+                ? JSON.parse(safeStorage.getItem("pending_favorites_array")!) 
+                : serverProfile.favorites || localProfile?.favorites || [],
+            watchLater: safeStorage.getItem("needs_user_sync") === "true" && safeStorage.getItem("pending_watch_later_array") 
+                ? JSON.parse(safeStorage.getItem("pending_watch_later_array")!) 
+                : serverProfile.watchLater || localProfile?.watchLater || [],
+            timeSpent: Math.max(serverProfile.timeSpent || 0, localProfile?.timeSpent || 0)
+        };
+      }
+
+      // 4. If user data is same then also update user data doc and update chunk_meta version for user 
+      const needsUserSync = safeStorage.getItem("needs_user_sync") === "true";
+      if (isDailySync || force || versionChanged || needsUserSync) {
         try {
-          const pendingUpdates: any = {};
-          const pendingFavorites = safeStorage.getItem("pending_favorites_array");
-          if (pendingFavorites) pendingUpdates.favorites = JSON.parse(pendingFavorites);
-
-          const pendingWatchLater = safeStorage.getItem("pending_watch_later_array");
-          if (pendingWatchLater) pendingUpdates.watchLater = JSON.parse(pendingWatchLater);
-
-          if (Object.keys(pendingUpdates).length > 0) {
             const { writeBatch } = await import('firebase/firestore');
             const batch = writeBatch(db);
-            batch.update(userRef, pendingUpdates);
-            batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentUser.uid]: Date.now() } }, { merge: true });
+            const newVersion = Date.now();
+            
+            const updatesToPush: any = {};
+            if (needsUserSync) {
+                const pendFavs = safeStorage.getItem("pending_favorites_array");
+                if (pendFavs) updatesToPush.favorites = JSON.parse(pendFavs);
+                const pendWL = safeStorage.getItem("pending_watch_later_array");
+                if (pendWL) updatesToPush.watchLater = JSON.parse(pendWL);
+            }
+            if (mergedProfile.timeSpent !== undefined) updatesToPush.timeSpent = mergedProfile.timeSpent;
+            updatesToPush.lastActive = new Date().toISOString();
+
+            if (Object.keys(updatesToPush).length > 0) {
+              batch.update(userRef, updatesToPush);
+            }
+
+            // 6. Remember that when writing user data, user version in chunk_meta will also updated
+            batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentUser.uid]: newVersion } }, { merge: true });
             await batch.commit();
 
             if (isDailySync) localStorage.setItem(dailySyncKey, pktDate);
             safeStorage.setItem("needs_user_sync", "false");
             safeStorage.removeItem("pending_favorites_array");
             safeStorage.removeItem("pending_watch_later_array");
-            console.log("Profile changes synced to Firestore");
-          }
+            safeStorage.setItem(localVersionKey, newVersion.toString());
+            mergedProfile = { ...mergedProfile, ...updatesToPush };
+            if (versionChanged) updatedSomething = true;
+            console.log("Profile changes synced & merged to Firestore");
         } catch (err) {
-          console.error("Manual/Daily profile sync failed:", err);
+            console.error("Manual/Daily profile sync failed:", err);
+        }
+      } else {
+        if (serverProfile) {
+            safeStorage.setItem(localVersionKey, serverVersion.toString());
         }
       }
 
-      const alreadySyncedAfterNine = isAfterNine && lastSyncDateStr === pktDate;
-
-      if (alreadySyncedAfterNine && !force && cachedProfile && serverVersion <= localVersion && serverVersion !== 0) {
-        console.log("Profile is up to date according to chunk_meta and already synced after 9AM");
-        const data = JSON.parse(cachedProfile);
-        setProfile(data);
-        setLoading(false);
-        return;
+      if (mergedProfile && Object.keys(mergedProfile).length > 0) {
+          safeStorage.setItem("profile_cache", JSON.stringify(mergedProfile));
+          setProfile(mergedProfile);
       }
 
-      const docSnap = await getDoc(userRef);
-      if (docSnap.exists()) {
-        const data = docSnap.data() as UserProfile;
-        safeStorage.setItem("profile_cache", JSON.stringify(data));
-        safeStorage.setItem(localVersionKey, serverVersion.toString());
+      // Admin & Session checks
+      if (mergedProfile || serverProfile) {
+        const data = mergedProfile && Object.keys(mergedProfile).length > 0 ? mergedProfile : serverProfile as UserProfile;
 
         const userEmailLower = currentUser.email?.toLowerCase();
         const isOwner = userEmailLower === "asmatn628@gmail.com";
@@ -282,7 +328,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setError(
               "You have been logged out because your account was accessed from another device.",
             );
-            return;
+            return false;
           } else if (!data.sessionId) {
             updates.sessionId = localSessionId;
             data.sessionId = localSessionId;
@@ -659,6 +705,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        if (safeStorage.getItem("needs_user_sync") === "true") {
+           refreshProfile(true).catch(console.error);
+        }
+      }
+    };
+    window.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => window.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [refreshProfile]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {

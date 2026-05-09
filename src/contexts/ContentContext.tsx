@@ -374,10 +374,11 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     return sorted;
   };
 
-  const syncWithServer = async (force: boolean = false) => {
+  const syncWithServer = async (force: boolean = false): Promise<boolean> => {
+    let updatedSomething = false;
     if (!navigator.onLine) {
         setLoading(false);
-        return;
+        return false;
     }
     const isAdmin = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
 
@@ -530,6 +531,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
                         setGenres(data.genres || []);
                         setLanguages(data.languages || []);
                         setQualities(data.qualities || []);
+                        updatedSomething = true;
                     }
                 } catch(e) { console.error("Error fetching metadata chunk", e) }
             }
@@ -657,10 +659,14 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
             
             localMeta.collections = collectionsVersion;
             safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+            updatedSomething = true;
         }
+        
+        if (chunksToFetch.length > 0) updatedSomething = true;
     } catch(e) {}
     
     setLoading(false);
+    return updatedSomething;
   };
 
   useEffect(() => {
@@ -695,19 +701,16 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     // Period check to avoid redundant auto-checks
     const lastCheckPeriod = safeStorage.getItem('last_meta_check_period');
     
-    // Always refresh if content list is empty locally
+    // Always refresh if content list is empty locally or first login
     const noLocalData = contentList.length === 0;
 
     if (!force && lastCheckPeriod === checkPeriod && !noLocalData) {
         // Already checked for this period (either before 9AM or for the 9AM cycle)
         setLoading(false);
+        if (force) window.dispatchEvent(new CustomEvent('sync_status', { detail: 'up-to-date' }));
         return;
     }
 
-    // The user requested: "Ensure it will automatically do all process like refresh app data after 9AM or manually pressing button"
-    // This implies that for ALL users:
-    // 1. Auto-sync if it's past 9AM and not checked yet for this period.
-    // 2. Manual sync if button is pressed (force=true).
     if (!force && !isPast9AMPKT && !noLocalData) {
         console.log("Auto-sync deferred: Before 9 AM PKT.");
         setLoading(false);
@@ -715,20 +718,40 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     }
     
     // Proceed with sync
-    if (force) {
-        // Trigger profile refresh (will sync pending changes because force=true)
-        refreshProfile(true).catch(console.error);
-        // Refresh users list if admin and push pending user changes
-        if (isAdmin) {
-          finalizeUserChanges(true).catch(console.error);
-          refreshUsers(true).catch(console.error);
-        }
+    if (force || noLocalData || (isPast9AMPKT && lastCheckPeriod !== checkPeriod)) {
+        window.dispatchEvent(new CustomEvent('sync_status', { detail: 'syncing' }));
     }
 
-    await syncWithServer(force);
+    let updatedSomething = false;
+
+    // Trigger profile refresh 
+    try {
+        const userUpdated = await refreshProfile(force);
+        if (userUpdated) updatedSomething = true;
+    } catch(err) {
+        console.error(err);
+    }
+    
+    // Refresh users list if admin and push pending user changes
+    if (isAdmin) {
+      finalizeUserChanges(true).catch(console.error);
+      try {
+          const { updatedSomething: usersUpdated } = await refreshUsers(true);
+          if (usersUpdated) updatedSomething = true;
+      } catch (e) {
+          console.error(e);
+      }
+    }
+
+    const dataUpdated = await syncWithServer(force);
+    if (dataUpdated) updatedSomething = true;
     
     // Record that we checked in this period
     safeStorage.setItem('last_meta_check_period', checkPeriod);
+
+    if (force || noLocalData || (isPast9AMPKT && lastCheckPeriod !== checkPeriod)) {
+        window.dispatchEvent(new CustomEvent('sync_status', { detail: updatedSomething ? 'success' : 'up-to-date' }));
+    }
   };
 
   const saveContentInternal = async (content: Content, localOnly = false) => {
@@ -1203,13 +1226,15 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     if (isFull) return item;
     let chunkId = item.chunkId;
     if (!chunkId) {
-        const { getDocs, collection } = await import('firebase/firestore');
-        const chunksSnap = await getDocs(collection(db, 'content_chunks'));
-        for (const d of chunksSnap.docs) {
-          if (d.data().items[id]) {
-            chunkId = d.id;
-            break;
-          }
+        const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+        let localMeta: Record<string, any> = {};
+        try { localMeta = JSON.parse(localMetaString); } catch(e) {}
+        for (const cid of Object.keys(localMeta)) {
+            const chunkStr = safeStorage.getItem('content_chunk_' + cid);
+            if (chunkStr && chunkStr.includes(`"${id}"`)) {
+                chunkId = cid;
+                break;
+            }
         }
     }
     if (!chunkId) return item;

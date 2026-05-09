@@ -143,13 +143,21 @@ export default function UserManagement() {
   const { users: allUsers, loading: usersLoading, updateUserFields, finalizeUserChanges, hasPendingChanges, refreshUsers } = useUsers();
   
   // Fetch fresh data on mount and force sync on unmount
+  const { checkForUpdates } = useContent();
+
   useEffect(() => {
-    refreshUsers(true).catch(console.error);
+    let mounted = true;
+    if (mounted) {
+       refreshUsers(true).catch(console.error);
+    }
+    
     return () => {
-      // Best effort to save on unmount
+      mounted = false;
+      // Best effort to save on unmount (finalizeUserChanges handles checking internally)
       finalizeUserChanges(true).catch(console.error);
     };
-  }, [refreshUsers, finalizeUserChanges]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Handle page unload for hard refreshes
   useEffect(() => {
@@ -485,37 +493,7 @@ export default function UserManagement() {
         batch.set(doc(db, 'user_meta', 'versions'), { [currentDeleteConfirm]: -1 }, { merge: true });
         
         // Parallelize all data fetches
-        const [
-          ordersSnap,
-          requestsSnap,
-          joinedRequestsSnap,
-          notificationsSnap,
-          metaDoc
-        ] = await Promise.all([
-          getDocs(query(collection(db, 'orders'), where('userId', '==', currentDeleteConfirm))),
-          getDocs(query(collection(db, 'movie_requests'), where('userId', '==', currentDeleteConfirm))),
-          getDocs(query(collection(db, 'movie_requests'), where('requestedBy', 'array-contains', currentDeleteConfirm))),
-          getDocs(query(collection(db, 'notifications'), where('targetUserId', '==', currentDeleteConfirm))),
-          getDoc(doc(db, 'chunk_meta', 'versions'))
-        ]);
-        
-        // 2. Delete orders
-        ordersSnap.forEach(d => batch.delete(d.ref));
-        
-        // 3. Delete movie requests created by this user
-        requestsSnap.forEach(d => batch.delete(d.ref));
-
-        // 3b. Remove user from other movie requests they joined
-        joinedRequestsSnap.forEach(d => {
-          const data = d.data();
-          if (data.userId !== currentDeleteConfirm) {
-            const newRequestedBy = (data.requestedBy || []).filter((id: string) => id !== currentDeleteConfirm);
-            batch.update(d.ref, { 
-              requestedBy: newRequestedBy,
-              requestCount: newRequestedBy.length
-            });
-          }
-        });
+        const metaDoc = await getDoc(doc(db, 'chunk_meta', 'versions'));
         
         // 4. Update consolidated FCM tokens document across chunks
         if (metaDoc.exists()) {
@@ -544,8 +522,7 @@ export default function UserManagement() {
           }
         }
 
-        // 5. Delete notifications targeted to this user
-        notificationsSnap.forEach(d => batch.delete(d.ref));
+        // No separate notification documents to delete; they are embedded
         
         await batch.commit();
         setAlertConfig({ isOpen: true, title: 'Success', message: 'User and all associated data deleted successfully' });
