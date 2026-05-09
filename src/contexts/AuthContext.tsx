@@ -134,8 +134,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [authLoading, setAuthLoading] = useState(!auth.currentUser);
   const [error, setError] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [isStoragePersistent, setIsStoragePersistent] = useState(true);
   const sessionStartTimeRef = useRef<number | null>(null);
-  const justLoggedInRef = useRef(false);
 
   const getLocalSessionId = () => {
     try {
@@ -160,6 +160,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const handleOffline = () => setIsOnline(false);
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
+
+    // Check if storage is persistent
+    try {
+      const testKey = "__persistence_test__";
+      localStorage.setItem(testKey, "1");
+      if (localStorage.getItem(testKey) === "1") {
+        localStorage.removeItem(testKey);
+        setIsStoragePersistent(true);
+      } else {
+        setIsStoragePersistent(false);
+      }
+    } catch (e) {
+      setIsStoragePersistent(false);
+    }
+
     return () => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
@@ -321,14 +336,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const localSessionId = getLocalSessionId();
 
         // 1-Device Lock Check
-        if (!hasAdminPrivileges && !justLoggedInRef.current) {
+        const isJustLoggedIn = sessionStorage.getItem("just_logged_in") === "true";
+        if (!hasAdminPrivileges && isStoragePersistent) {
           if (data.sessionId && data.sessionId !== localSessionId) {
-            console.log("Logged in from another device. Logging out.");
-            signOut(auth);
-            setError(
-              "You have been logged out because your account was accessed from another device.",
-            );
-            return false;
+            if (isJustLoggedIn) {
+              // If we just logged in (or refreshed after login), claim/overwrite the session ID
+              updates.sessionId = localSessionId;
+              data.sessionId = localSessionId;
+              console.log("Just logged in: updating session ID in Firestore.");
+            } else {
+              console.log("Logged in from another device. Logging out.");
+              signOut(auth);
+              setError(
+                "You have been logged out because your account was accessed from another device.",
+              );
+              return false;
+            }
           } else if (!data.sessionId) {
             updates.sessionId = localSessionId;
             data.sessionId = localSessionId;
@@ -1018,7 +1041,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signInWithGoogle = async () => {
     try {
       setError(null);
-      justLoggedInRef.current = true;
+      sessionStorage.setItem("just_logged_in", "true");
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
 
@@ -1048,10 +1071,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } catch (e) {}
       }
       setTimeout(() => {
-        justLoggedInRef.current = false;
+        sessionStorage.removeItem("just_logged_in");
       }, 10000);
     } catch (err: any) {
-      justLoggedInRef.current = false;
+      sessionStorage.removeItem("just_logged_in");
       console.error("Login error:", err);
       setError(err.message || "Failed to login");
     }
@@ -1060,7 +1083,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signInWithEmail = async (email: string, password: string) => {
     try {
       setError(null);
-      justLoggedInRef.current = true;
+      sessionStorage.setItem("just_logged_in", "true");
       const result = await signInWithEmailAndPassword(auth, email, password);
       
       // Force refresh app data
@@ -1079,10 +1102,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await batch.commit();
       } catch (e) {}
       setTimeout(() => {
-        justLoggedInRef.current = false;
+        sessionStorage.removeItem("just_logged_in");
       }, 10000);
     } catch (err: any) {
-      justLoggedInRef.current = false;
+      sessionStorage.removeItem("just_logged_in");
       console.error("Email login error:", err);
       if (
         err.code === "auth/invalid-credential" ||
@@ -1136,7 +1159,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         sessionStorage.setItem('pending_signup_phone', standardizedPhone);
       }
 
-      justLoggedInRef.current = true;
+      sessionStorage.setItem("just_logged_in", "true");
       let userCredential;
       try {
         userCredential = await createUserWithEmailAndPassword(
@@ -1153,10 +1176,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await updateProfile(userCredential.user, { displayName });
 
       setTimeout(() => {
-        justLoggedInRef.current = false;
+        sessionStorage.removeItem("just_logged_in");
       }, 10000);
     } catch (err: any) {
-      justLoggedInRef.current = false;
+      sessionStorage.removeItem("just_logged_in");
       console.error("Email signup error:", err);
       setError(err.message || "Failed to sign up");
       throw err;
@@ -1208,7 +1231,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         sessionStorage.setItem('pending_signup_phone', standardizedPhone);
       }
 
-      justLoggedInRef.current = true;
+      sessionStorage.setItem("just_logged_in", "true");
       let userCredential;
       try {
         userCredential = await createUserWithEmailAndPassword(
@@ -1228,10 +1251,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await updateProfile(userCredential.user, { displayName });
 
       setTimeout(() => {
-        justLoggedInRef.current = false;
+        sessionStorage.removeItem("just_logged_in");
       }, 10000);
     } catch (err: any) {
-      justLoggedInRef.current = false;
+      sessionStorage.removeItem("just_logged_in");
       console.error("Signup error:", err);
       if (err.code === "auth/email-already-in-use") {
         setError("This account is already registered.");
