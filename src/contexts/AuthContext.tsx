@@ -259,7 +259,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // 4. Update user data doc and update chunk_meta version for user ONLY when necessary daily or local change
       const needsUserSync = safeStorage.getItem("needs_user_sync") === "true";
-      const shouldWrite = (serverProfile || localProfile) && (isDailySync || needsUserSync || isVersionMissing);
+      const shouldWrite = (serverProfile || localProfile) && (force || isDailySync || needsUserSync || isVersionMissing);
 
       if (shouldWrite) {
         try {

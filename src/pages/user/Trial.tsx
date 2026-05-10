@@ -8,7 +8,7 @@ import { Loader2, CheckCircle, AlertCircle, Home, MessageCircle } from 'lucide-r
 import { Helmet } from 'react-helmet-async';
 
 export default function Trial() {
-  const { user, profile, loading, authLoading } = useAuth();
+  const { user, profile, loading, authLoading, updateUserProfileData, refreshProfile } = useAuth();
   const { settings } = useSettings();
   const navigate = useNavigate();
   const [status, setStatus] = useState<'loading' | 'success' | 'error' | 'disabled'>('loading');
@@ -20,7 +20,9 @@ export default function Trial() {
     if (loading || authLoading || !settings) return;
 
     if (!user || !profile) {
-      navigate('/login', { state: { from: '/trial' }, replace: true });
+      if (!authLoading) {
+        navigate('/login', { state: { from: '/trial' }, replace: true });
+      }
       return;
     }
 
@@ -43,14 +45,21 @@ export default function Trial() {
       return () => clearInterval(timer);
     }
 
-    if (profile.status === 'active') {
+    if (profile.role === 'trial') {
       setStatus('error');
-      setMessage(profile.role === 'trial' ? 'You already have an active trial.' : 'Your account is already active.');
+      setMessage('You already have an active trial.');
       setTimeout(() => navigate('/'), 3000);
       return;
     }
 
-    if (profile.status === 'expired' || profile.role !== 'user') {
+    if (profile.status === 'active') {
+       setStatus('error');
+       setMessage('Your account is already active. Trial is only for new pending members.');
+       setTimeout(() => navigate('/'), 3000);
+       return;
+    }
+
+    if (profile.status !== 'pending' || profile.role !== 'user') {
       setStatus('error');
       setMessage('Trial is only available for new pending accounts.');
       setTimeout(() => navigate('/'), 3000);
@@ -71,11 +80,15 @@ export default function Trial() {
           expiry.setDate(expiry.getDate() + 2);
         }
 
-        await updateDoc(doc(db, 'users', user.uid), {
+        // Use standard update profile function to ensure chunk_meta and local cache are updated
+        await updateUserProfileData({
           role: 'trial',
           status: 'active',
           expiryDate: expiry.toISOString()
         });
+
+        // Force a full refresh to be absolutely sure
+        await refreshProfile(true);
 
         setStatus('success');
         setMessage('Trial activated successfully! Enjoy 48 hours of access.');
@@ -90,7 +103,7 @@ export default function Trial() {
     };
 
     activateTrial();
-  }, [user, profile, loading, authLoading, navigate, settings]);
+  }, [user, profile, loading, authLoading, navigate, settings, updateUserProfileData, refreshProfile]);
 
   const handleContactAdmin = () => {
     let supportPhone = settings?.supportNumber || '3363284466';
