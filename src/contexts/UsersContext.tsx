@@ -95,10 +95,10 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       setHasPendingChanges(false);
       
       // Update local meta versions
-      const cachedMetaStr = safeStorage.getItem('cached_user_meta_versions');
+      const cachedMetaStr = safeStorage.getItem('cached_chunk_users_versions');
       const localVersions = cachedMetaStr ? JSON.parse(cachedMetaStr) : {};
       Object.assign(localVersions, metaUpdates);
-      safeStorage.setItem('cached_user_meta_versions', JSON.stringify(localVersions));
+      safeStorage.setItem('cached_chunk_users_versions', JSON.stringify(localVersions));
 
     } catch(err) {
       console.error("Failed to commit user changes:", err);
@@ -123,7 +123,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     const locallyCachedUsers = cachedStr ? JSON.parse(cachedStr) : [];
 
     // Period check to avoid redundant fetches
-    const lastCheckPeriod = safeStorage.getItem('last_user_meta_check_period');
+    const lastCheckPeriod = safeStorage.getItem('last_chunk_users_check_period');
     if (!force && lastCheckPeriod === checkPeriod && locallyCachedUsers.length > 0) {
         setLoading(false);
         return { users: locallyCachedUsers, updatedSomething: false };
@@ -146,7 +146,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         throw err;
       }
       
-      const cachedMetaStr = safeStorage.getItem('cached_user_meta_versions');
+      const cachedMetaStr = safeStorage.getItem('cached_chunk_users_versions');
       const localVersions = cachedMetaStr ? JSON.parse(cachedMetaStr) : {};
       
       // Determine which users need fetching
@@ -219,7 +219,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       
       setUsers(currentUsers);
       safeStorage.setItem('cached_all_users', JSON.stringify(currentUsers));
-      safeStorage.setItem('cached_user_meta_versions', JSON.stringify(serverVersions));
+      safeStorage.setItem('cached_chunk_users_versions', JSON.stringify(serverVersions));
       
       // Mark as checked in this period
       const now = Date.now();
@@ -227,7 +227,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       const isPast9AM = pktTime.getUTCHours() >= 9;
       const pktDate = `${pktTime.getUTCFullYear()}-${pktTime.getUTCMonth() + 1}-${pktTime.getUTCDate()}`;
       const checkPeriod = isPast9AM ? pktDate : `before-9am-${pktDate}`;
-      safeStorage.setItem('last_user_meta_check_period', checkPeriod);
+      safeStorage.setItem('last_chunk_users_check_period', checkPeriod);
       
       setLoading(false);
       setError(null);

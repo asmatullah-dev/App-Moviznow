@@ -9,9 +9,9 @@ export const CartButton = React.memo(() => {
   const { profile } = useAuth();
 
   if (!profile) return null;
-
-  // Only show for selected_content or pending users (matching UserProfileMenu logic)
-  const showCart = (profile.role === 'selected_content' && profile.status !== 'expired') || profile.status === 'pending';
+  const role = profile.role;
+  const status = profile.status;
+  const showCart = (role === 'selected_content' && status !== 'expired') || status === 'pending';
   
   if (!showCart) return null;
 

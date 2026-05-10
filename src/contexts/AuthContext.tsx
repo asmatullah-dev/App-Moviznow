@@ -202,11 +202,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // 1. Firstly read chunk_meta
       let serverVersion = localVersion;
+      let isVersionMissing = false;
       if (force || isDailySync || !localProfile) {
         try {
           const { getChunkMeta } = await import('../utils/chunkMeta');
           const meta = await getChunkMeta(force);
-          serverVersion = meta.users?.[currentUser.uid] || 0;
+          const chunkUsersMeta = meta.users || {};
+          if (currentUser.uid in chunkUsersMeta) {
+             serverVersion = chunkUsersMeta[currentUser.uid];
+          } else {
+             isVersionMissing = true;
+          }
         } catch (e) {
           console.error("Failed to fetch chunk_meta for profile:", e);
         }
@@ -237,10 +243,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       // 3. Update user data if changed versions then sync it with local storage version like time in app, favorites, watch later... merge data intelligently first in local storage
-      let mergedProfile = { ...localProfile } as UserProfile;
+      let mergedProfile: UserProfile | null = localProfile ? { ...localProfile } as UserProfile : null;
       if (serverProfile) {
         mergedProfile = {
-            ...localProfile,
+            ...(localProfile || {}),
             ...serverProfile,
             favorites: safeStorage.getItem("needs_user_sync") === "true" && safeStorage.getItem("pending_favorites_array") 
                 ? JSON.parse(safeStorage.getItem("pending_favorites_array")!) 
@@ -252,9 +258,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         };
       }
 
-      // 4. If user data is same then also update user data doc and update chunk_meta version for user 
+      // 4. Update user data doc and update chunk_meta version for user ONLY when necessary daily or local change
       const needsUserSync = safeStorage.getItem("needs_user_sync") === "true";
-      if (isDailySync || force || versionChanged || needsUserSync) {
+      const shouldWrite = (serverProfile || localProfile) && (isDailySync || needsUserSync || isVersionMissing);
+
+      if (shouldWrite) {
         try {
             const { writeBatch } = await import('firebase/firestore');
             const batch = writeBatch(db);
@@ -271,7 +279,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             updatesToPush.lastActive = new Date().toISOString();
 
             if (Object.keys(updatesToPush).length > 0) {
-              batch.update(userRef, updatesToPush);
+              batch.set(userRef, updatesToPush, { merge: true });
             }
 
             // 6. Remember that when writing user data, user version in chunk_meta will also updated
@@ -284,7 +292,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             safeStorage.removeItem("pending_watch_later_array");
             safeStorage.setItem(localVersionKey, newVersion.toString());
             mergedProfile = { ...mergedProfile, ...updatesToPush };
-            if (versionChanged) updatedSomething = true;
+            if (isDailySync || needsUserSync) updatedSomething = true;
             console.log("Profile changes synced & merged to Firestore");
         } catch (err) {
             console.error("Manual/Daily profile sync failed:", err);
@@ -386,7 +394,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           try {
             const { writeBatch } = await import('firebase/firestore');
             const batch = writeBatch(db);
-            batch.update(userRef, updates);
+            batch.set(userRef, updates, { merge: true });
             batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentUser.uid]: Date.now() } }, { merge: true });
             await batch.commit();
           } catch (err) {
@@ -770,11 +778,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (pendingWatchLater) pendingUpdates.watchLater = JSON.parse(pendingWatchLater);
         }
 
-        if (Object.keys(pendingUpdates).length > 0) {
+        const hasLocalProfile = !!safeStorage.getItem("profile_cache");
+        if (Object.keys(pendingUpdates).length > 0 && hasLocalProfile) {
             try {
                 const { writeBatch } = await import('firebase/firestore');
                 const batch = writeBatch(db);
-                batch.update(userRef, pendingUpdates);
+                batch.set(userRef, pendingUpdates, { merge: true });
                 batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentUser.uid]: Date.now() } }, { merge: true });
                 await batch.commit();
 
@@ -784,7 +793,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 safeStorage.removeItem("pending_watch_later_array");
             } catch (err) {
                 console.error("Daily sync failed:", err);
-                handleFirestoreError(err, OperationType.WRITE, `users/${currentUser.uid} and chunk_meta/versions`);
             }
         }
 
@@ -1024,7 +1032,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Force refresh app data
       safeStorage.removeItem("profile_cache");
-      safeStorage.removeItem("cached_user_meta_versions");
+      safeStorage.removeItem("cached_chunk_users_versions");
       safeStorage.removeItem("cached_all_users");
       localStorage.removeItem(`last_daily_sync_${result.user.uid}`);
 
@@ -1065,7 +1073,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       // Force refresh app data
       safeStorage.removeItem("profile_cache");
-      safeStorage.removeItem("cached_user_meta_versions");
+      safeStorage.removeItem("cached_chunk_users_versions");
       safeStorage.removeItem("cached_all_users");
       localStorage.removeItem(`last_daily_sync_${result.user.uid}`);
       

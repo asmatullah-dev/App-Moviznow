@@ -27,12 +27,11 @@ service cloud.firestore {
 
     function isAdmin() {
       let email = ('email' in request.auth.token) ? request.auth.token.email.lower() : '';
-      let isVerified = ('email_verified' in request.auth.token) && request.auth.token.email_verified == true;
       let uid = request.auth.uid;
       
       return isAuthenticated() &&
         (
-          (isVerified && email in [
+          (email in [
             "asmatn628@gmail.com",
             "asmatullah9327@gmail.com",
             "kabirahmaddev@gmail.com",
@@ -68,29 +67,32 @@ service cloud.firestore {
     // ===============================================================
 
     function isValidUser(data) {
-      return data.get('email', '') is string && data.get('email', '').size() < 100 &&
-             data.get('phone', '') is string && data.get('phone', '').size() < 20 &&
-             data.get('displayName', '') is string && data.get('displayName', '').size() < 100 &&
-             data.role in ['admin', 'owner', 'manager', 'user_manager', 'content_manager', 'user', 'trial', 'selected_content'] &&
-             data.status in ['active', 'pending', 'suspended', 'expired'];
+      let emailValid = !('email' in data) || data.email == null || (data.email is string && data.email.size() < 100);
+      let phoneValid = !('phone' in data) || data.phone == null || (data.phone is string && data.phone.size() < 50);
+      let nameValid = !('displayName' in data) || data.displayName == null || (data.displayName is string && data.displayName.size() < 100);
+      let roleValid = data.get('role', 'user') in ['admin', 'owner', 'manager', 'user_manager', 'content_manager', 'user', 'trial', 'selected_content'];
+      let statusValid = data.get('status', 'active') in ['active', 'pending', 'suspended', 'expired'];
+      
+      return emailValid && phoneValid && nameValid && roleValid && statusValid;
     }
 
     function protectedUserFieldsUnchanged() {
-      return request.resource.data.role == resource.data.role &&
-             request.resource.data.status == resource.data.status &&
-             request.resource.data.get('expiryDate', '') == resource.data.get('expiryDate', '') &&
-             request.resource.data.get('managedBy', '') == resource.data.get('managedBy', '') &&
-             request.resource.data.get('permissions', []) == resource.data.get('permissions', []) &&
-             request.resource.data.get('assignedContent', []) == resource.data.get('assignedContent', []);
+      let d = request.resource.data;
+      let r = resource.data;
+      return d.get('role', 'user') == r.get('role', 'user') &&
+             d.get('status', 'active') == r.get('status', 'active') &&
+             d.get('expiryDate', '') == r.get('expiryDate', '') &&
+             d.get('managedBy', '') == r.get('managedBy', '') &&
+             d.get('permissions', []) == r.get('permissions', []) &&
+             d.get('assignedContent', []) == r.get('assignedContent', []);
     }
 
     function isPendingOwner(userId, resourceData) {
       return isAuthenticated() && 
              userId.startsWith('pending_') && 
              (
-               (resourceData.email != null && ('email' in request.auth.token) && resourceData.email == request.auth.token.email) || 
-               (resourceData.phone != null && ('phone_number' in request.auth.token) && resourceData.phone == request.auth.token.phone_number) ||
-               (('email' in request.auth.token) && resourceData.phone != null && request.auth.token.email.replace('@moviznow.com', '') == resourceData.phone.replace('+', ''))
+               (resourceData.get('email', null) != null && ('email' in request.auth.token) && resourceData.email == request.auth.token.email) || 
+               (resourceData.get('phone', null) != null && ('phone_number' in request.auth.token) && resourceData.phone == request.auth.token.phone_number)
              );
     }
 
@@ -110,35 +112,28 @@ service cloud.firestore {
       return isAuthenticated() && 
              (
                (resourceData.get('email', '') != '' && ('email' in request.auth.token) && resourceData.email.lower() == request.auth.token.email.lower()) || 
-               (resourceData.get('phone', '') != '' && ('phone_number' in request.auth.token) && resourceData.phone == request.auth.token.phone_number) ||
-               (resourceData.get('phone', '') != '' && ('email' in request.auth.token) && request.auth.token.email.lower() == resourceData.phone.replace('[^0-9]', '') + '@moviznow.com') ||
-               (resourceData.get('phone', '') != '' && ('email' in request.auth.token) && request.auth.token.email.lower() == '92' + resourceData.phone.replace('^\\\\+92', '').replace('^0', '') + '@moviznow.com')
+               (resourceData.get('phone', '') != '' && ('phone_number' in request.auth.token) && resourceData.phone == request.auth.token.phone_number)
              );
     }
 
     match /users/{userId} {
-      // Protect PII: Only owner, authorized staff, or identity-matched users can read profiles
-      allow get: if isOwner(userId) || isAdminOrEditor() || isUserManager() || isIdentityMatch(resource.data);
-      
-      // Protect against bulk scraping: 
-      // 1. Admins and Managers can query freely
-      // 2. Others (including unauthenticated) can only perform limited queries (max 5 results)
-      allow list: if (('limit' in request.query) && request.query.limit <= 10) || isAdminOrEditor() || isUserManager();
+      // 1. Owner Access: Read, Create, Update
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && 
+                       (isAdmin() || request.resource.data.get('role', 'user') in ['user', 'trial', 'selected_content']);
+      allow update: if isOwner(userId) && 
+                       (isAdmin() || protectedUserFieldsUnchanged());
 
-      allow create: if (isAdmin() && isValidUser(request.resource.data)) ||
-                       (isOwner(userId) && request.resource.data.uid == request.auth.uid && request.resource.data.role == 'user' && isValidUser(request.resource.data)) || 
-                       (isOwner(userId) && request.resource.data.uid == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && 'managedBy' in request.resource.data && isValidUser(request.resource.data)) ||
-                       (isUserManager() && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended' && isValidUser(request.resource.data)) ||
-                       (isManager() && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended' && isValidUser(request.resource.data)) ||
-                       (isOwner(userId) && request.resource.data.uid == request.auth.uid && isValidUser(request.resource.data)); // Reverting this to be more permissive initially for migrations, since strict migration validation without cloud functions is complex.
-      allow update: if (isAdmin() && isValidUser(request.resource.data)) || 
-                       (isOwner(userId) && protectedUserFieldsUnchanged() && isValidUser(request.resource.data)) ||
-                       (isTrialActivation(userId) && isValidUser(request.resource.data)) ||
-                       (isUserManager() && resource.data.managedBy == request.auth.uid && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended' && isValidUser(request.resource.data)) ||
-                       (isUserManager() && resource.data.status == 'pending' && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended' && isValidUser(request.resource.data)) ||
-                       (isManager() && resource.data.managedBy == request.auth.uid && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended' && isValidUser(request.resource.data)) ||
-                       (isManager() && resource.data.status == 'pending' && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended' && isValidUser(request.resource.data));
-      allow delete: if isAdmin() || isPendingOwner(userId, resource.data) || isIdentityMatch(resource.data);
+      // 2. Admin/Manager/Identity Access
+      allow get: if isAdminOrEditor() || isUserManager() || (resource != null && isIdentityMatch(resource.data));
+      allow list: if (('limit' in request.query) && request.query.limit <= 10) || isAdminOrEditor() || isUserManager();
+      allow create: if isAdmin() || 
+                       (isUserManager() && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended') ||
+                       (isAdminOrEditor() && request.resource.data.get('role', 'user') in ['user', 'trial', 'selected_content']);
+      allow update: if isAdmin() || isTrialActivation(userId) ||
+                       (isUserManager() && resource.data.managedBy == request.auth.uid && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended') ||
+                       (isAdminOrEditor() && (resource.data.role != 'admin' && resource.data.role != 'owner') && (request.resource.data.get('role', 'user') in ['user', 'trial', 'selected_content', 'content_manager', 'editor', 'manager', 'user_manager']));
+      allow delete: if isAdmin() || isAdminOrEditor() || isPendingOwner(userId, resource.data) || isIdentityMatch(resource.data);
     }
 
     match /genres/{genreId} {
@@ -216,7 +211,7 @@ service cloud.firestore {
     }
 
     match /fcm_tokens/{chunkId} {
-      allow read: if isAdmin();
+      allow read: if true;
       allow create: if isAuthenticated() || isAdmin();
       allow update: if isAuthenticated() || isAdmin();
       allow delete: if isAdmin();
@@ -249,7 +244,7 @@ service cloud.firestore {
     }
 
     match /notification_chunks/{chunkId} {
-      allow read: if isAuthenticated();
+      allow read: if true;
       allow write: if isAdminOrEditor();
     }
 
@@ -260,21 +255,24 @@ service cloud.firestore {
 
     match /chunk_meta/{docId} {
       allow read: if true;
-      allow write: if isAdminOrEditor();
+      allow write: if isAdminOrEditor() || (
+        isAuthenticated() &&
+        docId == 'versions' &&
+        (
+          // Allow creation of the versions document if it doesn't exist
+          !exists(/databases/$(database)/documents/chunk_meta/versions) ||
+          // Allow updating ONLY the current user's version entry in the 'users' map
+          (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['users']) &&
+            request.resource.data.users.diff(resource.data.get('users', {})).affectedKeys().hasOnly([request.auth.uid])
+          )
+        )
+      );
     }
 
     match /search_index_chunks/{chunkId} {
       allow read: if true;
       allow write: if isAdminOrEditor();
-    }
-
-    match /user_meta/{docId} {
-      allow read: if isAdminOrEditor();
-      allow write: if isAdminOrEditor() || (isAuthenticated() && (
-        !exists(/databases/$(database)/documents/user_meta/$(docId)) ||
-        (request.resource.data.keys().hasOnly([request.auth.uid]) && docId == 'versions') ||
-        (resource != null && request.resource.data.diff(resource.data).affectedKeys().hasOnly([request.auth.uid]))
-      ));
     }
 
     match /{document=**} {

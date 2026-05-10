@@ -3,9 +3,10 @@ import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
 import { collection, doc, updateDoc, getDoc, onSnapshot, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit } from 'firebase/firestore';
 import { UserProfile, Role, Status, AnalyticsEvent, Content } from '../../types';
-import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone } from 'lucide-react';
+import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, Bell } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import clsx from 'clsx';
+import { motion, AnimatePresence } from 'framer-motion';
 import AlertModal from '../../components/AlertModal';
 import ConfirmModal from '../../components/ConfirmModal';
 import { Button } from '../../components/Button';
@@ -148,7 +149,16 @@ export default function UserManagement() {
   useEffect(() => {
     let mounted = true;
     if (mounted) {
-       refreshUsers(true).catch(console.error);
+       window.dispatchEvent(new CustomEvent('sync_status', { detail: 'syncing' }));
+       refreshUsers(true).then((res) => {
+         if (mounted) {
+           if (res.updatedSomething) {
+             window.dispatchEvent(new CustomEvent('sync_status', { detail: 'success' }));
+           } else {
+             window.dispatchEvent(new CustomEvent('sync_status', { detail: 'up-to-date' }));
+           }
+         }
+       }).catch(console.error);
     }
     
     return () => {
@@ -490,7 +500,7 @@ export default function UserManagement() {
         
         // 1. Delete user document
         batch.delete(doc(db, 'users', currentDeleteConfirm));
-        batch.set(doc(db, 'user_meta', 'versions'), { [currentDeleteConfirm]: -1 }, { merge: true });
+        batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentDeleteConfirm]: -1 } }, { merge: true });
         
         // Parallelize all data fetches
         const metaDoc = await getDoc(doc(db, 'chunk_meta', 'versions'));

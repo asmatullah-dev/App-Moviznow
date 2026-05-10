@@ -55,10 +55,12 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
     }
   };
 
-  if (!profile) return null;
+  // Still need profile for the popup internals, but render the button right away
+  const role = profile?.role || 'user';
+  const status = profile?.status || 'pending';
 
-  const getRoleColor = (role: string) => {
-    switch(role) {
+  const getRoleColor = (r: string) => {
+    switch(r) {
       case 'admin': return 'bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/30';
       case 'manager': return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30';
       case 'content_manager': return 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/30';
@@ -103,15 +105,15 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                   <User className="w-6 h-6" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="font-bold text-zinc-900 dark:text-white truncate">{profile.displayName || 'User'}</p>
+                  <p className="font-bold text-zinc-900 dark:text-white truncate">{profile?.displayName || 'Loading...'}</p>
                   <div className="space-y-0.5">
-                    {profile.email && !profile.email.endsWith('@moviznow.com') && (
+                    {profile?.email && !profile.email.endsWith('@moviznow.com') && (
                       <p className="text-[10px] text-zinc-500 truncate">{profile.email}</p>
                     )}
-                    {profile.phone && (
+                    {profile?.phone && (
                       <p className="text-[10px] text-zinc-500 truncate">{profile.phone}</p>
                     )}
-                    {!profile.phone && profile.email?.endsWith('@moviznow.com') && (
+                    {!profile?.phone && profile?.email?.endsWith('@moviznow.com') && (
                       <p className="text-[10px] text-zinc-500 truncate">No Contact Info</p>
                     )}
                   </div>
@@ -119,17 +121,17 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
               </div>
               
               <div className="flex flex-wrap gap-2 mb-2">
-                <span className={clsx("text-[10px] font-medium px-2 py-0.5 rounded-full border", getRoleColor(profile.role))}>
-                  {profile.role.replace('_', ' ').toUpperCase()}
+                <span className={clsx("text-[10px] font-medium px-2 py-0.5 rounded-full border", getRoleColor(role))}>
+                  {role.replace('_', ' ').toUpperCase()}
                 </span>
-                {profile.role !== 'owner' && (
-                  <span className={clsx("text-[10px] font-medium px-2 py-0.5 rounded-full border uppercase", getStatusColor(profile.status))}>
-                    {profile.status}
+                {role !== 'owner' && (
+                  <span className={clsx("text-[10px] font-medium px-2 py-0.5 rounded-full border uppercase", getStatusColor(status))}>
+                    {status}
                   </span>
                 )}
               </div>
 
-              {profile.role !== 'owner' && profile.expiryDate && (
+              {role !== 'owner' && profile?.expiryDate && (
                 <div className="text-xs text-zinc-500 mt-2 flex items-center justify-between">
                   <div>
                     Expiry: <span className="font-medium text-zinc-900 dark:text-white">{profile.expiryDate === 'Lifetime' ? 'Lifetime' : format(new Date(profile.expiryDate), 'MMM dd, yyyy')}</span>

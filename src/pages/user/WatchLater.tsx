@@ -45,7 +45,7 @@ export default function WatchLater() {
             </h1>
           </div>
           <div className="flex items-center gap-4">
-            {profile && <NotificationMenu />}
+            <NotificationMenu />
             <AdminButtons profile={profile} />
             <CartButton />
             <UserProfileMenu />

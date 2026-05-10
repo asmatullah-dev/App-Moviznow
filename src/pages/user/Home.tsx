@@ -423,7 +423,7 @@ export default function Home({ onOpenMediaModal }: { onOpenMediaModal: () => voi
               </button>
             )}
             <AdminButtons profile={profile} />
-            {profile && <NotificationMenu />}
+            <NotificationMenu />
             <CartButton />
             <UserProfileMenu onOpenLogoutModal={() => setIsLogoutModalOpen(true)} />
           </div>

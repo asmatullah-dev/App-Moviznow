@@ -29,6 +29,8 @@ export const NotificationMenu = React.memo(() => {
     };
   }, [profile?.lastNotificationCheck]);
 
+  if (!profile) return null;
+
   const handleOpen = async () => {
     const willOpen = !isOpen;
     setIsOpen(willOpen);
@@ -48,11 +50,9 @@ export const NotificationMenu = React.memo(() => {
     }
   };
 
-  if (!profile) return null;
-
-  const lastCheck = (localLastCheck && (!profile.lastNotificationCheck || localLastCheck > new Date(profile.lastNotificationCheck)))
+  const lastCheck = (localLastCheck && (!profile?.lastNotificationCheck || localLastCheck > new Date(profile.lastNotificationCheck)))
     ? localLastCheck
-    : (profile.lastNotificationCheck ? new Date(profile.lastNotificationCheck) : mountTime.current);
+    : (profile?.lastNotificationCheck ? new Date(profile.lastNotificationCheck) : mountTime.current);
 
   const unreadCount = isOpen ? 0 : notifications.filter(n => {
     const notifDate = new Date(n.createdAt);

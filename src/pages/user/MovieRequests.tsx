@@ -6,6 +6,10 @@ import { Film, Plus, Search, Clock, CheckCircle2, XCircle, MessageCircle, ArrowL
 import { useCart } from '../../contexts/CartContext';
 import { Link } from 'react-router-dom';
 import { ThemeToggle } from '../../components/ThemeToggle';
+import { NotificationMenu } from '../../components/NotificationMenu';
+import { AdminButtons } from '../../components/AdminButtons';
+import { CartButton } from '../../components/CartButton';
+import { UserProfileMenu } from '../../components/UserProfileMenu';
 import { clsx } from 'clsx';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
 import { smartSearch } from '../../utils/searchUtils';
@@ -116,23 +120,16 @@ export default function MovieRequests() {
           </div>
           
           <div className="flex items-center gap-4">
-            <ThemeToggle />
-            {((profile?.role === 'selected_content' && profile?.status !== 'expired') || profile?.status === 'pending') && (
-              <Link to="/cart" className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors relative" title="Cart">
-                <ShoppingCart className="w-5 h-5" />
-                {cart.length > 0 && (
-                  <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full">
-                    {cart.length}
-                  </span>
-                )}
-              </Link>
-            )}
+            <NotificationMenu />
+            <AdminButtons profile={profile} />
+            <CartButton />
+            <UserProfileMenu />
             <button
               onClick={() => setIsRequestModalOpen(true)}
-              className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 transition-colors"
+              className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm justify-center font-bold flex items-center gap-2 transition-colors ml-2"
             >
               <Plus className="w-4 h-4" />
-              Request New
+              <span className="hidden sm:inline">Request New</span>
             </button>
           </div>
         </div>
