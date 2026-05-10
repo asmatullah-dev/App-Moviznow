@@ -97,42 +97,49 @@ service cloud.firestore {
     }
 
     function isTrialActivation(userId) {
+      let d = request.resource.data;
+      let r = resource.data;
       return isOwner(userId) &&
-             resource.data.role == 'user' &&
-             resource.data.status == 'pending' &&
-             request.resource.data.role == 'trial' &&
-             request.resource.data.status == 'active' &&
-             request.resource.data.get('expiryDate', '') != '' &&
-             request.resource.data.get('managedBy', '') == resource.data.get('managedBy', '') &&
-             request.resource.data.get('permissions', []) == resource.data.get('permissions', []) &&
-             request.resource.data.get('assignedContent', []) == resource.data.get('assignedContent', []);
+             r.get('role', 'user') == 'user' &&
+             r.get('status', 'pending') == 'pending' &&
+             d.get('role', 'trial') == 'trial' &&
+             d.get('status', 'active') == 'active' &&
+             d.get('expiryDate', '') != '' &&
+             timestamp(d.expiryDate) > request.time &&
+             timestamp(d.expiryDate) <= request.time + duration.value(3, 'd') &&
+             d.get('managedBy', '') == r.get('managedBy', '') &&
+             d.get('permissions', []) == r.get('permissions', []) &&
+             d.get('assignedContent', []) == r.get('assignedContent', []);
     }
 
     function isIdentityMatch(resourceData) {
       return isAuthenticated() && 
              (
-               (resourceData.get('email', '') != '' && ('email' in request.auth.token) && resourceData.email.lower() == request.auth.token.email.lower()) || 
-               (resourceData.get('phone', '') != '' && ('phone_number' in request.auth.token) && resourceData.phone == request.auth.token.phone_number)
+               (resourceData.get('email', '') != '' && ('email' in request.auth.token) && resourceData.get('email', '').lower() == request.auth.token.email.lower()) || 
+               (resourceData.get('phone', '') != '' && ('phone_number' in request.auth.token) && resourceData.get('phone', '') == request.auth.token.phone_number)
              );
     }
 
     match /users/{userId} {
       // 1. Owner Access: Read, Create, Update
       allow get: if isOwner(userId);
-      allow create: if isOwner(userId) && 
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) &&
                        (isAdmin() || request.resource.data.get('role', 'user') in ['user', 'trial', 'selected_content']);
-      allow update: if isOwner(userId) && 
-                       (isAdmin() || protectedUserFieldsUnchanged());
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) &&
+                       (isAdmin() || protectedUserFieldsUnchanged() || isTrialActivation(userId));
 
       // 2. Admin/Manager/Identity Access
       allow get: if isAdminOrEditor() || isUserManager() || (resource != null && isIdentityMatch(resource.data));
       allow list: if (('limit' in request.query) && request.query.limit <= 10) || isAdminOrEditor() || isUserManager();
-      allow create: if isAdmin() || 
+      allow create: if isAdmin() || (isValidUser(request.resource.data) && (
                        (isUserManager() && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended') ||
-                       (isAdminOrEditor() && request.resource.data.get('role', 'user') in ['user', 'trial', 'selected_content']);
-      allow update: if isAdmin() || isTrialActivation(userId) ||
+                       (isAdminOrEditor() && request.resource.data.get('role', 'user') in ['user', 'trial', 'selected_content'])
+                    ));
+      allow update: if isAdmin() || (isValidUser(request.resource.data) && (
+                       isTrialActivation(userId) ||
                        (isUserManager() && resource.data.managedBy == request.auth.uid && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended') ||
-                       (isAdminOrEditor() && (resource.data.role != 'admin' && resource.data.role != 'owner') && (request.resource.data.get('role', 'user') in ['user', 'trial', 'selected_content', 'content_manager', 'editor', 'manager', 'user_manager']));
+                       (isAdminOrEditor() && (resource.data.role != 'admin' && resource.data.role != 'owner') && (request.resource.data.get('role', 'user') in ['user', 'trial', 'selected_content', 'content_manager', 'editor', 'manager', 'user_manager']))
+                    ));
       allow delete: if isAdmin() || isAdminOrEditor() || isPendingOwner(userId, resource.data) || isIdentityMatch(resource.data);
     }
 
