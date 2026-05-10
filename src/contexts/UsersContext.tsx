@@ -54,11 +54,13 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     
     // Check 9AM restriction for auto-syncs
     const now = Date.now();
-    const pktTime = new Date(now + (5 * 60 * 60 * 1000));
-    const isPast9AM = pktTime.getUTCHours() >= 9;
+    // PKT is UTC+5. Shift back by 9 hours to align the daily update cycle with 9 AM PKT.
+    const shiftedTime = new Date(now + (5 - 9) * 60 * 60 * 1000);
+    const checkPeriod = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
+    const lastCheckPeriod = safeStorage.getItem('last_user_finalize_period');
     
-    if (!isPast9AM && !force) {
-        console.log("Users sync deferred: Before 9 AM PKT and group sync not forced.");
+    if (lastCheckPeriod === checkPeriod && !force) {
+        console.log("Users sync deferred: Already synced in this 9 AM PKT period.");
         return;
     }
     
@@ -94,6 +96,11 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       safeStorage.removeItem('pending_user_updates');
       setHasPendingChanges(false);
       
+      const nowSync = Date.now();
+      const shiftedSync = new Date(nowSync + (5 - 9) * 60 * 60 * 1000);
+      const periodSync = `${shiftedSync.getUTCFullYear()}-${shiftedSync.getUTCMonth() + 1}-${shiftedSync.getUTCDate()}`;
+      safeStorage.setItem('last_user_finalize_period', periodSync);
+      
       // Update local meta versions
       const cachedMetaStr = safeStorage.getItem('cached_chunk_users_versions');
       const localVersions = cachedMetaStr ? JSON.parse(cachedMetaStr) : {};
@@ -114,10 +121,9 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     }
 
     const now = Date.now();
-    const pktTime = new Date(now + (5 * 60 * 60 * 1000));
-    const isPast9AM = pktTime.getUTCHours() >= 9;
-    const pktDate = `${pktTime.getUTCFullYear()}-${pktTime.getUTCMonth() + 1}-${pktTime.getUTCDate()}`;
-    const checkPeriod = isPast9AM ? pktDate : `before-9am-${pktDate}`;
+    // PKT is UTC+5. Shift back by 9 hours to align the daily update cycle with 9 AM PKT.
+    const shiftedTime = new Date(now + (5 - 9) * 60 * 60 * 1000);
+    const checkPeriod = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
 
     const cachedStr = safeStorage.getItem('cached_all_users');
     const locallyCachedUsers = cachedStr ? JSON.parse(cachedStr) : [];
@@ -222,12 +228,10 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       safeStorage.setItem('cached_chunk_users_versions', JSON.stringify(serverVersions));
       
       // Mark as checked in this period
-      const now = Date.now();
-      const pktTime = new Date(now + (5 * 60 * 60 * 1000));
-      const isPast9AM = pktTime.getUTCHours() >= 9;
-      const pktDate = `${pktTime.getUTCFullYear()}-${pktTime.getUTCMonth() + 1}-${pktTime.getUTCDate()}`;
-      const checkPeriod = isPast9AM ? pktDate : `before-9am-${pktDate}`;
-      safeStorage.setItem('last_chunk_users_check_period', checkPeriod);
+      const nowChecked = Date.now();
+      const shiftedChecked = new Date(nowChecked + (5 - 9) * 60 * 60 * 1000);
+      const periodChecked = `${shiftedChecked.getUTCFullYear()}-${shiftedChecked.getUTCMonth() + 1}-${shiftedChecked.getUTCDate()}`;
+      safeStorage.setItem('last_chunk_users_check_period', periodChecked);
       
       setLoading(false);
       setError(null);

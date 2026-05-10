@@ -191,10 +191,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const dailySyncKey = `last_daily_sync_${currentUser.uid}`;
       const lastSyncDateStr = localStorage.getItem(dailySyncKey);
       
-      const pktTime = new Date(now + (5 * 60 * 60 * 1000));
-      const isAfterNine = pktTime.getUTCHours() >= 9;
-      const pktDate = `${pktTime.getUTCFullYear()}-${pktTime.getUTCMonth() + 1}-${pktTime.getUTCDate()}`;
-      const isDailySync = isAfterNine && lastSyncDateStr !== pktDate;
+      const shiftedTime = new Date(now + (5 - 9) * 60 * 60 * 1000);
+      const pktDate = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
+      const isDailySync = lastSyncDateStr !== pktDate;
 
       if (localProfile && !profile) {
          setProfile(localProfile);
@@ -739,11 +738,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const lastSyncDateStr = localStorage.getItem(dailySyncKey);
         const lastSessionStart = localStorage.getItem(sessionKey);
         const now = Date.now();
-        const pktTime = new Date(now + (5 * 60 * 60 * 1000));
-        const isPast9AM = pktTime.getUTCHours() >= 9;
-        const pktDate = `${pktTime.getUTCFullYear()}-${pktTime.getUTCMonth() + 1}-${pktTime.getUTCDate()}`;
+        const shiftedTime = new Date(now + (5 - 9) * 60 * 60 * 1000);
+        const pktDate = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
 
-        const isDailySync = isPast9AM && lastSyncDateStr !== pktDate;
+        const isDailySync = lastSyncDateStr !== pktDate;
 
         const twelveHours = 12 * 60 * 60 * 1000;
 
@@ -770,6 +768,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         
         // Add pending local state lists if daily sync applies or it's past 9AM and needs sync
         const needsSync = safeStorage.getItem("needs_user_sync") === "true";
+        const isPast9AM = new Date(now + 5 * 3600000).getUTCHours() >= 9;
         if (isDailySync || (isPast9AM && needsSync)) {
             const pendingFavorites = safeStorage.getItem("pending_favorites_array");
             if (pendingFavorites) pendingUpdates.favorites = JSON.parse(pendingFavorites);

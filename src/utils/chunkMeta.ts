@@ -6,35 +6,12 @@ let chunkMetaPromise: Promise<Record<string, any>> | null = null;
 let memoryCache: Record<string, any> | null = null;
 
 const shouldFetchMeta = () => {
-  let isAdmin = false;
-  try {
-    const profileStr = safeStorage.getItem('profile_cache');
-    if (profileStr) {
-      const profile = JSON.parse(profileStr);
-      isAdmin = ['owner', 'admin', 'content_manager', 'editor', 'manager', 'user_manager'].includes(profile.role);
-    }
-  } catch(e) {}
-  
-  if (isAdmin) return true;
-  
   const now = Date.now();
-  const pktTimeNow = new Date(now + (5 * 60 * 60 * 1000));
-  const pktDateNowString = `${pktTimeNow.getUTCFullYear()}-${pktTimeNow.getUTCMonth() + 1}-${pktTimeNow.getUTCDate()}`;
+  // PKT is UTC+5. Shift back by 9 hours to align the daily update cycle with 9 AM PKT.
+  const shiftedTime = new Date(now + (5 - 9) * 60 * 60 * 1000);
+  const checkPeriod = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
 
-  const isPast9AMPKT = pktTimeNow.getUTCHours() >= 9;
-  
-  const lastFetchStr = safeStorage.getItem('last_chunk_meta_fetch_time');
-  if (!lastFetchStr) return true;
-
-  const lastFetch = new Date(parseInt(lastFetchStr, 10));
-  const pktTimeLastFetch = new Date(lastFetch.getTime() + (5 * 60 * 60 * 1000));
-  const pktDateLastFetchString = `${pktTimeLastFetch.getUTCFullYear()}-${pktTimeLastFetch.getUTCMonth() + 1}-${pktTimeLastFetch.getUTCDate()}`;
-
-  // If we haven't fetched today in PKT, and it's past 9AM PKT, or if we fetched today before 9AM but it's now past 9AM...
-  // Simplify: Check the last fetch period string
-  const checkPeriod = isPast9AMPKT ? pktDateNowString : `before-9am-${pktDateNowString}`;
   const lastCheckPeriod = safeStorage.getItem('last_chunk_meta_period');
-
   if (lastCheckPeriod !== checkPeriod) {
      return true;
   }
@@ -77,12 +54,10 @@ export const getChunkMeta = async (forceRefresh = false) => {
         safeStorage.setItem('cached_chunk_meta_doc', JSON.stringify(data));
         safeStorage.setItem('last_chunk_meta_fetch_time', Date.now().toString());
 
-        const now = Date.now();
-        const pktTimeNow = new Date(now + (5 * 60 * 60 * 1000));
-        const pktDateNowString = `${pktTimeNow.getUTCFullYear()}-${pktTimeNow.getUTCMonth() + 1}-${pktTimeNow.getUTCDate()}`;
-        const isPast9AMPKT = pktTimeNow.getUTCHours() >= 9;
-        const checkPeriod = isPast9AMPKT ? pktDateNowString : `before-9am-${pktDateNowString}`;
-        safeStorage.setItem('last_chunk_meta_period', checkPeriod);
+        const nowInternal = Date.now();
+        const shiftedTimeInternal = new Date(nowInternal + (5 - 9) * 60 * 60 * 1000);
+        const periodInternal = `${shiftedTimeInternal.getUTCFullYear()}-${shiftedTimeInternal.getUTCMonth() + 1}-${shiftedTimeInternal.getUTCDate()}`;
+        safeStorage.setItem('last_chunk_meta_period', periodInternal);
 
         chunkMetaPromise = null; // Clear the inflight promise
         return data;

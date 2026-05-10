@@ -52,12 +52,29 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
   const { profile, loading: authProfileLoading, refreshProfile } = useAuth();
   const { users: allUsers, refreshUsers, finalizeUserChanges } = useUsers();
 
-  const [contentList, setContentList] = useState<Content[]>([]);
-  const [genres, setGenres] = useState<Genre[]>([]);
-  const [languages, setLanguages] = useState<Language[]>([]);
-  const [qualities, setQualities] = useState<Quality[]>([]);
-  const [collections, setCollections] = useState<AppCollection[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [contentList, setContentList] = useState<Content[]>(() => {
+    const cached = safeStorage.getItem('content_cache');
+    return cached ? JSON.parse(cached) : [];
+  });
+  const [genres, setGenres] = useState<Genre[]>(() => {
+    const cached = safeStorage.getItem('genres_cache');
+    return cached ? JSON.parse(cached) : [];
+  });
+  const [languages, setLanguages] = useState<Language[]>(() => {
+    const cached = safeStorage.getItem('languages_cache');
+    return cached ? JSON.parse(cached) : [];
+  });
+  const [qualities, setQualities] = useState<Quality[]>(() => {
+    const cached = safeStorage.getItem('qualities_cache');
+    return cached ? JSON.parse(cached) : [];
+  });
+  const [collections, setCollections] = useState<AppCollection[]>(() => {
+    const cached = safeStorage.getItem('collections_cache');
+    return cached ? JSON.parse(cached) : [];
+  });
+  const [loading, setLoading] = useState(() => {
+    return !safeStorage.getItem('content_cache') || !safeStorage.getItem('collections_cache');
+  });
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   
   const hasLoadedRef = useRef(false);
@@ -691,12 +708,10 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     
     const isAdmin = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
     
-    const now = new Date();
-    // PKT is UTC+5. 
-    const pktTime = new Date(now.getTime() + (5 * 60 * 60 * 1000));
-    const isPast9AMPKT = pktTime.getUTCHours() >= 9;
-    const pktDate = `${pktTime.getUTCFullYear()}-${pktTime.getUTCMonth() + 1}-${pktTime.getUTCDate()}`;
-    const checkPeriod = isPast9AMPKT ? pktDate : `before-9am-${pktDate}`;
+    const now = Date.now();
+    // PKT is UTC+5. Shift back by 9 hours to align the daily update cycle with 9 AM PKT.
+    const shiftedTime = new Date(now + (5 - 9) * 60 * 60 * 1000);
+    const checkPeriod = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
 
     // Period check to avoid redundant auto-checks
     const lastCheckPeriod = safeStorage.getItem('last_meta_check_period');
@@ -705,20 +720,14 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     const noLocalData = contentList.length === 0;
 
     if (!force && lastCheckPeriod === checkPeriod && !noLocalData) {
-        // Already checked for this period (either before 9AM or for the 9AM cycle)
+        // Already checked for this period (the 9AM cycle)
         setLoading(false);
         if (force) window.dispatchEvent(new CustomEvent('sync_status', { detail: 'up-to-date' }));
         return;
     }
-
-    if (!force && !isPast9AMPKT && !noLocalData) {
-        console.log("Auto-sync deferred: Before 9 AM PKT.");
-        setLoading(false);
-        return;
-    }
     
     // Proceed with sync
-    if (force || noLocalData || (isPast9AMPKT && lastCheckPeriod !== checkPeriod)) {
+    if (force || noLocalData || lastCheckPeriod !== checkPeriod) {
         window.dispatchEvent(new CustomEvent('sync_status', { detail: 'syncing' }));
     }
 
@@ -736,7 +745,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     if (isAdmin) {
       finalizeUserChanges(true).catch(console.error);
       try {
-          const { updatedSomething: usersUpdated } = await refreshUsers(true);
+          const { updatedSomething: usersUpdated } = await refreshUsers(false);
           if (usersUpdated) updatedSomething = true;
       } catch (e) {
           console.error(e);
@@ -749,7 +758,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     // Record that we checked in this period
     safeStorage.setItem('last_meta_check_period', checkPeriod);
 
-    if (force || noLocalData || (isPast9AMPKT && lastCheckPeriod !== checkPeriod)) {
+    if (force || noLocalData || lastCheckPeriod !== checkPeriod) {
         window.dispatchEvent(new CustomEvent('sync_status', { detail: updatedSomething ? 'success' : 'up-to-date' }));
     }
   };
