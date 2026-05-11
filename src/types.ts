@@ -15,7 +15,7 @@ export interface UserProfile {
   favorites?: string[];
   createdAt: string;
   sessionsCount?: number;
-  timeSpent?: number; // in minutes
+  timeSpent?: number; // in seconds
   lastNotificationCheck?: string; // ISO string
   permissions?: string[]; // Specific management access
   managedBy?: string; // UID of the User Manager who added this user
@@ -28,6 +28,9 @@ export interface UserProfile {
   orders?: Order[];
   reported_links?: any[];
   movieRequests?: any[];
+  trialActivated?: boolean;
+  contentClicks?: Record<string, { count: number, title: string, type: string, lastClicked: string }>;
+  linkClicks?: Record<string, { count: number, url: string, title?: string, lastClicked: string }>;
 }
 
 export interface AppNotification {

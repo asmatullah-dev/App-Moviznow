@@ -164,7 +164,10 @@ export default function Login() {
                     <button 
                       type="button"
                       onClick={() => {
-                        const adminPhone = `92${settings?.supportNumber || '3363284466'}`;
+                        let supportPhone = settings?.supportNumber || '3363284466';
+                        if (supportPhone.startsWith('92')) supportPhone = supportPhone.substring(2);
+                        if (supportPhone.startsWith('0')) supportPhone = supportPhone.substring(1);
+                        const adminPhone = `92${supportPhone}`;
                         const message = `Hello Admin,\n\nName: ${user?.displayName || 'Unknown'}\nEmail: ${user?.email || 'N/A'}\nPhone: ${standardizedPhone}\nRole & Status: Unknown, Unknown\n\nYour message/question:\nI need help logging in.`;
                         window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
                       }}
@@ -230,7 +233,10 @@ export default function Login() {
         return;
       }
       // Open WhatsApp to admin
-      const adminPhone = `92${settings?.supportNumber || '3363284466'}`;
+      let supportPhone = settings?.supportNumber || '3363284466';
+      if (supportPhone.startsWith('92')) supportPhone = supportPhone.substring(2);
+      if (supportPhone.startsWith('0')) supportPhone = supportPhone.substring(1);
+      const adminPhone = `92${supportPhone}`;
       const message = `Hello Admin,\n\nName: ${registeredUser?.displayName || 'Unknown'}\nEmail: ${registeredUser?.email || 'N/A'}\nPhone: ${registeredUser?.phone || identifier}\nRole & Status: ${String(registeredUser?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(registeredUser?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nI forgot my password and need help resetting it.`;
       window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
     }

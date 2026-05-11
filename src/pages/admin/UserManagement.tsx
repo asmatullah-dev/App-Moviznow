@@ -57,7 +57,7 @@ export default function UserManagement() {
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [isEditingOverlay, setIsEditingOverlay] = useState(false);
   const [isAnalyticsLoading, setIsAnalyticsLoading] = useState(false);
-  const [scannedAnalytics, setScannedAnalytics] = useState<Record<string, { timeSpent: number, favoritesCount: number, watchLaterCount: number, lastActive: string | null, hasScanned: boolean }>>({});
+  const [scannedAnalytics, setScannedAnalytics] = useState<Record<string, { timeSpent: number, favoritesCount: number, watchLaterCount: number, lastActive: string | null, hasScanned: boolean, sessionsCount: number, mostClickedContent: { id: string, count: number, type: string, title?: string }[], mostClickedLinks: { count: number, url: string, title?: string }[] }>>({});
   const [userRequests, setUserRequests] = useState<any[]>([]);
   const [assignedContentTitles, setAssignedContentTitles] = useState<string[]>([]);
   const [allContent, setAllContent] = useState<any[]>([]);
@@ -275,11 +275,22 @@ export default function UserManagement() {
       }
 
       // 2. Process Analytics IMMEDIATELY from LOCAL data (no network wait)
+      const cClicksObj = freshUser.contentClicks || {};
+      const ccList = Object.keys(cClicksObj).map(id => ({ ...cClicksObj[id], id }));
+      ccList.sort((a,b) => b.count - a.count);
+
+      const lClicksObj = freshUser.linkClicks || {};
+      const lcList = Object.keys(lClicksObj).map(id => ({ ...lClicksObj[id], id }));
+      lcList.sort((a,b) => b.count - a.count);
+
       const newAnalytics = { 
         timeSpent: freshUser.timeSpent || 0,
         favoritesCount: (freshUser.favorites || []).length,
         watchLaterCount: (freshUser.watchLater || []).length,
         lastActive: freshUser.lastActive || null,
+        sessionsCount: freshUser.sessionsCount || 0,
+        mostClickedContent: ccList.slice(0, 5),
+        mostClickedLinks: lcList.slice(0, 5),
         hasScanned: true
       };
       
@@ -314,7 +325,7 @@ export default function UserManagement() {
   };
 
   const getUserAnalytics = (uid: string) => {
-    return scannedAnalytics[uid] || { timeSpent: 0, favoritesCount: 0, watchLaterCount: 0, lastActive: null, hasScanned: false };
+    return scannedAnalytics[uid] || { timeSpent: 0, favoritesCount: 0, watchLaterCount: 0, lastActive: null, hasScanned: false, sessionsCount: 0, mostClickedContent: [], mostClickedLinks: [] };
   };
 
   const handleRowClick = (user: UserProfile, e: React.MouseEvent) => {
@@ -333,15 +344,16 @@ export default function UserManagement() {
       } catch (e) {
         setScannedAnalytics(prev => ({ 
           ...prev, 
-          [user.uid]: { timeSpent: 0, favoritesCount: 0, watchLaterCount: 0, lastActive: null, hasScanned: false } 
+          [user.uid]: { timeSpent: 0, favoritesCount: 0, watchLaterCount: 0, lastActive: null, hasScanned: false, sessionsCount: 0, mostClickedContent: [], mostClickedLinks: [] } 
         }));
       }
     } else {
       setScannedAnalytics(prev => ({ 
         ...prev, 
-        [user.uid]: { timeSpent: 0, favoritesCount: 0, watchLaterCount: 0, lastActive: null, hasScanned: false } 
+        [user.uid]: { timeSpent: 0, favoritesCount: 0, watchLaterCount: 0, lastActive: null, hasScanned: false, sessionsCount: 0, mostClickedContent: [], mostClickedLinks: [] } 
       }));
     }
+    
     
     setUserRequests([]);
     setAssignedContentTitles([]);
@@ -1680,7 +1692,7 @@ export default function UserManagement() {
                                     {!userAna.hasScanned ? (
                                       <span className="text-zinc-400 italic font-normal">Not Scanned</span>
                                     ) : (
-                                      `${userAna.timeSpent || 0} mins`
+                                      `${Math.floor((userAna.timeSpent || 0) / 60)}m ${(userAna.timeSpent || 0) % 60}s`
                                     )}
                                   </span>
                                 </div>
@@ -1742,6 +1754,63 @@ export default function UserManagement() {
                                         })}
                                       </div>
                                     </div>
+                                  )}
+                                </div>
+                                <div className="flex items-center justify-between bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
+                                  <div className="flex items-center gap-3 text-zinc-600 dark:text-zinc-300">
+                                    <Layers className="w-4 h-4 text-emerald-500" />
+                                    <span className="text-xs font-medium">Sessions Count</span>
+                                  </div>
+                                  <span className="font-bold text-zinc-900 dark:text-white text-xs">
+                                    {!userAna.hasScanned ? (
+                                      <span className="text-zinc-400 italic font-normal">Not Scanned</span>
+                                    ) : (
+                                      `${userAna.sessionsCount || 0}`
+                                    )}
+                                  </span>
+                                </div>
+                                <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-3 text-zinc-600 dark:text-zinc-300">
+                                      <Film className="w-4 h-4 text-emerald-500" />
+                                      <span className="text-xs font-medium">Most Clicked Content</span>
+                                    </div>
+                                  </div>
+                                  {userAna.hasScanned && (userAna.mostClickedContent || []).length > 0 ? (
+                                    <div className="mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-900 overflow-y-auto custom-scrollbar">
+                                      <div className="flex flex-col gap-1 text-[10px] text-zinc-500 dark:text-zinc-400">
+                                        {userAna.mostClickedContent.map((c, idx) => (
+                                           <div key={idx} className="flex justify-between items-center">
+                                             <span className="truncate pr-2">{c.title || c.id}</span>
+                                             <span className="font-bold text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded">{c.count} clicks</span>
+                                           </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="text-[10px] text-zinc-400 italic">No content clicks</div>
+                                  )}
+                                </div>
+                                <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-3 text-zinc-600 dark:text-zinc-300">
+                                      <Tv className="w-4 h-4 text-emerald-500" />
+                                      <span className="text-xs font-medium">Most Clicked Links</span>
+                                    </div>
+                                  </div>
+                                  {userAna.hasScanned && (userAna.mostClickedLinks || []).length > 0 ? (
+                                    <div className="mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-900 overflow-y-auto custom-scrollbar">
+                                      <div className="flex flex-col gap-1 text-[10px] text-zinc-500 dark:text-zinc-400">
+                                        {userAna.mostClickedLinks.map((l, idx) => (
+                                           <div key={idx} className="flex justify-between items-center">
+                                             <span className="truncate pr-2" title={l.url}>{l.title || l.url}</span>
+                                             <span className="font-bold text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded">{l.count} clicks</span>
+                                           </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="text-[10px] text-zinc-400 italic">No link clicks</div>
                                   )}
                                 </div>
                               </>

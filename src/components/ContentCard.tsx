@@ -8,6 +8,7 @@ import { formatContentTitle, getContrastColor } from '../utils/contentUtils';
 import { clsx } from 'clsx';
 import { useCart } from '../contexts/CartContext';
 import { useSettings } from '../contexts/SettingsContext';
+import { useAuth } from '../contexts/AuthContext';
 
 interface ContentCardProps {
   content: Content;
@@ -33,6 +34,7 @@ const ContentCard = React.memo(({
   isSmall
 }: ContentCardProps) => {
   const { addToCart, cart } = useCart();
+  const { profile: sysProfile, trackContentClick } = useAuth();
   const { settings } = useSettings();
   const [isTrailerSelectionOpen, setIsTrailerSelectionOpen] = React.useState(false);
   const [selectedTrailerUrl, setSelectedTrailerUrl] = React.useState<string | null>(null);
@@ -150,7 +152,10 @@ const ContentCard = React.memo(({
         <div className="relative flex flex-col h-full bg-black rounded-[14.5px] p-[0.5px] transition-colors">
           {/* Inner Content */}
           <div className="relative flex flex-col h-full bg-zinc-50 dark:bg-zinc-900 rounded-[14px] overflow-hidden">
-          <Link to={`/movie/${content.id}`} className="absolute inset-0 z-20" aria-label={`View details for ${content.title}`} />
+          <Link 
+             to={`/movie/${content.id}`} 
+             onClick={() => trackContentClick(content.id, content.title, content.type)}
+             className="absolute inset-0 z-20" aria-label={`View details for ${content.title}`} />
           
           <div className="relative aspect-[2/3] w-full bg-zinc-100 dark:bg-zinc-800 block z-10">
             <LazyLoadImage

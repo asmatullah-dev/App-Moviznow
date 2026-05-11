@@ -26,7 +26,7 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      let email = ('email' in request.auth.token) ? request.auth.token.email.lower() : '';
+      let email = (('email' in request.auth.token) && (request.auth.token.email is string)) ? request.auth.token.email.toLower() : '';
       let uid = request.auth.uid;
       
       return isAuthenticated() &&
@@ -67,11 +67,17 @@ service cloud.firestore {
     // ===============================================================
 
     function isValidUser(data) {
-      let emailValid = !('email' in data) || data.email == null || (data.email is string && data.email.size() < 100);
-      let phoneValid = !('phone' in data) || data.phone == null || (data.phone is string && data.phone.size() < 50);
-      let nameValid = !('displayName' in data) || data.displayName == null || (data.displayName is string && data.displayName.size() < 100);
-      let roleValid = data.get('role', 'user') in ['admin', 'owner', 'manager', 'user_manager', 'content_manager', 'user', 'trial', 'selected_content', 'editor', 'temporary'];
-      let statusValid = data.get('status', 'active') in ['active', 'pending', 'suspended', 'expired'];
+      let email = data.get('email', null);
+      let phone = data.get('phone', null);
+      let name = data.get('displayName', null);
+      
+      let emailValid = email == null || (email is string && email.size() < 100);
+      let phoneValid = phone == null || (phone is string && phone.size() < 50);
+      let nameValid = name == null || (name is string && name.size() < 100);
+      
+      // Only validate 'role' and 'status' if they exist in the update payload
+      let roleValid = !('role' in data) || (data.role in ['admin', 'owner', 'manager', 'user_manager', 'content_manager', 'user', 'trial', 'selected_content', 'editor', 'temporary']);
+      let statusValid = !('status' in data) || (data.status in ['active', 'pending', 'suspended', 'expired']);
       
       return emailValid && phoneValid && nameValid && roleValid && statusValid;
     }
@@ -79,66 +85,75 @@ service cloud.firestore {
     function protectedUserFieldsUnchanged() {
       let d = request.resource.data;
       let r = resource.data;
-      return d.get('role', 'user') == r.get('role', 'user') &&
-             d.get('status', 'active') == r.get('status', 'active') &&
-             d.get('expiryDate', null) == r.get('expiryDate', null) &&
-             d.get('managedBy', null) == r.get('managedBy', null) &&
-             d.get('permissions', null) == r.get('permissions', null) &&
-             d.get('assignedContent', null) == r.get('assignedContent', null);
+      // If a field is not present in the update, it is considered "unchanged" (i.e. we don't care if it's there or not, as long as it isn't being modified)
+      return d.get('role', r.get('role', null)) == r.get('role', null) &&
+             d.get('status', r.get('status', null)) == r.get('status', null) &&
+             d.get('expiryDate', r.get('expiryDate', null)) == r.get('expiryDate', null) &&
+             d.get('managedBy', r.get('managedBy', null)) == r.get('managedBy', null) &&
+             d.get('permissions', r.get('permissions', null)) == r.get('permissions', null) &&
+             d.get('assignedContent', r.get('assignedContent', null)) == r.get('assignedContent', null);
     }
 
     function isPendingOwner(userId, resourceData) {
       return isAuthenticated() && 
-             userId.startsWith('pending_') && 
+             (userId.startsWith('pending_') || userId == request.auth.uid) &&
              (
-               (resourceData.get('email', null) != null && ('email' in request.auth.token) && resourceData.email == request.auth.token.email) || 
-               (resourceData.get('phone', null) != null && ('phone_number' in request.auth.token) && resourceData.phone == request.auth.token.phone_number)
+               (resourceData.get('email', '') != '' && ('email' in request.auth.token) && (request.auth.token.email is string) && resourceData.get('email', '').toLower() == request.auth.token.email.toLower()) || 
+               (resourceData.get('phone', '') != '' && ('phone_number' in request.auth.token) && resourceData.get('phone', '') == request.auth.token.phone_number) ||
+               (userId == 'pending_' + request.auth.token.get('phone_number', 'invalid')) ||
+               (userId == 'pending_' + request.auth.uid)
              );
     }
 
     function isTrialActivation(userId) {
       let d = request.resource.data;
       let r = resource.data;
-      return isOwner(userId) &&
-             r.get('role', 'user') == 'user' &&
-             r.get('status', 'pending') == 'pending' &&
-             d.get('role', 'trial') == 'trial' &&
-             d.get('status', 'active') == 'active' &&
-             d.get('expiryDate', '') != '' &&
-             timestamp(d.expiryDate) > request.time - duration.value(1, 'm') &&
-             timestamp(d.expiryDate) <= request.time + duration.value(4, 'd') &&
-             d.get('managedBy', null) == r.get('managedBy', null) &&
-             d.get('permissions', null) == r.get('permissions', null) &&
-             d.get('assignedContent', null) == r.get('assignedContent', null);
+      
+      // Mandatory: Already have 'User' role, 'Pending' status, NOT yet activated trial
+      let isEligible = r.get('role', 'none') == 'user' && 
+                       r.get('status', 'none') == 'pending' &&
+                       r.get('trialActivated', false) == false;
+      
+      // Required changes: Role -> Trial, Status -> Active, trialActivated -> true, expiryDate -> string
+      let roleValid = d.get('role', '') == 'trial';
+      let statusValid = d.get('status', '') == 'active';
+      let activationValid = d.get('trialActivated', false) == true;
+      let expiryValid = d.get('expiryDate', '') is string && d.get('expiryDate', '').size() > 10;
+      
+      // Sensitive fields lock
+      let sensitiveValid = !d.diff(r).affectedKeys().hasAny(['managedBy', 'permissions', 'assignedContent']);
+
+      return isEligible && roleValid && statusValid && activationValid && expiryValid && sensitiveValid;
     }
 
     function isIdentityMatch(resourceData) {
       return isAuthenticated() && 
              (
-               (resourceData.get('email', '') != '' && ('email' in request.auth.token) && resourceData.get('email', '').lower() == request.auth.token.email.lower()) || 
+               (resourceData.get('email', '') != '' && ('email' in request.auth.token) && (request.auth.token.email is string) && resourceData.get('email', '').toLower() == request.auth.token.email.toLower()) || 
                (resourceData.get('phone', '') != '' && ('phone_number' in request.auth.token) && resourceData.get('phone', '') == request.auth.token.phone_number)
              );
     }
 
     match /users/{userId} {
-      // 1. Owner Access: Read, Create, Update
+      // 1. Owner Access: Basic CRUD with field restrictions
       allow get: if isOwner(userId);
       allow create: if isOwner(userId) && isValidUser(request.resource.data) &&
                        (isAdmin() || request.resource.data.get('role', 'user') in ['user', 'trial', 'selected_content']);
-      allow update: if isOwner(userId) && isValidUser(request.resource.data) &&
-                       (isAdmin() || protectedUserFieldsUnchanged() || isTrialActivation(userId));
+      
+      allow update: if (isOwner(userId) || isAdminOrEditor() || isUserManager()) &&
+                       isValidUser(request.resource.data) && (
+                         // Allow if no sensitive fields are changed
+                         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'status', 'expiryDate', 'trialActivated', 'managedBy', 'permissions', 'assignedContent'])
+                         // Or it's a valid trial activation
+                         || (isOwner(userId) && isTrialActivation(userId))
+                       );
 
       // 2. Admin/Manager/Identity Access
-      allow get: if isAdminOrEditor() || isUserManager() || (resource != null && isIdentityMatch(resource.data));
+      allow get: if isOwner(userId) || isAdminOrEditor() || isUserManager() || (resource != null && isIdentityMatch(resource.data));
       allow list: if (('limit' in request.query) && request.query.limit <= 10) || isAdminOrEditor() || isUserManager();
       allow create: if isAdmin() || (isValidUser(request.resource.data) && (
                        (isUserManager() && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended') ||
                        (isAdminOrEditor() && request.resource.data.get('role', 'user') in ['user', 'trial', 'selected_content'])
-                    ));
-      allow update: if isAdmin() || (isValidUser(request.resource.data) && (
-                       isTrialActivation(userId) ||
-                       (isUserManager() && resource.data.managedBy == request.auth.uid && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended') ||
-                       (isAdminOrEditor() && (resource.data.role != 'admin' && resource.data.role != 'owner') && (request.resource.data.get('role', 'user') in ['user', 'trial', 'selected_content', 'content_manager', 'editor', 'manager', 'user_manager']))
                     ));
       allow delete: if isAdmin() || isAdminOrEditor() || isPendingOwner(userId, resource.data) || isIdentityMatch(resource.data);
     }
@@ -151,6 +166,10 @@ service cloud.firestore {
     match /languages/{languageId} {
       allow read: if true;
       allow write: if isAdminOrEditor();
+    }
+
+    match /content_meta/versions/{userId} {
+      allow read, write: if isOwner(userId);
     }
 
     match /qualities/{qualityId} {
@@ -270,8 +289,7 @@ service cloud.firestore {
           !exists(/databases/$(database)/documents/chunk_meta/versions) ||
           // Allow updating ONLY the current user's version entry in the 'users' map
           (
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['users']) &&
-            request.resource.data.users.diff(resource.data.get('users', {})).affectedKeys().hasOnly([request.auth.uid])
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['users'])
           )
         )
       );

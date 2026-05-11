@@ -23,7 +23,7 @@ import { useSettings } from '../../contexts/SettingsContext';
 
 export default function MovieDetails() {
   const { id } = useParams<{ id: string }>();
-  const { profile, loading: profileLoading, toggleFavorite: authToggleFavorite, toggleWatchLater: authToggleWatchLater } = useAuth();
+  const { profile, loading: profileLoading, toggleFavorite: authToggleFavorite, toggleWatchLater: authToggleWatchLater, trackLinkClick } = useAuth();
   const { contentList, genres, languages, qualities, loading: contentLoading, isOffline, getContent, updateContentFields, deleteContent } = useContent();
   const { cart, addToCart } = useCart();
   const { settings } = useSettings();
@@ -845,6 +845,10 @@ export default function MovieDetails() {
     };
 
     if (!checkEligibility()) return;
+
+    if (linkId !== 'sample') {
+      trackLinkClick(url, linkName || url);
+    }
 
     if (isOffline) {
       setAlertConfig({ isOpen: true, title: 'No Internet', message: 'You need an internet connection to open this link.' });

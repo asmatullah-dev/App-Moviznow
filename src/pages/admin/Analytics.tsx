@@ -133,7 +133,7 @@ export default function Analytics() {
                   </div>
                 </div>
                 <span className="bg-emerald-500/10 text-emerald-500 px-3 py-1 rounded-full text-sm font-medium">
-                  {user.timeSpent} min
+                  {Math.floor((user.timeSpent || 0) / 60)}m {(user.timeSpent || 0) % 60}s
                 </span>
               </div>
             )) : (

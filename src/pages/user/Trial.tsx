@@ -84,8 +84,9 @@ export default function Trial() {
         await updateUserProfileData({
           role: 'trial',
           status: 'active',
+          trialActivated: true,
           expiryDate: expiry.toISOString()
-        });
+        }, undefined, true);
 
         // Force a full refresh to be absolutely sure
         await refreshProfile(true);

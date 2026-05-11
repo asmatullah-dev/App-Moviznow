@@ -1998,7 +1998,10 @@ export default function ContentManagement() {
     }
 
     text += `\n🍿 Enjoy watching on ${settings?.headerText || 'MovizNow'}!\n`;
-    text += `📞 WhatsApp: 0${settings?.supportNumber || '3363284466'}`;
+    let sn = settings?.supportNumber || '3363284466';
+    if (sn.startsWith('92')) sn = '0' + sn.substring(2);
+    else if (!sn.startsWith('0')) sn = '0' + sn;
+    text += `📞 WhatsApp: ${sn}`;
     
     if (navigator.share) {
       try {

@@ -71,11 +71,14 @@ interface AuthContextType {
   updateUserProfileData: (
     data: Partial<UserProfile>,
     newPassword?: string,
+    force?: boolean,
   ) => Promise<void>;
   clearError: () => void;
   logout: () => Promise<void>;
   toggleFavorite: (contentId: string) => Promise<void>;
   toggleWatchLater: (contentId: string) => Promise<void>;
+  trackContentClick: (contentId: string, title: string, type: string) => void;
+  trackLinkClick: (url: string, title?: string) => void;
   refreshProfile: (force?: boolean) => Promise<boolean>;
 }
 
@@ -253,13 +256,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             watchLater: safeStorage.getItem("needs_user_sync") === "true" && safeStorage.getItem("pending_watch_later_array") 
                 ? JSON.parse(safeStorage.getItem("pending_watch_later_array")!) 
                 : serverProfile.watchLater || localProfile?.watchLater || [],
+            contentClicks: safeStorage.getItem("needs_user_sync") === "true" && safeStorage.getItem("pending_content_clicks")
+                ? JSON.parse(safeStorage.getItem("pending_content_clicks")!)
+                : serverProfile.contentClicks || localProfile?.contentClicks || {},
+            linkClicks: safeStorage.getItem("needs_user_sync") === "true" && safeStorage.getItem("pending_link_clicks")
+                ? JSON.parse(safeStorage.getItem("pending_link_clicks")!)
+                : serverProfile.linkClicks || localProfile?.linkClicks || {},
             timeSpent: Math.max(serverProfile.timeSpent || 0, localProfile?.timeSpent || 0)
         };
       }
 
+      // Flush any accumulated seconds before sync
+      const cacheKey = `accumulated_time_seconds_${currentUser.uid}`;
+      let accSecs = parseInt(safeStorage.getItem(cacheKey) || "0", 10);
+      if (accSecs > 0) {
+        safeStorage.setItem(cacheKey, "0");
+        const pendingStr = safeStorage.getItem('pending_user_updates') || '{}';
+        try {
+          let pendingAll = JSON.parse(pendingStr);
+          pendingAll[currentUser.uid] = pendingAll[currentUser.uid] || {};
+          let currentBase = typeof pendingAll[currentUser.uid].timeSpent === 'number' ? pendingAll[currentUser.uid].timeSpent : (localProfile?.timeSpent || 0);
+          pendingAll[currentUser.uid].timeSpent = currentBase + accSecs;
+          safeStorage.setItem('pending_user_updates', JSON.stringify(pendingAll));
+        } catch(e){}
+      }
+
       // 4. Update user data doc and update chunk_meta version for user ONLY when necessary daily or local change
       const needsUserSync = safeStorage.getItem("needs_user_sync") === "true";
-      const shouldWrite = (serverProfile || localProfile) && (force || isDailySync || needsUserSync || isVersionMissing);
+      
+      // Strict rule: Only write to Firestore if forced or if it's the daily sync window (after 9 AM PKT)
+      // If needsUserSync is true but it's not the daily sync time, it stays in local storage until next day
+      const shouldWrite = (serverProfile || localProfile) && (force || isDailySync || isVersionMissing);
 
       if (shouldWrite) {
         try {
@@ -273,8 +300,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 if (pendFavs) updatesToPush.favorites = JSON.parse(pendFavs);
                 const pendWL = safeStorage.getItem("pending_watch_later_array");
                 if (pendWL) updatesToPush.watchLater = JSON.parse(pendWL);
+                const pendCClicks = safeStorage.getItem("pending_content_clicks");
+                if (pendCClicks) updatesToPush.contentClicks = JSON.parse(pendCClicks);
+                const pendLClicks = safeStorage.getItem("pending_link_clicks");
+                if (pendLClicks) updatesToPush.linkClicks = JSON.parse(pendLClicks);
             }
             if (mergedProfile.timeSpent !== undefined) updatesToPush.timeSpent = mergedProfile.timeSpent;
+            
+            // Check if there's any pending timeSpent in pending_user_updates for THIS user
+            const pendingUpdatesStr = safeStorage.getItem("pending_user_updates");
+            if (pendingUpdatesStr) {
+              try {
+                const pendingAll = JSON.parse(pendingUpdatesStr);
+                const myPending = pendingAll[currentUser.uid];
+                if (myPending && myPending.timeSpent !== undefined) {
+                   updatesToPush.timeSpent = Math.max(updatesToPush.timeSpent || 0, myPending.timeSpent);
+                   // Remove my pending time as it's about to be written
+                   delete pendingAll[currentUser.uid];
+                   safeStorage.setItem("pending_user_updates", JSON.stringify(pendingAll));
+                }
+              } catch (e) {}
+            }
+            
             updatesToPush.lastActive = new Date().toISOString();
 
             if (Object.keys(updatesToPush).length > 0) {
@@ -289,11 +336,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             safeStorage.setItem("needs_user_sync", "false");
             safeStorage.removeItem("pending_favorites_array");
             safeStorage.removeItem("pending_watch_later_array");
+            safeStorage.removeItem("pending_content_clicks");
+            safeStorage.removeItem("pending_link_clicks");
             safeStorage.setItem(localVersionKey, newVersion.toString());
             mergedProfile = { ...mergedProfile, ...updatesToPush };
             if (isDailySync || needsUserSync) updatedSomething = true;
             console.log("Profile changes synced & merged to Firestore");
         } catch (err) {
+            handleFirestoreError(err, OperationType.WRITE, 'chunk_meta/versions');
             console.error("Manual/Daily profile sync failed:", err);
         }
       } else {
@@ -388,8 +438,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           data.hasPassword = true;
         }
 
-        // Perform consolidated update if needed
-        if (Object.keys(updates).length > 0) {
+      // Perform consolidated update if needed
+      if (Object.keys(updates).length > 0 && (force || isDailySync)) {
           try {
             const { writeBatch } = await import('firebase/firestore');
             const batch = writeBatch(db);
@@ -775,6 +825,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
             const pendingWatchLater = safeStorage.getItem("pending_watch_later_array");
             if (pendingWatchLater) pendingUpdates.watchLater = JSON.parse(pendingWatchLater);
+            
+            const pendingContentClicks = safeStorage.getItem("pending_content_clicks");
+            if (pendingContentClicks) pendingUpdates.contentClicks = JSON.parse(pendingContentClicks);
+
+            const pendingLinkClicks = safeStorage.getItem("pending_link_clicks");
+            if (pendingLinkClicks) pendingUpdates.linkClicks = JSON.parse(pendingLinkClicks);
         }
 
         const hasLocalProfile = !!safeStorage.getItem("profile_cache");
@@ -790,6 +846,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 safeStorage.setItem("needs_user_sync", "false");
                 safeStorage.removeItem("pending_favorites_array");
                 safeStorage.removeItem("pending_watch_later_array");
+                safeStorage.removeItem("pending_content_clicks");
+                safeStorage.removeItem("pending_link_clicks");
             } catch (err) {
                 console.error("Daily sync failed:", err);
             }
@@ -845,20 +903,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const forceSync = Date.now() - lastSyncTime >= twelveHoursMs;
 
             // Sync to Firestore every 5 minutes (300 seconds) or every 12 hours to reduce write operations
-            if ((accSeconds >= 300 || forceSync) && navigator.onLine) {
-              let minutesToSync = Math.floor(accSeconds / 60);
+            if ((accSeconds >= 10 || forceSync) && navigator.onLine) {
+              let secondsToSync = accSeconds;
 
-              // If forced by 12 hours and we have less than 1 minute, round up so we don't drop the time
-              if (forceSync && minutesToSync === 0 && accSeconds > 0) {
-                minutesToSync = 1;
-              }
-
-              if (minutesToSync > 0) {
+              if (secondsToSync > 0) {
                 // Critical multi-tab lock: Deduct exactly what we consume immediately BEFORE the async request
-                const actualSecondsToConsume = Math.min(
-                  accSeconds,
-                  minutesToSync * 60,
-                );
+                const actualSecondsToConsume = secondsToSync;
 
                 // Double-check the cache before deducting to prevent race conditions across tabs
                 let currentSafeSeconds = parseInt(
@@ -889,11 +939,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 let cachedUsers: any[] = [];
                 try { cachedUsers = JSON.parse(cachedUsersStr); } catch (e) {}
                 const userIndex = cachedUsers.findIndex(u => u.uid === uid);
-                let currentTotalMinutes = 0;
+                let currentTotalSeconds = 0;
                 
                 if (userIndex !== -1) {
-                  currentTotalMinutes = cachedUsers[userIndex].timeSpent || 0;
-                  cachedUsers[userIndex].timeSpent = currentTotalMinutes + minutesToSync;
+                  currentTotalSeconds = cachedUsers[userIndex].timeSpent || 0;
+                  cachedUsers[userIndex].timeSpent = currentTotalSeconds + secondsToSync;
                   cachedUsers[userIndex].lastActive = lastActiveStr;
                   safeStorage.setItem('cached_all_users', JSON.stringify(cachedUsers));
                   
@@ -909,8 +959,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 try { pending = JSON.parse(pendingStr); } catch(e) {}
                 
                 pending[uid] = pending[uid] || {};
-                const baseTime = typeof pending[uid].timeSpent === 'number' ? pending[uid].timeSpent : currentTotalMinutes;
-                pending[uid].timeSpent = baseTime + minutesToSync;
+                const baseTime = typeof pending[uid].timeSpent === 'number' ? pending[uid].timeSpent : currentTotalSeconds;
+                pending[uid].timeSpent = baseTime + secondsToSync;
                 pending[uid].lastActive = lastActiveStr;
                 
                 safeStorage.setItem('pending_user_updates', JSON.stringify(pending));
@@ -918,7 +968,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 // Dispatch event so that UsersContext or other observing context can trigger setHasPendingChanges
                 window.dispatchEvent(new Event('pending_user_updates_changed'));
 
-                logEvent("time_spent", uid, { duration: minutesToSync })
+                logEvent("time_spent", uid, { duration: secondsToSync })
                   .catch((err) => {
                     console.error("Failed to sync time spent to analytics:", err);
                   });
@@ -943,11 +993,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         let accSeconds = parseInt(safeStorage.getItem(cacheKey) || "0", 10);
         if (isNaN(accSeconds)) accSeconds = 0;
 
-        const minutesToSync = Math.floor(accSeconds / 60);
+        const secondsToSync = accSeconds;
 
-        // Only execute a Firestore update on hide if there are actually full minutes to sync
-        if (minutesToSync > 0) {
-          const actualSecondsToConsume = minutesToSync * 60;
+        // Only execute a Firestore update on hide if there are actually seconds to sync
+        if (secondsToSync > 0) {
+          const actualSecondsToConsume = secondsToSync;
 
           // Read latest cache to prevent cross-tab overlap deduction
           let currentSafeSeconds = parseInt(
@@ -977,11 +1027,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           let cachedUsers: any[] = [];
           try { cachedUsers = JSON.parse(cachedUsersStr); } catch (e) {}
           const userIndex = cachedUsers.findIndex(u => u.uid === uid);
-          let currentTotalMinutes = 0;
+          let currentTotalSeconds = 0;
           
           if (userIndex !== -1) {
-            currentTotalMinutes = cachedUsers[userIndex].timeSpent || 0;
-            cachedUsers[userIndex].timeSpent = currentTotalMinutes + minutesToSync;
+            currentTotalSeconds = cachedUsers[userIndex].timeSpent || 0;
+            cachedUsers[userIndex].timeSpent = currentTotalSeconds + secondsToSync;
             cachedUsers[userIndex].lastActive = lastActiveStr;
             safeStorage.setItem('cached_all_users', JSON.stringify(cachedUsers));
             
@@ -997,8 +1047,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           try { pending = JSON.parse(pendingStr); } catch(e) {}
           
           pending[uid] = pending[uid] || {};
-          const baseTime = typeof pending[uid].timeSpent === 'number' ? pending[uid].timeSpent : currentTotalMinutes;
-          pending[uid].timeSpent = baseTime + minutesToSync;
+          const baseTime = typeof pending[uid].timeSpent === 'number' ? pending[uid].timeSpent : currentTotalSeconds;
+          pending[uid].timeSpent = baseTime + secondsToSync;
           pending[uid].lastActive = lastActiveStr;
           
           safeStorage.setItem('pending_user_updates', JSON.stringify(pending));
@@ -1006,7 +1056,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // Dispatch event
           window.dispatchEvent(new Event('pending_user_updates_changed'));
 
-          logEvent("time_spent", uid, { duration: minutesToSync }).catch(err => console.error(err));
+          logEvent("time_spent", uid, { duration: secondsToSync }).catch(err => console.error(err));
         }
       }
     };
@@ -1368,9 +1418,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const updateUserProfileData = async (
     data: Partial<UserProfile>,
     newPassword?: string,
+    force = false,
   ) => {
     if (!auth.currentUser || !user || !profile)
       throw new Error("No user logged in");
+    
+    const now = Date.now();
+    const dailySyncKey = `last_daily_sync_${user.uid}`;
+    const lastSyncDateStr = localStorage.getItem(dailySyncKey);
+    const shiftedTime = new Date(now + (5 - 9) * 60 * 60 * 1000);
+    const pktDate = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
+    const isDailySync = lastSyncDateStr !== pktDate;
+
+    if (!isDailySync && !force) {
+      console.log("Profile update deferred: Already updated in this 9 AM PKT period.");
+      // Still update local profile and set needs_user_sync so it catches up tomorrow
+      setProfile({ ...profile, ...data });
+      safeStorage.setItem("profile_cache", JSON.stringify({ ...profile, ...data }));
+      safeStorage.setItem("needs_user_sync", "true");
+      return;
+    }
+
     try {
       setError(null);
 
@@ -1422,13 +1490,72 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         data.hasPassword = true;
       }
 
+      // Flush any accumulated seconds before sync
+      const cacheKey = `accumulated_time_seconds_${user.uid}`;
+      let accSecs = parseInt(safeStorage.getItem(cacheKey) || "0", 10);
+      if (accSecs > 0) {
+        safeStorage.setItem(cacheKey, "0");
+        const pendingStr = safeStorage.getItem('pending_user_updates') || '{}';
+        try {
+          let pendingAll = JSON.parse(pendingStr);
+          pendingAll[user.uid] = pendingAll[user.uid] || {};
+          let currentBase = typeof pendingAll[user.uid].timeSpent === 'number' ? pendingAll[user.uid].timeSpent : (profile.timeSpent || 0);
+          pendingAll[user.uid].timeSpent = currentBase + accSecs;
+          safeStorage.setItem('pending_user_updates', JSON.stringify(pendingAll));
+        } catch(e){}
+      }
+
+      // Include pending local updates if there are any
+      const needsSync = safeStorage.getItem("needs_user_sync") === "true";
+      if (needsSync) {
+        const pendFavs = safeStorage.getItem("pending_favorites_array");
+        if (pendFavs) data.favorites = JSON.parse(pendFavs);
+        const pendWL = safeStorage.getItem("pending_watch_later_array");
+        if (pendWL) data.watchLater = JSON.parse(pendWL);
+        const pendCClicks = safeStorage.getItem("pending_content_clicks");
+        if (pendCClicks) data.contentClicks = JSON.parse(pendCClicks);
+        const pendLClicks = safeStorage.getItem("pending_link_clicks");
+        if (pendLClicks) data.linkClicks = JSON.parse(pendLClicks);
+        
+        safeStorage.setItem("needs_user_sync", "false");
+        safeStorage.removeItem("pending_favorites_array");
+        safeStorage.removeItem("pending_watch_later_array");
+        safeStorage.removeItem("pending_content_clicks");
+        safeStorage.removeItem("pending_link_clicks");
+      }
+      
+      const pendingUpdatesStr = safeStorage.getItem("pending_user_updates");
+      if (pendingUpdatesStr) {
+        try {
+          const pendingAll = JSON.parse(pendingUpdatesStr);
+          const myPending = pendingAll[user.uid];
+          if (myPending && myPending.timeSpent !== undefined) {
+             data.timeSpent = Math.max(data.timeSpent || profile.timeSpent || 0, myPending.timeSpent);
+             delete pendingAll[user.uid];
+             safeStorage.setItem("pending_user_updates", JSON.stringify(pendingAll));
+          }
+        } catch (e) {}
+      }
+
       // Update Firestore
-      const userRef = doc(db, "users", user.uid);
-      const { writeBatch } = await import('firebase/firestore');
-      const batch = writeBatch(db);
-      batch.update(userRef, data);
-      batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [user.uid]: Date.now() } }, { merge: true });
-      await batch.commit();
+      const userRefPath = doc(db, "users", user.uid);
+      
+      try {
+        await updateDoc(userRefPath, data);
+        console.log("Users doc updated successfully.");
+      } catch (err: any) {
+        handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`);
+      }
+
+      try {
+        await setDoc(doc(db, 'chunk_meta', 'versions'), { users: { [user.uid]: Date.now() } }, { merge: true });
+        console.log("chunk_meta versions updated successfully.");
+      } catch (err: any) {
+        handleFirestoreError(err, OperationType.WRITE, 'chunk_meta/versions');
+      }
+      
+      if (isDailySync) localStorage.setItem(dailySyncKey, pktDate);
+      safeStorage.setItem("needs_user_sync", "false");
 
       setProfile({ ...profile, ...data });
     } catch (err: any) {
@@ -1504,6 +1631,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     safeStorage.setItem("needs_user_sync", "true");
   };
 
+  const trackContentClick = (contentId: string, title: string, type: string) => {
+    if (!profile || !user) return;
+    const currentClicks = profile.contentClicks || {};
+    const count = (currentClicks[contentId]?.count || 0) + 1;
+    const newClicks = {
+      ...currentClicks,
+      [contentId]: { count, title, type, lastClicked: new Date().toISOString() }
+    };
+    
+    const updatedProfile = { ...profile, contentClicks: newClicks };
+    setProfile(updatedProfile);
+    safeStorage.setItem("profile_cache", JSON.stringify(updatedProfile));
+    safeStorage.setItem("pending_content_clicks", JSON.stringify(newClicks));
+    safeStorage.setItem("needs_user_sync", "true");
+  };
+
+  const trackLinkClick = (url: string, title?: string) => {
+    if (!profile || !user) return;
+    const currentClicks = profile.linkClicks || {};
+    const count = (currentClicks[url]?.count || 0) + 1;
+    const newClicks = {
+      ...currentClicks,
+      [url]: { count, url, title: title || currentClicks[url]?.title || '', lastClicked: new Date().toISOString() }
+    };
+
+    const updatedProfile = { ...profile, linkClicks: newClicks };
+    setProfile(updatedProfile);
+    safeStorage.setItem("profile_cache", JSON.stringify(updatedProfile));
+    safeStorage.setItem("pending_link_clicks", JSON.stringify(newClicks));
+    safeStorage.setItem("needs_user_sync", "true");
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -1524,6 +1683,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         logout,
         toggleFavorite,
         toggleWatchLater,
+        trackContentClick,
+        trackLinkClick,
         refreshProfile,
       }}
     >
