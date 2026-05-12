@@ -448,7 +448,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     const pendingChunkIds = new Set(JSON.parse(pendingStr));
 
     for (const [chunkId, versionMeta] of Object.entries(versions)) {
-        if (chunkId === 'collections' || chunkId === 'notifications' || chunkId === 'lastGlobalUpdate' || chunkId === 'metadata') continue;
+        if (chunkId === 'collections' || chunkId === 'notifications' || chunkId === 'lastGlobalUpdate' || chunkId === 'metadata' || chunkId === 'users' || chunkId === 'fcm_tokens') continue;
         if (pendingChunkIds.has(chunkId)) continue; // SKIP pending chunks to avoid overwriting with old server data
 
         const version = typeof versionMeta === 'object' ? (versionMeta as any).version : versionMeta;
@@ -722,7 +722,6 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     if (!force && lastCheckPeriod === checkPeriod && !noLocalData) {
         // Already checked for this period (the 9AM cycle)
         setLoading(false);
-        if (force) window.dispatchEvent(new CustomEvent('sync_status', { detail: 'up-to-date' }));
         return;
     }
     
@@ -735,7 +734,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
     // Trigger profile refresh 
     try {
-        const userUpdated = await refreshProfile(force);
+        const userUpdated = await refreshProfile(force, force ? 'manual' : 'auto');
         if (userUpdated) updatedSomething = true;
     } catch(err) {
         console.error(err);
@@ -745,7 +744,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     if (isAdmin) {
       finalizeUserChanges(true).catch(console.error);
       try {
-          const { updatedSomething: usersUpdated } = await refreshUsers(false);
+          const { updatedSomething: usersUpdated } = await refreshUsers(force);
           if (usersUpdated) updatedSomething = true;
       } catch (e) {
           console.error(e);

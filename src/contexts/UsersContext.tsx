@@ -202,6 +202,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       } else if (currentUsers.length === 0) {
         // Fallback: If local cache is empty for some reason, do a full pull.
         try {
+          updatedSomething = true;
           const q = query(collection(db, 'users'));
           const snapshot = await getDocs(q);
           currentUsers = snapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id })) as UserProfile[];

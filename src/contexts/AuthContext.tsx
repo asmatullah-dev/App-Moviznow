@@ -79,7 +79,7 @@ interface AuthContextType {
   toggleWatchLater: (contentId: string) => Promise<void>;
   trackContentClick: (contentId: string, title: string, type: string) => void;
   trackLinkClick: (url: string, title?: string) => void;
-  refreshProfile: (force?: boolean) => Promise<boolean>;
+  refreshProfile: (force?: boolean, reason?: 'auto' | 'manual' | 'login' | 'logout') => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -169,7 +169,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const refreshProfile = useCallback(async (force = false): Promise<boolean> => {
+  const refreshProfile = useCallback(async (force = false, reason: 'auto' | 'manual' | 'login' | 'logout' = 'auto'): Promise<boolean> => {
     let updatedSomething = false;
     const currentUser = auth.currentUser;
     if (!currentUser) {
@@ -283,10 +283,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // 4. Update user data doc and update chunk_meta version for user ONLY when necessary daily or local change
       const needsUserSync = safeStorage.getItem("needs_user_sync") === "true";
+      let pendingTimeSpent = false;
+      try {
+        const pdStr = safeStorage.getItem("pending_user_updates");
+        if (pdStr) {
+           const pObj = JSON.parse(pdStr);
+           if (pObj[currentUser.uid] && pObj[currentUser.uid].timeSpent !== undefined) pendingTimeSpent = true;
+        }
+      } catch(e){}
+      
+      const hasLocalChanges = needsUserSync || (accSecs > 0) || pendingTimeSpent;
       
       // Strict rule: Only write to Firestore if forced or if it's the daily sync window (after 9 AM PKT)
       // If needsUserSync is true but it's not the daily sync time, it stays in local storage until next day
-      const shouldWrite = (serverProfile || localProfile) && (force || isDailySync || isVersionMissing);
+      const isLogin = justLoggedInRef.current || reason === 'login';
+      const isSignOut = reason === 'logout';
+      const shouldWrite = (serverProfile || localProfile) && 
+        (isVersionMissing || isLogin || isSignOut || versionChanged || (isDailySync && hasLocalChanges));
 
       if (shouldWrite) {
         try {
@@ -316,7 +329,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 if (myPending && myPending.timeSpent !== undefined) {
                    updatesToPush.timeSpent = Math.max(updatesToPush.timeSpent || 0, myPending.timeSpent);
                    // Remove my pending time as it's about to be written
-                   delete pendingAll[currentUser.uid];
+                   delete myPending.timeSpent;
+                   if (Object.keys(myPending).length === 0) {
+                     delete pendingAll[currentUser.uid];
+                   }
                    safeStorage.setItem("pending_user_updates", JSON.stringify(pendingAll));
                 }
               } catch (e) {}
@@ -340,13 +356,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             safeStorage.removeItem("pending_link_clicks");
             safeStorage.setItem(localVersionKey, newVersion.toString());
             mergedProfile = { ...mergedProfile, ...updatesToPush };
-            if (isDailySync || needsUserSync) updatedSomething = true;
+            if (hasLocalChanges || versionChanged) updatedSomething = true;
             console.log("Profile changes synced & merged to Firestore");
         } catch (err) {
             handleFirestoreError(err, OperationType.WRITE, 'chunk_meta/versions');
             console.error("Manual/Daily profile sync failed:", err);
         }
       } else {
+        if (isDailySync) localStorage.setItem(dailySyncKey, pktDate);
         if (serverProfile) {
             safeStorage.setItem(localVersionKey, serverVersion.toString());
         }
@@ -439,7 +456,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
       // Perform consolidated update if needed
-      if (Object.keys(updates).length > 0 && (force || isDailySync)) {
+      if (Object.keys(updates).length > 0 && (isDailySync || isLogin || isSignOut || (force && reason !== 'manual'))) {
           try {
             const { writeBatch } = await import('firebase/firestore');
             const batch = writeBatch(db);
@@ -760,6 +777,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       );
     } finally {
       setLoading(false);
+      return updatedSomething;
     }
   }, []);
 
@@ -767,7 +785,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
         if (safeStorage.getItem("needs_user_sync") === "true") {
-           refreshProfile(true).catch(console.error);
+           refreshProfile(true, 'manual').catch(console.error);
         }
       }
     };
@@ -1531,7 +1549,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const myPending = pendingAll[user.uid];
           if (myPending && myPending.timeSpent !== undefined) {
              data.timeSpent = Math.max(data.timeSpent || profile.timeSpent || 0, myPending.timeSpent);
-             delete pendingAll[user.uid];
+             delete myPending.timeSpent;
+             if (Object.keys(myPending).length === 0) {
+               delete pendingAll[user.uid];
+             }
              safeStorage.setItem("pending_user_updates", JSON.stringify(pendingAll));
           }
         } catch (e) {}
@@ -1587,7 +1608,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     try {
-      await refreshProfile(true);
+      await refreshProfile(true, 'logout');
       window.dispatchEvent(new Event('force_flush_all_data'));
       // give listeners a brief moment to catch up
       await new Promise(r => setTimeout(r, 500));
