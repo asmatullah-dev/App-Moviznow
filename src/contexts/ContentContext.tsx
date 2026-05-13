@@ -58,15 +58,15 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
   });
   const [genres, setGenres] = useState<Genre[]>(() => {
     const cached = safeStorage.getItem('genres_cache');
-    return cached ? JSON.parse(cached) : [];
+    return cached ? JSON.parse(cached).sort((a: any, b: any) => (a.order || 999) - (b.order || 999)) : [];
   });
   const [languages, setLanguages] = useState<Language[]>(() => {
     const cached = safeStorage.getItem('languages_cache');
-    return cached ? JSON.parse(cached) : [];
+    return cached ? JSON.parse(cached).sort((a: any, b: any) => (a.order || 999) - (b.order || 999)) : [];
   });
   const [qualities, setQualities] = useState<Quality[]>(() => {
     const cached = safeStorage.getItem('qualities_cache');
-    return cached ? JSON.parse(cached) : [];
+    return cached ? JSON.parse(cached).sort((a: any, b: any) => (a.order || 999) - (b.order || 999)) : [];
   });
   const [collections, setCollections] = useState<AppCollection[]>(() => {
     const cached = safeStorage.getItem('collections_cache');
@@ -345,7 +345,13 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         }
     }
     const rawContent = Object.values(rawContentMap);
-    rawContent.sort((a, b) => (b.order || 0) - (a.order || 0));
+    rawContent.sort((a, b) => {
+        // Use order if explicitly set, otherwise use createdAt for newest-first (reverse order)
+        if (a.order !== undefined && b.order !== undefined) {
+            return b.order - a.order;
+        }
+        return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+    });
     
     const isAdminOrEditor = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
     if (!isAdminOrEditor) {
@@ -545,9 +551,9 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
                         safeStorage.setItem('qualities_cache', JSON.stringify(data.qualities || []));
                         localMeta.metadata = metadataVersion;
                         safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
-                        setGenres(data.genres || []);
-                        setLanguages(data.languages || []);
-                        setQualities(data.qualities || []);
+                        setGenres((data.genres || []).sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
+                        setLanguages((data.languages || []).sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
+                        setQualities((data.qualities || []).sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
                         updatedSomething = true;
                     }
                 } catch(e) { console.error("Error fetching metadata chunk", e) }

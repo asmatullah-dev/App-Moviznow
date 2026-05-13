@@ -74,8 +74,6 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       const { writeBatch } = await import('firebase/firestore');
       let batches = [writeBatch(db)];
       let opCount = 0;
-      
-      const metaUpdates: Record<string, number> = {};
 
       for (const uid of userIds) {
         if (opCount >= 490) {
@@ -83,13 +81,8 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           opCount = 0;
         }
         batches[batches.length - 1].update(doc(db, 'users', uid), pending[uid]);
-        metaUpdates[uid] = now;
         opCount++;
       }
-
-      // Add chunk_meta update
-      if (opCount >= 490) batches.push(writeBatch(db));
-      batches[batches.length - 1].set(doc(db, 'chunk_meta', 'versions'), { users: metaUpdates }, { merge: true });
 
       for (const b of batches) await b.commit();
       
@@ -100,12 +93,6 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       const shiftedSync = new Date(nowSync + (5 - 9) * 60 * 60 * 1000);
       const periodSync = `${shiftedSync.getUTCFullYear()}-${shiftedSync.getUTCMonth() + 1}-${shiftedSync.getUTCDate()}`;
       safeStorage.setItem('last_user_finalize_period', periodSync);
-      
-      // Update local meta versions
-      const cachedMetaStr = safeStorage.getItem('cached_chunk_users_versions');
-      const localVersions = cachedMetaStr ? JSON.parse(cachedMetaStr) : {};
-      Object.assign(localVersions, metaUpdates);
-      safeStorage.setItem('cached_chunk_users_versions', JSON.stringify(localVersions));
 
     } catch(err) {
       console.error("Failed to commit user changes:", err);
@@ -126,7 +113,9 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     const checkPeriod = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
 
     const cachedStr = safeStorage.getItem('cached_all_users');
-    const locallyCachedUsers = cachedStr ? JSON.parse(cachedStr) : [];
+    const locallyCachedUsers: UserProfile[] = cachedStr ? JSON.parse(cachedStr) : [];
+    const lastFetchTimeStr = safeStorage.getItem('last_users_sync_timestamp');
+    const lastFetchTime = lastFetchTimeStr ? parseInt(lastFetchTimeStr, 10) : 0;
 
     // Period check to avoid redundant fetches
     const lastCheckPeriod = safeStorage.getItem('last_chunk_users_check_period');
@@ -142,64 +131,10 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     let updatedSomething = false;
 
     try {
-      // 1. Fetch chunk_meta/versions
-      let serverVersions = {};
-      try {
-        const meta = await import('../utils/chunkMeta').then(m => m.getChunkMeta(force));
-        serverVersions = meta.users || {};
-      } catch (err) {
-        handleFirestoreError(err, OperationType.GET, 'chunk_meta/versions');
-        throw err;
-      }
-      
-      const cachedMetaStr = safeStorage.getItem('cached_chunk_users_versions');
-      const localVersions = cachedMetaStr ? JSON.parse(cachedMetaStr) : {};
-      
-      // Determine which users need fetching
-      const usersToFetch: string[] = [];
-      const deletedUserIds: string[] = [];
-
-      for (const [uid, serverVer] of Object.entries(serverVersions)) {
-        const localVer = localVersions[uid];
-        if (serverVer === -1) {
-            deletedUserIds.push(uid);
-        } else if (!localVer || localVer < (serverVer as number)) {
-            usersToFetch.push(uid);
-        }
-      }
-
       let currentUsers = [...locallyCachedUsers];
-      
-      // Handle deleted users
-      if (deletedUserIds.length > 0) {
-        currentUsers = currentUsers.filter(u => !deletedUserIds.includes(u.uid));
-        updatedSomething = true;
-      }
+      let { getDocs, query, collection, where } = await import('firebase/firestore');
 
-      if (usersToFetch.length > 0) {
-        updatedSomething = true;
-        // Fetch up to 30 users per query (Firestore IN limit)
-        const newFetchedUsers: UserProfile[] = [];
-        for (let i = 0; i < usersToFetch.length; i += 30) {
-            const batchIds = usersToFetch.slice(i, i + 30);
-            
-            const fetches = batchIds.map(id => getDoc(doc(db, 'users', id)).catch(err => {
-              handleFirestoreError(err, OperationType.GET, `users/${id}`);
-              throw err;
-            }));
-            const snaps = await Promise.all(fetches);
-            snaps.forEach(snap => {
-               if (snap.exists()) {
-                   newFetchedUsers.push(snap.data() as UserProfile);
-               }
-            });
-        }
-        
-        // Merge
-        const currentUsersMap = new Map(currentUsers.map(u => [u.uid, u]));
-        newFetchedUsers.forEach(u => currentUsersMap.set(u.uid, u));
-        currentUsers = Array.from(currentUsersMap.values());
-      } else if (currentUsers.length === 0) {
+      if (currentUsers.length === 0 || force) {
         // Fallback: If local cache is empty for some reason, do a full pull.
         try {
           updatedSomething = true;
@@ -210,23 +145,31 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           handleFirestoreError(err, OperationType.LIST, 'users');
           throw err;
         }
-        
-        // Populate meta logic locally if it's missing on server
-        if (Object.keys(serverVersions).length === 0) {
-            const initialMeta: Record<string, number> = {};
-            currentUsers.forEach(u => initialMeta[u.uid] = Date.now());
-            try { 
-              await setDoc(doc(db, 'chunk_meta', 'versions'), { users: initialMeta }, { merge: true }); 
-            } catch(e) {
-              console.warn("Failed to set chunk_meta versions singleton:", e);
-            }
-            Object.assign(serverVersions, initialMeta);
+      } else {
+        // Fetch only recently active/updated users since our last run
+        try {
+          // Add a generous buffer (1 hour) to ensure no missed updates near the boundary
+          const bufferTime = 60 * 60 * 1000;
+          const sinceIso = new Date(Math.max(0, lastFetchTime - bufferTime)).toISOString();
+          const q = query(collection(db, 'users'), where('lastActive', '>=', sinceIso));
+          const snapshot = await getDocs(q);
+          
+          if (!snapshot.empty) {
+            updatedSomething = true;
+            const fetchedUsers = snapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id })) as UserProfile[];
+            const currentUsersMap = new Map(currentUsers.map(u => [u.uid, u]));
+            fetchedUsers.forEach(u => currentUsersMap.set(u.uid, u));
+            currentUsers = Array.from(currentUsersMap.values());
+          }
+        } catch (err) {
+          handleFirestoreError(err, OperationType.LIST, 'users filter by lastActive');
+          throw err;
         }
       }
       
       setUsers(currentUsers);
       safeStorage.setItem('cached_all_users', JSON.stringify(currentUsers));
-      safeStorage.setItem('cached_chunk_users_versions', JSON.stringify(serverVersions));
+      safeStorage.setItem('last_users_sync_timestamp', now.toString());
       
       // Mark as checked in this period
       const nowChecked = Date.now();

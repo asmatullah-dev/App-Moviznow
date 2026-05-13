@@ -895,16 +895,28 @@ async function startServer() {
         'users', 'admin_settings', 'notifications', 
         'notification_templates', 'orders', 'movie_requests', 
         'reported_links', 'error_links', 'whitelisted_phones', 
-        'fcm_tokens', 'income'
-      ] : ['content'];
+        'fcm_tokens', 'income', 'content_chunks', 'chunk_meta', 'collections'
+      ] : ['genres', 'languages', 'qualities', 'content', 'content_chunks', 'chunk_meta', 'collections'];
       const results: any = {};
 
       for (const colName of collections) {
         let sourceSnap = await sourceDb.collection(colName).get();
         let targetSnap = await targetDb.collection(colName).get();
 
-        let sourceDocs = sourceSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        let targetDocs = targetSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        let sourceDocs = sourceSnap.docs.map(d => {
+          const data = d.data();
+          if (colName === 'chunk_meta' && d.id === 'versions' && !syncAllData) {
+            delete data.users; // Ignore users in compare if not syncing all data
+          }
+          return { id: d.id, ...data };
+        });
+        let targetDocs = targetSnap.docs.map(d => {
+          const data = d.data();
+          if (colName === 'chunk_meta' && d.id === 'versions' && !syncAllData) {
+            delete data.users; // Ignore users in compare if not syncing all data
+          }
+          return { id: d.id, ...data };
+        });
 
         if (onlyPublished && colName === 'content') {
           sourceDocs = sourceDocs.filter((d: any) => d.status === 'published');
@@ -977,8 +989,8 @@ async function startServer() {
         'users', 'admin_settings', 'notifications', 
         'notification_templates', 'orders', 'movie_requests', 
         'reported_links', 'error_links', 'whitelisted_phones', 
-        'fcm_tokens', 'income'
-      ] : ['content'];
+        'fcm_tokens', 'income', 'content_chunks', 'chunk_meta', 'collections'
+      ] : ['genres', 'languages', 'qualities', 'content', 'content_chunks', 'chunk_meta', 'collections'];
       const logs: string[] = [];
 
       for (const colName of collections) {
@@ -996,11 +1008,25 @@ async function startServer() {
 
           if (mode === 'changed') {
             const targetSnap = await targetDb.collection(colName).get();
-            const targetMap = new Map(targetSnap.docs.map(d => [d.id, d.data().updatedAt]));
+            const targetMap = new Map(targetSnap.docs.map(d => {
+              const data = d.data();
+              if (colName === 'chunk_meta' && d.id === 'versions' && !syncAllData) {
+                delete data.users;
+              }
+              return [d.id, data];
+            }));
             docsToSync = docsToSync.filter(d => {
               const sData = d.data();
+              if (colName === 'chunk_meta' && d.id === 'versions' && !syncAllData) {
+                delete sData.users;
+              }
               const sUpdate = normalizeData(sData.updatedAt || sData.createdAt || 0);
-              const tUpdate = normalizeData(targetMap.get(d.id) || 0);
+              const tData = targetMap.get(d.id) || {};
+              const tUpdate = normalizeData(tData.updatedAt || tData.createdAt || 0);
+              // For chunk_meta, we should just merge if not equal
+              if (colName === 'chunk_meta') {
+                return !areDocsEqual(sData, tData);
+              }
               return !tUpdate || sUpdate > tUpdate;
             });
           } else if (mode === 'missing') {
@@ -1019,9 +1045,19 @@ async function startServer() {
         for (let i = 0; i < docsToSync.length; i += 500) {
           const batch = targetDb.batch();
           const chunk = docsToSync.slice(i, i + 500);
-          chunk.forEach(d => {
-            batch.set(targetDb.collection(colName).doc(d.id), d.data());
-          });
+          for (const d of chunk) {
+            let data = d.data();
+            if (colName === 'chunk_meta' && d.id === 'versions' && !syncAllData) {
+              const targetDoc = await targetDb.collection(colName).doc(d.id).get();
+              if (targetDoc.exists) {
+                const tData = targetDoc.data();
+                data.users = tData.users || {};
+              } else {
+                delete data.users;
+              }
+            }
+            batch.set(targetDb.collection(colName).doc(d.id), data);
+          }
           await batch.commit();
         }
         logs.push(`Synced ${docsToSync.length} items for ${colName}`);
@@ -1050,8 +1086,8 @@ async function startServer() {
         'users', 'admin_settings', 'notifications', 
         'notification_templates', 'orders', 'movie_requests', 
         'reported_links', 'error_links', 'whitelisted_phones', 
-        'fcm_tokens', 'income'
-      ] : ['content'];
+        'fcm_tokens', 'income', 'content_chunks', 'chunk_meta', 'collections'
+      ] : ['genres', 'languages', 'qualities', 'content', 'content_chunks', 'chunk_meta', 'collections'];
       const logs: string[] = [];
 
       for (const colName of collections) {
@@ -1071,6 +1107,28 @@ async function startServer() {
             const sourceSnap = await sourceDb.collection(colName).get();
             const sourceIds = new Set(sourceSnap.docs.map(d => d.id));
             docsToSync = docsToSync.filter(d => !sourceIds.has(d.id));
+          } else if (mode === 'changed') {
+            const sourceSnap = await sourceDb.collection(colName).get();
+            const sourceMap = new Map(sourceSnap.docs.map(d => {
+              const data = d.data();
+              if (colName === 'chunk_meta' && d.id === 'versions' && !syncAllData) {
+                delete data.users;
+              }
+              return [d.id, data];
+            }));
+             docsToSync = docsToSync.filter(d => {
+              const tData = d.data();
+              if (colName === 'chunk_meta' && d.id === 'versions' && !syncAllData) {
+                delete tData.users;
+              }
+              const tUpdate = normalizeData(tData.updatedAt || tData.createdAt || 0);
+              const sData = sourceMap.get(d.id) || {};
+              const sUpdate = normalizeData(sData.updatedAt || sData.createdAt || 0);
+              if (colName === 'chunk_meta') {
+                return !areDocsEqual(tData, sData);
+              }
+              return !sUpdate || tUpdate > sUpdate;
+            });
           }
         }
         
@@ -1083,9 +1141,19 @@ async function startServer() {
         for (let i = 0; i < docsToSync.length; i += 500) {
           const batch = sourceDb.batch();
           const chunk = docsToSync.slice(i, i + 500);
-          chunk.forEach(d => {
-            batch.set(sourceDb.collection(colName).doc(d.id), d.data());
-          });
+          for (const d of chunk) {
+            let data = d.data();
+            if (colName === 'chunk_meta' && d.id === 'versions' && !syncAllData) {
+              const sourceDoc = await sourceDb.collection(colName).doc(d.id).get();
+              if (sourceDoc.exists) {
+                const sData = sourceDoc.data();
+                data.users = sData.users || {};
+              } else {
+                delete data.users;
+              }
+            }
+            batch.set(sourceDb.collection(colName).doc(d.id), data);
+          }
           await batch.commit();
         }
         logs.push(`Pulled ${docsToSync.length} items for ${colName}`);

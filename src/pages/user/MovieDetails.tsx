@@ -847,7 +847,8 @@ export default function MovieDetails() {
     if (!checkEligibility()) return;
 
     if (linkId !== 'sample') {
-      trackLinkClick(url, linkName || url);
+      const contentPrefix = mergedContent ? `${mergedContent.title}${seasonInfo ? ` S${seasonInfo.number}` : ''} - ` : '';
+      trackLinkClick(url, `${contentPrefix}${linkName || 'Unknown Link'}`);
     }
 
     if (isOffline) {

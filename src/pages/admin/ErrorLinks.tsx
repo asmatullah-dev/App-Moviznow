@@ -220,7 +220,7 @@ export default function ErrorLinks() {
         return original && live.link.url !== original.link.url;
       });
 
-      if (changedLinks.length === 0) return;
+      if (changedLinks?.length === 0) return;
 
       for (const item of changedLinks) {
         try {
@@ -412,10 +412,10 @@ export default function ErrorLinks() {
 
     results.forEach(res => {
       const isMissingLanguageOnly = res.statusLabel === "MISSING_METADATA" && res.message === "Missing Language in filename";
-      if (!isMissingLanguageOnly && (!res.ok || res.statusLabel === "BROKEN" || res.statusLabel === "SIZE_MISMATCH" || res.statusLabel === "MISSING_FILENAME" || res.statusLabel === "MISSING_METADATA" || (res.mismatchWarnings && res.mismatchWarnings.length > 0))) {
+      if (!isMissingLanguageOnly && (!res.ok || res.statusLabel === "BROKEN" || res.statusLabel === "SIZE_MISMATCH" || res.statusLabel === "MISSING_FILENAME" || res.statusLabel === "MISSING_METADATA" || (res.mismatchWarnings && res.mismatchWarnings?.length > 0))) {
         const original = allLinksToScan.find(l => l.url === res.url);
         if (original) {
-          const errorDetail = (res.mismatchWarnings && res.mismatchWarnings.length > 0) ? res.mismatchWarnings.join(', ') : (res.message || res.statusLabel || "Unknown Error");
+          const errorDetail = (res.mismatchWarnings && res.mismatchWarnings?.length > 0) ? res.mismatchWarnings.join(', ') : (res.message || res.statusLabel || "Unknown Error");
           newErrorLinks.push({
             ...original.info,
             errorDetail: errorDetail,
@@ -439,7 +439,7 @@ export default function ErrorLinks() {
     } else {
       linksToScan = getAllLinksToScan();
     }
-    if (linksToScan.length === 0) return;
+    if (linksToScan?.length === 0) return;
     
     linkScannerManager.startScan(linksToScan);
   };
@@ -589,7 +589,7 @@ export default function ErrorLinks() {
       newLinks = parseLinks(addLinksInput);
     }
 
-    if (newLinks.length === 0) return;
+    if (newLinks?.length === 0) return;
 
     setAddingLinks(true);
     try {
@@ -602,7 +602,7 @@ export default function ErrorLinks() {
         try {
           const seasons: Season[] = Array.isArray(updatedContent.seasons) ? updatedContent.seasons : JSON.parse(updatedContent.seasons);
           // Add to Season 1 Episode 1 by default if it's series and no episode specified in context (usually Add Links is for whole content or first ep)
-          if (seasons.length > 0 && seasons[0].episodes && seasons[0].episodes.length > 0) {
+          if (seasons?.length > 0 && seasons[0]?.episodes && seasons[0].episodes?.length > 0) {
             const existing = parseLinks(JSON.stringify(seasons[0].episodes[0].links));
             seasons[0].episodes[0].links = sortLinksBySize([...existing, ...newLinks]);
             updatedContent.seasons = JSON.stringify(seasons);
@@ -892,14 +892,14 @@ export default function ErrorLinks() {
                   <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                   Start Deep Scan
                 </button>
-                {errorLinks.length > 0 && (
+                {errorLinks?.length > 0 && (
                   <button
                     onClick={() => scanLinks(true)}
                     disabled={loading}
                     className="bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-all active:scale-95 whitespace-nowrap border border-zinc-300 dark:border-zinc-700"
                   >
                     <RefreshCw className="w-4 h-4" />
-                    Re-check Filtered ({filteredAndSortedLinks.length})
+                    Re-check Filtered ({filteredAndSortedLinks?.length || 0})
                   </button>
                 )}
               </>
@@ -928,7 +928,7 @@ export default function ErrorLinks() {
             <RefreshCw className="w-8 h-8 text-zinc-400 animate-spin mx-auto mb-4" />
             <p className="text-zinc-500">Loading error links...</p>
           </div>
-        ) : errorLinks.length === 0 ? (
+        ) : (!errorLinks || errorLinks.length === 0) ? (
             <div className="text-center py-20 text-zinc-500">
               {(scanStatus === 'scanning' || scanStatus === 'paused') ? (
                 <div className="flex flex-col items-center">
@@ -974,19 +974,19 @@ export default function ErrorLinks() {
               <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/40 grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white dark:bg-zinc-900 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
                   <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1">Total Errors</p>
-                  <p className="text-xl font-bold text-zinc-900 dark:text-white">{liveErrorLinks.length}</p>
+                  <p className="text-xl font-bold text-zinc-900 dark:text-white">{liveErrorLinks?.length || 0}</p>
                 </div>
                 <div className="bg-white dark:bg-zinc-900 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
                   <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1">Searching</p>
-                  <p className="text-xl font-bold text-zinc-900 dark:text-white">{filteredAndSortedLinks.length}</p>
+                  <p className="text-xl font-bold text-zinc-900 dark:text-white">{filteredAndSortedLinks?.length || 0}</p>
                 </div>
                 <div className="bg-white dark:bg-zinc-900 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
                   <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1">Movies</p>
-                  <p className="text-xl font-bold text-blue-500">{liveErrorLinks.filter(l => l.contentType === 'movie').length}</p>
+                  <p className="text-xl font-bold text-blue-500">{liveErrorLinks?.filter(l => l?.contentType === 'movie')?.length || 0}</p>
                 </div>
                 <div className="bg-white dark:bg-zinc-900 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
                   <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1">Series</p>
-                  <p className="text-xl font-bold text-purple-500">{liveErrorLinks.filter(l => l.contentType === 'series').length}</p>
+                  <p className="text-xl font-bold text-purple-500">{liveErrorLinks?.filter(l => l?.contentType === 'series')?.length || 0}</p>
                 </div>
               </div>
               <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 flex flex-col md:flex-row gap-4 justify-between items-center">
@@ -1008,7 +1008,7 @@ export default function ErrorLinks() {
                       onChange={(e) => setFilterErrorType(e.target.value)}
                       className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500 w-full sm:w-auto"
                     >
-                      <option value="all">All Errors ({liveErrorLinks.length})</option>
+                      <option value="all">All Errors ({liveErrorLinks?.length || 0})</option>
                       {uniqueErrorTypes.map(type => (
                         <option key={type} value={type}>{type} ({stats[type] || 0})</option>
                       ))}
@@ -1044,7 +1044,7 @@ export default function ErrorLinks() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-                    {filteredAndSortedLinks.length === 0 ? (
+                    {(!filteredAndSortedLinks || filteredAndSortedLinks.length === 0) ? (
                       <tr>
                         <td colSpan={3} className="px-6 py-12 text-center text-zinc-500">
                           <div className="flex flex-col items-center gap-2">
@@ -1079,17 +1079,17 @@ export default function ErrorLinks() {
                                 )}>
                                   {info.contentType}
                                 </span>
-                                <span className="text-emerald-500 truncate whitespace-nowrap">{info.link.name.substring(0, 6)}</span>
-                                <span className="text-zinc-500 text-xs whitespace-nowrap">({info.link.size}{info.link.unit})</span>
+                                <span className="text-emerald-500 truncate whitespace-nowrap">{info.link?.name ? info.link.name.substring(0, 6) : 'N/A'}</span>
+                                <span className="text-zinc-500 text-xs whitespace-nowrap">({info.link?.size}{info.link?.unit})</span>
                               </div>
                               <div>
                                 <a 
-                                  href={info.link.url} 
+                                  href={info.link?.url || '#'} 
                                   target="_blank" 
                                   rel="noopener noreferrer" 
                                   className="text-[10px] text-zinc-500 hover:text-emerald-500 transition-colors truncate max-w-md inline-block font-mono"
                                 >
-                                  {info.link.url.length > 40 ? info.link.url.substring(0, 40) + '...' : info.link.url}
+                                  {info.link?.url && info.link.url?.length > 40 ? info.link.url.substring(0, 40) + '...' : (info.link?.url || 'No URL')}
                                 </a>
                               </div>
                               <div>

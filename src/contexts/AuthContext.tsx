@@ -299,7 +299,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const isLogin = justLoggedInRef.current || reason === 'login';
       const isSignOut = reason === 'logout';
       const shouldWrite = (serverProfile || localProfile) && 
-        (isVersionMissing || isLogin || isSignOut || versionChanged || (isDailySync && hasLocalChanges));
+        (isVersionMissing || isLogin || isSignOut || (isDailySync && hasLocalChanges) || (force && reason !== 'manual'));
 
       if (shouldWrite) {
         try {
@@ -343,9 +343,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (Object.keys(updatesToPush).length > 0) {
               batch.set(userRef, updatesToPush, { merge: true });
             }
-
-            // 6. Remember that when writing user data, user version in chunk_meta will also updated
-            batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentUser.uid]: newVersion } }, { merge: true });
             await batch.commit();
 
             if (isDailySync) localStorage.setItem(dailySyncKey, pktDate);
@@ -359,7 +356,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (hasLocalChanges || versionChanged) updatedSomething = true;
             console.log("Profile changes synced & merged to Firestore");
         } catch (err) {
-            handleFirestoreError(err, OperationType.WRITE, 'chunk_meta/versions');
+            handleFirestoreError(err, OperationType.WRITE, `users/${currentUser.uid}`);
             console.error("Manual/Daily profile sync failed:", err);
         }
       } else {
@@ -461,7 +458,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const { writeBatch } = await import('firebase/firestore');
             const batch = writeBatch(db);
             batch.set(userRef, updates, { merge: true });
-            batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentUser.uid]: Date.now() } }, { merge: true });
             await batch.commit();
           } catch (err) {
             handleFirestoreError(err, OperationType.WRITE, `users/${currentUser.uid}`);
@@ -739,12 +735,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const metaUpdates: Record<string, number> = { [currentUser.uid]: Date.now() };
           oldDocIds.forEach((oldId) => {
             batch.delete(doc(db, "users", oldId));
-            metaUpdates[oldId] = -1;
             console.log(
               `Merged and scheduled deletion of old profile: ${oldId}`,
             );
           });
-          batch.set(doc(db, 'chunk_meta', 'versions'), { users: metaUpdates }, { merge: true });
 
           await batch.commit();
           console.log(
@@ -757,7 +751,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const { writeBatch } = await import('firebase/firestore');
             const fbBatch = writeBatch(db);
             fbBatch.set(userRef, newProfile);
-            fbBatch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentUser.uid]: Date.now() } }, { merge: true });
             await fbBatch.commit();
           } catch (e) {}
         }
@@ -857,7 +850,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 const { writeBatch } = await import('firebase/firestore');
                 const batch = writeBatch(db);
                 batch.set(userRef, pendingUpdates, { merge: true });
-                batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentUser.uid]: Date.now() } }, { merge: true });
                 await batch.commit();
 
                 if (isDailySync) localStorage.setItem(dailySyncKey, pktDate);
@@ -1118,7 +1110,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const { writeBatch } = await import('firebase/firestore');
           const batch = writeBatch(db);
           batch.update(userRef, updates);
-          batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [result.user.uid]: Date.now() } }, { merge: true });
           await batch.commit();
         } catch (e) {}
       }
@@ -1150,7 +1141,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         batch.update(doc(db, "users", result.user.uid), {
           sessionId: getLocalSessionId(),
         });
-        batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [result.user.uid]: Date.now() } }, { merge: true });
         await batch.commit();
       } catch (e) {}
       setTimeout(() => {
@@ -1567,13 +1557,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch (err: any) {
         handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`);
       }
-
-      try {
-        await setDoc(doc(db, 'chunk_meta', 'versions'), { users: { [user.uid]: Date.now() } }, { merge: true });
-        console.log("chunk_meta versions updated successfully.");
-      } catch (err: any) {
-        handleFirestoreError(err, OperationType.WRITE, 'chunk_meta/versions');
-      }
       
       if (isDailySync) localStorage.setItem(dailySyncKey, pktDate);
       safeStorage.setItem("needs_user_sync", "false");
@@ -1594,7 +1577,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { writeBatch } = await import('firebase/firestore');
       const batch = writeBatch(db);
       batch.update(userRef, { hasPassword: true });
-      batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [user.uid]: Date.now() } }, { merge: true });
       await batch.commit();
       if (profile) {
         setProfile({ ...profile, hasPassword: true });
