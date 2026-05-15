@@ -194,6 +194,27 @@ export default function ReportedLinks() {
 
   const handleUrlBlur = async (url: string) => {
     if (!url) return;
+    
+    if (url.includes('hubcloud') || url.includes('moviesdrives')) {
+      try {
+        const res = await fetch("/api/hubcloud/extract", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.size && data.unit) {
+            setEditSize(data.size);
+            setEditUnit(data.unit as 'MB' | 'GB');
+          }
+        }
+      } catch (e) {
+        console.error("Failed to extract HubCloud info", e);
+      }
+      return;
+    }
+
     try {
       const res = await fetch("/api/check-link", {
         method: "POST",

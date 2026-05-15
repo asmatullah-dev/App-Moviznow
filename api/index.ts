@@ -860,6 +860,185 @@ async function startServer() {
     return JSON.stringify(normalizeData(d1)) === JSON.stringify(normalizeData(d2));
   };
 
+  app.post("/api/hubcloud/extract", async (req, res) => {
+    try {
+      const { url } = req.body;
+      if (!url || (!url.includes('hubcloud') && !url.includes('moviesdrives'))) {
+        return res.status(400).json({ error: 'Invalid HubCloud URL' });
+      }
+
+      const axios = (await import('axios')).default;
+      const cheerio = await import('cheerio');
+      
+      const response = await axios.get(url, { validateStatus: () => true });
+      const $ = cheerio.load(response.data);
+      
+      let sizeStr = $('li:contains("File Size") i').text() || $('li:contains("File Size")').text();
+      sizeStr = sizeStr.replace('File Size', '').trim();
+      
+      let size = '';
+      let unit = '';
+      if (sizeStr) {
+        const parts = sizeStr.split(' ');
+        if (parts.length >= 2) {
+          size = parts[0];
+          unit = parts[1];
+        } else {
+          size = sizeStr;
+        }
+      }
+      
+      const title = $('title').text() || $('.card-header').text() || '';
+      
+      res.json({ size, unit, title: title.trim() });
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/hubcloud/direct-link", async (req, res) => {
+    try {
+      const { url, checkOnly } = req.body;
+      const axios = (await import('axios')).default;
+      
+      if (checkOnly && url) {
+        try {
+           const checkRes = await axios.get(url, {
+              headers: { Range: 'bytes=0-0' },
+              maxRedirects: 0,
+              validateStatus: () => true,
+              timeout: 5000
+           });
+           if (checkRes.status < 400 || checkRes.status === 405 || checkRes.status === 416) {
+              return res.json({ ok: true });
+           }
+           if (checkRes.status >= 300 && checkRes.status < 400 && checkRes.headers.location) {
+              return res.json({ ok: true, location: checkRes.headers.location });
+           }
+           return res.json({ ok: false });
+        } catch (e) {
+           return res.json({ ok: false });
+        }
+      }
+
+      if (!url || (!url.includes('hubcloud') && !url.includes('moviesdrives'))) {
+        return res.json({ url });
+      }
+
+      const cheerio = await import('cheerio');
+      
+      const response = await axios.get(url, { validateStatus: () => true });
+      const $ = cheerio.load(response.data);
+      
+      let nextUrl = $('#download').attr('href') || $('a:contains("Generate Direct Download Link")').attr('href');
+      
+      if (!nextUrl) {
+         return res.json({ url });
+      }
+
+      const res2 = await axios.get(nextUrl, { validateStatus: () => true });
+      const $2 = cheerio.load(res2.data);
+      
+      const candidateLinks: { text: string, href: string }[] = [];
+      $2('a.btn').each((i, el) => {
+         const href = $2(el).attr('href');
+         const text = $2(el).text().toLowerCase();
+         if (href && !text.includes('telegram')) candidateLinks.push({ text, href });
+      });
+
+      if (candidateLinks.length === 0) {
+        return res.json({ url });
+      }
+
+      // Sort: pixeldrain first, then .workers.dev, then others
+      candidateLinks.sort((a, b) => {
+        const isA_PD = /pixeldrain|pixel\.drain|pixeldra\.in/i.test(a.text) || /pixeldrain|pixel\.drain|pixeldra\.in/i.test(a.href);
+        const isB_PD = /pixeldrain|pixel\.drain|pixeldra\.in/i.test(b.text) || /pixeldrain|pixel\.drain|pixeldra\.in/i.test(b.href);
+        if (isA_PD && !isB_PD) return -1;
+        if (!isA_PD && isB_PD) return 1;
+        
+        const isA_Worker = /\.workers\.dev/i.test(a.href);
+        const isB_Worker = /\.workers\.dev/i.test(b.href);
+        if (isA_Worker && !isB_Worker) return -1;
+        if (!isA_Worker && isB_Worker) return 1;
+        
+        return 0;
+      });
+
+      // Find first working link
+      let workingLink = url; // fallback to original hubcloud url
+      for (const candidate of candidateLinks) {
+        try {
+          // Do a GET with Range: bytes=0-0 to prevent full download, and check if it succeeds
+          let checkUrl = candidate.href;
+          const checkRes = await axios.get(checkUrl, { 
+             headers: { Range: 'bytes=0-0' },
+             maxRedirects: 0, // Stop at first redirect to capture it
+             validateStatus: () => true, 
+             timeout: 5000 
+          });
+          
+          if (checkRes.status >= 300 && checkRes.status < 400 && checkRes.headers.location) {
+             workingLink = checkRes.headers.location;
+             
+             // Check one more depth for redirect (cloudflare worker -> google user content)
+             try {
+                const nextRes = await axios.get(workingLink, {
+                   headers: { Range: 'bytes=0-0' },
+                   maxRedirects: 0,
+                   validateStatus: () => true,
+                   timeout: 5000
+                });
+                if (nextRes.status >= 300 && nextRes.status < 400 && nextRes.headers.location) {
+                    workingLink = nextRes.headers.location;
+                }
+             } catch (e) {}
+             break;
+          } else if (checkRes.status < 400 || checkRes.status === 405 || checkRes.status === 416) {
+             // 416 means range not satisfiable, but the server is there and responding
+             // Usually 206 Partial Content or 200 OK means it works
+             workingLink = candidate.href;
+             break;
+          }
+        } catch (e) {
+          // Ignore error, try next
+        }
+      }
+      
+      // If none working, just use the first candidate
+      if (workingLink === url && candidateLinks.length > 0) {
+         workingLink = candidateLinks[0].href;
+      }
+
+      // First Priority for Pixeldrain: Rewrite to pixeldrain.dev/u/
+      // Matches both api/file/xxx and /u/xxx
+      if (/(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+)/i.test(workingLink)) {
+         workingLink = workingLink.replace(/.*(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+).*/i, 'https://pixeldrain.dev/u/$1');
+      }
+
+      const returnCandidates = candidateLinks.map(c => {
+         let href = c.href;
+         if (/(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+)/i.test(href)) {
+             href = href.replace(/.*(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+).*/i, 'https://pixeldrain.dev/u/$1');
+         }
+         return { text: c.text.trim(), href };
+      });
+      
+      const bodyText = $('body').text();
+      let sizeInfo = '';
+      const sizeMatch = bodyText.match(/File Size\s*([\d.]+\s*[A-Za-z]+)/i);
+      if (sizeMatch && sizeMatch[1]) {
+          sizeInfo = sizeMatch[1].trim();
+      }
+
+      res.json({ url: workingLink, candidates: returnCandidates, size: sizeInfo });
+    } catch (e: any) {
+      console.error(e);
+      res.json({ url: req.body.url }); 
+    }
+  });
+
   // Sync Endpoints
   app.post("/api/sync/status", async (req, res) => {
     try {
