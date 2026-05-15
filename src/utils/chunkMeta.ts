@@ -70,3 +70,22 @@ export const getChunkMeta = async (forceRefresh = false) => {
   }
   return chunkMetaPromise;
 };
+
+export const updateUserChunkMeta = async (userIds: string[]) => {
+  const { doc, getDoc, setDoc } = await import('firebase/firestore');
+  const metaRef = doc(db, 'chunk_meta', 'versions');
+  const snap = await getDoc(metaRef);
+  const data = snap.exists() ? snap.data() : { users: {} };
+  const users = data.users || {};
+  
+  const now = Date.now();
+  userIds.forEach(uid => {
+    users[uid] = now;
+  });
+  
+  await setDoc(metaRef, { ...data, users }, { merge: true });
+  
+  // Clear memory cache to ensure next read gets fresh data
+  memoryCache = null;
+  safeStorage.removeItem('cached_chunk_meta_doc');
+};

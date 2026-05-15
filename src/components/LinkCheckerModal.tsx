@@ -415,9 +415,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
           unit = r.fileSizeText.toLowerCase().includes('gb') ? 'GB' : 'MB';
         }
       } else if (r.fileSize) {
-        const sizeMB = r.fileSize / (1000 * 1000);
-        if (sizeMB >= 1000) {
-          sizeStr = (sizeMB / 1000).toFixed(2);
+        const sizeMB = r.fileSize / (1024 * 1024);
+        if (sizeMB >= 1024) {
+          sizeStr = (sizeMB / 1024).toFixed(2);
           unit = 'GB';
         } else {
           sizeStr = sizeMB.toFixed(1).replace(/\.0$/, '');
