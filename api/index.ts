@@ -869,8 +869,11 @@ async function startServer() {
 
       const axios = (await import('axios')).default;
       const cheerio = await import('cheerio');
+      const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+      };
       
-      const response = await axios.get(url, { validateStatus: () => true });
+      const response = await axios.get(url, { headers, validateStatus: () => true });
       const $ = cheerio.load(response.data);
       
       let sizeStr = $('li:contains("File Size") i').text() || $('li:contains("File Size")').text();
@@ -901,11 +904,14 @@ async function startServer() {
     try {
       const { url, checkOnly } = req.body;
       const axios = (await import('axios')).default;
+      const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+      };
       
       if (checkOnly && url) {
         try {
            const checkRes = await axios.get(url, {
-              headers: { Range: 'bytes=0-0' },
+              headers: { ...headers, Range: 'bytes=0-0' },
               maxRedirects: 0,
               validateStatus: () => true,
               timeout: 5000
@@ -928,7 +934,7 @@ async function startServer() {
 
       const cheerio = await import('cheerio');
       
-      const response = await axios.get(url, { validateStatus: () => true });
+      const response = await axios.get(url, { headers, validateStatus: () => true });
       const $ = cheerio.load(response.data);
       
       let nextUrl = $('#download').attr('href') || $('a:contains("Generate Direct Download Link")').attr('href');
@@ -937,7 +943,7 @@ async function startServer() {
          return res.json({ url });
       }
 
-      const res2 = await axios.get(nextUrl, { validateStatus: () => true });
+      const res2 = await axios.get(nextUrl, { headers, validateStatus: () => true });
       const $2 = cheerio.load(res2.data);
       
       const candidateLinks: { text: string, href: string }[] = [];
@@ -991,53 +997,54 @@ async function startServer() {
         return 0;
       });
 
-      // Find first working link
-      let workingLink = url; // fallback to original hubcloud url
-      for (const candidate of candidateLinks) {
+      // Find first working link using parallel probing to avoid timeouts
+      let workingLink = url; 
+      const probePromises = candidateLinks.map(async (candidate) => {
         try {
-          // Do a GET with Range: bytes=0-0 to prevent full download, and check if it succeeds
           let checkUrl = candidate.href;
-          // Normalize to .com for checking if it's a known pixeldrain domain
           if (/(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)/i.test(checkUrl)) {
              checkUrl = checkUrl.replace(/pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in/i, 'pixeldrain.com');
           }
 
           const checkRes = await axios.get(checkUrl, { 
-             headers: { Range: 'bytes=0-0' },
-             maxRedirects: 0, // Stop at first redirect to capture it
+             headers: { 
+                Range: 'bytes=0-0',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+             },
+             maxRedirects: 0, 
              validateStatus: () => true, 
-             timeout: 5000 
+             timeout: 4000 
           });
           
           if (checkRes.status >= 300 && checkRes.status < 400 && checkRes.headers.location) {
-             workingLink = checkRes.headers.location;
-             
-             // Check one more depth for redirect (cloudflare worker -> google user content)
+             let resolvedUrl = checkRes.headers.location;
              try {
-                const nextRes = await axios.get(workingLink, {
-                   headers: { Range: 'bytes=0-0' },
+                const nextRes = await axios.get(resolvedUrl, {
+                   headers: { 
+                      Range: 'bytes=0-0',
+                      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+                   },
                    maxRedirects: 0,
                    validateStatus: () => true,
-                   timeout: 5000
+                   timeout: 3000
                 });
                 if (nextRes.status >= 300 && nextRes.status < 400 && nextRes.headers.location) {
-                    workingLink = nextRes.headers.location;
+                    resolvedUrl = nextRes.headers.location;
                 }
              } catch (e) {}
-             break;
+             return resolvedUrl;
           } else if (checkRes.status < 400 || checkRes.status === 405 || checkRes.status === 416) {
-             // 416 means range not satisfiable, but the server is there and responding
-             // Usually 206 Partial Content or 200 OK means it works
-             workingLink = checkUrl;
-             break;
+             return checkUrl;
           }
-        } catch (e) {
-          // Ignore error, try next
-        }
-      }
-      
-      // If none working, just use the first candidate
-      if (workingLink === url && candidateLinks.length > 0) {
+        } catch (e) {}
+        return null;
+      });
+
+      const probeResults = await Promise.all(probePromises);
+      const firstWorking = probeResults.find(r => r !== null);
+      if (firstWorking) {
+         workingLink = firstWorking;
+      } else if (candidateLinks.length > 0) {
          workingLink = candidateLinks[0].href;
       }
 
@@ -1404,7 +1411,7 @@ async function startServer() {
       }
     });
   } else {
-    const distPath = path.resolve(__dirname, '../dist');
+    const distPath = path.resolve(process.cwd(), 'dist');
     app.use(express.static(distPath, { index: false })); // Disable default index.html serving
     
     // Explicitly serve PWA files with correct MIME types
