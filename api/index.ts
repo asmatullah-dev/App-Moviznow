@@ -947,6 +947,25 @@ async function startServer() {
          if (href && !text.includes('telegram')) candidateLinks.push({ text, href });
       });
 
+      // Special: Scan HTML for hidden pixeldrain links (sometimes in scripts)
+      const pdRegex = /(?:https?:\/\/)?(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+)/gi;
+      let match;
+      const seenIds = new Set<string>();
+      
+      // Mark seen IDs from existing candidates
+      candidateLinks.forEach(c => {
+        const idMatch = c.href.match(/(?:api\/file|u)\/([a-zA-Z0-9_-]+)/);
+        if (idMatch) seenIds.add(idMatch[1]);
+      });
+
+      while ((match = pdRegex.exec(res2.data)) !== null) {
+        const id = match[1];
+        if (!seenIds.has(id)) {
+           seenIds.add(id);
+           candidateLinks.push({ text: 'Download [PixelServer : Advanced]', href: `https://pixeldrain.com/u/${id}` });
+        }
+      }
+
       if (candidateLinks.length === 0) {
         return res.json({ url });
       }
@@ -958,6 +977,12 @@ async function startServer() {
         if (isA_PD && !isB_PD) return -1;
         if (!isA_PD && isB_PD) return 1;
         
+        // Prefer "Advanced" (script-extracted) over potentially fake ones
+        if (isA_PD && isB_PD) {
+          if (a.text.includes('Advanced') && !b.text.includes('Advanced')) return -1;
+          if (!a.text.includes('Advanced') && b.text.includes('Advanced')) return 1;
+        }
+
         const isA_Worker = /\.workers\.dev/i.test(a.href);
         const isB_Worker = /\.workers\.dev/i.test(b.href);
         if (isA_Worker && !isB_Worker) return -1;
@@ -972,6 +997,11 @@ async function startServer() {
         try {
           // Do a GET with Range: bytes=0-0 to prevent full download, and check if it succeeds
           let checkUrl = candidate.href;
+          // Normalize to .com for checking if it's a known pixeldrain domain
+          if (/(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)/i.test(checkUrl)) {
+             checkUrl = checkUrl.replace(/pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in/i, 'pixeldrain.com');
+          }
+
           const checkRes = await axios.get(checkUrl, { 
              headers: { Range: 'bytes=0-0' },
              maxRedirects: 0, // Stop at first redirect to capture it
@@ -998,7 +1028,7 @@ async function startServer() {
           } else if (checkRes.status < 400 || checkRes.status === 405 || checkRes.status === 416) {
              // 416 means range not satisfiable, but the server is there and responding
              // Usually 206 Partial Content or 200 OK means it works
-             workingLink = candidate.href;
+             workingLink = checkUrl;
              break;
           }
         } catch (e) {
@@ -1011,16 +1041,16 @@ async function startServer() {
          workingLink = candidateLinks[0].href;
       }
 
-      // First Priority for Pixeldrain: Rewrite to pixeldrain.dev/u/
+      // First Priority for Pixeldrain: Rewrite to pixeldrain.com/u/
       // Matches both api/file/xxx and /u/xxx
       if (/(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+)/i.test(workingLink)) {
-         workingLink = workingLink.replace(/.*(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+).*/i, 'https://pixeldrain.dev/u/$1');
+         workingLink = workingLink.replace(/.*(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+).*/i, 'https://pixeldrain.com/u/$1');
       }
 
       const returnCandidates = candidateLinks.map(c => {
          let href = c.href;
          if (/(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+)/i.test(href)) {
-             href = href.replace(/.*(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+).*/i, 'https://pixeldrain.dev/u/$1');
+             href = href.replace(/.*(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+).*/i, 'https://pixeldrain.com/u/$1');
          }
          return { text: c.text.trim(), href };
       });
