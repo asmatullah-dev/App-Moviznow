@@ -536,37 +536,8 @@ export async function performFullLinkScan(
   let base: LinkCheckResult;
   let finalUrlToUse = url;
 
-  // HubCloud interception
-  let hubcloudTitle = "";
-  if (url.includes('hubcloud') || url.includes('moviesdrives')) {
-    try {
-      const res = await fetch('/api/hubcloud/extract', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.size && data.unit) {
-          hubcloudTitle = data.title || "";
-          base = {
-            url,
-            ok: true,
-            statusLabel: "WORKING",
-            fileName: hubcloudTitle || undefined,
-            fileSizeText: `${data.size} ${data.unit}`
-          };
-          finalUrlToUse = url;
-        } else {
-           base = await serverCheckLink(url, signal);
-        }
-      } else {
-         base = await serverCheckLink(url, signal);
-      }
-    } catch {
-      base = await serverCheckLink(url, signal);
-    }
-  } else if (url.includes('?token=') || url.includes('&token=')) {
+  // Check if URL has a token parameter
+  if (url.includes('?token=') || url.includes('&token=')) {
     try {
       const urlObj = new URL(url);
       const token = urlObj.searchParams.get('token');

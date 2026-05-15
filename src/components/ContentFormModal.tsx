@@ -15,38 +15,6 @@ const QualityInputs: React.FC<QualityInputsProps> = ({ links, onChange, droppabl
   const safeLinks = links || [];
   const handleUrlBlur = async (url: string, idx: number) => {
     if (!url) return;
-    
-    // Check if it's a HubCloud or MoviesDrives link
-    if (url.includes('hubcloud') || url.includes('moviesdrives')) {
-      try {
-        const res = await fetch("/api/hubcloud/extract", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.size && data.unit) {
-            onChange(prevLinks => {
-              const currentLinks = Array.isArray(prevLinks) ? prevLinks : [];
-              const newLinks = [...currentLinks];
-              if (newLinks[idx]) {
-                newLinks[idx] = {
-                  ...newLinks[idx],
-                  size: data.size,
-                  unit: data.unit as 'MB' | 'GB'
-                };
-              }
-              return newLinks;
-            });
-          }
-        }
-      } catch (e) {
-        console.error("Failed to extract HubCloud info", e);
-      }
-      return; 
-    }
-
     try {
       const res = await fetch("/api/check-link", {
         method: "POST",
