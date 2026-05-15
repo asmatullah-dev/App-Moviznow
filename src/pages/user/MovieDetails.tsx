@@ -56,7 +56,7 @@ export default function MovieDetails() {
   const [isFavoriteLoading, setIsFavoriteLoading] = useState(false);
   const [isShareLoading, setIsShareLoading] = useState(false);
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
-  const [linkPopup, setLinkPopup] = useState<{ isOpen: boolean; url: string; name: string; id: string; isZip?: boolean; tinyUrl?: string } | null>(null);
+  const [linkPopup, setLinkPopup] = useState<{ isOpen: boolean; url: string; name: string; id: string; isZip?: boolean; tinyUrl?: string; candidates?: {text: string, href: string}[], size?: string } | null>(null);
   const [isPosterExpanded, setIsPosterExpanded] = useState(false);
   const [isTrailerPopupOpen, setIsTrailerPopupOpen] = useState(false);
   const [isTrailerSelectionOpen, setIsTrailerSelectionOpen] = useState(false);
@@ -113,6 +113,7 @@ export default function MovieDetails() {
   });
   const [fetchFailed, setFetchFailed] = useState(false);
   const hasFetchedFull = useRef<Record<string, boolean>>({});
+  const hubcloudCacheRef = useRef<Record<string, { url: string, candidates?: {text: string, href: string}[], size?: string, timestamp: number }>>({});
 
   // Reset state and load cache on ID change
   useEffect(() => {
@@ -794,7 +795,7 @@ export default function MovieDetails() {
     }
   };
 
-  const handlePlayClick = (url: string, linkName?: string, linkId?: string, isZip?: boolean, tinyUrl?: string, isLocked?: boolean, seasonInfo?: { id: string; number: number; title?: string }) => {
+  const handlePlayClick = async (url: string, linkName?: string, linkId?: string, isZip?: boolean, tinyUrl?: string, isLocked?: boolean, seasonInfo?: { id: string; number: number; title?: string }) => {
     // Check eligibility before opening links
     const checkEligibility = () => {
       if (linkId === 'sample') return true;
@@ -856,7 +857,68 @@ export default function MovieDetails() {
       return;
     }
     
-    setLinkPopup({ isOpen: true, url, name: linkName || 'Unknown Link', id: linkId || 'unknown', isZip, tinyUrl });
+    let finalUrl = url;
+    let finalTinyUrl = tinyUrl;
+    let finalCandidates: {text: string, href: string}[] | undefined;
+    let finalSize: string | undefined;
+    
+    if (url.includes('hubcloud') || url.includes('moviesdrives')) {
+      setIsExtractingLink(true);
+      // Immediately open the popup with a temporary "extracting" state, so user gets feedback
+      setLinkPopup({ isOpen: true, url, name: linkName || 'Unknown Link', id: linkId || 'unknown', isZip, tinyUrl });
+      
+      let shouldExtract = true;
+      const now = Date.now();
+      const cached = hubcloudCacheRef.current[url];
+      
+      // If we have a cached link within 30 seconds, try to check if it's working
+      if (cached && (now - cached.timestamp < 30000)) {
+         try {
+            // Check if the cached link is still alive by hitting it in the backend
+            const checkRes = await fetch('/api/hubcloud/direct-link', { 
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: cached.url, checkOnly: true })
+            }); 
+            if (checkRes.ok) {
+               const checkData = await checkRes.json();
+               if (checkData.ok) {
+                 shouldExtract = false;
+                 finalUrl = cached.url;
+                 finalTinyUrl = undefined;
+                 finalCandidates = cached.candidates;
+                 finalSize = cached.size;
+               }
+            }
+         } catch(e) {}
+      }
+
+      if (shouldExtract) {
+        try {
+          const res = await fetch('/api/hubcloud/direct-link', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.url && data.url !== url) {
+               finalUrl = data.url;
+               finalTinyUrl = undefined; // Drop the old tinyurl since url changed!
+               finalCandidates = data.candidates;
+               finalSize = data.size;
+               // Save to cache
+               hubcloudCacheRef.current[url] = { url: finalUrl, candidates: finalCandidates, size: finalSize, timestamp: Date.now() };
+            }
+          }
+        } catch (e) {
+          console.error('Failed to resolve link', e);
+        }
+      }
+      setIsExtractingLink(false);
+    }
+    
+    setLinkPopup({ isOpen: true, url: finalUrl, name: linkName || 'Unknown Link', id: linkId || 'unknown', isZip, tinyUrl: finalTinyUrl, candidates: finalCandidates, size: finalSize });
   };
 
   const closePosterPopup = () => {
@@ -870,6 +932,8 @@ export default function MovieDetails() {
       setLinkPopup(null);
     }
   };
+
+  const [isExtractingLink, setIsExtractingLink] = useState(false);
 
   const handlePlayExternal = async (player: 'vlc' | 'mx' | 'generic' | 'download' | 'browser') => {
     if (!linkPopup) return;
@@ -885,6 +949,7 @@ export default function MovieDetails() {
     }
     
     let urlToPlay = linkPopup.url;
+
     if (!urlToPlay.startsWith('http')) {
       urlToPlay = 'https://' + urlToPlay;
     }
@@ -1081,6 +1146,7 @@ export default function MovieDetails() {
     }
     
     let url = linkPopup.url;
+
     if (!url.startsWith('http')) {
       url = 'https://' + url;
     }
@@ -1860,12 +1926,44 @@ export default function MovieDetails() {
               <button
                 onClick={closeLinkPopup}
                 className="absolute top-4 right-4 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors"
+                disabled={isExtractingLink}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
               </button>
               <h3 className="text-xl font-bold mb-2">Play Content</h3>
-              <p className="text-zinc-500 dark:text-zinc-400 mb-6">How would you like to open "{linkPopup.name}"?</p>
+              <div className="flex justify-between items-center mb-6">
+                <p className="text-zinc-500 dark:text-zinc-400">How would you like to open "{linkPopup.name}"?</p>
+                {linkPopup.size && (
+                  <span className="px-2.5 py-1 bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-lg text-xs font-bold whitespace-nowrap">
+                    {linkPopup.size}
+                  </span>
+                )}
+              </div>
+              
+              {isExtractingLink && (
+                <div className="absolute inset-0 bg-white/50 dark:bg-zinc-900/50 backdrop-blur-sm z-10 flex flex-col items-center justify-center rounded-2xl">
+                  <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-emerald-500 mb-2"></div>
+                  <p className="text-sm font-medium text-zinc-900 dark:text-white">Extracting link...</p>
+                </div>
+              )}
+
               <div className="flex flex-col gap-3">
+                {linkPopup.candidates && linkPopup.candidates.length > 0 && (
+                  <div className="mb-1">
+                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">Select Server:</label>
+                    <select 
+                      value={linkPopup.url}
+                      onChange={(e) => setLinkPopup({...linkPopup, url: e.target.value})}
+                      className="w-full bg-zinc-100 dark:bg-zinc-800 border-none rounded-xl p-3 text-sm font-medium text-zinc-900 dark:text-white outline-none ring-2 ring-transparent focus:ring-emerald-500 transition-all cursor-pointer"
+                    >
+                      {linkPopup.candidates.map((c, i) => (
+                        <option key={i} value={c.href}>
+                          {c.text.replace(/download|download file/gi, '').trim() || `Server ${i + 1}`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 {!(linkPopup.isZip || linkPopup.name.toLowerCase().includes('zip') || linkPopup.url.toLowerCase().includes('.zip')) ? (
                   <>
                     <button

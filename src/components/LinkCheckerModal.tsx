@@ -405,7 +405,16 @@ export const LinkCheckerModal: React.FC<Props> = ({
       let sizeStr = '';
       let unit: 'MB' | 'GB' = 'MB';
       
-      if (r.fileSize) {
+      if (r.fileSizeText) {
+        const parts = r.fileSizeText.split(' ');
+        if (parts.length === 2 && (parts[1].toUpperCase() === 'MB' || parts[1].toUpperCase() === 'GB')) {
+          sizeStr = parts[0];
+          unit = parts[1].toUpperCase() as 'MB' | 'GB';
+        } else {
+          sizeStr = r.fileSizeText.replace(/MB|GB/i, '').trim();
+          unit = r.fileSizeText.toLowerCase().includes('gb') ? 'GB' : 'MB';
+        }
+      } else if (r.fileSize) {
         const sizeMB = r.fileSize / (1000 * 1000);
         if (sizeMB >= 1000) {
           sizeStr = (sizeMB / 1000).toFixed(2);
