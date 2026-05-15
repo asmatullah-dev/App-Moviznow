@@ -1,33 +1,121 @@
-import React, { useState, useEffect, useMemo, useRef, memo, useCallback } from 'react';
-import { useSearchParams, Link, useLocation, useNavigate } from 'react-router-dom';
-import { db } from '../../firebase';
-import { safeStorage } from '../../utils/safeStorage';
-import { collection, addDoc, deleteDoc, doc, updateDoc, onSnapshot, writeBatch, getDocs, query, where, arrayUnion, deleteField } from 'firebase/firestore';
-import { useAuth } from '../../contexts/AuthContext';
-import { useContent } from '../../contexts/ContentContext';
-import { useNotifications } from '../../contexts/NotificationContext';
-import { useUsers } from '../../contexts/UsersContext';
-import { Content, Genre, Language, Quality, QualityLinks, Season, Episode, LinkDef, Role, Trailer } from '../../types';
-import { motion, AnimatePresence } from 'framer-motion';
-import { clsx } from 'clsx';
-import { Plus, Edit2, Trash2, Share2, Film, Tv, X, Save, Upload, Search, Eye, EyeOff, ArrowUp, ArrowDown, Copy, ClipboardPaste, GripVertical, Bell, RefreshCw, ChevronDown, ChevronUp, User, Lock, Loader2, MessageCircle, MoreVertical, Link2, AlertCircle, Check, TrendingUp, Clock } from 'lucide-react';
-import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
-import ConfirmModal from '../../components/ConfirmModal';
-import { MediaModal, findTMDBByImdb, searchTMDBByTitle, fetchTMDBDetails, fetchSeriesSeasons, fetchIMDbRating } from '../../components/MediaModal';
-import { LinkCheckerModal } from '../../components/LinkCheckerModal';
-import { AdjustContentsModal } from '../../components/AdjustContentsModal';
-import ManageModal from '../../components/ManageModal';
-import { Button } from '../../components/Button';
-import { formatContentTitle, formatReleaseDate, formatRuntime, formatDateToMonthDDYYYY } from '../../utils/contentUtils';
-import { smartSearch } from '../../utils/searchUtils';
-import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
-import { generateTinyUrl } from '../../utils/tinyurl';
-import { useModalBehavior } from '../../hooks/useModalBehavior';
-import { useSettings } from '../../contexts/SettingsContext';
-import { memoryStore } from '../../utils/memoryStore';
-import { ContentFormModal } from '../../components/ContentFormModal';
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useRef,
+  memo,
+  useCallback,
+} from "react";
+import {
+  useSearchParams,
+  Link,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
+import { db } from "../../firebase";
+import { safeStorage } from "../../utils/safeStorage";
+import {
+  collection,
+  addDoc,
+  deleteDoc,
+  doc,
+  updateDoc,
+  onSnapshot,
+  writeBatch,
+  getDocs,
+  query,
+  where,
+  arrayUnion,
+  deleteField,
+} from "firebase/firestore";
+import { useAuth } from "../../contexts/AuthContext";
+import { useContent } from "../../contexts/ContentContext";
+import { useNotifications } from "../../contexts/NotificationContext";
+import { useUsers } from "../../contexts/UsersContext";
+import {
+  Content,
+  Genre,
+  Language,
+  Quality,
+  QualityLinks,
+  Season,
+  Episode,
+  LinkDef,
+  Role,
+  Trailer,
+} from "../../types";
+import { motion, AnimatePresence } from "framer-motion";
+import { clsx } from "clsx";
+import {
+  Plus,
+  Edit2,
+  Trash2,
+  Share2,
+  Film,
+  Tv,
+  X,
+  Save,
+  Upload,
+  Search,
+  Eye,
+  EyeOff,
+  ArrowUp,
+  ArrowDown,
+  Copy,
+  ClipboardPaste,
+  GripVertical,
+  Bell,
+  RefreshCw,
+  ChevronDown,
+  ChevronUp,
+  User,
+  Lock,
+  Loader2,
+  MessageCircle,
+  MoreVertical,
+  Link2,
+  AlertCircle,
+  Check,
+  TrendingUp,
+  Clock,
+} from "lucide-react";
+import {
+  DragDropContext,
+  Droppable,
+  Draggable,
+  DropResult,
+} from "@hello-pangea/dnd";
+import ConfirmModal from "../../components/ConfirmModal";
+import {
+  MediaModal,
+  findTMDBByImdb,
+  searchTMDBByTitle,
+  fetchTMDBDetails,
+  fetchSeriesSeasons,
+  fetchIMDbRating,
+} from "../../components/MediaModal";
+import { LinkCheckerModal } from "../../components/LinkCheckerModal";
+import { AdjustContentsModal } from "../../components/AdjustContentsModal";
+import ManageModal from "../../components/ManageModal";
+import { Button } from "../../components/Button";
+import {
+  formatContentTitle,
+  formatReleaseDate,
+  formatRuntime,
+  formatDateToMonthDDYYYY,
+} from "../../utils/contentUtils";
+import { smartSearch } from "../../utils/searchUtils";
+import {
+  handleFirestoreError,
+  OperationType,
+} from "../../utils/firestoreErrorHandler";
+import { generateTinyUrl } from "../../utils/tinyurl";
+import { useModalBehavior } from "../../hooks/useModalBehavior";
+import { useSettings } from "../../contexts/SettingsContext";
+import { memoryStore } from "../../utils/memoryStore";
+import { ContentFormModal } from "../../components/ContentFormModal";
 
-import { BatchFetchModal } from '../../components/BatchFetchModal';
+import { BatchFetchModal } from "../../components/BatchFetchModal";
 
 interface ContentCardProps {
   content: Content;
@@ -39,212 +127,337 @@ interface ContentCardProps {
   isShareLoading: boolean;
   isWhatsappLoading: boolean;
   handleSelectContent: (id: string, e?: React.SyntheticEvent) => void;
-  handleShare: (content: Content, mode: 'standard' | 'whatsapp') => void;
+  handleShare: (content: Content, mode: "standard" | "whatsapp") => void;
   handleEdit: (content: Content) => void;
   handleCopyData: (content: Content) => void;
   setDeleteId: (id: string) => void;
-  setNotificationModal: (modal: { isOpen: boolean; content: Content | null; status: 'idle' | 'sending' | 'success' | 'error' }) => void;
+  setNotificationModal: (modal: {
+    isOpen: boolean;
+    content: Content | null;
+    status: "idle" | "sending" | "success" | "error";
+  }) => void;
   setActiveDropdownId: (id: string | null) => void;
   getMissingLabels: (content: Content, profile: any) => string[];
-  handleAddToSpecialCollection: (contentId: string, type: 'trending' | 'newly_added') => void;
+  handleAddToSpecialCollection: (
+    contentId: string,
+    type: "trending" | "newly_added",
+  ) => void;
 }
 
-import { useScrollRestoration } from '../../hooks/useScrollRestoration';
+import { useScrollRestoration } from "../../hooks/useScrollRestoration";
 
-const ContentCard = memo(({ 
-  content, profile, isSelected, anySelected, handleSelectContent, handleShare, handleEdit, 
-  handleCopyData, setDeleteId, setNotificationModal, isActiveDropdown, 
-  setActiveDropdownId, isDuplicate, getMissingLabels, isShareLoading, isWhatsappLoading,
-  handleAddToSpecialCollection
-}: ContentCardProps) => {
-  const missingLabels = useMemo(() => getMissingLabels(content, profile), [content, profile, getMissingLabels]);
+const ContentCard = memo(
+  ({
+    content,
+    profile,
+    isSelected,
+    anySelected,
+    handleSelectContent,
+    handleShare,
+    handleEdit,
+    handleCopyData,
+    setDeleteId,
+    setNotificationModal,
+    isActiveDropdown,
+    setActiveDropdownId,
+    isDuplicate,
+    getMissingLabels,
+    isShareLoading,
+    isWhatsappLoading,
+    handleAddToSpecialCollection,
+  }: ContentCardProps) => {
+    const missingLabels = useMemo(
+      () => getMissingLabels(content, profile),
+      [content, profile, getMissingLabels],
+    );
 
-  return (
-    <div 
-      className={clsx(
-        "bg-zinc-50 dark:bg-zinc-900 border rounded-xl flex flex-col group relative overflow-hidden transition-all hover:ring-2 cursor-pointer", 
-        isSelected ? "ring-2 ring-emerald-500 border-emerald-500" : (isDuplicate ? "border-red-500 hover:ring-red-500/50" : "border-zinc-200 dark:border-zinc-800 hover:ring-emerald-500/50")
-      )}
-      onClick={(e) => {
-        if (anySelected) {
-          handleSelectContent(content.id, e);
-        }
-      }}
-    >
-      <label className="absolute top-0 left-0 z-30 w-16 h-16 cursor-pointer group/checkbox" onClick={(e) => e.stopPropagation()}>
-        <div className="absolute top-3 left-3 w-5 h-5 flex items-center justify-center rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 group-hover/checkbox:border-emerald-500 transition-colors">
-          <input 
-            type="checkbox" 
-            checked={isSelected}
-            onChange={(e) => {
-              handleSelectContent(content.id, e);
-            }}
-            className="w-4 h-4 rounded border-none bg-transparent text-emerald-500 focus:ring-emerald-500 focus:ring-offset-zinc-950 cursor-pointer"
-          />
-        </div>
-      </label>
-      <div className="relative aspect-[2/3] rounded-t-xl overflow-hidden">
-        <Link 
-          to={anySelected ? '#' : `/movie/${content.id}`} 
-          onClick={(e) => {
-            if (anySelected) {
-              e.preventDefault();
-              handleSelectContent(content.id, e);
-            }
-          }}
-          className="block w-full h-full"
+    return (
+      <div
+        className={clsx(
+          "bg-zinc-50 dark:bg-zinc-900 border rounded-xl flex flex-col group relative overflow-hidden transition-all hover:ring-2 cursor-pointer",
+          isSelected
+            ? "ring-2 ring-emerald-500 border-emerald-500"
+            : isDuplicate
+              ? "border-red-500 hover:ring-red-500/50"
+              : "border-zinc-200 dark:border-zinc-800 hover:ring-emerald-500/50",
+        )}
+        onClick={(e) => {
+          if (anySelected) {
+            handleSelectContent(content.id, e);
+          }
+        }}
+      >
+        <label
+          className="absolute top-0 left-0 z-30 w-16 h-16 cursor-pointer group/checkbox"
+          onClick={(e) => e.stopPropagation()}
         >
-          <img 
-            src={content.posterUrl || 'https://picsum.photos/seed/movie/400/600'} 
-            alt={content.title} 
-            className="w-full h-full object-cover" 
-            referrerPolicy="no-referrer"
-            loading="lazy" 
-          />
-        </Link>
-        {isDuplicate && (
-          <div className="absolute top-3 left-10 z-20 pointer-events-none">
-            <div className="bg-red-600 animate-pulse text-white px-2 py-0.5 rounded shadow-lg shadow-red-600/40 text-[11px] font-black uppercase tracking-widest border border-red-400">
-              Duplicate
-            </div>
+          <div className="absolute top-3 left-3 w-5 h-5 flex items-center justify-center rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 group-hover/checkbox:border-emerald-500 transition-colors">
+            <input
+              type="checkbox"
+              checked={isSelected}
+              onChange={(e) => {
+                handleSelectContent(content.id, e);
+              }}
+              className="w-4 h-4 rounded border-none bg-transparent text-emerald-500 focus:ring-emerald-500 focus:ring-offset-zinc-950 cursor-pointer"
+            />
           </div>
-        )}
-        {missingLabels.length > 0 && (
-          <div className="absolute bottom-1 left-1 right-1 flex flex-row flex-wrap items-end gap-0.5 pointer-events-none opacity-80 group-hover:opacity-100 transition-opacity max-h-[80%] overflow-hidden">
-            {missingLabels.map((lbl, idx) => (
-              <div key={idx} className="bg-red-600/90 backdrop-blur-sm text-white px-1.5 py-[1px] rounded text-[9px] font-bold uppercase tracking-wider shadow-sm truncate max-w-full">
-                {lbl}
+        </label>
+        <div className="relative aspect-[2/3] rounded-t-xl overflow-hidden">
+          <Link
+            to={anySelected ? "#" : `/movie/${content.id}`}
+            onClick={(e) => {
+              if (anySelected) {
+                e.preventDefault();
+                handleSelectContent(content.id, e);
+              }
+            }}
+            className="block w-full h-full"
+          >
+            <img
+              src={
+                content.posterUrl || "https://picsum.photos/seed/movie/400/600"
+              }
+              alt={content.title}
+              className="w-full h-full object-cover"
+              referrerPolicy="no-referrer"
+              loading="lazy"
+            />
+          </Link>
+          {isDuplicate && (
+            <div className="absolute top-3 left-10 z-20 pointer-events-none">
+              <div className="bg-red-600 animate-pulse text-white px-2 py-0.5 rounded shadow-lg shadow-red-600/40 text-[11px] font-black uppercase tracking-widest border border-red-400">
+                Duplicate
               </div>
-            ))}
-          </div>
-        )}
-        <div className="absolute top-1 right-1 flex flex-col gap-1 items-end">
-          <div className={clsx(
-            "px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider text-white",
-            content.type === 'movie' ? 'bg-blue-500/90' : 'bg-purple-500/90'
-          )}>
-            {content.type}
-          </div>
-          {content.status === 'draft' && (
-            <div className="bg-yellow-500/90 text-black backdrop-blur-md px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
-              <EyeOff className="w-3 h-3" />
-              Draft
             </div>
           )}
-        </div>
-      </div>
-      <div className="p-2 md:p-3 flex-1 flex flex-col">
-        <h3 className="font-bold text-sm md:text-base mb-0.5 line-clamp-1" title={content.title}>{content.title}</h3>
-        <p className="text-zinc-500 dark:text-zinc-400 text-xs mb-2">{content.year}</p>
-        {['owner', 'admin'].includes(profile?.role) && content.addedByRole && !['owner', 'admin'].includes(content.addedByRole) && content.addedByName && (
-          <p className="text-zinc-400 dark:text-zinc-500 text-[10px] italic mb-1 -mt-1">By {content.addedByName}</p>
-        )}
-        
-        <div className="mt-auto flex flex-wrap items-center justify-between gap-1 pt-2 border-t border-zinc-200 dark:border-zinc-800/50">
-          <div className="flex flex-wrap gap-1">
-            <button 
-              onClick={(e) => {
-                e.stopPropagation();
-                handleShare(content, 'whatsapp');
-              }} 
-              className="text-emerald-500 hover:text-emerald-400 p-1.5 transition-colors" 
-              title="Share to WhatsApp" 
-              disabled={isWhatsappLoading}
-            >
-              {isWhatsappLoading ? <RefreshCw className="w-4 h-4 md:w-5 md:h-5 animate-spin" /> : <MessageCircle className="w-4 h-4 md:w-5 md:h-5" />}
-            </button>
-            <button 
-              onClick={(e) => {
-                e.stopPropagation();
-                handleShare(content, 'standard');
-              }} 
-              className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-1.5 transition-colors" 
-              title="Share Links & Details" 
-              disabled={isShareLoading}
-            >
-              {isShareLoading ? <RefreshCw className="w-4 h-4 md:w-5 md:h-5 animate-spin" /> : <Share2 className="w-4 h-4 md:w-5 md:h-5" />}
-            </button>
-          </div>
-          <div className="flex gap-1 ml-auto">
-            {(profile?.role === 'admin' || profile?.role === 'owner' || content.status === 'draft') && (
-              <button 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleEdit(content);
-                }} 
-                className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-1.5 transition-colors"
-              >
-                <Edit2 className="w-4 h-4 md:w-5 md:h-5" />
-              </button>
-            )}
-            <div className="relative">
-              <button 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setActiveDropdownId(isActiveDropdown ? null : content.id);
-                }}
-                className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white p-1.5 transition-colors"
-              >
-                <MoreVertical className="w-4 h-4 md:w-5 md:h-5" />
-              </button>
-              {isActiveDropdown && (
-                <div 
-                  className="absolute bottom-full right-0 mb-2 w-48 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-xl overflow-hidden z-20 py-1"
-                  onClick={(e) => e.stopPropagation()}
+          {missingLabels.length > 0 && (
+            <div className="absolute bottom-1 left-1 right-1 flex flex-row flex-wrap items-end gap-0.5 pointer-events-none opacity-80 group-hover:opacity-100 transition-opacity max-h-[80%] overflow-hidden">
+              {missingLabels.map((lbl, idx) => (
+                <div
+                  key={idx}
+                  className="bg-red-600/90 backdrop-blur-sm text-white px-1.5 py-[1px] rounded text-[9px] font-bold uppercase tracking-wider shadow-sm truncate max-w-full"
                 >
-                  {(profile?.role === 'admin' || profile?.role === 'owner') && (
-                    <button onClick={() => { setNotificationModal({ isOpen: true, content, status: 'idle' }); setActiveDropdownId(null); }} className="w-full flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 text-sm text-blue-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left">
-                      <Bell className="w-4 h-4" /> Send Notification
-                    </button>
-                  )}
-                  {(profile?.role === 'admin' || profile?.role === 'owner') && (
-                    <button onClick={() => { handleAddToSpecialCollection(content.id, 'trending'); setActiveDropdownId(null); }} className="w-full flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 text-sm text-amber-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left">
-                      <TrendingUp className="w-4 h-4" /> Add to Trending
-                    </button>
-                  )}
-                  {(profile?.role === 'admin' || profile?.role === 'owner') && (
-                    <button onClick={() => { handleAddToSpecialCollection(content.id, 'newly_added'); setActiveDropdownId(null); }} className="w-full flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 text-sm text-emerald-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left">
-                      <Clock className="w-4 h-4" /> Add to Newly Added
-                    </button>
-                  )}
-                  {(profile?.role === 'admin' || profile?.role === 'owner') && (
-                    <button onClick={() => { handleCopyData(content); setActiveDropdownId(null); }} className="w-full flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left">
-                      <Copy className="w-4 h-4" /> Copy Data
-                    </button>
-                  )}
-                  {(profile?.role === 'admin' || profile?.role === 'owner') && (
-                    <button onClick={() => { setDeleteId(content.id); setActiveDropdownId(null); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left">
-                      <Trash2 className="w-4 h-4" /> Delete
-                    </button>
-                  )}
+                  {lbl}
                 </div>
+              ))}
+            </div>
+          )}
+          <div className="absolute top-1 right-1 flex flex-col gap-1 items-end">
+            <div
+              className={clsx(
+                "px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider text-white",
+                content.type === "movie"
+                  ? "bg-blue-500/90"
+                  : "bg-purple-500/90",
               )}
+            >
+              {content.type}
+            </div>
+            {content.status === "draft" && (
+              <div className="bg-yellow-500/90 text-black backdrop-blur-md px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                <EyeOff className="w-3 h-3" />
+                Draft
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="p-2 md:p-3 flex-1 flex flex-col">
+          <h3
+            className="font-bold text-sm md:text-base mb-0.5 line-clamp-1"
+            title={content.title}
+          >
+            {content.title}
+          </h3>
+          <p className="text-zinc-500 dark:text-zinc-400 text-xs mb-2">
+            {content.year}
+          </p>
+          {["owner", "admin"].includes(profile?.role) &&
+            content.addedByRole &&
+            !["owner", "admin"].includes(content.addedByRole) &&
+            content.addedByName && (
+              <p className="text-zinc-400 dark:text-zinc-500 text-[10px] italic mb-1 -mt-1">
+                By {content.addedByName}
+              </p>
+            )}
+
+          <div className="mt-auto flex flex-wrap items-center justify-between gap-1 pt-2 border-t border-zinc-200 dark:border-zinc-800/50">
+            <div className="flex flex-wrap gap-1">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleShare(content, "whatsapp");
+                }}
+                className="text-emerald-500 hover:text-emerald-400 p-1.5 transition-colors"
+                title="Share to WhatsApp"
+                disabled={isWhatsappLoading}
+              >
+                {isWhatsappLoading ? (
+                  <RefreshCw className="w-4 h-4 md:w-5 md:h-5 animate-spin" />
+                ) : (
+                  <MessageCircle className="w-4 h-4 md:w-5 md:h-5" />
+                )}
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleShare(content, "standard");
+                }}
+                className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-1.5 transition-colors"
+                title="Share Links & Details"
+                disabled={isShareLoading}
+              >
+                {isShareLoading ? (
+                  <RefreshCw className="w-4 h-4 md:w-5 md:h-5 animate-spin" />
+                ) : (
+                  <Share2 className="w-4 h-4 md:w-5 md:h-5" />
+                )}
+              </button>
+            </div>
+            <div className="flex gap-1 ml-auto">
+              {(profile?.role === "admin" ||
+                profile?.role === "owner" ||
+                content.status === "draft") && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleEdit(content);
+                  }}
+                  className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-1.5 transition-colors"
+                >
+                  <Edit2 className="w-4 h-4 md:w-5 md:h-5" />
+                </button>
+              )}
+              <div className="relative">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveDropdownId(isActiveDropdown ? null : content.id);
+                  }}
+                  className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white p-1.5 transition-colors"
+                >
+                  <MoreVertical className="w-4 h-4 md:w-5 md:h-5" />
+                </button>
+                {isActiveDropdown && (
+                  <div
+                    className="absolute bottom-full right-0 mb-2 w-48 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-xl overflow-hidden z-20 py-1"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {(profile?.role === "admin" ||
+                      profile?.role === "owner") && (
+                      <button
+                        onClick={() => {
+                          setNotificationModal({
+                            isOpen: true,
+                            content,
+                            status: "idle",
+                          });
+                          setActiveDropdownId(null);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 text-sm text-blue-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left"
+                      >
+                        <Bell className="w-4 h-4" /> Send Notification
+                      </button>
+                    )}
+                    {(profile?.role === "admin" ||
+                      profile?.role === "owner") && (
+                      <button
+                        onClick={() => {
+                          handleAddToSpecialCollection(content.id, "trending");
+                          setActiveDropdownId(null);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 text-sm text-amber-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left"
+                      >
+                        <TrendingUp className="w-4 h-4" /> Add to Trending
+                      </button>
+                    )}
+                    {(profile?.role === "admin" ||
+                      profile?.role === "owner") && (
+                      <button
+                        onClick={() => {
+                          handleAddToSpecialCollection(
+                            content.id,
+                            "newly_added",
+                          );
+                          setActiveDropdownId(null);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 text-sm text-emerald-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left"
+                      >
+                        <Clock className="w-4 h-4" /> Add to Newly Added
+                      </button>
+                    )}
+                    {(profile?.role === "admin" ||
+                      profile?.role === "owner") && (
+                      <button
+                        onClick={() => {
+                          handleCopyData(content);
+                          setActiveDropdownId(null);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left"
+                      >
+                        <Copy className="w-4 h-4" /> Copy Data
+                      </button>
+                    )}
+                    {(profile?.role === "admin" ||
+                      profile?.role === "owner") && (
+                      <button
+                        onClick={() => {
+                          setDeleteId(content.id);
+                          setActiveDropdownId(null);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left"
+                      >
+                        <Trash2 className="w-4 h-4" /> Delete
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
       </div>
-    </div>
-  );
-}, (prevProps, nextProps) => {
-  return prevProps.content === nextProps.content &&
-         prevProps.profile === nextProps.profile &&
-         prevProps.isSelected === nextProps.isSelected &&
-         prevProps.anySelected === nextProps.anySelected &&
-         prevProps.isActiveDropdown === nextProps.isActiveDropdown &&
-         prevProps.isDuplicate === nextProps.isDuplicate &&
-         prevProps.isShareLoading === nextProps.isShareLoading &&
-         prevProps.isWhatsappLoading === nextProps.isWhatsappLoading;
-});
+    );
+  },
+  (prevProps, nextProps) => {
+    return (
+      prevProps.content === nextProps.content &&
+      prevProps.profile === nextProps.profile &&
+      prevProps.isSelected === nextProps.isSelected &&
+      prevProps.anySelected === nextProps.anySelected &&
+      prevProps.isActiveDropdown === nextProps.isActiveDropdown &&
+      prevProps.isDuplicate === nextProps.isDuplicate &&
+      prevProps.isShareLoading === nextProps.isShareLoading &&
+      prevProps.isWhatsappLoading === nextProps.isWhatsappLoading
+    );
+  },
+);
 
 export default function ContentManagement() {
   const { profile, user } = useAuth();
   const { users: allUsers } = useUsers();
   const { settings } = useSettings();
-  const { contentList, collections, updateCollection, addCollection, genres, languages, qualities, loading: contextLoading, getContent, saveContent, deleteContent, updateContentFields, deleteMultipleContents, updateAuxiliaryCollection, finalizeChanges, hasPendingChanges } = useContent();
+  const {
+    contentList,
+    collections,
+    updateCollection,
+    addCollection,
+    genres,
+    languages,
+    qualities,
+    loading: contextLoading,
+    getContent,
+    saveContent,
+    deleteContent,
+    updateContentFields,
+    deleteMultipleContents,
+    updateAuxiliaryCollection,
+    finalizeChanges,
+    hasPendingChanges,
+  } = useContent();
   const { sendNotification } = useNotifications();
   const [loading, setLoading] = useState(contextLoading);
 
-  useScrollRestoration('admin_content_mgmt_window', true, !loading);
+  useScrollRestoration("admin_content_mgmt_window", true, !loading);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSyncConfirmOpen, setIsSyncConfirmOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -252,87 +465,153 @@ export default function ContentManagement() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [isBatchFetchModalOpen, setIsBatchFetchModalOpen] = useState(false);
-  const [batchFetchMode, setBatchFetchMode] = useState<'media'|'links'>('media');
-  const [alertConfig, setAlertConfig] = useState<{ isOpen: boolean; title: string; message: string }>({ isOpen: false, title: '', message: '' });
-  const [toasts, setToasts] = useState<{ id: string; title: string; message: string; type: 'success' | 'error' | 'info' }[]>([]);
+  const [batchFetchMode, setBatchFetchMode] = useState<"media" | "links">(
+    "media",
+  );
+  const [alertConfig, setAlertConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+  }>({ isOpen: false, title: "", message: "" });
+  const [toasts, setToasts] = useState<
+    {
+      id: string;
+      title: string;
+      message: string;
+      type: "success" | "error" | "info";
+    }[]
+  >([]);
 
-  const addToast = (title: string, message: string, type: 'success' | 'error' | 'info' = 'info') => {
+  const addToast = (
+    title: string,
+    message: string,
+    type: "success" | "error" | "info" = "info",
+  ) => {
     const id = Math.random().toString(36).substr(2, 9);
-    setToasts(prev => [...prev, { id, title, message, type }]);
+    setToasts((prev) => [...prev, { id, title, message, type }]);
     setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
+      setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 5000);
   };
 
   // Helper to replace setAlertConfig with addToast where appropriate
-  const triggerAlert = (title: string, message: string, type: 'success' | 'error' | 'info' = 'info') => {
+  const triggerAlert = (
+    title: string,
+    message: string,
+    type: "success" | "error" | "info" = "info",
+  ) => {
     addToast(title, message, type);
   };
 
   useEffect(() => {
     if (alertConfig.isOpen) {
-      const type = alertConfig.title.toLowerCase().includes('success') ? 'success' : 
-                   alertConfig.title.toLowerCase().includes('error') ? 'error' : 'info';
+      const type = alertConfig.title.toLowerCase().includes("success")
+        ? "success"
+        : alertConfig.title.toLowerCase().includes("error")
+          ? "error"
+          : "info";
       addToast(alertConfig.title, alertConfig.message, type);
-      setAlertConfig(prev => ({ ...prev, isOpen: false }));
+      setAlertConfig((prev) => ({ ...prev, isOpen: false }));
     }
   }, [alertConfig.isOpen]);
   const [managers, setManagers] = useState<Record<string, string>>({});
 
   // Form State
-  const [type, setType] = useState<'movie' | 'series'>('movie');
-  const [status, setStatus] = useState<'draft' | 'published' | 'selected_content'>('published');
-  const [initialStatus, setInitialStatus] = useState<'draft' | 'published' | 'selected_content' | null>(null);
+  const [type, setType] = useState<"movie" | "series">("movie");
+  const [status, setStatus] = useState<
+    "draft" | "published" | "selected_content"
+  >("published");
+  const [initialStatus, setInitialStatus] = useState<
+    "draft" | "published" | "selected_content" | null
+  >(null);
   const [addToTrending, setAddToTrending] = useState(false);
   const [addToNewlyAdded, setAddToNewlyAdded] = useState(false);
-  const [title, setTitle] = useState('');
+  const [title, setTitle] = useState("");
   const [showTitleSuggestions, setShowTitleSuggestions] = useState(false);
   const [disableSuggestions, setDisableSuggestions] = useState(false);
-  const [description, setDescription] = useState('');
-  const [posterUrl, setPosterUrl] = useState('');
-  const [trailerUrl, setTrailerUrl] = useState('');
-  const [trailerTitle, setTrailerTitle] = useState('');
-  const [trailerYoutubeTitle, setTrailerYoutubeTitle] = useState('');
-  const [trailerSeasonNumber, setTrailerSeasonNumber] = useState<number | undefined>(undefined);
+  const [description, setDescription] = useState("");
+  const [posterUrl, setPosterUrl] = useState("");
+  const [trailerUrl, setTrailerUrl] = useState("");
+  const [trailerTitle, setTrailerTitle] = useState("");
+  const [trailerYoutubeTitle, setTrailerYoutubeTitle] = useState("");
+  const [trailerSeasonNumber, setTrailerSeasonNumber] = useState<
+    number | undefined
+  >(undefined);
   const [trailers, setTrailers] = useState<Trailer[]>([]);
-  const [sampleUrl, setSampleUrl] = useState('');
-  const [imdbLink, setImdbLink] = useState('');
-  const [imdbRating, setImdbRating] = useState('');
+  const [sampleUrl, setSampleUrl] = useState("");
+  const [imdbLink, setImdbLink] = useState("");
+  const [imdbRating, setImdbRating] = useState("");
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [selectedLanguages, setSelectedLanguages] = useState<string[]>([]);
-  const [selectedQuality, setSelectedQuality] = useState<string>('');
+  const [selectedQuality, setSelectedQuality] = useState<string>("");
   const [subtitles, setSubtitles] = useState(false);
-  const [cast, setCast] = useState('');
-  const [country, setCountry] = useState('');
+  const [cast, setCast] = useState("");
+  const [country, setCountry] = useState("");
   const [year, setYear] = useState(new Date().getFullYear());
-  const [releaseDate, setReleaseDate] = useState('');
-  const [runtime, setRuntime] = useState('');
+  const [releaseDate, setReleaseDate] = useState("");
+  const [runtime, setRuntime] = useState("");
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
   const [isCastExpanded, setIsCastExpanded] = useState(false);
   const [isCountryExpanded, setIsCountryExpanded] = useState(false);
-  
+
   // Movie specific
   const [movieLinks, setMovieLinks] = useState<QualityLinks>([]);
-  
+
   // Series specific
   const [seasons, setSeasons] = useState<Season[]>([]);
-  const [expandedEpisodes, setExpandedEpisodes] = useState<Record<string, boolean>>({});
- 
+  const [expandedEpisodes, setExpandedEpisodes] = useState<
+    Record<string, boolean>
+  >({});
+
   // Search States
-  const [searchTerm, setSearchTerm] = useState(() => sessionStorage.getItem('content_mgmt_search') || '');
+  const [searchTerm, setSearchTerm] = useState(
+    () => sessionStorage.getItem("content_mgmt_search") || "",
+  );
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [showDuplicates, setShowDuplicates] = useState(() => sessionStorage.getItem('adminShowDuplicates') === 'true');
-  const [showMissing, setShowMissing] = useState<'none' | 'missing' | 'complete' | '480p' | '720p' | '1080p' | 'genre' | 'language' | 'quality' | 'poster' | 'year' | 'imdb' | 'disabled'>(() => {
-    const saved = sessionStorage.getItem('adminShowMissingOnly');
-    if (saved === 'true') return 'missing';
-    if (saved === 'complete') return 'complete';
-    if (['480p', '720p', '1080p', 'genre', 'language', 'quality', 'poster', 'year', 'imdb', 'disabled'].includes(saved || '')) return saved as any;
-    return 'none';
+  const [showDuplicates, setShowDuplicates] = useState(
+    () => sessionStorage.getItem("adminShowDuplicates") === "true",
+  );
+  const [showMissing, setShowMissing] = useState<
+    | "none"
+    | "missing"
+    | "complete"
+    | "480p"
+    | "720p"
+    | "1080p"
+    | "genre"
+    | "language"
+    | "quality"
+    | "poster"
+    | "year"
+    | "imdb"
+    | "disabled"
+  >(() => {
+    const saved = sessionStorage.getItem("adminShowMissingOnly");
+    if (saved === "true") return "missing";
+    if (saved === "complete") return "complete";
+    if (
+      [
+        "480p",
+        "720p",
+        "1080p",
+        "genre",
+        "language",
+        "quality",
+        "poster",
+        "year",
+        "imdb",
+        "disabled",
+      ].includes(saved || "")
+    )
+      return saved as any;
+    return "none";
   });
-  const [missingThisOneOnly, setMissingThisOneOnly] = useState(() => sessionStorage.getItem('adminMissingThisOneOnly') === 'true');
+  const [missingThisOneOnly, setMissingThisOneOnly] = useState(
+    () => sessionStorage.getItem("adminMissingThisOneOnly") === "true",
+  );
   const [isMissingFilterOpen, setIsMissingFilterOpen] = useState(false);
-  
+
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearchTerm(searchTerm);
@@ -346,7 +625,7 @@ export default function ContentManagement() {
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (
-        suggestionsRef.current && 
+        suggestionsRef.current &&
         !suggestionsRef.current.contains(event.target as Node) &&
         searchInputRef.current &&
         !searchInputRef.current.contains(event.target as Node)
@@ -354,31 +633,56 @@ export default function ContentManagement() {
         setShowSuggestions(false);
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   const searchSuggestions = useMemo(() => {
     if (!debouncedSearchTerm.trim()) return [];
-    return smartSearch(contentList, debouncedSearchTerm, ['title', 'description', 'cast', 'country', 'year']).slice(0, 5);
+    return smartSearch(contentList, debouncedSearchTerm, [
+      "title",
+      "description",
+      "cast",
+      "country",
+      "year",
+    ]).slice(0, 5);
   }, [debouncedSearchTerm, contentList]);
 
-  const [filterType, setFilterType] = useState<'all' | 'movie' | 'series'>(() => (sessionStorage.getItem('content_mgmt_type') as any) || 'all');
-  const [filterGenre, setFilterGenre] = useState<string>(() => sessionStorage.getItem('content_mgmt_genre') || 'all');
-  const [filterLanguage, setFilterLanguage] = useState<string>(() => sessionStorage.getItem('content_mgmt_language') || 'all');
-  const [filterQuality, setFilterQuality] = useState<string>(() => sessionStorage.getItem('content_mgmt_quality') || 'all');
-  const [filterYear, setFilterYear] = useState<string>(() => sessionStorage.getItem('content_mgmt_year') || 'all');
-  const [filterStatus, setFilterStatus] = useState<'all' | 'published' | 'draft' | 'selected_content'>(() => (sessionStorage.getItem('content_mgmt_status') as any) || 'all');
-  const [filterAddedBy, setFilterAddedBy] = useState<string>(() => sessionStorage.getItem('content_mgmt_added_by') || 'all');
-  const [filterSort, setFilterSort] = useState<'default' | 'newest' | 'oldest'>(() => (sessionStorage.getItem('content_mgmt_sort') as any) || 'newest');
+  const [filterType, setFilterType] = useState<"all" | "movie" | "series">(
+    () => (sessionStorage.getItem("content_mgmt_type") as any) || "all",
+  );
+  const [filterGenre, setFilterGenre] = useState<string>(
+    () => sessionStorage.getItem("content_mgmt_genre") || "all",
+  );
+  const [filterLanguage, setFilterLanguage] = useState<string>(
+    () => sessionStorage.getItem("content_mgmt_language") || "all",
+  );
+  const [filterQuality, setFilterQuality] = useState<string>(
+    () => sessionStorage.getItem("content_mgmt_quality") || "all",
+  );
+  const [filterYear, setFilterYear] = useState<string>(
+    () => sessionStorage.getItem("content_mgmt_year") || "all",
+  );
+  const [filterStatus, setFilterStatus] = useState<
+    "all" | "published" | "draft" | "selected_content"
+  >(() => (sessionStorage.getItem("content_mgmt_status") as any) || "all");
+  const [filterAddedBy, setFilterAddedBy] = useState<string>(
+    () => sessionStorage.getItem("content_mgmt_added_by") || "all",
+  );
+  const [filterSort, setFilterSort] = useState<"default" | "newest" | "oldest">(
+    () => (sessionStorage.getItem("content_mgmt_sort") as any) || "newest",
+  );
   const [selectedContent, setSelectedContent] = useState<string[]>([]);
   const [visibleCount, setVisibleCount] = useState(() => {
-    const saved = sessionStorage.getItem('admin_content_mgmt_visible_count');
+    const saved = sessionStorage.getItem("admin_content_mgmt_visible_count");
     return saved ? parseInt(saved, 10) : 50;
   });
 
   useEffect(() => {
-    sessionStorage.setItem('admin_content_mgmt_visible_count', visibleCount.toString());
+    sessionStorage.setItem(
+      "admin_content_mgmt_visible_count",
+      visibleCount.toString(),
+    );
   }, [visibleCount]);
 
   const isFirstMount = useRef(true);
@@ -388,28 +692,56 @@ export default function ContentManagement() {
       return;
     }
     setVisibleCount(50); // Reset visible count on filter/search change
-  }, [debouncedSearchTerm, filterType, filterGenre, filterLanguage, filterQuality, filterYear, filterStatus, filterAddedBy, filterSort, showDuplicates, showMissing]);
+  }, [
+    debouncedSearchTerm,
+    filterType,
+    filterGenre,
+    filterLanguage,
+    filterQuality,
+    filterYear,
+    filterStatus,
+    filterAddedBy,
+    filterSort,
+    showDuplicates,
+    showMissing,
+  ]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      sessionStorage.setItem('content_mgmt_search', searchTerm);
-      sessionStorage.setItem('content_mgmt_type', filterType);
-      sessionStorage.setItem('content_mgmt_genre', filterGenre);
-      sessionStorage.setItem('content_mgmt_language', filterLanguage);
-      sessionStorage.setItem('content_mgmt_quality', filterQuality);
-      sessionStorage.setItem('content_mgmt_year', filterYear);
-      sessionStorage.setItem('content_mgmt_status', filterStatus);
-      sessionStorage.setItem('content_mgmt_added_by', filterAddedBy);
-      sessionStorage.setItem('content_mgmt_sort', filterSort);
-      sessionStorage.setItem('adminShowDuplicates', showDuplicates.toString());
-      sessionStorage.setItem('adminShowMissingOnly', showMissing.toString());
-      sessionStorage.setItem('adminMissingThisOneOnly', missingThisOneOnly.toString());
+      sessionStorage.setItem("content_mgmt_search", searchTerm);
+      sessionStorage.setItem("content_mgmt_type", filterType);
+      sessionStorage.setItem("content_mgmt_genre", filterGenre);
+      sessionStorage.setItem("content_mgmt_language", filterLanguage);
+      sessionStorage.setItem("content_mgmt_quality", filterQuality);
+      sessionStorage.setItem("content_mgmt_year", filterYear);
+      sessionStorage.setItem("content_mgmt_status", filterStatus);
+      sessionStorage.setItem("content_mgmt_added_by", filterAddedBy);
+      sessionStorage.setItem("content_mgmt_sort", filterSort);
+      sessionStorage.setItem("adminShowDuplicates", showDuplicates.toString());
+      sessionStorage.setItem("adminShowMissingOnly", showMissing.toString());
+      sessionStorage.setItem(
+        "adminMissingThisOneOnly",
+        missingThisOneOnly.toString(),
+      );
     }, 500);
     return () => clearTimeout(timer);
-  }, [searchTerm, filterType, filterGenre, filterLanguage, filterQuality, filterYear, filterStatus, filterAddedBy, filterSort, showDuplicates, showMissing, missingThisOneOnly]);
+  }, [
+    searchTerm,
+    filterType,
+    filterGenre,
+    filterLanguage,
+    filterQuality,
+    filterYear,
+    filterStatus,
+    filterAddedBy,
+    filterSort,
+    showDuplicates,
+    showMissing,
+    missingThisOneOnly,
+  ]);
 
-  const [genreSearchTerm, setGenreSearchTerm] = useState('');
-  const [languageSearchTerm, setLanguageSearchTerm] = useState('');
+  const [genreSearchTerm, setGenreSearchTerm] = useState("");
+  const [languageSearchTerm, setLanguageSearchTerm] = useState("");
 
   const [isGenreDropdownOpen, setIsGenreDropdownOpen] = useState(false);
   const [isLanguageDropdownOpen, setIsLanguageDropdownOpen] = useState(false);
@@ -418,25 +750,55 @@ export default function ContentManagement() {
   const [isMasterFetchModalOpen, setIsMasterFetchModalOpen] = useState(false);
   const [isLinkCheckerOpen, setIsLinkCheckerOpen] = useState(false);
   const [isBatchLinkCheckerOpen, setIsBatchLinkCheckerOpen] = useState(false);
-  const [isAdjustContentsModalOpen, setIsAdjustContentsModalOpen] = useState(false);
-  const [manageModal, setManageModal] = useState<{ isOpen: boolean; type: 'genre' | 'language' | 'quality' | null }>({ isOpen: false, type: null });
+  const [isAdjustContentsModalOpen, setIsAdjustContentsModalOpen] =
+    useState(false);
+  const [manageModal, setManageModal] = useState<{
+    isOpen: boolean;
+    type: "genre" | "language" | "quality" | null;
+  }>({ isOpen: false, type: null });
   const [fetchingPoster, setFetchingPoster] = useState(false);
   const [isAutoFillModalOpen, setIsAutoFillModalOpen] = useState(false);
   const [loadingShareId, setLoadingShareId] = useState<string | null>(null);
-  const [loadingWhatsappShareId, setLoadingWhatsappShareId] = useState<string | null>(null);
-  const [autoFillText, setAutoFillText] = useState('');
-  const [imdbSeasonsPopup, setImdbSeasonsPopup] = useState<{ isOpen: boolean; seasons: any[]; show: any; epData: any[] } | null>(null);
+  const [loadingWhatsappShareId, setLoadingWhatsappShareId] = useState<
+    string | null
+  >(null);
+  const [autoFillText, setAutoFillText] = useState("");
+  const [imdbSeasonsPopup, setImdbSeasonsPopup] = useState<{
+    isOpen: boolean;
+    seasons: any[];
+    show: any;
+    epData: any[];
+  } | null>(null);
   const [selectedImdbSeasons, setSelectedImdbSeasons] = useState<number[]>([]);
-  const [shareSeasonModal, setShareSeasonModal] = useState<{ isOpen: boolean; content: Content | null; seasons: Season[], mode: 'standard' | 'whatsapp' }>({ isOpen: false, content: null, seasons: [], mode: 'standard' });
-  const [notificationModal, setNotificationModal] = useState<{ isOpen: boolean; content: Content | null; status: 'idle' | 'sending' | 'success' | 'error' }>({ isOpen: false, content: null, status: 'idle' });
-  const [shareAnywayConfig, setShareAnywayConfig] = useState<{ isOpen: boolean; content: Content | null, mode: 'standard' | 'whatsapp' }>({ isOpen: false, content: null, mode: 'standard' });
-  const [selectedShareSeasons, setSelectedShareSeasons] = useState<number[]>([]);
+  const [shareSeasonModal, setShareSeasonModal] = useState<{
+    isOpen: boolean;
+    content: Content | null;
+    seasons: Season[];
+    mode: "standard" | "whatsapp";
+  }>({ isOpen: false, content: null, seasons: [], mode: "standard" });
+  const [notificationModal, setNotificationModal] = useState<{
+    isOpen: boolean;
+    content: Content | null;
+    status: "idle" | "sending" | "success" | "error";
+  }>({ isOpen: false, content: null, status: "idle" });
+  const [shareAnywayConfig, setShareAnywayConfig] = useState<{
+    isOpen: boolean;
+    content: Content | null;
+    mode: "standard" | "whatsapp";
+  }>({ isOpen: false, content: null, mode: "standard" });
+  const [selectedShareSeasons, setSelectedShareSeasons] = useState<number[]>(
+    [],
+  );
   const [activeDropdownId, setActiveDropdownId] = useState<string | null>(null);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [isMerging, setIsMerging] = useState(false);
   const [showMergeConfirm, setShowMergeConfirm] = useState(false);
-  const [mergeData, setMergeData] = useState<{ title: string; year: number | ''; items: Content[] }>({ title: '', year: '', items: [] });
+  const [mergeData, setMergeData] = useState<{
+    title: string;
+    year: number | "";
+    items: Content[];
+  }>({ title: "", year: "", items: [] });
   const location = useLocation();
 
   useEffect(() => {
@@ -444,55 +806,73 @@ export default function ContentManagement() {
       setActiveDropdownId(null);
       setIsMissingFilterOpen(false);
     };
-    document.addEventListener('click', handleClickOutside);
-    return () => document.removeEventListener('click', handleClickOutside);
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
   }, []);
 
   useModalBehavior(isModalOpen, () => setIsModalOpen(false));
-  useModalBehavior(imdbSeasonsPopup?.isOpen || false, () => setImdbSeasonsPopup(null));
-  useModalBehavior(shareSeasonModal.isOpen, () => setShareSeasonModal({ ...shareSeasonModal, isOpen: false }));
-  useModalBehavior(notificationModal.isOpen, () => setNotificationModal({ isOpen: false, content: null, status: 'idle' }));
-  useModalBehavior(shareAnywayConfig.isOpen, () => setShareAnywayConfig({ ...shareAnywayConfig, isOpen: false, content: null }));
+  useModalBehavior(imdbSeasonsPopup?.isOpen || false, () =>
+    setImdbSeasonsPopup(null),
+  );
+  useModalBehavior(shareSeasonModal.isOpen, () =>
+    setShareSeasonModal({ ...shareSeasonModal, isOpen: false }),
+  );
+  useModalBehavior(notificationModal.isOpen, () =>
+    setNotificationModal({ isOpen: false, content: null, status: "idle" }),
+  );
+  useModalBehavior(shareAnywayConfig.isOpen, () =>
+    setShareAnywayConfig({
+      ...shareAnywayConfig,
+      isOpen: false,
+      content: null,
+    }),
+  );
   useModalBehavior(isAutoFillModalOpen, () => setIsAutoFillModalOpen(false));
   useModalBehavior(showMergeConfirm, () => setShowMergeConfirm(false));
-  // isMasterFetchModalOpen, isLinkCheckerOpen, isAdjustContentsModalOpen, manageModal, alertConfig, deleteId 
+  // isMasterFetchModalOpen, isLinkCheckerOpen, isAdjustContentsModalOpen, manageModal, alertConfig, deleteId
   // are handled internally by their respective components (MediaModal, LinkCheckerModal, etc.)
 
   const prefilledDataApplied = useRef(false);
 
   const titleSuggestions = useMemo(() => {
     if (!title.trim() || title.length < 2) return [];
-    return smartSearch(contentList, title).filter(c => c.id !== editingId).slice(0, 5);
+    return smartSearch(contentList, title)
+      .filter((c) => c.id !== editingId)
+      .slice(0, 5);
   }, [title, contentList, editingId]);
 
   useEffect(() => {
-    if (location.state?.prefilledData && !prefilledDataApplied.current && genres.length > 0) {
+    if (
+      location.state?.prefilledData &&
+      !prefilledDataApplied.current &&
+      genres.length > 0
+    ) {
       const data = location.state.prefilledData;
-      
+
       // Reset form first
       setEditingId(null);
-      setTitle('');
-      setDescription('');
-      setPosterUrl('');
-      setTrailerUrl('');
-      setImdbLink('');
-      setImdbRating('');
+      setTitle("");
+      setDescription("");
+      setPosterUrl("");
+      setTrailerUrl("");
+      setImdbLink("");
+      setImdbRating("");
       setYear(new Date().getFullYear());
-      setReleaseDate('');
-      setRuntime('');
-      setCast('');
-      setCountry('');
-      setType('movie');
+      setReleaseDate("");
+      setRuntime("");
+      setCast("");
+      setCountry("");
+      setType("movie");
       setSelectedGenres([]);
       setSeasons([]);
       setMovieLinks([]);
-      
+
       // Apply prefilled data using the standard apply function
       applyFetchedData(data);
-      
+
       setIsModalOpen(true);
       prefilledDataApplied.current = true;
-      
+
       // Clear state so it doesn't re-open on refresh, preserving history state for modals
       // We use replaceState directly to preserve the modalId pushed by useModalBehavior
       const currentState = window.history.state || {};
@@ -506,43 +886,50 @@ export default function ContentManagement() {
 
   useEffect(() => {
     const managersData: Record<string, string> = {};
-    allUsers.forEach(data => {
-      if (data.role === 'admin' || data.role === 'owner' || data.role === 'content_manager' || data.role === 'manager') {
-        managersData[data.uid] = data.displayName || data.email || 'Unknown';
+    allUsers.forEach((data) => {
+      if (
+        data.role === "admin" ||
+        data.role === "owner" ||
+        data.role === "content_manager" ||
+        data.role === "manager"
+      ) {
+        managersData[data.uid] = data.displayName || data.email || "Unknown";
       }
     });
     setManagers(managersData);
   }, [allUsers]);
 
   const clearFilters = () => {
-    setFilterType('all');
-    setFilterGenre('all');
-    setFilterLanguage('all');
-    setFilterQuality('all');
-    setFilterYear('all');
-    setFilterStatus('all');
-    setFilterAddedBy('all');
-    setFilterSort('newest');
-    setSearchTerm('');
-    setShowMissing('none');
+    setFilterType("all");
+    setFilterGenre("all");
+    setFilterLanguage("all");
+    setFilterQuality("all");
+    setFilterYear("all");
+    setFilterStatus("all");
+    setFilterAddedBy("all");
+    setFilterSort("newest");
+    setSearchTerm("");
+    setShowMissing("none");
     setShowDuplicates(false);
   };
 
   useEffect(() => {
     const fetchTitle = async (url: string, setter: (title: string) => void) => {
       if (!url) return;
-      
-      let videoUrl = '';
-      if (url.includes('youtube.com/watch')) {
+
+      let videoUrl = "";
+      if (url.includes("youtube.com/watch")) {
         videoUrl = url;
-      } else if (url.includes('youtu.be/')) {
-        const videoId = url.split('youtu.be/')[1].split('?')[0];
+      } else if (url.includes("youtu.be/")) {
+        const videoId = url.split("youtu.be/")[1].split("?")[0];
         videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
       }
 
       if (videoUrl) {
         try {
-          const res = await fetch(`https://www.youtube.com/oembed?url=${videoUrl}&format=json`);
+          const res = await fetch(
+            `https://www.youtube.com/oembed?url=${videoUrl}&format=json`,
+          );
           const data = await res.json();
           if (data && data.title) {
             setter(data.title);
@@ -560,7 +947,7 @@ export default function ContentManagement() {
     trailers.forEach((trailer, idx) => {
       if (trailer.url && !trailer.youtubeTitle) {
         fetchTitle(trailer.url, (newTitle) => {
-          setTrailers(prev => {
+          setTrailers((prev) => {
             const next = [...prev];
             if (next[idx]) {
               next[idx] = { ...next[idx], youtubeTitle: newTitle };
@@ -573,11 +960,14 @@ export default function ContentManagement() {
   }, [trailerUrl, trailers]);
 
   useEffect(() => {
-    const editId = searchParams.get('edit');
+    const editId = searchParams.get("edit");
     if (editId && contentList.length > 0) {
-      const content = contentList.find(c => c.id === editId);
+      const content = contentList.find((c) => c.id === editId);
       if (content) {
-        const canEdit = profile?.role === 'admin' || profile?.role === 'owner' || content.status === 'draft';
+        const canEdit =
+          profile?.role === "admin" ||
+          profile?.role === "owner" ||
+          content.status === "draft";
         if (canEdit) {
           handleEdit(content);
         }
@@ -588,35 +978,53 @@ export default function ContentManagement() {
   }, [searchParams, contentList, profile]);
 
   const resetForm = () => {
-    setType('movie');
-    setStatus('published');
+    setType("movie");
+    setStatus("published");
     setInitialStatus(null);
     setAddToTrending(false);
     setAddToNewlyAdded(false);
-    setTitle('');
-    setDescription('');
-    setPosterUrl('');
-    setTrailerUrl('');
-    setTrailerTitle('');
-    setTrailerYoutubeTitle('');
+    setTitle("");
+    setDescription("");
+    setPosterUrl("");
+    setTrailerUrl("");
+    setTrailerTitle("");
+    setTrailerYoutubeTitle("");
     setTrailerSeasonNumber(undefined);
     setTrailers([]);
-    setSampleUrl('');
-    setImdbLink('');
-    setImdbRating('');
+    setSampleUrl("");
+    setImdbLink("");
+    setImdbRating("");
     setSelectedGenres([]);
     setSelectedLanguages([]);
-    setSelectedQuality('');
+    setSelectedQuality("");
     setSubtitles(false);
-    setCast('');
-    setCountry('');
+    setCast("");
+    setCountry("");
     setYear(new Date().getFullYear());
-    setReleaseDate('');
-    setRuntime('');
+    setReleaseDate("");
+    setRuntime("");
     setMovieLinks([
-      { id: Math.random().toString(36).substr(2, 9), name: '480p', url: '', size: '', unit: 'MB' },
-      { id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'GB' },
-      { id: Math.random().toString(36).substr(2, 9), name: '1080p', url: '', size: '', unit: 'GB' }
+      {
+        id: Math.random().toString(36).substr(2, 9),
+        name: "480p",
+        url: "",
+        size: "",
+        unit: "MB",
+      },
+      {
+        id: Math.random().toString(36).substr(2, 9),
+        name: "720p",
+        url: "",
+        size: "",
+        unit: "GB",
+      },
+      {
+        id: Math.random().toString(36).substr(2, 9),
+        name: "1080p",
+        url: "",
+        size: "",
+        unit: "GB",
+      },
     ]);
     setSeasons([]);
     setEditingId(null);
@@ -629,14 +1037,16 @@ export default function ContentManagement() {
       const parsed = JSON.parse(linksStr);
       if (Array.isArray(parsed)) return parsed;
       // Convert old format
-      if (typeof parsed === 'object') {
-        return Object.entries(parsed).map(([name, link]: [string, any]) => ({
-          id: Math.random().toString(36).substr(2, 9),
-          name,
-          url: link?.url || '',
-          size: link?.size || '',
-          unit: 'MB' as 'MB' | 'GB'
-        })).filter(l => l.url);
+      if (typeof parsed === "object") {
+        return Object.entries(parsed)
+          .map(([name, link]: [string, any]) => ({
+            id: Math.random().toString(36).substr(2, 9),
+            name,
+            url: link?.url || "",
+            size: link?.size || "",
+            unit: "MB" as "MB" | "GB",
+          }))
+          .filter((l) => l.url);
       }
     } catch (e) {
       console.error("Error parsing links", e);
@@ -646,12 +1056,14 @@ export default function ContentManagement() {
 
   const handleEdit = async (content: Content) => {
     let contentToUse = content;
-    
-    // Check if the content object is "minimal" (from the sanitized cache) 
+
+    // Check if the content object is "minimal" (from the sanitized cache)
     // and fetch the full version if needed for editing
-    const minimal = (content as any)._isMinimal || 
-                     (content.type === 'movie' && content.movieLinks === undefined) || 
-                     (content.type === 'series' && (content.seasons === undefined || content.seasons === '[]'));
+    const minimal =
+      (content as any)._isMinimal ||
+      (content.type === "movie" && content.movieLinks === undefined) ||
+      (content.type === "series" &&
+        (content.seasons === undefined || content.seasons === "[]"));
 
     if (minimal) {
       try {
@@ -664,47 +1076,59 @@ export default function ContentManagement() {
       }
     }
 
-    const normalizedType = (contentToUse.type?.toLowerCase() === 'series' || contentToUse.type?.toLowerCase() === 'tv') ? 'series' : 'movie';
+    const normalizedType =
+      contentToUse.type?.toLowerCase() === "series" ||
+      contentToUse.type?.toLowerCase() === "tv"
+        ? "series"
+        : "movie";
     setType(normalizedType);
-    setStatus(contentToUse.status || 'published');
-    setInitialStatus(contentToUse.status || 'published');
-    setTitle(contentToUse.title || '');
-    setDescription(contentToUse.description || '');
-    setPosterUrl(contentToUse.posterUrl || '');
-    setTrailerUrl(contentToUse.trailerUrl || '');
-    setTrailerTitle(contentToUse.trailerTitle || '');
-    setTrailerYoutubeTitle(contentToUse.trailerYoutubeTitle || '');
+    setStatus(contentToUse.status || "published");
+    setInitialStatus(contentToUse.status || "published");
+    setTitle(contentToUse.title || "");
+    setDescription(contentToUse.description || "");
+    setPosterUrl(contentToUse.posterUrl || "");
+    setTrailerUrl(contentToUse.trailerUrl || "");
+    setTrailerTitle(contentToUse.trailerTitle || "");
+    setTrailerYoutubeTitle(contentToUse.trailerYoutubeTitle || "");
     setTrailerSeasonNumber(contentToUse.trailerSeasonNumber || undefined);
-    setTrailers(contentToUse.trailers ? (Array.isArray(contentToUse.trailers) ? contentToUse.trailers : JSON.parse(contentToUse.trailers || '[]')) : []);
-    setSampleUrl(contentToUse.sampleUrl || '');
-    setImdbLink(contentToUse.imdbLink || '');
-    setImdbRating(contentToUse.imdbRating || '');
+    setTrailers(
+      contentToUse.trailers
+        ? Array.isArray(contentToUse.trailers)
+          ? contentToUse.trailers
+          : JSON.parse(contentToUse.trailers || "[]")
+        : [],
+    );
+    setSampleUrl(contentToUse.sampleUrl || "");
+    setImdbLink(contentToUse.imdbLink || "");
+    setImdbRating(contentToUse.imdbRating || "");
     setSelectedGenres(contentToUse.genreIds || []);
     setSelectedLanguages(contentToUse.languageIds || []);
-    setSelectedQuality(contentToUse.qualityId || '');
+    setSelectedQuality(contentToUse.qualityId || "");
     setSubtitles(contentToUse.subtitles || false);
-    setCast((contentToUse.cast || []).join(', '));
-    setCountry(contentToUse.country || '');
+    setCast((contentToUse.cast || []).join(", "));
+    setCountry(contentToUse.country || "");
     setYear(contentToUse.year || new Date().getFullYear());
-    setReleaseDate(contentToUse.releaseDate || '');
-    setRuntime(contentToUse.runtime || '');
-    
-    if (contentToUse.type === 'movie') {
+    setReleaseDate(contentToUse.releaseDate || "");
+    setRuntime(contentToUse.runtime || "");
+
+    if (contentToUse.type === "movie") {
       setMovieLinks(parseLinks(contentToUse.movieLinks));
     } else {
       setMovieLinks([]);
     }
-    
-    if (contentToUse.type === 'series' && contentToUse.seasons) {
+
+    if (contentToUse.type === "series" && contentToUse.seasons) {
       try {
-        const parsedSeasons = Array.isArray(contentToUse.seasons) ? contentToUse.seasons : JSON.parse(contentToUse.seasons || '[]');
+        const parsedSeasons = Array.isArray(contentToUse.seasons)
+          ? contentToUse.seasons
+          : JSON.parse(contentToUse.seasons || "[]");
         const normalizedSeasons = parsedSeasons.map((s: any) => ({
           ...s,
           zipLinks: parseLinks(JSON.stringify(s.zipLinks)),
           episodes: (s.episodes || []).map((ep: any) => ({
             ...ep,
-            links: parseLinks(JSON.stringify(ep.links))
-          }))
+            links: parseLinks(JSON.stringify(ep.links)),
+          })),
         }));
         setSeasons(normalizedSeasons);
       } catch (e) {
@@ -713,7 +1137,7 @@ export default function ContentManagement() {
     } else {
       setSeasons([]);
     }
-    
+
     setEditingId(contentToUse.id);
     setIsModalOpen(true);
   };
@@ -726,7 +1150,7 @@ export default function ContentManagement() {
     reader.onload = (event) => {
       const img = new Image();
       img.onload = () => {
-        const canvas = document.createElement('canvas');
+        const canvas = document.createElement("canvas");
         const MAX_WIDTH = 600;
         const MAX_HEIGHT = 900;
         let width = img.width;
@@ -746,10 +1170,10 @@ export default function ContentManagement() {
 
         canvas.width = width;
         canvas.height = height;
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext("2d");
         ctx?.drawImage(img, 0, 0, width, height);
-        
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
         setPosterUrl(dataUrl);
       };
       img.src = event.target?.result as string;
@@ -762,49 +1186,67 @@ export default function ContentManagement() {
     setIsSaving(true);
     try {
       // Sort seasons and episodes before saving
-      const sortedSeasons = [...seasons].sort((a, b) => a.seasonNumber - b.seasonNumber).map(s => ({
-        ...s,
-        episodes: [...s.episodes].sort((a, b) => a.episodeNumber - b.episodeNumber)
-      }));
+      const sortedSeasons = [...seasons]
+        .sort((a, b) => a.seasonNumber - b.seasonNumber)
+        .map((s) => ({
+          ...s,
+          episodes: [...s.episodes].sort(
+            (a, b) => a.episodeNumber - b.episodeNumber,
+          ),
+        }));
 
       const currentEditingId = editingId;
-      const existingContent = currentEditingId ? contentList.find(c => c.id === currentEditingId) : null;
+      const existingContent = currentEditingId
+        ? contentList.find((c) => c.id === currentEditingId)
+        : null;
       const initialStatus = existingContent?.status;
-      const finalStatus = (profile?.role === 'content_manager' || profile?.role === 'manager') ? 'draft' : status;
-      
+      const finalStatus =
+        profile?.role === "content_manager" || profile?.role === "manager"
+          ? "draft"
+          : status;
+
       const data: Partial<Content> = {
         type,
         status: finalStatus,
         title,
-        description: description || '',
+        description: description || "",
         posterUrl,
         trailerUrl,
-        trailerTitle: trailerTitle || '',
+        trailerTitle: trailerTitle || "",
         // Do not save trailerYoutubeTitle to Firestore
         trailerSeasonNumber: trailerSeasonNumber || null,
-        trailers: JSON.stringify(trailers.map(({ youtubeTitle, ...rest }) => rest)),
-        sampleUrl: sampleUrl || '',
-        imdbLink: imdbLink || '',
-        imdbRating: imdbRating || '',
+        trailers: JSON.stringify(
+          trailers.map(({ youtubeTitle, ...rest }) => rest),
+        ),
+        sampleUrl: sampleUrl || "",
+        imdbLink: imdbLink || "",
+        imdbRating: imdbRating || "",
         genreIds: selectedGenres,
         languageIds: selectedLanguages,
         qualityId: selectedQuality,
         subtitles: !!subtitles,
-        cast: cast.split(',').map(c => c.trim()).filter(Boolean),
-        country: country || '',
+        cast: cast
+          .split(",")
+          .map((c) => c.trim())
+          .filter(Boolean),
+        country: country || "",
         year: Number(year) || new Date().getFullYear(),
-        releaseDate: releaseDate || '',
-        runtime: runtime || '',
+        releaseDate: releaseDate || "",
+        runtime: runtime || "",
         updatedAt: new Date().toISOString(),
       };
 
-      if (currentEditingId && initialStatus === 'draft' && finalStatus === 'published') {
+      if (
+        currentEditingId &&
+        initialStatus === "draft" &&
+        finalStatus === "published"
+      ) {
         data.createdAt = new Date().toISOString();
-        const maxOrder = Math.max(0, ...contentList.map(c => c.order || 0));
+        const maxOrder = Math.max(0, ...contentList.map((c) => c.order || 0));
         data.order = maxOrder + 1;
       }
 
-      if (type === 'movie') {
+      if (type === "movie") {
         data.movieLinks = JSON.stringify(movieLinks);
         data.seasons = JSON.stringify([]);
       } else {
@@ -816,7 +1258,11 @@ export default function ContentManagement() {
       let newDocId = currentEditingId;
 
       if (currentEditingId) {
-        const fullContent = { ...existingContent, ...cleanedData, id: currentEditingId } as Content;
+        const fullContent = {
+          ...existingContent,
+          ...cleanedData,
+          id: currentEditingId,
+        } as Content;
         await saveContent(fullContent);
         safeStorage.removeItem(`movie_details_${currentEditingId}`);
       } else {
@@ -824,28 +1270,32 @@ export default function ContentManagement() {
         cleanedData.id = newDocId;
         cleanedData.createdAt = new Date().toISOString();
         cleanedData.addedBy = user?.uid;
-        
-        const maxOrder = Math.max(0, ...contentList.map(c => c.order || 0));
+
+        const maxOrder = Math.max(0, ...contentList.map((c) => c.order || 0));
         cleanedData.order = maxOrder + 1;
 
         await saveContent(cleanedData as Content);
       }
-      
+
       // Add to special collections if checked
       if (newDocId) {
         if (addToTrending) {
-          await handleAddToSpecialCollection(newDocId, 'trending');
+          await handleAddToSpecialCollection(newDocId, "trending");
         }
         if (addToNewlyAdded) {
-          await handleAddToSpecialCollection(newDocId, 'newly_added');
+          await handleAddToSpecialCollection(newDocId, "newly_added");
         }
       }
-      
+
       setIsModalOpen(false);
       resetForm();
     } catch (error) {
-      console.error('Error saving content:', error);
-      setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to save content' });
+      console.error("Error saving content:", error);
+      setAlertConfig({
+        isOpen: true,
+        title: "Error",
+        message: "Failed to save content",
+      });
     } finally {
       setIsSaving(false);
     }
@@ -858,11 +1308,16 @@ export default function ContentManagement() {
       if (!seasonsMap.has(ep.season)) seasonsMap.set(ep.season, []);
       seasonsMap.get(ep.season)!.push(ep);
     });
-    
-    setSeasons(prevSeasons => {
-      const newSeasons = prevSeasons.map(s => ({ ...s, episodes: [...s.episodes] }));
+
+    setSeasons((prevSeasons) => {
+      const newSeasons = prevSeasons.map((s) => ({
+        ...s,
+        episodes: [...s.episodes],
+      }));
       seasonsMap.forEach((eps, seasonNum) => {
-        let seasonIndex = newSeasons.findIndex(s => s.seasonNumber === seasonNum);
+        let seasonIndex = newSeasons.findIndex(
+          (s) => s.seasonNumber === seasonNum,
+        );
         if (seasonIndex === -1) {
           newSeasons.push({
             id: Math.random().toString(36).substr(2, 9),
@@ -870,45 +1325,91 @@ export default function ContentManagement() {
             year: undefined,
             episodes: [],
             zipLinks: [
-              { id: Math.random().toString(36).substr(2, 9), name: '480p', url: '', size: '', unit: 'GB' },
-              { id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'GB' },
-              { id: Math.random().toString(36).substr(2, 9), name: '1080p', url: '', size: '', unit: 'GB' }
+              {
+                id: Math.random().toString(36).substr(2, 9),
+                name: "480p",
+                url: "",
+                size: "",
+                unit: "GB",
+              },
+              {
+                id: Math.random().toString(36).substr(2, 9),
+                name: "720p",
+                url: "",
+                size: "",
+                unit: "GB",
+              },
+              {
+                id: Math.random().toString(36).substr(2, 9),
+                name: "1080p",
+                url: "",
+                size: "",
+                unit: "GB",
+              },
             ],
             mkvLinks: [
-              { id: Math.random().toString(36).substr(2, 9), name: '480p', url: '', size: '', unit: 'GB' },
-              { id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'GB' },
-              { id: Math.random().toString(36).substr(2, 9), name: '1080p', url: '', size: '', unit: 'GB' }
-            ]
+              {
+                id: Math.random().toString(36).substr(2, 9),
+                name: "480p",
+                url: "",
+                size: "",
+                unit: "GB",
+              },
+              {
+                id: Math.random().toString(36).substr(2, 9),
+                name: "720p",
+                url: "",
+                size: "",
+                unit: "GB",
+              },
+              {
+                id: Math.random().toString(36).substr(2, 9),
+                name: "1080p",
+                url: "",
+                size: "",
+                unit: "GB",
+              },
+            ],
           });
           seasonIndex = newSeasons.length - 1;
         }
-        
+
         const currentSeason = newSeasons[seasonIndex];
         const newEpisodes = currentSeason.episodes;
-        
-        eps.forEach(ep => {
-          const epIndex = newEpisodes.findIndex(e => e.episodeNumber === ep.number);
+
+        eps.forEach((ep) => {
+          const epIndex = newEpisodes.findIndex(
+            (e) => e.episodeNumber === ep.number,
+          );
           if (epIndex === -1) {
             newEpisodes.push({
               id: Math.random().toString(36).substr(2, 9),
               episodeNumber: ep.number,
               title: ep.name,
               links: [
-                { id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'MB' }
-              ]
+                {
+                  id: Math.random().toString(36).substr(2, 9),
+                  name: "720p",
+                  url: "",
+                  size: "",
+                  unit: "MB",
+                },
+              ],
             });
           } else {
             newEpisodes[epIndex].title = ep.name;
           }
-          
+
           if (ep.number === 1 && ep.airdate) {
-              currentSeason.year = parseInt(ep.airdate.substring(0, 4));
+            currentSeason.year = parseInt(ep.airdate.substring(0, 4));
           } else if (!currentSeason.year && ep.airdate) {
-              currentSeason.year = parseInt(ep.airdate.substring(0, 4));
+            currentSeason.year = parseInt(ep.airdate.substring(0, 4));
           }
         });
-        
-        currentSeason.episodes = newEpisodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
+
+        currentSeason.episodes = newEpisodes.sort(
+          (a, b) => a.episodeNumber - b.episodeNumber,
+        );
       });
       return newSeasons.sort((a, b) => a.seasonNumber - b.seasonNumber);
     });
@@ -925,7 +1426,7 @@ export default function ContentManagement() {
       episode?: number;
       title?: string;
       year?: number;
-    }
+    },
   ) => {
     // Auto-select metadata if provided
     let activeType: "movie" | "series" = type;
@@ -939,11 +1440,11 @@ export default function ContentManagement() {
 
       if (metadata.languages.length > 0) {
         const matchedLangIds = languages
-          .filter(l => metadata.languages.includes(l.name))
-          .map(l => l.id);
-        
+          .filter((l) => metadata.languages.includes(l.name))
+          .map((l) => l.id);
+
         if (matchedLangIds.length > 0) {
-          setSelectedLanguages(prev => {
+          setSelectedLanguages((prev) => {
             const combined = new Set([...prev, ...matchedLangIds]);
             return Array.from(combined);
           });
@@ -951,7 +1452,9 @@ export default function ContentManagement() {
       }
 
       if (metadata.printQuality) {
-        const matchedQuality = qualities.find(q => q.name === metadata.printQuality);
+        const matchedQuality = qualities.find(
+          (q) => q.name === metadata.printQuality,
+        );
         if (matchedQuality) {
           setSelectedQuality(matchedQuality.id);
         }
@@ -962,38 +1465,44 @@ export default function ContentManagement() {
       }
 
       if (metadata.type) {
-        const normalizedType = (metadata.type?.toLowerCase() === 'series' || metadata.type?.toLowerCase() === 'tv') ? 'series' : 'movie';
+        const normalizedType =
+          metadata.type?.toLowerCase() === "series" ||
+          metadata.type?.toLowerCase() === "tv"
+            ? "series"
+            : "movie";
         setType(normalizedType);
         activeType = normalizedType;
       }
     }
 
-    if (activeType === 'movie') {
-      setMovieLinks(prev => {
+    if (activeType === "movie") {
+      setMovieLinks((prev) => {
         const currentLinks = [...prev];
 
         const parseSizeInMB = (size: string, unit: string) => {
           if (!size) return 0;
-          const num = parseFloat(size.replace(/,/g, '')) || 0;
+          const num = parseFloat(size.replace(/,/g, "")) || 0;
           const u = unit.toUpperCase();
-          if (u === 'GB') return num * 1000;
-          if (u === 'TB') return num * 1000 * 1000;
+          if (u === "GB") return num * 1000;
+          if (u === "TB") return num * 1000 * 1000;
           return num;
         };
 
-        links.forEach(newLink => {
+        links.forEach((newLink) => {
           if (newLink.isSample && newLink.url) {
             setSampleUrl(newLink.url);
           }
 
           // SKIP if URL already exists in content
-          if (newLink.url && currentLinks.some(l => l.url === newLink.url)) {
+          if (newLink.url && currentLinks.some((l) => l.url === newLink.url)) {
             console.log("Skipping duplicate movie link:", newLink.url);
             return;
           }
 
           // Find an existing link with same name and empty URL
-          const emptyIdx = currentLinks.findIndex(l => l.name === newLink.name && (!l.url || !l.url.trim()));
+          const emptyIdx = currentLinks.findIndex(
+            (l) => l.name === newLink.name && (!l.url || !l.url.trim()),
+          );
           if (emptyIdx !== -1) {
             currentLinks[emptyIdx] = newLink;
           } else {
@@ -1001,56 +1510,80 @@ export default function ContentManagement() {
           }
         });
 
-        currentLinks.sort((a, b) => parseSizeInMB(a.size, a.unit) - parseSizeInMB(b.size, b.unit));
+        currentLinks.sort(
+          (a, b) =>
+            parseSizeInMB(a.size, a.unit) - parseSizeInMB(b.size, b.unit),
+        );
         return currentLinks;
       });
-      setAlertConfig({ isOpen: true, title: 'Success', message: `Added/Merged movie links.` });
+      setAlertConfig({
+        isOpen: true,
+        title: "Success",
+        message: `Added/Merged movie links.`,
+      });
     } else {
       // Series logic
       const updatedSeasons = [...seasons];
-      
-      links.forEach(link => {
+
+      links.forEach((link) => {
         if (link.isSample && link.url) {
           setSampleUrl(link.url);
         }
 
         const targetSeason = link.season || metadata?.season || 1;
         const targetEpisode = link.episode || metadata?.episode; // if undefined, it's a full season
-        
-        let seasonIdx = updatedSeasons.findIndex(s => s.seasonNumber === targetSeason);
+
+        let seasonIdx = updatedSeasons.findIndex(
+          (s) => s.seasonNumber === targetSeason,
+        );
         if (seasonIdx === -1) {
           const newSeason: Season = {
             id: Math.random().toString(36).substr(2, 9),
             seasonNumber: targetSeason,
             zipLinks: [],
             mkvLinks: [],
-            episodes: []
+            episodes: [],
           };
           updatedSeasons.push(newSeason);
           updatedSeasons.sort((a, b) => a.seasonNumber - b.seasonNumber);
-          seasonIdx = updatedSeasons.findIndex(s => s.seasonNumber === targetSeason);
+          seasonIdx = updatedSeasons.findIndex(
+            (s) => s.seasonNumber === targetSeason,
+          );
         }
 
-        if (targetEpisode === undefined || link.isFullSeasonMKV || link.isFullSeasonZIP) {
+        if (
+          targetEpisode === undefined ||
+          link.isFullSeasonMKV ||
+          link.isFullSeasonZIP
+        ) {
           // Full season
-          const isZip = link.isFullSeasonZIP || (link.url && link.url.toLowerCase().includes('.zip'));
-          
+          const isZip =
+            link.isFullSeasonZIP ||
+            (link.url && link.url.toLowerCase().includes(".zip"));
+
           const updatedSeason = { ...updatedSeasons[seasonIdx] };
-          const targetLinks = isZip ? [...updatedSeason.zipLinks] : [...(updatedSeason.mkvLinks || [])];
-          
+          const targetLinks = isZip
+            ? [...updatedSeason.zipLinks]
+            : [...(updatedSeason.mkvLinks || [])];
+
           // SKIP if URL already exists in this season
-          if (link.url && targetLinks.some(l => l.url === link.url)) {
+          if (link.url && targetLinks.some((l) => l.url === link.url)) {
             console.log("Skipping duplicate season link:", link.url);
             return;
           }
 
           // Merge logic: replace if name matches and URL is empty, otherwise add
           // Special case for MKV Full Season: match "720p" if new is "720p HEVC"
-          const emptyIdx = targetLinks.findIndex(l => {
+          const emptyIdx = targetLinks.findIndex((l) => {
             const isEmpty = !l.url || !l.url.trim();
             if (!isEmpty) return false;
             if (l.name === link.name) return true;
-            if (!isZip && link.name.endsWith(' HEVC') && l.name === link.name.replace(' HEVC', '')) return true;
+            if (
+              !isZip &&
+              link.name.endsWith(" HEVC") &&
+              l.name === link.name.replace(" HEVC", "")
+            )
+              return true;
             return false;
           });
           if (emptyIdx !== -1) {
@@ -1061,39 +1594,51 @@ export default function ContentManagement() {
 
           if (isZip) updatedSeason.zipLinks = targetLinks;
           else updatedSeason.mkvLinks = targetLinks;
-          
+
           updatedSeasons[seasonIdx] = updatedSeason;
         } else {
           // Episode logic
-          let epIdx = updatedSeasons[seasonIdx].episodes.findIndex(e => e.episodeNumber === targetEpisode);
+          let epIdx = updatedSeasons[seasonIdx].episodes.findIndex(
+            (e) => e.episodeNumber === targetEpisode,
+          );
           if (epIdx === -1) {
             const newEpisode: Episode = {
               id: Math.random().toString(36).substr(2, 9),
               episodeNumber: targetEpisode,
               title: `Episode ${targetEpisode}`,
-              links: []
+              links: [],
             };
-            const updatedEpisodes = [...updatedSeasons[seasonIdx].episodes, newEpisode];
+            const updatedEpisodes = [
+              ...updatedSeasons[seasonIdx].episodes,
+              newEpisode,
+            ];
             updatedEpisodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
-            
-            const updatedSeason = { ...updatedSeasons[seasonIdx], episodes: updatedEpisodes };
+
+            const updatedSeason = {
+              ...updatedSeasons[seasonIdx],
+              episodes: updatedEpisodes,
+            };
             updatedSeasons[seasonIdx] = updatedSeason;
-            epIdx = updatedEpisodes.findIndex(e => e.episodeNumber === targetEpisode);
+            epIdx = updatedEpisodes.findIndex(
+              (e) => e.episodeNumber === targetEpisode,
+            );
           }
 
           const updatedSeason = { ...updatedSeasons[seasonIdx] };
           const updatedEpisodes = [...updatedSeason.episodes];
           const updatedEpisode = { ...updatedEpisodes[epIdx] };
           const targetLinks = [...updatedEpisode.links];
-          
+
           // SKIP if URL already exists in this episode
-          if (link.url && targetLinks.some(l => l.url === link.url)) {
+          if (link.url && targetLinks.some((l) => l.url === link.url)) {
             console.log("Skipping duplicate episode link:", link.url);
             return;
           }
 
           // Merge logic: replace if name matches and URL is empty, otherwise add
-          const emptyIdx = targetLinks.findIndex(l => l.name === link.name && (!l.url || !l.url.trim()));
+          const emptyIdx = targetLinks.findIndex(
+            (l) => l.name === link.name && (!l.url || !l.url.trim()),
+          );
           if (emptyIdx !== -1) {
             targetLinks[emptyIdx] = link;
           } else {
@@ -1108,16 +1653,30 @@ export default function ContentManagement() {
       });
 
       // Sort all links in all seasons and episodes
-      updatedSeasons.forEach(s => {
-        if (s.zipLinks) s.zipLinks.sort((a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit));
-        if (s.mkvLinks) s.mkvLinks.sort((a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit));
-        s.episodes.forEach(e => {
-          if (e.links) e.links.sort((a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit));
+      updatedSeasons.forEach((s) => {
+        if (s.zipLinks)
+          s.zipLinks.sort(
+            (a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
+          );
+        if (s.mkvLinks)
+          s.mkvLinks.sort(
+            (a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
+          );
+        s.episodes.forEach((e) => {
+          if (e.links)
+            e.links.sort(
+              (a, b) =>
+                getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
+            );
         });
       });
-      
+
       setSeasons(updatedSeasons);
-      setAlertConfig({ isOpen: true, title: 'Success', message: `Added/Merged ${links.length} episode/season links.` });
+      setAlertConfig({
+        isOpen: true,
+        title: "Success",
+        message: `Added/Merged ${links.length} episode/season links.`,
+      });
     }
 
     // Ensure the main form modal is open so the user sees the newly populated data
@@ -1127,18 +1686,23 @@ export default function ContentManagement() {
   const deepClean = (obj: any): any => {
     if (obj === undefined) return undefined;
     if (obj === null) return null;
-    
+
     // Check if it's a Firestore FieldValue (they have internal properties like _methodName or are instances we shouldn't touch)
-    if (obj && typeof obj === 'object' && (obj._methodName || (obj.constructor && obj.constructor.name.includes('FieldValue')))) {
+    if (
+      obj &&
+      typeof obj === "object" &&
+      (obj._methodName ||
+        (obj.constructor && obj.constructor.name.includes("FieldValue")))
+    ) {
       return obj;
     }
 
     if (Array.isArray(obj)) {
-      const cleanedArr = obj.map(deepClean).filter(v => v !== undefined);
+      const cleanedArr = obj.map(deepClean).filter((v) => v !== undefined);
       return cleanedArr.length > 0 ? cleanedArr : [];
     }
-    
-    if (typeof obj === 'object') {
+
+    if (typeof obj === "object") {
       const cleanedObj: any = {};
       let hasProps = false;
       for (const [key, value] of Object.entries(obj)) {
@@ -1150,16 +1714,16 @@ export default function ContentManagement() {
       }
       return hasProps ? cleanedObj : {};
     }
-    
+
     return obj;
   };
 
   const getSizeInMB = (sizeStr: string, unit: string) => {
     if (!sizeStr) return 0;
-    const num = parseFloat(sizeStr.replace(/,/g, '')) || 0;
-    const u = (unit || '').toUpperCase();
-    if (u.includes('GB')) return num * 1000;
-    if (u.includes('TB')) return num * 1000 * 1000;
+    const num = parseFloat(sizeStr.replace(/,/g, "")) || 0;
+    const u = (unit || "").toUpperCase();
+    if (u.includes("GB")) return num * 1000;
+    if (u.includes("TB")) return num * 1000 * 1000;
     return num;
   };
 
@@ -1169,97 +1733,135 @@ export default function ContentManagement() {
       year?: number;
       links: QualityLinks;
       metadata: any;
-    }[]
+    }[],
   ) => {
     setIsSaving(true);
     let newItemsAdded = 0;
     try {
       console.log("Starting batch save for", batches.length, "batches");
       const itemsToSave: Content[] = [];
-      const currentMaxOrder = Math.max(0, ...contentList.map(c => c.order || 0));
+      const currentMaxOrder = Math.max(
+        0,
+        ...contentList.map((c) => c.order || 0),
+      );
 
       batches.forEach((b, index) => {
-         const newId = Math.random().toString(36).substr(2, 9);
-         const contentData: any = {
-           id: newId,
-           title: b.title || "Untitled",
-           year: b.year || '',
-           type: b.metadata.type || 'movie',
-           description: '',
-           status: 'draft',
-           addedBy: user?.uid || null,
-           createdAt: new Date().toISOString(),
-           updatedAt: new Date().toISOString(),
-           order: currentMaxOrder + index + 1,
-         };
-         
-         if (b.metadata.type === 'movie' || !b.metadata.type) {
-           contentData.movieLinks = JSON.stringify([...b.links].sort((a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit)));
-           contentData.seasons = JSON.stringify([]);
-           contentData.type = 'movie';
-         } else {
-           contentData.type = 'series';
-           const seasonMap = new Map<number, Season>();
-           
-           b.links.forEach((l: LinkDef) => {
-             const sNum = l.season || b.metadata.season || 1;
-             if (!seasonMap.has(sNum)) {
-               seasonMap.set(sNum, {
-                 id: Math.random().toString(36).substr(2, 9),
-                 seasonNumber: sNum,
-                 zipLinks: [],
-                 mkvLinks: [],
-                 episodes: [],
-               });
-             }
-             const s = seasonMap.get(sNum)!;
-             
-             if (l.episode !== undefined && !l.isFullSeasonZIP && !l.isFullSeasonMKV) {
-               let ep = s.episodes.find(e => e.episodeNumber === l.episode);
-               if (!ep) {
-                 ep = {
-                   id: Math.random().toString(36).substr(2, 9),
-                   episodeNumber: l.episode,
-                   title: `Episode ${l.episode}`,
-                   links: []
-                 };
-                 s.episodes.push(ep);
-                 s.episodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
-               }
-               ep.links.push(l);
-               ep.links.sort((a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit));
-             } else {
-               if (l.isFullSeasonMKV) {
-                 if (!s.mkvLinks) s.mkvLinks = [];
-                  s.mkvLinks.push(l);
-                  s.mkvLinks.sort((a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit));
-               } else {
-                  s.zipLinks.push(l);
-                  s.zipLinks.sort((a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit));
-               }
-             }
-           });
-           
-           contentData.seasons = JSON.stringify(Array.from(seasonMap.values()).sort((a, b) => a.seasonNumber - b.seasonNumber));
-           contentData.movieLinks = JSON.stringify([]);
-         }
-         
-         const matchedQuality = qualities.find(q => q.name === b.metadata.printQuality);
-         if (matchedQuality) contentData.qualityId = matchedQuality.id;
-         if (b.metadata.languages?.length) {
-            const matchedLangIds = languages.filter(l => b.metadata.languages.includes(l.name)).map(l => l.id);
-            if (matchedLangIds.length > 0) contentData.languageIds = matchedLangIds;
-         }
+        const newId = Math.random().toString(36).substr(2, 9);
+        const contentData: any = {
+          id: newId,
+          title: b.title || "Untitled",
+          year: b.year || "",
+          type: b.metadata.type || "movie",
+          description: "",
+          status: "draft",
+          addedBy: user?.uid || null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          order: currentMaxOrder + index + 1,
+        };
 
-         const cleanedData = deepClean(contentData);
-         itemsToSave.push(cleanedData as Content);
+        if (b.metadata.type === "movie" || !b.metadata.type) {
+          contentData.movieLinks = JSON.stringify(
+            [...b.links].sort(
+              (a, b) =>
+                getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
+            ),
+          );
+          contentData.seasons = JSON.stringify([]);
+          contentData.type = "movie";
+        } else {
+          contentData.type = "series";
+          const seasonMap = new Map<number, Season>();
+
+          b.links.forEach((l: LinkDef) => {
+            const sNum = l.season || b.metadata.season || 1;
+            if (!seasonMap.has(sNum)) {
+              seasonMap.set(sNum, {
+                id: Math.random().toString(36).substr(2, 9),
+                seasonNumber: sNum,
+                zipLinks: [],
+                mkvLinks: [],
+                episodes: [],
+              });
+            }
+            const s = seasonMap.get(sNum)!;
+
+            if (
+              l.episode !== undefined &&
+              !l.isFullSeasonZIP &&
+              !l.isFullSeasonMKV
+            ) {
+              let ep = s.episodes.find((e) => e.episodeNumber === l.episode);
+              if (!ep) {
+                ep = {
+                  id: Math.random().toString(36).substr(2, 9),
+                  episodeNumber: l.episode,
+                  title: `Episode ${l.episode}`,
+                  links: [],
+                };
+                s.episodes.push(ep);
+                s.episodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
+              }
+              ep.links.push(l);
+              ep.links.sort(
+                (a, b) =>
+                  getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
+              );
+            } else {
+              if (l.isFullSeasonMKV) {
+                if (!s.mkvLinks) s.mkvLinks = [];
+                s.mkvLinks.push(l);
+                s.mkvLinks.sort(
+                  (a, b) =>
+                    getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
+                );
+              } else {
+                s.zipLinks.push(l);
+                s.zipLinks.sort(
+                  (a, b) =>
+                    getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
+                );
+              }
+            }
+          });
+
+          contentData.seasons = JSON.stringify(
+            Array.from(seasonMap.values()).sort(
+              (a, b) => a.seasonNumber - b.seasonNumber,
+            ),
+          );
+          contentData.movieLinks = JSON.stringify([]);
+        }
+
+        const matchedQuality = qualities.find(
+          (q) => q.name === b.metadata.printQuality,
+        );
+        if (matchedQuality) contentData.qualityId = matchedQuality.id;
+        if (b.metadata.languages?.length) {
+          const matchedLangIds = languages
+            .filter((l) => b.metadata.languages.includes(l.name))
+            .map((l) => l.id);
+          if (matchedLangIds.length > 0)
+            contentData.languageIds = matchedLangIds;
+        }
+
+        const cleanedData = deepClean(contentData);
+        itemsToSave.push(cleanedData as Content);
       });
 
-      await Promise.all(itemsToSave.map(item => saveContent(item)));
-      setAlertConfig({ isOpen: true, title: 'Success', message: `Batch created ${itemsToSave.length} draft content entries.` });
+      await Promise.all(itemsToSave.map((item) => saveContent(item)));
+      setAlertConfig({
+        isOpen: true,
+        title: "Success",
+        message: `Batch created ${itemsToSave.length} draft content entries.`,
+      });
     } catch (e: any) {
       console.error(e);
-      setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to batch save links: ' + e.message });
+      setAlertConfig({
+        isOpen: true,
+        title: "Error",
+        message: "Failed to batch save links: " + e.message,
+      });
     } finally {
       setIsSaving(false);
     }
@@ -1272,8 +1874,12 @@ export default function ContentManagement() {
       if (!isNaN(parsedYear)) setYear(parsedYear);
     }
     if (data.type) {
-        const normalizedType = (data.type?.toLowerCase() === 'series' || data.type?.toLowerCase() === 'tv') ? 'series' : 'movie';
-        setType(normalizedType);
+      const normalizedType =
+        data.type?.toLowerCase() === "series" ||
+        data.type?.toLowerCase() === "tv"
+          ? "series"
+          : "movie";
+      setType(normalizedType);
     }
     if (data.description) setDescription(data.description);
     if (data.cast) setCast(data.cast);
@@ -1288,10 +1894,10 @@ export default function ContentManagement() {
       setTrailerUrl(data.trailerUrl);
     }
     if (data.trailers && Array.isArray(data.trailers)) {
-      setTrailers(prev => {
+      setTrailers((prev) => {
         const newTrailers = [...prev];
         data.trailers.forEach((newTrailer: any) => {
-          if (!newTrailers.some(t => t.url === newTrailer.url)) {
+          if (!newTrailers.some((t) => t.url === newTrailer.url)) {
             newTrailers.push(newTrailer);
           }
         });
@@ -1300,70 +1906,117 @@ export default function ContentManagement() {
     }
 
     if (data.genres && Array.isArray(data.genres)) {
-      const fetchedGenreNames = data.genres.map((g: string) => g.trim().toLowerCase());
-      const matchedGenreIds = genres.filter(g => {
-        const gName = g.name.toLowerCase();
-        return fetchedGenreNames.some((fetched: string) => 
-          fetched === gName || 
-          fetched.includes(gName) || 
-          gName.includes(fetched) ||
-          (fetched === 'history' && gName === 'historical') ||
-          (fetched === 'historical' && gName === 'history') ||
-          (fetched === 'sci-fi' && gName.includes('sci')) ||
-          (fetched === 'science fiction' && gName.includes('sci')) ||
-          (fetched === 'romance' && gName === 'romantic') ||
-          (fetched === 'romantic' && gName === 'romance') ||
-          (fetched === 'comedy' && gName === 'comic') ||
-          (fetched === 'comic' && gName === 'comedy')
-        );
-      }).map(g => g.id);
+      const fetchedGenreNames = data.genres.map((g: string) =>
+        g.trim().toLowerCase(),
+      );
+      const matchedGenreIds = genres
+        .filter((g) => {
+          const gName = g.name.toLowerCase();
+          return fetchedGenreNames.some(
+            (fetched: string) =>
+              fetched === gName ||
+              fetched.includes(gName) ||
+              gName.includes(fetched) ||
+              (fetched === "history" && gName === "historical") ||
+              (fetched === "historical" && gName === "history") ||
+              (fetched === "sci-fi" && gName.includes("sci")) ||
+              (fetched === "science fiction" && gName.includes("sci")) ||
+              (fetched === "romance" && gName === "romantic") ||
+              (fetched === "romantic" && gName === "romance") ||
+              (fetched === "comedy" && gName === "comic") ||
+              (fetched === "comic" && gName === "comedy"),
+          );
+        })
+        .map((g) => g.id);
       if (matchedGenreIds.length > 0) {
-        setSelectedGenres(prev => [...new Set([...prev, ...matchedGenreIds])]);
+        setSelectedGenres((prev) => [
+          ...new Set([...prev, ...matchedGenreIds]),
+        ]);
       }
     }
 
-    if (data.type === 'movie') {
+    if (data.type === "movie") {
       // If movieLinks is empty, initialize with default links
-      setMovieLinks(prev => prev.length > 0 ? prev : [
-        { id: Math.random().toString(36).substr(2, 9), name: '480p', url: '', size: '', unit: 'MB' },
-        { id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'GB' },
-        { id: Math.random().toString(36).substr(2, 9), name: '1080p', url: '', size: '', unit: 'GB' }
-      ]);
+      setMovieLinks((prev) =>
+        prev.length > 0
+          ? prev
+          : [
+              {
+                id: Math.random().toString(36).substr(2, 9),
+                name: "480p",
+                url: "",
+                size: "",
+                unit: "MB",
+              },
+              {
+                id: Math.random().toString(36).substr(2, 9),
+                name: "720p",
+                url: "",
+                size: "",
+                unit: "GB",
+              },
+              {
+                id: Math.random().toString(36).substr(2, 9),
+                name: "1080p",
+                url: "",
+                size: "",
+                unit: "GB",
+              },
+            ],
+      );
     } else {
       setMovieLinks([]);
     }
-    
-    if (data.type === 'series' && data.seasons && Array.isArray(data.seasons)) {
-      setSeasons(prevSeasons => {
+
+    if (data.type === "series" && data.seasons && Array.isArray(data.seasons)) {
+      setSeasons((prevSeasons) => {
         const updatedSeasons = [...prevSeasons];
-        
+
         data.seasons.forEach((fetchedSeason: any) => {
-          const existingSeasonIndex = updatedSeasons.findIndex(s => s.seasonNumber === fetchedSeason.seasonNumber);
-          
+          const existingSeasonIndex = updatedSeasons.findIndex(
+            (s) => s.seasonNumber === fetchedSeason.seasonNumber,
+          );
+
           if (existingSeasonIndex !== -1) {
             // Merge episodes
             const existingSeason = updatedSeasons[existingSeasonIndex];
-            if (fetchedSeason.seasonYear) existingSeason.year = fetchedSeason.seasonYear;
+            if (fetchedSeason.seasonYear)
+              existingSeason.year = fetchedSeason.seasonYear;
             if (fetchedSeason.title) existingSeason.title = fetchedSeason.title;
-            if (fetchedSeason.trailerUrl) existingSeason.trailerUrl = fetchedSeason.trailerUrl;
+            if (fetchedSeason.trailerUrl)
+              existingSeason.trailerUrl = fetchedSeason.trailerUrl;
             fetchedSeason.episodes.forEach((fetchedEp: any) => {
-              const existingEpIndex = existingSeason.episodes.findIndex(ep => ep.episodeNumber === fetchedEp.episodeNumber);
+              const existingEpIndex = existingSeason.episodes.findIndex(
+                (ep) => ep.episodeNumber === fetchedEp.episodeNumber,
+              );
               if (existingEpIndex !== -1) {
                 // Update title, description, duration, keep links
                 existingSeason.episodes[existingEpIndex] = {
                   ...existingSeason.episodes[existingEpIndex],
-                  title: (!existingSeason.episodes[existingEpIndex].title || /^Episode\s+\d+$/i.test(existingSeason.episodes[existingEpIndex].title)) && fetchedEp.title
-                    ? fetchedEp.title : existingSeason.episodes[existingEpIndex].title,
-                  description: fetchedEp.description || existingSeason.episodes[existingEpIndex].description,
-                  duration: fetchedEp.duration || existingSeason.episodes[existingEpIndex].duration,
+                  title:
+                    (!existingSeason.episodes[existingEpIndex].title ||
+                      /^Episode\s+\d+$/i.test(
+                        existingSeason.episodes[existingEpIndex].title,
+                      )) &&
+                    fetchedEp.title
+                      ? fetchedEp.title
+                      : existingSeason.episodes[existingEpIndex].title,
+                  description:
+                    fetchedEp.description ||
+                    existingSeason.episodes[existingEpIndex].description,
+                  duration:
+                    fetchedEp.duration ||
+                    existingSeason.episodes[existingEpIndex].duration,
                 };
               }
             });
             // Sort episodes
-            existingSeason.episodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
+            existingSeason.episodes.sort(
+              (a, b) => a.episodeNumber - b.episodeNumber,
+            );
           }
         });
-        
+
         return updatedSeasons.sort((a, b) => a.seasonNumber - b.seasonNumber);
       });
     }
@@ -1372,49 +2025,58 @@ export default function ContentManagement() {
   const handleDelete = () => {
     if (!deleteId) return;
     const currentDeleteId = deleteId;
-    const content = contentList.find(c => c.id === currentDeleteId);
+    const content = contentList.find((c) => c.id === currentDeleteId);
     setDeleteId(null);
-    deleteContent(currentDeleteId, content?.chunkId).catch(error => {
-      console.error('Error deleting content:', error);
-      setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to delete content' });
+    deleteContent(currentDeleteId, content?.chunkId).catch((error) => {
+      console.error("Error deleting content:", error);
+      setAlertConfig({
+        isOpen: true,
+        title: "Error",
+        message: "Failed to delete content",
+      });
     });
   };
 
   const getNotificationPreview = (content: Content | null) => {
-    if (!content) return { title: '', body: '' };
-    
-    let languageName = '';
+    if (!content) return { title: "", body: "" };
+
+    let languageName = "";
     if (content.languageIds && content.languageIds.length > 0) {
-      const langId = content.languageIds.length > 1 ? content.languageIds[1] : content.languageIds[0];
-      const lang = languages.find(l => l.id === langId);
-      if (lang) languageName = lang.name + ' ';
+      const langId =
+        content.languageIds.length > 1
+          ? content.languageIds[1]
+          : content.languageIds[0];
+      const lang = languages.find((l) => l.id === langId);
+      if (lang) languageName = lang.name + " ";
     }
 
-    let genreNames = '';
+    let genreNames = "";
     if (content.genreIds && content.genreIds.length > 0) {
       genreNames = content.genreIds
-        .map(id => genres.find(g => g.id === id)?.name)
+        .map((id) => genres.find((g) => g.id === id)?.name)
         .filter(Boolean)
-        .join(', ');
+        .join(", ");
     }
 
-    let qualityName = '';
+    let qualityName = "";
     if (content.qualityId) {
-      const quality = qualities.find(q => q.id === content.qualityId);
+      const quality = qualities.find((q) => q.id === content.qualityId);
       if (quality) qualityName = quality.name;
     }
 
-    const contentType = content.type === 'movie' ? 'Movie' : 'Series';
-    const yearStr = content.year ? ` (${content.year})` : '';
-    
+    const contentType = content.type === "movie" ? "Movie" : "Series";
+    const yearStr = content.year ? ` (${content.year})` : "";
+
     const title = `🎬 New ${languageName}${contentType} Added: ${content.title}${yearStr}`;
-    
-    let body = '';
+
+    let body = "";
     if (genreNames) body += `${genreNames} ${contentType}`;
-    if (qualityName) body += `${body ? ' in ' : 'In '}${qualityName}`;
-    
+    if (qualityName) body += `${body ? " in " : "In "}${qualityName}`;
+
     if (!body) {
-       body = content.description.substring(0, 100) + (content.description.length > 100 ? '...' : '');
+      body =
+        content.description.substring(0, 100) +
+        (content.description.length > 100 ? "..." : "");
     }
 
     return { title, body };
@@ -1422,87 +2084,104 @@ export default function ContentManagement() {
 
   const handleSendNotification = async () => {
     if (!notificationModal.content) return;
-    
-    setNotificationModal(prev => ({ ...prev, status: 'sending' }));
-    
+
+    setNotificationModal((prev) => ({ ...prev, status: "sending" }));
+
     try {
       const content = notificationModal.content;
       const { title, body } = getNotificationPreview(content);
-      
+
       const notification = {
         title,
         body,
         contentId: content.id,
         posterUrl: content.posterUrl,
         type: content.type,
-        createdBy: 'admin' // In a real app, this would be the admin's UID
+        createdBy: "admin", // In a real app, this would be the admin's UID
       } as any;
 
       // Add to Firestore for in-app history using chunks
       await sendNotification(notification);
-      
+
       // Send push notification via backend
       try {
-        await fetch('/api/notifications/send', {
-          method: 'POST',
+        await fetch("/api/notifications/send", {
+          method: "POST",
           headers: {
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({
             title,
             body,
             imageUrl: content.posterUrl,
-            url: `/movie/${content.id}`
-          })
+            url: `/movie/${content.id}`,
+          }),
         });
       } catch (fcmError) {
         console.warn("FCM Send failed, but stored in Firestore", fcmError);
       }
-      
-      setNotificationModal(prev => ({ ...prev, status: 'success' }));
-      
+
+      setNotificationModal((prev) => ({ ...prev, status: "success" }));
+
       // Close modal after 2 seconds on success
       setTimeout(() => {
-        setNotificationModal({ isOpen: false, content: null, status: 'idle' });
+        setNotificationModal({ isOpen: false, content: null, status: "idle" });
       }, 2000);
-      
     } catch (error) {
-      console.error('Error sending notification:', error);
-      setNotificationModal(prev => ({ ...prev, status: 'error' }));
+      console.error("Error sending notification:", error);
+      setNotificationModal((prev) => ({ ...prev, status: "error" }));
     }
   };
 
-  const handleAddToSpecialCollection = async (contentId: string, type: 'trending' | 'newly_added') => {
+  const handleAddToSpecialCollection = async (
+    contentId: string,
+    type: "trending" | "newly_added",
+  ) => {
     try {
-      const title = type === 'trending' ? 'Trending' : 'Newly Added';
-      const existing = collections.find(c => c.title === title);
+      const title = type === "trending" ? "Trending" : "Newly Added";
+      const existing = collections.find((c) => c.title === title);
 
       if (existing) {
         const currentIds = existing.contentIds || [];
-        const newIds = [contentId, ...currentIds.filter((id: string) => id !== contentId)];
+        const newIds = [
+          contentId,
+          ...currentIds.filter((id: string) => id !== contentId),
+        ];
         await updateCollection(existing.id, { contentIds: newIds });
       } else {
         await addCollection({
           title,
-          description: '',
+          description: "",
           contentIds: [contentId],
           createdAt: new Date().toISOString(),
-          order: collections.length
+          order: collections.length,
         });
       }
-      triggerAlert('Success', `Added to ${title}`, 'success');
+      triggerAlert("Success", `Added to ${title}`, "success");
     } catch (error) {
-      console.error('Error adding to collection:', error);
-      triggerAlert('Error', 'Failed to add to collection', 'error');
+      console.error("Error adding to collection:", error);
+      triggerAlert("Error", "Failed to add to collection", "error");
     }
   };
 
-  const handleShare = async (content: Content, mode: 'standard' | 'whatsapp' = 'standard') => {
-    const isMissingWhatsappData = mode === 'whatsapp' && (!content.country || !content.languageIds || content.languageIds.length === 0);
-    const isMissingData = !content.runtime || !content.releaseDate || !content.genreIds || content.genreIds.length === 0 || isMissingWhatsappData;
-    
+  const handleShare = async (
+    content: Content,
+    mode: "standard" | "whatsapp" = "standard",
+  ) => {
+    const isMissingWhatsappData =
+      mode === "whatsapp" &&
+      (!content.country ||
+        !content.languageIds ||
+        content.languageIds.length === 0);
+    const isMissingData =
+      !content.runtime ||
+      !content.releaseDate ||
+      !content.genreIds ||
+      content.genreIds.length === 0 ||
+      isMissingWhatsappData;
+
     if (isMissingData) {
-      if (mode === 'whatsapp') {
+      if (mode === "whatsapp") {
         setLoadingWhatsappShareId(content.id);
       } else {
         setLoadingShareId(content.id);
@@ -1510,115 +2189,160 @@ export default function ContentManagement() {
       try {
         let tmdbItem = null;
         let type = content.type;
-        
+
         if (content.imdbLink) {
-            const match = content.imdbLink.match(/tt\d+/);
-            if (match) {
-                const found = await findTMDBByImdb(match[0], content.type);
-                if (found) {
-                    tmdbItem = found.item;
-                    type = found.type === 'tv' ? 'series' : 'movie';
-                }
+          const match = content.imdbLink.match(/tt\d+/);
+          if (match) {
+            const found = await findTMDBByImdb(match[0], content.type);
+            if (found) {
+              tmdbItem = found.item;
+              type = found.type === "tv" ? "series" : "movie";
             }
+          }
         }
-        
+
         if (!tmdbItem) {
-            const results = await searchTMDBByTitle(content.title, content.year?.toString() || '', content.type);
-            if (results && results.length > 0) {
-                tmdbItem = results[0].item;
-                type = results[0].type === 'tv' ? 'series' : 'movie';
-            }
+          const results = await searchTMDBByTitle(
+            content.title,
+            content.year?.toString() || "",
+            content.type,
+          );
+          if (results && results.length > 0) {
+            tmdbItem = results[0].item;
+            type = results[0].type === "tv" ? "series" : "movie";
+          }
         }
-        
+
         if (tmdbItem) {
-            const tmdbType = type === 'series' ? 'tv' : 'movie';
-            const details = await fetchTMDBDetails(tmdbItem.id, tmdbType);
-            
-            const promises: Promise<any>[] = [];
-            let imdbPromiseIndex = -1;
-            let seasonsPromiseIndex = -1;
+          const tmdbType = type === "series" ? "tv" : "movie";
+          const details = await fetchTMDBDetails(tmdbItem.id, tmdbType);
 
-            if (details.external_ids && details.external_ids.imdb_id) {
-                promises.push(fetchIMDbRating(details.external_ids.imdb_id));
-                imdbPromiseIndex = promises.length - 1;
+          const promises: Promise<any>[] = [];
+          let imdbPromiseIndex = -1;
+          let seasonsPromiseIndex = -1;
+
+          if (details.external_ids && details.external_ids.imdb_id) {
+            promises.push(fetchIMDbRating(details.external_ids.imdb_id));
+            imdbPromiseIndex = promises.length - 1;
+          }
+
+          let parsedSeasons: Season[] = [];
+          let needsDuration = false;
+          if (type === "series") {
+            try {
+              parsedSeasons =
+                typeof content.seasons === "string"
+                  ? JSON.parse(content.seasons || "[]")
+                  : content.seasons || [];
+              needsDuration = parsedSeasons.some((s) =>
+                s.episodes?.some((e) => !e.duration),
+              );
+              if (needsDuration) {
+                promises.push(fetchSeriesSeasons(tmdbItem.id));
+                seasonsPromiseIndex = promises.length - 1;
+              }
+            } catch (e) {
+              console.error("Error parsing seasons for share:", e);
             }
+          }
 
-            let parsedSeasons: Season[] = [];
-            let needsDuration = false;
-            if (type === 'series') {
-                try {
-                    parsedSeasons = typeof content.seasons === 'string' ? JSON.parse(content.seasons || '[]') : (content.seasons || []);
-                    needsDuration = parsedSeasons.some(s => s.episodes?.some(e => !e.duration));
-                    if (needsDuration) {
-                        promises.push(fetchSeriesSeasons(tmdbItem.id));
-                        seasonsPromiseIndex = promises.length - 1;
-                    }
-                } catch (e) {
-                    console.error("Error parsing seasons for share:", e);
-                }
+          const results = await Promise.all(promises);
+          const imdbRatingData =
+            imdbPromiseIndex !== -1 ? results[imdbPromiseIndex] : null;
+          const fetchedSeasons =
+            seasonsPromiseIndex !== -1 ? results[seasonsPromiseIndex] : null;
+
+          const updatedContent = {
+            ...content,
+            description: content.description || details.overview || "",
+            runtime:
+              content.runtime ||
+              (details.runtime
+                ? `${details.runtime} min`
+                : details.episode_run_time &&
+                    details.episode_run_time.length > 0
+                  ? `${details.episode_run_time[0]} min/episode`
+                  : ""),
+            releaseDate:
+              content.releaseDate ||
+              details.release_date ||
+              details.first_air_date,
+            imdbRating:
+              content.imdbRating ||
+              (imdbRatingData?.rating ? `${imdbRatingData.rating}/10` : ""),
+          };
+
+          if (
+            mode === "whatsapp" &&
+            !updatedContent.country &&
+            details.production_countries &&
+            details.production_countries.length > 0
+          ) {
+            updatedContent.country =
+              details.production_countries[0].name ||
+              details.production_countries[0].iso_3166_1;
+          }
+
+          if (!updatedContent.posterUrl && details.poster_path) {
+            updatedContent.posterUrl = `https://image.tmdb.org/t/p/w500${details.poster_path}`;
+          }
+
+          if (updatedContent.type === "series") {
+            try {
+              if (needsDuration && fetchedSeasons) {
+                parsedSeasons = parsedSeasons.map((s) => {
+                  const fetchedSeason = fetchedSeasons.find(
+                    (fs: any) => fs.season === s.seasonNumber,
+                  );
+                  if (fetchedSeason) {
+                    return {
+                      ...s,
+                      episodes: s.episodes?.map((e) => {
+                        const fetchedEpisode = fetchedSeason.episodes.find(
+                          (fe: any) => fe.episode_number === e.episodeNumber,
+                        );
+                        return {
+                          ...e,
+                          duration:
+                            e.duration ||
+                            (fetchedEpisode?.runtime
+                              ? `${fetchedEpisode.runtime}m`
+                              : ""),
+                        };
+                      }),
+                    };
+                  }
+                  return s;
+                });
+                updatedContent.seasons = JSON.stringify(parsedSeasons);
+              }
+
+              if (parsedSeasons.length > 1) {
+                setShareSeasonModal({
+                  isOpen: true,
+                  content: updatedContent,
+                  seasons: parsedSeasons,
+                  mode,
+                });
+                setSelectedShareSeasons(
+                  parsedSeasons.map((s) => s.seasonNumber),
+                );
+                setLoadingShareId(null);
+                setLoadingWhatsappShareId(null);
+                return;
+              }
+            } catch (e) {
+              console.error("Error parsing/updating seasons for share:", e);
             }
-
-            const results = await Promise.all(promises);
-            const imdbRatingData = imdbPromiseIndex !== -1 ? results[imdbPromiseIndex] : null;
-            const fetchedSeasons = seasonsPromiseIndex !== -1 ? results[seasonsPromiseIndex] : null;
-            
-            const updatedContent = {
-                ...content,
-                description: content.description || details.overview || '',
-                runtime: content.runtime || (details.runtime ? `${details.runtime} min` : (details.episode_run_time && details.episode_run_time.length > 0 ? `${details.episode_run_time[0]} min/episode` : '')),
-                releaseDate: content.releaseDate || details.release_date || details.first_air_date,
-                imdbRating: content.imdbRating || (imdbRatingData?.rating ? `${imdbRatingData.rating}/10` : ''),
-            };
-
-            if (mode === 'whatsapp' && !updatedContent.country && details.production_countries && details.production_countries.length > 0) {
-                updatedContent.country = details.production_countries[0].name || details.production_countries[0].iso_3166_1;
-            }
-
-            if (!updatedContent.posterUrl && details.poster_path) {
-                updatedContent.posterUrl = `https://image.tmdb.org/t/p/w500${details.poster_path}`;
-            }
-
-            if (updatedContent.type === 'series') {
-                try {
-                    if (needsDuration && fetchedSeasons) {
-                        parsedSeasons = parsedSeasons.map(s => {
-                            const fetchedSeason = fetchedSeasons.find((fs: any) => fs.season === s.seasonNumber);
-                            if (fetchedSeason) {
-                                return {
-                                    ...s,
-                                    episodes: s.episodes?.map(e => {
-                                        const fetchedEpisode = fetchedSeason.episodes.find((fe: any) => fe.episode_number === e.episodeNumber);
-                                        return {
-                                            ...e,
-                                            duration: e.duration || (fetchedEpisode?.runtime ? `${fetchedEpisode.runtime}m` : '')
-                                        };
-                                    })
-                                };
-                            }
-                            return s;
-                        });
-                        updatedContent.seasons = JSON.stringify(parsedSeasons);
-                    }
-
-                    if (parsedSeasons.length > 1) {
-                        setShareSeasonModal({ isOpen: true, content: updatedContent, seasons: parsedSeasons, mode });
-                        setSelectedShareSeasons(parsedSeasons.map(s => s.seasonNumber));
-                        setLoadingShareId(null);
-                        setLoadingWhatsappShareId(null);
-                        return;
-                    }
-                } catch (e) {
-                    console.error("Error parsing/updating seasons for share:", e);
-                }
-            }
-            if (mode === 'whatsapp') {
-                executeWhatsappShare(updatedContent);
-            } else {
-                executeShare(updatedContent);
-            }
+          }
+          if (mode === "whatsapp") {
+            executeWhatsappShare(updatedContent);
+          } else {
+            executeShare(updatedContent);
+          }
         } else {
-            // Failed to find TMDB item, show share anyway option
-            setShareAnywayConfig({ isOpen: true, content, mode });
+          // Failed to find TMDB item, show share anyway option
+          setShareAnywayConfig({ isOpen: true, content, mode });
         }
       } catch (error) {
         console.error("Share Fetch Error:", error);
@@ -1630,82 +2354,113 @@ export default function ContentManagement() {
       return;
     }
 
-    if (content.type === 'series' && content.seasons) {
+    if (content.type === "series" && content.seasons) {
       try {
-        const parsedSeasons: Season[] = typeof content.seasons === 'string' ? JSON.parse(content.seasons || '[]') : content.seasons;
+        const parsedSeasons: Season[] =
+          typeof content.seasons === "string"
+            ? JSON.parse(content.seasons || "[]")
+            : content.seasons;
         if (parsedSeasons.length > 1) {
-          setShareSeasonModal({ isOpen: true, content, seasons: parsedSeasons, mode });
-          setSelectedShareSeasons(parsedSeasons.map(s => s.seasonNumber));
+          setShareSeasonModal({
+            isOpen: true,
+            content,
+            seasons: parsedSeasons,
+            mode,
+          });
+          setSelectedShareSeasons(parsedSeasons.map((s) => s.seasonNumber));
           return;
         }
       } catch (e) {
         console.error("Error parsing seasons for share:", e);
-        setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to parse content data.' });
+        setAlertConfig({
+          isOpen: true,
+          title: "Error",
+          message: "Failed to parse content data.",
+        });
         return;
       }
     }
-    if (mode === 'whatsapp') {
-        executeWhatsappShare(content);
+    if (mode === "whatsapp") {
+      executeWhatsappShare(content);
     } else {
-        executeShare(content);
+      executeShare(content);
     }
   };
 
   const getCountryDemonym = (countryStr?: string) => {
-    const c = String(countryStr || '').toLowerCase();
-    if (c.includes('united states') || c === 'us' || c === 'usa') return 'American';
-    if (c.includes('korea') || c === 'kr' || c === 'south korea') return 'Korean';
-    if (c.includes('united kingdom') || c === 'uk' || c === 'great britain') return 'British';
-    if (c.includes('japan') || c === 'jp') return 'Japanese';
-    if (c.includes('china') || c === 'cn') return 'Chinese';
-    if (c.includes('france') || c === 'fr') return 'French';
-    if (c.includes('germany') || c === 'de') return 'German';
-    if (c.includes('spain') || c === 'es') return 'Spanish';
-    if (c.includes('italy') || c === 'it') return 'Italian';
-    if (c.includes('canada') || c === 'ca') return 'Canadian';
-    if (c.includes('australia') || c === 'au') return 'Australian';
-    if (c.includes('turkey') || c === 'tr') return 'Turkish';
-    if (c.includes('thailand') || c === 'th') return 'Thai';
-    if (c.includes('mexico') || c === 'mx') return 'Mexican';
-    if (c.includes('brazil') || c === 'br') return 'Brazilian';
-    
+    const c = String(countryStr || "").toLowerCase();
+    if (c.includes("united states") || c === "us" || c === "usa")
+      return "American";
+    if (c.includes("korea") || c === "kr" || c === "south korea")
+      return "Korean";
+    if (c.includes("united kingdom") || c === "uk" || c === "great britain")
+      return "British";
+    if (c.includes("japan") || c === "jp") return "Japanese";
+    if (c.includes("china") || c === "cn") return "Chinese";
+    if (c.includes("france") || c === "fr") return "French";
+    if (c.includes("germany") || c === "de") return "German";
+    if (c.includes("spain") || c === "es") return "Spanish";
+    if (c.includes("italy") || c === "it") return "Italian";
+    if (c.includes("canada") || c === "ca") return "Canadian";
+    if (c.includes("australia") || c === "au") return "Australian";
+    if (c.includes("turkey") || c === "tr") return "Turkish";
+    if (c.includes("thailand") || c === "th") return "Thai";
+    if (c.includes("mexico") || c === "mx") return "Mexican";
+    if (c.includes("brazil") || c === "br") return "Brazilian";
+
     // Fallback: capitalize each word
-    return (countryStr || '').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+    return (countryStr || "")
+      .split(" ")
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(" ");
   };
 
-  const executeWhatsappShare = async (content: Content, selectedSeasonNumbers?: number[]) => {
+  const executeWhatsappShare = async (
+    content: Content,
+    selectedSeasonNumbers?: number[],
+  ) => {
     setLoadingWhatsappShareId(content.id);
     try {
-      let origin = '';
-      const countryRaw = (content.country || '').toUpperCase();
-      const contentLangs = languages.filter(l => content.languageIds?.includes(l.id)).map(l => l.name);
-      
-      if (countryRaw.includes('INDIA') || countryRaw === 'IN') {
+      let origin = "";
+      const countryRaw = (content.country || "").toUpperCase();
+      const contentLangs = languages
+        .filter((l) => content.languageIds?.includes(l.id))
+        .map((l) => l.name);
+
+      if (countryRaw.includes("INDIA") || countryRaw === "IN") {
         if (contentLangs.length >= 2) {
           origin = contentLangs[1];
         } else if (contentLangs.length === 1) {
           origin = contentLangs[0];
         } else {
-          origin = 'Indian';
+          origin = "Indian";
         }
       } else if (countryRaw) {
         origin = getCountryDemonym(content.country);
       }
 
-      const contentGenres = genres.filter(g => content.genreIds?.includes(g.id)).map(g => g.name).join(', ');
-      
+      const contentGenres = genres
+        .filter((g) => content.genreIds?.includes(g.id))
+        .map((g) => g.name)
+        .join(", ");
+
       if (!origin && (!contentLangs || contentLangs.length === 0)) {
-         setAlertConfig({ isOpen: true, title: 'Missing Data', message: 'Country or Language is required for WhatsApp sharing. Please update the content or use Master Fetch.' });
-         setLoadingWhatsappShareId(null);
-         return;
+        setAlertConfig({
+          isOpen: true,
+          title: "Missing Data",
+          message:
+            "Country or Language is required for WhatsApp sharing. Please update the content or use Master Fetch.",
+        });
+        setLoadingWhatsappShareId(null);
+        return;
       }
-      
-      let typeStr = '';
-      if (content.type === 'movie') {
-        typeStr = 'Movie';
+
+      let typeStr = "";
+      if (content.type === "movie") {
+        typeStr = "Movie";
       } else {
         if (selectedSeasonNumbers && selectedSeasonNumbers.length > 0) {
-          const sorted = [...selectedSeasonNumbers].sort((a,b) => a - b);
+          const sorted = [...selectedSeasonNumbers].sort((a, b) => a - b);
           if (sorted.length === 1) {
             typeStr = `Season ${sorted[0]}`;
           } else if (sorted.length === 2) {
@@ -1714,34 +2469,46 @@ export default function ContentManagement() {
             typeStr = `Season ${sorted[0]}-${sorted[sorted.length - 1]}`;
           }
         } else {
-          typeStr = 'Series';
+          typeStr = "Series";
         }
       }
 
       const parts = [origin, contentGenres, typeStr].filter(Boolean);
-      const partsStr = parts.join(' ');
-      const text = `*${content.title} ${content.year || ''}*\n${partsStr}`;
-      
+      const partsStr = parts.join(" ");
+      const text = `*${content.title} ${content.year || ""}*\n${partsStr}`;
+
       let files: File[] = [];
       if (content.posterUrl) {
         try {
           const response = await fetch(content.posterUrl);
           const blob = await response.blob();
-          const file = new File([blob], 'poster.jpg', { type: blob.type || 'image/jpeg' });
+          const file = new File([blob], "poster.jpg", {
+            type: blob.type || "image/jpeg",
+          });
           files = [file];
         } catch (e) {
-          console.error("Direct fetch failed, falling back to proxy for WhatsApp sharing", e);
+          console.error(
+            "Direct fetch failed, falling back to proxy for WhatsApp sharing",
+            e,
+          );
           try {
-            const proxyResponse = await fetch(`/api/image-proxy?url=${encodeURIComponent(content.posterUrl)}`);
+            const proxyResponse = await fetch(
+              `/api/image-proxy?url=${encodeURIComponent(content.posterUrl)}`,
+            );
             if (proxyResponse.ok) {
               const blob = await proxyResponse.blob();
-              const file = new File([blob], 'poster.jpg', { type: blob.type || 'image/jpeg' });
+              const file = new File([blob], "poster.jpg", {
+                type: blob.type || "image/jpeg",
+              });
               files = [file];
             } else {
               throw new Error("Proxy fetch also failed");
             }
           } catch (proxyError) {
-             console.error("Could not fetch poster for WhatsApp sharing via proxy", proxyError);
+            console.error(
+              "Could not fetch poster for WhatsApp sharing via proxy",
+              proxyError,
+            );
           }
         }
       }
@@ -1751,7 +2518,11 @@ export default function ContentManagement() {
         text: text,
       };
 
-      if (files.length > 0 && navigator.canShare && navigator.canShare({ files })) {
+      if (
+        files.length > 0 &&
+        navigator.canShare &&
+        navigator.canShare({ files })
+      ) {
         shareData.files = files;
       }
 
@@ -1759,17 +2530,30 @@ export default function ContentManagement() {
         await navigator.share(shareData);
       } else {
         await navigator.clipboard.writeText(text);
-        setAlertConfig({ isOpen: true, title: 'Success', message: 'WhatsApp share content copied to clipboard!' });
+        setAlertConfig({
+          isOpen: true,
+          title: "Success",
+          message: "WhatsApp share content copied to clipboard!",
+        });
       }
     } catch (err: any) {
-      if (err.name !== 'AbortError') {
-         try {
-           const fallbackText = `*${content.title} ${content.year || ''}*\n\n${content.posterUrl ? content.posterUrl + '\n\n' : ''}`;
-           await navigator.clipboard.writeText(fallbackText);
-           setAlertConfig({ isOpen: true, title: 'Notice', message: 'Sharing failed directly, but content was copied to clipboard.' });
-         } catch(e) {
-           setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to share to WhatsApp.' });
-         }
+      if (err.name !== "AbortError") {
+        try {
+          const fallbackText = `*${content.title} ${content.year || ""}*\n\n${content.posterUrl ? content.posterUrl + "\n\n" : ""}`;
+          await navigator.clipboard.writeText(fallbackText);
+          setAlertConfig({
+            isOpen: true,
+            title: "Notice",
+            message:
+              "Sharing failed directly, but content was copied to clipboard.",
+          });
+        } catch (e) {
+          setAlertConfig({
+            isOpen: true,
+            title: "Error",
+            message: "Failed to share to WhatsApp.",
+          });
+        }
       }
     } finally {
       setLoadingWhatsappShareId(null);
@@ -1784,23 +2568,36 @@ export default function ContentManagement() {
     return formatDateToMonthDDYYYY(dateStr);
   };
 
-  const executeShare = async (content: Content, selectedSeasonNumbers?: number[]) => {
+  const executeShare = async (
+    content: Content,
+    selectedSeasonNumbers?: number[],
+  ) => {
     setLoadingShareId(content.id);
-    let text = `🎬 *${content.title}${content.year ? ` (${content.year})` : ''}*\n\n`;
-    
-    const contentGenres = genres.filter(g => content.genreIds?.includes(g.id)).map(g => g.name).join(', ');
+    let text = `🎬 *${content.title}${content.year ? ` (${content.year})` : ""}*\n\n`;
+
+    const contentGenres = genres
+      .filter((g) => content.genreIds?.includes(g.id))
+      .map((g) => g.name)
+      .join(", ");
     if (contentGenres) text += `🎭 Genres: ${contentGenres}\n`;
-    
-    const contentLangs = languages.filter(l => content.languageIds?.includes(l.id)).map(l => l.name).join(', ');
+
+    const contentLangs = languages
+      .filter((l) => content.languageIds?.includes(l.id))
+      .map((l) => l.name)
+      .join(", ");
     if (contentLangs) text += `🗣️ Languages: ${contentLangs}\n`;
 
-    const contentQuality = qualities.find(q => q.id === content.qualityId)?.name;
+    const contentQuality = qualities.find(
+      (q) => q.id === content.qualityId,
+    )?.name;
     if (contentQuality) text += `🖨️ Print Quality: ${contentQuality}\n`;
-    
-    if (content.runtime) text += `⏱️ Runtime: ${formatRuntimeForShare(content.runtime)}\n`;
-    if (content.releaseDate) text += `📅 Release: ${formatReleaseDateForShare(content.releaseDate)}\n`;
+
+    if (content.runtime)
+      text += `⏱️ Runtime: ${formatRuntimeForShare(content.runtime)}\n`;
+    if (content.releaseDate)
+      text += `📅 Release: ${formatReleaseDateForShare(content.releaseDate)}\n`;
     if (content.subtitles) text += `📝 Subtitles: Available\n`;
-    
+
     if (content.sampleUrl) text += `📽️ Sample: ${content.sampleUrl}\n`;
     text += `\n`;
 
@@ -1809,17 +2606,20 @@ export default function ContentManagement() {
 
     const processLink = async (link: LinkDef) => {
       if (!link.url) return link;
-      
+
       // If the original URL is HTML, it's broken
-      if (link.url && link.url.toLowerCase().includes('<html')) {
-        return { ...link, url: '', tinyUrl: '' };
+      if (link.url && link.url.toLowerCase().includes("<html")) {
+        return { ...link, url: "", tinyUrl: "" };
       }
 
       let extractedUrl = link.url;
       let finalHasUpdates = false;
 
       // Extract HubCloud links
-      if (extractedUrl.includes('hubcloud') || extractedUrl.includes('moviesdrives')) {
+      if (
+        extractedUrl.includes("hubcloud") ||
+        extractedUrl.includes("moviesdrives")
+      ) {
         try {
           const res = await fetch("/api/hubcloud/direct-link", {
             method: "POST",
@@ -1843,16 +2643,32 @@ export default function ContentManagement() {
         prevTinyUrl = undefined; // Need new tinyUrl since main URL changed
       }
 
-      const isBadTinyUrl = prevTinyUrl && typeof prevTinyUrl === 'string' && prevTinyUrl.toLowerCase().includes('<html');
-      
-      if (!extractedUrl.includes('pixeldrain.com') && !extractedUrl.includes('pixeldrain.dev') && !extractedUrl.includes('pixeldrain.net') && (!prevTinyUrl || isBadTinyUrl)) {
-        const tinyUrl = await generateTinyUrl(extractedUrl, true, settings?.supportNumber || '3363284466');
-        if (tinyUrl && tinyUrl !== extractedUrl && !tinyUrl.toLowerCase().includes('<html')) {
+      const isBadTinyUrl =
+        prevTinyUrl &&
+        typeof prevTinyUrl === "string" &&
+        prevTinyUrl.toLowerCase().includes("<html");
+
+      if (
+        !extractedUrl.includes("pixeldrain.com") &&
+        !extractedUrl.includes("pixeldrain.dev") &&
+        !extractedUrl.includes("pixeldrain.net") &&
+        (!prevTinyUrl || isBadTinyUrl)
+      ) {
+        const tinyUrl = await generateTinyUrl(
+          extractedUrl,
+          true,
+          settings?.supportNumber || "3363284466",
+        );
+        if (
+          tinyUrl &&
+          tinyUrl !== extractedUrl &&
+          !tinyUrl.toLowerCase().includes("<html")
+        ) {
           hasUpdates = true;
           return { ...link, url: extractedUrl, tinyUrl };
         } else if (isBadTinyUrl) {
           hasUpdates = true;
-          return { ...link, url: extractedUrl, tinyUrl: '' };
+          return { ...link, url: extractedUrl, tinyUrl: "" };
         }
       }
 
@@ -1864,9 +2680,9 @@ export default function ContentManagement() {
       return link;
     };
 
-    if (updatedContent.type === 'movie' && updatedContent.movieLinks) {
+    if (updatedContent.type === "movie" && updatedContent.movieLinks) {
       const links: QualityLinks = parseLinks(updatedContent.movieLinks);
-      
+
       const processedLinks = await Promise.all(links.map(processLink));
       for (let i = 0; i < links.length; i++) {
         links[i] = processedLinks[i];
@@ -1876,11 +2692,21 @@ export default function ContentManagement() {
         updatedContent.movieLinks = JSON.stringify(links);
       }
 
-      const sortedLinks = [...links].sort((a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit));
-      
-      const zipLinks = sortedLinks.filter(l => l.name.toLowerCase().includes('zip'));
-      const mkvLinks = sortedLinks.filter(l => l.name.toLowerCase().includes('mkv'));
-      const otherLinks = sortedLinks.filter(l => !l.name.toLowerCase().includes('zip') && !l.name.toLowerCase().includes('mkv'));
+      const sortedLinks = [...links].sort(
+        (a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
+      );
+
+      const zipLinks = sortedLinks.filter((l) =>
+        l.name.toLowerCase().includes("zip"),
+      );
+      const mkvLinks = sortedLinks.filter((l) =>
+        l.name.toLowerCase().includes("mkv"),
+      );
+      const otherLinks = sortedLinks.filter(
+        (l) =>
+          !l.name.toLowerCase().includes("zip") &&
+          !l.name.toLowerCase().includes("mkv"),
+      );
 
       if (zipLinks.length > 0 || mkvLinks.length > 0 || otherLinks.length > 0) {
         text += `📥 *Download Links:*\n`;
@@ -1888,62 +2714,79 @@ export default function ContentManagement() {
 
       if (zipLinks.length > 0) {
         text += `\n📦 *ZIP Files:*\n`;
-        zipLinks.forEach(l => { 
+        zipLinks.forEach((l) => {
           const finalUrl = l.tinyUrl || l.url;
-          if (finalUrl && !finalUrl.toLowerCase().includes('<html')) {
-            text += `▪️ ${l.name} (${l.size}${l.unit})\n${finalUrl}\n`; 
+          if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
+            text += `▪️ ${l.name} (${l.size}${l.unit})\n${finalUrl}\n`;
           }
         });
       }
       if (mkvLinks.length > 0) {
         text += `\n🎞️ *MKV Files:*\n`;
-        mkvLinks.forEach(l => { 
+        mkvLinks.forEach((l) => {
           const finalUrl = l.tinyUrl || l.url;
-          if (finalUrl && !finalUrl.toLowerCase().includes('<html')) {
-            text += `▪️ ${l.name} (${l.size}${l.unit})\n${finalUrl}\n`; 
+          if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
+            text += `▪️ ${l.name} (${l.size}${l.unit})\n${finalUrl}\n`;
           }
         });
       }
       if (otherLinks.length > 0) {
-        if (zipLinks.length > 0 || mkvLinks.length > 0) text += `\n📄 *Other Files:*\n`;
-        otherLinks.forEach(l => { 
+        if (zipLinks.length > 0 || mkvLinks.length > 0)
+          text += `\n📄 *Other Files:*\n`;
+        otherLinks.forEach((l) => {
           const finalUrl = l.tinyUrl || l.url;
-          if (finalUrl && !finalUrl.toLowerCase().includes('<html')) {
-            text += `▪️ ${l.name} (${l.size}${l.unit})\n${finalUrl}\n`; 
+          if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
+            text += `▪️ ${l.name} (${l.size}${l.unit})\n${finalUrl}\n`;
           }
         });
       }
-    } else if (updatedContent.type === 'series' && updatedContent.seasons) {
-      const parsedSeasons: Season[] = Array.isArray(updatedContent.seasons) ? updatedContent.seasons : JSON.parse(updatedContent.seasons || '[]');
-      const seasonsToShare = selectedSeasonNumbers 
-        ? parsedSeasons.filter(s => selectedSeasonNumbers.includes(s.seasonNumber))
+    } else if (updatedContent.type === "series" && updatedContent.seasons) {
+      const parsedSeasons: Season[] = Array.isArray(updatedContent.seasons)
+        ? updatedContent.seasons
+        : JSON.parse(updatedContent.seasons || "[]");
+      const seasonsToShare = selectedSeasonNumbers
+        ? parsedSeasons.filter((s) =>
+            selectedSeasonNumbers.includes(s.seasonNumber),
+          )
         : parsedSeasons;
 
       const linkPromises: Promise<void>[] = [];
 
       for (let s = 0; s < parsedSeasons.length; s++) {
         const season = parsedSeasons[s];
-        
+
         if (season.zipLinks) {
-          linkPromises.push((async () => {
-            const processed = await Promise.all(season.zipLinks!.map(processLink));
-            season.zipLinks = processed;
-          })());
+          linkPromises.push(
+            (async () => {
+              const processed = await Promise.all(
+                season.zipLinks!.map(processLink),
+              );
+              season.zipLinks = processed;
+            })(),
+          );
         }
         if (season.mkvLinks) {
-          linkPromises.push((async () => {
-            const processed = await Promise.all(season.mkvLinks!.map(processLink));
-            season.mkvLinks = processed;
-          })());
+          linkPromises.push(
+            (async () => {
+              const processed = await Promise.all(
+                season.mkvLinks!.map(processLink),
+              );
+              season.mkvLinks = processed;
+            })(),
+          );
         }
         if (season.episodes) {
           for (let e = 0; e < season.episodes.length; e++) {
             const ep = season.episodes[e];
             if (ep.links) {
-              linkPromises.push((async () => {
-                const processed = await Promise.all(ep.links.map(processLink));
-                ep.links = processed;
-              })());
+              linkPromises.push(
+                (async () => {
+                  const processed = await Promise.all(
+                    ep.links.map(processLink),
+                  );
+                  ep.links = processed;
+                })(),
+              );
             }
           }
         }
@@ -1955,16 +2798,24 @@ export default function ContentManagement() {
         updatedContent.seasons = JSON.stringify(parsedSeasons);
       }
 
-      seasonsToShare.forEach(season => {
-        text += `\n📺 *Season ${season.seasonNumber}${season.year ? ` (${season.year})` : updatedContent.year ? ` (${updatedContent.year})` : ''}*\n`;
-        const zipLinks = parseLinks(JSON.stringify(season.zipLinks)).filter(l => l && l.url).sort((a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit));
-        const mkvLinks = parseLinks(JSON.stringify(season.mkvLinks || [])).filter(l => l && l.url).sort((a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit));
-        
+      seasonsToShare.forEach((season) => {
+        text += `\n📺 *Season ${season.seasonNumber}${season.year ? ` (${season.year})` : updatedContent.year ? ` (${updatedContent.year})` : ""}*\n`;
+        const zipLinks = parseLinks(JSON.stringify(season.zipLinks))
+          .filter((l) => l && l.url)
+          .sort(
+            (a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
+          );
+        const mkvLinks = parseLinks(JSON.stringify(season.mkvLinks || []))
+          .filter((l) => l && l.url)
+          .sort(
+            (a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
+          );
+
         if (zipLinks.length > 0) {
           text += `📦 *Full Season ZIP:*\n`;
           zipLinks.forEach((link) => {
             const finalUrl = link.tinyUrl || link.url;
-            if (finalUrl && !finalUrl.toLowerCase().includes('<html')) {
+            if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
               text += `  ▪️ ${link.name} (${link.size}${link.unit})\n  ${finalUrl}\n`;
             }
           });
@@ -1973,38 +2824,50 @@ export default function ContentManagement() {
           text += `\n🎞️ *Full Season MKV:*\n`;
           mkvLinks.forEach((link) => {
             const finalUrl = link.tinyUrl || link.url;
-            if (finalUrl && !finalUrl.toLowerCase().includes('<html')) {
+            if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
               text += `  ▪️ ${link.name} (${link.size}${link.unit})\n  ${finalUrl}\n`;
             }
           });
         }
         if (season.episodes && season.episodes.length > 0) {
-          const allEpLinks = season.episodes.flatMap(ep => parseLinks(JSON.stringify(ep.links)).filter(l => l && l.url));
-          const uniqueQualities = [...new Set(allEpLinks.map(l => l.name))];
-          const hasUniformQuality = uniqueQualities.length === 1 && 
-                                   allEpLinks.length === season.episodes.length &&
-                                   season.episodes.every(ep => parseLinks(JSON.stringify(ep.links)).filter(l => l && l.url).length === 1);
+          const allEpLinks = season.episodes.flatMap((ep) =>
+            parseLinks(JSON.stringify(ep.links)).filter((l) => l && l.url),
+          );
+          const uniqueQualities = [...new Set(allEpLinks.map((l) => l.name))];
+          const hasUniformQuality =
+            uniqueQualities.length === 1 &&
+            allEpLinks.length === season.episodes.length &&
+            season.episodes.every(
+              (ep) =>
+                parseLinks(JSON.stringify(ep.links)).filter((l) => l && l.url)
+                  .length === 1,
+            );
 
           if (hasUniformQuality) {
             text += `\n🎬 *Episodes (${uniqueQualities[0]}):*\n`;
-            season.episodes.forEach(ep => {
-              const link = parseLinks(JSON.stringify(ep.links)).find(l => l && l.url);
+            season.episodes.forEach((ep) => {
+              const link = parseLinks(JSON.stringify(ep.links)).find(
+                (l) => l && l.url,
+              );
               if (link) {
                 const finalUrl = link.tinyUrl || link.url;
-                if (finalUrl && !finalUrl.toLowerCase().includes('<html')) {
-                  text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ''} (${link.size}${link.unit})\n${finalUrl}\n`;
+                if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
+                  text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""} (${link.size}${link.unit})\n${finalUrl}\n`;
                 }
               }
             });
           } else {
             text += `\n🎬 *Episodes:*\n`;
-            season.episodes.forEach(ep => {
-              text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ''}\n`;
-              const epLinks = parseLinks(JSON.stringify(ep.links)).sort((a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit));
+            season.episodes.forEach((ep) => {
+              text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}\n`;
+              const epLinks = parseLinks(JSON.stringify(ep.links)).sort(
+                (a, b) =>
+                  getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
+              );
               epLinks.forEach((link) => {
                 if (link && link.url) {
                   const finalUrl = link.tinyUrl || link.url;
-                  if (finalUrl && !finalUrl.toLowerCase().includes('<html')) {
+                  if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
                     text += `- ${link.name} (${link.size}${link.unit})\n${finalUrl}\n`;
                   }
                 }
@@ -2017,25 +2880,27 @@ export default function ContentManagement() {
 
     if (hasUpdates) {
       try {
-        await updateContentFields([{
-          id: updatedContent.id,
-          chunkId: updatedContent.chunkId,
-          fields: {
-            movieLinks: JSON.stringify(updatedContent.movieLinks || []),
-            seasons: JSON.stringify(updatedContent.seasons || [])
-          }
-        }]);
+        await updateContentFields([
+          {
+            id: updatedContent.id,
+            chunkId: updatedContent.chunkId,
+            fields: {
+              movieLinks: JSON.stringify(updatedContent.movieLinks || []),
+              seasons: JSON.stringify(updatedContent.seasons || []),
+            },
+          },
+        ]);
       } catch (error) {
         console.error("Error saving tinyUrls to db:", error);
       }
     }
 
-    text += `\n🍿 Enjoy watching on ${settings?.headerText || 'MovizNow'}!\n`;
-    let sn = settings?.supportNumber || '3363284466';
-    if (sn.startsWith('92')) sn = '0' + sn.substring(2);
-    else if (!sn.startsWith('0')) sn = '0' + sn;
+    text += `\n🍿 Enjoy watching on ${settings?.headerText || "MovizNow"}!\n`;
+    let sn = settings?.supportNumber || "3363284466";
+    if (sn.startsWith("92")) sn = "0" + sn.substring(2);
+    else if (!sn.startsWith("0")) sn = "0" + sn;
     text += `📞 WhatsApp: ${sn}`;
-    
+
     if (navigator.share) {
       try {
         await navigator.share({
@@ -2043,15 +2908,20 @@ export default function ContentManagement() {
           text: text,
         });
       } catch (err) {
-        if ((err as Error).name !== 'AbortError') {
+        if ((err as Error).name !== "AbortError") {
           // Fallback to clipboard
           try {
             await navigator.clipboard.writeText(text);
-            setAlertConfig({ isOpen: true, title: 'Success', message: 'Share content copied to clipboard! You can now paste it in WhatsApp.' });
+            setAlertConfig({
+              isOpen: true,
+              title: "Success",
+              message:
+                "Share content copied to clipboard! You can now paste it in WhatsApp.",
+            });
           } catch (clipErr) {
             // Last resort: WhatsApp direct link
             const encodedText = encodeURIComponent(text);
-            window.open(`https://wa.me/?text=${encodedText}`, '_blank');
+            window.open(`https://wa.me/?text=${encodedText}`, "_blank");
           }
         }
       }
@@ -2059,10 +2929,15 @@ export default function ContentManagement() {
       // Fallback for browsers without navigator.share
       try {
         await navigator.clipboard.writeText(text);
-        setAlertConfig({ isOpen: true, title: 'Success', message: 'Share content copied to clipboard! You can now paste it in WhatsApp.' });
+        setAlertConfig({
+          isOpen: true,
+          title: "Success",
+          message:
+            "Share content copied to clipboard! You can now paste it in WhatsApp.",
+        });
       } catch (clipErr) {
         const encodedText = encodeURIComponent(text);
-        window.open(`https://wa.me/?text=${encodedText}`, '_blank');
+        window.open(`https://wa.me/?text=${encodedText}`, "_blank");
       }
     }
     setLoadingShareId(null);
@@ -2070,62 +2945,81 @@ export default function ContentManagement() {
 
   const handleCopyData = async (content: Content) => {
     if (!content.posterUrl) {
-      setAlertConfig({ isOpen: true, title: 'Poster Required', message: 'Cannot copy data because poster URL is missing.' });
+      setAlertConfig({
+        isOpen: true,
+        title: "Poster Required",
+        message: "Cannot copy data because poster URL is missing.",
+      });
       return;
     }
 
-    let text = `🎬 *${content.title}${content.year ? ` (${content.year})` : ''}*\n\n`;
+    let text = `🎬 *${content.title}${content.year ? ` (${content.year})` : ""}*\n\n`;
     text += `Type: ${content.type.charAt(0).toUpperCase() + content.type.slice(1)}\n`;
-    
-    const contentGenres = genres.filter(g => content.genreIds?.includes(g.id)).map(g => g.name).join(', ');
+
+    const contentGenres = genres
+      .filter((g) => content.genreIds?.includes(g.id))
+      .map((g) => g.name)
+      .join(", ");
     if (contentGenres) text += `🎭 Genres: ${contentGenres}\n`;
-    
-    const contentLangs = languages.filter(l => content.languageIds?.includes(l.id)).map(l => l.name).join(', ');
+
+    const contentLangs = languages
+      .filter((l) => content.languageIds?.includes(l.id))
+      .map((l) => l.name)
+      .join(", ");
     if (contentLangs) text += `🗣️ Languages: ${contentLangs}\n`;
 
-    const contentQuality = qualities.find(q => q.id === content.qualityId)?.name;
+    const contentQuality = qualities.find(
+      (q) => q.id === content.qualityId,
+    )?.name;
     if (contentQuality) text += `🖨️ Print Quality: ${contentQuality}\n`;
 
     if (content.imdbLink) text += `⭐ IMDb: ${content.imdbLink}\n`;
     if (content.trailerUrl) text += `🎥 Trailer: ${content.trailerUrl}\n`;
     if (content.sampleUrl) text += `📽️ Sample: ${content.sampleUrl}\n`;
     if (content.posterUrl) text += `🖼️ Poster: ${content.posterUrl}\n`;
-    if (content.cast && content.cast.length > 0) text += `👥 Cast: ${content.cast.join(', ')}\n`;
-    if (content.description) text += `📝 Description: ${content.description}\n\n`;
+    if (content.cast && content.cast.length > 0)
+      text += `👥 Cast: ${content.cast.join(", ")}\n`;
+    if (content.description)
+      text += `📝 Description: ${content.description}\n\n`;
 
-    if (content.type === 'movie' && content.movieLinks) {
+    if (content.type === "movie" && content.movieLinks) {
       const links: QualityLinks = parseLinks(content.movieLinks);
       text += `📥 *Download Links:*\n`;
-      links.forEach(l => {
+      links.forEach((l) => {
         if (l.url) text += `▪️ ${l.name} (${l.size}${l.unit}): ${l.url}\n`;
       });
-    } else if (content.type === 'series' && content.seasons) {
+    } else if (content.type === "series" && content.seasons) {
       try {
-        const parsedSeasons: Season[] = Array.isArray(content.seasons) ? content.seasons : JSON.parse(content.seasons || '[]');
-        parsedSeasons.forEach(season => {
-          text += `\n📺 *Season ${season.seasonNumber}${season.year ? ` (${season.year})` : content.year ? ` (${content.year})` : ''}*\n`;
+        const parsedSeasons: Season[] = Array.isArray(content.seasons)
+          ? content.seasons
+          : JSON.parse(content.seasons || "[]");
+        parsedSeasons.forEach((season) => {
+          text += `\n📺 *Season ${season.seasonNumber}${season.year ? ` (${season.year})` : content.year ? ` (${content.year})` : ""}*\n`;
           const zipLinks = parseLinks(JSON.stringify(season.zipLinks));
           const mkvLinks = parseLinks(JSON.stringify(season.mkvLinks || []));
-          
+
           if (zipLinks.length > 0) {
             text += `📦 *Full Season ZIP:*\n`;
             zipLinks.forEach((link) => {
-              if (link && link.url) text += `  ▪️ ${link.name} (${link.size}${link.unit}): ${link.url}\n`;
+              if (link && link.url)
+                text += `  ▪️ ${link.name} (${link.size}${link.unit}): ${link.url}\n`;
             });
           }
           if (mkvLinks.length > 0) {
             text += `\n🎞️ *Full Season MKV:*\n`;
             mkvLinks.forEach((link) => {
-              if (link && link.url) text += `  ▪️ ${link.name} (${link.size}${link.unit}): ${link.url}\n`;
+              if (link && link.url)
+                text += `  ▪️ ${link.name} (${link.size}${link.unit}): ${link.url}\n`;
             });
           }
           if (season.episodes && season.episodes.length > 0) {
             text += `\n🎬 *Episodes:*\n`;
-            season.episodes.forEach(ep => {
+            season.episodes.forEach((ep) => {
               text += `  E${ep.episodeNumber}: ${ep.title}\n`;
               const epLinks = parseLinks(JSON.stringify(ep.links));
               epLinks.forEach((link) => {
-                if (link && link.url) text += `    - ${link.name} (${link.size}${link.unit}): ${link.url}\n`;
+                if (link && link.url)
+                  text += `    - ${link.name} (${link.size}${link.unit}): ${link.url}\n`;
               });
             });
           }
@@ -2138,182 +3032,228 @@ export default function ContentManagement() {
 
     try {
       await navigator.clipboard.writeText(text);
-      setAlertConfig({ isOpen: true, title: 'Success', message: 'All data copied to clipboard!' });
+      setAlertConfig({
+        isOpen: true,
+        title: "Success",
+        message: "All data copied to clipboard!",
+      });
     } catch (err) {
-      console.error('Error copying data:', err);
-      setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to copy data' });
+      console.error("Error copying data:", err);
+      setAlertConfig({
+        isOpen: true,
+        title: "Error",
+        message: "Failed to copy data",
+      });
     }
   };
 
   const handleAutoFill = () => {
     if (!autoFillText) return;
 
-    const lines = autoFillText.split('\n');
-    let newTitle = '';
+    const lines = autoFillText.split("\n");
+    let newTitle = "";
     let newYear = year;
-    let newType: 'movie' | 'series' = type;
-    let newDescription = '';
-    let newCast = '';
-    let newImdb = '';
-    let newTrailer = '';
-    let newSample = '';
-    let newPoster = '';
-    let newReleaseDate = '';
+    let newType: "movie" | "series" = type;
+    let newDescription = "";
+    let newCast = "";
+    let newImdb = "";
+    let newTrailer = "";
+    let newSample = "";
+    let newPoster = "";
+    let newReleaseDate = "";
     let newGenreIds: string[] = [];
     let newLanguageIds: string[] = [];
-    let newQualityId = '';
+    let newQualityId = "";
     let newMovieLinks: QualityLinks = [];
     let newSeasons: Season[] = [];
 
     const findGenreId = (name: string) => {
       const fetched = name.toLowerCase();
-      return genres.find(g => {
+      return genres.find((g) => {
         const gName = g.name.toLowerCase();
-        return fetched === gName || 
-          fetched.includes(gName) || 
+        return (
+          fetched === gName ||
+          fetched.includes(gName) ||
           gName.includes(fetched) ||
-          (fetched === 'history' && gName === 'historical') ||
-          (fetched === 'historical' && gName === 'history') ||
-          (fetched === 'sci-fi' && gName.includes('sci')) ||
-          (fetched === 'science fiction' && gName.includes('sci'));
+          (fetched === "history" && gName === "historical") ||
+          (fetched === "historical" && gName === "history") ||
+          (fetched === "sci-fi" && gName.includes("sci")) ||
+          (fetched === "science fiction" && gName.includes("sci"))
+        );
       })?.id;
     };
-    const findLanguageId = (name: string) => languages.find(l => l.name.toLowerCase() === name.toLowerCase())?.id;
-    const findQualityId = (name: string) => qualities.find(q => q.name.toLowerCase() === name.toLowerCase())?.id;
+    const findLanguageId = (name: string) =>
+      languages.find((l) => l.name.toLowerCase() === name.toLowerCase())?.id;
+    const findQualityId = (name: string) =>
+      qualities.find((q) => q.name.toLowerCase() === name.toLowerCase())?.id;
 
     let currentSeason: Season | null = null;
     let currentEpisode: Episode | null = null;
-    let linkSection: 'movie' | 'zip' | 'mkv' | 'episode' | null = null;
+    let linkSection: "movie" | "zip" | "mkv" | "episode" | null = null;
 
-    lines.forEach(line => {
+    lines.forEach((line) => {
       const trimmed = line.trim();
       if (!trimmed) return;
 
       // Title and Year: 🎬 *Title (Year)* or Title (Year) or just Title Year
-      const titleYearMatch = trimmed.match(/🎬?\s*\*?([^(]+)\s*\((\d{4})\)\*?/) || 
-                            trimmed.match(/🎬?\s*\*?([^(]+)\s*(\d{4})\*?/);
-      if (titleYearMatch && !newTitle) { // Only set if not already set by first link
-        newTitle = titleYearMatch[1].replace(/[🎬\*]/g, '').trim();
+      const titleYearMatch =
+        trimmed.match(/🎬?\s*\*?([^(]+)\s*\((\d{4})\)\*?/) ||
+        trimmed.match(/🎬?\s*\*?([^(]+)\s*(\d{4})\*?/);
+      if (titleYearMatch && !newTitle) {
+        // Only set if not already set by first link
+        newTitle = titleYearMatch[1].replace(/[🎬\*]/g, "").trim();
         newYear = parseInt(titleYearMatch[2]);
 
         // Further clean Title: if it includes markers, take everything before
-        const noiseMarkers = ['\\d{3,4}p', '[0-9]k', 'web[-.\\s_]?(dl|rip)', 'hd[-.\\s_]?rip', 'blu[-.\\s_]?ray', 'bd[-.\\s_]?rip', 'br[-.\\s_]?rip', 'hdtc', 'hdcam', 'dvdrip', 'webrip', 'hevc', 'x264', 'x265', 'dual[-.\\s_]?audio', 'hindi', 'english'];
-        const markerRegex = new RegExp(`\\b(${noiseMarkers.join('|')})\\b`, 'i');
+        const noiseMarkers = [
+          "\\d{3,4}p",
+          "[0-9]k",
+          "web[-.\\s_]?(dl|rip)",
+          "hd[-.\\s_]?rip",
+          "blu[-.\\s_]?ray",
+          "bd[-.\\s_]?rip",
+          "br[-.\\s_]?rip",
+          "hdtc",
+          "hdcam",
+          "dvdrip",
+          "webrip",
+          "hevc",
+          "x264",
+          "x265",
+          "dual[-.\\s_]?audio",
+          "hindi",
+          "english",
+        ];
+        const markerRegex = new RegExp(
+          `\\b(${noiseMarkers.join("|")})\\b`,
+          "i",
+        );
         const markerMatch = newTitle.match(markerRegex);
         if (markerMatch) {
           newTitle = newTitle.substring(0, markerMatch.index).trim();
         }
-        
+
         // Capitalize
-        newTitle = newTitle.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+        newTitle = newTitle
+          .split(" ")
+          .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+          .join(" ");
       }
 
       // Type
-      if (trimmed.toLowerCase().includes('type: movie')) newType = 'movie';
-      if (trimmed.toLowerCase().includes('type: series')) newType = 'series';
+      if (trimmed.toLowerCase().includes("type: movie")) newType = "movie";
+      if (trimmed.toLowerCase().includes("type: series")) newType = "series";
 
       // Genres
-      if (trimmed.includes('🎭 Genres:')) {
-        const genreNames = trimmed.split('🎭 Genres:')[1].split(',').map(s => s.trim());
+      if (trimmed.includes("🎭 Genres:")) {
+        const genreNames = trimmed
+          .split("🎭 Genres:")[1]
+          .split(",")
+          .map((s) => s.trim());
         newGenreIds = genreNames.map(findGenreId).filter(Boolean) as string[];
       }
 
       // Languages
-      if (trimmed.includes('🗣️ Languages:')) {
-        const langNames = trimmed.split('🗣️ Languages:')[1].split(',').map(s => s.trim());
-        newLanguageIds = langNames.map(findLanguageId).filter(Boolean) as string[];
+      if (trimmed.includes("🗣️ Languages:")) {
+        const langNames = trimmed
+          .split("🗣️ Languages:")[1]
+          .split(",")
+          .map((s) => s.trim());
+        newLanguageIds = langNames
+          .map(findLanguageId)
+          .filter(Boolean) as string[];
       }
 
       // Quality
-      if (trimmed.includes('📺 Quality:')) {
-        const qName = trimmed.split('📺 Quality:')[1].trim();
-        newQualityId = findQualityId(qName) || '';
+      if (trimmed.includes("📺 Quality:")) {
+        const qName = trimmed.split("📺 Quality:")[1].trim();
+        newQualityId = findQualityId(qName) || "";
       }
 
       // IMDb
-      if (trimmed.includes('IMDb:')) {
+      if (trimmed.includes("IMDb:")) {
         const match = trimmed.match(/https?:\/\/[^\s]+/);
         if (match) newImdb = match[0];
       }
 
       // Trailer
-      if (trimmed.includes('Trailer:')) {
+      if (trimmed.includes("Trailer:")) {
         const match = trimmed.match(/https?:\/\/[^\s]+/);
         if (match) newTrailer = match[0];
       }
 
       // Sample
-      if (trimmed.includes('Sample:')) {
+      if (trimmed.includes("Sample:")) {
         const match = trimmed.match(/https?:\/\/[^\s]+/);
         if (match) newSample = match[0];
       }
 
       // Poster
-      if (trimmed.includes('Poster:')) {
+      if (trimmed.includes("Poster:")) {
         const match = trimmed.match(/https?:\/\/[^\s]+/);
         if (match) newPoster = match[0];
       }
 
       // Release Date
-      if (trimmed.includes('📅 Release:')) {
-        newReleaseDate = trimmed.split('📅 Release:')[1].trim();
-      } else if (trimmed.includes('Release Date:')) {
-        newReleaseDate = trimmed.split('Release Date:')[1].trim();
+      if (trimmed.includes("📅 Release:")) {
+        newReleaseDate = trimmed.split("📅 Release:")[1].trim();
+      } else if (trimmed.includes("Release Date:")) {
+        newReleaseDate = trimmed.split("Release Date:")[1].trim();
       }
 
       // Cast
-      if (trimmed.includes('👥 Cast:')) {
-        newCast = trimmed.split('👥 Cast:')[1].trim();
+      if (trimmed.includes("👥 Cast:")) {
+        newCast = trimmed.split("👥 Cast:")[1].trim();
       }
 
       // Description
-      if (trimmed.includes('📝 Description:')) {
-        newDescription = trimmed.split('📝 Description:')[1].trim();
+      if (trimmed.includes("📝 Description:")) {
+        newDescription = trimmed.split("📝 Description:")[1].trim();
       }
 
       // Links Detection
-      if (trimmed.includes('Download Links:')) {
-        linkSection = 'movie';
-        newType = 'movie';
+      if (trimmed.includes("Download Links:")) {
+        linkSection = "movie";
+        newType = "movie";
       }
-      if (trimmed.includes('Full Season ZIP:')) {
-        linkSection = 'zip';
-        newType = 'series';
+      if (trimmed.includes("Full Season ZIP:")) {
+        linkSection = "zip";
+        newType = "series";
         if (!currentSeason) {
           currentSeason = {
             id: Math.random().toString(36).substr(2, 9),
             seasonNumber: 1,
             zipLinks: [],
             mkvLinks: [],
-            episodes: []
+            episodes: [],
           };
           newSeasons.push(currentSeason);
         }
       }
-      if (trimmed.includes('Full Season MKV:')) {
-        linkSection = 'mkv';
-        newType = 'series';
+      if (trimmed.includes("Full Season MKV:")) {
+        linkSection = "mkv";
+        newType = "series";
         if (!currentSeason) {
           currentSeason = {
             id: Math.random().toString(36).substr(2, 9),
             seasonNumber: 1,
             zipLinks: [],
             mkvLinks: [],
-            episodes: []
+            episodes: [],
           };
           newSeasons.push(currentSeason);
         }
       }
-      if (trimmed.includes('Episodes:')) {
-        linkSection = 'episode';
-        newType = 'series';
+      if (trimmed.includes("Episodes:")) {
+        linkSection = "episode";
+        newType = "series";
         if (!currentSeason) {
           currentSeason = {
             id: Math.random().toString(36).substr(2, 9),
             seasonNumber: 1,
             zipLinks: [],
             mkvLinks: [],
-            episodes: []
+            episodes: [],
           };
           newSeasons.push(currentSeason);
         }
@@ -2322,14 +3262,14 @@ export default function ContentManagement() {
       // Season Detection: 📺 *Season X (Year)*
       const seasonMatch = trimmed.match(/📺?\s*\*?Season\s*(\d+)/i);
       if (seasonMatch) {
-        newType = 'series';
+        newType = "series";
         const sNum = parseInt(seasonMatch[1]);
         currentSeason = {
           id: Math.random().toString(36).substr(2, 9),
           seasonNumber: sNum,
           zipLinks: [],
           mkvLinks: [],
-          episodes: []
+          episodes: [],
         };
         newSeasons.push(currentSeason);
       }
@@ -2343,7 +3283,7 @@ export default function ContentManagement() {
             seasonNumber: 1,
             zipLinks: [],
             mkvLinks: [],
-            episodes: []
+            episodes: [],
           };
           newSeasons.push(currentSeason);
         }
@@ -2352,59 +3292,75 @@ export default function ContentManagement() {
           id: Math.random().toString(36).substr(2, 9),
           episodeNumber: epNum,
           title: epMatch[2].trim(),
-          links: []
+          links: [],
         };
         currentSeason.episodes.push(currentEpisode);
-        linkSection = 'episode';
+        linkSection = "episode";
       }
 
       // Link Parsing
       // Skip metadata lines that might contain URLs to avoid adding them as download links
-      if (trimmed.startsWith('IMDb:') || trimmed.startsWith('Trailer:') || trimmed.startsWith('Sample:') || trimmed.startsWith('Poster:')) {
+      if (
+        trimmed.startsWith("IMDb:") ||
+        trimmed.startsWith("Trailer:") ||
+        trimmed.startsWith("Sample:") ||
+        trimmed.startsWith("Poster:")
+      ) {
         return;
       }
 
       const urlMatch = trimmed.match(/(https?:\/\/[^\s]+)/);
       if (urlMatch && linkSection) {
         let url = urlMatch[1];
-        
+
         // Auto-convert /api/file/ to /u/ and /api/list/ to /l/
-        if (url.includes('/api/file/')) {
-          url = url.replace('/api/file/', '/u/');
-        } else if (url.includes('/api/list/')) {
-          url = url.replace('/api/list/', '/l/');
+        if (url.includes("/api/file/")) {
+          url = url.replace("/api/file/", "/u/");
+        } else if (url.includes("/api/list/")) {
+          url = url.replace("/api/list/", "/l/");
         }
-        
+
         const sizeMatch = trimmed.match(/([\d.]+)\s*(MB|GB)/i);
-        const size = sizeMatch ? sizeMatch[1] : '';
-        const unit = sizeMatch ? sizeMatch[2].toUpperCase() as 'MB' | 'GB' : 'MB';
-        
-        let name = '';
+        const size = sizeMatch ? sizeMatch[1] : "";
+        const unit = sizeMatch
+          ? (sizeMatch[2].toUpperCase() as "MB" | "GB")
+          : "MB";
+
+        let name = "";
         if (sizeMatch) {
-          name = trimmed.substring(0, sizeMatch.index)
-            .replace(/^[▪️\-*•\s]+/, '')
-            .replace(/[\[\]():]/g, '')
-            .replace(/[\-*\s]+$/, '')
+          name = trimmed
+            .substring(0, sizeMatch.index)
+            .replace(/^[▪️\-*•\s]+/, "")
+            .replace(/[\[\]():]/g, "")
+            .replace(/[\-*\s]+$/, "")
             .trim();
         } else {
-          name = trimmed.substring(0, urlMatch.index)
-            .replace(/^[▪️\-*•\s]+/, '')
-            .replace(/[\[\]():]/g, '')
-            .replace(/[\-*\s]+$/, '')
+          name = trimmed
+            .substring(0, urlMatch.index)
+            .replace(/^[▪️\-*•\s]+/, "")
+            .replace(/[\[\]():]/g, "")
+            .replace(/[\-*\s]+$/, "")
             .trim();
         }
-        
-        if (!name || name.toLowerCase() === 'download' || name.toLowerCase() === 'link') {
+
+        if (
+          !name ||
+          name.toLowerCase() === "download" ||
+          name.toLowerCase() === "link"
+        ) {
           let count = 1;
-          if (linkSection === 'movie') count = newMovieLinks.length + 1;
-          else if (linkSection === 'zip' && currentSeason) count = currentSeason.zipLinks.length + 1;
-          else if (linkSection === 'mkv' && currentSeason) count = (currentSeason.mkvLinks?.length || 0) + 1;
-          else if (linkSection === 'episode' && currentEpisode) count = currentEpisode.links.length + 1;
+          if (linkSection === "movie") count = newMovieLinks.length + 1;
+          else if (linkSection === "zip" && currentSeason)
+            count = currentSeason.zipLinks.length + 1;
+          else if (linkSection === "mkv" && currentSeason)
+            count = (currentSeason.mkvLinks?.length || 0) + 1;
+          else if (linkSection === "episode" && currentEpisode)
+            count = currentEpisode.links.length + 1;
           name = `Link ${count}`;
         }
 
         // Skip if URL is actually HTML
-        if (url.toLowerCase().includes('<html')) {
+        if (url.toLowerCase().includes("<html")) {
           return;
         }
 
@@ -2413,24 +3369,24 @@ export default function ContentManagement() {
           name,
           size,
           unit,
-          url
+          url,
         };
 
-        if (linkSection === 'movie') {
-          if (!newMovieLinks.some(l => l.url === url)) {
+        if (linkSection === "movie") {
+          if (!newMovieLinks.some((l) => l.url === url)) {
             newMovieLinks.push(link);
           }
-        } else if (linkSection === 'zip' && currentSeason) {
-          if (!currentSeason.zipLinks.some(l => l.url === url)) {
+        } else if (linkSection === "zip" && currentSeason) {
+          if (!currentSeason.zipLinks.some((l) => l.url === url)) {
             currentSeason.zipLinks.push(link);
           }
-        } else if (linkSection === 'mkv' && currentSeason) {
+        } else if (linkSection === "mkv" && currentSeason) {
           if (!currentSeason.mkvLinks) currentSeason.mkvLinks = [];
-          if (!currentSeason.mkvLinks.some(l => l.url === url)) {
+          if (!currentSeason.mkvLinks.some((l) => l.url === url)) {
             currentSeason.mkvLinks.push(link);
           }
-        } else if (linkSection === 'episode' && currentEpisode) {
-          if (!currentEpisode.links.some(l => l.url === url)) {
+        } else if (linkSection === "episode" && currentEpisode) {
+          if (!currentEpisode.links.some((l) => l.url === url)) {
             currentEpisode.links.push(link);
           }
         }
@@ -2454,165 +3410,239 @@ export default function ContentManagement() {
     if (newSeasons.length > 0) setSeasons(newSeasons);
 
     setIsAutoFillModalOpen(false);
-    setAutoFillText('');
-    setAlertConfig({ isOpen: true, title: 'Success', message: 'Data auto-filled successfully!' });
+    setAutoFillText("");
+    setAlertConfig({
+      isOpen: true,
+      title: "Success",
+      message: "Data auto-filled successfully!",
+    });
   };
 
-
   const uniqueYears = useMemo(() => {
-    const years = new Set(contentList.map(c => Number(c.year)).filter(y => y > 0 && !isNaN(y)));
+    const years = new Set(
+      contentList.map((c) => Number(c.year)).filter((y) => y > 0 && !isNaN(y)),
+    );
     return Array.from(years).sort((a, b) => b - a);
   }, [contentList]);
 
   const getMissingLabels = useCallback((content: Content, profile: any) => {
     const labels: string[] = [];
-    const isStaff = profile?.role === 'owner' || profile?.role === 'admin' || profile?.role === 'manager' || profile?.role === 'content_manager';
+    const isStaff =
+      profile?.role === "owner" ||
+      profile?.role === "admin" ||
+      profile?.role === "manager" ||
+      profile?.role === "content_manager";
     if (!isStaff || (content as any)._isMinimal) return [];
 
     const safeParse = (data: any) => {
-        if (!data) return [];
-        try {
-            const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-            if (Array.isArray(parsed)) return parsed;
-            if (typeof parsed === 'object') {
-                return Object.entries(parsed).map(([name, val]: [string, any]) => ({
-                    name,
-                    url: typeof val === 'string' ? val : val?.url || '',
-                    ... (typeof val === 'object' ? val : {})
-                }));
-            }
-        } catch(e) {}
-        return [];
+      if (!data) return [];
+      try {
+        const parsed = typeof data === "string" ? JSON.parse(data) : data;
+        if (Array.isArray(parsed)) return parsed;
+        if (typeof parsed === "object") {
+          return Object.entries(parsed).map(([name, val]: [string, any]) => ({
+            name,
+            url: typeof val === "string" ? val : val?.url || "",
+            ...(typeof val === "object" ? val : {}),
+          }));
+        }
+      } catch (e) {}
+      return [];
     };
 
     if (isStaff) {
-      if (!content.posterUrl) labels.push('Missing Poster');
-      if (!content.year) labels.push('Missing Year');
+      if (!content.posterUrl) labels.push("Missing Poster");
+      if (!content.year) labels.push("Missing Year");
       // Removed Missing Release Date
-      if (!content.genreIds || content.genreIds.length === 0) labels.push('Missing Genre');
-      if (!content.languageIds || content.languageIds.length === 0) labels.push('Missing Language');
-      if (!content.qualityId) labels.push('Missing Print Quality');
-      if (content.type === 'movie') {
-          try {
-              let has480 = false, has720 = false, has1080 = false;
-              const ml = safeParse(content.movieLinks);
-              
-              const isStandard = (l: any, res: string) => 
-                  (l.name?.includes(res) || l.quality === res) && 
-                  !l.name?.toUpperCase().includes('HEVC') &&
-                  l.url;
-                  
-              has480 = ml.some((l: any) => isStandard(l, '480p'));
-              has720 = ml.some((l: any) => isStandard(l, '720p'));
-              has1080 = ml.some((l: any) => isStandard(l, '1080p'));
+      if (!content.genreIds || content.genreIds.length === 0)
+        labels.push("Missing Genre");
+      if (!content.languageIds || content.languageIds.length === 0)
+        labels.push("Missing Language");
+      if (!content.qualityId) labels.push("Missing Print Quality");
+      if (content.type === "movie") {
+        try {
+          let has480 = false,
+            has720 = false,
+            has1080 = false;
+          const ml = safeParse(content.movieLinks);
 
-              // Explicitly catch any empty URL in existing links, but skip standard ones we'll flag anyway
-              ml.forEach((l: any) => {
-                  const isStd = ['480p', '720p', '1080p'].some(res => 
-                      (l.name?.includes(res) || l.quality === res) && !l.name?.toUpperCase().includes('HEVC')
-                  );
-                  if (!l.url && !isStd) labels.push(`Missing Link URL: ${l.name || 'Link'}`);
-              });
+          const isStandard = (l: any, res: string) =>
+            (l.name?.includes(res) || l.quality === res) &&
+            !l.name?.toUpperCase().includes("HEVC") &&
+            l.url;
 
-              if (!has480) labels.push('Missing 480p');
-              if (!has720) labels.push('Missing 720p');
-              if (!has1080) labels.push('Missing 1080p');
-          } catch(e){
-              console.error('Error parsing movieLinks', e);
-          }
-      } else if (content.type === 'series') {
-          try {
-              if (content.seasons) {
-                  const seasonsList = typeof content.seasons === 'string' ? JSON.parse(content.seasons) : (Array.isArray(content.seasons) ? content.seasons : []);
-                  if (seasonsList.length === 0) {
-                      labels.push('Missing Seasons Data');
-                  } else {
-                      seasonsList.forEach((s: any) => {
-                          if (!s.year) labels.push(`Missing S${s.seasonNumber} Year`);
-                          
-                          const zips = safeParse(s.zipLinks);
-                          const mkvs = safeParse(s.mkvLinks);
+          has480 = ml.some((l: any) => isStandard(l, "480p"));
+          has720 = ml.some((l: any) => isStandard(l, "720p"));
+          has1080 = ml.some((l: any) => isStandard(l, "1080p"));
 
-                          if (zips.length === 0) labels.push(`Missing S${s.seasonNumber} Zip`);
-                          if (mkvs.length === 0) labels.push(`Missing S${s.seasonNumber} MKV`);
-                          
-                          if (!s.episodes || !Array.isArray(s.episodes) || s.episodes.length === 0) {
-                              labels.push(`Missing S${s.seasonNumber} Episodes`);
-                          } else {
-                              const seasonHas1080pEpisode = s.episodes.some((ep: any) => {
-                                  const epLinks = safeParse(ep.links);
-                                  return epLinks.some((l: any) => l.name?.includes('1080p') || l.quality === '1080p');
-                              });
+          // Explicitly catch any empty URL in existing links, but skip standard ones we'll flag anyway
+          ml.forEach((l: any) => {
+            const isStd = ["480p", "720p", "1080p"].some(
+              (res) =>
+                (l.name?.includes(res) || l.quality === res) &&
+                !l.name?.toUpperCase().includes("HEVC"),
+            );
+            if (!l.url && !isStd)
+              labels.push(`Missing Link URL: ${l.name || "Link"}`);
+          });
 
-                              s.episodes.forEach((ep: any) => {
-                                  const epLinks = safeParse(ep.links);
-                                  if (epLinks.length === 0) {
-                                      labels.push(`Missing S${s.seasonNumber}E${ep.episodeNumber}`);
-                                  } else {
-                                      const isStd = (l: any, res: string) => (l.name?.includes(res) || l.quality === res) && !l.name?.toUpperCase().includes('HEVC') && l.url;
-                                      const has720p = epLinks.some((l: any) => isStd(l, '720p'));
-                                      const has1080p = epLinks.some((l: any) => isStd(l, '1080p'));
-                                      
-                                      epLinks.forEach((l: any) => {
-                                          const isStandardRes = ['480p', '720p', '1080p'].some(res => 
-                                              (l.name?.includes(res) || l.quality === res) && !l.name?.toUpperCase().includes('HEVC')
-                                          );
-                                          if (!l.url && !isStandardRes) labels.push(`Missing S${s.seasonNumber}E${ep.episodeNumber} URL: ${l.name || 'Link'}`);
-                                      });
+          if (!has480) labels.push("Missing 480p");
+          if (!has720) labels.push("Missing 720p");
+          if (!has1080) labels.push("Missing 1080p");
+        } catch (e) {
+          console.error("Error parsing movieLinks", e);
+        }
+      } else if (content.type === "series") {
+        try {
+          if (content.seasons) {
+            const seasonsList =
+              typeof content.seasons === "string"
+                ? JSON.parse(content.seasons)
+                : Array.isArray(content.seasons)
+                  ? content.seasons
+                  : [];
+            if (seasonsList.length === 0) {
+              labels.push("Missing Seasons Data");
+            } else {
+              seasonsList.forEach((s: any) => {
+                if (!s.year) labels.push(`Missing S${s.seasonNumber} Year`);
 
-                                      if (!has720p) labels.push(`Missing S${s.seasonNumber}E${ep.episodeNumber} 720p`);
-                                      if (seasonHas1080pEpisode && !has1080p) labels.push(`Missing S${s.seasonNumber}E${ep.episodeNumber} 1080p`);
-                                  }
-                              });
-                          }
-                          
-                          if (zips.length > 0) {
-                              const isStandardZip = (l: any, res: string) => {
-                                  return (l.name?.includes(res) || l.quality === res) && !l.name?.toUpperCase().includes('HEVC') && l.url;
-                              };
-                              let has480 = zips.some((l: any) => isStandardZip(l, '480p'));
-                              let has720 = zips.some((l: any) => isStandardZip(l, '720p'));
-                              let has1080 = zips.some((l: any) => isStandardZip(l, '1080p'));
-                              
-                              zips.forEach((l: any) => {
-                                  const isStandardRes = ['480p', '720p', '1080p'].some(res => 
-                                      (l.name?.includes(res) || l.quality === res) && !l.name?.toUpperCase().includes('HEVC')
-                                  );
-                                  if (!l.url && !isStandardRes) labels.push(`Missing S${s.seasonNumber} Zip URL: ${l.name || 'Link'}`);
-                              });
+                const zips = safeParse(s.zipLinks);
+                const mkvs = safeParse(s.mkvLinks);
 
-                              if (!has480) labels.push(`Missing S${s.seasonNumber} Zip 480p`);
-                              if (!has720) labels.push(`Missing S${s.seasonNumber} Zip 720p`);
-                              if (!has1080) labels.push(`Missing S${s.seasonNumber} Zip 1080p`);
-                          }
-                          
-                          if (mkvs.length > 0) {
-                              const isStandardMkv = (l: any, res: string) => {
-                                  return (l.name?.includes(res) || l.quality === res) && l.url;
-                              };
-                              let has480 = mkvs.some((l: any) => isStandardMkv(l, '480p'));
-                              let has720 = mkvs.some((l: any) => isStandardMkv(l, '720p'));
-                              let has1080 = mkvs.some((l: any) => isStandardMkv(l, '1080p'));
+                if (zips.length === 0)
+                  labels.push(`Missing S${s.seasonNumber} Zip`);
+                if (mkvs.length === 0)
+                  labels.push(`Missing S${s.seasonNumber} MKV`);
 
-                              mkvs.forEach((l: any) => {
-                                  const isStandardRes = ['480p', '720p', '1080p'].some(res => 
-                                      (l.name?.includes(res) || l.quality === res)
-                                  );
-                                  if (!l.url && !isStandardRes) labels.push(`Missing S${s.seasonNumber} MKV URL: ${l.name || 'Link'}`);
-                              });
+                if (
+                  !s.episodes ||
+                  !Array.isArray(s.episodes) ||
+                  s.episodes.length === 0
+                ) {
+                  labels.push(`Missing S${s.seasonNumber} Episodes`);
+                } else {
+                  const seasonHas1080pEpisode = s.episodes.some((ep: any) => {
+                    const epLinks = safeParse(ep.links);
+                    return epLinks.some(
+                      (l: any) =>
+                        l.name?.includes("1080p") || l.quality === "1080p",
+                    );
+                  });
 
-                              if (!has480) labels.push(`Missing S${s.seasonNumber} MKV 480p`);
-                              if (!has720) labels.push(`Missing S${s.seasonNumber} MKV 720p`);
-                              if (!has1080) labels.push(`Missing S${s.seasonNumber} MKV 1080p`);
-                          }
+                  s.episodes.forEach((ep: any) => {
+                    const epLinks = safeParse(ep.links);
+                    if (epLinks.length === 0) {
+                      labels.push(
+                        `Missing S${s.seasonNumber}E${ep.episodeNumber}`,
+                      );
+                    } else {
+                      const isStd = (l: any, res: string) =>
+                        (l.name?.includes(res) || l.quality === res) &&
+                        !l.name?.toUpperCase().includes("HEVC") &&
+                        l.url;
+                      const has720p = epLinks.some((l: any) =>
+                        isStd(l, "720p"),
+                      );
+                      const has1080p = epLinks.some((l: any) =>
+                        isStd(l, "1080p"),
+                      );
+
+                      epLinks.forEach((l: any) => {
+                        const isStandardRes = ["480p", "720p", "1080p"].some(
+                          (res) =>
+                            (l.name?.includes(res) || l.quality === res) &&
+                            !l.name?.toUpperCase().includes("HEVC"),
+                        );
+                        if (!l.url && !isStandardRes)
+                          labels.push(
+                            `Missing S${s.seasonNumber}E${ep.episodeNumber} URL: ${l.name || "Link"}`,
+                          );
                       });
-                  }
-              } else {
-                  labels.push('Missing Seasons Data');
-              }
-          } catch(e) {
-              console.error('Error parsing seasons', e);
+
+                      if (!has720p)
+                        labels.push(
+                          `Missing S${s.seasonNumber}E${ep.episodeNumber} 720p`,
+                        );
+                      if (seasonHas1080pEpisode && !has1080p)
+                        labels.push(
+                          `Missing S${s.seasonNumber}E${ep.episodeNumber} 1080p`,
+                        );
+                    }
+                  });
+                }
+
+                if (zips.length > 0) {
+                  const isStandardZip = (l: any, res: string) => {
+                    return (
+                      (l.name?.includes(res) || l.quality === res) &&
+                      !l.name?.toUpperCase().includes("HEVC") &&
+                      l.url
+                    );
+                  };
+                  let has480 = zips.some((l: any) => isStandardZip(l, "480p"));
+                  let has720 = zips.some((l: any) => isStandardZip(l, "720p"));
+                  let has1080 = zips.some((l: any) =>
+                    isStandardZip(l, "1080p"),
+                  );
+
+                  zips.forEach((l: any) => {
+                    const isStandardRes = ["480p", "720p", "1080p"].some(
+                      (res) =>
+                        (l.name?.includes(res) || l.quality === res) &&
+                        !l.name?.toUpperCase().includes("HEVC"),
+                    );
+                    if (!l.url && !isStandardRes)
+                      labels.push(
+                        `Missing S${s.seasonNumber} Zip URL: ${l.name || "Link"}`,
+                      );
+                  });
+
+                  if (!has480)
+                    labels.push(`Missing S${s.seasonNumber} Zip 480p`);
+                  if (!has720)
+                    labels.push(`Missing S${s.seasonNumber} Zip 720p`);
+                  if (!has1080)
+                    labels.push(`Missing S${s.seasonNumber} Zip 1080p`);
+                }
+
+                if (mkvs.length > 0) {
+                  const isStandardMkv = (l: any, res: string) => {
+                    return (
+                      (l.name?.includes(res) || l.quality === res) && l.url
+                    );
+                  };
+                  let has480 = mkvs.some((l: any) => isStandardMkv(l, "480p"));
+                  let has720 = mkvs.some((l: any) => isStandardMkv(l, "720p"));
+                  let has1080 = mkvs.some((l: any) =>
+                    isStandardMkv(l, "1080p"),
+                  );
+
+                  mkvs.forEach((l: any) => {
+                    const isStandardRes = ["480p", "720p", "1080p"].some(
+                      (res) => l.name?.includes(res) || l.quality === res,
+                    );
+                    if (!l.url && !isStandardRes)
+                      labels.push(
+                        `Missing S${s.seasonNumber} MKV URL: ${l.name || "Link"}`,
+                      );
+                  });
+
+                  if (!has480)
+                    labels.push(`Missing S${s.seasonNumber} MKV 480p`);
+                  if (!has720)
+                    labels.push(`Missing S${s.seasonNumber} MKV 720p`);
+                  if (!has1080)
+                    labels.push(`Missing S${s.seasonNumber} MKV 1080p`);
+                }
+              });
+            }
+          } else {
+            labels.push("Missing Seasons Data");
           }
+        } catch (e) {
+          console.error("Error parsing seasons", e);
+        }
       }
     }
     return labels;
@@ -2621,29 +3651,30 @@ export default function ContentManagement() {
   const duplicateIds = useMemo(() => {
     const ids = new Set<string>();
     const duplicateGroups = new Map<string, string[]>();
-    contentList.forEach(c => {
-      const title = (c.title || '').trim().toLowerCase();
+    contentList.forEach((c) => {
+      const title = (c.title || "").trim().toLowerCase();
       // Normalize series titles for duplicate detection by removing season markers (e.g. "Season 1", "S1")
       // this ensures "Show Season 1" and "Show Season 2" are correctly identified as duplicates
-      const baseTitle = c.type === 'series' 
-        ? title.replace(/\s+(s(eason)?|part|vol)\s*\d+/gi, '').trim()
-        : title;
+      const baseTitle =
+        c.type === "series"
+          ? title.replace(/\s+(s(eason)?|part|vol)\s*\d+/gi, "").trim()
+          : title;
 
-      let key = '';
-      if (c.type === 'movie') {
-         key = `movie_${baseTitle}_${c.year || ''}`;
+      let key = "";
+      if (c.type === "movie") {
+        key = `movie_${baseTitle}_${c.year || ""}`;
       } else {
-         key = `series_${baseTitle}`;
+        key = `series_${baseTitle}`;
       }
       if (!duplicateGroups.has(key)) {
-         duplicateGroups.set(key, []);
+        duplicateGroups.set(key, []);
       }
       duplicateGroups.get(key)!.push(c.id);
     });
 
-    duplicateGroups.forEach(group => {
+    duplicateGroups.forEach((group) => {
       if (group.length > 1) {
-        group.forEach(id => ids.add(id));
+        group.forEach((id) => ids.add(id));
       }
     });
 
@@ -2652,102 +3683,140 @@ export default function ContentManagement() {
 
   const filteredContent = useMemo(() => {
     let result = contentList;
-    
+
     if (showDuplicates) {
-      result = result.filter(c => duplicateIds.has(c.id));
+      result = result.filter((c) => duplicateIds.has(c.id));
     }
 
-    if (showMissing === 'missing') {
-      result = result.filter(c => {
+    if (showMissing === "missing") {
+      result = result.filter((c) => {
         const labels = getMissingLabels(c, profile);
         return labels.length > 0;
       });
-    } else if (showMissing === 'complete') {
-      result = result.filter(c => {
+    } else if (showMissing === "complete") {
+      result = result.filter((c) => {
         const labels = getMissingLabels(c, profile);
         return labels.length === 0;
       });
-    } else if (showMissing === 'disabled') {
-      result = result.filter(c => (c.status || 'published') === 'draft');
-    } else if (showMissing !== 'none') {
-      result = result.filter(c => {
+    } else if (showMissing === "disabled") {
+      result = result.filter((c) => (c.status || "published") === "draft");
+    } else if (showMissing !== "none") {
+      result = result.filter((c) => {
         const labels = getMissingLabels(c, profile);
         if (labels.length === 0) return false;
 
-        const searchTagLower = (showMissing || '').toString().toLowerCase();
+        const searchTagLower = (showMissing || "").toString().toLowerCase();
         const missingLabelMap: Record<string, string> = {
-          '480p': 'missing 480p',
-          '720p': 'missing 720p',
-          '1080p': 'missing 1080p',
-          'genre': 'missing genre',
-          'language': 'missing language',
-          'quality': 'missing print quality',
-          'poster': 'missing poster',
-          'year': 'missing year',
+          "480p": "missing 480p",
+          "720p": "missing 720p",
+          "1080p": "missing 1080p",
+          genre: "missing genre",
+          language: "missing language",
+          quality: "missing print quality",
+          poster: "missing poster",
+          year: "missing year",
         };
-        const expectedLabel = missingLabelMap[showMissing as string] || `missing ${searchTagLower}`;
-        
-        const isMatch = missingThisOneOnly 
-          ? labels.every(l => l && typeof l === 'string' && l.toLowerCase() === expectedLabel)
-          : labels.some(l => l && typeof l === 'string' && l.toLowerCase().includes(searchTagLower));
-        
+        const expectedLabel =
+          missingLabelMap[showMissing as string] || `missing ${searchTagLower}`;
+
+        const isMatch = missingThisOneOnly
+          ? labels.every(
+              (l) =>
+                l && typeof l === "string" && l.toLowerCase() === expectedLabel,
+            )
+          : labels.some(
+              (l) =>
+                l &&
+                typeof l === "string" &&
+                l.toLowerCase().includes(searchTagLower),
+            );
+
         return isMatch;
       });
     }
 
     // Content Manager restriction: only see their own content
-    if (profile?.role === 'content_manager' || profile?.role === 'manager') {
-      result = result.filter(c => c.addedBy === user?.uid);
+    if (profile?.role === "content_manager" || profile?.role === "manager") {
+      result = result.filter((c) => c.addedBy === user?.uid);
     }
 
-    if (filterType !== 'all') {
-      result = result.filter(c => c.type === filterType);
+    if (filterType !== "all") {
+      result = result.filter((c) => c.type === filterType);
     }
-    if (filterGenre !== 'all') {
-      result = result.filter(c => c.genreIds?.includes(filterGenre));
+    if (filterGenre !== "all") {
+      result = result.filter((c) => c.genreIds?.includes(filterGenre));
     }
-    if (filterLanguage !== 'all') {
-      result = result.filter(c => c.languageIds?.includes(filterLanguage));
+    if (filterLanguage !== "all") {
+      result = result.filter((c) => c.languageIds?.includes(filterLanguage));
     }
-    if (filterQuality !== 'all') {
-      result = result.filter(c => c.qualityId === filterQuality);
+    if (filterQuality !== "all") {
+      result = result.filter((c) => c.qualityId === filterQuality);
     }
-    if (filterYear !== 'all') {
-      result = result.filter(c => String(c.year) === filterYear);
+    if (filterYear !== "all") {
+      result = result.filter((c) => String(c.year) === filterYear);
     }
-    if (filterStatus !== 'all') {
-      result = result.filter(c => (c.status || 'published') === filterStatus);
+    if (filterStatus !== "all") {
+      result = result.filter((c) => (c.status || "published") === filterStatus);
     }
 
-    if (filterAddedBy !== 'all') {
-      result = result.filter(c => c.addedBy === filterAddedBy);
+    if (filterAddedBy !== "all") {
+      result = result.filter((c) => c.addedBy === filterAddedBy);
     }
     if (debouncedSearchTerm) {
-      result = smartSearch(result, debouncedSearchTerm, ['title', 'description', 'cast', 'country', 'year']);
+      result = smartSearch(result, debouncedSearchTerm, [
+        "title",
+        "description",
+        "cast",
+        "country",
+        "year",
+      ]);
     }
-    
+
     // Sort according to user preference, just like Home page
     let sortedResult = [...result];
-    
+
     // If we're searching and the sort is default or newest, we SHOULD NOT re-sort,
     // because smartSearch already sorted by relevance score.
-    if (debouncedSearchTerm && (filterSort === 'default' || filterSort === 'newest')) {
+    if (
+      debouncedSearchTerm &&
+      (filterSort === "default" || filterSort === "newest")
+    ) {
       return result;
     }
 
     sortedResult.sort((a, b) => {
-        if (filterSort === 'default') {
-          if (a.order !== undefined && b.order !== undefined) return b.order - a.order;
-          if (a.order === undefined && b.order !== undefined) return 1;
-          if (a.order !== undefined && b.order === undefined) return -1;
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-        }
-        const timeA = new Date(a.createdAt).getTime();
-        const timeB = new Date(b.createdAt).getTime();
-        return filterSort === 'newest' ? timeB - timeA : timeA - timeB;
-      });
+      if (filterSort === "default") {
+        if (a.order !== undefined && b.order !== undefined)
+          return b.order - a.order;
+        if (a.order === undefined && b.order !== undefined) return 1;
+        if (a.order !== undefined && b.order === undefined) return -1;
+        return (
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+      }
+      const timeA = new Date(a.createdAt).getTime();
+      const timeB = new Date(b.createdAt).getTime();
+      return filterSort === "newest" ? timeB - timeA : timeA - timeB;
+    });
     return sortedResult;
-  }, [contentList, debouncedSearchTerm, filterType, filterGenre, filterLanguage, filterQuality, filterYear, filterStatus, filterSort, filterAddedBy, profile, user, showDuplicates, showMissing, duplicateIds, missingThisOneOnly]);
+  }, [
+    contentList,
+    debouncedSearchTerm,
+    filterType,
+    filterGenre,
+    filterLanguage,
+    filterQuality,
+    filterYear,
+    filterStatus,
+    filterSort,
+    filterAddedBy,
+    profile,
+    user,
+    showDuplicates,
+    showMissing,
+    duplicateIds,
+    missingThisOneOnly,
+  ]);
 
   const filteredGenres = useMemo(() => {
     if (!genreSearchTerm) return genres;
@@ -2763,38 +3832,52 @@ export default function ContentManagement() {
     if (selectedContent.length > 0) {
       setSelectedContent([]);
     } else {
-      setSelectedContent(filteredContent.map(c => c.id));
+      setSelectedContent(filteredContent.map((c) => c.id));
     }
   };
 
-  const handleSelectContent = useCallback((id: string, e?: React.SyntheticEvent) => {
-    if (e) e.stopPropagation();
-    setSelectedContent(prev => 
-      prev.includes(id) ? prev.filter(cId => cId !== id) : [...prev, id]
-    );
-  }, []);
+  const handleSelectContent = useCallback(
+    (id: string, e?: React.SyntheticEvent) => {
+      if (e) e.stopPropagation();
+      setSelectedContent((prev) =>
+        prev.includes(id) ? prev.filter((cId) => cId !== id) : [...prev, id],
+      );
+    },
+    [],
+  );
 
-  const handleBulkStatusChange = async (status: 'published' | 'draft' | 'selected_content') => {
-    if (!window.confirm(`Are you sure you want to change the status of ${selectedContent.length} items to ${status}?`)) return;
-    
+  const handleBulkStatusChange = async (
+    status: "published" | "draft" | "selected_content",
+  ) => {
+    if (
+      !window.confirm(
+        `Are you sure you want to change the status of ${selectedContent.length} items to ${status}?`,
+      )
+    )
+      return;
+
     const currentSelected = [...selectedContent];
     setSelectedContent([]);
-    
-    const updates: { id: string, [key: string]: any }[] = [];
 
-    let currentMax = Math.max(0, ...contentList.map(c => c.order || 0));
-    currentSelected.forEach(id => {
-      const content = contentList.find(c => c.id === id);
+    const updates: { id: string; [key: string]: any }[] = [];
+
+    let currentMax = Math.max(0, ...contentList.map((c) => c.order || 0));
+    currentSelected.forEach((id) => {
+      const content = contentList.find((c) => c.id === id);
       if (content) {
         // Prevent managers from modifying published content
-        if ((profile?.role === 'content_manager' || profile?.role === 'manager') && content.status === 'published') {
+        if (
+          (profile?.role === "content_manager" ||
+            profile?.role === "manager") &&
+          content.status === "published"
+        ) {
           return;
         }
 
         const updateData: any = { id, chunkId: content.chunkId, status };
-        
+
         // When moving from draft to published, consider it as new and increment order
-        if (content.status === 'draft' && status === 'published') {
+        if (content.status === "draft" && status === "published") {
           updateData.createdAt = new Date().toISOString();
           currentMax += 1;
           updateData.order = currentMax;
@@ -2806,51 +3889,71 @@ export default function ContentManagement() {
 
     try {
       if (updates.length > 0) {
-        await updateContentFields(updates.map(u => ({
-          id: u.id,
-          chunkId: u.chunkId,
-          fields: Object.fromEntries(Object.entries(u).filter(([k]) => k !== 'id' && k !== 'chunkId'))
-        })));
+        await updateContentFields(
+          updates.map((u) => ({
+            id: u.id,
+            chunkId: u.chunkId,
+            fields: Object.fromEntries(
+              Object.entries(u).filter(([k]) => k !== "id" && k !== "chunkId"),
+            ),
+          })),
+        );
       }
     } catch (error) {
-      console.error('Error updating content:', error);
-      setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to update content' });
+      console.error("Error updating content:", error);
+      setAlertConfig({
+        isOpen: true,
+        title: "Error",
+        message: "Failed to update content",
+      });
     }
   };
 
   const handleBulkDelete = async () => {
     setShowBulkDeleteConfirm(false);
     setIsBulkDeleting(true);
-    
+
     const currentSelected = [...selectedContent];
-    
+
     try {
-      const deleteItems = currentSelected.map(id => {
-        const c = contentList.find(c => c.id === id);
+      const deleteItems = currentSelected.map((id) => {
+        const c = contentList.find((c) => c.id === id);
         return { id, chunkId: c?.chunkId };
       });
       await deleteMultipleContents(deleteItems);
       setSelectedContent([]);
-      setAlertConfig({ isOpen: true, title: 'Success', message: `Successfully deleted ${currentSelected.length} items` });
+      setAlertConfig({
+        isOpen: true,
+        title: "Success",
+        message: `Successfully deleted ${currentSelected.length} items`,
+      });
     } catch (error) {
-      console.error('Error deleting content:', error);
-      setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to delete content' });
+      console.error("Error deleting content:", error);
+      setAlertConfig({
+        isOpen: true,
+        title: "Error",
+        message: "Failed to delete content",
+      });
     } finally {
       setIsBulkDeleting(false);
     }
   };
 
   const initiateMerge = () => {
-    const items = contentList.filter(c => selectedContent.includes(c.id));
+    const items = contentList.filter((c) => selectedContent.includes(c.id));
     if (items.length < 2) {
-      setAlertConfig({ isOpen: true, title: 'Error', message: 'Select at least 2 items to merge' });
+      setAlertConfig({
+        isOpen: true,
+        title: "Error",
+        message: "Select at least 2 items to merge",
+      });
       return;
     }
-    
+
     setMergeData({
       title: items[0].title,
       year: items[0].year,
-      items
+      items,
     });
     setShowMergeConfirm(true);
   };
@@ -2858,16 +3961,16 @@ export default function ContentManagement() {
   const handleMerge = async () => {
     setIsMerging(true);
     setShowMergeConfirm(false);
-    
+
     const { items, title: finalTitle, year: finalYear } = mergeData;
     const targetItem = items[0];
     const otherItems = items.slice(1);
-    
+
     try {
       console.log("Merging", items.length, "items into", targetItem.id);
       let combinedMovieLinks: LinkDef[] = [];
       let combinedSeasons: Season[] = [];
-      
+
       // Metadata accumulation
       const combinedGenres = new Set<string>();
       const combinedLanguages = new Set<string>();
@@ -2888,24 +3991,24 @@ export default function ContentManagement() {
       let finalTrailerYoutubeTitle = targetItem.trailerYoutubeTitle;
       let finalTrailerSeasonNumber = targetItem.trailerSeasonNumber;
       let finalSubtitles = targetItem.subtitles;
-      
-      items.forEach(item => {
+
+      items.forEach((item) => {
         // Collect arrays
         if (item.genreIds && Array.isArray(item.genreIds)) {
-          item.genreIds.forEach(g => combinedGenres.add(g));
+          item.genreIds.forEach((g) => combinedGenres.add(g));
         }
         if (item.languageIds && Array.isArray(item.languageIds)) {
-          item.languageIds.forEach(l => combinedLanguages.add(l));
+          item.languageIds.forEach((l) => combinedLanguages.add(l));
         }
         if (item.cast && Array.isArray(item.cast)) {
-          item.cast.forEach(c => combinedCast.add(c));
+          item.cast.forEach((c) => combinedCast.add(c));
         }
 
         // Collect trailers
         if (item.trailers) {
           try {
             const itemTrailers: Trailer[] = JSON.parse(item.trailers);
-            itemTrailers.forEach(t => {
+            itemTrailers.forEach((t) => {
               if (!trailerUrls.has(t.url)) {
                 trailerUrls.add(t.url);
                 combinedTrailers.push(t);
@@ -2925,15 +4028,20 @@ export default function ContentManagement() {
         if (!finalRuntime) finalRuntime = item.runtime;
         if (!finalImdbRating) finalImdbRating = item.imdbRating;
         if (!finalTrailerTitle) finalTrailerTitle = item.trailerTitle;
-        if (!finalTrailerYoutubeTitle) finalTrailerYoutubeTitle = item.trailerYoutubeTitle;
-        if (!finalTrailerSeasonNumber) finalTrailerSeasonNumber = item.trailerSeasonNumber;
+        if (!finalTrailerYoutubeTitle)
+          finalTrailerYoutubeTitle = item.trailerYoutubeTitle;
+        if (!finalTrailerSeasonNumber)
+          finalTrailerSeasonNumber = item.trailerSeasonNumber;
         if (finalSubtitles === undefined) finalSubtitles = item.subtitles;
 
         // Merge links logic...
-        if (item.type === 'movie' || !item.type) {
+        if (item.type === "movie" || !item.type) {
           let links: LinkDef[] = [];
           try {
-            links = typeof item.movieLinks === 'string' ? JSON.parse(item.movieLinks) : (item.movieLinks || []);
+            links =
+              typeof item.movieLinks === "string"
+                ? JSON.parse(item.movieLinks)
+                : item.movieLinks || [];
           } catch (e) {
             links = [];
           }
@@ -2941,48 +4049,69 @@ export default function ContentManagement() {
         } else {
           let seasons: Season[] = [];
           try {
-            seasons = typeof item.seasons === 'string' ? JSON.parse(item.seasons) : (item.seasons || []);
+            seasons =
+              typeof item.seasons === "string"
+                ? JSON.parse(item.seasons)
+                : item.seasons || [];
           } catch (e) {
             seasons = [];
           }
-          
-          seasons.forEach(s => {
-            const existingSeason = combinedSeasons.find(cs => cs.seasonNumber === s.seasonNumber);
+
+          seasons.forEach((s) => {
+            const existingSeason = combinedSeasons.find(
+              (cs) => cs.seasonNumber === s.seasonNumber,
+            );
             if (existingSeason) {
               // Merge episodes
               if (s.episodes) {
-                s.episodes.forEach(ep => {
-                  const existingEp = existingSeason.episodes.find(ce => ce.episodeNumber === ep.episodeNumber);
+                s.episodes.forEach((ep) => {
+                  const existingEp = existingSeason.episodes.find(
+                    (ce) => ce.episodeNumber === ep.episodeNumber,
+                  );
                   if (existingEp) {
-                    existingEp.links = [...(existingEp.links || []), ...(ep.links || [])];
+                    existingEp.links = [
+                      ...(existingEp.links || []),
+                      ...(ep.links || []),
+                    ];
                   } else {
                     existingSeason.episodes.push(ep);
                   }
                 });
               }
               // Merge season-level links
-              if (s.zipLinks) existingSeason.zipLinks = [...(existingSeason.zipLinks || []), ...s.zipLinks];
-              if (s.mkvLinks) existingSeason.mkvLinks = [...(existingSeason.mkvLinks || []), ...s.mkvLinks];
+              if (s.zipLinks)
+                existingSeason.zipLinks = [
+                  ...(existingSeason.zipLinks || []),
+                  ...s.zipLinks,
+                ];
+              if (s.mkvLinks)
+                existingSeason.mkvLinks = [
+                  ...(existingSeason.mkvLinks || []),
+                  ...s.mkvLinks,
+                ];
             } else {
               combinedSeasons.push(s);
             }
           });
         }
       });
-      
+
       // Sort and dedupe links
       const dedupeAndSort = (links: LinkDef[] | undefined) => {
         if (!links) return [];
-        return links.filter((l, i, self) => i === self.findIndex(t => t.url === l.url)) 
-          .sort((a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit));
+        return links
+          .filter((l, i, self) => i === self.findIndex((t) => t.url === l.url))
+          .sort(
+            (a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
+          );
       };
 
       combinedMovieLinks = dedupeAndSort(combinedMovieLinks);
-      combinedSeasons.forEach(s => {
+      combinedSeasons.forEach((s) => {
         if (s.zipLinks) s.zipLinks = dedupeAndSort(s.zipLinks);
         if (s.mkvLinks) s.mkvLinks = dedupeAndSort(s.mkvLinks);
         if (s.episodes) {
-          s.episodes.forEach(e => {
+          s.episodes.forEach((e) => {
             if (e.links) e.links = dedupeAndSort(e.links);
           });
           s.episodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
@@ -2999,56 +4128,74 @@ export default function ContentManagement() {
         seasons: JSON.stringify(combinedSeasons),
         genreIds: Array.from(combinedGenres),
         languageIds: Array.from(combinedLanguages),
-        posterUrl: finalPoster || '',
-        imdbLink: finalImdb || '',
-        trailerUrl: finalTrailer || '',
-        trailerTitle: finalTrailerTitle || '',
-        trailerYoutubeTitle: finalTrailerYoutubeTitle || '',
+        posterUrl: finalPoster || "",
+        imdbLink: finalImdb || "",
+        trailerUrl: finalTrailer || "",
+        trailerTitle: finalTrailerTitle || "",
+        trailerYoutubeTitle: finalTrailerYoutubeTitle || "",
         trailerSeasonNumber: finalTrailerSeasonNumber || null,
         trailers: JSON.stringify(combinedTrailers),
         subtitles: !!finalSubtitles,
-        qualityId: finalQuality || '',
-        description: finalDesc || '',
+        qualityId: finalQuality || "",
+        description: finalDesc || "",
         cast: Array.from(combinedCast),
-        country: finalCountry || '',
-        releaseDate: finalReleaseDate || '',
-        runtime: finalRuntime || '',
-        imdbRating: finalImdbRating || '',
-        updatedAt: Date.now()
+        country: finalCountry || "",
+        releaseDate: finalReleaseDate || "",
+        runtime: finalRuntime || "",
+        imdbRating: finalImdbRating || "",
+        updatedAt: Date.now(),
       };
-      
-      await updateContentFields([{
-        id: updateData.id,
-        chunkId: updateData.chunkId,
-        fields: Object.fromEntries(Object.entries(updateData).filter(([k]) => k !== 'id' && k !== 'chunkId'))
-      }]);
-      
-      const itemsToDelete = otherItems.map(item => ({ id: item.id, chunkId: item.chunkId }));
+
+      await updateContentFields([
+        {
+          id: updateData.id,
+          chunkId: updateData.chunkId,
+          fields: Object.fromEntries(
+            Object.entries(updateData).filter(
+              ([k]) => k !== "id" && k !== "chunkId",
+            ),
+          ),
+        },
+      ]);
+
+      const itemsToDelete = otherItems.map((item) => ({
+        id: item.id,
+        chunkId: item.chunkId,
+      }));
       if (itemsToDelete.length > 0) {
         await deleteMultipleContents(itemsToDelete);
       }
-      
+
       setSelectedContent([]);
       setShowMergeConfirm(false);
-      setAlertConfig({ isOpen: true, title: 'Success', message: `Successfully merged ${items.length} items into "${finalTitle}"` });
+      setAlertConfig({
+        isOpen: true,
+        title: "Success",
+        message: `Successfully merged ${items.length} items into "${finalTitle}"`,
+      });
     } catch (e: any) {
       console.error(e);
-      setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to merge: ' + e.message });
+      setAlertConfig({
+        isOpen: true,
+        title: "Error",
+        message: "Failed to merge: " + e.message,
+      });
     } finally {
       setIsMerging(false);
     }
   };
 
-  const isFiltered = searchTerm !== '' || 
-    filterType !== 'all' || 
-    filterGenre !== 'all' || 
-    filterLanguage !== 'all' || 
-    filterQuality !== 'all' || 
-    filterYear !== 'all' || 
-    filterStatus !== 'all' || 
-    filterAddedBy !== 'all' || 
-    filterSort !== 'newest' || 
-    showMissing !== 'none' || 
+  const isFiltered =
+    searchTerm !== "" ||
+    filterType !== "all" ||
+    filterGenre !== "all" ||
+    filterLanguage !== "all" ||
+    filterQuality !== "all" ||
+    filterYear !== "all" ||
+    filterStatus !== "all" ||
+    filterAddedBy !== "all" ||
+    filterSort !== "newest" ||
+    showMissing !== "none" ||
     showDuplicates;
 
   return (
@@ -3056,8 +4203,10 @@ export default function ContentManagement() {
       <div className="flex flex-col gap-4 mb-8">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <h1 className="text-xl md:text-2xl font-bold whitespace-nowrap">Movies & Series</h1>
-            {profile?.role === 'owner' && (
+            <h1 className="text-xl md:text-2xl font-bold whitespace-nowrap">
+              Movies & Series
+            </h1>
+            {profile?.role === "owner" && (
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setIsBatchLinkCheckerOpen(true)}
@@ -3077,9 +4226,13 @@ export default function ContentManagement() {
                   onClick={() => setShowDuplicates(!showDuplicates)}
                   className={clsx(
                     "flex items-center justify-center p-2 rounded-lg transition-colors",
-                    showDuplicates ? "bg-emerald-500 text-white" : "bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white"
+                    showDuplicates
+                      ? "bg-emerald-500 text-white"
+                      : "bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white",
                   )}
-                  title={showDuplicates ? "Viewing Duplicates" : "Find Duplicates"}
+                  title={
+                    showDuplicates ? "Viewing Duplicates" : "Find Duplicates"
+                  }
                 >
                   <Copy className="w-4 h-4" />
                 </button>
@@ -3091,18 +4244,26 @@ export default function ContentManagement() {
                     }}
                     className={clsx(
                       "flex items-center justify-center p-2 rounded-lg transition-colors relative gap-1",
-                      showMissing !== 'none' ? (showMissing === 'complete' ? "bg-emerald-500 text-white" : "bg-red-500 text-white") : 
-                      "bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white"
+                      showMissing !== "none"
+                        ? showMissing === "complete"
+                          ? "bg-emerald-500 text-white"
+                          : "bg-red-500 text-white"
+                        : "bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white",
                     )}
                     title="Missing Details Filter"
                   >
                     <AlertCircle className="w-4 h-4" />
-                    <ChevronDown className={clsx("w-3 h-3 transition-transform", isMissingFilterOpen && "rotate-180")} />
-                    {showMissing !== 'none' && (
+                    <ChevronDown
+                      className={clsx(
+                        "w-3 h-3 transition-transform",
+                        isMissingFilterOpen && "rotate-180",
+                      )}
+                    />
+                    {showMissing !== "none" && (
                       <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-white border-2 border-zinc-900 shadow-sm" />
                     )}
                   </button>
-                  
+
                   <AnimatePresence>
                     {isMissingFilterOpen && (
                       <motion.div
@@ -3114,37 +4275,73 @@ export default function ContentManagement() {
                       >
                         <div className="p-2 space-y-0.5">
                           {[
-                            { label: 'All Content', value: 'none', icon: <Eye className="w-4 h-4" /> },
-                            { label: 'Missing Info (All)', value: 'missing', icon: <AlertCircle className="w-4 h-4" />, color: 'text-red-500' },
-                            { label: 'Complete Info', value: 'complete', icon: <Check className="w-4 h-4" />, color: 'text-emerald-500' },
-                            { type: 'checkbox', label: 'Missing This One Only', value: 'missing-this-one-only' },
-                            { type: 'divider' },
-                            { label: 'Missing 480p', value: '480p' },
-                            { label: 'Missing 720p', value: '720p' },
-                            { label: 'Missing 1080p', value: '1080p' },
-                             { label: 'Missing Genre', value: 'genre' },
-                            { label: 'Missing Language', value: 'language' },
-                            { label: 'Missing Print Quality', value: 'quality' },
-                            { label: 'Missing Poster', value: 'poster' },
-                            { label: 'Missing Year', value: 'year' },
-                            { type: 'divider' },
-                            { label: 'Disabled (Draft)', value: 'disabled', icon: <EyeOff className="w-4 h-4" /> }
+                            {
+                              label: "All Content",
+                              value: "none",
+                              icon: <Eye className="w-4 h-4" />,
+                            },
+                            {
+                              label: "Missing Info (All)",
+                              value: "missing",
+                              icon: <AlertCircle className="w-4 h-4" />,
+                              color: "text-red-500",
+                            },
+                            {
+                              label: "Complete Info",
+                              value: "complete",
+                              icon: <Check className="w-4 h-4" />,
+                              color: "text-emerald-500",
+                            },
+                            {
+                              type: "checkbox",
+                              label: "Missing This One Only",
+                              value: "missing-this-one-only",
+                            },
+                            { type: "divider" },
+                            { label: "Missing 480p", value: "480p" },
+                            { label: "Missing 720p", value: "720p" },
+                            { label: "Missing 1080p", value: "1080p" },
+                            { label: "Missing Genre", value: "genre" },
+                            { label: "Missing Language", value: "language" },
+                            {
+                              label: "Missing Print Quality",
+                              value: "quality",
+                            },
+                            { label: "Missing Poster", value: "poster" },
+                            { label: "Missing Year", value: "year" },
+                            { type: "divider" },
+                            {
+                              label: "Disabled (Draft)",
+                              value: "disabled",
+                              icon: <EyeOff className="w-4 h-4" />,
+                            },
                           ].map((item, idx) => {
-                            if (item.type === 'divider') return <div key={`div-${idx}`} className="h-px bg-zinc-200 dark:bg-zinc-800 my-1 mx-2" />;
-                            if (item.type === 'checkbox') {
+                            if (item.type === "divider")
                               return (
-                                <label key={item.value} className="flex items-center gap-2 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
-                                  <input 
-                                    type="checkbox" 
-                                    checked={missingThisOneOnly} 
-                                    onChange={e => setMissingThisOneOnly(e.target.checked)} 
-                                    className="rounded text-emerald-500 focus:ring-emerald-500" 
+                                <div
+                                  key={`div-${idx}`}
+                                  className="h-px bg-zinc-200 dark:bg-zinc-800 my-1 mx-2"
+                                />
+                              );
+                            if (item.type === "checkbox") {
+                              return (
+                                <label
+                                  key={item.value}
+                                  className="flex items-center gap-2 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={missingThisOneOnly}
+                                    onChange={(e) =>
+                                      setMissingThisOneOnly(e.target.checked)
+                                    }
+                                    className="rounded text-emerald-500 focus:ring-emerald-500"
                                   />
                                   {item.label}
                                 </label>
                               );
                             }
-                            
+
                             return (
                               <button
                                 key={item.value}
@@ -3154,16 +4351,30 @@ export default function ContentManagement() {
                                 }}
                                 className={clsx(
                                   "w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors",
-                                  showMissing === item.value 
-                                    ? "bg-emerald-500 text-white" 
-                                    : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800"
+                                  showMissing === item.value
+                                    ? "bg-emerald-500 text-white"
+                                    : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800",
                                 )}
                               >
                                 <div className="flex items-center gap-2">
-                                  {item.icon && <span className={clsx(showMissing === item.value ? "text-white" : item.color)}>{item.icon}</span>}
-                                  <span className={clsx(!item.icon && "ml-6")}>{item.label}</span>
+                                  {item.icon && (
+                                    <span
+                                      className={clsx(
+                                        showMissing === item.value
+                                          ? "text-white"
+                                          : item.color,
+                                      )}
+                                    >
+                                      {item.icon}
+                                    </span>
+                                  )}
+                                  <span className={clsx(!item.icon && "ml-6")}>
+                                    {item.label}
+                                  </span>
                                 </div>
-                                {showMissing === item.value && <Check className="w-4 h-4" />}
+                                {showMissing === item.value && (
+                                  <Check className="w-4 h-4" />
+                                )}
                               </button>
                             );
                           })}
@@ -3191,14 +4402,16 @@ export default function ContentManagement() {
                 className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-10 pr-4 py-3 focus:outline-none focus:border-emerald-500"
               />
               {showSuggestions && searchSuggestions.length > 0 && (
-                <div 
+                <div
                   ref={suggestionsRef}
                   className="absolute z-50 w-full mt-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-xl shadow-2xl max-h-60 overflow-y-auto"
                 >
-                  <div className="p-2 text-xs font-medium text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-800">Suggestions</div>
-                  {searchSuggestions.map(suggestion => (
-                    <div 
-                      key={suggestion.id} 
+                  <div className="p-2 text-xs font-medium text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-800">
+                    Suggestions
+                  </div>
+                  {searchSuggestions.map((suggestion) => (
+                    <div
+                      key={suggestion.id}
                       className="px-4 py-3 hover:bg-zinc-200 dark:hover:bg-zinc-800 cursor-pointer flex items-center gap-3 transition-colors"
                       onClick={() => {
                         setSearchTerm(suggestion.title);
@@ -3206,15 +4419,23 @@ export default function ContentManagement() {
                       }}
                     >
                       {suggestion.posterUrl ? (
-                        <img src={suggestion.posterUrl} alt={suggestion.title} className="w-8 h-12 object-cover rounded" />
+                        <img
+                          src={suggestion.posterUrl}
+                          alt={suggestion.title}
+                          className="w-8 h-12 object-cover rounded"
+                        />
                       ) : (
                         <div className="w-8 h-12 bg-zinc-100 dark:bg-zinc-800 rounded flex items-center justify-center">
                           <Film className="w-4 h-4 text-zinc-600" />
                         </div>
                       )}
                       <div>
-                        <div className="font-medium text-sm text-zinc-900 dark:text-white line-clamp-1">{formatContentTitle(suggestion)}</div>
-                        <div className="text-xs text-zinc-500 dark:text-zinc-400">{suggestion.year} • {suggestion.type}</div>
+                        <div className="font-medium text-sm text-zinc-900 dark:text-white line-clamp-1">
+                          {formatContentTitle(suggestion)}
+                        </div>
+                        <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                          {suggestion.year} • {suggestion.type}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -3230,39 +4451,47 @@ export default function ContentManagement() {
                   </div>
                 ) : (
                   <>
-                    <span className="text-sm text-zinc-500 dark:text-zinc-400">{selectedContent.length} selected</span>
+                    <span className="text-sm text-zinc-500 dark:text-zinc-400">
+                      {selectedContent.length} selected
+                    </span>
                     <select
                       onChange={(e) => {
-                        if (e.target.value === 'delete') {
+                        if (e.target.value === "delete") {
                           setShowBulkDeleteConfirm(true);
-                        } else if (e.target.value === 'merge') {
+                        } else if (e.target.value === "merge") {
                           initiateMerge();
-                        } else if (e.target.value === 'batch_fetch') {
+                        } else if (e.target.value === "batch_fetch") {
                           setIsBatchFetchModalOpen(true);
-                          setBatchFetchMode('media');
-                        } else if (e.target.value === 'batch_links') {
+                          setBatchFetchMode("media");
+                        } else if (e.target.value === "batch_links") {
                           setIsBatchFetchModalOpen(true);
-                          setBatchFetchMode('links');
+                          setBatchFetchMode("links");
                         } else if (e.target.value) {
                           handleBulkStatusChange(e.target.value as any);
                         }
-                        e.target.value = '';
+                        e.target.value = "";
                       }}
                       className="bg-transparent border-none text-sm focus:outline-none text-emerald-500 font-medium cursor-pointer"
                     >
                       <option value="">Bulk Actions</option>
-                      {(profile?.role === 'admin' || profile?.role === 'owner') && (
+                      {(profile?.role === "admin" ||
+                        profile?.role === "owner") && (
                         <>
                           <option value="published">Publish</option>
                           <option value="draft">Draft</option>
-                          <option value="selected_content">Selected Content Only</option>
-                          <option value="batch_fetch">Batch Fetch Missing Data</option>
+                          <option value="selected_content">
+                            Selected Content Only
+                          </option>
+                          <option value="batch_fetch">
+                            Batch Fetch Missing Data
+                          </option>
                           <option value="batch_links">Batch Fetch Links</option>
                           <option value="merge">Merge Contents</option>
                           <option value="delete">Delete</option>
                         </>
                       )}
-                      {(profile?.role === 'content_manager' || profile?.role === 'manager') && (
+                      {(profile?.role === "content_manager" ||
+                        profile?.role === "manager") && (
                         <option value="draft">Draft</option>
                       )}
                     </select>
@@ -3270,24 +4499,31 @@ export default function ContentManagement() {
                 )}
               </div>
             )}
-            {(profile?.role === 'admin' || profile?.role === 'owner') && (
-               <div className="flex items-center gap-2">
-                 {hasPendingChanges && (
-                    <span className="flex h-2 w-2 rounded-full bg-red-500 animate-ping" />
-                 )}
-                 <button
-                   className={clsx(
-                     "px-6 py-3 rounded-xl font-medium flex items-center justify-center gap-2 transition-colors whitespace-nowrap text-white",
-                     hasPendingChanges ? "bg-orange-600 hover:bg-orange-700" : "bg-zinc-600 hover:bg-zinc-700"
-                   )}
-                   onClick={() => setIsSyncConfirmOpen(true)}
-                 >
-                   {hasPendingChanges ? 'Update Changes to Server*' : 'Update Changes to Server'}
-                 </button>
-               </div>
+            {(profile?.role === "admin" || profile?.role === "owner") && (
+              <div className="flex items-center gap-2">
+                {hasPendingChanges && (
+                  <span className="flex h-2 w-2 rounded-full bg-red-500 animate-ping" />
+                )}
+                <button
+                  className={clsx(
+                    "px-6 py-3 rounded-xl font-medium flex items-center justify-center gap-2 transition-colors whitespace-nowrap text-white",
+                    hasPendingChanges
+                      ? "bg-orange-600 hover:bg-orange-700"
+                      : "bg-zinc-600 hover:bg-zinc-700",
+                  )}
+                  onClick={() => setIsSyncConfirmOpen(true)}
+                >
+                  {hasPendingChanges
+                    ? "Update Changes to Server*"
+                    : "Update Changes to Server"}
+                </button>
+              </div>
             )}
             <button
-              onClick={() => { resetForm(); setIsModalOpen(true); }}
+              onClick={() => {
+                resetForm();
+                setIsModalOpen(true);
+              }}
               className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-3 rounded-xl font-medium flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
             >
               <Plus className="w-5 h-5" />
@@ -3295,25 +4531,44 @@ export default function ContentManagement() {
             </button>
           </div>
         </div>
-        
+
         <div className="flex flex-col gap-1 bg-zinc-50 dark:bg-zinc-900 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
           {/* Line 1 */}
           <div className="flex flex-row flex-nowrap gap-1">
             {isFiltered && (
-              <button onClick={clearFilters} className="flex-none bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-lg px-2 py-1 text-xs flex items-center gap-1">
+              <button
+                onClick={clearFilters}
+                className="flex-none bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-lg px-2 py-1 text-xs flex items-center gap-1"
+              >
                 <X className="w-3 h-3" />
               </button>
             )}
-            <select value={filterType} onChange={(e) => setFilterType(e.target.value as any)} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500">
+            <select
+              value={filterType}
+              onChange={(e) => setFilterType(e.target.value as any)}
+              className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
+            >
               <option value="all">Types</option>
               <option value="movie">Movies</option>
               <option value="series">Series</option>
             </select>
-            <select value={filterYear} onChange={(e) => setFilterYear(e.target.value)} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500">
+            <select
+              value={filterYear}
+              onChange={(e) => setFilterYear(e.target.value)}
+              className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
+            >
               <option value="all">Years</option>
-              {uniqueYears.map(y => <option key={y} value={y.toString()}>{y}</option>)}
+              {uniqueYears.map((y) => (
+                <option key={y} value={y.toString()}>
+                  {y}
+                </option>
+              ))}
             </select>
-            <select value={filterSort} onChange={(e) => setFilterSort(e.target.value as any)} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500">
+            <select
+              value={filterSort}
+              onChange={(e) => setFilterSort(e.target.value as any)}
+              className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
+            >
               <option value="default">Default Order</option>
               <option value="newest">Newest Added</option>
               <option value="oldest">Oldest Added</option>
@@ -3321,31 +4576,71 @@ export default function ContentManagement() {
           </div>
           {/* Line 2 */}
           <div className="flex flex-row flex-nowrap gap-1">
-            <select value={filterGenre} onChange={(e) => setFilterGenre(e.target.value)} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500">
+            <select
+              value={filterGenre}
+              onChange={(e) => setFilterGenre(e.target.value)}
+              className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
+            >
               <option value="all">Genres</option>
-              {[...genres].sort((a,b) => a.name.localeCompare(b.name)).map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+              {[...genres]
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
             </select>
-            <select value={filterLanguage} onChange={(e) => setFilterLanguage(e.target.value)} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500">
+            <select
+              value={filterLanguage}
+              onChange={(e) => setFilterLanguage(e.target.value)}
+              className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
+            >
               <option value="all">Languages</option>
-              {[...languages].sort((a,b) => a.name.localeCompare(b.name)).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+              {[...languages]
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
             </select>
-            <select value={filterQuality} onChange={(e) => setFilterQuality(e.target.value)} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500">
+            <select
+              value={filterQuality}
+              onChange={(e) => setFilterQuality(e.target.value)}
+              className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
+            >
               <option value="all">Qualities</option>
-              {[...qualities].sort((a,b) => a.name.localeCompare(b.name)).map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+              {[...qualities]
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map((q) => (
+                  <option key={q.id} value={q.id}>
+                    {q.name}
+                  </option>
+                ))}
             </select>
           </div>
           {/* Line 3 */}
           <div className="flex flex-row flex-nowrap gap-1">
-            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as any)} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500">
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value as any)}
+              className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
+            >
               <option value="all">Status</option>
               <option value="published">Published</option>
               <option value="draft">Draft</option>
             </select>
-            {(profile?.role === 'admin' || profile?.role === 'owner') && (
-              <select value={filterAddedBy} onChange={(e) => setFilterAddedBy(e.target.value)} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500">
+            {(profile?.role === "admin" || profile?.role === "owner") && (
+              <select
+                value={filterAddedBy}
+                onChange={(e) => setFilterAddedBy(e.target.value)}
+                className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
+              >
                 <option value="all">Added By: All</option>
                 {Object.entries(managers).map(([id, name]) => (
-                  <option key={id} value={id}>{name}</option>
+                  <option key={id} value={id}>
+                    {name}
+                  </option>
                 ))}
               </select>
             )}
@@ -3355,22 +4650,28 @@ export default function ContentManagement() {
 
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <input 
-            type="checkbox" 
-            checked={selectedContent.length === filteredContent.length && filteredContent.length > 0}
+          <input
+            type="checkbox"
+            checked={
+              selectedContent.length === filteredContent.length &&
+              filteredContent.length > 0
+            }
             onChange={handleSelectAll}
             ref={(el) => {
               if (el) {
-                el.indeterminate = selectedContent.length > 0 && selectedContent.length < filteredContent.length;
+                el.indeterminate =
+                  selectedContent.length > 0 &&
+                  selectedContent.length < filteredContent.length;
               }
             }}
             className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-zinc-950"
           />
           <span className="text-sm text-zinc-500 dark:text-zinc-400">
-            {selectedContent.length === filteredContent.length && filteredContent.length > 0 
-              ? "Deselect All" 
-              : selectedContent.length > 0 
-                ? "Deselect Selected" 
+            {selectedContent.length === filteredContent.length &&
+            filteredContent.length > 0
+              ? "Deselect All"
+              : selectedContent.length > 0
+                ? "Deselect Selected"
                 : "Select All"}
           </span>
         </div>
@@ -3416,9 +4717,9 @@ export default function ContentManagement() {
           </div>
           {visibleCount < filteredContent.length && (
             <div className="mt-8 flex justify-center">
-              <Button 
-                variant="secondary" 
-                onClick={() => setVisibleCount(prev => prev + 50)}
+              <Button
+                variant="secondary"
+                onClick={() => setVisibleCount((prev) => prev + 50)}
                 className="px-8"
               >
                 Load More
@@ -3428,30 +4729,102 @@ export default function ContentManagement() {
         </>
       )}
 
-      <ContentFormModal state={{
-      isModalOpen, editingId, contentList, profile, type, status, initialStatus, addToTrending, addToNewlyAdded,
-      title, showTitleSuggestions, disableSuggestions, description, posterUrl, trailerUrl, trailerTitle, trailerYoutubeTitle,
-      trailerSeasonNumber, trailers, sampleUrl, imdbLink, imdbRating, year, releaseDate, runtime, selectedGenres, genres,
-      selectedLanguages, languages, selectedQuality, qualities, subtitles, cast, country, isDescriptionExpanded, isCastExpanded,
-      isCountryExpanded, movieLinks, seasons, expandedEpisodes, isSaving, titleSuggestions
-  }} actions={{
-      setIsModalOpen, setIsAutoFillModalOpen, setType, setStatus, setTitle, setShowTitleSuggestions, setDisableSuggestions,
-      setDescription, setPosterUrl, handleImageUpload, setTrailerUrl, setTrailerTitle, setTrailerYoutubeTitle, setTrailerSeasonNumber,
-      setTrailers, setSampleUrl, setImdbLink, setImdbRating, setYear, setReleaseDate, setRuntime, setSelectedGenres, setManageModal,
-      setSelectedLanguages, setSelectedQuality, setSubtitles, setCast, setCountry, setIsDescriptionExpanded, setIsCastExpanded,
-      setIsCountryExpanded, setMovieLinks, setSeasons, setExpandedEpisodes, handleSave, setIsLinkCheckerOpen, setIsMasterFetchModalOpen
-  }} />
+      <ContentFormModal
+        state={{
+          isModalOpen,
+          editingId,
+          contentList,
+          profile,
+          type,
+          status,
+          initialStatus,
+          addToTrending,
+          addToNewlyAdded,
+          title,
+          showTitleSuggestions,
+          disableSuggestions,
+          description,
+          posterUrl,
+          trailerUrl,
+          trailerTitle,
+          trailerYoutubeTitle,
+          trailerSeasonNumber,
+          trailers,
+          sampleUrl,
+          imdbLink,
+          imdbRating,
+          year,
+          releaseDate,
+          runtime,
+          selectedGenres,
+          genres,
+          selectedLanguages,
+          languages,
+          selectedQuality,
+          qualities,
+          subtitles,
+          cast,
+          country,
+          isDescriptionExpanded,
+          isCastExpanded,
+          isCountryExpanded,
+          movieLinks,
+          seasons,
+          expandedEpisodes,
+          isSaving,
+          titleSuggestions,
+        }}
+        actions={{
+          setIsModalOpen,
+          setIsAutoFillModalOpen,
+          setType,
+          setStatus,
+          setTitle,
+          setShowTitleSuggestions,
+          setDisableSuggestions,
+          setDescription,
+          setPosterUrl,
+          handleImageUpload,
+          setTrailerUrl,
+          setTrailerTitle,
+          setTrailerYoutubeTitle,
+          setTrailerSeasonNumber,
+          setTrailers,
+          setSampleUrl,
+          setImdbLink,
+          setImdbRating,
+          setYear,
+          setReleaseDate,
+          setRuntime,
+          setSelectedGenres,
+          setManageModal,
+          setSelectedLanguages,
+          setSelectedQuality,
+          setSubtitles,
+          setCast,
+          setCountry,
+          setIsDescriptionExpanded,
+          setIsCastExpanded,
+          setIsCountryExpanded,
+          setMovieLinks,
+          setSeasons,
+          setExpandedEpisodes,
+          handleSave,
+          setIsLinkCheckerOpen,
+          setIsMasterFetchModalOpen,
+        }}
+      />
 
       {/* Auto-Fill Modal */}
       <AnimatePresence>
         {isAutoFillModalOpen && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 z-[60]"
           >
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
@@ -3460,47 +4833,52 @@ export default function ContentManagement() {
             >
               <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-900/50">
                 <div>
-                  <h3 className="text-xl font-bold text-zinc-900 dark:text-white">Auto-Fill from Text</h3>
-                  <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">Paste WhatsApp or copied data to automatically populate fields</p>
+                  <h3 className="text-xl font-bold text-zinc-900 dark:text-white">
+                    Auto-Fill from Text
+                  </h3>
+                  <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
+                    Paste WhatsApp or copied data to automatically populate
+                    fields
+                  </p>
                 </div>
-                <button 
+                <button
                   onClick={() => setIsAutoFillModalOpen(false)}
                   className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-full transition-all"
                 >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-            
-            <div className="p-6">
-              <textarea
-                value={autoFillText}
-                onChange={(e) => setAutoFillText(e.target.value)}
-                placeholder="Paste your movie/series data here..."
-                className="w-full h-64 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 text-zinc-600 dark:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all resize-none font-mono text-sm"
-              />
-              
-              <div className="mt-6 flex gap-3">
-                <button
-                  onClick={handleAutoFill}
-                  disabled={!autoFillText.trim()}
-                  className="flex-1 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
-                >
-                  <ClipboardPaste className="w-5 h-5" /> Process & Auto-Fill
-                </button>
-                <button
-                  onClick={() => {
-                    setAutoFillText('');
-                    setIsAutoFillModalOpen(false);
-                  }}
-                  className="px-8 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white font-bold py-4 rounded-2xl transition-all"
-                >
-                  Cancel
+                  <X className="w-6 h-6" />
                 </button>
               </div>
-            </div>
+
+              <div className="p-6">
+                <textarea
+                  value={autoFillText}
+                  onChange={(e) => setAutoFillText(e.target.value)}
+                  placeholder="Paste your movie/series data here..."
+                  className="w-full h-64 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 text-zinc-600 dark:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all resize-none font-mono text-sm"
+                />
+
+                <div className="mt-6 flex gap-3">
+                  <button
+                    onClick={handleAutoFill}
+                    disabled={!autoFillText.trim()}
+                    className="flex-1 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
+                  >
+                    <ClipboardPaste className="w-5 h-5" /> Process & Auto-Fill
+                  </button>
+                  <button
+                    onClick={() => {
+                      setAutoFillText("");
+                      setIsAutoFillModalOpen(false);
+                    }}
+                    className="px-8 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white font-bold py-4 rounded-2xl transition-all"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </motion.div>
           </motion.div>
-        </motion.div>
-      )}
+        )}
       </AnimatePresence>
 
       <MediaModal
@@ -3541,14 +4919,16 @@ export default function ContentManagement() {
             setAlertConfig({
               isOpen: true,
               title: "Sync Successful",
-              message: "All changes have been synced to the server successfully."
+              message:
+                "All changes have been synced to the server successfully.",
             });
             setIsSyncConfirmOpen(false);
           } catch (error) {
             setAlertConfig({
               isOpen: true,
               title: "Sync Failed",
-              message: "An error occurred while syncing changes. Please try again."
+              message:
+                "An error occurred while syncing changes. Please try again.",
             });
           } finally {
             setIsSyncing(false);
@@ -3593,30 +4973,49 @@ export default function ContentManagement() {
                   <RefreshCw className="w-5 h-5 text-emerald-500" />
                   Confirm Merge
                 </h2>
-                <button onClick={() => setShowMergeConfirm(false)} className="text-zinc-500 hover:text-zinc-900 dark:hover:text-white"><X className="w-6 h-6" /></button>
+                <button
+                  onClick={() => setShowMergeConfirm(false)}
+                  className="text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
+                >
+                  <X className="w-6 h-6" />
+                </button>
               </div>
 
               <div className="p-6 space-y-4">
                 <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                  You are merging <strong>{mergeData.items.length} items</strong>. All links will be combined into one content entry. The other items will be deleted.
+                  You are merging{" "}
+                  <strong>{mergeData.items.length} items</strong>. All links
+                  will be combined into one content entry. The other items will
+                  be deleted.
                 </p>
 
                 <div className="space-y-4 bg-zinc-50 dark:bg-zinc-900/50 p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800">
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Final Title</label>
-                    <input 
-                      type="text" 
-                      value={mergeData.title} 
-                      onChange={(e) => setMergeData({...mergeData, title: e.target.value})}
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+                      Final Title
+                    </label>
+                    <input
+                      type="text"
+                      value={mergeData.title}
+                      onChange={(e) =>
+                        setMergeData({ ...mergeData, title: e.target.value })
+                      }
                       className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Final Year</label>
-                    <input 
-                      type="number" 
-                      value={mergeData.year} 
-                      onChange={(e) => setMergeData({...mergeData, year: e.target.value ? parseInt(e.target.value) : ''})}
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+                      Final Year
+                    </label>
+                    <input
+                      type="number"
+                      value={mergeData.year}
+                      onChange={(e) =>
+                        setMergeData({
+                          ...mergeData,
+                          year: e.target.value ? parseInt(e.target.value) : "",
+                        })
+                      }
                       className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
                       placeholder="YYYY"
                     />
@@ -3624,31 +5023,40 @@ export default function ContentManagement() {
                 </div>
 
                 <div className="max-h-32 overflow-y-auto custom-scrollbar space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 block mb-1">Items being merged:</label>
-                  {mergeData.items.map(item => (
-                    <div key={item.id} className="text-xs p-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg flex justify-between">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 block mb-1">
+                    Items being merged:
+                  </label>
+                  {mergeData.items.map((item) => (
+                    <div
+                      key={item.id}
+                      className="text-xs p-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg flex justify-between"
+                    >
                       <span className="truncate">{item.title}</span>
-                      <span className="text-zinc-500 shrink-0 ml-2">{item.year}</span>
+                      <span className="text-zinc-500 shrink-0 ml-2">
+                        {item.year}
+                      </span>
                     </div>
                   ))}
                 </div>
               </div>
 
               <div className="p-6 border-t border-zinc-100 dark:border-zinc-800 flex gap-3">
-                <button 
+                <button
                   onClick={() => setShowMergeConfirm(false)}
                   disabled={isMerging}
                   className="flex-1 px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 text-sm font-bold hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all"
                 >
                   Cancel
                 </button>
-                <button 
+                <button
                   onClick={handleMerge}
                   disabled={isMerging}
                   className="flex-1 px-4 py-3 rounded-xl bg-emerald-500 text-white text-sm font-bold hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2"
                 >
-                  {isMerging ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                  {isMerging ? 'Merging...' : 'Merge Now'}
+                  {isMerging ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : null}
+                  {isMerging ? "Merging..." : "Merge Now"}
                 </button>
               </div>
             </motion.div>
@@ -3667,19 +5075,27 @@ export default function ContentManagement() {
               exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
               className={clsx(
                 "pointer-events-auto px-6 py-2.5 rounded-full flex items-center gap-3 text-sm font-medium shadow-lg whitespace-nowrap",
-                toast.type === 'error' ? "bg-red-500 text-white" :
-                toast.type === 'success' ? "bg-emerald-500 text-white" :
-                "bg-zinc-950 text-white"
+                toast.type === "error"
+                  ? "bg-red-500 text-white"
+                  : toast.type === "success"
+                    ? "bg-emerald-500 text-white"
+                    : "bg-zinc-950 text-white",
               )}
             >
               <div className="shrink-0">
-                {toast.type === 'error' ? <AlertCircle className="w-4 h-4" /> : 
-                 toast.type === 'success' ? <Check className="w-4 h-4" /> : 
-                 <Bell className="w-4 h-4" />}
+                {toast.type === "error" ? (
+                  <AlertCircle className="w-4 h-4" />
+                ) : toast.type === "success" ? (
+                  <Check className="w-4 h-4" />
+                ) : (
+                  <Bell className="w-4 h-4" />
+                )}
               </div>
               <span className="truncate">{toast.message}</span>
-              <button 
-                onClick={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
+              <button
+                onClick={() =>
+                  setToasts((prev) => prev.filter((t) => t.id !== toast.id))
+                }
                 className="ml-2 p-1 hover:bg-black/10 rounded-full transition-colors flex items-center justify-center"
               >
                 <X className="w-3.5 h-3.5" />
@@ -3699,13 +5115,13 @@ export default function ContentManagement() {
 
       <AnimatePresence>
         {imdbSeasonsPopup && imdbSeasonsPopup.isOpen && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4"
           >
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
@@ -3716,92 +5132,114 @@ export default function ContentManagement() {
                 onClick={() => setImdbSeasonsPopup(null)}
                 className="absolute top-4 right-4 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors"
               >
-              <X className="w-5 h-5" />
-            </button>
-            <h3 className="text-xl font-bold mb-2">Select Seasons</h3>
-            <p className="text-zinc-500 dark:text-zinc-400 mb-6">Choose which seasons to fetch for "{imdbSeasonsPopup.show.name}"</p>
-            
-            <div className="max-h-60 overflow-y-auto space-y-2 mb-6 pr-2 custom-scrollbar">
-              {imdbSeasonsPopup.seasons.map(season => (
-                <label key={season} className="flex items-center gap-3 p-3 rounded-xl hover:bg-zinc-200 dark:hover:bg-zinc-800/50 cursor-pointer border border-zinc-200 dark:border-zinc-800/50 transition-colors">
-                  <input
-                    type="checkbox"
-                    checked={selectedImdbSeasons.includes(season)}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedImdbSeasons(prev => [...prev, season]);
-                      } else {
-                        setSelectedImdbSeasons(prev => prev.filter(s => s !== season));
-                      }
-                    }}
-                    className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-700 text-emerald-500 focus:ring-emerald-500/20 bg-white dark:bg-zinc-950"
-                  />
-                  <span className="font-medium">Season {season}</span>
-                </label>
-              ))}
-            </div>
+                <X className="w-5 h-5" />
+              </button>
+              <h3 className="text-xl font-bold mb-2">Select Seasons</h3>
+              <p className="text-zinc-500 dark:text-zinc-400 mb-6">
+                Choose which seasons to fetch for "{imdbSeasonsPopup.show.name}"
+              </p>
 
-            <div className="flex gap-3">
-              <button
-                onClick={() => {
-                  setSelectedImdbSeasons(imdbSeasonsPopup.seasons);
-                }}
-                className="flex-1 py-2 px-4 rounded-xl font-medium bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white transition-colors text-sm"
-              >
-                Select All
-              </button>
-              <button
-                onClick={() => {
-                  setSelectedImdbSeasons([]);
-                }}
-                className="flex-1 py-2 px-4 rounded-xl font-medium bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white transition-colors text-sm"
-              >
-                Deselect All
-              </button>
-            </div>
+              <div className="max-h-60 overflow-y-auto space-y-2 mb-6 pr-2 custom-scrollbar">
+                {imdbSeasonsPopup.seasons.map((season) => (
+                  <label
+                    key={season}
+                    className="flex items-center gap-3 p-3 rounded-xl hover:bg-zinc-200 dark:hover:bg-zinc-800/50 cursor-pointer border border-zinc-200 dark:border-zinc-800/50 transition-colors"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedImdbSeasons.includes(season)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedImdbSeasons((prev) => [...prev, season]);
+                        } else {
+                          setSelectedImdbSeasons((prev) =>
+                            prev.filter((s) => s !== season),
+                          );
+                        }
+                      }}
+                      className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-700 text-emerald-500 focus:ring-emerald-500/20 bg-white dark:bg-zinc-950"
+                    />
+                    <span className="font-medium">Season {season}</span>
+                  </label>
+                ))}
+              </div>
 
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                onClick={() => setImdbSeasonsPopup(null)}
-                className="px-6 py-2 rounded-xl font-medium hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  processImdbSeasons(imdbSeasonsPopup.epData, selectedImdbSeasons);
-                  setImdbSeasonsPopup(null);
-                }}
-                disabled={selectedImdbSeasons.length === 0}
-                className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-xl font-bold transition-colors"
-              >
-                Fetch Selected
-              </button>
-            </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setSelectedImdbSeasons(imdbSeasonsPopup.seasons);
+                  }}
+                  className="flex-1 py-2 px-4 rounded-xl font-medium bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white transition-colors text-sm"
+                >
+                  Select All
+                </button>
+                <button
+                  onClick={() => {
+                    setSelectedImdbSeasons([]);
+                  }}
+                  className="flex-1 py-2 px-4 rounded-xl font-medium bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white transition-colors text-sm"
+                >
+                  Deselect All
+                </button>
+              </div>
+
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  onClick={() => setImdbSeasonsPopup(null)}
+                  className="px-6 py-2 rounded-xl font-medium hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    processImdbSeasons(
+                      imdbSeasonsPopup.epData,
+                      selectedImdbSeasons,
+                    );
+                    setImdbSeasonsPopup(null);
+                  }}
+                  disabled={selectedImdbSeasons.length === 0}
+                  className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-xl font-bold transition-colors"
+                >
+                  Fetch Selected
+                </button>
+              </div>
+            </motion.div>
           </motion.div>
-        </motion.div>
-      )}
+        )}
       </AnimatePresence>
       {shareSeasonModal.isOpen && shareSeasonModal.content && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
           <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-md w-full relative">
             <button
-              onClick={() => setShareSeasonModal({ ...shareSeasonModal, isOpen: false })}
+              onClick={() =>
+                setShareSeasonModal({ ...shareSeasonModal, isOpen: false })
+              }
               className="absolute top-4 right-4 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
             <h3 className="text-xl font-bold mb-2">Share Series</h3>
-            <p className="text-zinc-500 dark:text-zinc-400 mb-6">Select which seasons of "{shareSeasonModal.content.title}" you want to share on WhatsApp.</p>
-            
+            <p className="text-zinc-500 dark:text-zinc-400 mb-6">
+              Select which seasons of "{shareSeasonModal.content.title}" you
+              want to share on WhatsApp.
+            </p>
+
             <div className="max-h-60 overflow-y-auto space-y-2 mb-6 pr-2 custom-scrollbar">
-              <label className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer border transition-colors ${selectedShareSeasons.length === shareSeasonModal.seasons.length ? 'bg-emerald-500/10 border-emerald-500 text-emerald-500' : 'bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800/50'}`}>
+              <label
+                className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer border transition-colors ${selectedShareSeasons.length === shareSeasonModal.seasons.length ? "bg-emerald-500/10 border-emerald-500 text-emerald-500" : "bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800/50"}`}
+              >
                 <input
                   type="checkbox"
-                  checked={selectedShareSeasons.length === shareSeasonModal.seasons.length}
+                  checked={
+                    selectedShareSeasons.length ===
+                    shareSeasonModal.seasons.length
+                  }
                   onChange={(e) => {
                     if (e.target.checked) {
-                      setSelectedShareSeasons(shareSeasonModal.seasons.map(s => s.seasonNumber));
+                      setSelectedShareSeasons(
+                        shareSeasonModal.seasons.map((s) => s.seasonNumber),
+                      );
                     } else {
                       setSelectedShareSeasons([]);
                     }
@@ -3811,28 +5249,40 @@ export default function ContentManagement() {
                 <span className="font-medium">All Seasons</span>
               </label>
               <div className="h-px bg-zinc-100 dark:bg-zinc-800 my-2" />
-              {shareSeasonModal.seasons.map(season => (
-                <label key={season.id} className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer border transition-colors ${selectedShareSeasons.includes(season.seasonNumber) ? 'bg-emerald-500/10 border-emerald-500 text-emerald-500' : 'bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800/50'}`}>
+              {shareSeasonModal.seasons.map((season) => (
+                <label
+                  key={season.id}
+                  className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer border transition-colors ${selectedShareSeasons.includes(season.seasonNumber) ? "bg-emerald-500/10 border-emerald-500 text-emerald-500" : "bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800/50"}`}
+                >
                   <input
                     type="checkbox"
                     checked={selectedShareSeasons.includes(season.seasonNumber)}
                     onChange={(e) => {
                       if (e.target.checked) {
-                        setSelectedShareSeasons(prev => [...prev, season.seasonNumber]);
+                        setSelectedShareSeasons((prev) => [
+                          ...prev,
+                          season.seasonNumber,
+                        ]);
                       } else {
-                        setSelectedShareSeasons(prev => prev.filter(s => s !== season.seasonNumber));
+                        setSelectedShareSeasons((prev) =>
+                          prev.filter((s) => s !== season.seasonNumber),
+                        );
                       }
                     }}
                     className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-700 text-emerald-500 focus:ring-emerald-500/20 bg-white dark:bg-zinc-950"
                   />
-                  <span className="font-medium">Season {season.seasonNumber}</span>
+                  <span className="font-medium">
+                    Season {season.seasonNumber}
+                  </span>
                 </label>
               ))}
             </div>
 
             <div className="flex justify-end gap-3">
               <button
-                onClick={() => setShareSeasonModal({ ...shareSeasonModal, isOpen: false })}
+                onClick={() =>
+                  setShareSeasonModal({ ...shareSeasonModal, isOpen: false })
+                }
                 className="px-6 py-2 rounded-xl font-medium hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
               >
                 Cancel
@@ -3840,10 +5290,16 @@ export default function ContentManagement() {
               <button
                 onClick={() => {
                   if (shareSeasonModal.content) {
-                    if (shareSeasonModal.mode === 'whatsapp') {
-                      executeWhatsappShare(shareSeasonModal.content, selectedShareSeasons);
+                    if (shareSeasonModal.mode === "whatsapp") {
+                      executeWhatsappShare(
+                        shareSeasonModal.content,
+                        selectedShareSeasons,
+                      );
                     } else {
-                      executeShare(shareSeasonModal.content, selectedShareSeasons);
+                      executeShare(
+                        shareSeasonModal.content,
+                        selectedShareSeasons,
+                      );
                     }
                     setShareSeasonModal({ ...shareSeasonModal, isOpen: false });
                   }
@@ -3851,7 +5307,12 @@ export default function ContentManagement() {
                 disabled={selectedShareSeasons.length === 0}
                 className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-xl font-bold transition-colors flex items-center gap-2"
               >
-                {shareSeasonModal.mode === 'whatsapp' ? <MessageCircle className="w-4 h-4" /> : <Share2 className="w-4 h-4" />} Share ({selectedShareSeasons.length})
+                {shareSeasonModal.mode === "whatsapp" ? (
+                  <MessageCircle className="w-4 h-4" />
+                ) : (
+                  <Share2 className="w-4 h-4" />
+                )}{" "}
+                Share ({selectedShareSeasons.length})
               </button>
             </div>
           </div>
@@ -3866,57 +5327,86 @@ export default function ContentManagement() {
               <Bell className="w-6 h-6 text-blue-500" />
               Send Notification
             </h2>
-            
+
             <div className="bg-white dark:bg-zinc-950 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 mb-6 flex gap-4">
               {notificationModal.content.posterUrl && (
-                <img 
-                  src={notificationModal.content.posterUrl} 
-                  alt="Poster" 
+                <img
+                  src={notificationModal.content.posterUrl}
+                  alt="Poster"
                   className="w-16 h-24 object-cover rounded-md shrink-0"
                   referrerPolicy="no-referrer"
                 />
               )}
               <div>
-                <h3 className="font-bold text-zinc-900 dark:text-white mb-1">{getNotificationPreview(notificationModal.content).title}</h3>
-                <p className="text-sm text-zinc-500 dark:text-zinc-400 line-clamp-2">{getNotificationPreview(notificationModal.content).body}</p>
+                <h3 className="font-bold text-zinc-900 dark:text-white mb-1">
+                  {getNotificationPreview(notificationModal.content).title}
+                </h3>
+                <p className="text-sm text-zinc-500 dark:text-zinc-400 line-clamp-2">
+                  {getNotificationPreview(notificationModal.content).body}
+                </p>
               </div>
             </div>
 
-            {notificationModal.status === 'idle' && (
+            {notificationModal.status === "idle" && (
               <p className="text-zinc-500 dark:text-zinc-400 mb-6">
-                This will send a push notification to all users about this new content. Do you want to proceed?
+                This will send a push notification to all users about this new
+                content. Do you want to proceed?
               </p>
             )}
 
-            {notificationModal.status === 'sending' && (
+            {notificationModal.status === "sending" && (
               <div className="flex flex-col items-center justify-center py-6">
                 <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-blue-500 mb-4"></div>
-                <p className="text-blue-500 font-medium">Sending notification...</p>
+                <p className="text-blue-500 font-medium">
+                  Sending notification...
+                </p>
               </div>
             )}
 
-            {notificationModal.status === 'success' && (
+            {notificationModal.status === "success" && (
               <div className="flex flex-col items-center justify-center py-6">
                 <div className="w-12 h-12 bg-emerald-500/20 rounded-full flex items-center justify-center mb-4">
-                  <svg className="w-6 h-6 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
+                  <svg
+                    className="w-6 h-6 text-emerald-500"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M5 13l4 4L19 7"
+                    ></path>
+                  </svg>
                 </div>
-                <p className="text-emerald-500 font-medium">Notification successfully pushed!</p>
+                <p className="text-emerald-500 font-medium">
+                  Notification successfully pushed!
+                </p>
               </div>
             )}
 
-            {notificationModal.status === 'error' && (
+            {notificationModal.status === "error" && (
               <div className="flex flex-col items-center justify-center py-6">
                 <div className="w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mb-4">
                   <X className="w-6 h-6 text-red-500" />
                 </div>
-                <p className="text-red-500 font-medium">Error sending notification.</p>
+                <p className="text-red-500 font-medium">
+                  Error sending notification.
+                </p>
               </div>
             )}
 
-            {notificationModal.status === 'idle' && (
+            {notificationModal.status === "idle" && (
               <div className="flex justify-end gap-3">
                 <button
-                  onClick={() => setNotificationModal({ isOpen: false, content: null, status: 'idle' })}
+                  onClick={() =>
+                    setNotificationModal({
+                      isOpen: false,
+                      content: null,
+                      status: "idle",
+                    })
+                  }
                   className="px-6 py-2 rounded-xl font-medium hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
                 >
                   Cancel
@@ -3929,11 +5419,17 @@ export default function ContentManagement() {
                 </button>
               </div>
             )}
-            
-            {notificationModal.status === 'error' && (
+
+            {notificationModal.status === "error" && (
               <div className="flex justify-end gap-3 mt-4">
                 <button
-                  onClick={() => setNotificationModal({ isOpen: false, content: null, status: 'idle' })}
+                  onClick={() =>
+                    setNotificationModal({
+                      isOpen: false,
+                      content: null,
+                      status: "idle",
+                    })
+                  }
                   className="bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-6 py-2 rounded-xl font-bold transition-colors"
                 >
                   Close
@@ -3952,15 +5448,25 @@ export default function ContentManagement() {
         cancelText="Cancel"
         onConfirm={() => {
           if (shareAnywayConfig.content) {
-            if (shareAnywayConfig.mode === 'whatsapp') {
+            if (shareAnywayConfig.mode === "whatsapp") {
               executeWhatsappShare(shareAnywayConfig.content);
             } else {
               executeShare(shareAnywayConfig.content);
             }
-            setShareAnywayConfig({ isOpen: false, content: null, mode: 'standard' });
+            setShareAnywayConfig({
+              isOpen: false,
+              content: null,
+              mode: "standard",
+            });
           }
         }}
-        onCancel={() => setShareAnywayConfig({ isOpen: false, content: null, mode: 'standard' })}
+        onCancel={() =>
+          setShareAnywayConfig({
+            isOpen: false,
+            content: null,
+            mode: "standard",
+          })
+        }
       />
 
       <AdjustContentsModal
@@ -3970,13 +5476,17 @@ export default function ContentManagement() {
       />
       <ManageModal
         isOpen={manageModal.isOpen}
-        title={`Manage ${manageModal.type ? manageModal.type.charAt(0).toUpperCase() + manageModal.type.slice(1) : ''}s`}
+        title={`Manage ${manageModal.type ? manageModal.type.charAt(0).toUpperCase() + manageModal.type.slice(1) : ""}s`}
         onClose={() => setManageModal({ isOpen: false, type: null })}
-        type={manageModal.type || 'genre'}
+        type={manageModal.type || "genre"}
         items={
-          manageModal.type === 'genre' ? genres :
-          manageModal.type === 'language' ? languages :
-          manageModal.type === 'quality' ? qualities : []
+          manageModal.type === "genre"
+            ? genres
+            : manageModal.type === "language"
+              ? languages
+              : manageModal.type === "quality"
+                ? qualities
+                : []
         }
         onSave={async (items) => {
           if (!manageModal.type) return;

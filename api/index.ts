@@ -1309,15 +1309,25 @@ async function startServer() {
         if (parts.length >= 2) {
           let num = parseFloat(parts[0]);
           unit = parts[1].toUpperCase();
-          
+
           if (!isNaN(num)) {
-             // Convert from Hubcloud's Base-1024 to our Base-1000
-             const multiplier = unit === 'GB' ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000) : 
-                                unit === 'MB' ? (1024 * 1024) / (1000 * 1000) : 
-                                unit === 'KB' ? 1024 / 1000 : 1;
-             num = num * multiplier;
-             size = num >= 100 ? num.toFixed(0) : num >= 10 ? num.toFixed(1) : num.toFixed(2);
-             size = size.replace(/\.00$/, '').replace(/\.0$/, '');
+            // Convert from Hubcloud's Base-1024 to our Base-1000
+            const multiplier =
+              unit === "GB"
+                ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000)
+                : unit === "MB"
+                  ? (1024 * 1024) / (1000 * 1000)
+                  : unit === "KB"
+                    ? 1024 / 1000
+                    : 1;
+            num = num * multiplier;
+            size =
+              num >= 100
+                ? num.toFixed(0)
+                : num >= 10
+                  ? num.toFixed(1)
+                  : num.toFixed(2);
+            size = size.replace(/\.00$/, "").replace(/\.0$/, "");
           } else {
             size = parts[0];
           }
@@ -1327,8 +1337,20 @@ async function startServer() {
       }
 
       const title = $("title").text() || $(".card-header").text() || "";
+      const isNotFound =
+        response.status === 404 || title.toLowerCase().includes("not found");
+      const isWorking =
+        response.status < 400 ||
+        response.status === 403 ||
+        response.status === 503;
 
-      res.json({ size, unit, title: title.trim() });
+      res.json({
+        size,
+        unit,
+        title: title.trim(),
+        isWorking: isWorking && !isNotFound,
+        isNotFound,
+      });
     } catch (e: any) {
       console.error(e);
       res.status(500).json({ error: e.message });
@@ -1595,21 +1617,31 @@ async function startServer() {
       const sizeMatch = bodyText.match(/File Size\s*([\d.]+\s*[A-Za-z]+)/i);
       if (sizeMatch && sizeMatch[1]) {
         sizeInfo = sizeMatch[1].trim();
-        
+
         // Convert to base-1000
         const parts = sizeInfo.split(" ");
         if (parts.length >= 2) {
-           let num = parseFloat(parts[0]);
-           let unit = parts[1].toUpperCase();
-           if (!isNaN(num)) {
-             const multiplier = unit === 'GB' ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000) : 
-                                unit === 'MB' ? (1024 * 1024) / (1000 * 1000) : 
-                                unit === 'KB' ? 1024 / 1000 : 1;
-             num = num * multiplier;
-             let newSize = num >= 100 ? num.toFixed(0) : num >= 10 ? num.toFixed(1) : num.toFixed(2);
-             newSize = newSize.replace(/\.00$/, '').replace(/\.0$/, '');
-             sizeInfo = `${newSize} ${unit}`;
-           }
+          let num = parseFloat(parts[0]);
+          let unit = parts[1].toUpperCase();
+          if (!isNaN(num)) {
+            const multiplier =
+              unit === "GB"
+                ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000)
+                : unit === "MB"
+                  ? (1024 * 1024) / (1000 * 1000)
+                  : unit === "KB"
+                    ? 1024 / 1000
+                    : 1;
+            num = num * multiplier;
+            let newSize =
+              num >= 100
+                ? num.toFixed(0)
+                : num >= 10
+                  ? num.toFixed(1)
+                  : num.toFixed(2);
+            newSize = newSize.replace(/\.00$/, "").replace(/\.0$/, "");
+            sizeInfo = `${newSize} ${unit}`;
+          }
         }
       }
 

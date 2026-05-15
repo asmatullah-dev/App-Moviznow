@@ -1,4 +1,4 @@
-import { Language, Quality } from '../types';
+import { Language, Quality } from "../types";
 
 export type StatusLabel =
   | "WORKING"
@@ -43,7 +43,7 @@ export type LinkCheckResult = {
 export function normalizeUrl(input: string) {
   let trimmed = input.trim();
   if (!trimmed) return "";
-  
+
   // Basic protocol check
   if (!/^https?:\/\//i.test(trimmed)) {
     trimmed = `https://${trimmed}`;
@@ -52,24 +52,25 @@ export function normalizeUrl(input: string) {
   try {
     const url = new URL(trimmed);
     const host = url.hostname.toLowerCase().replace(/^www\./, "");
-    
-    const isPixeldrain = host.includes("pixeldrain.com") || 
-                        host.includes("pixeldrain.dev") || 
-                        host.includes("pixeldrain.net") || 
-                        host === "pixel.drain" ||
-                        host === "pixeldra.in";
+
+    const isPixeldrain =
+      host.includes("pixeldrain.com") ||
+      host.includes("pixeldrain.dev") ||
+      host.includes("pixeldrain.net") ||
+      host === "pixel.drain" ||
+      host === "pixeldra.in";
 
     if (isPixeldrain) {
       // Pixeldrain conversion
       const fileIdMatch = url.pathname.match(/\/(?:u|api\/file)\/([^/?#]+)/i);
       const listIdMatch = url.pathname.match(/\/(?:l|api\/list)\/([^/?#]+)/i);
-      
+
       if (fileIdMatch?.[1]) {
         url.pathname = `/u/${fileIdMatch[1]}`;
       } else if (listIdMatch?.[1]) {
         url.pathname = `/l/${listIdMatch[1]}`;
       }
-      
+
       url.search = "";
       url.hash = "";
       return url.toString().replace(/\/$/, "");
@@ -81,11 +82,12 @@ export function normalizeUrl(input: string) {
     }
   } catch (e) {
     // Fallback logic if URL is invalid
-    const isPixeldrain = trimmed.includes("pixeldrain.com/") || 
-                        trimmed.includes("pixeldrain.dev/") || 
-                        trimmed.includes("pixeldrain.net/") ||
-                        trimmed.includes("pixel.drain/") ||
-                        trimmed.includes("pixeldra.in/");
+    const isPixeldrain =
+      trimmed.includes("pixeldrain.com/") ||
+      trimmed.includes("pixeldrain.dev/") ||
+      trimmed.includes("pixeldrain.net/") ||
+      trimmed.includes("pixel.drain/") ||
+      trimmed.includes("pixeldra.in/");
 
     if (isPixeldrain) {
       trimmed = trimmed.replace(/\?download$/i, "");
@@ -103,9 +105,21 @@ export function splitLinks(text: string) {
 
 export function guessLinkType(url: string) {
   const lower = url.toLowerCase();
-  if (lower.includes("pixeldrain.com") || lower.includes("pixeldrain.dev") || lower.includes("pixeldrain.net") || lower.includes("pixel.drain") || lower.includes("pixeldra.in")) return "Pixeldrain";
-  if (lower.includes("raj.lat") || lower.includes("hub.")) return "Direct download gate";
-  if (/\.(zip|rar|7z|tar|gz|mp4|mkv|avi|mov|pdf|docx?|xlsx?|pptx?|apk|exe|srt|ass|mp3|wav|png|jpe?g|webp)(\?|#|$)/i.test(lower)) {
+  if (
+    lower.includes("pixeldrain.com") ||
+    lower.includes("pixeldrain.dev") ||
+    lower.includes("pixeldrain.net") ||
+    lower.includes("pixel.drain") ||
+    lower.includes("pixeldra.in")
+  )
+    return "Pixeldrain";
+  if (lower.includes("raj.lat") || lower.includes("hub."))
+    return "Direct download gate";
+  if (
+    /\.(zip|rar|7z|tar|gz|mp4|mkv|avi|mov|pdf|docx?|xlsx?|pptx?|apk|exe|srt|ass|mp3|wav|png|jpe?g|webp)(\?|#|$)/i.test(
+      lower,
+    )
+  ) {
     return "Direct file";
   }
   return "General link";
@@ -121,17 +135,18 @@ export function normalizeCodec(v?: string) {
 export function formatQuality(q?: string) {
   if (!q) return undefined;
   const lower = q.toLowerCase();
-  if (lower === '4k') return '4K';
+  if (lower === "4k") return "4K";
   return lower;
 }
 
 export function normalizePrintQuality(text?: string, qualities?: Quality[]) {
   if (!text) return undefined;
-  
+
   let detected: string | undefined;
   if (/(web[\.\-\s_]*rip)/i.test(text)) detected = "WEB-Rip";
   else if (/(hd[\.\-\s_]*rip)/i.test(text)) detected = "HD-Rip";
-  else if (/(blu[\.\-\s_]*ray|bd[\.\-\s_]*rip|br[\.\-\s_]*rip)/i.test(text)) detected = "Blu-Ray";
+  else if (/(blu[\.\-\s_]*ray|bd[\.\-\s_]*rip|br[\.\-\s_]*rip)/i.test(text))
+    detected = "Blu-Ray";
   else if (/(web[\.\-\s_]*dl)/i.test(text)) detected = "WEB-DL";
   else if (/(hq[\.\-\s_]*hdtc)/i.test(text)) detected = "HQ HDTC";
   else if (/(hdtc)/i.test(text)) detected = "HDTC";
@@ -143,8 +158,14 @@ export function normalizePrintQuality(text?: string, qualities?: Quality[]) {
   // by comparing normalized versions (ignoring hyphens, spaces, etc.)
   if (qualities && qualities.length > 0) {
     if (detected) {
-      const normalizedDetected = detected.replace(/[\.\-\s_]+/g, "").toLowerCase();
-      const match = qualities.find(q => q.name.replace(/[\.\-\s_]+/g, "").toLowerCase() === normalizedDetected);
+      const normalizedDetected = detected
+        .replace(/[\.\-\s_]+/g, "")
+        .toLowerCase();
+      const match = qualities.find(
+        (q) =>
+          q.name.replace(/[\.\-\s_]+/g, "").toLowerCase() ===
+          normalizedDetected,
+      );
       if (match) return match.name;
     }
 
@@ -152,16 +173,24 @@ export function normalizePrintQuality(text?: string, qualities?: Quality[]) {
     const normalizedText = text.replace(/[\.\-\s_]+/g, "").toLowerCase();
     for (const q of qualities) {
       const normalizedQuality = q.name.replace(/[\.\-\s_]+/g, "").toLowerCase();
-      if (normalizedQuality.length > 2 && normalizedText.includes(normalizedQuality)) {
+      if (
+        normalizedQuality.length > 2 &&
+        normalizedText.includes(normalizedQuality)
+      ) {
         return q.name;
       }
     }
   }
-  
+
   return detected;
 }
 
-export function detectMetadataForLink(text: string, url: string, languages?: Language[], qualities?: Quality[]) {
+export function detectMetadataForLink(
+  text: string,
+  url: string,
+  languages?: Language[],
+  qualities?: Quality[],
+) {
   const lines = text.split(/\r?\n/);
   const idx = lines.findIndex((line) => line.includes(url));
   const windowLines = [
@@ -176,101 +205,103 @@ export function detectMetadataForLink(text: string, url: string, languages?: Lan
 
   const lower = windowLines.toLowerCase();
 
-  const qualityMatch = lower.match(/\b(2160p|4k|1440p|1080p|720p|480p|360p|540p)\b/i)?.[1];
+  const qualityMatch = lower.match(
+    /\b(2160p|4k|1440p|1080p|720p|480p|360p|540p)\b/i,
+  )?.[1];
   const quality = formatQuality(qualityMatch);
 
   const codec = normalizeCodec(
-    lower.match(/\b(x265|x264|h\.265|h\.264|hevc|av1)\b/i)?.[1]
+    lower.match(/\b(x265|x264|h\.265|h\.264|hevc|av1)\b/i)?.[1],
   );
 
   const audio = (() => {
     const foundLangs = [] as string[];
     const langShortCodes: Record<string, string[]> = {
-      'Hindi': ['hin', 'hi'],
-      'English': ['eng', 'en'],
-      'Punjabi': ['pun', 'pa'],
-      'Tamil': ['tam', 'ta'],
-      'Telugu': ['tel', 'te'],
-      'Urdu': ['urd', 'ur'],
-      'Marathi': ['mar', 'mr'],
-      'Bengali': ['ben', 'bn'],
-      'Gujarati': ['guj', 'gu'],
-      'Kannada': ['kan', 'kn'],
-      'Malayalam': ['mal', 'ml'],
-      'Odia': ['odi', 'or'],
-      'Assamese': ['asm', 'as'],
-      'Spanish': ['spa', 'es'],
-      'French': ['fre', 'fra', 'fr'],
-      'German': ['ger', 'deu', 'de'],
-      'Italian': ['ita', 'it'],
-      'Japanese': ['jpn', 'ja'],
-      'Korean': ['kor', 'ko'],
-      'Chinese': ['chi', 'zho', 'zh'],
-      'Arabic': ['ara', 'ar'],
-      'Russian': ['rus', 'ru'],
-      'Portuguese': ['por', 'pt'],
-      'Dutch': ['dut', 'nld', 'nl'],
-      'Turkish': ['tur', 'tr'],
-      'Vietnamese': ['vie', 'vi'],
-      'Thai': ['tha', 'th'],
-      'Indonesian': ['ind', 'id'],
-      'Malay': ['may', 'msa', 'ms'],
-      'Filipino': ['fil', 'tl'],
-      'Persian': ['per', 'fas', 'fa'],
-      'Polish': ['pol', 'pl'],
-      'Ukrainian': ['ukr', 'uk'],
-      'Greek': ['gre', 'ell', 'el'],
-      'Hebrew': ['heb', 'he'],
-      'Swedish': ['swe', 'sv'],
-      'Danish': ['dan', 'da'],
-      'Norwegian': ['nor', 'no'],
-      'Finnish': ['fin', 'fi'],
-      'Czech': ['cze', 'ces', 'cs'],
-      'Hungarian': ['hun', 'hu'],
-      'Romanian': ['rum', 'ron', 'ro'],
-      'Bulgarian': ['bul', 'bg'],
-      'Serbian': ['srp', 'sr'],
-      'Croatian': ['hrv', 'hr'],
-      'Slovak': ['slo', 'slk', 'sk'],
-      'Slovenian': ['slv', 'sl'],
-      'Lithuanian': ['lit', 'lt'],
-      'Latvian': ['lav', 'lv'],
-      'Estonian': ['est', 'et'],
-      'Icelandic': ['ice', 'isl', 'is'],
-      'Irish': ['gle', 'ga'],
-      'Welsh': ['wel', 'cym', 'cy'],
-      'Scottish Gaelic': ['gla', 'gd'],
-      'Basque': ['baq', 'eus', 'eu'],
-      'Catalan': ['cat', 'ca'],
-      'Galician': ['glg', 'gl'],
-      'Afrikaans': ['afr', 'af'],
-      'Swahili': ['swa', 'sw'],
-      'Zulu': ['zul', 'zu'],
-      'Xhosa': ['xho', 'xh'],
-      'Amharic': ['amh', 'am'],
-      'Somali': ['som', 'so'],
-      'Yoruba': ['yor', 'yo'],
-      'Igbo': ['ibo', 'ig'],
-      'Hausa': ['hau', 'ha'],
-      'Nepali': ['nep', 'ne'],
-      'Sinhala': ['sin', 'si'],
-      'Burmese': ['bur', 'mya', 'my'],
-      'Khmer': ['khm', 'km'],
-      'Lao': ['lao', 'lo'],
-      'Tibetan': ['tib', 'bod', 'bo'],
-      'Mongolian': ['mon', 'mn'],
-      'Uzbek': ['uzb', 'uz'],
-      'Kazakh': ['kaz', 'kk'],
-      'Kyrgyz': ['kir', 'ky'],
-      'Tajik': ['tgk', 'tg'],
-      'Turkmen': ['tuk', 'tk'],
-      'Azerbaijani': ['aze', 'az'],
-      'Armenian': ['arm', 'hye', 'hy'],
-      'Georgian': ['geo', 'kat', 'ka'],
-      'Pashto': ['pus', 'ps'],
-      'Kurdish': ['kur', 'ku'],
-      'Sindhi': ['snd', 'sd'],
-      'Kashmiri': ['kas', 'ks'],
+      Hindi: ["hin", "hi"],
+      English: ["eng", "en"],
+      Punjabi: ["pun", "pa"],
+      Tamil: ["tam", "ta"],
+      Telugu: ["tel", "te"],
+      Urdu: ["urd", "ur"],
+      Marathi: ["mar", "mr"],
+      Bengali: ["ben", "bn"],
+      Gujarati: ["guj", "gu"],
+      Kannada: ["kan", "kn"],
+      Malayalam: ["mal", "ml"],
+      Odia: ["odi", "or"],
+      Assamese: ["asm", "as"],
+      Spanish: ["spa", "es"],
+      French: ["fre", "fra", "fr"],
+      German: ["ger", "deu", "de"],
+      Italian: ["ita", "it"],
+      Japanese: ["jpn", "ja"],
+      Korean: ["kor", "ko"],
+      Chinese: ["chi", "zho", "zh"],
+      Arabic: ["ara", "ar"],
+      Russian: ["rus", "ru"],
+      Portuguese: ["por", "pt"],
+      Dutch: ["dut", "nld", "nl"],
+      Turkish: ["tur", "tr"],
+      Vietnamese: ["vie", "vi"],
+      Thai: ["tha", "th"],
+      Indonesian: ["ind", "id"],
+      Malay: ["may", "msa", "ms"],
+      Filipino: ["fil", "tl"],
+      Persian: ["per", "fas", "fa"],
+      Polish: ["pol", "pl"],
+      Ukrainian: ["ukr", "uk"],
+      Greek: ["gre", "ell", "el"],
+      Hebrew: ["heb", "he"],
+      Swedish: ["swe", "sv"],
+      Danish: ["dan", "da"],
+      Norwegian: ["nor", "no"],
+      Finnish: ["fin", "fi"],
+      Czech: ["cze", "ces", "cs"],
+      Hungarian: ["hun", "hu"],
+      Romanian: ["rum", "ron", "ro"],
+      Bulgarian: ["bul", "bg"],
+      Serbian: ["srp", "sr"],
+      Croatian: ["hrv", "hr"],
+      Slovak: ["slo", "slk", "sk"],
+      Slovenian: ["slv", "sl"],
+      Lithuanian: ["lit", "lt"],
+      Latvian: ["lav", "lv"],
+      Estonian: ["est", "et"],
+      Icelandic: ["ice", "isl", "is"],
+      Irish: ["gle", "ga"],
+      Welsh: ["wel", "cym", "cy"],
+      "Scottish Gaelic": ["gla", "gd"],
+      Basque: ["baq", "eus", "eu"],
+      Catalan: ["cat", "ca"],
+      Galician: ["glg", "gl"],
+      Afrikaans: ["afr", "af"],
+      Swahili: ["swa", "sw"],
+      Zulu: ["zul", "zu"],
+      Xhosa: ["xho", "xh"],
+      Amharic: ["amh", "am"],
+      Somali: ["som", "so"],
+      Yoruba: ["yor", "yo"],
+      Igbo: ["ibo", "ig"],
+      Hausa: ["hau", "ha"],
+      Nepali: ["nep", "ne"],
+      Sinhala: ["sin", "si"],
+      Burmese: ["bur", "mya", "my"],
+      Khmer: ["khm", "km"],
+      Lao: ["lao", "lo"],
+      Tibetan: ["tib", "bod", "bo"],
+      Mongolian: ["mon", "mn"],
+      Uzbek: ["uzb", "uz"],
+      Kazakh: ["kaz", "kk"],
+      Kyrgyz: ["kir", "ky"],
+      Tajik: ["tgk", "tg"],
+      Turkmen: ["tuk", "tk"],
+      Azerbaijani: ["aze", "az"],
+      Armenian: ["arm", "hye", "hy"],
+      Georgian: ["geo", "kat", "ka"],
+      Pashto: ["pus", "ps"],
+      Kurdish: ["kur", "ku"],
+      Sindhi: ["snd", "sd"],
+      Kashmiri: ["kas", "ks"],
     };
 
     const checkLang = (langName: string) => {
@@ -281,7 +312,10 @@ export function detectMetadataForLink(text: string, url: string, languages?: Lan
       } else {
         const codes = langShortCodes[langName] || [];
         for (const code of codes) {
-          const codeRegex = new RegExp(`(?<=^|[^a-zA-Z0-9])${code}(?![a-zA-Z0-9])`, 'i');
+          const codeRegex = new RegExp(
+            `(?<=^|[^a-zA-Z0-9])${code}(?![a-zA-Z0-9])`,
+            "i",
+          );
           if (codeRegex.test(lower)) {
             foundLangs.push(langName);
             break;
@@ -291,7 +325,7 @@ export function detectMetadataForLink(text: string, url: string, languages?: Lan
     };
 
     if (languages && languages.length > 0) {
-      languages.forEach(lang => checkLang(lang.name));
+      languages.forEach((lang) => checkLang(lang.name));
     }
 
     return foundLangs.length > 0 ? foundLangs.join(" / ") : undefined;
@@ -301,28 +335,39 @@ export function detectMetadataForLink(text: string, url: string, languages?: Lan
     qualityLabel: quality,
     codecLabel: codec,
     audioLabel: audio,
-    subtitleLabel: /subtitles|subs|softsub|hardsub|esub|esubs|msub|msubs/i.test(lower) ? "Yes" : undefined,
+    subtitleLabel: /subtitles|subs|softsub|hardsub|esub|esubs|msub|msubs/i.test(
+      lower,
+    )
+      ? "Yes"
+      : undefined,
     printQualityLabel: normalizePrintQuality(lower, qualities),
     ...(() => {
       const yearMatch = lower.match(/\b(19\d{2}|20\d{2})\b/);
       const year = yearMatch ? parseInt(yearMatch[1]) : undefined;
-      const seriesPattern = /(?<=^|[^a-zA-Z0-9])(?:s(?:eason)?\s*(\d+))(?:\s*e(?:pisode|p)?\s*(\d+))?(?![a-z0-9])/i;
+      const seriesPattern =
+        /(?<=^|[^a-zA-Z0-9])(?:s(?:eason)?\s*(\d+))(?:\s*e(?:pisode|p)?\s*(\d+))?(?![a-z0-9])/i;
       const seriesMatch = lower.match(seriesPattern);
       const season = seriesMatch ? parseInt(seriesMatch[1]) : undefined;
-      const episode = seriesMatch && seriesMatch[2] ? parseInt(seriesMatch[2]) : undefined;
+      const episode =
+        seriesMatch && seriesMatch[2] ? parseInt(seriesMatch[2]) : undefined;
       return { season, episode, year };
     })(),
-    isFullSeasonMKV: /full\s*season|complete\s*season/i.test(lower) && lower.includes(".mkv"),
-    isFullSeasonZIP: /full\s*season|complete\s*season/i.test(lower) && lower.includes(".zip"),
+    isFullSeasonMKV:
+      /full\s*season|complete\s*season/i.test(lower) && lower.includes(".mkv"),
+    isFullSeasonZIP:
+      /full\s*season|complete\s*season/i.test(lower) && lower.includes(".zip"),
   };
 }
 
-export async function serverCheckLink(url: string, signal?: AbortSignal): Promise<LinkCheckResult> {
+export async function serverCheckLink(
+  url: string,
+  signal?: AbortSignal,
+): Promise<LinkCheckResult> {
   const response = await fetch("/api/check-link", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ url }),
-    signal
+    signal,
   });
 
   const data = await response.json().catch(() => ({}));
@@ -344,103 +389,112 @@ export async function serverCheckLink(url: string, signal?: AbortSignal): Promis
   };
 }
 
-export function detectFromFilename(fileName?: string, finalUrl?: string, languages?: Language[], qualities?: Quality[]) {
+export function detectFromFilename(
+  fileName?: string,
+  finalUrl?: string,
+  languages?: Language[],
+  qualities?: Quality[],
+) {
   const source = `${fileName || ""} ${finalUrl || ""}`.toLowerCase();
-  
-  const qualityMatch = source.match(/\b(2160p|4k|1440p|1080p|720p|480p|360p|540p)\b/i)?.[1];
+
+  const qualityMatch = source.match(
+    /\b(2160p|4k|1440p|1080p|720p|480p|360p|540p)\b/i,
+  )?.[1];
   const quality = formatQuality(qualityMatch);
 
-  const codec = normalizeCodec(source.match(/\b(x265|x264|h\.265|h\.264|hevc|av1)\b/i)?.[1]);
-  
+  const codec = normalizeCodec(
+    source.match(/\b(x265|x264|h\.265|h\.264|hevc|av1)\b/i)?.[1],
+  );
+
   const audio = (() => {
     const foundLangs = [] as string[];
-    
+
     const langShortCodes: Record<string, string[]> = {
-      'Hindi': ['hin', 'hi'],
-      'English': ['eng', 'en'],
-      'Punjabi': ['pun', 'pa'],
-      'Tamil': ['tam', 'ta'],
-      'Telugu': ['tel', 'te'],
-      'Urdu': ['urd', 'ur'],
-      'Marathi': ['mar', 'mr'],
-      'Bengali': ['ben', 'bn'],
-      'Gujarati': ['guj', 'gu'],
-      'Kannada': ['kan', 'kn'],
-      'Malayalam': ['mal', 'ml'],
-      'Odia': ['odi', 'or'],
-      'Assamese': ['asm', 'as'],
-      'Spanish': ['spa', 'es'],
-      'French': ['fre', 'fra', 'fr'],
-      'German': ['ger', 'deu', 'de'],
-      'Italian': ['ita', 'it'],
-      'Japanese': ['jpn', 'ja'],
-      'Korean': ['kor', 'ko'],
-      'Chinese': ['chi', 'zho', 'zh'],
-      'Arabic': ['ara', 'ar'],
-      'Russian': ['rus', 'ru'],
-      'Portuguese': ['por', 'pt'],
-      'Dutch': ['dut', 'nld', 'nl'],
-      'Turkish': ['tur', 'tr'],
-      'Vietnamese': ['vie', 'vi'],
-      'Thai': ['tha', 'th'],
-      'Indonesian': ['ind', 'id'],
-      'Malay': ['may', 'msa', 'ms'],
-      'Filipino': ['fil', 'tl'],
-      'Persian': ['per', 'fas', 'fa'],
-      'Polish': ['pol', 'pl'],
-      'Ukrainian': ['ukr', 'uk'],
-      'Greek': ['gre', 'ell', 'el'],
-      'Hebrew': ['heb', 'he'],
-      'Swedish': ['swe', 'sv'],
-      'Danish': ['dan', 'da'],
-      'Norwegian': ['nor', 'no'],
-      'Finnish': ['fin', 'fi'],
-      'Czech': ['cze', 'ces', 'cs'],
-      'Hungarian': ['hun', 'hu'],
-      'Romanian': ['rum', 'ron', 'ro'],
-      'Bulgarian': ['bul', 'bg'],
-      'Serbian': ['srp', 'sr'],
-      'Croatian': ['hrv', 'hr'],
-      'Slovak': ['slo', 'slk', 'sk'],
-      'Slovenian': ['slv', 'sl'],
-      'Lithuanian': ['lit', 'lt'],
-      'Latvian': ['lav', 'lv'],
-      'Estonian': ['est', 'et'],
-      'Icelandic': ['ice', 'isl', 'is'],
-      'Irish': ['gle', 'ga'],
-      'Welsh': ['wel', 'cym', 'cy'],
-      'Scottish Gaelic': ['gla', 'gd'],
-      'Basque': ['baq', 'eus', 'eu'],
-      'Catalan': ['cat', 'ca'],
-      'Galician': ['glg', 'gl'],
-      'Afrikaans': ['afr', 'af'],
-      'Swahili': ['swa', 'sw'],
-      'Zulu': ['zul', 'zu'],
-      'Xhosa': ['xho', 'xh'],
-      'Amharic': ['amh', 'am'],
-      'Somali': ['som', 'so'],
-      'Yoruba': ['yor', 'yo'],
-      'Igbo': ['ibo', 'ig'],
-      'Hausa': ['hau', 'ha'],
-      'Nepali': ['nep', 'ne'],
-      'Sinhala': ['sin', 'si'],
-      'Burmese': ['bur', 'mya', 'my'],
-      'Khmer': ['khm', 'km'],
-      'Lao': ['lao', 'lo'],
-      'Tibetan': ['tib', 'bod', 'bo'],
-      'Mongolian': ['mon', 'mn'],
-      'Uzbek': ['uzb', 'uz'],
-      'Kazakh': ['kaz', 'kk'],
-      'Kyrgyz': ['kir', 'ky'],
-      'Tajik': ['tgk', 'tg'],
-      'Turkmen': ['tuk', 'tk'],
-      'Azerbaijani': ['aze', 'az'],
-      'Armenian': ['arm', 'hye', 'hy'],
-      'Georgian': ['geo', 'kat', 'ka'],
-      'Pashto': ['pus', 'ps'],
-      'Kurdish': ['kur', 'ku'],
-      'Sindhi': ['snd', 'sd'],
-      'Kashmiri': ['kas', 'ks'],
+      Hindi: ["hin", "hi"],
+      English: ["eng", "en"],
+      Punjabi: ["pun", "pa"],
+      Tamil: ["tam", "ta"],
+      Telugu: ["tel", "te"],
+      Urdu: ["urd", "ur"],
+      Marathi: ["mar", "mr"],
+      Bengali: ["ben", "bn"],
+      Gujarati: ["guj", "gu"],
+      Kannada: ["kan", "kn"],
+      Malayalam: ["mal", "ml"],
+      Odia: ["odi", "or"],
+      Assamese: ["asm", "as"],
+      Spanish: ["spa", "es"],
+      French: ["fre", "fra", "fr"],
+      German: ["ger", "deu", "de"],
+      Italian: ["ita", "it"],
+      Japanese: ["jpn", "ja"],
+      Korean: ["kor", "ko"],
+      Chinese: ["chi", "zho", "zh"],
+      Arabic: ["ara", "ar"],
+      Russian: ["rus", "ru"],
+      Portuguese: ["por", "pt"],
+      Dutch: ["dut", "nld", "nl"],
+      Turkish: ["tur", "tr"],
+      Vietnamese: ["vie", "vi"],
+      Thai: ["tha", "th"],
+      Indonesian: ["ind", "id"],
+      Malay: ["may", "msa", "ms"],
+      Filipino: ["fil", "tl"],
+      Persian: ["per", "fas", "fa"],
+      Polish: ["pol", "pl"],
+      Ukrainian: ["ukr", "uk"],
+      Greek: ["gre", "ell", "el"],
+      Hebrew: ["heb", "he"],
+      Swedish: ["swe", "sv"],
+      Danish: ["dan", "da"],
+      Norwegian: ["nor", "no"],
+      Finnish: ["fin", "fi"],
+      Czech: ["cze", "ces", "cs"],
+      Hungarian: ["hun", "hu"],
+      Romanian: ["rum", "ron", "ro"],
+      Bulgarian: ["bul", "bg"],
+      Serbian: ["srp", "sr"],
+      Croatian: ["hrv", "hr"],
+      Slovak: ["slo", "slk", "sk"],
+      Slovenian: ["slv", "sl"],
+      Lithuanian: ["lit", "lt"],
+      Latvian: ["lav", "lv"],
+      Estonian: ["est", "et"],
+      Icelandic: ["ice", "isl", "is"],
+      Irish: ["gle", "ga"],
+      Welsh: ["wel", "cym", "cy"],
+      "Scottish Gaelic": ["gla", "gd"],
+      Basque: ["baq", "eus", "eu"],
+      Catalan: ["cat", "ca"],
+      Galician: ["glg", "gl"],
+      Afrikaans: ["afr", "af"],
+      Swahili: ["swa", "sw"],
+      Zulu: ["zul", "zu"],
+      Xhosa: ["xho", "xh"],
+      Amharic: ["amh", "am"],
+      Somali: ["som", "so"],
+      Yoruba: ["yor", "yo"],
+      Igbo: ["ibo", "ig"],
+      Hausa: ["hau", "ha"],
+      Nepali: ["nep", "ne"],
+      Sinhala: ["sin", "si"],
+      Burmese: ["bur", "mya", "my"],
+      Khmer: ["khm", "km"],
+      Lao: ["lao", "lo"],
+      Tibetan: ["tib", "bod", "bo"],
+      Mongolian: ["mon", "mn"],
+      Uzbek: ["uzb", "uz"],
+      Kazakh: ["kaz", "kk"],
+      Kyrgyz: ["kir", "ky"],
+      Tajik: ["tgk", "tg"],
+      Turkmen: ["tuk", "tk"],
+      Azerbaijani: ["aze", "az"],
+      Armenian: ["arm", "hye", "hy"],
+      Georgian: ["geo", "kat", "ka"],
+      Pashto: ["pus", "ps"],
+      Kurdish: ["kur", "ku"],
+      Sindhi: ["snd", "sd"],
+      Kashmiri: ["kas", "ks"],
     };
 
     const checkLang = (langName: string) => {
@@ -451,7 +505,10 @@ export function detectFromFilename(fileName?: string, finalUrl?: string, languag
       } else {
         const codes = langShortCodes[langName] || [];
         for (const code of codes) {
-          const codeRegex = new RegExp(`(?<=^|[^a-zA-Z0-9])${code}(?![a-zA-Z0-9])`, 'i');
+          const codeRegex = new RegExp(
+            `(?<=^|[^a-zA-Z0-9])${code}(?![a-zA-Z0-9])`,
+            "i",
+          );
           if (codeRegex.test(source)) {
             foundLangs.push(langName);
             break;
@@ -461,28 +518,39 @@ export function detectFromFilename(fileName?: string, finalUrl?: string, languag
     };
 
     if (languages && languages.length > 0) {
-      languages.forEach(lang => checkLang(lang.name));
+      languages.forEach((lang) => checkLang(lang.name));
     } else {
-      const defaultLangs = ['Hindi', 'English', 'Urdu', 'Tamil', 'Telugu', 'Punjabi'];
-      defaultLangs.forEach(lang => checkLang(lang));
+      const defaultLangs = [
+        "Hindi",
+        "English",
+        "Urdu",
+        "Tamil",
+        "Telugu",
+        "Punjabi",
+      ];
+      defaultLangs.forEach((lang) => checkLang(lang));
     }
-    
+
     if (/dual[ ._-]?audio/i.test(source)) {
       if (foundLangs.length > 0) {
-        if (foundLangs.length === 1 && !foundLangs.includes('English')) {
-          foundLangs.push('English');
+        if (foundLangs.length === 1 && !foundLangs.includes("English")) {
+          foundLangs.push("English");
         }
         return foundLangs.join(" / ");
       } else {
         return "Hindi / English";
       }
     }
-    
+
     return foundLangs.length ? foundLangs.join(" / ") : undefined;
   })();
 
-  const subtitle = /subtitles|subs|softsub|hardsub|esub|esubs|msub|msubs/i.test(source) ? "Subtitles" : undefined;
-  
+  const subtitle = /subtitles|subs|softsub|hardsub|esub|esubs|msub|msubs/i.test(
+    source,
+  )
+    ? "Subtitles"
+    : undefined;
+
   let printQuality = normalizePrintQuality(source, qualities);
 
   const result = {
@@ -501,18 +569,25 @@ export function detectFromFilename(fileName?: string, finalUrl?: string, languag
   const yearMatch = source.match(/\b(19\d{2}|20\d{2})\b/);
   if (yearMatch) result.year = parseInt(yearMatch[1]);
 
-  const combinedMatch = source.match(/(?<=^|[^a-zA-Z0-9])s(\d+)e(\d+)(?![a-z0-9])/i) ||
-                    source.match(/(?<=^|[^a-zA-Z0-9])dl\s+(\d+)\s+(\d+)(?![a-z0-9])/i);
+  const combinedMatch =
+    source.match(/(?<=^|[^a-zA-Z0-9])s(\d+)e(\d+)(?![a-z0-9])/i) ||
+    source.match(/(?<=^|[^a-zA-Z0-9])dl\s+(\d+)\s+(\d+)(?![a-z0-9])/i);
   if (combinedMatch) {
     result.season = parseInt(combinedMatch[1]);
     result.episode = parseInt(combinedMatch[2]);
   } else {
-    const seriesMatch = source.match(/(?<=^|[^a-zA-Z0-9])(s(\d+)|season\s*(\d+))(?![a-z0-9])/i);
+    const seriesMatch = source.match(
+      /(?<=^|[^a-zA-Z0-9])(s(\d+)|season\s*(\d+))(?![a-z0-9])/i,
+    );
     if (seriesMatch) {
       result.season = parseInt(seriesMatch[2] || seriesMatch[3]);
-      const episodeMatch = source.match(/(?<=^|[^a-zA-Z0-9])(?:e(\d+)|episode\s*(\d+)|ep\s*(\d+))(?![a-z0-9])/i);
+      const episodeMatch = source.match(
+        /(?<=^|[^a-zA-Z0-9])(?:e(\d+)|episode\s*(\d+)|ep\s*(\d+))(?![a-z0-9])/i,
+      );
       if (episodeMatch) {
-        result.episode = parseInt(episodeMatch[1] || episodeMatch[2] || episodeMatch[3]);
+        result.episode = parseInt(
+          episodeMatch[1] || episodeMatch[2] || episodeMatch[3],
+        );
       } else {
         // Full season detection
         if (source.includes(".mkv")) result.isFullSeasonMKV = true;
@@ -525,25 +600,25 @@ export function detectFromFilename(fileName?: string, finalUrl?: string, languag
 }
 
 export async function performFullLinkScan(
-  url: string, 
-  extractedMeta: Record<string, any> = {}, 
-  languages: Language[] = [], 
+  url: string,
+  extractedMeta: Record<string, any> = {},
+  languages: Language[] = [],
   qualities: Quality[] = [],
   signal?: AbortSignal,
   expectedSize?: string,
-  expectedUnit?: 'MB' | 'GB'
+  expectedUnit?: "MB" | "GB",
 ): Promise<LinkCheckResult> {
   let base: LinkCheckResult;
   let finalUrlToUse = url;
 
   // HubCloud interception
   let hubcloudTitle = "";
-  if (url.includes('hubcloud') || url.includes('moviesdrives')) {
+  if (url.includes("hubcloud") || url.includes("moviesdrives")) {
     try {
-      const res = await fetch('/api/hubcloud/extract', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url })
+      const res = await fetch("/api/hubcloud/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -554,26 +629,61 @@ export async function performFullLinkScan(
             ok: true,
             statusLabel: "WORKING",
             fileName: hubcloudTitle || undefined,
-            fileSizeText: `${data.size} ${data.unit}`
+            fileSizeText: `${data.size} ${data.unit}`,
+          };
+          finalUrlToUse = url;
+        } else if (data.isNotFound) {
+          base = {
+            url,
+            ok: false,
+            statusLabel: "BROKEN",
+            message: "File Not Found",
+          };
+          finalUrlToUse = url;
+        } else if (data.isWorking) {
+          hubcloudTitle = data.title || "";
+          base = {
+            url,
+            ok: true,
+            statusLabel: "WORKING",
+            fileName: hubcloudTitle || undefined,
           };
           finalUrlToUse = url;
         } else {
-           base = await serverCheckLink(url, signal);
+          base = {
+            url,
+            ok: true,
+            statusLabel: "WORKING",
+            message: "Assuming working (size extraction failed)",
+          };
+          finalUrlToUse = url;
         }
       } else {
-         base = await serverCheckLink(url, signal);
+        base = {
+          url,
+          ok: true,
+          statusLabel: "WORKING",
+          message: "Assuming working (timeout/blocked)",
+        };
+        finalUrlToUse = url;
       }
     } catch {
-      base = await serverCheckLink(url, signal);
+      base = {
+        url,
+        ok: true,
+        statusLabel: "WORKING",
+        message: "Assuming working (network error)",
+      };
+      finalUrlToUse = url;
     }
-  } else if (url.includes('?token=') || url.includes('&token=')) {
+  } else if (url.includes("?token=") || url.includes("&token=")) {
     try {
       const urlObj = new URL(url);
-      const token = urlObj.searchParams.get('token');
+      const token = urlObj.searchParams.get("token");
       if (token) {
-        urlObj.searchParams.delete('token');
+        urlObj.searchParams.delete("token");
         const urlWithoutToken = urlObj.toString();
-        
+
         try {
           // Try without token first
           base = await serverCheckLink(urlWithoutToken, signal);
@@ -613,9 +723,10 @@ export async function performFullLinkScan(
       }
     } catch (e) {
       // Fallback for invalid URL objects that are still Pixeldrain
-      const devUrl = url.replace(/pixeldrain\.(com|net)/i, "pixeldrain.dev")
-                        .replace(/pixel\.drain/i, "pixeldrain.dev")
-                        .replace(/pixeldra\.in/i, "pixeldrain.dev");
+      const devUrl = url
+        .replace(/pixeldrain\.(com|net)/i, "pixeldrain.dev")
+        .replace(/pixel\.drain/i, "pixeldrain.dev")
+        .replace(/pixeldra\.in/i, "pixeldrain.dev");
       if (devUrl !== url) {
         try {
           const devBase = await serverCheckLink(devUrl, signal);
@@ -628,7 +739,11 @@ export async function performFullLinkScan(
     }
   }
 
-  if ((!base.ok || base.statusLabel === "REDIRECT") && base.finalUrl && base.finalUrl !== url) {
+  if (
+    (!base.ok || base.statusLabel === "REDIRECT") &&
+    base.finalUrl &&
+    base.finalUrl !== url
+  ) {
     try {
       const retryBase = await serverCheckLink(base.finalUrl, signal);
       base = retryBase;
@@ -639,16 +754,25 @@ export async function performFullLinkScan(
   }
 
   const postMeta = extractedMeta[url] || {};
-  const fileMeta = detectFromFilename(base.fileName, base.finalUrl, languages, qualities);
+  const fileMeta = detectFromFilename(
+    base.fileName,
+    base.finalUrl,
+    languages,
+    qualities,
+  );
   const hasFileName = !!base.fileName;
 
   const result: LinkCheckResult = {
     ...base,
     url: finalUrlToUse,
     qualityLabel: fileMeta.qualityLabel || postMeta.qualityLabel,
-    codecLabel: fileMeta.codecLabel || (hasFileName ? undefined : postMeta.codecLabel),
-    audioLabel: fileMeta.audioLabel || (hasFileName ? undefined : postMeta.audioLabel),
-    subtitleLabel: fileMeta.subtitleLabel || (hasFileName ? undefined : postMeta.subtitleLabel),
+    codecLabel:
+      fileMeta.codecLabel || (hasFileName ? undefined : postMeta.codecLabel),
+    audioLabel:
+      fileMeta.audioLabel || (hasFileName ? undefined : postMeta.audioLabel),
+    subtitleLabel:
+      fileMeta.subtitleLabel ||
+      (hasFileName ? undefined : postMeta.subtitleLabel),
     printQualityLabel: fileMeta.printQualityLabel || postMeta.printQualityLabel,
     season: fileMeta.season || postMeta.season,
     episode: fileMeta.episode || postMeta.episode,
@@ -661,7 +785,7 @@ export async function performFullLinkScan(
     result.statusLabel = "MISSING_FILENAME";
     result.message = "Missing filename";
   }
-  
+
   if (result.ok && result.fileSize && result.fileSize < 20 * 1000 * 1000) {
     result.statusLabel = "SMALL_FILE";
     result.message = "File size too small (< 20MB)";
@@ -669,9 +793,12 @@ export async function performFullLinkScan(
 
   // Size mismatch validation
   if (result.ok && result.fileSize && expectedSize && expectedUnit) {
-    const expectedSizeBytes = parseFloat(expectedSize) * (expectedUnit === 'GB' ? 1000 * 1000 * 1000 : 1000 * 1000);
+    const expectedSizeBytes =
+      parseFloat(expectedSize) *
+      (expectedUnit === "GB" ? 1000 * 1000 * 1000 : 1000 * 1000);
     const diff = Math.abs(result.fileSize - expectedSizeBytes);
-    if (diff > 50 * 1000 * 1000) { // 50MB tolerance
+    if (diff > 50 * 1000 * 1000) {
+      // 50MB tolerance
       result.statusLabel = "SIZE_MISMATCH";
       result.message = `Size mismatch: Expected ${expectedSize}${expectedUnit}, got ${result.fileSizeText}`;
     }
@@ -681,7 +808,7 @@ export async function performFullLinkScan(
   if (result.ok && result.fileName) {
     const hasQuality = !!result.qualityLabel;
     const hasLanguage = !!result.audioLabel;
-    
+
     if (!hasQuality && result.statusLabel === "WORKING") {
       result.statusLabel = "MISSING_METADATA";
       result.message = "Missing Quality in filename";
@@ -694,12 +821,28 @@ export async function performFullLinkScan(
   return result;
 }
 
-export function buildMismatchWarnings(result: LinkCheckResult, all: LinkCheckResult[], languages?: Language[], qualities?: Quality[]) {
+export function buildMismatchWarnings(
+  result: LinkCheckResult,
+  all: LinkCheckResult[],
+  languages?: Language[],
+  qualities?: Quality[],
+) {
   const warnings: string[] = [];
-  const fileMeta = detectFromFilename(result.fileName, result.finalUrl, languages, qualities);
+  const fileMeta = detectFromFilename(
+    result.fileName,
+    result.finalUrl,
+    languages,
+    qualities,
+  );
 
-  if (result.qualityLabel && fileMeta.qualityLabel && result.qualityLabel !== fileMeta.qualityLabel) {
-    warnings.push(`Post says ${result.qualityLabel}, file suggests ${fileMeta.qualityLabel}`);
+  if (
+    result.qualityLabel &&
+    fileMeta.qualityLabel &&
+    result.qualityLabel !== fileMeta.qualityLabel
+  ) {
+    warnings.push(
+      `Post says ${result.qualityLabel}, file suggests ${fileMeta.qualityLabel}`,
+    );
   }
 
   const postCodec = normalizeCodec(result.codecLabel);
@@ -708,42 +851,69 @@ export function buildMismatchWarnings(result: LinkCheckResult, all: LinkCheckRes
     warnings.push(`Post says ${postCodec}, file suggests ${fileCodec}`);
   }
 
-  if (result.printQualityLabel && fileMeta.printQualityLabel && result.printQualityLabel !== fileMeta.printQualityLabel) {
-    warnings.push(`Post says ${result.printQualityLabel}, file suggests ${fileMeta.printQualityLabel}`);
+  if (
+    result.printQualityLabel &&
+    fileMeta.printQualityLabel &&
+    result.printQualityLabel !== fileMeta.printQualityLabel
+  ) {
+    warnings.push(
+      `Post says ${result.printQualityLabel}, file suggests ${fileMeta.printQualityLabel}`,
+    );
   }
 
   if (result.audioLabel && fileMeta.audioLabel) {
     const a = result.audioLabel.toLowerCase();
     const b = fileMeta.audioLabel.toLowerCase();
     if (a !== b && !(a.includes("dual") && b.includes("dual"))) {
-      warnings.push(`Post says ${result.audioLabel}, file suggests ${fileMeta.audioLabel}`);
+      warnings.push(
+        `Post says ${result.audioLabel}, file suggests ${fileMeta.audioLabel}`,
+      );
     }
   }
 
   if (result.subtitleLabel && !fileMeta.subtitleLabel && result.fileName) {
-    warnings.push("Post says subtitles, but filename does not suggest subtitles");
+    warnings.push(
+      "Post says subtitles, but filename does not suggest subtitles",
+    );
   }
 
   const duplicates = all.filter((x) => x.url === result.url);
-  const duplicateQualities = [...new Set(duplicates.map((d) => d.qualityLabel).filter(Boolean))];
+  const duplicateQualities = [
+    ...new Set(duplicates.map((d) => d.qualityLabel).filter(Boolean)),
+  ];
   if (duplicateQualities.length > 1) {
-    warnings.push(`Same link reused for multiple qualities: ${duplicateQualities.join(", ")}`);
+    warnings.push(
+      `Same link reused for multiple qualities: ${duplicateQualities.join(", ")}`,
+    );
   }
 
-  const sameFile = all.filter((x) => x.fileName && result.fileName && x.fileName === result.fileName);
-  const sameFileQualities = [...new Set(sameFile.map((d) => d.qualityLabel).filter(Boolean))];
+  const sameFile = all.filter(
+    (x) => x.fileName && result.fileName && x.fileName === result.fileName,
+  );
+  const sameFileQualities = [
+    ...new Set(sameFile.map((d) => d.qualityLabel).filter(Boolean)),
+  ];
   if (sameFile.length > 1 && sameFileQualities.length > 1) {
-    warnings.push(`Same file name reused across qualities: ${sameFileQualities.join(", ")}`);
+    warnings.push(
+      `Same file name reused across qualities: ${sameFileQualities.join(", ")}`,
+    );
   }
 
   if (result.fileSize && result.qualityLabel) {
     const mb = result.fileSize / (1000 * 1000);
     const gb = mb / 1000;
     if (mb < 20) warnings.push("File size is suspiciously small (< 20MB)");
-    if (result.qualityLabel === "1080P" && gb < 0.5) warnings.push("Suspiciously small for 1080p");
-    if (result.qualityLabel === "720P" && gb < 0.25) warnings.push("Suspiciously small for 720p");
-    if (result.qualityLabel === "480P" && gb > 3.5) warnings.push("Suspiciously large for 480p");
-    if ((result.qualityLabel === "2160P" || result.qualityLabel === "4K") && gb < 1.2) warnings.push("Suspiciously small for 4K");
+    if (result.qualityLabel === "1080P" && gb < 0.5)
+      warnings.push("Suspiciously small for 1080p");
+    if (result.qualityLabel === "720P" && gb < 0.25)
+      warnings.push("Suspiciously small for 720p");
+    if (result.qualityLabel === "480P" && gb > 3.5)
+      warnings.push("Suspiciously large for 480p");
+    if (
+      (result.qualityLabel === "2160P" || result.qualityLabel === "4K") &&
+      gb < 1.2
+    )
+      warnings.push("Suspiciously small for 4K");
   }
 
   return [...new Set(warnings)];
