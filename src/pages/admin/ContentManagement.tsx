@@ -1815,19 +1815,52 @@ export default function ContentManagement() {
         return { ...link, url: '', tinyUrl: '' };
       }
 
-      const isBadTinyUrl = link.tinyUrl && typeof link.tinyUrl === 'string' && link.tinyUrl.toLowerCase().includes('<html');
-      
-      if (!link.url.includes('pixeldrain.com') && !link.url.includes('pixeldrain.dev') && !link.url.includes('pixeldrain.net') && (!link.tinyUrl || isBadTinyUrl)) {
-        const tinyUrl = await generateTinyUrl(link.url, true, settings?.supportNumber || '3363284466');
-        if (tinyUrl && tinyUrl !== link.url && !tinyUrl.toLowerCase().includes('<html')) {
-          hasUpdates = true;
-          return { ...link, tinyUrl };
-        } else if (isBadTinyUrl) {
-          // If we had a bad tinyUrl and couldn't generate a new one, clear it
-          hasUpdates = true;
-          return { ...link, tinyUrl: '' };
+      let extractedUrl = link.url;
+      let finalHasUpdates = false;
+
+      // Extract HubCloud links
+      if (extractedUrl.includes('hubcloud') || extractedUrl.includes('moviesdrives')) {
+        try {
+          const res = await fetch("/api/hubcloud/direct-link", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: extractedUrl }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.url && data.url !== extractedUrl) {
+              extractedUrl = data.url;
+              finalHasUpdates = true;
+            }
+          }
+        } catch (e) {
+          console.error("Hubcloud extract failed for share", e);
         }
       }
+
+      let prevTinyUrl = link.tinyUrl;
+      if (finalHasUpdates) {
+        prevTinyUrl = undefined; // Need new tinyUrl since main URL changed
+      }
+
+      const isBadTinyUrl = prevTinyUrl && typeof prevTinyUrl === 'string' && prevTinyUrl.toLowerCase().includes('<html');
+      
+      if (!extractedUrl.includes('pixeldrain.com') && !extractedUrl.includes('pixeldrain.dev') && !extractedUrl.includes('pixeldrain.net') && (!prevTinyUrl || isBadTinyUrl)) {
+        const tinyUrl = await generateTinyUrl(extractedUrl, true, settings?.supportNumber || '3363284466');
+        if (tinyUrl && tinyUrl !== extractedUrl && !tinyUrl.toLowerCase().includes('<html')) {
+          hasUpdates = true;
+          return { ...link, url: extractedUrl, tinyUrl };
+        } else if (isBadTinyUrl) {
+          hasUpdates = true;
+          return { ...link, url: extractedUrl, tinyUrl: '' };
+        }
+      }
+
+      if (finalHasUpdates) {
+        hasUpdates = true;
+        return { ...link, url: extractedUrl, tinyUrl: prevTinyUrl };
+      }
+
       return link;
     };
 
