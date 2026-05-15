@@ -1017,7 +1017,22 @@ async function startServer() {
          workingLink = workingLink.replace(/.*(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+).*/i, 'https://pixeldrain.dev/u/$1');
       }
 
-      res.json({ url: workingLink });
+      const returnCandidates = candidateLinks.map(c => {
+         let href = c.href;
+         if (/(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+)/i.test(href)) {
+             href = href.replace(/.*(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+).*/i, 'https://pixeldrain.dev/u/$1');
+         }
+         return { text: c.text.trim(), href };
+      });
+      
+      const bodyText = $('body').text();
+      let sizeInfo = '';
+      const sizeMatch = bodyText.match(/File Size\s*([\d.]+\s*[A-Za-z]+)/i);
+      if (sizeMatch && sizeMatch[1]) {
+          sizeInfo = sizeMatch[1].trim();
+      }
+
+      res.json({ url: workingLink, candidates: returnCandidates, size: sizeInfo });
     } catch (e: any) {
       console.error(e);
       res.json({ url: req.body.url }); 
