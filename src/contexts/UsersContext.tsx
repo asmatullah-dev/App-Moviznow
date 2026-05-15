@@ -86,14 +86,6 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
 
       for (const b of batches) await b.commit();
       
-      // Sync with chunk_meta so users see the updates on next check
-      try {
-        const { updateUserChunkMeta } = await import('../utils/chunkMeta');
-        await updateUserChunkMeta(userIds);
-      } catch (e) {
-        console.error("Failed to update chunk_meta for users:", e);
-      }
-
       safeStorage.removeItem('pending_user_updates');
       setHasPendingChanges(false);
       

@@ -684,10 +684,8 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                       <button type="button" onClick={() => setManageModal({ isOpen: true, type: 'genre' })} className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-2 py-0.5 rounded hover:bg-zinc-300 dark:hover:bg-zinc-700">Manage</button>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {[...genres]
-                        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-                        .map((g, idx) => {
-                          const isSelected = selectedGenres.includes(g.id);
+                      {genres.map((g, idx) => {
+                        const isSelected = selectedGenres.includes(g.id);
                         return (
                           <button
                             key={g.id}
@@ -719,10 +717,8 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                       <button type="button" onClick={() => setManageModal({ isOpen: true, type: 'language' })} className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-2 py-0.5 rounded hover:bg-zinc-300 dark:hover:bg-zinc-700">Manage</button>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {[...languages]
-                        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-                        .map((l, idx) => {
-                          const isSelected = selectedLanguages.includes(l.id);
+                      {languages.map((l, idx) => {
+                        const isSelected = selectedLanguages.includes(l.id);
                         return (
                           <button
                             key={l.id}
@@ -754,13 +750,11 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                       <button type="button" onClick={() => setManageModal({ isOpen: true, type: 'quality' })} className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-2 py-0.5 rounded hover:bg-zinc-300 dark:hover:bg-zinc-700">Manage</button>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {[...qualities]
-                        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-                        .map((q, idx) => (
-                          <button
-                            key={q.id}
-                            type="button"
-                            onClick={() => setSelectedQuality(q.id)}
+                      {qualities.map((q, idx) => (
+                        <button
+                          key={q.id}
+                          type="button"
+                          onClick={() => setSelectedQuality(q.id)}
                           className={`px-3 py-1 rounded-full text-xs font-medium transition-colors border ${
                             selectedQuality === q.id
                               ? 'bg-emerald-500/20 border-emerald-500 text-emerald-500'

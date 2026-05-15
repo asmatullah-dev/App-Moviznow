@@ -629,18 +629,11 @@ async function startServer() {
 
   function formatBytes(bytes?: number) {
     if (!bytes || Number.isNaN(bytes)) return undefined;
-    const units = [
-      "B",
-      "KB",
-      "MB",
-      "GB",
-      "TB",
-    ];
+    const units = ["B", "KB", "MB", "GB", "TB"];
     let size = bytes;
     let unit = 0;
-    // Use Base-1024 as requested for consistency with file sites (2.88GB = 3092MB)
-    while (size >= 1024 && unit < units.length - 1) {
-      size /= 1024;
+    while (size >= 1000 && unit < units.length - 1) {
+      size /= 1000;
       unit++;
     }
     return `${size >= 100 ? size.toFixed(0) : size >= 10 ? size.toFixed(1) : size.toFixed(2)} ${units[unit]}`;
@@ -1318,7 +1311,16 @@ async function startServer() {
           unit = parts[1].toUpperCase();
 
           if (!isNaN(num)) {
-            // Keep original binary values (Base-1024) as preferred by user
+            // Convert from Hubcloud's Base-1024 to our Base-1000
+            const multiplier =
+              unit === "GB"
+                ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000)
+                : unit === "MB"
+                  ? (1024 * 1024) / (1000 * 1000)
+                  : unit === "KB"
+                    ? 1024 / 1000
+                    : 1;
+            num = num * multiplier;
             size =
               num >= 100
                 ? num.toFixed(0)
@@ -1405,16 +1407,9 @@ async function startServer() {
       const cheerio = await import("cheerio");
 
       const response = await axios.get(url, {
-        headers: {
-          ...headers,
-          "Upgrade-Insecure-Requests": "1",
-          "Sec-Fetch-Dest": "document",
-          "Sec-Fetch-Mode": "navigate",
-          "Sec-Fetch-Site": "none",
-          "Sec-Fetch-User": "?1",
-        },
+        headers,
         validateStatus: () => true,
-        timeout: 10000,
+        timeout: 5000,
       });
       const $ = cheerio.load(response.data);
 
@@ -1427,19 +1422,10 @@ async function startServer() {
         return res.json({ url });
       }
 
-      if (nextUrl.startsWith("/")) {
-        const urlObj = new URL(url);
-        nextUrl = `${urlObj.protocol}//${urlObj.host}${nextUrl}`;
-      }
-
       const res2 = await axios.get(nextUrl, {
-        headers: {
-          ...headers,
-          Referer: url,
-          "Upgrade-Insecure-Requests": "1",
-        },
+        headers,
         validateStatus: () => true,
-        timeout: 10000,
+        timeout: 5000,
       });
       const $2 = cheerio.load(res2.data);
 
@@ -1631,6 +1617,32 @@ async function startServer() {
       const sizeMatch = bodyText.match(/File Size\s*([\d.]+\s*[A-Za-z]+)/i);
       if (sizeMatch && sizeMatch[1]) {
         sizeInfo = sizeMatch[1].trim();
+
+        // Convert to base-1000
+        const parts = sizeInfo.split(" ");
+        if (parts.length >= 2) {
+          let num = parseFloat(parts[0]);
+          let unit = parts[1].toUpperCase();
+          if (!isNaN(num)) {
+            const multiplier =
+              unit === "GB"
+                ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000)
+                : unit === "MB"
+                  ? (1024 * 1024) / (1000 * 1000)
+                  : unit === "KB"
+                    ? 1024 / 1000
+                    : 1;
+            num = num * multiplier;
+            let newSize =
+              num >= 100
+                ? num.toFixed(0)
+                : num >= 10
+                  ? num.toFixed(1)
+                  : num.toFixed(2);
+            newSize = newSize.replace(/\.00$/, "").replace(/\.0$/, "");
+            sizeInfo = `${newSize} ${unit}`;
+          }
+        }
       }
 
       res.json({
