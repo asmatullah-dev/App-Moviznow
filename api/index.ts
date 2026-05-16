@@ -1335,13 +1335,20 @@ async function startServer() {
         }
       }
 
-      const title = $("title").text() || $(".card-header").text() || "";
+      let title = $("title").text() || $(".card-header").text() || "";
+      const isCloudflare = title.toLowerCase().includes("just a moment");
+
+      if (isCloudflare) {
+        title = "Unknown (Cloudflare Block)";
+      }
+
       const isNotFound =
         response.status === 404 || title.toLowerCase().includes("not found");
       const isWorking =
         response.status < 400 ||
         response.status === 403 ||
-        response.status === 503;
+        response.status === 503 ||
+        isCloudflare;
 
       res.json({
         size,
@@ -1354,13 +1361,13 @@ async function startServer() {
       console.error("Hubcloud extract error:", e.message);
       // Even if it fails (like timeout on Vercel), return a generic response instead of 500
       // since the link might actually be working but just blocked by Vercel's datacenter IPs
-      if (e.code === 'ECONNABORTED' || e.message.includes('timeout')) {
+      if (e.code === "ECONNABORTED" || e.message.includes("timeout")) {
         return res.json({
           size: "",
           unit: "",
           title: "Unknown (Timeout)",
           isWorking: true, // Assume it works if it just timed out
-          isNotFound: false
+          isNotFound: false,
         });
       }
       res.status(500).json({ error: e.message });
@@ -1419,6 +1426,10 @@ async function startServer() {
         timeout: 5000,
       });
       const $ = cheerio.load(response.data);
+
+      if ($("title").text().toLowerCase().includes("just a moment")) {
+        return res.json({ url: url, isCloudflare: true });
+      }
 
       let nextUrl =
         $("#download").attr("href") ||
