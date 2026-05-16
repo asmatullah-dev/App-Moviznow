@@ -1339,7 +1339,45 @@ async function startServer() {
       const isCloudflare = title.toLowerCase().includes("just a moment");
 
       if (isCloudflare) {
-        title = "Unknown (Cloudflare Block)";
+        try {
+          // Use Microlink proxy API to bypass Cloudflare
+          const dlRes = await axios.get(`https://api.microlink.io/?url=${encodeURIComponent(url)}&prerender=true&meta=false&data.body.selector=body&data.body.attr=html`, { timeout: 10000 });
+          if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
+            const proxyHtml = dlRes.data.data.body;
+            const $proxy = cheerio.load(proxyHtml);
+            let sStr =
+              $proxy('li:contains("File Size") i').text() ||
+              $proxy('li:contains("File Size")').text();
+            sStr = sStr.replace("File Size", "").trim();
+            if (sStr) { sizeStr = sStr; }
+
+            const proxyTitle = $proxy("title").text() || $proxy(".card-header").text() || "";
+            if (proxyTitle && !proxyTitle.toLowerCase().includes("just a moment")) {
+                title = proxyTitle;
+                
+                // Recalculate size stuff based on fixed html
+                if (sizeStr) {
+                  const parts = sizeStr.split(" ");
+                  if (parts.length >= 2) {
+                    let num = parseFloat(parts[0]);
+                    unit = parts[1].toUpperCase();
+                    if (!isNaN(num)) {
+                      const multiplier = unit === "GB" ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000) : unit === "MB" ? (1024 * 1024) / (1000 * 1000) : unit === "KB" ? 1024 / 1000 : 1;
+                      num = num * multiplier;
+                      size = num >= 100 ? num.toFixed(0) : num >= 10 ? num.toFixed(1) : num.toFixed(2);
+                      size = size.replace(/\.00$/, "").replace(/\.0$/, "");
+                    } else { size = parts[0]; }
+                  } else { size = sizeStr; }
+                }
+            } else {
+                title = "Unknown (Cloudflare Block)";
+            }
+          } else {
+             title = "Unknown (Cloudflare Block)";
+          }
+        } catch(err) {
+           title = "Unknown (Cloudflare Block)";
+        }
       }
 
       const isNotFound =
@@ -1348,7 +1386,7 @@ async function startServer() {
         response.status < 400 ||
         response.status === 403 ||
         response.status === 503 ||
-        isCloudflare;
+        title === "Unknown (Cloudflare Block)";
 
       res.json({
         size,
@@ -1425,10 +1463,24 @@ async function startServer() {
         validateStatus: () => true,
         timeout: 5000,
       });
-      const $ = cheerio.load(response.data);
+      let $ = cheerio.load(response.data);
 
       if ($("title").text().toLowerCase().includes("just a moment")) {
-        return res.json({ url: url, isCloudflare: true });
+        try {
+          const dlRes = await axios.get(`https://api.microlink.io/?url=${encodeURIComponent(url)}&prerender=true&meta=false&data.body.selector=body&data.body.attr=html`, { timeout: 10000 });
+          if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
+             const proxyTitle = cheerio.load(dlRes.data.data.body)("title").text() || "";
+             if (!proxyTitle.toLowerCase().includes("just a moment")) {
+                 $ = cheerio.load(dlRes.data.data.body);
+             } else {
+                 return res.json({ url: url, isCloudflare: true });
+             }
+          } else {
+             return res.json({ url: url, isCloudflare: true });
+          }
+        } catch(err) {
+          return res.json({ url: url, isCloudflare: true });
+        }
       }
 
       let nextUrl =
@@ -1440,12 +1492,23 @@ async function startServer() {
         return res.json({ url });
       }
 
-      const res2 = await axios.get(nextUrl, {
+      let res2 = await axios.get(nextUrl, {
         headers,
         validateStatus: () => true,
         timeout: 5000,
       });
-      const $2 = cheerio.load(res2.data);
+      let $2 = cheerio.load(res2.data);
+      
+      if ($2("title").text().toLowerCase().includes("just a moment")) {
+         try {
+           const dlRes2 = await axios.get(`https://api.microlink.io/?url=${encodeURIComponent(nextUrl)}&prerender=true&meta=false&data.body.selector=body&data.body.attr=html`, { timeout: 10000 });
+           if (dlRes2.data && dlRes2.data.data && dlRes2.data.data.body) {
+               $2 = cheerio.load(dlRes2.data.data.body);
+           }
+         } catch(err) {
+           // Ignore and continue with original $2
+         }
+      }
 
       const candidateLinks: { text: string; href: string }[] = [];
       $2("a.btn").each((i, el) => {

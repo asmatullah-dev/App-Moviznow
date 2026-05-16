@@ -2853,93 +2853,69 @@ export default function MovieDetails() {
                   linkPopup.name.toLowerCase().includes("zip") ||
                   linkPopup.url.toLowerCase().includes(".zip")
                 ) ? (
-                  linkPopup.isCloudflare ? (
+                  <>
                     <button
-                      onClick={() => handlePlayExternal("browser")}
-                      className="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-3 px-6 text-base rounded-xl transition-colors flex items-center justify-center gap-2"
+                      onClick={() => handlePlayExternal("generic")}
+                      className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 px-6 text-base rounded-xl transition-colors flex items-center justify-center gap-2"
                     >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="20"
-                        height="20"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M21 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6"></path>
-                        <polyline points="21 3 14 3 14 10"></polyline>
-                        <line x1="21" y1="3" x2="10" y2="14"></line>
-                      </svg>
-                      Open link to bypass protection
+                      <Play className="w-5 h-5" /> Play in Video Player
                     </button>
-                  ) : (
-                    <>
-                      <button
-                        onClick={() => handlePlayExternal("generic")}
-                        className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 px-6 text-base rounded-xl transition-colors flex items-center justify-center gap-2"
-                      >
-                        <Play className="w-5 h-5" /> Play in Video Player
-                      </button>
 
-                      <div className="grid grid-cols-2 gap-3">
-                        <button
-                          onClick={() => handlePlayExternal("mx")}
-                          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl transition-colors flex items-center justify-center gap-2 text-sm sm:text-base"
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        onClick={() => handlePlayExternal("mx")}
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl transition-colors flex items-center justify-center gap-2 text-sm sm:text-base"
+                      >
+                        <svg
+                          width="20"
+                          height="20"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="w-5 h-5"
                         >
-                          <svg
-                            width="20"
-                            height="20"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            xmlns="http://www.w3.org/2000/svg"
-                            className="w-5 h-5"
-                          >
-                            <rect
-                              width="24"
-                              height="24"
-                              rx="6"
-                              fill="white"
-                              fillOpacity="0.2"
-                            />
-                            <path
-                              d="M16.5 12L9 16.5V7.5L16.5 12Z"
-                              fill="currentColor"
-                            />
-                          </svg>
-                          MX Player
-                        </button>
-                        <button
-                          onClick={() => handlePlayExternal("vlc")}
-                          className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 px-6 rounded-xl transition-colors flex items-center justify-center gap-2 text-sm sm:text-base"
+                          <rect
+                            width="24"
+                            height="24"
+                            rx="6"
+                            fill="white"
+                            fillOpacity="0.2"
+                          />
+                          <path
+                            d="M16.5 12L9 16.5V7.5L16.5 12Z"
+                            fill="currentColor"
+                          />
+                        </svg>
+                        MX Player
+                      </button>
+                      <button
+                        onClick={() => handlePlayExternal("vlc")}
+                        className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 px-6 rounded-xl transition-colors flex items-center justify-center gap-2 text-sm sm:text-base"
+                      >
+                        <svg
+                          width="20"
+                          height="20"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="w-5 h-5"
                         >
-                          <svg
-                            width="20"
-                            height="20"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            xmlns="http://www.w3.org/2000/svg"
-                            className="w-5 h-5"
-                          >
-                            <path d="M12 2L5 22H19L12 2Z" fill="currentColor" />
-                            <path
-                              d="M6.5 17H17.5"
-                              stroke="#ea580c"
-                              strokeWidth="2.5"
-                            />
-                            <path
-                              d="M9 10H15"
-                              stroke="#ea580c"
-                              strokeWidth="2.5"
-                            />
-                          </svg>
-                          VLC Player
-                        </button>
-                      </div>
-                    </>
-                  )
+                          <path d="M12 2L5 22H19L12 2Z" fill="currentColor" />
+                          <path
+                            d="M6.5 17H17.5"
+                            stroke="#ea580c"
+                            strokeWidth="2.5"
+                          />
+                          <path
+                            d="M9 10H15"
+                            stroke="#ea580c"
+                            strokeWidth="2.5"
+                          />
+                        </svg>
+                        VLC Player
+                      </button>
+                    </div>
+                  </>
                 ) : null}
 
                 <button
