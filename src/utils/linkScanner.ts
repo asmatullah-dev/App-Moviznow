@@ -613,7 +613,7 @@ export async function performFullLinkScan(
 
   // HubCloud interception
   let hubcloudTitle = "";
-  if (url.includes("hubcloud") || url.includes("moviesdrives")) {
+  if (url.includes("hubcloud") || url.includes("moviesdrives") || url.includes("vcloud")) {
     try {
       const res = await fetch("/api/hubcloud/extract", {
         method: "POST",

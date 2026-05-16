@@ -1261,7 +1261,7 @@ export default function MovieDetails() {
     let finalCandidates: { text: string; href: string }[] | undefined;
     let finalSize: string | undefined;
 
-    if (url.includes("hubcloud") || url.includes("moviesdrives")) {
+    if (url.includes("hubcloud") || url.includes("moviesdrives") || url.includes("vcloud")) {
       const clickId = url;
       setExtractingLinkId(clickId);
       // Immediately open the popup with a temporary "extracting" state, so user gets feedback
@@ -2851,7 +2851,8 @@ export default function MovieDetails() {
                 {!(
                   linkPopup.isZip ||
                   linkPopup.name.toLowerCase().includes("zip") ||
-                  linkPopup.url.toLowerCase().includes(".zip")
+                  (linkPopup.url.toLowerCase().includes(".zip") &&
+                    !linkPopup.url.toLowerCase().includes("vcloud.zip"))
                 ) ? (
                   <>
                     <button
