@@ -5,6 +5,8 @@ import fs from "fs";
 import firebaseConfig from "../firebase-applet-config.json" assert { type: "json" };
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
+import axios from "axios";
+import * as cheerio from "cheerio";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1277,9 +1279,6 @@ async function startServer() {
         return res.status(400).json({ error: "Invalid HubCloud URL" });
       }
 
-      const axios = (await import("axios")).default;
-      const cheerio = await import("cheerio");
-
       const headers = {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -1360,7 +1359,6 @@ async function startServer() {
   app.post("/api/hubcloud/direct-link", async (req, res) => {
     try {
       const { url, checkOnly } = req.body;
-      const axios = (await import("axios")).default;
 
       const headers = {
         "User-Agent":
@@ -1403,8 +1401,6 @@ async function startServer() {
       ) {
         return res.json({ url });
       }
-
-      const cheerio = await import("cheerio");
 
       const response = await axios.get(url, {
         headers,

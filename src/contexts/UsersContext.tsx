@@ -84,6 +84,18 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         opCount++;
       }
 
+      // Update chunk meta for all affected users
+      const usersMeta: Record<string, number> = {};
+      const versionTime = Date.now();
+      for (const uid of userIds) {
+        usersMeta[uid] = versionTime;
+      }
+
+      if (opCount >= 499) {
+        batches.push(writeBatch(db));
+      }
+      batches[batches.length - 1].set(doc(db, 'chunk_meta', 'versions'), { users: usersMeta }, { merge: true });
+
       for (const b of batches) await b.commit();
       
       safeStorage.removeItem('pending_user_updates');
