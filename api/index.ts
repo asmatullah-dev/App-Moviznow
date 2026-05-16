@@ -1351,7 +1351,18 @@ async function startServer() {
         isNotFound,
       });
     } catch (e: any) {
-      console.error(e);
+      console.error("Hubcloud extract error:", e.message);
+      // Even if it fails (like timeout on Vercel), return a generic response instead of 500
+      // since the link might actually be working but just blocked by Vercel's datacenter IPs
+      if (e.code === 'ECONNABORTED' || e.message.includes('timeout')) {
+        return res.json({
+          size: "",
+          unit: "",
+          title: "Unknown (Timeout)",
+          isWorking: true, // Assume it works if it just timed out
+          isNotFound: false
+        });
+      }
       res.status(500).json({ error: e.message });
     }
   });

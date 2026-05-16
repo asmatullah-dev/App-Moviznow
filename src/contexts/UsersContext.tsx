@@ -80,7 +80,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           batches.push(writeBatch(db));
           opCount = 0;
         }
-        batches[batches.length - 1].update(doc(db, 'users', uid), pending[uid]);
+        batches[batches.length - 1].set(doc(db, 'users', uid), pending[uid], { merge: true });
         opCount++;
       }
 

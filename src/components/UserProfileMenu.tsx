@@ -227,7 +227,8 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                   // checkForUpdates(true) is our master sync function that handles profile, content, and users sync
                   await Promise.all([
                     checkForUpdates(true),
-                    refreshSettings()
+                    refreshSettings(),
+                    refreshProfile(true)
                   ]);
                 }} 
                 className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
