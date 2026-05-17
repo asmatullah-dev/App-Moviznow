@@ -1270,6 +1270,7 @@ async function startServer() {
   };
 
   app.post("/api/hblinks/extract", async (req, res) => {
+    const startTime = Date.now();
     try {
       const { url } = req.body;
       if (!url || (!url.includes("hblinks.") && !url.includes("hublinks."))) {
@@ -1278,15 +1279,30 @@ async function startServer() {
 
       const headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       };
 
-      const response = await axios.get(url, { headers, validateStatus: () => true, timeout: 8000 });
-      const html = response.data;
+      let html = "";
+      try {
+        const response = await axios.get(url, { headers, validateStatus: () => true, timeout: 6000 });
+        html = response.data;
+        if (html.toLowerCase().includes("just a moment") || response.status === 403 || response.status === 503) {
+           const dlRes = await axios.get(`https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html`, { timeout: 10000 });
+           if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
+              html = dlRes.data.data.body;
+           }
+        }
+      } catch (e) {
+          const dlRes = await axios.get(`https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html`, { timeout: 10000 });
+          if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
+              html = dlRes.data.data.body;
+          }
+      }
+      
+      if (!html) throw new Error("Could not fetch page content");
+      
       const $ = cheerio.load(html);
-
       const titleText = $("title").text() || $("h1").first().text() || "";
-      // E.g., The Pitt S01-E15 – HUBLinks
       let contentName = "";
       let year, season, episode;
 
@@ -1310,17 +1326,14 @@ async function startServer() {
       const qualities: any[] = [];
       const seenQualities = new Set();
       
-      // Look for heading blocks with quality like 480p, 720p, 1080p
       $("h1, h2, h3, h4, h5, h6").each((i, header) => {
          const headerText = $(header).text().trim();
          if (/(480p|720p|1080p|2160p|4k)/i.test(headerText) || /WEB-DL/i.test(headerText)) {
-            // Find links inside or immediately following this header
             let nextElem = $(header).next();
             let isLinksFound = false;
             let hubcloudLink = "";
             let hubdriveLink = "";
 
-            // Check if links are inside the header itself
             $(header).find("a").each((j, a) => {
                const href = $(a).attr("href");
                const text = $(a).text().toLowerCase();
@@ -1349,89 +1362,106 @@ async function startServer() {
                const qName = qNameRaw.length < 30 ? qNameRaw : (qNameRaw.match(/(480p|720p|1080p|2160p|4k).*?(WEB-DL|HEVC|10Bit)?/i)?.[0] || qNameRaw);
                if (!seenQualities.has(qName)) {
                  seenQualities.add(qName);
-                 qualities.push({
-                    name: qName,
-                    hubcloudLink,
-                    hubdriveLink
-                 });
+                 qualities.push({ name: qName, hubcloudLink, hubdriveLink });
                }
             }
          }
       });
 
-      const qualitiesWithSizes = (await Promise.all(qualities.map(async (q) => {
-         let targetUrl = q.hubcloudLink || q.hubdriveLink;
-         let resolvedUrl = targetUrl;
-         let size = "";
-         let unit = "";
-         let fileName = "";
-         
-         if (resolvedUrl && (resolvedUrl.includes('hubdrive') || resolvedUrl.includes('hubcdn'))) {
-            try {
-               const hdRes = await axios.get(resolvedUrl, { headers, timeout: 5000 });
-               const hcMatch = hdRes.data.match(/href=[\"']([^\"']*?(?:hubcloud|vcloud|moviesdrives)[^\"']*?)[\"']/i);
-               if (hcMatch && hcMatch[1]) resolvedUrl = hcMatch[1];
-               else {
-                  const dlRes = await axios.get(`https://api.microlink.io/?url=${encodeURIComponent(resolvedUrl)}&meta=false&data.body.selector=body&data.body.attr=html`);
-                  if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
-                    const proxyHcMatch = dlRes.data.data.body.match(/href=[\"']([^\"']*?(?:hubcloud|vcloud|moviesdrives)[^\"']*?)[\"']/i);
-                    if (proxyHcMatch && proxyHcMatch[1]) resolvedUrl = proxyHcMatch[1];
-                  }
-               }
-               
-               // Also try to get filename from hubdrive if available
-               const $hd = cheerio.load(hdRes.data);
-               fileName = $hd('li:contains("File Name") i').text() || $hd('li:contains("File Name")').text() || $hd('li:contains("Name") i').text() || $hd('li:contains("Name")').text();
-               fileName = fileName.replace("File Name", "").replace("Name", "").replace(":", "").trim();
-            } catch (e) {}
-         }
+      // Sequential detail extraction with a time budget to avoid Vercel 10s limit
+      const qualitiesWithSizes: any[] = [];
+      const MAX_TIME = 9000; // 9 seconds total
+      const MAX_QUALITIES = 5; // Cap at 5 qualities for detailed info
 
-         if (resolvedUrl) {
-            try {
-               const qRes = await axios.get(resolvedUrl, {
-                  headers, validateStatus: () => true, timeout: 5000
-               });
-               const $q = cheerio.load(qRes.data);
-               let sizeStr = $q('li:contains("File Size") i').text() || $q('li:contains("File Size")').text() || $q('li:contains("Size") i').text() || $q('li:contains("Size")').text();
-               sizeStr = sizeStr.replace("File Size", "").replace("Size", "").replace(":", "").trim();
-               if (sizeStr) {
-                  const parts = sizeStr.split(" ");
-                  if (parts.length >= 2) {
-                     let num = parseFloat(parts[0]);
-                     unit = parts[1].toUpperCase();
-                     if (!isNaN(num)) {
-                        const multiplier = unit === "GB" ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000) : unit === "MB" ? (1024 * 1024) / (1000 * 1000) : unit === "KB" ? 1024 / 1000 : 1;
-                        num = num * multiplier;
-                        size = num >= 100 ? num.toFixed(0) : num >= 10 ? num.toFixed(1) : num.toFixed(2);
-                        size = size.replace(/\.00$/, "").replace(/\.0$/, "");
-                     } else {
-                        size = parts[0];
-                     }
-                  } else {
-                     size = sizeStr;
-                  }
-               }
-               
-               if (!fileName) {
-                  fileName = $q('li:contains("File Name") i').text() || $q('li:contains("File Name")').text() || $q('li:contains("Name") i').text() || $q('li:contains("Name")').text();
-                  fileName = fileName.replace("File Name", "").replace("Name", "").replace(":", "").trim();
-               }
-            } catch (ignore) {}
-         }
-         
-         // If we couldn't find size, skip it.
-         if (!size) {
-            return null;
-         }
+      const subset = qualities.slice(0, MAX_QUALITIES);
+      for (const q of subset) {
+          if (Date.now() - startTime > MAX_TIME) break;
+          
+          let targetUrl = q.hubcloudLink || q.hubdriveLink;
+          let resolvedUrl = targetUrl;
+          let size = "";
+          let unit = "";
+          let fileName = "";
+          
+          if (resolvedUrl && (resolvedUrl.includes('hubdrive') || resolvedUrl.includes('hubcdn'))) {
+             try {
+                const hdRes = await axios.get(resolvedUrl, { headers, timeout: 3500, validateStatus: () => true });
+                let hdHtml = hdRes.data;
+                const isCloudflare = hdHtml?.toLowerCase().includes("just a moment");
 
-         return {
-            ...q,
-            resolvedUrl: resolvedUrl !== targetUrl ? resolvedUrl : undefined,
-            size,
-            unit,
-            fileName: fileName || undefined
-         };
-      }))).filter(Boolean);
+                if (isCloudflare) {
+                   const dlRes = await axios.get(`https://api.microlink.io/?url=${encodeURIComponent(resolvedUrl)}&meta=false&data.body.selector=body&data.body.attr=html`, { timeout: 6000 });
+                   if (dlRes.data?.data?.body) hdHtml = dlRes.data.data.body;
+                }
+
+                if (hdHtml) {
+                   const hcMatch = hdHtml.match(/href=[\"']([^\"']*?(?:hubcloud|vcloud|moviesdrives)[^\"']*?)[\"']/i);
+                   if (hcMatch && hcMatch[1]) resolvedUrl = hcMatch[1];
+                   
+                   const $hd = cheerio.load(hdHtml);
+                   fileName = $hd('li:contains("File Name") i, li:contains("File Name") span, li:contains("Name") i, li:contains("Name") span').first().text() || 
+                              $hd('li:contains("File Name"), li:contains("Name")').first().text();
+                   fileName = fileName.replace(/File Name|Name|:/gi, "").trim();
+                }
+             } catch (e) {}
+          }
+
+          if (resolvedUrl) {
+             try {
+                const qRes = await axios.get(resolvedUrl, { headers, validateStatus: () => true, timeout: 3500 });
+                let qHtml = qRes.data;
+                if (qHtml?.toLowerCase().includes("just a moment")) {
+                   const dlRes = await axios.get(`https://api.microlink.io/?url=${encodeURIComponent(resolvedUrl)}&meta=false&data.body.selector=body&data.body.attr=html`, { timeout: 6000 });
+                   if (dlRes.data?.data?.body) qHtml = dlRes.data.data.body;
+                }
+
+                if (qHtml) {
+                   const $q = cheerio.load(qHtml);
+                   let sizeStr = $q('li:contains("File Size") i, li:contains("File Size") span, li:contains("Size") i, li:contains("Size") span').first().text() || 
+                                 $q('li:contains("File Size"), li:contains("Size")').first().text();
+                   sizeStr = sizeStr.replace(/File Size|Size|:/gi, "").trim();
+                   if (sizeStr && sizeStr.match(/\d/)) {
+                      const parts = sizeStr.split(/\s+/);
+                      if (parts.length >= 2) {
+                         let num = parseFloat(parts[0]);
+                         unit = parts[1].toUpperCase();
+                         if (!isNaN(num)) {
+                            const multiplier = unit === "GB" ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000) : unit === "MB" ? (1024 * 1024) / (1000 * 1000) : unit === "KB" ? 1024 / 1000 : 1;
+                            num = num * multiplier;
+                            size = num >= 100 ? num.toFixed(0) : num >= 10 ? num.toFixed(1) : num.toFixed(2);
+                            size = size.replace(/\.00$/, "").replace(/\.0$/, "");
+                         } else {
+                            size = parts[0];
+                         }
+                      } else {
+                         size = sizeStr;
+                      }
+                   }
+                   
+                   if (!fileName) {
+                      fileName = $q('li:contains("File Name") i, li:contains("File Name") span, li:contains("Name") i, li:contains("Name") span').first().text() || 
+                                 $q('li:contains("File Name"), li:contains("Name")').first().text();
+                      fileName = fileName.replace(/File Name|Name|:/gi, "").trim();
+                   }
+                }
+             } catch (ignore) {}
+          }
+          
+          qualitiesWithSizes.push({
+             ...q,
+             resolvedUrl: resolvedUrl !== targetUrl ? resolvedUrl : undefined,
+             size: size || undefined,
+             unit: unit || undefined,
+             fileName: fileName || undefined
+          });
+      }
+
+      // Add remaining qualities without extra details if they exist
+      if (qualities.length > qualitiesWithSizes.length) {
+         for (let i = qualitiesWithSizes.length; i < qualities.length; i++) {
+            qualitiesWithSizes.push(qualities[i]);
+         }
+      }
 
       res.json({
          title: cleanTitle,
@@ -1797,59 +1827,64 @@ async function startServer() {
 
       const checkPromises = candidateLinks.map(async (candidate, index) => {
         let checkUrl = candidate.href;
-        const checkRes = await axios.get(checkUrl, {
-          headers: { ...headers, Range: "bytes=0-0" },
-          maxRedirects: 0,
-          validateStatus: () => true,
-          timeout: 2500, // Reduced to avoid hitting vercel function 10s limit
-        });
+        try {
+          const timeout = index < 3 ? 3500 : 2500; // Give priority links more time
+          const checkRes = await axios.get(checkUrl, {
+            headers: { ...headers, Range: "bytes=0-0" },
+            maxRedirects: 0,
+            validateStatus: () => true,
+            timeout: timeout, 
+          });
 
-        let resultLink = candidate.href;
-        let isWorking = false;
+          let resultLink = candidate.href;
+          let isWorking = false;
 
-        if (
-          checkRes.status >= 300 &&
-          checkRes.status < 400 &&
-          checkRes.headers.location
-        ) {
-          resultLink = checkRes.headers.location;
-          try {
-            const nextRes = await axios.get(resultLink, {
-              headers: { ...headers, Range: "bytes=0-0" },
-              maxRedirects: 0,
-              validateStatus: () => true,
-              timeout: 2500,
-            });
-            if (
-              nextRes.status >= 300 &&
-              nextRes.status < 400 &&
-              nextRes.headers.location
-            ) {
-              resultLink = nextRes.headers.location;
+          if (
+            checkRes.status >= 300 &&
+            checkRes.status < 400 &&
+            checkRes.headers.location
+          ) {
+            resultLink = checkRes.headers.location;
+            try {
+              const nextRes = await axios.get(resultLink, {
+                headers: { ...headers, Range: "bytes=0-0" },
+                maxRedirects: 0,
+                validateStatus: () => true,
+                timeout: 2500,
+              });
+              if (
+                nextRes.status >= 300 &&
+                nextRes.status < 400 &&
+                nextRes.headers.location
+              ) {
+                resultLink = nextRes.headers.location;
+              }
+              if (
+                nextRes.status < 400 ||
+                nextRes.status === 405 ||
+                nextRes.status === 416
+              ) {
+                isWorking = true;
+              }
+            } catch (e) {
+              isWorking = true; 
             }
-            // Check if specifically returning 404/error on destination
-            if (
-              nextRes.status < 400 ||
-              nextRes.status === 405 ||
-              nextRes.status === 416
-            ) {
-              isWorking = true;
-            } else {
-              isWorking = false; // The destination is 404 or worse
-            }
-          } catch (e) {
-            isWorking = true; // Still assume it works if we just hit timeout
+          } else if (
+            checkRes.status < 400 ||
+            checkRes.status === 405 ||
+            checkRes.status === 416
+          ) {
+            isWorking = true;
           }
-        } else if (
-          checkRes.status < 400 ||
-          checkRes.status === 405 ||
-          checkRes.status === 416
-        ) {
-          isWorking = true;
-        }
 
-        if (isWorking) {
-          return { index, link: resultLink };
+          if (isWorking) {
+            return { index, link: resultLink };
+          }
+        } catch (e) {
+           // On timeout or error, if it's a priority link (pixeldrain), assume it might work
+           if (/pixeldrain|pixel\.drain|pixeldra\.in/i.test(checkUrl)) {
+              return { index, link: checkUrl };
+           }
         }
         throw new Error("Not working");
       });
