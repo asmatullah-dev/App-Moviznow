@@ -1716,6 +1716,9 @@ async function startServer() {
       let nextUrl =
         active$("#download").attr("href") ||
         active$('a:contains("Generate Direct Download Link")').attr("href") ||
+        active$('a:contains("Download Now")').attr("href") ||
+        active$('a:contains("Direct Download")').attr("href") ||
+        active$('a:contains("Download")').attr("href") ||
         active$("a.btn-zip").attr("href");
 
       // Extract url from script for vcloud if href is missing
@@ -1753,12 +1756,12 @@ async function startServer() {
       }
 
       const candidateLinks: { text: string; href: string }[] = [];
-      $2("a.btn").each((i, el) => {
+      $2('a.btn, a[class*="btn-"], a.download-btn, a[href*="pixeldrain"], a[href*="workers.dev"]').each((i, el) => {
         let href = $2(el).attr("href") || "";
         const text = $2(el).text().toLowerCase();
         const id = $2(el).attr("id");
 
-        if (id) {
+        if (id && (!href || href === "#" || href.includes("javascript"))) {
           $2("script").each((_, scriptEl) => {
             const scriptContent = $2(scriptEl).html();
             if (!scriptContent) return;
