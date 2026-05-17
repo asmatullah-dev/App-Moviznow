@@ -16,9 +16,7 @@ import {
   ChevronUp,
   Siren,
   Plus,
-  X,
-  Zap,
-  ChevronRight
+  X
 } from "lucide-react";
 import { QualityLinks, Language, Quality, LinkDef } from '../types';
 import { 
@@ -77,7 +75,6 @@ const badgeMap: Record<StatusLabel, string> = {
   MISSING_METADATA: "bg-pink-500/15 text-pink-400 border-pink-800/80",
   SMALL_FILE: "bg-orange-500/15 text-orange-400 border-orange-800/80",
   SIZE_MISMATCH: "bg-red-500/15 text-red-400 border-red-800/80",
-  HBLINKS_MULTIPLE: "bg-purple-500/15 text-purple-400 border-purple-800/80",
 };
 
 export const LinkCheckerModal: React.FC<Props> = ({
@@ -108,12 +105,6 @@ export const LinkCheckerModal: React.FC<Props> = ({
     links: QualityLinks;
     metadata: any;
   }[]>([]);
-
-  // Quality selector for HBLinks
-  const [hblinksSelector, setHblinksSelector] = useState<{
-    url: string;
-    data: any;
-  } | null>(null);
 
   useModalBehavior(isOpen, onClose);
 
@@ -407,14 +398,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
         if (eMatch) detectedE = parseInt(eMatch[1]);
       }
 
-      if (quality !== 'All Qualities') {
-        if (r.codecLabel === "HEVC") finalName += ` HEVC`;
-        if (r.audioLabel && r.audioLabel.includes('Dual') && r.codecLabel !== "HEVC") finalName += ' Dual';
-      }
-
-      // Explicit override from results
-      if (r.season) detectedS = r.season;
-      if (r.episode) detectedE = r.episode;
+      if (r.codecLabel === "HEVC") finalName += ` HEVC`;
+      if (r.audioLabel && r.audioLabel.includes('Dual') && r.codecLabel !== "HEVC") finalName += ' Dual';
 
       // Determine size and unit
       let sizeStr = '';
@@ -579,21 +564,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
     });
 
     const combinedNames = validResults.map(r => r.fileName || '').join(' ') + ' ' + input;
-    let { title: extractedTitle, year: extractedYear } = extractTitleAndYear(combinedNames);
-    
-    // Check if any single result provides robust info (like hblinks extraction)
-    const resultWithTitle = validResults.find(r => r.year && r.fileName && !r.fileName.toLowerCase().includes("hblinks"));
-    if (resultWithTitle) {
-      extractedTitle = resultWithTitle.fileName || extractedTitle;
-      extractedYear = resultWithTitle.year || extractedYear;
-      if (resultWithTitle.season) {
-         detectedType = "series";
-         detectedSeason = resultWithTitle.season;
-      }
-      if (resultWithTitle.episode) {
-         detectedEpisode = resultWithTitle.episode;
-      }
-    }
+    const { title: extractedTitle, year: extractedYear } = extractTitleAndYear(combinedNames);
     
     // Fallback to first working result's year if available
     const fallbackYear = validResults.find(r => r.year)?.year;
@@ -715,8 +686,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
   }, [results]);
 
   return (
-    <>
-      <AnimatePresence>
+    <AnimatePresence>
       {isOpen ? (
         <motion.div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
           <motion.div initial={{ opacity: 0, y: 20, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 10, scale: 0.98 }} transition={{ duration: 0.18 }} className="w-full max-w-5xl max-h-[95vh] overflow-y-auto custom-scrollbar">
@@ -954,14 +924,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                                 <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">{result.message || (result.ok ? "The link is reachable." : "The link could not be verified.")}</p>
                               </div>
                             </div>
-                            <div className="flex flex-col gap-2 self-start">
-                              {result.statusLabel === "HBLINKS_MULTIPLE" && result.hblinksData ? (
-                                <button onClick={() => setHblinksSelector({ url: result.url, data: result.hblinksData })} className="inline-flex items-center justify-center rounded-2xl border border-purple-200 dark:border-purple-700 bg-purple-50 dark:bg-purple-900/30 px-4 py-2 text-sm font-medium text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/50 gap-2 transition-colors">
-                                  <Zap className="h-4 w-4" /> Resolve Qualities
-                                </button>
-                              ) : null}
-                              <button onClick={() => toggleExpand(result.url)} className="inline-flex items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-transparent px-4 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-2 transition-colors">Details {openRow ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</button>
-                            </div>
+                            <button onClick={() => toggleExpand(result.url)} className="inline-flex items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-transparent px-4 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-2 self-start transition-colors">Details {openRow ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</button>
                           </div>
                           {openRow ? (
                             <div className="grid gap-2 text-xs text-zinc-500 dark:text-zinc-400 sm:grid-cols-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/70 p-4 transition-colors duration-300">
@@ -1001,120 +964,6 @@ export const LinkCheckerModal: React.FC<Props> = ({
         </motion.div>
       ) : null}
     </AnimatePresence>
-
-    <AnimatePresence>
-      {hblinksSelector ? (
-        <motion.div
-          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-zinc-900/40 dark:bg-black/60 backdrop-blur-sm"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-        >
-          <motion.div
-            className="w-full max-w-lg rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-6 shadow-xl"
-            initial={{ scale: 0.95, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.95, opacity: 0 }}
-          >
-            <div className="mb-4">
-              <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-1">
-                Select Quality
-              </h3>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                {hblinksSelector.data.contentName || "Content"} - {hblinksSelector.data.qualities.length} qualities found
-              </p>
-            </div>
-
-            <div className="space-y-3 mb-6 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
-              <button
-                className="w-full flex items-center justify-between p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 hover:border-cyan-500 hover:bg-cyan-50/50 dark:hover:bg-cyan-950/20 text-left transition-all"
-                onClick={async () => {
-                   // Keep as all qualities
-                   const newRes = {
-                     url: hblinksSelector.url,
-                     ok: true,
-                     statusLabel: "WORKING" as any,
-                     qualityLabel: "All Qualities",
-                     hblinksData: undefined,
-                     fileName: hblinksSelector.data.contentName,
-                     year: hblinksSelector.data.year,
-                     season: hblinksSelector.data.season,
-                     episode: hblinksSelector.data.episode,
-                   };
-                   
-                   setResults(prev => prev.map(r => r.url === hblinksSelector.url ? newRes as any : r));
-                   setHblinksSelector(null);
-                }}
-              >
-                <div>
-                   <div className="font-bold text-zinc-900 dark:text-white">Keep as "All Qualities"</div>
-                   <div className="text-xs text-zinc-500">Skips size/unit and assigns All Qualities label</div>
-                </div>
-                <ChevronRight className="w-5 h-5 text-zinc-400" />
-              </button>
-
-              {hblinksSelector.data.qualities.map((q: any, i: number) => (
-                <button
-                  key={i}
-                  className="w-full flex items-center justify-between p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 hover:border-purple-500 hover:bg-purple-50/50 dark:hover:bg-purple-950/20 text-left transition-all"
-                  onClick={async () => {
-                     setHblinksSelector(null);
-                     setLoading(true);
-                     try {
-                        const targetUrl = q.resolvedUrl || q.hubcloudLink || q.hubdriveLink;
-                        if (!targetUrl) throw new Error("No URL found for quality");
-                        
-                        // Extract using hubcloud
-                        const res = await fetch("/api/hubcloud/extract", {
-                           method: "POST",
-                           headers: { "Content-Type": "application/json" },
-                           body: JSON.stringify({ url: targetUrl }),
-                        });
-                        const extracted = await res.json();
-                        
-                        const newRes = {
-                           url: hblinksSelector.url,
-                           finalUrl: targetUrl,
-                           ok: true,
-                           statusLabel: "WORKING" as any,
-                           qualityLabel: q.name,
-                           hblinksData: undefined,
-                           fileName: hblinksSelector.data.contentName,
-                           year: hblinksSelector.data.year,
-                           season: hblinksSelector.data.season,
-                           episode: hblinksSelector.data.episode,
-                           fileSizeText: (extracted.size && extracted.unit) ? `${extracted.size} ${extracted.unit}` : undefined,
-                        };
-                        setResults(prev => prev.map(r => r.url === hblinksSelector.url ? newRes as any : r));
-                     } catch(e) {
-                        alert("Failed to extract details for this quality.");
-                     } finally {
-                        setLoading(false);
-                     }
-                  }}
-                >
-                  <div className="space-y-1">
-                     <div className="font-bold text-zinc-900 dark:text-white">{q.name}</div>
-                     {q.hubcloudLink && <div className="text-[10px] uppercase font-bold text-emerald-500 tracking-wider">Has HubCloud</div>}
-                     {q.hubdriveLink && !q.hubcloudLink && <div className="text-[10px] uppercase font-bold text-blue-500 tracking-wider">Has HubDrive</div>}
-                  </div>
-                  <ChevronRight className="w-5 h-5 text-zinc-400" />
-                </button>
-              ))}
-            </div>
-            <div className="flex justify-end">
-              <button
-                className="px-4 py-2 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition"
-                onClick={() => setHblinksSelector(null)}
-              >
-                Cancel
-              </button>
-            </div>
-          </motion.div>
-        </motion.div>
-      ) : null}
-    </AnimatePresence>
-    </>
   );
 };
 
