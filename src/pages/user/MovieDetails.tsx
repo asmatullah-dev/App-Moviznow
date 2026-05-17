@@ -1261,7 +1261,7 @@ export default function MovieDetails() {
     let finalCandidates: { text: string; href: string }[] | undefined;
     let finalSize: string | undefined;
 
-    if (url.includes("hubcloud") || url.includes("moviesdrives") || url.includes("vcloud")) {
+    if (url.includes("hubcloud") || url.includes("moviesdrive") || url.includes("vcloud")) {
       const clickId = url;
       setExtractingLinkId(clickId);
       // Immediately open the popup with a temporary "extracting" state, so user gets feedback
@@ -1278,8 +1278,8 @@ export default function MovieDetails() {
       const now = Date.now();
       const cached = hubcloudCacheRef.current[url];
 
-      // If we have a cached link within 1 minute, try to check if it's working
-      if (cached && now - cached.timestamp < 60000) {
+      // If we have a cached link within 30 seconds, try to check if it's working
+      if (cached && now - cached.timestamp < 30000) {
         try {
           // Check if the cached link is still alive by hitting it in the backend
           const checkRes = await fetch("/api/hubcloud/direct-link", {

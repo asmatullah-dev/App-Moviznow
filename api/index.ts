@@ -1274,7 +1274,9 @@ async function startServer() {
       const { url } = req.body;
       if (
         !url ||
-        (!url.includes("hubcloud") && !url.includes("moviesdrives") && !url.includes("vcloud"))
+        (!url.includes("hubcloud") &&
+          !url.includes("moviesdrive") &&
+          !url.includes("vcloud"))
       ) {
         return res.status(400).json({ error: "Invalid HubCloud URL" });
       }
@@ -1338,14 +1340,19 @@ async function startServer() {
       }
 
       let title = $("title").text() || $(".card-header").text() || "";
-      const isCloudflare = title.toLowerCase().includes("just a moment");
+      const isCloudflare =
+        title.toLowerCase().includes("just a moment") ||
+        title.toLowerCase().includes("cloudflare") ||
+        title.toLowerCase().includes("ddos protection") ||
+        response.status === 403 ||
+        response.status === 503;
 
       if (isCloudflare) {
         try {
           // Use Microlink proxy API to bypass Cloudflare
           const dlRes = await axios.get(
-            `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html`,
-            { timeout: 10000 },
+            `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
+            { timeout: 8000 },
           );
           if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
             const proxyHtml = dlRes.data.data.body;
@@ -1482,7 +1489,9 @@ async function startServer() {
 
       if (
         !url ||
-        (!url.includes("hubcloud") && !url.includes("moviesdrives") && !url.includes("vcloud"))
+        (!url.includes("hubcloud") &&
+          !url.includes("moviesdrive") &&
+          !url.includes("vcloud"))
       ) {
         return res.json({ url });
       }
@@ -1494,16 +1503,28 @@ async function startServer() {
       });
       let $ = cheerio.load(response.data);
 
-      if ($("title").text().toLowerCase().includes("just a moment")) {
+      const titleText = $("title").text().toLowerCase();
+      const isCf =
+        titleText.includes("just a moment") ||
+        titleText.includes("cloudflare") ||
+        titleText.includes("ddos protection") ||
+        response.status === 403 ||
+        response.status === 503;
+
+      if (isCf) {
         try {
           const dlRes = await axios.get(
-            `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html`,
-            { timeout: 10000 },
+            `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
+            { timeout: 8000 },
           );
           if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
             const proxyTitle =
-              cheerio.load(dlRes.data.data.body)("title").text() || "";
-            if (!proxyTitle.toLowerCase().includes("just a moment")) {
+              cheerio.load(dlRes.data.data.body)("title").text().toLowerCase() || "";
+            if (
+              !proxyTitle.includes("just a moment") &&
+              !proxyTitle.includes("cloudflare") &&
+              !proxyTitle.includes("ddos protection")
+            ) {
               $ = cheerio.load(dlRes.data.data.body);
             } else {
               return res.json({ url: url, isCloudflare: true });
@@ -1541,11 +1562,19 @@ async function startServer() {
       });
       let $2 = cheerio.load(res2.data);
 
-      if ($2("title").text().toLowerCase().includes("just a moment")) {
+      const titleText2 = $2("title").text().toLowerCase();
+      const isCf2 =
+        titleText2.includes("just a moment") ||
+        titleText2.includes("cloudflare") ||
+        titleText2.includes("ddos protection") ||
+        res2.status === 403 ||
+        res2.status === 503;
+
+      if (isCf2) {
         try {
           const dlRes2 = await axios.get(
-            `https://api.microlink.io/?url=${encodeURIComponent(nextUrl)}&meta=false&data.body.selector=body&data.body.attr=html`,
-            { timeout: 10000 },
+            `https://api.microlink.io/?url=${encodeURIComponent(nextUrl)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
+            { timeout: 8000 },
           );
           if (dlRes2.data && dlRes2.data.data && dlRes2.data.data.body) {
             $2 = cheerio.load(dlRes2.data.data.body);

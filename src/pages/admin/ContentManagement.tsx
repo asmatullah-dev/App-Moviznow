@@ -2618,7 +2618,7 @@ export default function ContentManagement() {
       // Extract HubCloud links
       if (
         extractedUrl.includes("hubcloud") ||
-        extractedUrl.includes("moviesdrives") ||
+        extractedUrl.includes("moviesdrive") ||
         extractedUrl.includes("vcloud")
       ) {
         try {
