@@ -16,6 +16,54 @@ const QualityInputs: React.FC<QualityInputsProps> = ({ links, onChange, droppabl
   const handleUrlBlur = async (url: string, idx: number) => {
     if (!url) return;
     
+    if (url.includes('hblinks.') || url.includes('hublinks.')) {
+      try {
+        const res = await fetch("/api/hblinks/extract", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.isMultiple) {
+            onChange(prevLinks => {
+              const currentLinks = Array.isArray(prevLinks) ? prevLinks : [];
+              const newLinks = [...currentLinks];
+              if (newLinks[idx]) {
+                newLinks[idx] = {
+                  ...newLinks[idx],
+                  name: "All Qualities",
+                  size: "",
+                  unit: "MB"
+                };
+              }
+              return newLinks;
+            });
+            // Emit a custom event so the parent ContentFormModal can catch the metadata (name, year, season, episode)
+            window.dispatchEvent(new CustomEvent('hblinks-metadata', { detail: data }));
+          } else if (data.qualities?.length === 1) {
+             const singleUrl = data.qualities[0].hubcloudLink || data.qualities[0].hubdriveLink;
+             if (singleUrl) {
+                // Change the URL input to the resolved URL and proceed to check it
+                onChange(prevLinks => {
+                  const currentLinks = Array.isArray(prevLinks) ? prevLinks : [];
+                  const newLinks = [...currentLinks];
+                  if (newLinks[idx]) {
+                    newLinks[idx] = { ...newLinks[idx], url: singleUrl, name: data.qualities[0].name };
+                  }
+                  return newLinks;
+                });
+                handleUrlBlur(singleUrl, idx);
+                return;
+             }
+          }
+        }
+      } catch (e) {
+        console.error("Failed to extract HBLinks info", e);
+      }
+      return;
+    }
+
     // Check if it's a HubCloud or MoviesDrives link
     if (url.includes('hubcloud') || url.includes('moviesdrives') || url.includes('vcloud')) {
       try {
@@ -117,7 +165,7 @@ const QualityInputs: React.FC<QualityInputsProps> = ({ links, onChange, droppabl
                         <input
                           type="text"
                           placeholder="Name (e.g. 1080p, WEB-DL)"
-                          value={link.name}
+                          value={link.name || ''}
                           onChange={(e) => {
                             onChange(prev => {
                               const currentLinks = Array.isArray(prev) ? prev : [];
@@ -148,7 +196,7 @@ const QualityInputs: React.FC<QualityInputsProps> = ({ links, onChange, droppabl
                           <input
                             type="number"
                             placeholder="Size"
-                            value={link.size}
+                            value={link.size || ''}
                             onChange={(e) => {
                               onChange(prev => {
                                 const currentLinks = Array.isArray(prev) ? prev : [];
@@ -210,7 +258,7 @@ const QualityInputs: React.FC<QualityInputsProps> = ({ links, onChange, droppabl
                       <input
                         type="text"
                         placeholder="URL"
-                        value={link.url}
+                        value={link.url || ''}
                         onChange={(e) => {
                           onChange(prev => {
                             const currentLinks = Array.isArray(prev) ? prev : [];
@@ -269,6 +317,53 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
       setSelectedLanguages, setSelectedQuality, setSubtitles, setCast, setCountry, setIsDescriptionExpanded, setIsCastExpanded,
       setIsCountryExpanded, setMovieLinks, setSeasons, setExpandedEpisodes, handleSave, setIsLinkCheckerOpen, setIsMasterFetchModalOpen
   } = actions;
+
+  React.useEffect(() => {
+    const handleHblinksMeta = (e: any) => {
+       const data = e.detail;
+       if (!data) return;
+       if (!title && data.contentName) setTitle(data.contentName);
+       if (!year && data.year) setYear(data.year.toString());
+       
+       if (data.season && data.episode) {
+          setType('series');
+          // Wait briefly for state flush then update season
+          setTimeout(() => {
+              setSeasons(prev => {
+                  let arr = Array.isArray(prev) ? [...prev] : [];
+                  const existingSeason = arr.find(s => parseInt(s.seasonNumber) === data.season);
+                  if (existingSeason) {
+                     // check episode
+                     const existingEp = existingSeason.episodes.find(ep => parseInt(ep.episodeNumber) === data.episode);
+                     if (!existingEp) {
+                        existingSeason.episodes.push({
+                           id: Math.random().toString(36).substr(2, 9),
+                           episodeNumber: data.episode.toString(),
+                           name: `Episode ${data.episode}`,
+                           links: []
+                        });
+                     }
+                  } else {
+                     arr.push({
+                         id: Math.random().toString(36).substr(2, 9),
+                         seasonNumber: data.season.toString(),
+                         name: `Season ${data.season}`,
+                         episodes: [{
+                            id: Math.random().toString(36).substr(2, 9),
+                            episodeNumber: data.episode.toString(),
+                            name: `Episode ${data.episode}`,
+                            links: []
+                         }]
+                     });
+                  }
+                  return arr;
+              });
+          }, 50);
+       }
+    };
+    window.addEventListener('hblinks-metadata', handleHblinksMeta);
+    return () => window.removeEventListener('hblinks-metadata', handleHblinksMeta);
+  }, [title, year, setType, setTitle, setYear, setSeasons]);
 
   return (
     <AnimatePresence>
@@ -390,7 +485,7 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                     </div>
                     <input 
                       type="text" 
-                      value={title} 
+                      value={title || ''} 
                       onChange={(e) => {
                         setTitle(e.target.value);
                         setShowTitleSuggestions(true);
@@ -446,11 +541,11 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-medium text-zinc-500 mb-1">Release Date</label>
-                      <input type="text" placeholder="DD-MM-YYYY" value={releaseDate} onChange={(e) => setReleaseDate(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" />
+                      <input type="text" placeholder="DD-MM-YYYY" value={releaseDate || ''} onChange={(e) => setReleaseDate(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-zinc-500 mb-1">Runtime</label>
-                      <input type="text" placeholder="e.g. 120 min" value={runtime} onChange={(e) => setRuntime(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" />
+                      <input type="text" placeholder="e.g. 120 min" value={runtime || ''} onChange={(e) => setRuntime(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" />
                     </div>
                   </div>
 
@@ -534,7 +629,7 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                           <input 
                             type="text" 
                             placeholder="Trailer Title (e.g. Official Trailer, Teaser)"
-                            value={trailer.title}
+                            value={trailer.title || ''}
                             onChange={(e) => {
                               const newTrailers = [...trailers];
                               newTrailers[idx] = { ...newTrailers[idx], title: e.target.value };
@@ -545,7 +640,7 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                           <input 
                             type="url" 
                             placeholder="YouTube URL"
-                            value={trailer.url}
+                            value={trailer.url || ''}
                             onChange={(e) => {
                               const newTrailers = [...trailers];
                               newTrailers[idx] = { ...newTrailers[idx], url: e.target.value };
@@ -581,7 +676,7 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                       <div className="relative flex-1">
                         <input 
                           type="url" 
-                          value={imdbLink} 
+                          value={imdbLink || ''} 
                           onChange={(e) => setImdbLink(e.target.value)} 
                           className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" 
                           placeholder="https://www.imdb.com/title/..." 
@@ -590,7 +685,7 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                       <div className="w-24">
                         <input 
                           type="text" 
-                          value={imdbRating} 
+                          value={imdbRating || ''} 
                           onChange={(e) => setImdbRating(e.target.value)} 
                           className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-emerald-500" 
                           placeholder="Rating" 
@@ -604,7 +699,7 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                     <div className="flex-1">
                       <label className="block text-xs font-medium text-zinc-500 mb-1">Poster (URL or Upload)</label>
                       <div className="flex gap-2">
-                        <input type="text" placeholder="https://..." value={posterUrl} onChange={(e) => setPosterUrl(e.target.value)} className="flex-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" />
+                        <input type="text" placeholder="https://..." value={posterUrl || ''} onChange={(e) => setPosterUrl(e.target.value)} className="flex-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" />
                         <label className="flex items-center justify-center bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-3 py-1.5 rounded-lg cursor-pointer transition-colors">
                           <Upload className="w-4 h-4" />
                           <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
@@ -643,7 +738,7 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                       </div>
                       {isDescriptionExpanded && (
                         <div className="mt-1">
-                          <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" placeholder="Enter description..." />
+                          <textarea rows={3} value={description || ''} onChange={(e) => setDescription(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" placeholder="Enter description..." />
                         </div>
                       )}
                     </div>
@@ -657,7 +752,7 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                       </div>
                       {isCastExpanded && (
                         <div className="mt-1">
-                          <textarea rows={3} value={cast} onChange={(e) => setCast(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" placeholder="Enter cast (comma separated)..." />
+                          <textarea rows={3} value={cast || ''} onChange={(e) => setCast(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" placeholder="Enter cast (comma separated)..." />
                         </div>
                       )}
                     </div>
@@ -671,7 +766,7 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                       </div>
                       {isCountryExpanded && (
                         <div className="mt-1">
-                          <textarea rows={3} value={country} onChange={(e) => setCountry(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" placeholder="Enter country (comma separated)..." />
+                          <textarea rows={3} value={country || ''} onChange={(e) => setCountry(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" placeholder="Enter country (comma separated)..." />
                         </div>
                       )}
                     </div>
@@ -798,7 +893,7 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
 
                   {/* 12. Sample link */}
                   <div>
-                    <input type="url" value={sampleUrl} onChange={(e) => setSampleUrl(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" placeholder="Sample Video file" />
+                    <input type="url" value={sampleUrl || ''} onChange={(e) => setSampleUrl(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" placeholder="Sample Video file" />
                   </div>
 
                 </div>
@@ -975,7 +1070,7 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                                     />
                                     <input
                                       type="text"
-                                      value={ep.title}
+                                      value={ep.title || ''}
                                       onChange={(e) => {
                                         const newSeasons = [...seasons];
                                         newSeasons[sIdx].episodes[eIdx].title = e.target.value;

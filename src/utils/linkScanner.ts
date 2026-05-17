@@ -10,7 +10,8 @@ export type StatusLabel =
   | "MISSING_FILENAME"
   | "MISSING_METADATA"
   | "SMALL_FILE"
-  | "SIZE_MISMATCH";
+  | "SIZE_MISMATCH"
+  | "HBLINKS_MULTIPLE";
 
 export type LinkCheckResult = {
   url: string;
@@ -38,6 +39,7 @@ export type LinkCheckResult = {
   year?: number;
   mismatchWarnings?: string[];
   confidenceScore?: number;
+  hblinksData?: any;
 };
 
 export function normalizeUrl(input: string) {
@@ -611,9 +613,56 @@ export async function performFullLinkScan(
   let base: LinkCheckResult;
   let finalUrlToUse = url;
 
-  // HubCloud interception
-  let hubcloudTitle = "";
-  if (url.includes("hubcloud") || url.includes("moviesdrives") || url.includes("vcloud")) {
+  if (url.includes("hblinks.") || url.includes("hublinks.")) {
+     try {
+       const res = await fetch("/api/hblinks/extract", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+       });
+       if (res.ok) {
+           const data = await res.json();
+           
+           if (data.isMultiple) {
+              return {
+                 url,
+                 ok: true,
+                 statusLabel: "HBLINKS_MULTIPLE", 
+                 message: `Multiple qualities found: ${data.qualities.length}`,
+                 hblinksData: data
+              };
+           } else if (data.qualities?.length === 1) {
+              const q = data.qualities[0];
+              const singleUrl = q.resolvedUrl || q.hubcloudLink || q.hubdriveLink;
+              if (singleUrl) {
+                 const result = await performFullLinkScan(singleUrl, extractedMeta, languages, qualities, signal, expectedSize, expectedUnit);
+                 // Override with info from hblinks if it's more specific
+                 return {
+                    ...result,
+                    qualityLabel: q.name || result.qualityLabel,
+                    fileName: q.fileName || result.fileName,
+                    fileSizeText: (q.size && q.unit) ? `${q.size} ${q.unit}` : result.fileSizeText,
+                    year: data.year || result.year,
+                    season: data.season || result.season,
+                    episode: data.episode || result.episode,
+                 };
+              }
+           }
+           
+           base = {
+              url,
+              ok: true,
+              statusLabel: "WORKING",
+              fileName: data.contentName || "HBLINKS Container"
+           };
+       } else {
+           base = { url, ok: false, statusLabel: "BROKEN", message: "Failed to extract HBLinks" };
+       }
+     } catch(e) {
+         base = { url, ok: false, statusLabel: "UNKNOWN", message: "Error reaching HBLinks" };
+     }
+  } else if (url.includes("hubcloud") || url.includes("moviesdrives") || url.includes("vcloud") || url.includes("hubdrive") || url.includes("hubcdn")) {
+    let hubcloudTitle = "";
     try {
       const res = await fetch("/api/hubcloud/extract", {
         method: "POST",
@@ -623,7 +672,7 @@ export async function performFullLinkScan(
       if (res.ok) {
         const data = await res.json();
         if (data.size && data.unit) {
-          hubcloudTitle = data.title || "";
+          hubcloudTitle = data.fileName || data.title || "";
           base = {
             url,
             ok: true,
@@ -641,7 +690,7 @@ export async function performFullLinkScan(
           };
           finalUrlToUse = url;
         } else if (data.isWorking) {
-          hubcloudTitle = data.title || "";
+          hubcloudTitle = data.fileName || data.title || "";
           base = {
             url,
             ok: true,

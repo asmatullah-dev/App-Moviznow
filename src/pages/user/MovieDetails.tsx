@@ -146,6 +146,8 @@ export default function MovieDetails() {
     candidates?: { text: string; href: string }[];
     size?: string;
     isCloudflare?: boolean;
+    isHblinksExtracting?: boolean;
+    hblinksData?: any;
   } | null>(null);
   const [isPosterExpanded, setIsPosterExpanded] = useState(false);
   const [isTrailerPopupOpen, setIsTrailerPopupOpen] = useState(false);
@@ -1261,7 +1263,64 @@ export default function MovieDetails() {
     let finalCandidates: { text: string; href: string }[] | undefined;
     let finalSize: string | undefined;
 
-    if (url.includes("hubcloud") || url.includes("moviesdrives") || url.includes("vcloud")) {
+    if (url.includes("hblinks.") || url.includes("hublinks.")) {
+       setExtractingLinkId(url);
+       setLinkPopup({
+         isOpen: true,
+         url,
+         name: linkName || "Unknown Link",
+         id: linkId || "unknown",
+         isZip,
+         tinyUrl,
+         isHblinksExtracting: true,
+       });
+
+       try {
+         const res = await fetch("/api/hblinks/extract", {
+           method: "POST",
+           headers: { "Content-Type": "application/json" },
+           body: JSON.stringify({ url }),
+         });
+         if (res.ok) {
+           const data = await res.json();
+           if (data.isMultiple) {
+              setLinkPopup((prev) => {
+                 if (prev && prev.url === url) {
+                   return {
+                     ...prev,
+                     isHblinksExtracting: false,
+                     hblinksData: data,
+                   };
+                 }
+                 return prev;
+              });
+              setExtractingLinkId((prev) => (prev === url ? null : prev));
+              return; // Wait for user choice
+           } else if (data.qualities?.length === 1) {
+              const singleUrl = data.qualities[0].resolvedUrl || data.qualities[0].hubcloudLink || data.qualities[0].hubdriveLink;
+              if (singleUrl) { 
+                 setLinkPopup(null);
+                 setExtractingLinkId((prev) => (prev === url ? null : prev));
+                 setTimeout(() => handlePlayClick(singleUrl, data.qualities[0].name, linkId, isZip, tinyUrl), 0);
+                 return;
+              }
+           }
+         }
+       } catch (e) {
+         console.error("Failed to extract HBLinks", e);
+       }
+       
+       setExtractingLinkId((prev) => (prev === url ? null : prev));
+       setLinkPopup((prev) => {
+         if (prev && prev.url === url) {
+           return { ...prev, isHblinksExtracting: false };
+         }
+         return prev;
+       });
+       return;
+    }
+
+    if (url.includes("hubcloud") || url.includes("moviesdrives") || url.includes("vcloud") || url.includes("hubdrive") || url.includes("hubcdn")) {
       const clickId = url;
       setExtractingLinkId(clickId);
       // Immediately open the popup with a temporary "extracting" state, so user gets feedback
@@ -1349,6 +1408,18 @@ export default function MovieDetails() {
       const isCloudflareBlocked = hubcloudCacheRef.current[url]?.isCloudflare;
 
       setExtractingLinkId((prev) => (prev === clickId ? null : prev));
+
+      // Don't show native hubcloud/hubdrive links if we couldn't extract candidates
+      if (!isCloudflareBlocked && (!finalCandidates || finalCandidates.length === 0) && (finalUrl.includes("hubcloud") || finalUrl.includes("moviesdrives") || finalUrl.includes("vcloud") || finalUrl.includes("hubdrive") || finalUrl.includes("hubcdn"))) {
+         setAlertConfig({
+           isOpen: true,
+           title: "Download Unavailable",
+           message: "We couldn't extract any working links from this source. The file might no longer be available.",
+         });
+         setLinkPopup((prev) => (prev && prev.url === url ? null : prev));
+         return;
+      }
+
       setLinkPopup((prev) => {
         // Only update the popup final URL if they haven't clicked a DIFFERENT link
         // We know it's the same popup content if the original 'url' or 'id' matches what we opened
@@ -1748,9 +1819,11 @@ export default function MovieDetails() {
                 ) : (
                   <Download className="w-5 h-5 shrink-0" />
                 )}
-                <span className="text-zinc-500 dark:text-zinc-400">
-                  ({link.size} {link.unit})
-                </span>
+                {link.size && (
+                  <span className="text-zinc-500 dark:text-zinc-400">
+                    ({link.size} {link.unit})
+                  </span>
+                )}
               </button>
             </div>
           );
@@ -2825,12 +2898,40 @@ export default function MovieDetails() {
                 </div>
               )}
 
-              <div className="flex flex-col gap-3">
-                {linkPopup.candidates && linkPopup.candidates.length > 0 && (
-                  <div className="mb-1">
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
-                      Select Server:
-                    </label>
+              {linkPopup.isHblinksExtracting ? (
+                <div className="absolute inset-0 bg-white dark:bg-zinc-900 z-10 flex flex-col items-center justify-center rounded-2xl">
+                  <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-purple-500 mb-2"></div>
+                  <p className="text-sm font-medium text-zinc-900 dark:text-white">
+                    Fetching Qualities...
+                  </p>
+                </div>
+              ) : linkPopup.hblinksData ? (
+                <div className="flex flex-col gap-3">
+                  <p className="text-zinc-500 dark:text-zinc-400 mb-2 font-medium">Select Quality:</p>
+                  <div className="max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar flex flex-col gap-2">
+                     {linkPopup.hblinksData.qualities.map((q: any, i: number) => (
+                       <button
+                         key={i}
+                         onClick={() => {
+                           const singleUrl = q.resolvedUrl || q.hubcloudLink || q.hubdriveLink;
+                           setLinkPopup(null);
+                           handlePlayClick(singleUrl, q.name, linkPopup.id, linkPopup.isZip, linkPopup.tinyUrl);
+                         }}
+                         className="flex flex-col items-start p-4 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:scale-[1.02] active:scale-[0.98] transition-all rounded-xl cursor-pointer w-full text-left"
+                       >
+                         <span className="font-bold text-zinc-900 dark:text-white text-base">{q.name}</span>
+                         {q.size && <span className="text-xs text-zinc-500 font-medium">{q.size} {q.unit}</span>}
+                       </button>
+                     ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {linkPopup.candidates && linkPopup.candidates.length > 0 && (
+                    <div className="mb-1">
+                      <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
+                        Select Server:
+                      </label>
                     <select
                       value={linkPopup.url}
                       onChange={(e) =>
@@ -2946,6 +3047,7 @@ export default function MovieDetails() {
                   <Download className="w-5 h-5" /> Download
                 </button>
               </div>
+              )}
             </motion.div>
           </motion.div>
         )}

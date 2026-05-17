@@ -1269,16 +1269,189 @@ async function startServer() {
     );
   };
 
+  app.post("/api/hblinks/extract", async (req, res) => {
+    try {
+      const { url } = req.body;
+      if (!url || (!url.includes("hblinks.") && !url.includes("hublinks."))) {
+        return res.status(400).json({ error: "Invalid HBLinks URL" });
+      }
+
+      const headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+      };
+
+      const response = await axios.get(url, { headers, validateStatus: () => true, timeout: 8000 });
+      const html = response.data;
+      const $ = cheerio.load(html);
+
+      const titleText = $("title").text() || $("h1").first().text() || "";
+      // E.g., The Pitt S01-E15 – HUBLinks
+      let contentName = "";
+      let year, season, episode;
+
+      const cleanTitle = titleText.replace(/–\s*HUBLinks|HUBLinks/ig, "").trim();
+      const seasonEpisodeMatch = cleanTitle.match(/(.*?)\s+S(\d+)[-\s]*E(\d+)/i) || cleanTitle.match(/(.*?)\s+Season\s+(\d+).*?Episode\s+(\d+)/i);
+      
+      if (seasonEpisodeMatch) {
+         contentName = seasonEpisodeMatch[1].trim();
+         season = parseInt(seasonEpisodeMatch[2]);
+         episode = parseInt(seasonEpisodeMatch[3]);
+      } else {
+         const yearMatch = cleanTitle.match(/(.*?)\s+\((\d{4})\)/);
+         if (yearMatch) {
+            contentName = yearMatch[1].trim();
+            year = parseInt(yearMatch[2]);
+         } else {
+            contentName = cleanTitle;
+         }
+      }
+
+      const qualities: any[] = [];
+      const seenQualities = new Set();
+      
+      // Look for heading blocks with quality like 480p, 720p, 1080p
+      $("h1, h2, h3, h4, h5, h6").each((i, header) => {
+         const headerText = $(header).text().trim();
+         if (/(480p|720p|1080p|2160p|4k)/i.test(headerText) || /WEB-DL/i.test(headerText)) {
+            // Find links inside or immediately following this header
+            let nextElem = $(header).next();
+            let isLinksFound = false;
+            let hubcloudLink = "";
+            let hubdriveLink = "";
+
+            // Check if links are inside the header itself
+            $(header).find("a").each((j, a) => {
+               const href = $(a).attr("href");
+               const text = $(a).text().toLowerCase();
+               if (href) {
+                 if (text.includes("direct") || href.includes("hubcloud") || href.includes("vcloud") || href.includes("moviesdrives")) hubcloudLink = href;
+                 else if (text.includes("drive") || text.includes("instant") || href.includes("hubdrive") || href.includes("hubcdn")) hubdriveLink = href;
+                 isLinksFound = true;
+               }
+            });
+
+            while (!isLinksFound && nextElem.length && !nextElem.is("h1, h2, h3, h4, h5, h6")) {
+               nextElem.find("a").each((j, a) => {
+                  const href = $(a).attr("href");
+                  const text = $(a).text().toLowerCase();
+                  if (href) {
+                    if (text.includes("direct") || href.includes("hubcloud") || href.includes("vcloud") || href.includes("moviesdrives")) hubcloudLink = href;
+                    else if (text.includes("drive") || text.includes("instant") || href.includes("hubdrive") || href.includes("hubcdn")) hubdriveLink = href;
+                    isLinksFound = true;
+                  }
+               });
+               nextElem = nextElem.next();
+            }
+
+            if (isLinksFound && (hubcloudLink || hubdriveLink)) {
+               const qNameRaw = headerText.split("–")[0].trim();
+               const qName = qNameRaw.length < 30 ? qNameRaw : (qNameRaw.match(/(480p|720p|1080p|2160p|4k).*?(WEB-DL|HEVC|10Bit)?/i)?.[0] || qNameRaw);
+               if (!seenQualities.has(qName)) {
+                 seenQualities.add(qName);
+                 qualities.push({
+                    name: qName,
+                    hubcloudLink,
+                    hubdriveLink
+                 });
+               }
+            }
+         }
+      });
+
+      const qualitiesWithSizes = (await Promise.all(qualities.map(async (q) => {
+         let targetUrl = q.hubcloudLink || q.hubdriveLink;
+         let resolvedUrl = targetUrl;
+         let size = "";
+         let unit = "";
+         let fileName = "";
+         
+         if (resolvedUrl && (resolvedUrl.includes('hubdrive') || resolvedUrl.includes('hubcdn'))) {
+            try {
+               const hdRes = await axios.get(resolvedUrl, { headers, timeout: 5000 });
+               const hcMatch = hdRes.data.match(/href=[\"']([^\"']*?(?:hubcloud|vcloud|moviesdrives)[^\"']*?)[\"']/i);
+               if (hcMatch && hcMatch[1]) resolvedUrl = hcMatch[1];
+               else {
+                  const dlRes = await axios.get(`https://api.microlink.io/?url=${encodeURIComponent(resolvedUrl)}&meta=false&data.body.selector=body&data.body.attr=html`);
+                  if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
+                    const proxyHcMatch = dlRes.data.data.body.match(/href=[\"']([^\"']*?(?:hubcloud|vcloud|moviesdrives)[^\"']*?)[\"']/i);
+                    if (proxyHcMatch && proxyHcMatch[1]) resolvedUrl = proxyHcMatch[1];
+                  }
+               }
+               
+               // Also try to get filename from hubdrive if available
+               const $hd = cheerio.load(hdRes.data);
+               fileName = $hd('li:contains("File Name") i').text() || $hd('li:contains("File Name")').text() || $hd('li:contains("Name") i').text() || $hd('li:contains("Name")').text();
+               fileName = fileName.replace("File Name", "").replace("Name", "").replace(":", "").trim();
+            } catch (e) {}
+         }
+
+         if (resolvedUrl) {
+            try {
+               const qRes = await axios.get(resolvedUrl, {
+                  headers, validateStatus: () => true, timeout: 5000
+               });
+               const $q = cheerio.load(qRes.data);
+               let sizeStr = $q('li:contains("File Size") i').text() || $q('li:contains("File Size")').text() || $q('li:contains("Size") i').text() || $q('li:contains("Size")').text();
+               sizeStr = sizeStr.replace("File Size", "").replace("Size", "").replace(":", "").trim();
+               if (sizeStr) {
+                  const parts = sizeStr.split(" ");
+                  if (parts.length >= 2) {
+                     let num = parseFloat(parts[0]);
+                     unit = parts[1].toUpperCase();
+                     if (!isNaN(num)) {
+                        const multiplier = unit === "GB" ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000) : unit === "MB" ? (1024 * 1024) / (1000 * 1000) : unit === "KB" ? 1024 / 1000 : 1;
+                        num = num * multiplier;
+                        size = num >= 100 ? num.toFixed(0) : num >= 10 ? num.toFixed(1) : num.toFixed(2);
+                        size = size.replace(/\.00$/, "").replace(/\.0$/, "");
+                     } else {
+                        size = parts[0];
+                     }
+                  } else {
+                     size = sizeStr;
+                  }
+               }
+               
+               if (!fileName) {
+                  fileName = $q('li:contains("File Name") i').text() || $q('li:contains("File Name")').text() || $q('li:contains("Name") i').text() || $q('li:contains("Name")').text();
+                  fileName = fileName.replace("File Name", "").replace("Name", "").replace(":", "").trim();
+               }
+            } catch (ignore) {}
+         }
+         
+         // If we couldn't find size, skip it.
+         if (!size) {
+            return null;
+         }
+
+         return {
+            ...q,
+            resolvedUrl: resolvedUrl !== targetUrl ? resolvedUrl : undefined,
+            size,
+            unit,
+            fileName: fileName || undefined
+         };
+      }))).filter(Boolean);
+
+      res.json({
+         title: cleanTitle,
+         contentName,
+         year,
+         season,
+         episode,
+         qualities: qualitiesWithSizes,
+         isMultiple: qualitiesWithSizes.length > 1
+      });
+      
+    } catch (error: any) {
+      console.error("HBLinks Extract Error:", error.message);
+      res.status(500).json({ error: "Failed to extract HBLinks" });
+    }
+  });
+
   app.post("/api/hubcloud/extract", async (req, res) => {
     try {
       const { url } = req.body;
-      if (
-        !url ||
-        (!url.includes("hubcloud") && !url.includes("moviesdrives") && !url.includes("vcloud"))
-      ) {
-        return res.status(400).json({ error: "Invalid HubCloud URL" });
-      }
-
       const headers = {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -1288,139 +1461,113 @@ async function startServer() {
         "Cache-Control": "no-cache",
         Pragma: "no-cache",
       };
-
-      const response = await axios.get(url, {
-        headers,
-        validateStatus: () => true,
-        timeout: 8000,
-      });
-      const $ = cheerio.load(response.data);
-
-      let sizeStr =
-        $('li:contains("File Size") i').text() ||
-        $('li:contains("File Size")').text() ||
-        $('li:contains("Size") i').text() ||
-        $('li:contains("Size")').text();
-      sizeStr = sizeStr.replace("File Size", "").replace("Size", "").trim();
-
+      
+      let resolvedUrl = url;
       let size = "";
       let unit = "";
-      if (sizeStr) {
-        const parts = sizeStr.split(" ");
-        if (parts.length >= 2) {
-          let num = parseFloat(parts[0]);
-          unit = parts[1].toUpperCase();
+      let fileName = "";
 
-          if (!isNaN(num)) {
-            // Convert from Hubcloud's Base-1024 to our Base-1000
-            const multiplier =
-              unit === "GB"
-                ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000)
-                : unit === "MB"
-                  ? (1024 * 1024) / (1000 * 1000)
-                  : unit === "KB"
-                    ? 1024 / 1000
-                    : 1;
-            num = num * multiplier;
-            size =
-              num >= 100
-                ? num.toFixed(0)
-                : num >= 10
-                  ? num.toFixed(1)
-                  : num.toFixed(2);
-            size = size.replace(/\.00$/, "").replace(/\.0$/, "");
-          } else {
-            size = parts[0];
-          }
-        } else {
-          size = sizeStr;
-        }
-      }
-
-      let title = $("title").text() || $(".card-header").text() || "";
-      const isCloudflare = title.toLowerCase().includes("just a moment");
-
-      if (isCloudflare) {
-        try {
-          // Use Microlink proxy API to bypass Cloudflare
-          const dlRes = await axios.get(
-            `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html`,
-            { timeout: 10000 },
-          );
-          if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
-            const proxyHtml = dlRes.data.data.body;
-            const $proxy = cheerio.load(proxyHtml);
-            let sStr =
-              $proxy('li:contains("File Size") i').text() ||
-              $proxy('li:contains("File Size")').text() ||
-              $proxy('li:contains("Size") i').text() ||
-              $proxy('li:contains("Size")').text();
-            sStr = sStr.replace("File Size", "").replace("Size", "").trim();
-            if (sStr) {
-              sizeStr = sStr;
+      if (resolvedUrl && (resolvedUrl.includes('hubdrive') || resolvedUrl.includes('hubcdn'))) {
+         try {
+            const hdRes = await axios.get(resolvedUrl, { headers, timeout: 5000 });
+            const hcMatch = hdRes.data.match(/href=[\"']([^\"']*?(?:hubcloud|vcloud|moviesdrives)[^\"']*?)[\"']/i);
+            if (hcMatch && hcMatch[1]) resolvedUrl = hcMatch[1];
+            else {
+               const dlRes = await axios.get(`https://api.microlink.io/?url=${encodeURIComponent(resolvedUrl)}&meta=false&data.body.selector=body&data.body.attr=html`);
+               if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
+                 const proxyHcMatch = dlRes.data.data.body.match(/href=[\"']([^\"']*?(?:hubcloud|vcloud|moviesdrives)[^\"']*?)[\"']/i);
+                 if (proxyHcMatch && proxyHcMatch[1]) resolvedUrl = proxyHcMatch[1];
+               }
             }
-
-            const proxyTitle =
-              $proxy("title").text() || $proxy(".card-header").text() || "";
-            if (
-              proxyTitle &&
-              !proxyTitle.toLowerCase().includes("just a moment")
-            ) {
-              title = proxyTitle;
-
-              // Recalculate size stuff based on fixed html
-              if (sizeStr) {
-                const parts = sizeStr.split(" ");
-                if (parts.length >= 2) {
-                  let num = parseFloat(parts[0]);
+            
+            const $hd = cheerio.load(hdRes.data);
+            fileName = $hd('li:contains("File Name") i, li:contains("File Name") span, li:contains("Name") i, li:contains("Name") span').first().text() || 
+                       $hd('li:contains("File Name"), li:contains("Name")').first().text();
+            fileName = fileName.replace(/File Name|Name|:/gi, "").trim();
+            
+            let hdSizeStr = $hd('li:contains("File Size") i, li:contains("File Size") span, li:contains("Size") i, li:contains("Size") span').first().text() || 
+                            $hd('li:contains("File Size"), li:contains("Size")').first().text();
+            hdSizeStr = hdSizeStr.replace(/File Size|Size|:/gi, "").trim();
+            if (hdSizeStr && hdSizeStr.match(/\d/)) {
+               const parts = hdSizeStr.split(/\s+/);
+               if (parts.length >= 2) {
+                  size = parts[0];
                   unit = parts[1].toUpperCase();
-                  if (!isNaN(num)) {
-                    const multiplier =
-                      unit === "GB"
-                        ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000)
-                        : unit === "MB"
-                          ? (1024 * 1024) / (1000 * 1000)
-                          : unit === "KB"
-                            ? 1024 / 1000
-                            : 1;
-                    num = num * multiplier;
-                    size =
-                      num >= 100
-                        ? num.toFixed(0)
-                        : num >= 10
-                          ? num.toFixed(1)
-                          : num.toFixed(2);
-                    size = size.replace(/\.00$/, "").replace(/\.0$/, "");
-                  } else {
-                    size = parts[0];
-                  }
-                } else {
-                  size = sizeStr;
-                }
-              }
-            } else {
-              title = "Unknown (Cloudflare Block)";
+               }
             }
-          } else {
-            title = "Unknown (Cloudflare Block)";
-          }
-        } catch (err) {
-          title = "Unknown (Cloudflare Block)";
-        }
+         } catch (e) {}
       }
 
-      const isNotFound =
-        response.status === 404 || title.toLowerCase().includes("not found");
-      const isWorking =
-        response.status < 400 ||
-        response.status === 403 ||
-        response.status === 503 ||
+      if (
+        !resolvedUrl ||
+        (!resolvedUrl.includes("hubcloud") && !resolvedUrl.includes("moviesdrives") && !resolvedUrl.includes("vcloud") && !resolvedUrl.includes("hubdrive") && !resolvedUrl.includes("hubcdn"))
+      ) {
+        return res.status(400).json({ error: "Invalid HubCloud URL" });
+      }
+
+      let response: any;
+      let title = "";
+      try {
+        response = await axios.get(resolvedUrl, {
+          headers,
+          validateStatus: () => true,
+          timeout: 8000,
+        });
+        let $ = cheerio.load(response.data);
+        title = $("title").text() || $(".card-header").text() || "";
+        const isCloudflare = title.toLowerCase().includes("just a moment");
+
+        if (isCloudflare) {
+           const dlRes = await axios.get(
+             `https://api.microlink.io/?url=${encodeURIComponent(resolvedUrl)}&meta=false&data.body.selector=body&data.body.attr=html`,
+             { timeout: 10000 },
+           );
+           if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
+             $ = cheerio.load(dlRes.data.data.body);
+             title = $("title").text() || $(".card-header").text() || "";
+           }
+        }
+
+        if (!fileName) {
+          fileName = $('li:contains("File Name") i, li:contains("File Name") span, li:contains("Name") i, li:contains("Name") span').first().text() || 
+                     $('li:contains("File Name"), li:contains("Name")').first().text();
+          fileName = fileName.replace(/File Name|Name|:/gi, "").trim();
+        }
+
+        if (!size) {
+          let sizeStr = $('li:contains("File Size") i, li:contains("File Size") span, li:contains("Size") i, li:contains("Size") span').first().text() || 
+                         $('li:contains("File Size"), li:contains("Size")').first().text();
+          sizeStr = sizeStr.replace(/File Size|Size|:/gi, "").trim();
+          if (sizeStr && sizeStr.match(/\d/)) {
+            const parts = sizeStr.split(/\s+/);
+            if (parts.length >= 2) {
+              let num = parseFloat(parts[0]);
+              unit = parts[1].toUpperCase();
+
+              if (!isNaN(num)) {
+                const multiplier = unit === "GB" ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000) : unit === "MB" ? (1024 * 1024) / (1000 * 1000) : unit === "KB" ? 1024 / 1000 : 1;
+                num = num * multiplier;
+                size = num >= 100 ? num.toFixed(0) : num >= 10 ? num.toFixed(1) : num.toFixed(2);
+                size = size.replace(/\.00$/, "").replace(/\.0$/, "");
+              } else {
+                size = parts[0];
+              }
+            }
+          }
+        }
+      } catch (err) {}
+
+      const isNotFound = (response?.status === 404) || title.toLowerCase().includes("not found");
+      const isWorking = (response?.status && response.status < 400) ||
+        (response?.status === 403) ||
+        (response?.status === 503) ||
         title === "Unknown (Cloudflare Block)";
 
       res.json({
         size,
         unit,
-        title: title.trim(),
+        title: title || fileName || "",
+        fileName: fileName || undefined,
         isWorking: isWorking && !isNotFound,
         isNotFound,
       });
@@ -1480,50 +1627,70 @@ async function startServer() {
         }
       }
 
+      let resolvedUrl = url;
+      if (resolvedUrl && (resolvedUrl.includes('hubdrive') || resolvedUrl.includes('hubcdn'))) {
+         try {
+            const hdRes = await axios.get(resolvedUrl, { headers, timeout: 5000 });
+            const hcMatch = hdRes.data.match(/href=[\"']([^\"']*?(?:hubcloud|vcloud|moviesdrives)[^\"']*?)[\"']/i);
+            if (hcMatch && hcMatch[1]) resolvedUrl = hcMatch[1];
+            else {
+               const dlRes = await axios.get(`https://api.microlink.io/?url=${encodeURIComponent(resolvedUrl)}&meta=false&data.body.selector=body&data.body.attr=html`);
+               if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
+                 const proxyHcMatch = dlRes.data.data.body.match(/href=[\"']([^\"']*?(?:hubcloud|vcloud|moviesdrives)[^\"']*?)[\"']/i);
+                 if (proxyHcMatch && proxyHcMatch[1]) resolvedUrl = proxyHcMatch[1];
+               }
+            }
+         } catch (e) {}
+      }
+
       if (
-        !url ||
-        (!url.includes("hubcloud") && !url.includes("moviesdrives") && !url.includes("vcloud"))
+        !resolvedUrl ||
+        (!resolvedUrl.includes("hubcloud") && !resolvedUrl.includes("moviesdrives") && !resolvedUrl.includes("vcloud") && !resolvedUrl.includes("hubdrive") && !resolvedUrl.includes("hubcdn"))
       ) {
         return res.json({ url });
       }
 
-      const response = await axios.get(url, {
+      const response = await axios.get(resolvedUrl, {
         headers,
         validateStatus: () => true,
         timeout: 5000,
       });
-      let $ = cheerio.load(response.data);
+      let title = "";
+      const $ = cheerio.load(response.data);
+      title = $("title").text() || $(".card-header").text() || "";
+      let isCloudflareInternal = title.toLowerCase().includes("just a moment");
+      let active$ = $;
 
-      if ($("title").text().toLowerCase().includes("just a moment")) {
+      if (isCloudflareInternal) {
         try {
           const dlRes = await axios.get(
-            `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html`,
+            `https://api.microlink.io/?url=${encodeURIComponent(resolvedUrl)}&meta=false&data.body.selector=body&data.body.attr=html`,
             { timeout: 10000 },
           );
           if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
             const proxyTitle =
               cheerio.load(dlRes.data.data.body)("title").text() || "";
             if (!proxyTitle.toLowerCase().includes("just a moment")) {
-              $ = cheerio.load(dlRes.data.data.body);
-            } else {
-              return res.json({ url: url, isCloudflare: true });
+              active$ = cheerio.load(dlRes.data.data.body);
+              title = proxyTitle;
+              isCloudflareInternal = false;
             }
-          } else {
-            return res.json({ url: url, isCloudflare: true });
           }
-        } catch (err) {
-          return res.json({ url: url, isCloudflare: true });
-        }
+        } catch (err) {}
+      }
+
+      if (isCloudflareInternal) {
+         return res.json({ url: url, isCloudflare: true });
       }
 
       let nextUrl =
-        $("#download").attr("href") ||
-        $('a:contains("Generate Direct Download Link")').attr("href") ||
-        $("a.btn-zip").attr("href");
+        active$("#download").attr("href") ||
+        active$('a:contains("Generate Direct Download Link")').attr("href") ||
+        active$("a.btn-zip").attr("href");
 
       // Extract url from script for vcloud if href is missing
       if (!nextUrl) {
-         const scriptHtml = $.html();
+         const scriptHtml = active$.html();
          const match = scriptHtml.match(/var\s+url\s*=\s*['"]([^'"]+)['"]/i);
          if (match && match[1]) {
             nextUrl = match[1];
@@ -1738,14 +1905,19 @@ async function startServer() {
         return { text: c.text.trim(), href };
       });
 
-      const bodyText = $("body").text();
       let sizeInfo = "";
-      const sizeMatch = bodyText.match(/File Size\s*([\d.]+\s*[A-Za-z]+)/i);
-      if (sizeMatch && sizeMatch[1]) {
-        sizeInfo = sizeMatch[1].trim();
+      let fileName = active$('li:contains("File Name") i, li:contains("File Name") span, li:contains("Name") i, li:contains("Name") span').first().text() || 
+                     active$('li:contains("File Name"), li:contains("Name")').first().text();
+      fileName = fileName.replace(/File Name|Name|:/gi, "").trim();
+      if (!fileName) fileName = title.replace(/hubcloud|moviesdrives|vcloud|direct download|links|download/gi, "").trim();
 
+      let sizeStr = active$('li:contains("File Size") i, li:contains("File Size") span, li:contains("Size") i, li:contains("Size") span').first().text() || 
+                    active$('li:contains("File Size"), li:contains("Size")').first().text();
+      sizeStr = sizeStr.replace(/File Size|Size|:/gi, "").trim();
+
+      if (sizeStr && sizeStr.match(/\d/)) {
         // Convert to base-1000
-        const parts = sizeInfo.split(" ");
+        const parts = sizeStr.split(/\s+/);
         if (parts.length >= 2) {
           let num = parseFloat(parts[0]);
           let unit = parts[1].toUpperCase();
@@ -1767,7 +1939,11 @@ async function startServer() {
                   : num.toFixed(2);
             newSize = newSize.replace(/\.00$/, "").replace(/\.0$/, "");
             sizeInfo = `${newSize} ${unit}`;
+          } else {
+            sizeInfo = sizeStr;
           }
+        } else {
+          sizeInfo = sizeStr;
         }
       }
 
@@ -1775,6 +1951,7 @@ async function startServer() {
         url: workingLink,
         candidates: returnCandidates,
         size: sizeInfo,
+        title: fileName,
       });
     } catch (e: any) {
       console.error(e);
