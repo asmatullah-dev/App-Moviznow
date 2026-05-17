@@ -1491,15 +1491,11 @@ export default function MovieDetails() {
 
       // Pixeldrain hotlink bypass: ensure we use the viewer page (/u/) for browser viewing
       browserUrl = browserUrl.replace(
-        /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/api\/file\//i,
-        "pixeldrain.dev/u/",
-      );
-      browserUrl = browserUrl.replace(
-        /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/u\//i,
-        "pixeldrain.dev/u/",
+        /(?:pixeldrain\.(?:com|dev|net|pw|sh|st|bz|li|ch|is|xyz)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\//i,
+        "pixeldrain.com/u/",
       );
 
-      if (browserUrl.includes("pixeldrain.dev/u/")) {
+      if (browserUrl.includes("pixeldrain.com/u/")) {
         try {
           const urlObj = new URL(browserUrl);
           urlObj.search = ""; // Remove query params like ?download=true
@@ -1586,15 +1582,11 @@ export default function MovieDetails() {
     let videoUrl = urlToPlay;
     if (player === "vlc" || player === "mx" || player === "generic") {
       videoUrl = videoUrl.replace(
-        /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/u\//i,
-        "pixeldrain.dev/api/file/",
-      );
-      videoUrl = videoUrl.replace(
-        /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/api\/file\//i,
-        "pixeldrain.dev/api/file/",
+        /(?:pixeldrain\.(?:com|dev|net|pw|sh|st|bz|li|ch|is|xyz)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\//i,
+        "pixeldrain.com/api/file/",
       );
 
-      if (videoUrl.includes("pixeldrain.dev/api/file/")) {
+      if (videoUrl.includes("pixeldrain.com/api/file/")) {
         try {
           const urlObj = new URL(videoUrl);
           urlObj.search = ""; // Remove query params

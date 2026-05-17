@@ -1719,7 +1719,7 @@ async function startServer() {
          return res.json({ url: url, isCloudflare: true });
       }
 
-      let nextUrl =
+      let nextUrlRaw =
         active$("#download").attr("href") ||
         active$('a:contains("Generate Direct Download Link")').attr("href") ||
         active$('a:contains("Download Now")').attr("href") ||
@@ -1732,6 +1732,13 @@ async function startServer() {
         active$('a[href*="/dl/"]').attr("href") ||
         active$('a[href*="/download/"]').attr("href");
 
+      let nextUrl = nextUrlRaw;
+      if (nextUrl && !nextUrl.startsWith("http")) {
+        try {
+          nextUrl = new URL(nextUrl, url).href;
+        } catch (e) {}
+      }
+
       // Extract url from script for vcloud if href is missing
       if (!nextUrl) {
          const scriptHtml = active$.html();
@@ -1741,6 +1748,11 @@ async function startServer() {
                           scriptHtml.match(/location\.replace\(['"]([^'"]+)['"]\)/i);
          if (urlMatch && urlMatch[1]) {
             nextUrl = urlMatch[1];
+            if (nextUrl && !nextUrl.startsWith("http")) {
+               try {
+                 nextUrl = new URL(nextUrl, url).href;
+               } catch (e) {}
+            }
          }
       }
 
@@ -1748,6 +1760,11 @@ async function startServer() {
          const form = active$('form[action*="download"], form[action*="dl"]');
          if (form.length) {
             nextUrl = form.attr("action");
+            if (nextUrl && !nextUrl.startsWith("http")) {
+               try {
+                 nextUrl = new URL(nextUrl, url).href;
+               } catch (e) {}
+            }
          }
       }
 
@@ -1760,86 +1777,179 @@ async function startServer() {
         validateStatus: () => true,
         timeout: 4000,
       });
-      let $2 = cheerio.load(res2.data);
+      let html2 = res2.data;
+      let $2 = cheerio.load(html2);
 
-      if ($2("title").text().toLowerCase().includes("just a moment")) {
+      const hasMoment = $2("title").text().toLowerCase().includes("just a moment") || 
+                        html2.toLowerCase().includes("just a moment") ||
+                        (res2.status === 200 && html2.length < 1000);
+
+      if (hasMoment) {
         try {
           const dlRes2 = await axios.get(
             `https://api.microlink.io/?url=${encodeURIComponent(nextUrl)}&meta=false&data.body.selector=body&data.body.attr=html`,
             { timeout: 10000 },
           );
-          if (dlRes2.data && dlRes2.data.data && dlRes2.data.data.body) {
+          if (dlRes2.data?.data?.body) {
             $2 = cheerio.load(dlRes2.data.data.body);
           }
-        } catch (err) {
-          // Ignore and continue with original $2
-        }
+        } catch (err) {}
       }
 
-      const candidateLinks: { text: string; href: string }[] = [];
-      $2('a.btn, a[class*="btn-"], a.download-btn, a[href*="pixeldrain"], a[href*="workers.dev"], a:contains("Download")').each((i, el) => {
-        let href = $2(el).attr("href") || "";
-        const text = $2(el).text().toLowerCase();
-        const id = $2(el).attr("id");
+      const findCandidates = (doc: cheerio.CheerioAPI, sourceUrl: string) => {
+        const results: { text: string; href: string }[] = [];
+        const mainContent = doc('main, #content, .content, #download, .card-body, .entry-content, #download-center, .download-buttons').first();
+        
+        const isJunk = (href: string, text: string) => {
+          const lowerText = text.toLowerCase();
+          const lowerHref = href.toLowerCase();
+          return (
+            lowerText.includes("tutorial") || 
+            lowerText.includes("how to") || 
+            lowerText.includes("join") || 
+            lowerText.includes("telegram") || 
+            lowerText.includes("support") || 
+            lowerText.includes("report") || 
+            lowerText.includes("contact") || 
+            lowerText.includes("advertise") || 
+            lowerText.includes("channel") || 
+            lowerText.includes("group") || 
+            lowerText.includes("request") ||
+            lowerText.includes("how download") ||
+            lowerText.includes("video guide") ||
+            lowerText.includes("subscription") ||
+            lowerText.includes("streaming") ||
+            lowerText.includes("error") ||
+            lowerText.includes("admin") ||
+            lowerText.includes("login") ||
+            lowerText.includes("register") ||
+            lowerText.includes("signup") ||
+            lowerText.includes("signin") ||
+            lowerHref.includes("login") ||
+            lowerHref.includes("signup") ||
+            lowerHref.includes("register") ||
+            lowerHref.includes("negn6f") ||
+            lowerHref.includes("youtube.com") ||
+            lowerHref.includes("how-to") ||
+            lowerHref.includes("/tutorial") ||
+            lowerHref.includes("t.me") ||
+            lowerHref.includes("telegram.me")
+          );
+        };
 
-        if (id && (!href || href === "#" || href.includes("javascript"))) {
-          $2("script").each((_, scriptEl) => {
-            const scriptContent = $2(scriptEl).html();
-            if (!scriptContent) return;
+        doc('a').each((i, el) => {
+          let href = doc(el).attr("href") || "";
+          let text = doc(el).text().trim() || doc(el).attr('title') || "";
+          const lowerText = text.toLowerCase();
+          const id = doc(el).attr("id");
+          const className = doc(el).attr("class") || "";
 
-            if (
-              scriptContent.includes(`getElementById("${id}")`) ||
-              scriptContent.includes(`getElementById('${id}')`)
-            ) {
-              const assignmentMatch = scriptContent.match(
-                new RegExp(
-                  `getElementById\\(['"]${id}['"]\\)\\.href\\s*=\\s*([a-zA-Z0-9_]+)`,
-                ),
-              );
-              if (assignmentMatch && assignmentMatch[1]) {
-                const varName = assignmentMatch[1];
-                const varMatch = scriptContent.match(
-                  new RegExp(
-                    `(?:var|let|const)\\s+${varName}\\s*=\\s*['"]([^'"]+)['"]`,
-                  ),
-                );
-                if (varMatch && varMatch[1]) {
-                  href = varMatch[1];
-                }
-              } else {
-                const directMatch = scriptContent.match(
-                  new RegExp(
-                    `getElementById\\(['"]${id}['"]\\)\\.href\\s*=\\s*['"]([^'"]+)['"]`,
-                  ),
-                );
-                if (directMatch && directMatch[1]) {
-                  href = directMatch[1];
-                }
-              }
+          const isPD = /pixeldrain|pixel\.drain|pixeldra\.in/i.test(href) || /pixeldrain|pixel\.drain|pixeldra\.in/i.test(lowerText);
+          const isDownloadLike = 
+            className.includes("btn") || 
+            className.includes("download") || 
+            lowerText.includes("download") || 
+            lowerText.includes("mirror") || 
+            lowerText.includes("direct") || 
+            lowerText.includes("fast") || 
+            lowerText.includes("instant") || 
+            isPD ||
+            /workers\.dev|gdtot|hubdrive|drive|cloud/i.test(href);
+
+          if (!isDownloadLike) return;
+          if (isJunk(href, text)) return;
+
+          if (id && (!href || href === "#" || href.includes("javascript"))) {
+             const scriptHtml = doc.html();
+             const assignmentMatch = scriptHtml.match(new RegExp(`getElementById\\(['"]${id}['"]\\)\\.href\\s*=\\s*([a-zA-Z0-9_]+)`));
+             if (assignmentMatch && assignmentMatch[1]) {
+                const varMatch = scriptHtml.match(new RegExp(`(?:var|let|const)\\s+${assignmentMatch[1]}\\s*=\\s*['"]([^'"]+)['"]`));
+                if (varMatch?.[1]) href = varMatch[1];
+             } else {
+                const directMatch = scriptHtml.match(new RegExp(`getElementById\\(['"]${id}['"]\\)\\.href\\s*=\\s*['"]([^'"]+)['"]`));
+                if (directMatch?.[1]) href = directMatch[1];
+             }
+          }
+
+          if (href && !href.startsWith("http") && !href.startsWith("javascript")) {
+            try { href = new URL(href, sourceUrl).href; } catch (e) {}
+          }
+
+          if (href && href.startsWith("http") && !isJunk(href, text)) {
+            // Label normalization
+            if (isPD && (lowerText.includes("direct") || lowerText.includes("download") || !lowerText.includes("pixeldrain"))) {
+               text = "Pixeldrain";
             }
-          });
-        }
-        if (href && !text.includes("telegram"))
-          candidateLinks.push({ text, href });
-      });
+            results.push({ text, href });
+          }
+        });
+
+        // Global search in scripts for Pixeldrain links as fallback
+        doc('script').each((_, sel) => {
+          const content = doc(sel).html();
+          if (content) {
+            const pdMatches = content.match(/https?:\/\/(?:pixeldrain\.(?:com|dev|net|pw|bz|sh|st)|pixel\.drain|pixeldra\.in)\/(?:u|api\/file)\/[a-zA-Z0-9_-]+/gi);
+            if (pdMatches) {
+              pdMatches.forEach(m => {
+                 if (!isJunk(m, "")) {
+                   results.push({ text: "Pixeldrain", href: m });
+                 }
+              });
+            }
+          }
+        });
+
+        return results;
+      };
+
+      let candidateLinks: { text: string; href: string }[] = [];
+      candidateLinks = findCandidates($2, nextUrl);
+
+      // If no links found, try microlink with browser=true to execute JS
+      if (candidateLinks.length === 0) {
+         try {
+           const dlRes2 = await axios.get(
+             `https://api.microlink.io/?url=${encodeURIComponent(nextUrl)}&meta=false&data.body.selector=body&data.body.attr=html&browser=true`,
+             { timeout: 10000 },
+           );
+           if (dlRes2.data?.data?.body) {
+             const $proxy = cheerio.load(dlRes2.data.data.body);
+             candidateLinks = findCandidates($proxy, nextUrl);
+           }
+         } catch (err) {}
+      }
 
       if (candidateLinks.length === 0) {
         return res.json({ url });
       }
 
-      // Sort: pixeldrain first, then .workers.dev, then others
+      // Final Deduplication
+      const uniqueLinks = new Map<string, { text: string, href: string }>();
+      candidateLinks.forEach(c => uniqueLinks.set(c.href, c));
+      candidateLinks = Array.from(uniqueLinks.values());
+
+      // Sort: Priority to real download buttons, then pixeldrain, then .workers.dev
       candidateLinks.sort((a, b) => {
-        const isA_PD =
-          /pixeldrain|pixel\.drain|pixeldra\.in/i.test(a.text) ||
-          /pixeldrain|pixel\.drain|pixeldra\.in/i.test(a.href);
-        const isB_PD =
-          /pixeldrain|pixel\.drain|pixeldra\.in/i.test(b.text) ||
-          /pixeldrain|pixel\.drain|pixeldra\.in/i.test(b.href);
+        const aText = a.text.toLowerCase();
+        const bText = b.text.toLowerCase();
+        const aHref = a.href.toLowerCase();
+        const bHref = b.href.toLowerCase();
+        
+        // Priority 1: Pixeldrain is best
+        const isA_PD = /pixeldrain|pixel\.drain|pixeldra\.in/i.test(aText) || /pixeldrain|pixel\.drain|pixeldra\.in/i.test(aHref);
+        const isB_PD = /pixeldrain|pixel\.drain|pixeldra\.in/i.test(bText) || /pixeldrain|pixel\.drain|pixeldra\.in/i.test(bHref);
         if (isA_PD && !isB_PD) return -1;
         if (!isA_PD && isB_PD) return 1;
 
-        const isA_Worker = /\.workers\.dev/i.test(a.href);
-        const isB_Worker = /\.workers\.dev/i.test(b.href);
+        // Priority 2: "Direct Download" or "Download Now"
+        const isA_Direct = /direct|instant|fast|high.*speed|download.*now/i.test(aText);
+        const isB_Direct = /direct|instant|fast|high.*speed|download.*now/i.test(bText);
+        if (isA_Direct && !isB_Direct) return -1;
+        if (!isA_Direct && isB_Direct) return 1;
+
+        // Priority 3: Common workers.dev
+        const isA_Worker = /\.workers\.dev/i.test(aHref);
+        const isB_Worker = /\.workers\.dev/i.test(bHref);
         if (isA_Worker && !isB_Worker) return -1;
         if (!isA_Worker && isB_Worker) return 1;
 
@@ -1945,7 +2055,7 @@ async function startServer() {
       ) {
         workingLink = workingLink.replace(
           /.*(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+).*/i,
-          "https://pixeldrain.dev/u/$1",
+          "https://pixeldrain.com/u/$1",
         );
       }
 
