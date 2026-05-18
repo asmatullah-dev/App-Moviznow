@@ -2619,7 +2619,8 @@ export default function ContentManagement() {
       if (
         extractedUrl.includes("hubcloud") ||
         extractedUrl.includes("moviesdrive") ||
-        extractedUrl.includes("vcloud")
+        extractedUrl.includes("vcloud") ||
+        extractedUrl.includes("hubdrive")
       ) {
         try {
           const res = await fetch("/api/hubcloud/direct-link", {
