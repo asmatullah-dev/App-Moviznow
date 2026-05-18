@@ -38,7 +38,6 @@ export type LinkCheckResult = {
   year?: number;
   mismatchWarnings?: string[];
   confidenceScore?: number;
-  candidates?: { text: string; href: string }[];
 };
 
 export function normalizeUrl(input: string) {
@@ -614,32 +613,13 @@ export async function performFullLinkScan(
 
   // HubCloud interception
   let hubcloudTitle = "";
-  if (url.includes("hubcloud") || url.includes("moviesdrive") || url.includes("vcloud") || url.includes("hubdrive")) {
+  if (url.includes("hubcloud") || url.includes("moviesdrive") || url.includes("vcloud")) {
     try {
       const res = await fetch("/api/hubcloud/extract", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url }),
       });
-      
-      let candidatesInfo: undefined | any[] = undefined;
-      // Also fetch candidates asynchronously
-      try {
-        const dLinkRes = await fetch("/api/hubcloud/direct-link", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url, checkOnly: false }),
-        });
-        if (dLinkRes.ok) {
-           const dLinkData = await dLinkRes.json();
-           if (dLinkData && dLinkData.candidates) {
-             candidatesInfo = dLinkData.candidates;
-           }
-        }
-      } catch (e) {
-        console.error("Direct link fetch error", e);
-      }
-
       if (res.ok) {
         const data = await res.json();
         if (data.size && data.unit) {
@@ -650,7 +630,6 @@ export async function performFullLinkScan(
             statusLabel: "WORKING",
             fileName: hubcloudTitle || undefined,
             fileSizeText: `${data.size} ${data.unit}`,
-            candidates: candidatesInfo
           };
           finalUrlToUse = url;
         } else if (data.isNotFound) {
@@ -668,7 +647,6 @@ export async function performFullLinkScan(
             ok: true,
             statusLabel: "WORKING",
             fileName: hubcloudTitle || undefined,
-            candidates: candidatesInfo
           };
           finalUrlToUse = url;
         } else {
@@ -677,7 +655,6 @@ export async function performFullLinkScan(
             ok: true,
             statusLabel: "WORKING",
             message: "Assuming working (size extraction failed)",
-            candidates: candidatesInfo
           };
           finalUrlToUse = url;
         }
@@ -687,7 +664,6 @@ export async function performFullLinkScan(
           ok: true,
           statusLabel: "WORKING",
           message: "Assuming working (timeout/blocked)",
-          candidates: candidatesInfo
         };
         finalUrlToUse = url;
       }
