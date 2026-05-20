@@ -109,15 +109,35 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
   useModalBehavior(isOpen, onClose);
 
+  // Update input when initialInput changes
+  React.useEffect(() => {
+    if (initialInput) {
+      setInput(initialInput);
+    }
+  }, [initialInput]);
+
+  // Auto-start check if requested
+  React.useEffect(() => {
+    if (isOpen && autoStart && initialInput && results.length === 0 && !loading) {
+      handleCheck();
+    }
+  }, [isOpen, autoStart, initialInput]);
+
+  // Auto-paste from clipboard when modal opens
+  // Removed automatic paste
+  
+  // Auto-paste from clipboard when window gains focus
+  // Removed automatic paste
+  
+  // Periodic clipboard check while modal is open
+  // Removed periodic check
+
   const links = useMemo(() => {
     if (!autoExtract) {
       return input.split(/\r?\n/).map((s) => normalizeUrl(s)).filter(Boolean);
     }
     return splitLinks(input).map(normalizeUrl).filter(Boolean);
   }, [input, autoExtract]);
-
-  // Auto-start check tracker
-  const autoStartedInputRef = React.useRef<string | null>(null);
 
   const extractedMeta = useMemo(() => {
     const map: Record<string, {
@@ -136,11 +156,6 @@ export const LinkCheckerModal: React.FC<Props> = ({
     }
     return map;
   }, [input, links, languages, qualities]);
-
-  const extractedMetaRef = React.useRef(extractedMeta);
-  React.useEffect(() => {
-    extractedMetaRef.current = extractedMeta;
-  }, [extractedMeta]);
 
   const firstType = useMemo(() => (links[0] ? guessLinkType(links[0]) : "General link"), [links]);
 
@@ -221,7 +236,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
         const u = queue.shift()!;
         
         try {
-          const result = await performFullLinkScan(u, extractedMetaRef.current, languages, qualities);
+          const result = await performFullLinkScan(u, extractedMeta, languages, qualities);
 
           allResults.push(result);
           completedCount++;
@@ -472,7 +487,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
          }
  
          // Update detection per batch (if movie, keep movie, if any link is series, whole batch is series)
-         if (ql.season || ql.episode || ql.isFullSeasonMKV || ql.isFullSeasonZIP || /full season|all episodes|complete/i.test(sourceText)) {
+         if (ql.season || ql.episode) {
            batch.detectMetadata.type = "series";
          }
          
@@ -512,7 +527,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
     const detectedLangs = new Set<string>();
     let detectedPrintQuality: string | undefined;
     let detectedSubtitles = false;
-    let detectedType: "movie" | "series" | undefined;
+    let detectedType: "movie" | "series" = "movie";
     let detectedSeason: number | undefined;
     let detectedEpisode: number | undefined;
 
@@ -527,10 +542,6 @@ export const LinkCheckerModal: React.FC<Props> = ({
       }
       if (r.subtitleLabel || /subtitles|subs|softsub|hardsub|esub|esubs|msub|msubs/i.test(source)) {
         detectedSubtitles = true;
-      }
-
-      if (r.isFullSeasonMKV || r.isFullSeasonZIP || /full season|all episodes|complete/i.test(source)) {
-        detectedType = "series";
       }
 
       // Detect Series vs Movie
@@ -613,31 +624,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
   useEffect(() => {
     if (isOpen) {
-      if (initialInput) {
-        setInput(initialInput);
-      } else {
-        setInput('');
-      }
-      setResults([]);
-      setSelectedUrls(new Set());
-      setError(null);
-      setExpanded({});
-      setIsReviewingBatch(false);
-      setBatchReviewItems([]);
-
-      if (autoStart && initialInput && autoStartedInputRef.current !== initialInput) {
-        const initialLinks = autoExtract 
-          ? splitLinks(initialInput).map(normalizeUrl).filter(Boolean)
-          : initialInput.split(/\r?\n/).map((s) => normalizeUrl(s)).filter(Boolean);
-        if (initialLinks.length > 0) {
-          autoStartedInputRef.current = initialInput;
-          handleCheck(initialLinks);
-        }
-      }
-    } else {
-      autoStartedInputRef.current = null;
+      pasteFromClipboard(true);
     }
-  }, [isOpen, initialInput, autoStart, autoExtract]);
+  }, [isOpen]);
 
   const reset = () => {
     setInput("");

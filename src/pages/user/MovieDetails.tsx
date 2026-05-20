@@ -233,23 +233,22 @@ export default function MovieDetails() {
   // Reset state and load cache on ID change
   useEffect(() => {
     if (id) {
-      // Load full content cache asynchronously
-      safeStorage.getItemAsync(`movie_details_${id}`).then((cachedFull) => {
-        if (cachedFull) {
-          try {
-            const parsed = JSON.parse(cachedFull);
-            if (parsed.id === id) {
-              setFullContent(parsed);
-            } else {
-              setFullContent(null);
-            }
-          } catch (e) {
+      // Load full content cache
+      const cachedFull = safeStorage.getItem(`movie_details_${id}`);
+      if (cachedFull) {
+        try {
+          const parsed = JSON.parse(cachedFull);
+          if (parsed.id === id) {
+            setFullContent(parsed);
+          } else {
             setFullContent(null);
           }
-        } else {
+        } catch (e) {
           setFullContent(null);
         }
-      });
+      } else {
+        setFullContent(null);
+      }
 
       // Load metadata cache
       const cachedMeta = safeStorage.getItem(`content_cache_${id}`);
@@ -350,7 +349,7 @@ export default function MovieDetails() {
                 );
                 expanded.order = content.order;
                 setFullContent(expanded);
-                safeStorage.setItemAsync(
+                safeStorage.setItem(
                   `movie_details_${id}`,
                   JSON.stringify(expanded),
                 );
@@ -362,7 +361,7 @@ export default function MovieDetails() {
           const data = await getContent(id);
           if (data) {
             setFullContent(data);
-            safeStorage.setItemAsync(`movie_details_${id}`, JSON.stringify(data));
+            safeStorage.setItem(`movie_details_${id}`, JSON.stringify(data));
           } else {
             setFetchFailed(true);
           }
@@ -594,43 +593,11 @@ export default function MovieDetails() {
             JSON.stringify(mergedContent),
           );
 
-          // Minimize data to prevent QuotaExceededError
-          const minimizedContent = {
-            id: mergedContent.id,
-            title: mergedContent.title,
-            posterUrl: mergedContent.posterUrl,
-            type: mergedContent.type,
-            quality: (mergedContent as any).quality || mergedContent.qualityId,
-            printQuality: (mergedContent as any).printQuality,
-            audio: (mergedContent as any).audio,
-            year: mergedContent.year,
-            imdbRating: mergedContent.imdbRating,
-            ageRating: (mergedContent as any).ageRating,
-            duration: (mergedContent as any).duration,
-            status: mergedContent.status
-          };
-
-          // Add to front
-          recent.unshift(minimizedContent as any);
-          // Keep max 25
-          if (recent.length > 25) recent = recent.slice(0, 25);
+          // Add to front, keep full data as requested
+          recent.unshift(mergedContent);
+          // Keep max 100
+          if (recent.length > 100) recent = recent.slice(0, 100);
           safeStorage.setItem("recently_viewed", JSON.stringify(recent));
-
-          // Cleanup old movie_details is now mostly handled automatically by IndexedDB size, but we can do a best effort using localstorage fallback keys if any
-          try {
-             const recentIds = recent.map(r => `movie_details_${r.id}`);
-             const keysToRemove = [];
-             for (let i = 0; i < localStorage.length; i++) {
-                const key = localStorage.key(i);
-                if (key?.startsWith('movie_details_') && !recentIds.includes(key)) {
-                   keysToRemove.push(key);
-                }
-             }
-             keysToRemove.forEach(k => {
-               localStorage.removeItem(k);
-               safeStorage.removeItemAsync(k);
-             });
-          } catch(e) {}
         } catch (e) {
           console.error("Failed to update recently viewed", e);
         }
@@ -1312,13 +1279,34 @@ export default function MovieDetails() {
       const now = Date.now();
       const cached = hubcloudCacheRef.current[url];
 
-      // If we have a cached link within 30 seconds, use it directly
+      // If we have a cached link within 30 seconds, try to check if it's working
       if (cached && now - cached.timestamp < 30000) {
-        shouldExtract = false;
-        finalUrl = cached.url;
-        finalTinyUrl = undefined;
-        finalCandidates = cached.candidates;
-        finalSize = cached.size;
+        try {
+          // Check if the cached link is still alive by hitting it in the backend
+          const checkRes = await fetch("/api/hubcloud/direct-link", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: cached.url, checkOnly: true }),
+          });
+          if (checkRes.ok) {
+            const checkData = await checkRes.json();
+            if (checkData.ok) {
+              shouldExtract = false;
+              finalUrl = cached.url;
+              finalTinyUrl = undefined;
+              finalCandidates = cached.candidates;
+              finalSize = cached.size;
+
+              // If the checkRes returns a location (it followed a redirect during check), update the url
+              if (checkData.location) {
+                finalUrl = checkData.location;
+                cached.url = finalUrl;
+              }
+            }
+          }
+        } catch (e) {
+          console.error("Cache validation failed", e);
+        }
       }
 
       if (shouldExtract) {
@@ -3354,13 +3342,13 @@ export default function MovieDetails() {
               if (fullContent) {
                 const updatedFullContent = { ...fullContent, ...updateData };
                 setFullContent(updatedFullContent);
-                safeStorage.setItemAsync(
+                safeStorage.setItem(
                   `movie_details_${id}`,
                   JSON.stringify(updatedFullContent),
                 );
               } else if (content) {
                 const updatedContent = { ...content, ...updateData };
-                safeStorage.setItemAsync(
+                safeStorage.setItem(
                   `movie_details_${id}`,
                   JSON.stringify(updatedContent),
                 );

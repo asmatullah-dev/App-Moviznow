@@ -18,8 +18,7 @@ export default defineConfig(({mode}) => {
           cleanupOutdatedCaches: true,
           skipWaiting: true,
           clientsClaim: true,
-          importScripts: ['/firebase-messaging-sw.js'],
-          maximumFileSizeToCacheInBytes: 5 * 1024 * 1024
+          importScripts: ['/firebase-messaging-sw.js']
         },
         manifest: {
           name: 'MovizNow',

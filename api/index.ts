@@ -127,10 +127,10 @@ async function startServer() {
         const checkPixeldrainLink = async (url: string) => {
           if (!url || url.trim() === "") return { error: "Empty link" };
           const fileMatch = url.match(
-            /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:u|api\/file)\/([a-zA-Z0-9_-]+)/i,
+            /pixeldrain\.(?:com|dev)\/(?:u|api\/file)\/([a-zA-Z0-9]+)/,
           );
           const listMatch = url.match(
-            /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:l|api\/list)\/([a-zA-Z0-9_-]+)/i,
+            /pixeldrain\.(?:com|dev)\/(?:l|api\/list)\/([a-zA-Z0-9]+)/,
           );
 
           try {
@@ -492,7 +492,7 @@ async function startServer() {
             let fetchUrl = link.url;
             // If it's a pixeldrain link, use the API for faster checking
             const pdMatch = fetchUrl.match(
-              /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:u|api\/file)\/([a-zA-Z0-9_-]+)/i,
+              /pixeldrain\.(?:com|dev)\/(?:u|api\/file)\/([a-zA-Z0-9]+)/,
             );
             if (pdMatch) {
               fetchUrl = `https://pixeldrain.com/api/file/${pdMatch[1]}/info`;
@@ -643,9 +643,6 @@ async function startServer() {
   }
 
   // Advanced Link Checker API
-  const checkLinkCache = new Map<string, { data: any, timestamp: number }>();
-  const CHECK_LINK_CACHE_TTL = 30 * 1000;
-
   app.post(["/api/check-link", "/check-link"], async (req, res) => {
     try {
       const { url } = req.body;
@@ -654,13 +651,6 @@ async function startServer() {
           .status(400)
           .json({ ok: false, statusLabel: "BROKEN", message: "Missing URL" });
       }
-
-      const cacheKey = url;
-      const cached = checkLinkCache.get(cacheKey);
-      if (cached && Date.now() - cached.timestamp < CHECK_LINK_CACHE_TTL) {
-         return res.json(cached.data);
-      }
-
 
       let parsed: URL;
       try {
@@ -686,14 +676,11 @@ async function startServer() {
       };
 
       // Try to resolve redirects first if it's not already a known special host
-      const isPDHost = 
-        currentHost.includes("pixeldrain") ||
-        currentHost.includes("pixel.drain") ||
-        currentHost.includes("pixeldra.in");
-
-      const isExempt = isPDHost || currentHost.includes("raj.lat");
-
-      if (!isExempt) {
+      if (
+        !currentHost.includes("pixeldrain.com") &&
+        !currentHost.includes("pixeldrain.dev") &&
+        !currentHost.includes("raj.lat")
+      ) {
         try {
           const controller = new AbortController();
           const timeout = setTimeout(() => controller.abort(), 8000);
@@ -730,10 +717,12 @@ async function startServer() {
       }
 
       // PIXELDRAIN SPECIAL CHECK
-      if (isPDHost) {
-        const match = currentUrl.match(
-          /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:u|api\/file)\/([a-zA-Z0-9_-]+)/i,
-        );
+      if (
+        currentHost.includes("pixeldrain.com") ||
+        currentHost.includes("pixeldrain.dev") ||
+        currentHost.includes("pixeldrain.net")
+      ) {
+        const match = currentParsed.pathname.match(/\/u\/([^/?#]+)/);
         if (match?.[1]) {
           const fileId = match[1];
           try {
