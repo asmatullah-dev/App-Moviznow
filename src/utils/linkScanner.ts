@@ -616,47 +616,33 @@ export async function performFullLinkScan(
   let hubcloudTitle = "";
   if (url.includes("hubcloud") || url.includes("moviesdrive") || url.includes("vcloud") || url.includes("hubdrive")) {
     try {
-      const extractController = new AbortController();
-      const extractTimeout = setTimeout(() => extractController.abort(), 7000);
+      const res = await fetch("/api/hubcloud/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
       
-      const directController = new AbortController();
-      const directTimeout = setTimeout(() => directController.abort(), 8000);
-
-      const [res, dLinkRes] = await Promise.allSettled([
-        fetch("/api/hubcloud/extract", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url }),
-          signal: extractController.signal
-        }),
-        fetch("/api/hubcloud/direct-link", {
+      let candidatesInfo: undefined | any[] = undefined;
+      // Also fetch candidates asynchronously
+      try {
+        const dLinkRes = await fetch("/api/hubcloud/direct-link", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url, checkOnly: false }),
-          signal: directController.signal
-        })
-      ]);
-      
-      clearTimeout(extractTimeout);
-      clearTimeout(directTimeout);
-
-      let candidatesInfo: undefined | any[] = undefined;
-      
-      if (dLinkRes.status === "fulfilled" && dLinkRes.value.ok) {
-        try {
-          const dLinkData = await dLinkRes.value.json();
-          if (dLinkData && dLinkData.candidates) {
-            candidatesInfo = dLinkData.candidates;
-          }
-        } catch (e) {
-          console.error("Direct link parsing error", e);
+        });
+        if (dLinkRes.ok) {
+           const dLinkData = await dLinkRes.json();
+           if (dLinkData && dLinkData.candidates) {
+             candidatesInfo = dLinkData.candidates;
+           }
         }
+      } catch (e) {
+        console.error("Direct link fetch error", e);
       }
 
-      if (res.status === "fulfilled" && res.value.ok) {
-        const data = await res.value.json();
+      if (res.ok) {
+        const data = await res.json();
         if (data.size && data.unit) {
-          hubcloudTitle = data.title || "";
           hubcloudTitle = data.title || "";
           base = {
             url,

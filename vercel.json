@@ -1,8 +1,7 @@
 {
   "functions": {
     "api/index.ts": {
-      "includeFiles": "dist/**",
-      "maxDuration": 60
+      "includeFiles": "dist/**"
     }
   },
   "rewrites": [
@@ -12,14 +11,6 @@
     },
     {
       "source": "/movie/(.*)",
-      "destination": "/api/index.ts"
-    },
-    {
-      "source": "/(manifest.webmanifest|sw.js|favicon.ico|launcher.svg|firebase-messaging-sw.js)",
-      "destination": "/api/index.ts"
-    },
-    {
-      "source": "/assets/(.*)",
       "destination": "/api/index.ts"
     },
     {

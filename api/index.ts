@@ -643,9 +643,6 @@ async function startServer() {
   }
 
   // Advanced Link Checker API
-  const checkLinkCache = new Map<string, { data: any, timestamp: number }>();
-  const CHECK_LINK_CACHE_TTL = 30 * 1000;
-
   app.post(["/api/check-link", "/check-link"], async (req, res) => {
     try {
       const { url } = req.body;
@@ -654,13 +651,6 @@ async function startServer() {
           .status(400)
           .json({ ok: false, statusLabel: "BROKEN", message: "Missing URL" });
       }
-
-      const cacheKey = url;
-      const cached = checkLinkCache.get(cacheKey);
-      if (cached && Date.now() - cached.timestamp < CHECK_LINK_CACHE_TTL) {
-         return res.json(cached.data);
-      }
-
 
       let parsed: URL;
       try {

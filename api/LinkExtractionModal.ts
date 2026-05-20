@@ -4,9 +4,6 @@ import * as cheerio from 'cheerio';
 
 export const linkExtractionRouter = Router();
 
-const extractionCache = new Map<string, { data: any, timestamp: number }>();
-const CACHE_TTL = 30 * 1000; // 30 seconds
-
   linkExtractionRouter.post("/api/hubcloud/extract", async (req, res) => {
     try {
       const { url } = req.body;
@@ -20,12 +17,6 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
         return res.status(400).json({ error: "Invalid HubCloud URL" });
       }
 
-      const cacheKey = `extract_${url}`;
-      const cached = extractionCache.get(cacheKey);
-      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-        return res.json(cached.data);
-      }
-
       const headers = {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -37,12 +28,9 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
       };
 
       const response = await axios.get(url, {
-        headers: {
-          ...headers,
-          Referer: "https://google.com/"
-        },
+        headers,
         validateStatus: () => true,
-        timeout: 6000,
+        timeout: 8000,
       });
       const $ = cheerio.load(response.data);
 
@@ -173,18 +161,13 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
         response.status === 503 ||
         title === "Unknown (Cloudflare Block)";
 
-      const responseData = {
+      res.json({
         size,
         unit,
         title: title.trim(),
         isWorking: isWorking && !isNotFound,
         isNotFound,
-      };
-      
-      extractionCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
-
-      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-      res.json(responseData);
+      });
     } catch (e: any) {
       console.error("Hubcloud extract error:", e.message);
       // Even if it fails (like timeout on Vercel), return a generic response instead of 500
@@ -204,13 +187,12 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
 
   async function performExtraction(url: string, checkOnly: boolean, depth = 0): Promise<any> {
     try {
-      if (depth > 1) return { url, candidates: [], size: "" }; // Reduce depth for Vercel safety
+      if (depth > 2) return { url, candidates: [], size: "" };
       const headers = {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         Accept:
           "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        Referer: url, // Better referer handling
       };
 
       if (checkOnly && url) {
@@ -219,7 +201,7 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
             headers: { ...headers, Range: "bytes=0-0" },
             maxRedirects: 0,
             validateStatus: () => true,
-            timeout: 2000,
+            timeout: 2500,
           });
           if (
             checkRes.status < 400 ||
@@ -251,13 +233,11 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
         return { url };
       }
 
-      console.log(`Extracting HubCloud: ${url}`);
       const response = await axios.get(url, {
         headers,
         validateStatus: () => true,
-        timeout: 4500, // Slightly tighter first call
+        timeout: 5000,
       });
-      console.log(`Response status: ${response.status}`);
       let $ = cheerio.load(response.data);
 
       const titleText = $("title").text().toLowerCase();
@@ -269,15 +249,12 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
         response.status === 503;
 
       if (isCf) {
-        console.log("Cloudflare detected, trying Microlink...");
         try {
-          // Rapidly check if Microlink is even available (common rate limiting on Vercel)
           const dlRes = await axios.get(
             `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
-            { timeout: 7000 },
+            { timeout: 8000 },
           );
           if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
-            console.log("Microlink returned content.");
             const proxyTitle =
               cheerio.load(dlRes.data.data.body)("title").text().toLowerCase() || "";
             if (
@@ -287,78 +264,28 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
             ) {
               $ = cheerio.load(dlRes.data.data.body);
             } else {
-              console.log("Microlink also returned Cloudflare.");
               return { url: url, isCloudflare: true };
             }
           } else {
             return { url: url, isCloudflare: true };
           }
         } catch (err) {
-          console.error("Microlink error:", err);
           return { url: url, isCloudflare: true };
         }
       }
 
-      const cookies = response.headers["set-cookie"]?.map(c => c.split(';')[0]).join('; ') || "";
-
       let nextUrl =
         $("#download").attr("href") ||
         $('a:contains("Generate Direct Download Link")').attr("href") ||
-        $('a:contains("Generate Download Link")').attr("href") ||
-        $('a:contains("Generate Link")').attr("href") ||
-        $('a:contains("Download Now")').attr("href") ||
-        $('a:contains("Direct Download")').attr("href") ||
-        $('a:contains("Click to Download")').attr("href") ||
-        $("a.btn-zip").attr("href") ||
-        $("a.btn-primary").attr("href") ||
-        $("a.btn-success").attr("href") ||
-        $("a.btn-info").attr("href");
+        $("a.btn-zip").attr("href");
 
-      // Specific for HubDrive/MoviesDrive forms
-      if (!nextUrl) {
-        const form = $('form');
-        if (form.length > 0) {
-          const action = form.attr('action');
-          if (action) {
-            console.log(`Found form action: ${action}`);
-            // Check if form has a button that looks like download
-            const hasDownloadBtn = form.find('button, input[type="submit"]').filter(function() {
-              const t = $(this).text().toLowerCase() || $(this).val()?.toString().toLowerCase() || "";
-              return t.includes('download') || t.includes('generate') || t.includes('link');
-            }).length > 0;
-
-            if (hasDownloadBtn) {
-              nextUrl = action;
-            }
-          }
-        }
-      }
-
-      console.log(`Next URL: ${nextUrl}`);
-
-      // Extract url from script for vcloud/hubcloud if href is missing
+      // Extract url from script for vcloud if href is missing
       if (!nextUrl) {
          const scriptHtml = $.html();
-         const match = scriptHtml.match(/var\s+url\s*=\s*['"]([^'"]+)['"]/i) || 
-                       scriptHtml.match(/location\.href\s*=\s*['"]([^'"]+)['"]/i) ||
-                       scriptHtml.match(/window\.location\.replace\(['"]([^'"]+)['"]\)/i) ||
-                       scriptHtml.match(/window\.location\s*=\s*['"]([^'"]+)['"]/i) ||
-                       scriptHtml.match(/location\.replace\(['"]([^'"]+)['"]\)/i) ||
-                       scriptHtml.match(/setTimeout\(.*['"]([^'"]+)['"].*\)/i);
-         if (match && match[1] && match[1].startsWith('http')) {
+         const match = scriptHtml.match(/var\s+url\s*=\s*['"]([^'"]+)['"]/i);
+         if (match && match[1]) {
             nextUrl = match[1];
          }
-      }
-
-      if (!nextUrl) {
-         console.log("Failed to find nextUrl, searching in all links...");
-         $("a").each((i, el) => {
-           const href = $(el).attr("href") || "";
-           const text = $(el).text().toLowerCase();
-           if (href && (text.includes("download") || text.includes("generate")) && (href.includes("hubcloud") || href.includes("hubdrive") || href.includes("vcloud"))) {
-             nextUrl = href;
-           }
-         });
       }
 
       let $2 = null;
@@ -367,23 +294,13 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
         if ($("a.btn").length > 0) {
           $2 = $;
         } else {
-          return { url, isCloudflare: isCf };
+          return { url };
         }
       } else {
-        // Ensure absolute URL
-        if (nextUrl.startsWith('/')) {
-           const parsedUrl = new URL(url);
-           nextUrl = `${parsedUrl.protocol}//${parsedUrl.host}${nextUrl}`;
-        }
-
         let res2 = await axios.get(nextUrl, {
-          headers: { 
-            ...headers, 
-            Referer: url,
-            Cookie: cookies
-          },
+          headers,
           validateStatus: () => true,
-          timeout: 4500,
+          timeout: 5000,
         });
         $2 = cheerio.load(res2.data);
 
@@ -411,14 +328,10 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
       }
 
       const candidateLinks: { text: string; href: string }[] = [];
-      $2("a.btn, a.btn-primary, a.btn-success, a.btn-info, a.btn-danger, a.btn-warning, button.btn").each((i, el) => {
+      $2("a.btn").each((i, el) => {
         let href = $2(el).attr("href") || "";
         const text = $2(el).text().toLowerCase();
         const id = $2(el).attr("id");
-
-        if (!href && $2(el).is('button')) {
-           // check if button triggers a script
-        }
 
         if (id) {
           $2("script").each((_, scriptEl) => {
@@ -666,30 +579,18 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
   linkExtractionRouter.post("/api/hubcloud/direct-link", async (req, res) => {
     try {
       const { url, checkOnly } = req.body;
-      const cacheKey = `direct_${url}_${checkOnly}`;
-      
-      const cached = extractionCache.get(cacheKey);
-      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-        return res.json(cached.data);
-      }
-
       const data = await performExtraction(url, checkOnly, 0);
 
       // Return ok stuff for checkOnly
       if (checkOnly && data && data.ok !== undefined) {
-         extractionCache.set(cacheKey, { data, timestamp: Date.now() });
          return res.json(data);
       }
 
       // If cloudflare error
       if (data.isCloudflare) {
-         const responseData = { url: data.url, isCloudflare: true };
-         extractionCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
-         return res.json(responseData);
+         return res.json({ url: data.url, isCloudflare: true });
       }
 
-      extractionCache.set(cacheKey, { data, timestamp: Date.now() });
-      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
       return res.json(data);
     } catch (e: any) {
       console.error(e);
