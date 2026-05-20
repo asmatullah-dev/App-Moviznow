@@ -1295,7 +1295,7 @@ export default function MovieDetails() {
     let finalCandidates: { text: string; href: string }[] | undefined;
     let finalSize: string | undefined;
 
-    if (url.includes("hubcloud") || url.includes("moviesdrive") || url.includes("vcloud") || url.includes("hubdrive") || url.includes("katdrive") || url.includes("kolop") || url.includes("drivehub") || url.includes("gdflix") || url.includes("byteclouds") || url.includes("fastload")) {
+    if (url.includes("hubcloud") || url.includes("moviesdrive") || url.includes("vcloud") || url.includes("hubdrive")) {
       const clickId = url;
       setExtractingLinkId(clickId);
       // Immediately open the popup with a temporary "extracting" state, so user gets feedback

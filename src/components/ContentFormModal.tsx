@@ -17,7 +17,7 @@ const QualityInputs: React.FC<QualityInputsProps> = ({ links, onChange, droppabl
     if (!url) return;
     
     // Check if it's a HubCloud or MoviesDrives link
-    if (url.includes('hubcloud') || url.includes('moviesdrive') || url.includes('vcloud') || url.includes('hubdrive') || url.includes('katdrive') || url.includes('kolop') || url.includes('drivehub') || url.includes('gdflix') || url.includes('byteclouds') || url.includes('fastload')) {
+    if (url.includes('hubcloud') || url.includes('moviesdrive') || url.includes('vcloud') || url.includes('hubdrive')) {
       try {
         const res = await fetch("/api/hubcloud/extract", {
           method: "POST",
@@ -221,6 +221,22 @@ const QualityInputs: React.FC<QualityInputsProps> = ({ links, onChange, droppabl
                         }}
                         onBlur={(e) => handleUrlBlur(e.target.value, idx)}
                         className="flex-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                    <div className="flex gap-2 items-center">
+                      <input
+                        type="text"
+                        placeholder="Status Reason / Comment (Optional)"
+                        value={link.reason || ''}
+                        onChange={(e) => {
+                          onChange(prev => {
+                            const currentLinks = Array.isArray(prev) ? prev : [];
+                            const newLinks = [...currentLinks];
+                            newLinks[idx] = { ...newLinks[idx], reason: e.target.value };
+                            return newLinks;
+                          });
+                        }}
+                        className="flex-1 bg-zinc-150/40 dark:bg-zinc-950/35 border border-zinc-200 dark:border-zinc-800/60 rounded-lg px-2.5 py-1 text-xs text-zinc-600 dark:text-zinc-400 focus:outline-none focus:border-emerald-500/80"
                       />
                     </div>
                   </div>

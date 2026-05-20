@@ -600,22 +600,6 @@ export function detectFromFilename(
   return result;
 }
 
-export function isHubVariant(url: string) {
-  const lower = url.toLowerCase();
-  return (
-    lower.includes("hubcloud") ||
-    lower.includes("moviesdrive") ||
-    lower.includes("vcloud") ||
-    lower.includes("hubdrive") ||
-    lower.includes("katdrive") ||
-    lower.includes("kolop") ||
-    lower.includes("drivehub") ||
-    lower.includes("gdflix") ||
-    lower.includes("byteclouds") ||
-    lower.includes("fastload")
-  );
-}
-
 export async function performFullLinkScan(
   url: string,
   extractedMeta: Record<string, any> = {},
@@ -630,7 +614,7 @@ export async function performFullLinkScan(
 
   // HubCloud interception
   let hubcloudTitle = "";
-  if (isHubVariant(url)) {
+  if (url.includes("hubcloud") || url.includes("moviesdrive") || url.includes("vcloud") || url.includes("hubdrive")) {
     try {
       const extractController = new AbortController();
       const extractTimeout = setTimeout(() => extractController.abort(), 7000);
@@ -671,14 +655,16 @@ export async function performFullLinkScan(
 
       if (res.status === "fulfilled" && res.value.ok) {
         const data = await res.value.json();
+        const isCf = data.title && data.title.includes("Cloudflare Block");
         if (data.size && data.unit) {
           hubcloudTitle = data.title || "";
           hubcloudTitle = data.title || "";
           base = {
             url,
             ok: true,
-            statusLabel: "WORKING",
-            fileName: hubcloudTitle || undefined,
+            statusLabel: isCf ? "PROTECTED" : "WORKING",
+            message: isCf ? "Link is alive but protected by Cloudflare/anti-bot (server IP blocked)." : undefined,
+            fileName: isCf ? undefined : (hubcloudTitle || undefined),
             fileSizeText: `${data.size} ${data.unit}`,
             candidates: candidatesInfo
           };
@@ -696,8 +682,9 @@ export async function performFullLinkScan(
           base = {
             url,
             ok: true,
-            statusLabel: "WORKING",
-            fileName: hubcloudTitle || undefined,
+            statusLabel: isCf ? "PROTECTED" : "WORKING",
+            message: isCf ? "Link is alive but protected by Cloudflare/anti-bot (server IP blocked)." : undefined,
+            fileName: isCf ? undefined : (hubcloudTitle || undefined),
             candidates: candidatesInfo
           };
           finalUrlToUse = url;
@@ -705,8 +692,8 @@ export async function performFullLinkScan(
           base = {
             url,
             ok: true,
-            statusLabel: "WORKING",
-            message: "Assuming working (size extraction failed)",
+            statusLabel: isCf ? "PROTECTED" : "WORKING",
+            message: isCf ? "Link is alive but protected by Cloudflare/anti-bot (server IP blocked)." : "Assuming working (size extraction failed)",
             candidates: candidatesInfo
           };
           finalUrlToUse = url;
@@ -835,7 +822,7 @@ export async function performFullLinkScan(
     year: fileMeta.year || postMeta.year || base.year,
   };
 
-  if (result.ok && !result.fileName) {
+  if (result.ok && !result.fileName && result.statusLabel !== "PROTECTED" && result.statusLabel !== "REDIRECT") {
     result.statusLabel = "MISSING_FILENAME";
     result.message = "Missing filename";
   }
@@ -859,7 +846,7 @@ export async function performFullLinkScan(
   }
 
   // Filename validation
-  if (result.ok && result.fileName) {
+  if (result.ok && result.fileName && result.statusLabel !== "PROTECTED" && result.statusLabel !== "REDIRECT") {
     const hasQuality = !!result.qualityLabel;
     const hasLanguage = !!result.audioLabel;
 

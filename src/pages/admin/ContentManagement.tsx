@@ -2637,13 +2637,7 @@ export default function ContentManagement() {
         extractedUrl.includes("hubcloud") ||
         extractedUrl.includes("moviesdrive") ||
         extractedUrl.includes("vcloud") ||
-        extractedUrl.includes("hubdrive") ||
-        extractedUrl.includes("katdrive") ||
-        extractedUrl.includes("kolop") ||
-        extractedUrl.includes("drivehub") ||
-        extractedUrl.includes("gdflix") ||
-        extractedUrl.includes("byteclouds") ||
-        extractedUrl.includes("fastload")
+        extractedUrl.includes("hubdrive")
       ) {
         try {
           const res = await fetch("/api/hubcloud/direct-link", {

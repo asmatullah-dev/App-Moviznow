@@ -195,7 +195,7 @@ export default function ReportedLinks() {
   const handleUrlBlur = async (url: string) => {
     if (!url) return;
     
-    if (url.includes('hubcloud') || url.includes('moviesdrive') || url.includes('vcloud') || url.includes('hubdrive') || url.includes('katdrive') || url.includes('kolop') || url.includes('drivehub') || url.includes('gdflix') || url.includes('byteclouds') || url.includes('fastload')) {
+    if (url.includes('hubcloud') || url.includes('moviesdrive') || url.includes('vcloud') || url.includes('hubdrive')) {
       try {
         const res = await fetch("/api/hubcloud/extract", {
           method: "POST",

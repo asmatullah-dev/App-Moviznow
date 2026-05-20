@@ -679,35 +679,17 @@ async function startServer() {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         Accept:
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
         "Cache-Control": "no-cache",
         Pragma: "no-cache",
-        "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand)";v="24", "Google Chrome";v="122"',
-        "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"Windows"',
-      };
-
-      const isProtectedHost = (h: string) => {
-        return h.includes("hubcloud") || 
-               h.includes("vcloud") || 
-               h.includes("hubdrive") || 
-               h.includes("moviesdrive") ||
-               h.includes("katdrive") ||
-               h.includes("kolop") ||
-               h.includes("drivehub") ||
-               h.includes("gdflix") ||
-               h.includes("byteclouds") ||
-               h.includes("fastload") ||
-               h.includes("raj.lat") ||
-               h.includes("hub.");
       };
 
       // Try to resolve redirects first if it's not already a known special host
       if (
         !currentHost.includes("pixeldrain.com") &&
         !currentHost.includes("pixeldrain.dev") &&
-        !isProtectedHost(currentHost)
+        !currentHost.includes("raj.lat")
       ) {
         try {
           const controller = new AbortController();
@@ -748,29 +730,35 @@ async function startServer() {
       if (
         currentHost.includes("pixeldrain.com") ||
         currentHost.includes("pixeldrain.dev") ||
-        currentHost.includes("pixeldrain.net")
+        currentHost.includes("pixeldrain.net") ||
+        currentHost.includes("pixeldra.in") ||
+        currentHost.includes("pixel.drain")
       ) {
-        const match = currentParsed.pathname.match(/\/u\/([^/?#]+)/);
-        if (match?.[1]) {
-          const fileId = match[1];
+        const fileMatch = currentParsed.pathname.match(/\/(?:u|api\/file)\/([a-zA-Z0-9_-]+)/i);
+        const listMatch = currentParsed.pathname.match(/\/(?:l|api\/list)\/([a-zA-Z0-9_-]+)/i);
+
+        if (fileMatch?.[1] || listMatch?.[1]) {
+          const fileId = fileMatch?.[1];
+          const listId = listMatch?.[1];
           try {
-            const infoRes = await fetch(
-              `https://pixeldrain.com/api/file/${fileId}/info`,
-              {
-                method: "GET",
-                headers: {
-                  ...headers,
-                  Accept: "application/json,text/plain,*/*",
-                },
+            const apiUrl = fileId 
+              ? `https://pixeldrain.com/api/file/${fileId}/info`
+              : `https://pixeldrain.com/api/list/${listId}`;
+
+            const infoRes = await fetch(apiUrl, {
+              method: "GET",
+              headers: {
+                ...headers,
+                Accept: "application/json,text/plain,*/*",
               },
-            );
+            });
 
             if (infoRes.status === 404) {
               return res.json({
                 ok: false,
                 status: 404,
                 statusLabel: "BROKEN",
-                message: "Pixeldrain file not found or deleted",
+                message: fileId ? "Pixeldrain file not found or deleted" : "Pixeldrain list not found or deleted",
                 finalUrl: currentUrl,
                 source: "pixeldrain-api",
                 host: currentHost,
@@ -791,6 +779,28 @@ async function startServer() {
 
             if (infoRes.ok) {
               const data: any = await infoRes.json();
+              
+              if (listId) {
+                const files = data.files || [];
+                const totalSize = files.reduce((acc: number, f: any) => acc + (f.size || 0), 0);
+                const fileSizeText = formatBytes(totalSize);
+                const title = data.title || `Pixeldrain List (${files.length} files)`;
+
+                return res.json({
+                  ok: true,
+                  status: 200,
+                  statusLabel: "WORKING",
+                  message: `Pixeldrain list is working: ${title}`,
+                  finalUrl: currentUrl,
+                  contentType: "application/json",
+                  isDirectDownload: false,
+                  fileName: title,
+                  fileSize: totalSize,
+                  fileSizeText,
+                  source: "pixeldrain-list-api",
+                  host: currentHost,
+                });
+              }
 
               const dlRes = await fetch(
                 `https://pixeldrain.com/api/file/${fileId}`,
@@ -892,7 +902,8 @@ async function startServer() {
                 host: currentHost,
               });
             }
-          } catch {
+          } catch (e) {
+            console.error("Pixeldrain check error:", e);
             return res.json({
               ok: false,
               statusLabel: "UNAVAILABLE",
@@ -987,74 +998,8 @@ async function startServer() {
             lower.includes("checking your browser") ||
             lower.includes("captcha") ||
             lower.includes("access denied") ||
-            lower.includes("forbidden") ||
-            (html.length < 1000 && lower.includes("javascript"))
+            lower.includes("forbidden")
           ) {
-            // Try bypass for these hosts
-            if (isProtectedHost(currentHost)) {
-               try {
-                  const proxyPromises = [
-                     fetch(`https://api.microlink.io/?url=${encodeURIComponent(currentUrl)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`)
-                        .then(async r => {
-                           if (!r.ok) throw new Error("Failed");
-                           const d = await r.json();
-                           return { html: d.data?.body || null, source: "microlink-bypass" };
-                        }),
-                     fetch(`https://corsproxy.io/?${encodeURIComponent(currentUrl)}`)
-                        .then(async r => {
-                           if (!r.ok) throw new Error("Failed");
-                           const h = await r.text();
-                           return { html: h || null, source: "corsproxy-bypass" };
-                        })
-                  ];
-
-                  const bypassResult = await Promise.any(proxyPromises.map(p => p.then(res => {
-                     if (!res.html) throw new Error("Empty");
-                     const $ = cheerio.load(res.html);
-                     const t = $("title").text().toLowerCase();
-                     if (t.includes("just a moment") || t.includes("cloudflare")) throw new Error("CF");
-                     return res;
-                  })));
-
-                  if (bypassResult) {
-                     return res.json({
-                        ok: true,
-                        status: 200,
-                        statusLabel: "WORKING",
-                        message: `Bypassed protection via proxy (${bypassResult.source.split("-")[0]})`,
-                        finalUrl: currentUrl,
-                        contentType: "text/html",
-                        source: bypassResult.source,
-                        host: currentHost,
-                     });
-                  }
-               } catch (e) {
-                  // Fallback to AllOrigins if race fails
-                  try {
-                     const aoRes = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(currentUrl)}`);
-                     if (aoRes.ok) {
-                        const data = await aoRes.json();
-                        if (data.contents) {
-                           const $ = cheerio.load(data.contents);
-                           const t = $("title").text().toLowerCase();
-                           if (!t.includes("just a moment") && data.contents.length > 500) {
-                              return res.json({
-                                 ok: true,
-                                 status: 200,
-                                 statusLabel: "WORKING",
-                                 message: "Bypassed protection via proxy (allorigins)",
-                                 finalUrl: currentUrl,
-                                 contentType: "text/html",
-                                 source: "allorigins-bypass",
-                                 host: currentHost,
-                              });
-                           }
-                        }
-                     }
-                  } catch (e2) {}
-               }
-            }
-
             return res.json({
               ok: true,
               status: fetchRes.status || 200,
@@ -1135,6 +1080,46 @@ async function startServer() {
         const fileName = fileNameMatch?.[1]
           ? decodeURIComponent(fileNameMatch[1])
           : undefined;
+
+        const serverHeader = res_fetch.headers.get("server") || "";
+        let isGeneralCloudflare = 
+          res_fetch.status === 403 || 
+          res_fetch.status === 503 || 
+          serverHeader.toLowerCase().includes("cloudflare") ||
+          serverHeader.toLowerCase().includes("ddos-guard");
+
+        // Try reading html body to check for cloudflare text if not flagged yet but marked as error
+        if (!isGeneralCloudflare && contentType && contentType.includes("html") && res_fetch.status >= 400) {
+          try {
+            const responseClone = res_fetch.clone();
+            const textContent = await responseClone.text().catch(() => "");
+            const lowerContent = textContent.toLowerCase();
+            if (
+              lowerContent.includes("cloudflare") ||
+              lowerContent.includes("just a moment") ||
+              lowerContent.includes("ddos") ||
+              lowerContent.includes("captcha") ||
+              lowerContent.includes("checking your browser") ||
+              lowerContent.includes("access denied")
+            ) {
+              isGeneralCloudflare = true;
+            }
+          } catch (e) {}
+        }
+
+        if (isGeneralCloudflare) {
+          return res.json({
+            ok: true,
+            status: res_fetch.status || 200,
+            statusLabel: "PROTECTED",
+            message: "Link is alive but protected by Cloudflare/anti-bot (server IP blocked).",
+            finalUrl: res_fetch.url || currentUrl,
+            contentType,
+            isDirectDownload: false,
+            source: "general-check-protection",
+            host: currentHost,
+          });
+        }
 
         if (res_fetch.ok || res_fetch.status === 206) {
           return res.json({

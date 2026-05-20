@@ -10,22 +10,14 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
   linkExtractionRouter.post("/api/hubcloud/extract", async (req, res) => {
     try {
       const { url } = req.body;
-      const isHubVariant = 
-        url && (
-          url.includes("hubcloud") ||
-          url.includes("moviesdrive") ||
-          url.includes("vcloud") ||
-          url.includes("hubdrive") ||
-          url.includes("katdrive") ||
-          url.includes("kolop") ||
-          url.includes("drivehub") ||
-          url.includes("gdflix") ||
-          url.includes("byteclouds") ||
-          url.includes("fastload")
-        );
-
-      if (!url || !isHubVariant) {
-        return res.status(400).json({ error: "Invalid HubCloud/Variant URL" });
+      if (
+        !url ||
+        (!url.includes("hubcloud") &&
+          !url.includes("moviesdrive") &&
+          !url.includes("vcloud") &&
+          !url.includes("hubdrive"))
+      ) {
+        return res.status(400).json({ error: "Invalid HubCloud URL" });
       }
 
       const cacheKey = `extract_${url}`;
@@ -36,7 +28,7 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
 
       const headers = {
         "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         Accept:
           "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
@@ -44,87 +36,25 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
         Pragma: "no-cache",
       };
 
-      const fetchDirect = async (targetUrl: string, t: number = 4000) => {
-        try {
-          return await axios.get(targetUrl, {
-            headers,
-            validateStatus: () => true,
-            timeout: t,
-          });
-        } catch (err) {
-          return { data: "", status: 0 };
-        }
-      };
-
-      let response = await fetchDirect(url);
-
-      let $ = cheerio.load(response.data || "");
-      let title = $("title").text() || $(".card-header").text() || "";
-      
-      const isCloudflare =
-        title.toLowerCase().includes("just a moment") ||
-        title.toLowerCase().includes("cloudflare") ||
-        title.toLowerCase().includes("ddos protection") ||
-        response.status === 403 ||
-        response.status === 503 ||
-        !response.data ||
-        response.data.length < 500;
-
-      if (isCloudflare) {
-        // Try proxies with a managed time budget for Vercel (Total ~10s limit)
-        try {
-          const proxyPromises = [
-            // Microlink is robust but can be slow
-            axios.get(`https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`, { timeout: 8000 })
-              .then(res => res.data?.data?.body ? res.data.data.body : null),
-            // CorsProxy is usually very fast
-            axios.get(`https://corsproxy.io/?${encodeURIComponent(url)}`, { timeout: 6000 })
-              .then(res => res.data || null)
-          ];
-
-          const proxyHtml = await Promise.any(proxyPromises.map(p => p.then(res => {
-            if (!res) throw new Error("Empty proxy response");
-            const $temp = cheerio.load(res);
-            const tTemp = $temp("title").text().toLowerCase();
-            if (tTemp.includes("just a moment") || tTemp.includes("cloudflare")) throw new Error("Cloudflare still present");
-            return res;
-          })));
-
-          if (proxyHtml) {
-            $ = cheerio.load(proxyHtml);
-            title = $("title").text() || $(".card-header").text() || "";
-          }
-        } catch (err) {
-          console.error("All proxies failed or timed out:", err);
-          // Last ditch effort: AllOrigins (Serial because it's slow)
-          try {
-             const allOriginsRes = await axios.get(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`, { timeout: 5000 });
-             if (allOriginsRes.data?.contents) {
-                const $ao = cheerio.load(allOriginsRes.data.contents);
-                const aoTitle = $ao("title").text() || "";
-                if (aoTitle && !aoTitle.toLowerCase().includes("just a moment")) {
-                   $ = $ao;
-                   title = aoTitle;
-                }
-             }
-          } catch(e) {}
-        }
-      }
+      const response = await axios.get(url, {
+        headers,
+        validateStatus: () => true,
+        timeout: 8000,
+      });
+      const $ = cheerio.load(response.data);
 
       let sizeStr =
         $('td:contains("File Size")').next('td').text() ||
         $('li:contains("File Size") i').text() ||
         $('li:contains("File Size")').text() ||
         $('li:contains("Size") i').text() ||
-        $('li:contains("Size")').text() ||
-        $('span:contains("Size")').next('span').text();
-        
+        $('li:contains("Size")').text();
       sizeStr = sizeStr.replace("File Size", "").replace("Size", "").trim();
 
       let size = "";
       let unit = "";
       if (sizeStr) {
-        const parts = sizeStr.split(/\s+/);
+        const parts = sizeStr.split(" ");
         if (parts.length >= 2) {
           let num = parseFloat(parts[0]);
           unit = parts[1].toUpperCase();
@@ -155,13 +85,90 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
         }
       }
 
+      let title = $("title").text() || $(".card-header").text() || "";
+      const isCloudflare =
+        title.toLowerCase().includes("just a moment") ||
+        title.toLowerCase().includes("cloudflare") ||
+        title.toLowerCase().includes("ddos protection") ||
+        response.status === 403 ||
+        response.status === 503;
+
+      if (isCloudflare) {
+        try {
+          // Use Microlink proxy API to bypass Cloudflare
+          const dlRes = await axios.get(
+            `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
+            { timeout: 8000 },
+          );
+          if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
+            const proxyHtml = dlRes.data.data.body;
+            const $proxy = cheerio.load(proxyHtml);
+            let sStr =
+              $proxy('li:contains("File Size") i').text() ||
+              $proxy('li:contains("File Size")').text() ||
+              $proxy('li:contains("Size") i').text() ||
+              $proxy('li:contains("Size")').text();
+            sStr = sStr.replace("File Size", "").replace("Size", "").trim();
+            if (sStr) {
+              sizeStr = sStr;
+            }
+
+            const proxyTitle =
+              $proxy("title").text() || $proxy(".card-header").text() || "";
+            if (
+              proxyTitle &&
+              !proxyTitle.toLowerCase().includes("just a moment")
+            ) {
+              title = proxyTitle;
+
+              // Recalculate size stuff based on fixed html
+              if (sizeStr) {
+                const parts = sizeStr.split(" ");
+                if (parts.length >= 2) {
+                  let num = parseFloat(parts[0]);
+                  unit = parts[1].toUpperCase();
+                  if (!isNaN(num)) {
+                    const multiplier =
+                      unit === "GB"
+                        ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000)
+                        : unit === "MB"
+                          ? (1024 * 1024) / (1000 * 1000)
+                          : unit === "KB"
+                            ? 1024 / 1000
+                            : 1;
+                    num = num * multiplier;
+                    size =
+                      num >= 100
+                        ? num.toFixed(0)
+                        : num >= 10
+                          ? num.toFixed(1)
+                          : num.toFixed(2);
+                    size = size.replace(/\.00$/, "").replace(/\.0$/, "");
+                  } else {
+                    size = parts[0];
+                  }
+                } else {
+                  size = sizeStr;
+                }
+              }
+            } else {
+              title = "Unknown (Cloudflare Block)";
+            }
+          } else {
+            title = "Unknown (Cloudflare Block)";
+          }
+        } catch (err) {
+          title = "Unknown (Cloudflare Block)";
+        }
+      }
+
       const isNotFound =
-        response.status === 404 || title.toLowerCase().includes("not found") || title.toLowerCase().includes("file not found");
-      
+        response.status === 404 || title.toLowerCase().includes("not found");
       const isWorking =
-        (response.status < 400 && response.status > 0) ||
-        isCloudflare || // If we hit CF, we don't know for sure, so assume working for now if title isn't 404
-        title !== "Unknown (Cloudflare Block)";
+        response.status < 400 ||
+        response.status === 403 ||
+        response.status === 503 ||
+        title === "Unknown (Cloudflare Block)";
 
       const responseData = {
         size,
@@ -169,7 +176,6 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
         title: title.trim(),
         isWorking: isWorking && !isNotFound,
         isNotFound,
-        isCloudflare: isCloudflare && title.toLowerCase().includes("just a moment")
       };
       
       extractionCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
@@ -177,12 +183,14 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
       res.json(responseData);
     } catch (e: any) {
       console.error("Hubcloud extract error:", e.message);
+      // Even if it fails (like timeout on Vercel), return a generic response instead of 500
+      // since the link might actually be working but just blocked by Vercel's datacenter IPs
       if (e.code === "ECONNABORTED" || e.message.includes("timeout")) {
         return res.json({
           size: "",
           unit: "",
           title: "Unknown (Timeout)",
-          isWorking: true,
+          isWorking: true, // Assume it works if it just timed out
           isNotFound: false,
         });
       }
@@ -195,24 +203,10 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
       if (depth > 2) return { url, candidates: [], size: "" };
       const headers = {
         "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         Accept:
           "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
       };
-
-      const isHubVariant = 
-        url && (
-          url.includes("hubcloud") ||
-          url.includes("moviesdrive") ||
-          url.includes("vcloud") ||
-          url.includes("hubdrive") ||
-          url.includes("katdrive") ||
-          url.includes("kolop") ||
-          url.includes("drivehub") ||
-          url.includes("gdflix") ||
-          url.includes("byteclouds") ||
-          url.includes("fastload")
-        );
 
       if (checkOnly && url) {
         try {
@@ -220,7 +214,7 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
             headers: { ...headers, Range: "bytes=0-0" },
             maxRedirects: 0,
             validateStatus: () => true,
-            timeout: 3500,
+            timeout: 2500,
           });
           if (
             checkRes.status < 400 ||
@@ -242,69 +236,61 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
         }
       }
 
-      if (!url || !isHubVariant) {
+      if (
+        !url ||
+        (!url.includes("hubcloud") &&
+          !url.includes("moviesdrive") &&
+          !url.includes("vcloud") &&
+          !url.includes("hubdrive"))
+      ) {
         return { url };
       }
 
-      let response;
-      try {
-        response = await axios.get(url, {
-          headers,
-          validateStatus: () => true,
-          timeout: 4000,
-        });
-      } catch(err: any) {
-        response = { data: "", status: 0 };
-      }
+      const response = await axios.get(url, {
+        headers,
+        validateStatus: () => true,
+        timeout: 5000,
+      });
+      let $ = cheerio.load(response.data);
 
-      let $ = cheerio.load(response.data || "");
-      let titleText = $("title").text().toLowerCase();
-      
+      const titleText = $("title").text().toLowerCase();
       const isCf =
         titleText.includes("just a moment") ||
         titleText.includes("cloudflare") ||
         titleText.includes("ddos protection") ||
         response.status === 403 ||
-        response.status === 503 ||
-        !response.data ||
-        response.data.length < 500;
+        response.status === 503;
 
       if (isCf) {
         try {
-          const proxyPromises = [
-            axios.get(`https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`, { timeout: 8000 })
-              .then(res => res.data?.data?.body || null),
-            axios.get(`https://corsproxy.io/?${encodeURIComponent(url)}`, { timeout: 6000 })
-              .then(res => res.data || null)
-          ];
-
-          const proxyHtml = await Promise.any(proxyPromises.map(p => p.then(res => {
-            if (!res) throw new Error("Empty");
-            const $temp = cheerio.load(res);
-            if ($temp("title").text().toLowerCase().includes("just a moment")) throw new Error("CF");
-            return res;
-          })));
-
-          if (proxyHtml) {
-            $ = cheerio.load(proxyHtml);
-            titleText = $("title").text().toLowerCase();
+          const dlRes = await axios.get(
+            `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
+            { timeout: 8000 },
+          );
+          if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
+            const proxyTitle =
+              cheerio.load(dlRes.data.data.body)("title").text().toLowerCase() || "";
+            if (
+              !proxyTitle.includes("just a moment") &&
+              !proxyTitle.includes("cloudflare") &&
+              !proxyTitle.includes("ddos protection")
+            ) {
+              $ = cheerio.load(dlRes.data.data.body);
+            } else {
+              return { url: url, isCloudflare: true };
+            }
+          } else {
+            return { url: url, isCloudflare: true };
           }
         } catch (err) {
-           try {
-              const allOriginsRes = await axios.get(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`, { timeout: 5000 });
-              if (allOriginsRes.data?.contents) {
-                 $ = cheerio.load(allOriginsRes.data.contents);
-                 titleText = $("title").text().toLowerCase();
-              }
-           } catch(e) {}
+          return { url: url, isCloudflare: true };
         }
       }
 
       let nextUrl =
         $("#download").attr("href") ||
         $('a:contains("Generate Direct Download Link")').attr("href") ||
-        $("a.btn-zip").attr("href") ||
-        $(".btn-success").attr("href");
+        $("a.btn-zip").attr("href");
 
       // Extract url from script for vcloud if href is missing
       if (!nextUrl) {
@@ -313,6 +299,13 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
          if (match && match[1]) {
             nextUrl = match[1];
          }
+      }
+
+      // Resolve relative nextUrl against original url
+      if (nextUrl && !nextUrl.startsWith("http")) {
+        try {
+          nextUrl = new URL(nextUrl, url).toString();
+        } catch (e) {}
       }
 
       let $2 = null;
@@ -324,55 +317,32 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
           return { url };
         }
       } else {
-        let res2;
-        try {
-          res2 = await axios.get(nextUrl, {
-            headers,
-            validateStatus: () => true,
-            timeout: 4000,
-          });
-        } catch(err2: any) {
-           res2 = { data: "", status: 0 };
-        }
+        let res2 = await axios.get(nextUrl, {
+          headers,
+          validateStatus: () => true,
+          timeout: 5000,
+        });
+        $2 = cheerio.load(res2.data);
 
-        $2 = cheerio.load(res2.data || "");
-        let titleText2 = $2("title").text().toLowerCase();
-        
+        const titleText2 = $2("title").text().toLowerCase();
         const isCf2 =
           titleText2.includes("just a moment") ||
           titleText2.includes("cloudflare") ||
           titleText2.includes("ddos protection") ||
           res2.status === 403 ||
-          res2.status === 503 ||
-          !res2.data ||
-          res2.data.length < 500;
+          res2.status === 503;
 
         if (isCf2) {
           try {
-            const proxyPromises2 = [
-              axios.get(`https://api.microlink.io/?url=${encodeURIComponent(nextUrl)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`, { timeout: 8000 })
-                .then(res => res.data?.data?.body || null),
-              axios.get(`https://corsproxy.io/?${encodeURIComponent(nextUrl)}`, { timeout: 6000 })
-                .then(res => res.data || null)
-            ];
-
-            const proxyHtml2 = await Promise.any(proxyPromises2.map(p => p.then(res => {
-              if (!res) throw new Error("Empty");
-              const $temp = cheerio.load(res);
-              if ($temp("title").text().toLowerCase().includes("just a moment")) throw new Error("CF");
-              return res;
-            })));
-
-            if (proxyHtml2) {
-              $2 = cheerio.load(proxyHtml2);
+            const dlRes2 = await axios.get(
+              `https://api.microlink.io/?url=${encodeURIComponent(nextUrl)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
+              { timeout: 8000 },
+            );
+            if (dlRes2.data && dlRes2.data.data && dlRes2.data.data.body) {
+              $2 = cheerio.load(dlRes2.data.data.body);
             }
           } catch (err) {
-             try {
-                const aoRes2 = await axios.get(`https://api.allorigins.win/get?url=${encodeURIComponent(nextUrl)}`, { timeout: 5000 });
-                if (aoRes2.data?.contents) {
-                   $2 = cheerio.load(aoRes2.data.contents);
-                }
-             } catch(e) {}
+            // Ignore and continue with original $2
           }
         }
       }
@@ -420,8 +390,17 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
             }
           });
         }
-        if (href && !text.includes("telegram"))
-          candidateLinks.push({ text, href });
+        if (href) {
+          if (!href.startsWith("http")) {
+            try {
+              const baseUrl = nextUrl || url;
+              href = new URL(href, baseUrl).toString();
+            } catch (err) {}
+          }
+          if (!text.includes("telegram")) {
+            candidateLinks.push({ text, href });
+          }
+        }
       });
 
       if (candidateLinks.length === 0) {
@@ -595,7 +574,7 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
 
       let nextHubcloudLink = "";
       for (const c of returnCandidates) {
-        if (c.href.includes("hubcloud") || c.href.includes("moviesdrive") || c.href.includes("vcloud") || c.href.includes("hubdrive") || c.href.includes("katdrive") || c.href.includes("kolop") || c.href.includes("drivehub") || c.href.includes("gdflix") || c.href.includes("byteclouds") || c.href.includes("fastload")) {
+        if (c.href.includes("hubcloud") || c.href.includes("moviesdrive") || c.href.includes("vcloud") || c.href.includes("hubdrive")) {
            nextHubcloudLink = c.href;
            break;
         }
