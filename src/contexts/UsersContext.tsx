@@ -144,9 +144,9 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
 
     try {
       let currentUsers = [...locallyCachedUsers];
-      let { getDocs, query, collection, where } = await import('firebase/firestore');
+      let { getDocs, query, collection, where, documentId } = await import('firebase/firestore');
 
-      if (currentUsers.length === 0 || force) {
+      if (currentUsers.length === 0) {
         // Fallback: If local cache is empty for some reason, do a full pull.
         try {
           updatedSomething = true;
@@ -160,7 +160,9 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       } else {
         // Fetch only recently active/updated users since our last run
         try {
-          // Add a generous buffer (1 hour) to ensure no missed updates near the boundary
+          const currentUsersMap = new Map(currentUsers.map(u => [u.uid, u]));
+
+          // 1. Fetch recently active users
           const bufferTime = 60 * 60 * 1000;
           const sinceIso = new Date(Math.max(0, lastFetchTime - bufferTime)).toISOString();
           const q = query(collection(db, 'users'), where('lastActive', '>=', sinceIso));
@@ -169,12 +171,38 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           if (!snapshot.empty) {
             updatedSomething = true;
             const fetchedUsers = snapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id })) as UserProfile[];
-            const currentUsersMap = new Map(currentUsers.map(u => [u.uid, u]));
             fetchedUsers.forEach(u => currentUsersMap.set(u.uid, u));
-            currentUsers = Array.from(currentUsersMap.values());
           }
+
+          // 2. Fetch specific users modified by admins, found via chunkMeta
+          const { getChunkMeta } = await import('../utils/chunkMeta');
+          const versions = await getChunkMeta();
+          const serverUsersVersion = versions?.users || {};
+          
+          const uidsToFetch = new Set<string>();
+          Object.entries(serverUsersVersion).forEach(([uid, mtime]) => {
+             if (typeof mtime === 'number' && mtime > lastFetchTime) {
+                uidsToFetch.add(uid);
+             }
+          });
+
+          if (uidsToFetch.size > 0) {
+            const uidsArray = Array.from(uidsToFetch);
+            for (let i = 0; i < uidsArray.length; i += 30) {
+               updatedSomething = true;
+               const chunk = uidsArray.slice(i, i + 30);
+               const qMerged = query(collection(db, 'users'), where(documentId(), 'in', chunk));
+               const snapshotMerged = await getDocs(qMerged);
+               snapshotMerged.docs.forEach(doc => {
+                  const u = { ...doc.data(), uid: doc.id } as UserProfile;
+                  currentUsersMap.set(u.uid, u);
+               });
+            }
+          }
+
+          currentUsers = Array.from(currentUsersMap.values());
         } catch (err) {
-          handleFirestoreError(err, OperationType.LIST, 'users filter by lastActive');
+          handleFirestoreError(err, OperationType.LIST, 'users filter delta updates');
           throw err;
         }
       }

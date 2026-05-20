@@ -40,7 +40,7 @@ export function PhoneWhitelistManager() {
     try {
       const standardized = standardizePhone(newPhone);
       if (!standardized) {
-        setError("Invalid phone number");
+        setError("Invalid WhatsApp number");
         setLoading(false);
         return;
       }
@@ -70,7 +70,7 @@ export function PhoneWhitelistManager() {
           value={newPhone}
           onChange={(e) => setNewPhone(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-          placeholder="Enter phone number"
+          placeholder="Enter WhatsApp number"
           className="flex-1 p-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent focus:outline-none focus:border-emerald-500"
         />
         <Button onClick={handleAdd} disabled={loading} variant="emerald">
