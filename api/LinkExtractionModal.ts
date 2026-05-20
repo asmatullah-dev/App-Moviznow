@@ -5,7 +5,7 @@ import * as cheerio from 'cheerio';
 export const linkExtractionRouter = Router();
 
 const extractionCache = new Map<string, { data: any, timestamp: number }>();
-const CACHE_TTL = 30 * 1000; // 30 seconds
+const CACHE_TTL = 10 * 60 * 1000; // Increased cache TTL to 10 minutes on the server
 
 interface BypassResult {
   html: string;
@@ -13,32 +13,90 @@ interface BypassResult {
   source: string;
 }
 
-async function raceSuccessfulBypasses(promises: Promise<BypassResult>[]): Promise<BypassResult> {
+// Memory-efficient Map to track and deduplicate in-flight extraction promises for the exact same URL
+const inflightBypasses = new Map<string, Promise<{ html: string; isCf: boolean } | null>>();
+
+/**
+ * Robustly races a set of asynchronous task handlers. Once the first handler
+ * resolves with a successful result, all other concurrent tasks are immediately
+ * aborted via their AbortSignals, preventing network/socket leak container crashes on Vercel.
+ */
+async function raceWithAbort<T>(
+  tasks: { name: string; fn: (signal: AbortSignal) => Promise<T> }[]
+): Promise<T> {
+  const controllers = tasks.map(() => new AbortController());
+  
   return new Promise((resolve, reject) => {
+    let completed = false;
     let rejectedCount = 0;
     const errors: any[] = [];
-    if (promises.length === 0) {
-      return reject(new Error("No promises provided"));
-    }
-    promises.forEach((p) => {
-      p.then((val) => {
-        resolve(val);
-      }).catch((err) => {
-        errors.push(err);
-        rejectedCount++;
-        if (rejectedCount === promises.length) {
-          reject(new Error("All bypass attempts failed: " + errors.map((e) => e.message).join(", ")));
-        }
-      });
+
+    tasks.forEach((task, idx) => {
+      const signal = controllers[idx].signal;
+      task.fn(signal)
+        .then((result) => {
+          if (!completed) {
+            completed = true;
+            // Abort all OTHER tasks immediately
+            controllers.forEach((ctrl, i) => {
+              if (i !== idx) {
+                try {
+                  ctrl.abort();
+                } catch (e) {
+                  // Ignore abort mistakes
+                }
+              }
+            });
+            resolve(result);
+          }
+        })
+        .catch((err) => {
+          const isAbort =
+            err.name === "CanceledError" ||
+            err.name === "AbortError" ||
+            axios.isCancel(err) ||
+            err.code === "ERR_CANCELED";
+            
+          if (!isAbort) {
+            errors.push(new Error(`[${task.name}]: ${err.message}`));
+          }
+          rejectedCount++;
+          if (rejectedCount === tasks.length && !completed) {
+            reject(new Error("All racing paths failed:\n" + errors.map((e) => e.message).join("\n")));
+          }
+        });
     });
   });
 }
 
 /**
  * Unified robust Cloudflare-bypass page fetcher with concurrent racing proxies.
+ * De-duplicates identical concurrently-running requests to stay safe under rate-limits.
+ */
+async function fetchHtmlBypass(url: string, timeoutMs: number = 4200): Promise<{ html: string; isCf: boolean } | null> {
+  const inflightKey = url;
+  if (inflightBypasses.has(inflightKey)) {
+    console.log(`[Bypass] Reusing in-flight bypass promise for ${url}`);
+    return inflightBypasses.get(inflightKey)!;
+  }
+
+  const promise = (async () => {
+    try {
+      return await executeFetchHtmlBypass(url, timeoutMs);
+    } finally {
+      inflightBypasses.delete(inflightKey);
+    }
+  })();
+
+  inflightBypasses.set(inflightKey, promise);
+  return promise;
+}
+
+/**
+ * Performs actual web fetching using multiple proxy sources in parallel.
  * Solves timeout issues by racing multiple proxy paths concurrently.
  */
-async function fetchHtmlBypass(url: string, timeoutMs: number = 8500): Promise<{ html: string; isCf: boolean } | null> {
+async function executeFetchHtmlBypass(url: string, timeoutMs: number): Promise<{ html: string; isCf: boolean } | null> {
   const headers = {
     "User-Agent":
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -53,7 +111,7 @@ async function fetchHtmlBypass(url: string, timeoutMs: number = 8500): Promise<{
   // If the target domain doesn't block direct server IPs or has transient bypasses, this returns in ~150-300ms.
   try {
     const res = await axios.get(url, { headers, timeout: 1000, validateStatus: () => true });
-    if (res.status === 200 && typeof res.data === 'string') {
+    if (res.status === 200 && typeof res.data === "string") {
       const html = res.data;
       const $ = cheerio.load(html);
       const titleText = $("title").text().toLowerCase();
@@ -70,79 +128,84 @@ async function fetchHtmlBypass(url: string, timeoutMs: number = 8500): Promise<{
     console.log(`[Bypass] Fast direct probe failed for ${url}:`, err.message);
   }
 
-  // Define parallel racing attempts
-  const attempts: Promise<BypassResult>[] = [];
-
-  // Route A: Microlink Standard (Very fast, fetches via residential network pool)
-  attempts.push((async () => {
-    const mlUrl = `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=html&data.body.attr=html`;
-    const res = await axios.get(mlUrl, { timeout: timeoutMs });
-    if (res.data && res.data.data && res.data.data.body) {
-      const html = res.data.data.body;
-      const $ = cheerio.load(html);
-      const titleText = $("title").text().toLowerCase();
-      const isCf =
-        titleText.includes("just a moment") ||
-        titleText.includes("cloudflare") ||
-        titleText.includes("ddos protection");
-      if (!isCf && html.length > 2000) {
-        return { html, isCf: false, source: "microlink-standard" };
+  // 2. Prepare racing tasks with AbortController boundaries
+  const tasks = [
+    {
+      name: "microlink-standard",
+      fn: async (signal: AbortSignal) => {
+        const mlUrl = `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=html&data.body.attr=html&ttl=1d`;
+        const res = await axios.get(mlUrl, { timeout: timeoutMs, signal });
+        if (res.data && res.data.data && res.data.data.body) {
+          const html = res.data.data.body;
+          const $ = cheerio.load(html);
+          const titleText = $("title").text().toLowerCase();
+          const isCf =
+            titleText.includes("just a moment") ||
+            titleText.includes("cloudflare") ||
+            titleText.includes("ddos protection");
+          if (!isCf && html.length > 2000) {
+            return { html, isCf: false, source: "microlink-standard" };
+          }
+        }
+        throw new Error("Microlink standard failed or returned Cloudflare");
+      }
+    },
+    {
+      name: "microlink-prerender",
+      fn: async (signal: AbortSignal) => {
+        // Prerender enables javascript rendering (higher latency, robust bypass)
+        const mlUrlPrerender = `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=html&data.body.attr=html&prerender=true&ttl=1d`;
+        const res = await axios.get(mlUrlPrerender, { timeout: timeoutMs + 800, signal });
+        if (res.data && res.data.data && res.data.data.body) {
+          const html = res.data.data.body;
+          const $ = cheerio.load(html);
+          const titleText = $("title").text().toLowerCase();
+          const isCf =
+            titleText.includes("just a moment") ||
+            titleText.includes("cloudflare") ||
+            titleText.includes("ddos protection");
+          if (!isCf && html.length > 2000) {
+            return { html, isCf: false, source: "microlink-prerender" };
+          }
+        }
+        throw new Error("Microlink prerender failed or returned Cloudflare");
+      }
+    },
+    {
+      name: "allorigins",
+      fn: async (signal: AbortSignal) => {
+        const aoUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+        const res = await axios.get(aoUrl, { timeout: timeoutMs, signal });
+        if (res.data && res.data.contents) {
+          const html = res.data.contents;
+          const $ = cheerio.load(html);
+          const titleText = $("title").text().toLowerCase();
+          const isCf =
+            titleText.includes("just a moment") ||
+            titleText.includes("cloudflare") ||
+            titleText.includes("ddos protection");
+          if (!isCf && html.length > 2000) {
+            return { html, isCf: false, source: "allorigins" };
+          }
+        }
+        throw new Error("AllOrigins failed or returned Cloudflare");
       }
     }
-    throw new Error("Microlink standard failed or returned Cloudflare");
-  })());
-
-  // Route B: Microlink Prerender/Headless Chromium (Highly reliable for complex JS bypasses)
-  attempts.push((async () => {
-    const mlUrlPrerender = `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=html&data.body.attr=html&force=true&prerender=true`;
-    const res = await axios.get(mlUrlPrerender, { timeout: timeoutMs + 1000 });
-    if (res.data && res.data.data && res.data.data.body) {
-      const html = res.data.data.body;
-      const $ = cheerio.load(html);
-      const titleText = $("title").text().toLowerCase();
-      const isCf =
-        titleText.includes("just a moment") ||
-        titleText.includes("cloudflare") ||
-        titleText.includes("ddos protection");
-      if (!isCf && html.length > 2000) {
-        return { html, isCf: false, source: "microlink-prerender" };
-      }
-    }
-    throw new Error("Microlink prerender failed or returned Cloudflare");
-  })());
-
-  // Route C: AllOrigins CORS proxy fallback
-  attempts.push((async () => {
-    const aoUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-    const res = await axios.get(aoUrl, { timeout: timeoutMs - 1000 });
-    if (res.data && res.data.contents) {
-      const html = res.data.contents;
-      const $ = cheerio.load(html);
-      const titleText = $("title").text().toLowerCase();
-      const isCf =
-        titleText.includes("just a moment") ||
-        titleText.includes("cloudflare") ||
-        titleText.includes("ddos protection");
-      if (!isCf && html.length > 2000) {
-        return { html, isCf: false, source: "allorigins" };
-      }
-    }
-    throw new Error("AllOrigins failed or returned Cloudflare");
-  })());
+  ];
 
   // Wait for any bypass to resolve successfully
   try {
-    const winner = await raceSuccessfulBypasses(attempts);
+    const winner = await raceWithAbort(tasks);
     console.log(`[Bypass] Direct-link race won by ${winner.source} for ${url}`);
     return { html: winner.html, isCf: false };
   } catch (err: any) {
     console.log(`[Bypass] Racing attempts failed: ${err.message}. Falling back to last-ditch direct.`);
   }
 
-  // 4. Last-Ditch Direct Fetch (4000ms max timeout)
+  // 3. Last-Ditch Direct Fetch (2200ms max timeout)
   try {
-    const res = await axios.get(url, { headers, timeout: 4000, validateStatus: () => true });
-    if (res.data && typeof res.data === 'string') {
+    const res = await axios.get(url, { headers, timeout: 2200, validateStatus: () => true });
+    if (res.data && typeof res.data === "string") {
       const html = res.data;
       const $ = cheerio.load(html);
       const titleText = $("title").text().toLowerCase();
@@ -331,7 +394,12 @@ async function performExtraction(url: string, checkOnly: boolean, depth = 0): Pr
     let nextUrl =
       $("#download").attr("href") ||
       $('a:contains("Generate Direct Download Link")').attr("href") ||
-      $("a.btn-zip").attr("href");
+      $('a:contains("Fast Download")').attr("href") ||
+      $('a:contains("Direct Download")').attr("href") ||
+      $('a:contains("Download Link")').attr("href") ||
+      $("a.btn-zip").attr("href") ||
+      $("a.btn-wp").attr("href") ||
+      $("a.btn-success").attr("href");
 
     // Extract url from script for vcloud if href is missing
     if (!nextUrl) {
