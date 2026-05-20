@@ -130,6 +130,7 @@ interface ContentCardProps {
   handleShare: (content: Content, mode: "standard" | "whatsapp") => void;
   handleEdit: (content: Content) => void;
   handleCopyData: (content: Content) => void;
+  handleCheckLinks: (content: Content) => void;
   setDeleteId: (id: string) => void;
   setNotificationModal: (modal: {
     isOpen: boolean;
@@ -156,6 +157,7 @@ const ContentCard = memo(
     handleShare,
     handleEdit,
     handleCopyData,
+    handleCheckLinks,
     setDeleteId,
     setNotificationModal,
     isActiveDropdown,
@@ -389,6 +391,18 @@ const ContentCard = memo(
                       profile?.role === "owner") && (
                       <button
                         onClick={() => {
+                          handleCheckLinks(content);
+                          setActiveDropdownId(null);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 text-sm text-cyan-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left"
+                      >
+                        <Link2 className="w-4 h-4" /> Check Links
+                      </button>
+                    )}
+                    {(profile?.role === "admin" ||
+                      profile?.role === "owner") && (
+                      <button
+                        onClick={() => {
                           handleCopyData(content);
                           setActiveDropdownId(null);
                         }}
@@ -465,6 +479,9 @@ export default function ContentManagement() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [isBatchFetchModalOpen, setIsBatchFetchModalOpen] = useState(false);
+  const [isContentLinkCheckerOpen, setIsContentLinkCheckerOpen] = useState(false);
+  const [contentLinkCheckerInput, setContentLinkCheckerInput] = useState("");
+  const [checkLinksContent, setCheckLinksContent] = useState<Content | null>(null);
   const [batchFetchMode, setBatchFetchMode] = useState<"media" | "links">(
     "media",
   );
@@ -2618,8 +2635,15 @@ export default function ContentManagement() {
       // Extract HubCloud links
       if (
         extractedUrl.includes("hubcloud") ||
-        extractedUrl.includes("moviesdrives") ||
-        extractedUrl.includes("vcloud")
+        extractedUrl.includes("moviesdrive") ||
+        extractedUrl.includes("vcloud") ||
+        extractedUrl.includes("hubdrive") ||
+        extractedUrl.includes("katdrive") ||
+        extractedUrl.includes("kolop") ||
+        extractedUrl.includes("drivehub") ||
+        extractedUrl.includes("gdflix") ||
+        extractedUrl.includes("byteclouds") ||
+        extractedUrl.includes("fastload")
       ) {
         try {
           const res = await fetch("/api/hubcloud/direct-link", {
@@ -2944,6 +2968,71 @@ export default function ContentManagement() {
     setLoadingShareId(null);
   };
 
+  const handleCheckLinks = (content: Content) => {
+    let urls: string[] = [];
+    
+    const safeParse = (data: any) => {
+      if (!data) return [];
+      if (typeof data === 'string') {
+        try {
+          return JSON.parse(data);
+        } catch(e) {
+          return [];
+        }
+      }
+      return data;
+    };
+
+    const extractUrls = (items: any[]) => {
+      items?.forEach((ld: any) => {
+        if (ld?.url) urls.push(ld.url);
+        if (ld?.links && Array.isArray(ld.links)) {
+          ld.links.forEach((l: any) => {
+            if (l?.url) urls.push(l.url);
+          });
+        }
+      });
+    };
+
+    if (content.type === 'movie' && content.movieLinks) {
+       extractUrls(safeParse(content.movieLinks));
+    } else if (content.type === 'series') {
+       if (content.seasons) {
+          const parsed = safeParse(content.seasons);
+          parsed.forEach((s: any) => {
+            extractUrls(s.zipLinks || []);
+            extractUrls(s.mkvLinks || []);
+            s.episodes?.forEach((e: any) => {
+               extractUrls(e.links || []);
+            });
+          });
+       }
+       if (content.fullSeasonZip) {
+          extractUrls(safeParse(content.fullSeasonZip));
+       }
+       if (content.fullSeasonMkv) {
+          extractUrls(safeParse(content.fullSeasonMkv));
+       }
+    }
+    
+    if ((content as any).telegramLinks) {
+      extractUrls(safeParse((content as any).telegramLinks));
+    }
+    
+    // Also grab trailer directly if we want
+    if (content.trailerUrl) urls.push(content.trailerUrl);
+    
+    if (content.trailers) {
+      const parsed = safeParse(content.trailers);
+      parsed.forEach((t: any) => urls.push(t.url));
+    }
+
+    const urlString = urls.filter(Boolean).filter((val, i, arr) => arr.indexOf(val) === i).join('\n');
+    setContentLinkCheckerInput(urlString);
+    setCheckLinksContent(content);
+    setIsContentLinkCheckerOpen(true);
+  };
+
   const handleCopyData = async (content: Content) => {
     if (!content.posterUrl) {
       setAlertConfig({
@@ -3213,11 +3302,15 @@ export default function ContentManagement() {
       }
 
       // Links Detection
-      if (trimmed.includes("Download Links:")) {
-        linkSection = "movie";
-        newType = "movie";
+      if (/download links/i.test(trimmed) && trimmed.length < 30) {
+        if (newType !== "series") {
+          linkSection = "movie";
+          newType = "movie";
+        } else {
+          linkSection = "mkv"; // default to mkv if already a series
+        }
       }
-      if (trimmed.includes("Full Season ZIP:")) {
+      if (/full season zip/i.test(trimmed)) {
         linkSection = "zip";
         newType = "series";
         if (!currentSeason) {
@@ -3231,7 +3324,7 @@ export default function ContentManagement() {
           newSeasons.push(currentSeason);
         }
       }
-      if (trimmed.includes("Full Season MKV:")) {
+      if (/full season mkv/i.test(trimmed)) {
         linkSection = "mkv";
         newType = "series";
         if (!currentSeason) {
@@ -3245,7 +3338,7 @@ export default function ContentManagement() {
           newSeasons.push(currentSeason);
         }
       }
-      if (trimmed.includes("Episodes:")) {
+      if (/episodes?:?/i.test(trimmed) && trimmed.length < 20) {
         linkSection = "episode";
         newType = "series";
         if (!currentSeason) {
@@ -4708,6 +4801,7 @@ export default function ContentManagement() {
                 handleShare={handleShare}
                 handleEdit={handleEdit}
                 handleCopyData={handleCopyData}
+                handleCheckLinks={handleCheckLinks}
                 setDeleteId={setDeleteId}
                 setNotificationModal={setNotificationModal}
                 setActiveDropdownId={setActiveDropdownId}
@@ -4903,6 +4997,19 @@ export default function ContentManagement() {
         onClose={() => setIsBatchLinkCheckerOpen(false)}
         isBatchMode={true}
         onBatchAddLinks={handleBatchAddLinks}
+        languages={languages}
+        qualities={qualities}
+      />
+      <LinkCheckerModal
+        isOpen={isContentLinkCheckerOpen}
+        onClose={() => {
+          setIsContentLinkCheckerOpen(false);
+          setContentLinkCheckerInput("");
+          setCheckLinksContent(null);
+        }}
+        title={`Check Links - ${checkLinksContent?.title || ''}`}
+        initialInput={contentLinkCheckerInput}
+        autoStart={true}
         languages={languages}
         qualities={qualities}
       />

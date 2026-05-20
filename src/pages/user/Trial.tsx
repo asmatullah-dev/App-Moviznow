@@ -2,18 +2,19 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSettings } from '../../contexts/SettingsContext';
-import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../../firebase';
-import { Loader2, CheckCircle, AlertCircle, Home, MessageCircle } from 'lucide-react';
+import { Loader2, CheckCircle, AlertCircle, Home, MessageCircle, Phone } from 'lucide-react';
 import { Helmet } from 'react-helmet-async';
 
 export default function Trial() {
   const { user, profile, loading, authLoading, updateUserProfileData, refreshProfile } = useAuth();
   const { settings } = useSettings();
   const navigate = useNavigate();
-  const [status, setStatus] = useState<'loading' | 'success' | 'error' | 'disabled'>('loading');
+  const [status, setStatus] = useState<'loading' | 'missing_phone' | 'success' | 'error' | 'disabled'>('loading');
   const [message, setMessage] = useState('Activating your trial...');
   const [countdown, setCountdown] = useState(15);
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [phoneError, setPhoneError] = useState('');
+  const [isSubmittingPhone, setIsSubmittingPhone] = useState(false);
   const hasActivatedRef = useRef(false);
 
   useEffect(() => {
@@ -66,45 +67,85 @@ export default function Trial() {
       return;
     }
 
-    const activateTrial = async () => {
-      hasActivatedRef.current = true;
-      try {
-        const now = new Date();
-        const expiry = new Date(now);
-        
-        // If after 6 PM (18:00), don't count today. Add 3 days total.
-        // If before 6 PM, count today. Add 2 days total.
-        if (now.getHours() >= 18) {
-          expiry.setDate(expiry.getDate() + 3);
-        } else {
-          expiry.setDate(expiry.getDate() + 2);
-        }
-
-        // Use standard update profile function to ensure chunk_meta and local cache are updated
-        await updateUserProfileData({
-          role: 'trial',
-          status: 'active',
-          trialActivated: true,
-          expiryDate: expiry.toISOString()
-        }, undefined, true);
-
-        // Force a full refresh to be absolutely sure
-        await refreshProfile(true);
-
-        setStatus('success');
-        setMessage('Trial activated successfully! Enjoy 48 hours of access.');
-        setTimeout(() => navigate('/'), 3000);
-      } catch (error) {
-        console.error('Error activating trial:', error);
-        hasActivatedRef.current = false;
-        setStatus('error');
-        setMessage('Failed to activate trial. Please try again.');
-        setTimeout(() => navigate('/'), 3000);
-      }
-    };
+    if (!profile.phone) {
+      setStatus('missing_phone');
+      setMessage('Please add your WhatsApp number to activate your trial.');
+      return;
+    }
 
     activateTrial();
-  }, [user, profile, loading, authLoading, navigate, settings, updateUserProfileData, refreshProfile]);
+  }, [user, profile, loading, authLoading, navigate, settings]);
+
+  const activateTrial = async () => {
+    hasActivatedRef.current = true;
+    try {
+      const now = new Date();
+      const expiry = new Date(now);
+      
+      // If after 6 PM (18:00), don't count today. Add 3 days total.
+      // If before 6 PM, count today. Add 2 days total.
+      if (now.getHours() >= 18) {
+        expiry.setDate(expiry.getDate() + 3);
+      } else {
+        expiry.setDate(expiry.getDate() + 2);
+      }
+
+      // Use standard update profile function to ensure chunk_meta and local cache are updated
+      await updateUserProfileData({
+        role: 'trial',
+        status: 'active',
+        trialActivated: true,
+        expiryDate: expiry.toISOString()
+      }, undefined, true);
+
+      // Force a full refresh to be absolutely sure
+      await refreshProfile(true);
+
+      setStatus('success');
+      setMessage('Trial activated successfully! Enjoy 48 hours of access.');
+      setTimeout(() => navigate('/'), 3000);
+    } catch (error) {
+      console.error('Error activating trial:', error);
+      hasActivatedRef.current = false;
+      setStatus('error');
+      setMessage('Failed to activate trial. Please try again.');
+      setTimeout(() => navigate('/'), 3000);
+    }
+  };
+
+  const handlePhoneSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!phoneNumber.trim()) {
+      setPhoneError('Please enter a valid WhatsApp number');
+      return;
+    }
+    
+    // Standardize phone number (similar to login)
+    let standardized = phoneNumber.trim().replace(/\D/g, '');
+    if (!standardized.startsWith('92') && !standardized.startsWith('0')) {
+      standardized = '92' + standardized;
+    } else if (standardized.startsWith('0')) {
+      standardized = '92' + standardized.substring(1);
+    }
+    
+    if (standardized.length < 10) {
+      setPhoneError('Please enter a valid WhatsApp number with correct length');
+      return;
+    }
+
+    try {
+      setIsSubmittingPhone(true);
+      await updateUserProfileData({ phone: standardized });
+      await refreshProfile();
+      setStatus('loading');
+      setMessage('Activating your trial...');
+      await activateTrial();
+    } catch (error: any) {
+      console.error('Error saving WhatsApp number:', error);
+      setPhoneError(error.message || 'Failed to save WhatsApp number. Please try again.');
+      setIsSubmittingPhone(false);
+    }
+  };
 
   const handleContactAdmin = () => {
     let supportPhone = settings?.supportNumber || '3363284466';
@@ -117,8 +158,8 @@ export default function Trial() {
     // Remove '+' if present
     supportPhone = supportPhone.replace('+', '');
     
-    const message = encodeURIComponent(`Hello Admin,\n\nName: ${user?.displayName || 'Unknown'}\nEmail: ${user?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nI tried to activate a trial but saw that it is disabled on the direct link. Please help me get a trial or membership.`);
-    window.open(`https://wa.me/${supportPhone}?text=${message}`, '_blank');
+    const urlMessage = encodeURIComponent(`Hello Admin,\n\nName: ${user?.displayName || 'Unknown'}\nEmail: ${user?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nI tried to activate a trial but saw that it is disabled on the direct link. Please help me get a trial or membership.`);
+    window.open(`https://wa.me/${supportPhone}?text=${urlMessage}`, '_blank');
   };
 
   return (
@@ -133,6 +174,41 @@ export default function Trial() {
             <Loader2 className="w-16 h-16 text-emerald-500 animate-spin mb-4" />
             <h2 className="text-2xl font-bold text-white mb-2">Activating Trial</h2>
             <p className="text-gray-400">{message}</p>
+          </div>
+        )}
+
+        {status === 'missing_phone' && (
+          <div className="flex flex-col items-center">
+            <Phone className="w-16 h-16 text-emerald-500 mb-4" />
+            <h2 className="text-2xl font-bold text-white mb-2">WhatsApp Number Required</h2>
+            <p className="text-gray-400 mb-6">{message}</p>
+            
+            <form onSubmit={handlePhoneSubmit} className="w-full">
+              <div className="mb-4">
+                <input
+                  type="tel"
+                  placeholder="e.g. 03001234567"
+                  value={phoneNumber}
+                  onChange={(e) => { setPhoneNumber(e.target.value); setPhoneError(''); }}
+                  className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                  disabled={isSubmittingPhone}
+                />
+                {phoneError && <p className="text-red-500 text-sm mt-2 text-left">{phoneError}</p>}
+                <p className="text-xs text-gray-500 mt-2 text-left">We need your WhatsApp number to verify your trial and provide support.</p>
+              </div>
+              
+              <button
+                type="submit"
+                disabled={isSubmittingPhone || !phoneNumber.trim()}
+                className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-transform active:scale-95"
+              >
+                {isSubmittingPhone ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  'Save & Activate Trial'
+                )}
+              </button>
+            </form>
           </div>
         )}
 
