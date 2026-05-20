@@ -15,6 +15,14 @@
       "destination": "/api/index.ts"
     },
     {
+      "source": "/(manifest.webmanifest|sw.js|favicon.ico|launcher.svg|firebase-messaging-sw.js)",
+      "destination": "/api/index.ts"
+    },
+    {
+      "source": "/assets/(.*)",
+      "destination": "/api/index.ts"
+    },
+    {
       "source": "/(.*)",
       "destination": "/api/index.ts"
     }

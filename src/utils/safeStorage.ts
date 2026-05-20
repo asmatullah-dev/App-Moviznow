@@ -78,15 +78,22 @@ class SafeStorage {
   
   private initDB(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open('moviznow_cache_db', 1);
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result);
-      request.onupgradeneeded = (e: any) => {
-        const db = e.target.result;
-        if (!db.objectStoreNames.contains('cache')) {
-          db.createObjectStore('cache');
-        }
-      };
+      if (typeof indexedDB === 'undefined') {
+        return reject(new Error('IndexedDB is not supported in this environment'));
+      }
+      try {
+        const request = indexedDB.open('moviznow_cache_db', 1);
+        request.onerror = () => reject(request.error || new Error('Failed to open database'));
+        request.onsuccess = () => resolve(request.result);
+        request.onupgradeneeded = (e: any) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains('cache')) {
+            db.createObjectStore('cache');
+          }
+        };
+      } catch (e) {
+        reject(e instanceof Error ? e : new Error(String(e)));
+      }
     });
   }
 

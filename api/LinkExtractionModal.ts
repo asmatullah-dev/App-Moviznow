@@ -4,6 +4,9 @@ import * as cheerio from 'cheerio';
 
 export const linkExtractionRouter = Router();
 
+const extractionCache = new Map<string, { data: any, timestamp: number }>();
+const CACHE_TTL = 30 * 1000; // 30 seconds
+
   linkExtractionRouter.post("/api/hubcloud/extract", async (req, res) => {
     try {
       const { url } = req.body;
@@ -17,6 +20,12 @@ export const linkExtractionRouter = Router();
         return res.status(400).json({ error: "Invalid HubCloud URL" });
       }
 
+      const cacheKey = `extract_${url}`;
+      const cached = extractionCache.get(cacheKey);
+      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        return res.json(cached.data);
+      }
+
       const headers = {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -28,9 +37,12 @@ export const linkExtractionRouter = Router();
       };
 
       const response = await axios.get(url, {
-        headers,
+        headers: {
+          ...headers,
+          Referer: "https://google.com/"
+        },
         validateStatus: () => true,
-        timeout: 8000,
+        timeout: 6000,
       });
       const $ = cheerio.load(response.data);
 
@@ -161,13 +173,17 @@ export const linkExtractionRouter = Router();
         response.status === 503 ||
         title === "Unknown (Cloudflare Block)";
 
-      res.json({
+      const responseData = {
         size,
         unit,
         title: title.trim(),
         isWorking: isWorking && !isNotFound,
         isNotFound,
-      });
+      };
+      
+      extractionCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
+
+      res.json(responseData);
     } catch (e: any) {
       console.error("Hubcloud extract error:", e.message);
       // Even if it fails (like timeout on Vercel), return a generic response instead of 500
@@ -187,12 +203,13 @@ export const linkExtractionRouter = Router();
 
   async function performExtraction(url: string, checkOnly: boolean, depth = 0): Promise<any> {
     try {
-      if (depth > 2) return { url, candidates: [], size: "" };
+      if (depth > 1) return { url, candidates: [], size: "" }; // Reduce depth for Vercel safety
       const headers = {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         Accept:
           "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        Referer: url, // Better referer handling
       };
 
       if (checkOnly && url) {
@@ -201,7 +218,7 @@ export const linkExtractionRouter = Router();
             headers: { ...headers, Range: "bytes=0-0" },
             maxRedirects: 0,
             validateStatus: () => true,
-            timeout: 2500,
+            timeout: 2000,
           });
           if (
             checkRes.status < 400 ||
@@ -236,7 +253,7 @@ export const linkExtractionRouter = Router();
       const response = await axios.get(url, {
         headers,
         validateStatus: () => true,
-        timeout: 5000,
+        timeout: 4500, // Slightly tighter first call
       });
       let $ = cheerio.load(response.data);
 
@@ -250,9 +267,10 @@ export const linkExtractionRouter = Router();
 
       if (isCf) {
         try {
+          // Rapidly check if Microlink is even available (common rate limiting on Vercel)
           const dlRes = await axios.get(
             `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
-            { timeout: 8000 },
+            { timeout: 7000 },
           );
           if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
             const proxyTitle =
@@ -274,15 +292,23 @@ export const linkExtractionRouter = Router();
         }
       }
 
+      const cookies = response.headers["set-cookie"]?.map(c => c.split(';')[0]).join('; ') || "";
+
       let nextUrl =
         $("#download").attr("href") ||
         $('a:contains("Generate Direct Download Link")').attr("href") ||
-        $("a.btn-zip").attr("href");
+        $('a:contains("Generate Download Link")').attr("href") ||
+        $('a:contains("Generate Link")').attr("href") ||
+        $('a:contains("Download Now")').attr("href") ||
+        $("a.btn-zip").attr("href") ||
+        $("a.btn-primary").attr("href") ||
+        $("a.btn-success").attr("href");
 
       // Extract url from script for vcloud if href is missing
       if (!nextUrl) {
          const scriptHtml = $.html();
-         const match = scriptHtml.match(/var\s+url\s*=\s*['"]([^'"]+)['"]/i);
+         const match = scriptHtml.match(/var\s+url\s*=\s*['"]([^'"]+)['"]/i) || 
+                       scriptHtml.match(/location\.href\s*=\s*['"]([^'"]+)['"]/i);
          if (match && match[1]) {
             nextUrl = match[1];
          }
@@ -294,13 +320,23 @@ export const linkExtractionRouter = Router();
         if ($("a.btn").length > 0) {
           $2 = $;
         } else {
-          return { url };
+          return { url, isCloudflare: isCf };
         }
       } else {
+        // Ensure absolute URL
+        if (nextUrl.startsWith('/')) {
+           const parsedUrl = new URL(url);
+           nextUrl = `${parsedUrl.protocol}//${parsedUrl.host}${nextUrl}`;
+        }
+
         let res2 = await axios.get(nextUrl, {
-          headers,
+          headers: { 
+            ...headers, 
+            Referer: url,
+            Cookie: cookies
+          },
           validateStatus: () => true,
-          timeout: 5000,
+          timeout: 4500,
         });
         $2 = cheerio.load(res2.data);
 
@@ -579,18 +615,29 @@ export const linkExtractionRouter = Router();
   linkExtractionRouter.post("/api/hubcloud/direct-link", async (req, res) => {
     try {
       const { url, checkOnly } = req.body;
+      const cacheKey = `direct_${url}_${checkOnly}`;
+      
+      const cached = extractionCache.get(cacheKey);
+      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        return res.json(cached.data);
+      }
+
       const data = await performExtraction(url, checkOnly, 0);
 
       // Return ok stuff for checkOnly
       if (checkOnly && data && data.ok !== undefined) {
+         extractionCache.set(cacheKey, { data, timestamp: Date.now() });
          return res.json(data);
       }
 
       // If cloudflare error
       if (data.isCloudflare) {
-         return res.json({ url: data.url, isCloudflare: true });
+         const responseData = { url: data.url, isCloudflare: true };
+         extractionCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
+         return res.json(responseData);
       }
 
+      extractionCache.set(cacheKey, { data, timestamp: Date.now() });
       return res.json(data);
     } catch (e: any) {
       console.error(e);
