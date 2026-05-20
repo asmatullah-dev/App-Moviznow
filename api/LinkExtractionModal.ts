@@ -5,779 +5,541 @@ import * as cheerio from 'cheerio';
 export const linkExtractionRouter = Router();
 
 const extractionCache = new Map<string, { data: any, timestamp: number }>();
-const CACHE_TTL = 10 * 60 * 1000; // Increased cache TTL to 10 minutes on the server
+const CACHE_TTL = 30 * 1000; // 30 seconds
 
-interface BypassResult {
-  html: string;
-  isCf: boolean;
-  source: string;
-}
-
-// Memory-efficient Map to track and deduplicate in-flight extraction promises for the exact same URL
-const inflightBypasses = new Map<string, Promise<{ html: string; isCf: boolean } | null>>();
-
-/**
- * Robustly races a set of asynchronous task handlers. Once the first handler
- * resolves with a successful result, all other concurrent tasks are immediately
- * aborted via their AbortSignals, preventing network/socket leak container crashes on Vercel.
- */
-async function raceWithAbort<T>(
-  tasks: { name: string; fn: (signal: AbortSignal) => Promise<T> }[]
-): Promise<T> {
-  const controllers = tasks.map(() => new AbortController());
-  
-  return new Promise((resolve, reject) => {
-    let completed = false;
-    let rejectedCount = 0;
-    const errors: any[] = [];
-
-    tasks.forEach((task, idx) => {
-      const signal = controllers[idx].signal;
-      task.fn(signal)
-        .then((result) => {
-          if (!completed) {
-            completed = true;
-            // Abort all OTHER tasks immediately
-            controllers.forEach((ctrl, i) => {
-              if (i !== idx) {
-                try {
-                  ctrl.abort();
-                } catch (e) {
-                  // Ignore abort mistakes
-                }
-              }
-            });
-            resolve(result);
-          }
-        })
-        .catch((err) => {
-          const isAbort =
-            err.name === "CanceledError" ||
-            err.name === "AbortError" ||
-            axios.isCancel(err) ||
-            err.code === "ERR_CANCELED";
-            
-          if (!isAbort) {
-            errors.push(new Error(`[${task.name}]: ${err.message}`));
-          }
-          rejectedCount++;
-          if (rejectedCount === tasks.length && !completed) {
-            reject(new Error("All racing paths failed:\n" + errors.map((e) => e.message).join("\n")));
-          }
-        });
-    });
-  });
-}
-
-/**
- * Unified robust Cloudflare-bypass page fetcher with concurrent racing proxies.
- * De-duplicates identical concurrently-running requests to stay safe under rate-limits.
- */
-async function fetchHtmlBypass(url: string, timeoutMs: number = 4200): Promise<{ html: string; isCf: boolean } | null> {
-  const inflightKey = url;
-  if (inflightBypasses.has(inflightKey)) {
-    console.log(`[Bypass] Reusing in-flight bypass promise for ${url}`);
-    return inflightBypasses.get(inflightKey)!;
-  }
-
-  const promise = (async () => {
+  linkExtractionRouter.post("/api/hubcloud/extract", async (req, res) => {
     try {
-      return await executeFetchHtmlBypass(url, timeoutMs);
-    } finally {
-      inflightBypasses.delete(inflightKey);
-    }
-  })();
-
-  inflightBypasses.set(inflightKey, promise);
-  return promise;
-}
-
-/**
- * Performs actual web fetching using multiple proxy sources in parallel.
- * Solves timeout issues by racing multiple proxy paths concurrently.
- */
-async function executeFetchHtmlBypass(url: string, timeoutMs: number): Promise<{ html: string; isCf: boolean } | null> {
-  const headers = {
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    Accept:
-      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Cache-Control": "no-cache",
-    Pragma: "no-cache",
-  };
-
-  // 1. Super Fast Direct Check (1000ms limit).
-  // If the target domain doesn't block direct server IPs or has transient bypasses, this returns in ~150-300ms.
-  try {
-    const res = await axios.get(url, { headers, timeout: 1000, validateStatus: () => true });
-    if (res.status === 200 && typeof res.data === "string") {
-      const html = res.data;
-      const $ = cheerio.load(html);
-      const titleText = $("title").text().toLowerCase();
-      const isCf =
-        titleText.includes("just a moment") ||
-        titleText.includes("cloudflare") ||
-        titleText.includes("ddos protection");
-      if (!isCf && html.length > 1000) {
-        console.log(`[Bypass] Fast direct fetch succeeded for ${url}`);
-        return { html, isCf: false };
+      const { url } = req.body;
+      if (
+        !url ||
+        (!url.includes("hubcloud") &&
+          !url.includes("moviesdrive") &&
+          !url.includes("vcloud") &&
+          !url.includes("hubdrive"))
+      ) {
+        return res.status(400).json({ error: "Invalid HubCloud URL" });
       }
-    }
-  } catch (err: any) {
-    console.log(`[Bypass] Fast direct probe failed for ${url}:`, err.message);
-  }
 
-  // 2. Prepare racing tasks with AbortController boundaries
-  const tasks = [
-    {
-      name: "corsproxy",
-      fn: async (signal: AbortSignal) => {
-        const cpUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-        const res = await axios.get(cpUrl, { timeout: timeoutMs, signal });
-        if (res.data && typeof res.data === "string" && res.data.length > 1000) {
-          const html = res.data;
-          const $ = cheerio.load(html);
-          const titleText = $("title").text().toLowerCase();
-          const isCf =
-            titleText.includes("just a moment") ||
-            titleText.includes("cloudflare") ||
-            titleText.includes("ddos protection");
-          if (!isCf) {
-            return { html, isCf: false, source: "corsproxy" };
-          }
-        }
-        throw new Error("Corsproxy.io failed or returned Cloudflare");
+      const cacheKey = `extract_${url}`;
+      const cached = extractionCache.get(cacheKey);
+      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        return res.json(cached.data);
       }
-    },
-    {
-      name: "codetabs",
-      fn: async (signal: AbortSignal) => {
-        const ctUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`;
-        const res = await axios.get(ctUrl, { timeout: timeoutMs, signal });
-        if (res.data && typeof res.data === "string" && res.data.length > 1000) {
-          const html = res.data;
-          const $ = cheerio.load(html);
-          const titleText = $("title").text().toLowerCase();
-          const isCf =
-            titleText.includes("just a moment") ||
-            titleText.includes("cloudflare") ||
-            titleText.includes("ddos protection");
-          if (!isCf) {
-            return { html, isCf: false, source: "codetabs" };
-          }
-        }
-        throw new Error("CodeTabs failed or returned Cloudflare");
-      }
-    },
-    {
-      name: "microlink-standard",
-      fn: async (signal: AbortSignal) => {
-        const mlUrl = `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=html&data.body.attr=html&ttl=1d`;
-        const res = await axios.get(mlUrl, { timeout: timeoutMs, signal });
-        if (res.data && res.data.data && res.data.data.body) {
-          const html = res.data.data.body;
-          const $ = cheerio.load(html);
-          const titleText = $("title").text().toLowerCase();
-          const isCf =
-            titleText.includes("just a moment") ||
-            titleText.includes("cloudflare") ||
-            titleText.includes("ddos protection");
-          if (!isCf && html.length > 1000) {
-            return { html, isCf: false, source: "microlink-standard" };
-          }
-        }
-        throw new Error("Microlink standard failed or returned Cloudflare");
-      }
-    },
-    {
-      name: "microlink-prerender",
-      fn: async (signal: AbortSignal) => {
-        // Prerender enables javascript rendering (higher latency, robust bypass)
-        const mlUrlPrerender = `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=html&data.body.attr=html&prerender=true&ttl=1d`;
-        const res = await axios.get(mlUrlPrerender, { timeout: timeoutMs + 800, signal });
-        if (res.data && res.data.data && res.data.data.body) {
-          const html = res.data.data.body;
-          const $ = cheerio.load(html);
-          const titleText = $("title").text().toLowerCase();
-          const isCf =
-            titleText.includes("just a moment") ||
-            titleText.includes("cloudflare") ||
-            titleText.includes("ddos protection");
-          if (!isCf && html.length > 1000) {
-            return { html, isCf: false, source: "microlink-prerender" };
-          }
-        }
-        throw new Error("Microlink prerender failed or returned Cloudflare");
-      }
-    },
-    {
-      name: "allorigins",
-      fn: async (signal: AbortSignal) => {
-        const aoUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-        const res = await axios.get(aoUrl, { timeout: timeoutMs, signal });
-        if (res.data && res.data.contents) {
-          const html = res.data.contents;
-          const $ = cheerio.load(html);
-          const titleText = $("title").text().toLowerCase();
-          const isCf =
-            titleText.includes("just a moment") ||
-            titleText.includes("cloudflare") ||
-            titleText.includes("ddos protection");
-          if (!isCf && html.length > 1000) {
-            return { html, isCf: false, source: "allorigins" };
-          }
-        }
-        throw new Error("AllOrigins failed or returned Cloudflare");
-      }
-    }
-  ];
 
-  // Wait for any bypass to resolve successfully
-  try {
-    const winner = await raceWithAbort(tasks);
-    console.log(`[Bypass] Direct-link race won by ${winner.source} for ${url}`);
-    return { html: winner.html, isCf: false };
-  } catch (err: any) {
-    console.log(`[Bypass] Racing attempts failed: ${err.message}. Falling back to last-ditch direct.`);
-  }
+      const headers = {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
+      };
 
-  // 3. Last-Ditch Direct Fetch (1800ms max timeout)
-  try {
-    const res = await axios.get(url, { headers, timeout: 1800, validateStatus: () => true });
-    if (res.data && typeof res.data === "string") {
-      const html = res.data;
-      const $ = cheerio.load(html);
-      const titleText = $("title").text().toLowerCase();
-      const isCf =
-        titleText.includes("just a moment") ||
-        titleText.includes("cloudflare") ||
-        titleText.includes("ddos protection");
-      return { html, isCf };
-    }
-  } catch (err: any) {
-    console.log(`[Bypass] Last-ditch direct fetch failed for ${url}:`, err.message);
-  }
-
-  return null;
-}
-
-linkExtractionRouter.post("/api/hubcloud/extract", async (req, res) => {
-  const start = Date.now();
-  const BUDGET = 6500; // 6.5s budget to prevent Vercel 10s timeout
-  try {
-    const { url } = req.body;
-    if (
-      !url ||
-      (!url.includes("hubcloud") &&
-        !url.includes("moviesdrive") &&
-        !url.includes("vcloud") &&
-        !url.includes("hubdrive"))
-    ) {
-      return res.status(400).json({ error: "Invalid HubCloud URL" });
-    }
-
-    const cacheKey = `extract_${url}`;
-    const cached = extractionCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      return res.json(cached.data);
-    }
-
-    const remaining = BUDGET - (Date.now() - start);
-    const fetchResult = await fetchHtmlBypass(url, Math.min(remaining - 500, 3200));
-    if (!fetchResult) {
-      return res.json({
-        size: "",
-        unit: "",
-        title: "Unknown (Bypass Failed)",
-        isWorking: false,
-        isNotFound: false,
+      const response = await axios.get(url, {
+        headers,
+        validateStatus: () => true,
+        timeout: 4000,
       });
-    }
+      const $ = cheerio.load(response.data);
 
-    const { html, isCf } = fetchResult;
-    const $ = cheerio.load(html);
-
-    let title = "";
-    let sizeStr = "";
-
-    if (isCf) {
-      title = "Unknown (Cloudflare Block)";
-    } else {
-      title = $("title").text() || $(".card-header").text() || "";
-      sizeStr =
+      let sizeStr =
         $('td:contains("File Size")').next('td').text() ||
         $('li:contains("File Size") i').text() ||
         $('li:contains("File Size")').text() ||
         $('li:contains("Size") i').text() ||
-        $('li:contains("Size")').text() ||
-        "";
-    }
+        $('li:contains("Size")').text();
+      sizeStr = sizeStr.replace("File Size", "").replace("Size", "").trim();
 
-    sizeStr = sizeStr.replace("File Size", "").replace("Size", "").trim();
+      let size = "";
+      let unit = "";
+      if (sizeStr) {
+        const parts = sizeStr.split(" ");
+        if (parts.length >= 2) {
+          let num = parseFloat(parts[0]);
+          unit = parts[1].toUpperCase();
 
-    let size = "";
-    let unit = "";
-    if (sizeStr) {
-      const parts = sizeStr.split(" ");
-      if (parts.length >= 2) {
-        let num = parseFloat(parts[0]);
-        unit = parts[1].toUpperCase();
-
-        if (!isNaN(num)) {
-          // Convert from Hubcloud's Base-1024 to our Base-1000
-          const multiplier =
-            unit === "GB"
-              ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000)
-              : unit === "MB"
-                ? (1024 * 1024) / (1000 * 1000)
-                : unit === "KB"
-                  ? 1024 / 1000
-                  : 1;
-          num = num * multiplier;
-          size =
-            num >= 100
-              ? num.toFixed(0)
-              : num >= 10
-                ? num.toFixed(1)
-                : num.toFixed(2);
-          size = size.replace(/\.00$/, "").replace(/\.0$/, "");
+          if (!isNaN(num)) {
+            // Convert from Hubcloud's Base-1024 to our Base-1000
+            const multiplier =
+              unit === "GB"
+                ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000)
+                : unit === "MB"
+                  ? (1024 * 1024) / (1000 * 1000)
+                  : unit === "KB"
+                    ? 1024 / 1000
+                    : 1;
+            num = num * multiplier;
+            size =
+              num >= 100
+                ? num.toFixed(0)
+                : num >= 10
+                  ? num.toFixed(1)
+                  : num.toFixed(2);
+            size = size.replace(/\.00$/, "").replace(/\.0$/, "");
+          } else {
+            size = parts[0];
+          }
         } else {
-          size = parts[0];
+          size = sizeStr;
         }
-      } else {
-        size = sizeStr;
       }
-    }
 
-    const isNotFound = title.toLowerCase().includes("not found");
-    const isWorking = !isCf && !isNotFound && !!title;
+      let title = $("title").text() || $(".card-header").text() || "";
+      const isCloudflare =
+        title.toLowerCase().includes("just a moment") ||
+        title.toLowerCase().includes("cloudflare") ||
+        title.toLowerCase().includes("ddos protection") ||
+        response.status === 403 ||
+        response.status === 503;
 
-    const responseData = {
-      size,
-      unit,
-      title: title.trim(),
-      isWorking: isWorking,
-      isNotFound,
-      isCloudflare: isCf,
-    };
-    
-    // Cache ONLY successful resolutions
-    if (responseData.isWorking && responseData.title && !responseData.title.includes("Cloudflare")) {
-      extractionCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
-    }
+      if (isCloudflare) {
+        try {
+          // Use Microlink proxy API to bypass Cloudflare
+          const dlRes = await axios.get(
+            `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
+            { timeout: 4000 },
+          );
+          if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
+            const proxyHtml = dlRes.data.data.body;
+            const $proxy = cheerio.load(proxyHtml);
+            let sStr =
+              $proxy('li:contains("File Size") i').text() ||
+              $proxy('li:contains("File Size")').text() ||
+              $proxy('li:contains("Size") i').text() ||
+              $proxy('li:contains("Size")').text();
+            sStr = sStr.replace("File Size", "").replace("Size", "").trim();
+            if (sStr) {
+              sizeStr = sStr;
+            }
 
-    res.json(responseData);
-  } catch (e: any) {
-    console.error("Hubcloud extract error:", e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
+            const proxyTitle =
+              $proxy("title").text() || $proxy(".card-header").text() || "";
+            if (
+              proxyTitle &&
+              !proxyTitle.toLowerCase().includes("just a moment")
+            ) {
+              title = proxyTitle;
 
-async function performExtraction(url: string, checkOnly: boolean, depth = 0, deadline: number = Date.now() + 6500): Promise<any> {
-  try {
-    if (depth > 2) return { url, candidates: [], size: "" };
-    const remaining = deadline - Date.now();
-    if (remaining < 1200) {
-      console.log(`[Bypass] Aborting performExtraction early: only ${remaining}ms left in budget.`);
-      return { url, candidates: [], size: "" };
-    }
-
-    const headers = {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      Accept:
-        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    };
-
-    if (checkOnly && url) {
-      try {
-        const checkRes = await axios.get(url, {
-          headers: { ...headers, Range: "bytes=0-0" },
-          maxRedirects: 0,
-          validateStatus: () => true,
-          timeout: Math.min(remaining - 300, 1800),
-        });
-        if (
-          checkRes.status < 400 ||
-          checkRes.status === 405 ||
-          checkRes.status === 416
-        ) {
-          return { ok: true };
-        }
-        if (
-          checkRes.status >= 300 &&
-          checkRes.status < 400 &&
-          checkRes.headers.location
-        ) {
-          return { ok: true, location: checkRes.headers.location };
-        }
-        return { ok: false };
-      } catch (e) {
-        return { ok: false };
-      }
-    }
-
-    if (
-      !url ||
-      (!url.includes("hubcloud") &&
-        !url.includes("moviesdrive") &&
-        !url.includes("vcloud") &&
-        !url.includes("hubdrive"))
-    ) {
-      return { url };
-    }
-
-    const fetchResult = await fetchHtmlBypass(url, Math.min(remaining - 500, 3200));
-    if (!fetchResult) {
-      return { url };
-    }
-
-    const { html, isCf } = fetchResult;
-    if (isCf) {
-      return { url, isCloudflare: true };
-    }
-
-    const $ = cheerio.load(html);
-
-    let nextUrl =
-      $("#download").attr("href") ||
-      $('a:contains("Generate Direct Download Link")').attr("href") ||
-      $('a:contains("Fast Download")').attr("href") ||
-      $('a:contains("Direct Download")').attr("href") ||
-      $('a:contains("Download Link")').attr("href") ||
-      $("a.btn-zip").attr("href") ||
-      $("a.btn-wp").attr("href") ||
-      $("a.btn-success").attr("href");
-
-    // Extract url from script for vcloud if href is missing
-    if (!nextUrl) {
-       const scriptHtml = $.html();
-       const match = scriptHtml.match(/var\s+url\s*=\s*['"]([^'"]+)['"]/i);
-       if (match && match[1]) {
-          nextUrl = match[1];
-       }
-    }
-
-    let $2 = null;
-
-    if (!nextUrl) {
-      if ($("a.btn").length > 0) {
-        $2 = $;
-      } else {
-        return { url };
-      }
-    } else {
-      const remaining2 = deadline - Date.now();
-      if (remaining2 < 1200) {
-        return { url, candidates: [] };
-      }
-      const fetchResult2 = await fetchHtmlBypass(nextUrl, Math.min(remaining2 - 500, 3200));
-      if (fetchResult2) {
-        if (fetchResult2.isCf) {
-          return { url, isCloudflare: true };
-        }
-        $2 = cheerio.load(fetchResult2.html);
-      }
-    }
-
-    if (!$2) {
-      return { url };
-    }
-
-    const candidateLinks: { text: string; href: string }[] = [];
-    $2("a.btn").each((i, el) => {
-      let href = $2(el).attr("href") || "";
-      const text = $2(el).text().toLowerCase();
-      const id = $2(el).attr("id");
-
-      if (id) {
-        $2("script").each((_, scriptEl) => {
-          const scriptContent = $2(scriptEl).html();
-          if (!scriptContent) return;
-
-          if (
-            scriptContent.includes(`getElementById("${id}")`) ||
-            scriptContent.includes(`getElementById('${id}')`)
-          ) {
-            const assignmentMatch = scriptContent.match(
-              new RegExp(
-                `getElementById\\(['"]${id}['"]\\)\\.href\\s*=\\s*([a-zA-Z0-9_]+)`,
-              ),
-            );
-            if (assignmentMatch && assignmentMatch[1]) {
-              const varName = assignmentMatch[1];
-              const varMatch = scriptContent.match(
-                new RegExp(
-                  `(?:var|let|const)\\s+${varName}\\s*=\\s*['"]([^'"]+)['"]`,
-                ),
-              );
-              if (varMatch && varMatch[1]) {
-                href = varMatch[1];
+              // Recalculate size stuff based on fixed html
+              if (sizeStr) {
+                const parts = sizeStr.split(" ");
+                if (parts.length >= 2) {
+                  let num = parseFloat(parts[0]);
+                  unit = parts[1].toUpperCase();
+                  if (!isNaN(num)) {
+                    const multiplier =
+                      unit === "GB"
+                        ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000)
+                        : unit === "MB"
+                          ? (1024 * 1024) / (1000 * 1000)
+                          : unit === "KB"
+                            ? 1024 / 1000
+                            : 1;
+                    num = num * multiplier;
+                    size =
+                      num >= 100
+                        ? num.toFixed(0)
+                        : num >= 10
+                          ? num.toFixed(1)
+                          : num.toFixed(2);
+                    size = size.replace(/\.00$/, "").replace(/\.0$/, "");
+                  } else {
+                    size = parts[0];
+                  }
+                } else {
+                  size = sizeStr;
+                }
               }
             } else {
-              const directMatch = scriptContent.match(
-                new RegExp(
-                  `getElementById\\(['"]${id}['"]\\)\\.href\\s*=\\s*['"]([^'"]+)['"]`,
-                ),
-              );
-              if (directMatch && directMatch[1]) {
-                href = directMatch[1];
-              }
+              title = "Unknown (Cloudflare Block)";
             }
+          } else {
+            title = "Unknown (Cloudflare Block)";
           }
+        } catch (err) {
+          title = "Unknown (Cloudflare Block)";
+        }
+      }
+
+      const isNotFound =
+        response.status === 404 || title.toLowerCase().includes("not found");
+      const isWorking =
+        response.status < 400 ||
+        response.status === 403 ||
+        response.status === 503 ||
+        title === "Unknown (Cloudflare Block)";
+
+      const responseData = {
+        size,
+        unit,
+        title: title.trim(),
+        isWorking: isWorking && !isNotFound,
+        isNotFound,
+      };
+      
+      extractionCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
+
+      res.json(responseData);
+    } catch (e: any) {
+      console.error("Hubcloud extract error:", e.message);
+      // Even if it fails (like timeout on Vercel), return a generic response instead of 500
+      // since the link might actually be working but just blocked by Vercel's datacenter IPs
+      if (e.code === "ECONNABORTED" || e.message.includes("timeout")) {
+        return res.json({
+          size: "",
+          unit: "",
+          title: "Unknown (Timeout)",
+          isWorking: true, // Assume it works if it just timed out
+          isNotFound: false,
         });
       }
-      if (href && !text.includes("telegram"))
-        candidateLinks.push({ text, href });
-    });
-
-    if (candidateLinks.length === 0) {
-      return { url };
+      res.status(500).json({ error: e.message });
     }
+  });
 
-    // Sort: pixeldrain first, then .workers.dev, then others
-    candidateLinks.sort((a, b) => {
-      const isA_PD =
-        /pixeldrain|pixel\.drain|pixeldra\.in/i.test(a.text) ||
-        /pixeldrain|pixel\.drain|pixeldra\.in/i.test(a.href);
-      const isB_PD =
-        /pixeldrain|pixel\.drain|pixeldra\.in/i.test(b.text) ||
-        /pixeldrain|pixel\.drain|pixeldra\.in/i.test(b.href);
-      if (isA_PD && !isB_PD) return -1;
-      if (!isA_PD && isB_PD) return 1;
+  async function performExtraction(url: string, checkOnly: boolean, depth = 0): Promise<any> {
+    try {
+      if (depth > 2) return { url, candidates: [], size: "" };
+      const headers = {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+      };
 
-      const isA_Worker = /\.workers\.dev/i.test(a.href);
-      const isB_Worker = /\.workers\.dev/i.test(b.href);
-      if (isA_Worker && !isB_Worker) return -1;
-      if (!isA_Worker && isB_Worker) return 1;
-
-      return 0;
-    });
-
-    // Find first working link
-    let workingLink = url; // fallback to original hubcloud url
-
-    const checkPromises = candidateLinks.map(async (candidate, index) => {
-      let checkUrl = candidate.href;
-      const remainingCheck = deadline - Date.now();
-      if (remainingCheck < 1000) {
-        // Safe check skip: just assume it works to avoid timing out the whole execution
-        return { index, link: candidate.href };
-      }
-
-      const checkRes = await axios.get(checkUrl, {
-        headers: { ...headers, Range: "bytes=0-0" },
-        maxRedirects: 0,
-        validateStatus: () => true,
-        timeout: Math.min(remainingCheck - 300, 1500),
-      });
-
-      let resultLink = candidate.href;
-      let isWorking = false;
-
-      if (
-        checkRes.status >= 300 &&
-        checkRes.status < 400 &&
-        checkRes.headers.location
-      ) {
-        resultLink = checkRes.headers.location;
-        const remainingNext = deadline - Date.now();
-        if (remainingNext < 1000) {
-          return { index, link: resultLink };
-        }
+      if (checkOnly && url) {
         try {
-          const nextRes = await axios.get(resultLink, {
+          const checkRes = await axios.get(url, {
             headers: { ...headers, Range: "bytes=0-0" },
             maxRedirects: 0,
             validateStatus: () => true,
-            timeout: Math.min(remainingNext - 300, 1500),
+            timeout: 2500,
           });
           if (
-            nextRes.status >= 300 &&
-            nextRes.status < 400 &&
-            nextRes.headers.location
+            checkRes.status < 400 ||
+            checkRes.status === 405 ||
+            checkRes.status === 416
           ) {
-            resultLink = nextRes.headers.location;
+            return { ok: true };
           }
           if (
-            nextRes.status < 400 ||
-            nextRes.status === 405 ||
-            nextRes.status === 416
+            checkRes.status >= 300 &&
+            checkRes.status < 400 &&
+            checkRes.headers.location
           ) {
-            isWorking = true;
-          } else {
-            isWorking = false;
+            return { ok: true, location: checkRes.headers.location };
           }
+          return { ok: false };
         } catch (e) {
-          isWorking = true;
+          return { ok: false };
         }
-      } else if (
-        checkRes.status < 400 ||
-        checkRes.status === 405 ||
-        checkRes.status === 416
+      }
+
+      if (
+        !url ||
+        (!url.includes("hubcloud") &&
+          !url.includes("moviesdrive") &&
+          !url.includes("vcloud") &&
+          !url.includes("hubdrive"))
       ) {
-        isWorking = true;
+        return { url };
       }
 
-      if (isWorking) {
-        return { index, link: resultLink };
+      const response = await axios.get(url, {
+        headers,
+        validateStatus: () => true,
+        timeout: 5000,
+      });
+      let $ = cheerio.load(response.data);
+
+      const titleText = $("title").text().toLowerCase();
+      const isCf =
+        titleText.includes("just a moment") ||
+        titleText.includes("cloudflare") ||
+        titleText.includes("ddos protection") ||
+        response.status === 403 ||
+        response.status === 503;
+
+      if (isCf) {
+        try {
+          const dlRes = await axios.get(
+            `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
+            { timeout: 4000 },
+          );
+          if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
+            const proxyTitle =
+              cheerio.load(dlRes.data.data.body)("title").text().toLowerCase() || "";
+            if (
+              !proxyTitle.includes("just a moment") &&
+              !proxyTitle.includes("cloudflare") &&
+              !proxyTitle.includes("ddos protection")
+            ) {
+              $ = cheerio.load(dlRes.data.data.body);
+            } else {
+              return { url: url, isCloudflare: true };
+            }
+          } else {
+            return { url: url, isCloudflare: true };
+          }
+        } catch (err) {
+          return { url: url, isCloudflare: true };
+        }
       }
-      throw new Error("Not working");
-    });
 
-    try {
-      const results = await Promise.allSettled(checkPromises);
-      let bestIndex = -1;
+      let nextUrl =
+        $("#download").attr("href") ||
+        $('a:contains("Generate Direct Download Link")').attr("href") ||
+        $("a.btn-zip").attr("href");
 
-      for (const result of results) {
-        if (result.status === "fulfilled") {
-          if (bestIndex === -1 || result.value.index < bestIndex) {
-            bestIndex = result.value.index;
-            workingLink = result.value.link;
+      // Extract url from script for vcloud if href is missing
+      if (!nextUrl) {
+         const scriptHtml = $.html();
+         const match = scriptHtml.match(/var\s+url\s*=\s*['"]([^'"]+)['"]/i);
+         if (match && match[1]) {
+            nextUrl = match[1];
+         }
+      }
+
+      let $2 = null;
+
+      if (!nextUrl) {
+        if ($("a.btn").length > 0) {
+          $2 = $;
+        } else {
+          return { url };
+        }
+      } else {
+        let res2 = await axios.get(nextUrl, {
+          headers,
+          validateStatus: () => true,
+          timeout: 5000,
+        });
+        $2 = cheerio.load(res2.data);
+
+        const titleText2 = $2("title").text().toLowerCase();
+        const isCf2 =
+          titleText2.includes("just a moment") ||
+          titleText2.includes("cloudflare") ||
+          titleText2.includes("ddos protection") ||
+          res2.status === 403 ||
+          res2.status === 503;
+
+        if (isCf2) {
+          try {
+            const dlRes2 = await axios.get(
+              `https://api.microlink.io/?url=${encodeURIComponent(nextUrl)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
+              { timeout: 4000 },
+            );
+            if (dlRes2.data && dlRes2.data.data && dlRes2.data.data.body) {
+              $2 = cheerio.load(dlRes2.data.data.body);
+            }
+          } catch (err) {
+            // Ignore and continue with original $2
           }
         }
       }
 
-      // If all rejected and we have candidates, fallback to first
-      if (bestIndex === -1 && candidateLinks.length > 0) {
-        workingLink = candidateLinks[0].href;
+      const candidateLinks: { text: string; href: string }[] = [];
+      $2("a.btn").each((i, el) => {
+        let href = $2(el).attr("href") || "";
+        const text = $2(el).text().toLowerCase();
+        const id = $2(el).attr("id");
+
+        if (id) {
+          $2("script").each((_, scriptEl) => {
+            const scriptContent = $2(scriptEl).html();
+            if (!scriptContent) return;
+
+            if (
+              scriptContent.includes(`getElementById("${id}")`) ||
+              scriptContent.includes(`getElementById('${id}')`)
+            ) {
+              const assignmentMatch = scriptContent.match(
+                new RegExp(
+                  `getElementById\\(['"]${id}['"]\\)\\.href\\s*=\\s*([a-zA-Z0-9_]+)`,
+                ),
+              );
+              if (assignmentMatch && assignmentMatch[1]) {
+                const varName = assignmentMatch[1];
+                const varMatch = scriptContent.match(
+                  new RegExp(
+                    `(?:var|let|const)\\s+${varName}\\s*=\\s*['"]([^'"]+)['"]`,
+                  ),
+                );
+                if (varMatch && varMatch[1]) {
+                  href = varMatch[1];
+                }
+              } else {
+                const directMatch = scriptContent.match(
+                  new RegExp(
+                    `getElementById\\(['"]${id}['"]\\)\\.href\\s*=\\s*['"]([^'"]+)['"]`,
+                  ),
+                );
+                if (directMatch && directMatch[1]) {
+                  href = directMatch[1];
+                }
+              }
+            }
+          });
+        }
+        if (href && !text.includes("telegram"))
+          candidateLinks.push({ text, href });
+      });
+
+      if (candidateLinks.length === 0) {
+        return { url };
       }
-    } catch (e) {
+
+      // Sort: pixeldrain first, then .workers.dev, then others
+      candidateLinks.sort((a, b) => {
+        const isA_PD =
+          /pixeldrain|pixel\.drain|pixeldra\.in/i.test(a.text) ||
+          /pixeldrain|pixel\.drain|pixeldra\.in/i.test(a.href);
+        const isB_PD =
+          /pixeldrain|pixel\.drain|pixeldra\.in/i.test(b.text) ||
+          /pixeldrain|pixel\.drain|pixeldra\.in/i.test(b.href);
+        if (isA_PD && !isB_PD) return -1;
+        if (!isA_PD && isB_PD) return 1;
+
+        const isA_Worker = /\.workers\.dev/i.test(a.href);
+        const isB_Worker = /\.workers\.dev/i.test(b.href);
+        if (isA_Worker && !isB_Worker) return -1;
+        if (!isA_Worker && isB_Worker) return 1;
+
+        return 0;
+      });
+
+      // Find first working link (Skip heavy head checks for speed on Vercel)
+      let workingLink = url; // fallback to original hubcloud url
+
       if (candidateLinks.length > 0) {
         workingLink = candidateLinks[0].href;
       }
-    }
 
-    // Rewrite Pixeldrain URLs
-    if (
-      /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+)/i.test(
-        workingLink,
-      )
-    ) {
-      workingLink = workingLink.replace(
-        /.*(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+).*/i,
-        "https://pixeldrain.dev/u/$1",
-      );
-    }
-
-    const returnCandidates = candidateLinks.map((c) => {
-      let href = c.href;
+      // First Priority for Pixeldrain: Rewrite to pixeldrain.dev/u/
+      // Matches both api/file/xxx and /u/xxx
       if (
         /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+)/i.test(
-          href,
+          workingLink,
         )
       ) {
-        href = href.replace(
+        workingLink = workingLink.replace(
           /.*(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+).*/i,
           "https://pixeldrain.dev/u/$1",
         );
       }
-      return { text: c.text.trim(), href };
-    });
 
-    const bodyText = $("body").text();
-    let sizeInfo = "";
-    const sizeMatch = bodyText.match(/File Size\s*([\d.]+\s*[A-Za-z]+)/i);
-    if (sizeMatch && sizeMatch[1]) {
-      sizeInfo = sizeMatch[1].trim();
+      const returnCandidates = candidateLinks.map((c) => {
+        let href = c.href;
+        if (
+          /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+)/i.test(
+            href,
+          )
+        ) {
+          href = href.replace(
+            /.*(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+).*/i,
+            "https://pixeldrain.dev/u/$1",
+          );
+        }
+        return { text: c.text.trim(), href };
+      });
 
-      // Convert to base-1000
-      const parts = sizeInfo.split(" ");
-      if (parts.length >= 2) {
-        let num = parseFloat(parts[0]);
-        let unit = parts[1].toUpperCase();
-        if (!isNaN(num)) {
-          const multiplier =
-            unit === "GB"
-              ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000)
-              : unit === "MB"
-                ? (1024 * 1024) / (1000 * 1000)
-                : unit === "KB"
-                  ? 1024 / 1000
-                  : 1;
-          num = num * multiplier;
-          let newSize =
-            num >= 100
-              ? num.toFixed(0)
-              : num >= 10
-                ? num.toFixed(1)
-                : num.toFixed(2);
-          newSize = newSize.replace(/\.00$/, "").replace(/\.0$/, "");
-          sizeInfo = `${newSize} ${unit}`;
+      const bodyText = $("body").text();
+      let sizeInfo = "";
+      const sizeMatch = bodyText.match(/File Size\s*([\d.]+\s*[A-Za-z]+)/i);
+      if (sizeMatch && sizeMatch[1]) {
+        sizeInfo = sizeMatch[1].trim();
+
+        // Convert to base-1000
+        const parts = sizeInfo.split(" ");
+        if (parts.length >= 2) {
+          let num = parseFloat(parts[0]);
+          let unit = parts[1].toUpperCase();
+          if (!isNaN(num)) {
+            const multiplier =
+              unit === "GB"
+                ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000)
+                : unit === "MB"
+                  ? (1024 * 1024) / (1000 * 1000)
+                  : unit === "KB"
+                    ? 1024 / 1000
+                    : 1;
+            num = num * multiplier;
+            let newSize =
+              num >= 100
+                ? num.toFixed(0)
+                : num >= 10
+                  ? num.toFixed(1)
+                  : num.toFixed(2);
+            newSize = newSize.replace(/\.00$/, "").replace(/\.0$/, "");
+            sizeInfo = `${newSize} ${unit}`;
+          }
         }
       }
-    }
 
-    let nextHubcloudLink = "";
-    for (const c of returnCandidates) {
-      if (c.href.includes("hubcloud") || c.href.includes("moviesdrive") || c.href.includes("vcloud") || c.href.includes("hubdrive")) {
-         nextHubcloudLink = c.href;
-         break;
+      let nextHubcloudLink = "";
+      for (const c of returnCandidates) {
+        if (c.href.includes("hubcloud") || c.href.includes("moviesdrive") || c.href.includes("vcloud") || c.href.includes("hubdrive")) {
+           nextHubcloudLink = c.href;
+           break;
+        }
       }
-    }
 
-    if (nextHubcloudLink && nextHubcloudLink !== url) {
-       try {
-         const recursiveRes = await performExtraction(nextHubcloudLink, false, depth + 1, deadline);
-         if (recursiveRes.candidates && recursiveRes.candidates.length > 0) {
-           if (!recursiveRes.size && sizeInfo) recursiveRes.size = sizeInfo;
-           if (recursiveRes.url) {
-             return recursiveRes;
+      if (nextHubcloudLink && nextHubcloudLink !== url) {
+         try {
+           const recursiveRes = await performExtraction(nextHubcloudLink, false, depth + 1);
+           if (recursiveRes.candidates && recursiveRes.candidates.length > 0) {
+             if (!recursiveRes.size && sizeInfo) recursiveRes.size = sizeInfo;
+             if (recursiveRes.url) {
+               return recursiveRes;
+             }
            }
+         } catch (e) {
+           console.error("Recursion error", e);
          }
-       } catch (e) {
-         console.error("Recursion error", e);
-       }
-     }
+      }
 
-    return {
-      url: workingLink,
-      candidates: returnCandidates,
-      size: sizeInfo,
-    };
-  } catch (e: any) {
-    console.error(e);
-    return { url };
+      return {
+        url: workingLink,
+        candidates: returnCandidates,
+        size: sizeInfo,
+      };
+    } catch (e: any) {
+      console.error(e);
+      return { url };
+    }
   }
-}
 
-linkExtractionRouter.post("/api/hubcloud/direct-link", async (req, res) => {
-  const start = Date.now();
-  const BUDGET = 7500; // 7.5s budget
-  const deadline = start + BUDGET;
-  try {
-    const { url, checkOnly } = req.body;
-    const cacheKey = `direct_${url}_${checkOnly}`;
-    
-    const cached = extractionCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      return res.json(cached.data);
-    }
+  linkExtractionRouter.post("/api/hubcloud/direct-link", async (req, res) => {
+    try {
+      const { url, checkOnly } = req.body;
+      const cacheKey = `direct_${url}_${checkOnly}`;
+      
+      const cached = extractionCache.get(cacheKey);
+      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        return res.json(cached.data);
+      }
 
-    const data = await performExtraction(url, checkOnly, 0, deadline);
+      const data = await performExtraction(url, checkOnly, 0);
 
-    // Return ok stuff for checkOnly
-    if (checkOnly && data && data.ok !== undefined) {
-       extractionCache.set(cacheKey, { data, timestamp: Date.now() });
-       return res.json(data);
-    }
+      // Return ok stuff for checkOnly
+      if (checkOnly && data && data.ok !== undefined) {
+         extractionCache.set(cacheKey, { data, timestamp: Date.now() });
+         return res.json(data);
+      }
 
-    // If cloudflare error
-    if (data.isCloudflare) {
-       const responseData = { url: data.url, isCloudflare: true };
-       extractionCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
-       return res.json(responseData);
-    }
+      // If cloudflare error
+      if (data.isCloudflare) {
+         const responseData = { url: data.url, isCloudflare: true };
+         extractionCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
+         return res.json(responseData);
+      }
 
-    // Cache ONLY if successfully resolved
-    if (data && ((data.candidates && data.candidates.length > 0) || (data.url && data.url !== url))) {
       extractionCache.set(cacheKey, { data, timestamp: Date.now() });
+      return res.json(data);
+    } catch (e: any) {
+      console.error(e);
+      res.json({ url: req.body.url });
     }
-
-    return res.json(data);
-  } catch (e: any) {
-    console.error(e);
-    res.json({ url: req.body.url });
-  }
-});
+  });
