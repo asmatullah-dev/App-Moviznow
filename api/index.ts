@@ -127,10 +127,10 @@ async function startServer() {
         const checkPixeldrainLink = async (url: string) => {
           if (!url || url.trim() === "") return { error: "Empty link" };
           const fileMatch = url.match(
-            /pixeldrain\.(?:com|dev)\/(?:u|api\/file)\/([a-zA-Z0-9]+)/,
+            /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:u|api\/file)\/([a-zA-Z0-9_-]+)/i,
           );
           const listMatch = url.match(
-            /pixeldrain\.(?:com|dev)\/(?:l|api\/list)\/([a-zA-Z0-9]+)/,
+            /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:l|api\/list)\/([a-zA-Z0-9_-]+)/i,
           );
 
           try {
@@ -492,7 +492,7 @@ async function startServer() {
             let fetchUrl = link.url;
             // If it's a pixeldrain link, use the API for faster checking
             const pdMatch = fetchUrl.match(
-              /pixeldrain\.(?:com|dev)\/(?:u|api\/file)\/([a-zA-Z0-9]+)/,
+              /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:u|api\/file)\/([a-zA-Z0-9_-]+)/i,
             );
             if (pdMatch) {
               fetchUrl = `https://pixeldrain.com/api/file/${pdMatch[1]}/info`;
@@ -686,11 +686,14 @@ async function startServer() {
       };
 
       // Try to resolve redirects first if it's not already a known special host
-      if (
-        !currentHost.includes("pixeldrain.com") &&
-        !currentHost.includes("pixeldrain.dev") &&
-        !currentHost.includes("raj.lat")
-      ) {
+      const isPDHost = 
+        currentHost.includes("pixeldrain") ||
+        currentHost.includes("pixel.drain") ||
+        currentHost.includes("pixeldra.in");
+
+      const isExempt = isPDHost || currentHost.includes("raj.lat");
+
+      if (!isExempt) {
         try {
           const controller = new AbortController();
           const timeout = setTimeout(() => controller.abort(), 8000);
@@ -727,12 +730,10 @@ async function startServer() {
       }
 
       // PIXELDRAIN SPECIAL CHECK
-      if (
-        currentHost.includes("pixeldrain.com") ||
-        currentHost.includes("pixeldrain.dev") ||
-        currentHost.includes("pixeldrain.net")
-      ) {
-        const match = currentParsed.pathname.match(/\/u\/([^/?#]+)/);
+      if (isPDHost) {
+        const match = currentUrl.match(
+          /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:u|api\/file)\/([a-zA-Z0-9_-]+)/i,
+        );
         if (match?.[1]) {
           const fileId = match[1];
           try {

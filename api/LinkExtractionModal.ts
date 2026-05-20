@@ -8,47 +8,15 @@ const extractionCache = new Map<string, { data: any, timestamp: number }>();
 const CACHE_TTL = 30 * 1000; // 30 seconds
 
 /**
- * Super-resilient HTML fetcher with 4 layers of fallback for bypassing network, DNS, and cloudflare restrictions.
+ * Super-resilient HTML fetcher starting directly with Microlink to bypass Cloudflare and proxy issues.
  */
-async function fetchPageHtml(url: string, useProxyInitially = false): Promise<string> {
+async function fetchPageHtml(url: string): Promise<string> {
   const headers = {
     "User-Agent":
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    Accept:
-      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Cache-Control": "no-cache",
-    Pragma: "no-cache",
   };
 
-  if (!useProxyInitially) {
-    try {
-      const res = await axios.get(url, {
-        headers,
-        validateStatus: () => true,
-        timeout: 4000,
-      });
-      const html = res.data;
-      if (html && typeof html === "string") {
-        const $ = cheerio.load(html);
-        const title = $("title").text() || "";
-        const isCf =
-          title.toLowerCase().includes("just a moment") ||
-          title.toLowerCase().includes("cloudflare") ||
-          title.toLowerCase().includes("ddos protection") ||
-          res.status === 403 ||
-          res.status === 503;
-        
-        if (!isCf) {
-          return html;
-        }
-      }
-    } catch (err: any) {
-      console.warn(`Direct fetch failed for ${url}: ${err.message}. Trying proxies...`);
-    }
-  }
-
-  // Fallback 1: Microlink without prerender (lightweight, super speed, bypasses IP locks & simple CF)
+  // Stage 1: Microlink without prerender (lightweight, super speed, bypasses IP locks & simple CF)
   try {
     const target = `https://api.microlink.io/?url=${encodeURIComponent(url)}&prerender=false&meta=false&data.body.selector=html&force=true`;
     const res = await axios.get(target, { timeout: 4000 });
@@ -59,7 +27,7 @@ async function fetchPageHtml(url: string, useProxyInitially = false): Promise<st
     console.warn(`Microlink fast fetch failed for ${url}: ${err.message}`);
   }
 
-  // Fallback 2: Codetabs proxy (simple, reliable fallback)
+  // Fallback 1: Codetabs proxy (simple, reliable fallback)
   try {
     const target = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`;
     const res = await axios.get(target, { headers, timeout: 4000 });
@@ -70,7 +38,7 @@ async function fetchPageHtml(url: string, useProxyInitially = false): Promise<st
     console.warn(`Codetabs fetch failed for ${url}: ${err.message}`);
   }
 
-  // Fallback 3: Microlink with prerender=true (last resort headless chrome scraper)
+  // Fallback 2: Microlink with prerender=true (last resort headless chrome scraper)
   try {
     const target = `https://api.microlink.io/?url=${encodeURIComponent(url)}&prerender=true&meta=false&data.body.selector=html&force=true`;
     const res = await axios.get(target, { timeout: 6000 });
