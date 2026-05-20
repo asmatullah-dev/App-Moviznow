@@ -93,7 +93,7 @@ export default function UserManagement() {
 
   const handleSearchUser = async () => {
     if (!newUserForm.phone && !newUserForm.email) {
-      setAlertConfig({ isOpen: true, title: 'Error', message: 'Please provide a WhatsApp / Phone Number or Email.' });
+      setAlertConfig({ isOpen: true, title: 'Error', message: 'Please provide a WhatsApp Number or Email.' });
       return;
     }
 
@@ -150,7 +150,7 @@ export default function UserManagement() {
     let mounted = true;
     if (mounted) {
        window.dispatchEvent(new CustomEvent('sync_status', { detail: 'syncing' }));
-       refreshUsers(true).then((res) => {
+       refreshUsers(false).then((res) => {
          if (mounted) {
            if (res.updatedSomething) {
              window.dispatchEvent(new CustomEvent('sync_status', { detail: 'success' }));
@@ -412,7 +412,7 @@ export default function UserManagement() {
           if (res.matches.some(u => u.uid !== editingId)) {
             const msg = res.type === 'email' 
               ? 'Email address is already in use by another account.' 
-              : 'WhatsApp / Phone Number is already in use by another account.';
+              : 'WhatsApp Number is already in use by another account.';
             setAlertConfig({ isOpen: true, title: 'Error', message: msg });
             setProcessing(prev => ({ ...prev, save: false }));
             return;
@@ -569,7 +569,7 @@ export default function UserManagement() {
 
   const sendWhatsAppReminder = (user: UserProfile) => {
     if (!user.phone) {
-      setAlertConfig({ isOpen: true, title: 'Missing WhatsApp / Phone Number', message: 'User does not have a WhatsApp / Phone number set.' });
+      setAlertConfig({ isOpen: true, title: 'Missing WhatsApp Number', message: 'User does not have a WhatsApp number set.' });
       return;
     }
     
@@ -964,7 +964,7 @@ export default function UserManagement() {
 
   const handleAddUser = async () => {
     if (!foundUser && !newUserForm.phone && !newUserForm.email) {
-      setAlertConfig({ isOpen: true, title: 'Error', message: 'Please provide a WhatsApp / Phone Number or Email.' });
+      setAlertConfig({ isOpen: true, title: 'Error', message: 'Please provide a WhatsApp Number or Email.' });
       return;
     }
 
@@ -1375,7 +1375,7 @@ export default function UserManagement() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">WhatsApp / Phone Number</label>
+                    <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">WhatsApp Number</label>
                     <input
                       type="text"
                       value={editForm.phone || ''}
@@ -1443,7 +1443,7 @@ export default function UserManagement() {
                     <div>
                       <h3 className="text-lg font-bold text-zinc-900 dark:text-white">{selectedUser.displayName || 'No Name'}</h3>
                       <p className="text-zinc-500 dark:text-zinc-400 text-sm">{selectedUser.email?.endsWith('@moviznow.com') ? 'No Email' : selectedUser.email}</p>
-                      <p className="text-zinc-500 dark:text-zinc-400 text-sm">{selectedUser.phone || 'No WhatsApp / Phone Number'}</p>
+                      <p className="text-zinc-500 dark:text-zinc-400 text-sm">{selectedUser.phone || 'No WhatsApp Number'}</p>
                       <p className="text-zinc-500 dark:text-zinc-400 mt-1 font-mono text-[10px] break-all border border-zinc-200 dark:border-zinc-800 rounded px-1.5 py-0.5 inline-block">ID: {selectedUser.uid}</p>
                     </div>
                   </div>
@@ -2066,7 +2066,7 @@ export default function UserManagement() {
                   ) : (
                     <>
                       <div>
-                        <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">WhatsApp / Phone Number</label>
+                        <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">WhatsApp Number</label>
                         <div className="flex gap-2">
                           <input
                             type="text"
@@ -2148,7 +2148,7 @@ export default function UserManagement() {
               ) : (
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">WhatsApp / Phone Number</label>
+                    <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">WhatsApp Number</label>
                     <div className="flex gap-2">
                       <input
                         type="text"

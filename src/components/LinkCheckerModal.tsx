@@ -16,7 +16,8 @@ import {
   ChevronUp,
   Siren,
   Plus,
-  X
+  X,
+  Server
 } from "lucide-react";
 import { QualityLinks, Language, Quality, LinkDef } from '../types';
 import { 
@@ -108,35 +109,21 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
   useModalBehavior(isOpen, onClose);
 
-  // Update input when initialInput changes
-  React.useEffect(() => {
-    if (initialInput) {
-      setInput(initialInput);
-    }
-  }, [initialInput]);
-
-  // Auto-start check if requested
-  React.useEffect(() => {
-    if (isOpen && autoStart && initialInput && results.length === 0 && !loading) {
-      handleCheck();
-    }
-  }, [isOpen, autoStart, initialInput]);
-
-  // Auto-paste from clipboard when modal opens
-  // Removed automatic paste
-  
-  // Auto-paste from clipboard when window gains focus
-  // Removed automatic paste
-  
-  // Periodic clipboard check while modal is open
-  // Removed periodic check
-
   const links = useMemo(() => {
     if (!autoExtract) {
       return input.split(/\r?\n/).map((s) => normalizeUrl(s)).filter(Boolean);
     }
     return splitLinks(input).map(normalizeUrl).filter(Boolean);
   }, [input, autoExtract]);
+
+  // Auto-start check if requested
+  React.useEffect(() => {
+    if (isOpen && autoStart && initialInput && results.length === 0 && !loading) {
+      if (input === initialInput && links.length > 0) {
+        handleCheck(links);
+      }
+    }
+  }, [isOpen, autoStart, initialInput, input, links, results.length, loading]);
 
   const extractedMeta = useMemo(() => {
     const map: Record<string, {
@@ -486,7 +473,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
          }
  
          // Update detection per batch (if movie, keep movie, if any link is series, whole batch is series)
-         if (ql.season || ql.episode) {
+         if (ql.season || ql.episode || ql.isFullSeasonMKV || ql.isFullSeasonZIP || /full season|all episodes|complete/i.test(sourceText)) {
            batch.detectMetadata.type = "series";
          }
          
@@ -526,7 +513,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
     const detectedLangs = new Set<string>();
     let detectedPrintQuality: string | undefined;
     let detectedSubtitles = false;
-    let detectedType: "movie" | "series" = "movie";
+    let detectedType: "movie" | "series" | undefined;
     let detectedSeason: number | undefined;
     let detectedEpisode: number | undefined;
 
@@ -541,6 +528,10 @@ export const LinkCheckerModal: React.FC<Props> = ({
       }
       if (r.subtitleLabel || /subtitles|subs|softsub|hardsub|esub|esubs|msub|msubs/i.test(source)) {
         detectedSubtitles = true;
+      }
+
+      if (r.isFullSeasonMKV || r.isFullSeasonZIP || /full season|all episodes|complete/i.test(source)) {
+        detectedType = "series";
       }
 
       // Detect Series vs Movie
@@ -623,9 +614,19 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
   useEffect(() => {
     if (isOpen) {
-      pasteFromClipboard(true);
+      if (initialInput) {
+        setInput(initialInput);
+      } else {
+        setInput('');
+      }
+      setResults([]);
+      setSelectedUrls(new Set());
+      setError(null);
+      setExpanded({});
+      setIsReviewingBatch(false);
+      setBatchReviewItems([]);
     }
-  }, [isOpen]);
+  }, [isOpen, initialInput]);
 
   const reset = () => {
     setInput("");
@@ -917,6 +918,21 @@ export const LinkCheckerModal: React.FC<Props> = ({
                                   {result.isFullSeasonMKV ? <span className="rounded-full border border-purple-200 dark:border-purple-800 bg-purple-500/10 px-2.5 py-1 text-[11px] font-bold text-purple-600 dark:text-purple-300">Full Season MKV</span> : null}
                                   {result.isFullSeasonZIP ? <span className="rounded-full border border-purple-200 dark:border-purple-800 bg-purple-500/10 px-2.5 py-1 text-[11px] font-bold text-purple-600 dark:text-purple-300">Full Season ZIP</span> : null}
                                 </div>
+                                {result.candidates && result.candidates.length > 0 && (
+                                  <div className="mt-2 flex flex-wrap gap-2 items-center">
+                                    <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 mr-1 flex items-center gap-1.5"><Server className="h-3.5 w-3.5" /> Downloads:</span>
+                                    {result.candidates.map((cand, idx) => {
+                                      // Improve text (e.g. from "[fslv2 server]" or "download [fsl server]")
+                                      let name = cand.text.replace(/download/i, '').replace(/\[|\]/g, '').trim();
+                                      if (!name) return null;
+                                      return (
+                                        <span key={idx} className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-200/50 dark:bg-zinc-800/50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-600 dark:text-zinc-300">
+                                          {name}
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                )}
                                 <div className="mt-2 break-all text-sm text-zinc-700 dark:text-zinc-200">{result.url}</div>
                                 {result.finalUrl && result.finalUrl !== result.url && (
                                   <div className="mt-1 break-all text-xs text-zinc-500 dark:text-zinc-400">Redirects to: {result.finalUrl}</div>
