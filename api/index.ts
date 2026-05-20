@@ -2,7 +2,7 @@ import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
-import firebaseConfig from "../firebase-applet-config.json" assert { type: "json" };
+const firebaseConfig = JSON.parse(fs.readFileSync(path.join(__dirname, "../firebase-applet-config.json"), "utf8"));
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 import axios from "axios";
