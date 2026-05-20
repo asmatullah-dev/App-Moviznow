@@ -287,13 +287,13 @@ export default function Home({
     try {
       const standardized = standardizePhone(whatsappNumber);
       if (!standardized) {
-        setWhatsappError("Please enter a valid WhatsApp number");
+        setWhatsappError("Please enter a valid phone number");
         setIsSavingWhatsapp(false);
         return;
       }
 
-      await updateUserProfileData({ phone: standardized });
-      await refreshProfile();
+      await updateUserProfileData({ phone: standardized }, undefined, true);
+      await refreshProfile(true);
       setShowWhatsappPrompt(false);
     } catch (error: any) {
       console.error("Failed to save WhatsApp number", error);

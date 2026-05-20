@@ -2977,40 +2977,33 @@ export default function ContentManagement() {
       return data;
     };
 
-    const extractUrls = (items: any[]) => {
-      items?.forEach((ld: any) => {
-        if (ld?.url) urls.push(ld.url);
-        if (ld?.links && Array.isArray(ld.links)) {
-          ld.links.forEach((l: any) => {
-            if (l?.url) urls.push(l.url);
-          });
-        }
-      });
-    };
-
     if (content.type === 'movie' && content.movieLinks) {
-       extractUrls(safeParse(content.movieLinks));
+       const parsed = safeParse(content.movieLinks);
+       parsed.forEach((ml: any) => ml.links?.forEach((ld: any) => urls.push(ld.url)));
     } else if (content.type === 'series') {
        if (content.seasons) {
           const parsed = safeParse(content.seasons);
           parsed.forEach((s: any) => {
-            extractUrls(s.zipLinks || []);
-            extractUrls(s.mkvLinks || []);
+            s.zipLinks?.forEach((ml: any) => ml.links?.forEach((ld: any) => urls.push(ld.url)));
+            s.mkvLinks?.forEach((ml: any) => ml.links?.forEach((ld: any) => urls.push(ld.url)));
             s.episodes?.forEach((e: any) => {
-               extractUrls(e.links || []);
+               e.links?.forEach((ml: any) => ml.links?.forEach((ld: any) => urls.push(ld.url)));
             });
           });
        }
        if (content.fullSeasonZip) {
-          extractUrls(safeParse(content.fullSeasonZip));
+          const parsed = safeParse(content.fullSeasonZip);
+          parsed.forEach((ml: any) => ml.links?.forEach((ld: any) => urls.push(ld.url)));
        }
        if (content.fullSeasonMkv) {
-          extractUrls(safeParse(content.fullSeasonMkv));
+          const parsed = safeParse(content.fullSeasonMkv);
+          parsed.forEach((ml: any) => ml.links?.forEach((ld: any) => urls.push(ld.url)));
        }
     }
     
     if ((content as any).telegramLinks) {
-      extractUrls(safeParse((content as any).telegramLinks));
+      const parsed = safeParse((content as any).telegramLinks);
+      parsed.forEach((ml: any) => ml.links?.forEach((ld: any) => urls.push(ld.url)));
     }
     
     // Also grab trailer directly if we want

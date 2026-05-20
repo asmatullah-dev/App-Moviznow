@@ -109,13 +109,6 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
   useModalBehavior(isOpen, onClose);
 
-  const links = useMemo(() => {
-    if (!autoExtract) {
-      return input.split(/\r?\n/).map((s) => normalizeUrl(s)).filter(Boolean);
-    }
-    return splitLinks(input).map(normalizeUrl).filter(Boolean);
-  }, [input, autoExtract]);
-
   // Auto-start check if requested
   React.useEffect(() => {
     if (isOpen && autoStart && initialInput && results.length === 0 && !loading) {
@@ -124,6 +117,22 @@ export const LinkCheckerModal: React.FC<Props> = ({
       }
     }
   }, [isOpen, autoStart, initialInput, input, links, results.length, loading]);
+
+  // Auto-paste from clipboard when modal opens
+  // Removed automatic paste
+  
+  // Auto-paste from clipboard when window gains focus
+  // Removed automatic paste
+  
+  // Periodic clipboard check while modal is open
+  // Removed periodic check
+
+  const links = useMemo(() => {
+    if (!autoExtract) {
+      return input.split(/\r?\n/).map((s) => normalizeUrl(s)).filter(Boolean);
+    }
+    return splitLinks(input).map(normalizeUrl).filter(Boolean);
+  }, [input, autoExtract]);
 
   const extractedMeta = useMemo(() => {
     const map: Record<string, {
