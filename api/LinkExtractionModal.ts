@@ -119,7 +119,7 @@ async function executeFetchHtmlBypass(url: string, timeoutMs: number): Promise<{
         titleText.includes("just a moment") ||
         titleText.includes("cloudflare") ||
         titleText.includes("ddos protection");
-      if (!isCf && html.length > 2000) {
+      if (!isCf && html.length > 1000) {
         console.log(`[Bypass] Fast direct fetch succeeded for ${url}`);
         return { html, isCf: false };
       }
@@ -130,6 +130,46 @@ async function executeFetchHtmlBypass(url: string, timeoutMs: number): Promise<{
 
   // 2. Prepare racing tasks with AbortController boundaries
   const tasks = [
+    {
+      name: "corsproxy",
+      fn: async (signal: AbortSignal) => {
+        const cpUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+        const res = await axios.get(cpUrl, { timeout: timeoutMs, signal });
+        if (res.data && typeof res.data === "string" && res.data.length > 1000) {
+          const html = res.data;
+          const $ = cheerio.load(html);
+          const titleText = $("title").text().toLowerCase();
+          const isCf =
+            titleText.includes("just a moment") ||
+            titleText.includes("cloudflare") ||
+            titleText.includes("ddos protection");
+          if (!isCf) {
+            return { html, isCf: false, source: "corsproxy" };
+          }
+        }
+        throw new Error("Corsproxy.io failed or returned Cloudflare");
+      }
+    },
+    {
+      name: "codetabs",
+      fn: async (signal: AbortSignal) => {
+        const ctUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`;
+        const res = await axios.get(ctUrl, { timeout: timeoutMs, signal });
+        if (res.data && typeof res.data === "string" && res.data.length > 1000) {
+          const html = res.data;
+          const $ = cheerio.load(html);
+          const titleText = $("title").text().toLowerCase();
+          const isCf =
+            titleText.includes("just a moment") ||
+            titleText.includes("cloudflare") ||
+            titleText.includes("ddos protection");
+          if (!isCf) {
+            return { html, isCf: false, source: "codetabs" };
+          }
+        }
+        throw new Error("CodeTabs failed or returned Cloudflare");
+      }
+    },
     {
       name: "microlink-standard",
       fn: async (signal: AbortSignal) => {
@@ -143,7 +183,7 @@ async function executeFetchHtmlBypass(url: string, timeoutMs: number): Promise<{
             titleText.includes("just a moment") ||
             titleText.includes("cloudflare") ||
             titleText.includes("ddos protection");
-          if (!isCf && html.length > 2000) {
+          if (!isCf && html.length > 1000) {
             return { html, isCf: false, source: "microlink-standard" };
           }
         }
@@ -164,7 +204,7 @@ async function executeFetchHtmlBypass(url: string, timeoutMs: number): Promise<{
             titleText.includes("just a moment") ||
             titleText.includes("cloudflare") ||
             titleText.includes("ddos protection");
-          if (!isCf && html.length > 2000) {
+          if (!isCf && html.length > 1000) {
             return { html, isCf: false, source: "microlink-prerender" };
           }
         }
@@ -184,7 +224,7 @@ async function executeFetchHtmlBypass(url: string, timeoutMs: number): Promise<{
             titleText.includes("just a moment") ||
             titleText.includes("cloudflare") ||
             titleText.includes("ddos protection");
-          if (!isCf && html.length > 2000) {
+          if (!isCf && html.length > 1000) {
             return { html, isCf: false, source: "allorigins" };
           }
         }
@@ -202,9 +242,9 @@ async function executeFetchHtmlBypass(url: string, timeoutMs: number): Promise<{
     console.log(`[Bypass] Racing attempts failed: ${err.message}. Falling back to last-ditch direct.`);
   }
 
-  // 3. Last-Ditch Direct Fetch (2200ms max timeout)
+  // 3. Last-Ditch Direct Fetch (1800ms max timeout)
   try {
-    const res = await axios.get(url, { headers, timeout: 2200, validateStatus: () => true });
+    const res = await axios.get(url, { headers, timeout: 1800, validateStatus: () => true });
     if (res.data && typeof res.data === "string") {
       const html = res.data;
       const $ = cheerio.load(html);
@@ -223,6 +263,8 @@ async function executeFetchHtmlBypass(url: string, timeoutMs: number): Promise<{
 }
 
 linkExtractionRouter.post("/api/hubcloud/extract", async (req, res) => {
+  const start = Date.now();
+  const BUDGET = 6500; // 6.5s budget to prevent Vercel 10s timeout
   try {
     const { url } = req.body;
     if (
@@ -241,7 +283,8 @@ linkExtractionRouter.post("/api/hubcloud/extract", async (req, res) => {
       return res.json(cached.data);
     }
 
-    const fetchResult = await fetchHtmlBypass(url);
+    const remaining = BUDGET - (Date.now() - start);
+    const fetchResult = await fetchHtmlBypass(url, Math.min(remaining - 500, 3200));
     if (!fetchResult) {
       return res.json({
         size: "",
@@ -331,9 +374,15 @@ linkExtractionRouter.post("/api/hubcloud/extract", async (req, res) => {
   }
 });
 
-async function performExtraction(url: string, checkOnly: boolean, depth = 0): Promise<any> {
+async function performExtraction(url: string, checkOnly: boolean, depth = 0, deadline: number = Date.now() + 6500): Promise<any> {
   try {
     if (depth > 2) return { url, candidates: [], size: "" };
+    const remaining = deadline - Date.now();
+    if (remaining < 1200) {
+      console.log(`[Bypass] Aborting performExtraction early: only ${remaining}ms left in budget.`);
+      return { url, candidates: [], size: "" };
+    }
+
     const headers = {
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -347,7 +396,7 @@ async function performExtraction(url: string, checkOnly: boolean, depth = 0): Pr
           headers: { ...headers, Range: "bytes=0-0" },
           maxRedirects: 0,
           validateStatus: () => true,
-          timeout: 1800,
+          timeout: Math.min(remaining - 300, 1800),
         });
         if (
           checkRes.status < 400 ||
@@ -379,7 +428,7 @@ async function performExtraction(url: string, checkOnly: boolean, depth = 0): Pr
       return { url };
     }
 
-    const fetchResult = await fetchHtmlBypass(url);
+    const fetchResult = await fetchHtmlBypass(url, Math.min(remaining - 500, 3200));
     if (!fetchResult) {
       return { url };
     }
@@ -419,7 +468,11 @@ async function performExtraction(url: string, checkOnly: boolean, depth = 0): Pr
         return { url };
       }
     } else {
-      const fetchResult2 = await fetchHtmlBypass(nextUrl);
+      const remaining2 = deadline - Date.now();
+      if (remaining2 < 1200) {
+        return { url, candidates: [] };
+      }
+      const fetchResult2 = await fetchHtmlBypass(nextUrl, Math.min(remaining2 - 500, 3200));
       if (fetchResult2) {
         if (fetchResult2.isCf) {
           return { url, isCloudflare: true };
@@ -507,11 +560,17 @@ async function performExtraction(url: string, checkOnly: boolean, depth = 0): Pr
 
     const checkPromises = candidateLinks.map(async (candidate, index) => {
       let checkUrl = candidate.href;
+      const remainingCheck = deadline - Date.now();
+      if (remainingCheck < 1000) {
+        // Safe check skip: just assume it works to avoid timing out the whole execution
+        return { index, link: candidate.href };
+      }
+
       const checkRes = await axios.get(checkUrl, {
         headers: { ...headers, Range: "bytes=0-0" },
         maxRedirects: 0,
         validateStatus: () => true,
-        timeout: 1500,
+        timeout: Math.min(remainingCheck - 300, 1500),
       });
 
       let resultLink = candidate.href;
@@ -523,12 +582,16 @@ async function performExtraction(url: string, checkOnly: boolean, depth = 0): Pr
         checkRes.headers.location
       ) {
         resultLink = checkRes.headers.location;
+        const remainingNext = deadline - Date.now();
+        if (remainingNext < 1000) {
+          return { index, link: resultLink };
+        }
         try {
           const nextRes = await axios.get(resultLink, {
             headers: { ...headers, Range: "bytes=0-0" },
             maxRedirects: 0,
             validateStatus: () => true,
-            timeout: 1500,
+            timeout: Math.min(remainingNext - 300, 1500),
           });
           if (
             nextRes.status >= 300 &&
@@ -656,7 +719,7 @@ async function performExtraction(url: string, checkOnly: boolean, depth = 0): Pr
 
     if (nextHubcloudLink && nextHubcloudLink !== url) {
        try {
-         const recursiveRes = await performExtraction(nextHubcloudLink, false, depth + 1);
+         const recursiveRes = await performExtraction(nextHubcloudLink, false, depth + 1, deadline);
          if (recursiveRes.candidates && recursiveRes.candidates.length > 0) {
            if (!recursiveRes.size && sizeInfo) recursiveRes.size = sizeInfo;
            if (recursiveRes.url) {
@@ -666,7 +729,7 @@ async function performExtraction(url: string, checkOnly: boolean, depth = 0): Pr
        } catch (e) {
          console.error("Recursion error", e);
        }
-    }
+     }
 
     return {
       url: workingLink,
@@ -680,6 +743,9 @@ async function performExtraction(url: string, checkOnly: boolean, depth = 0): Pr
 }
 
 linkExtractionRouter.post("/api/hubcloud/direct-link", async (req, res) => {
+  const start = Date.now();
+  const BUDGET = 7500; // 7.5s budget
+  const deadline = start + BUDGET;
   try {
     const { url, checkOnly } = req.body;
     const cacheKey = `direct_${url}_${checkOnly}`;
@@ -689,7 +755,7 @@ linkExtractionRouter.post("/api/hubcloud/direct-link", async (req, res) => {
       return res.json(cached.data);
     }
 
-    const data = await performExtraction(url, checkOnly, 0);
+    const data = await performExtraction(url, checkOnly, 0, deadline);
 
     // Return ok stuff for checkOnly
     if (checkOnly && data && data.ok !== undefined) {
