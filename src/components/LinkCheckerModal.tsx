@@ -16,8 +16,7 @@ import {
   ChevronUp,
   Siren,
   Plus,
-  X,
-  Server
+  X
 } from "lucide-react";
 import { QualityLinks, Language, Quality, LinkDef } from '../types';
 import { 
@@ -918,21 +917,6 @@ export const LinkCheckerModal: React.FC<Props> = ({
                                   {result.isFullSeasonMKV ? <span className="rounded-full border border-purple-200 dark:border-purple-800 bg-purple-500/10 px-2.5 py-1 text-[11px] font-bold text-purple-600 dark:text-purple-300">Full Season MKV</span> : null}
                                   {result.isFullSeasonZIP ? <span className="rounded-full border border-purple-200 dark:border-purple-800 bg-purple-500/10 px-2.5 py-1 text-[11px] font-bold text-purple-600 dark:text-purple-300">Full Season ZIP</span> : null}
                                 </div>
-                                {result.candidates && result.candidates.length > 0 && (
-                                  <div className="mt-2 flex flex-wrap gap-2 items-center">
-                                    <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 mr-1 flex items-center gap-1.5"><Server className="h-3.5 w-3.5" /> Downloads:</span>
-                                    {result.candidates.map((cand, idx) => {
-                                      // Improve text (e.g. from "[fslv2 server]" or "download [fsl server]")
-                                      let name = cand.text.replace(/download/i, '').replace(/\[|\]/g, '').trim();
-                                      if (!name) return null;
-                                      return (
-                                        <span key={idx} className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-200/50 dark:bg-zinc-800/50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-600 dark:text-zinc-300">
-                                          {name}
-                                        </span>
-                                      );
-                                    })}
-                                  </div>
-                                )}
                                 <div className="mt-2 break-all text-sm text-zinc-700 dark:text-zinc-200">{result.url}</div>
                                 {result.finalUrl && result.finalUrl !== result.url && (
                                   <div className="mt-1 break-all text-xs text-zinc-500 dark:text-zinc-400">Redirects to: {result.finalUrl}</div>

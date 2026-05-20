@@ -26,7 +26,6 @@ import { Content, QualityLinks, Season, Trailer } from "../../types";
 import { useAuth } from "../../contexts/AuthContext";
 import { useContent } from "../../contexts/ContentContext";
 import { useCart } from "../../contexts/CartContext";
-import { safeStorage } from "../../utils/safeStorage";
 import {
   Film,
   ArrowLeft,
@@ -205,7 +204,7 @@ export default function MovieDetails() {
 
   const [fullContent, setFullContent] = useState<Content | null>(() => {
     if (id) {
-      const cached = safeStorage.getItem(`movie_details_${id}`);
+      const cached = localStorage.getItem(`movie_details_${id}`);
       if (cached) {
         try {
           const parsed = JSON.parse(cached);
@@ -234,7 +233,7 @@ export default function MovieDetails() {
   useEffect(() => {
     if (id) {
       // Load full content cache
-      const cachedFull = safeStorage.getItem(`movie_details_${id}`);
+      const cachedFull = localStorage.getItem(`movie_details_${id}`);
       if (cachedFull) {
         try {
           const parsed = JSON.parse(cachedFull);
@@ -251,7 +250,7 @@ export default function MovieDetails() {
       }
 
       // Load metadata cache
-      const cachedMeta = safeStorage.getItem(`content_cache_${id}`);
+      const cachedMeta = localStorage.getItem(`content_cache_${id}`);
       if (cachedMeta) {
         try {
           setCachedMetadata({ id: id || "", data: JSON.parse(cachedMeta) });
@@ -277,7 +276,7 @@ export default function MovieDetails() {
 
   useEffect(() => {
     try {
-      const recentStr = safeStorage.getItem("recently_viewed");
+      const recentStr = localStorage.getItem("recently_viewed");
       if (recentStr) {
         setRecentlyViewed(JSON.parse(recentStr));
       }
@@ -349,7 +348,7 @@ export default function MovieDetails() {
                 );
                 expanded.order = content.order;
                 setFullContent(expanded);
-                safeStorage.setItem(
+                localStorage.setItem(
                   `movie_details_${id}`,
                   JSON.stringify(expanded),
                 );
@@ -361,7 +360,7 @@ export default function MovieDetails() {
           const data = await getContent(id);
           if (data) {
             setFullContent(data);
-            safeStorage.setItem(`movie_details_${id}`, JSON.stringify(data));
+            localStorage.setItem(`movie_details_${id}`, JSON.stringify(data));
           } else {
             setFetchFailed(true);
           }
@@ -582,13 +581,13 @@ export default function MovieDetails() {
 
         // Add to recently viewed
         try {
-          const recentStr = safeStorage.getItem("recently_viewed");
+          const recentStr = localStorage.getItem("recently_viewed");
           let recent: Content[] = recentStr ? JSON.parse(recentStr) : [];
           // Remove if already exists
           recent = recent.filter((c) => c.id !== mergedContent.id);
 
           // Save full content to local storage for offline access
-          safeStorage.setItem(
+          localStorage.setItem(
             `movie_details_${mergedContent.id}`,
             JSON.stringify(mergedContent),
           );
@@ -597,7 +596,7 @@ export default function MovieDetails() {
           recent.unshift(mergedContent);
           // Keep max 100
           if (recent.length > 100) recent = recent.slice(0, 100);
-          safeStorage.setItem("recently_viewed", JSON.stringify(recent));
+          localStorage.setItem("recently_viewed", JSON.stringify(recent));
         } catch (e) {
           console.error("Failed to update recently viewed", e);
         }
@@ -638,7 +637,7 @@ export default function MovieDetails() {
         if (mergedContent.imdbRating !== hasLiveRating) {
           setCachedMetadata((prev) => {
             const newCache = { ...prev.data, imdbRating: hasLiveRating };
-            safeStorage.setItem(
+            localStorage.setItem(
               `content_cache_${id}`,
               JSON.stringify(newCache),
             );
@@ -670,7 +669,7 @@ export default function MovieDetails() {
           if (mergedContent.imdbRating !== newRating) {
             setCachedMetadata((prev) => {
               const newCache = { ...prev.data, imdbRating: newRating };
-              safeStorage.setItem(
+              localStorage.setItem(
                 `content_cache_${id}`,
                 JSON.stringify(newCache),
               );
@@ -1041,7 +1040,7 @@ export default function MovieDetails() {
         setCachedMetadata((prev) => {
           if (prev.id !== id) return prev;
           const newCache = { ...prev.data, ...updates };
-          safeStorage.setItem(`content_cache_${id}`, JSON.stringify(newCache));
+          localStorage.setItem(`content_cache_${id}`, JSON.stringify(newCache));
           return { ...prev, data: newCache };
         });
       }
@@ -1262,7 +1261,7 @@ export default function MovieDetails() {
     let finalCandidates: { text: string; href: string }[] | undefined;
     let finalSize: string | undefined;
 
-    if (url.includes("hubcloud") || url.includes("moviesdrive") || url.includes("vcloud") || url.includes("hubdrive")) {
+    if (url.includes("hubcloud") || url.includes("moviesdrives") || url.includes("vcloud")) {
       const clickId = url;
       setExtractingLinkId(clickId);
       // Immediately open the popup with a temporary "extracting" state, so user gets feedback
@@ -1279,8 +1278,8 @@ export default function MovieDetails() {
       const now = Date.now();
       const cached = hubcloudCacheRef.current[url];
 
-      // If we have a cached link within 30 seconds, try to check if it's working
-      if (cached && now - cached.timestamp < 30000) {
+      // If we have a cached link within 1 minute, try to check if it's working
+      if (cached && now - cached.timestamp < 60000) {
         try {
           // Check if the cached link is still alive by hitting it in the backend
           const checkRes = await fetch("/api/hubcloud/direct-link", {
@@ -3342,13 +3341,13 @@ export default function MovieDetails() {
               if (fullContent) {
                 const updatedFullContent = { ...fullContent, ...updateData };
                 setFullContent(updatedFullContent);
-                safeStorage.setItem(
+                localStorage.setItem(
                   `movie_details_${id}`,
                   JSON.stringify(updatedFullContent),
                 );
               } else if (content) {
                 const updatedContent = { ...content, ...updateData };
-                safeStorage.setItem(
+                localStorage.setItem(
                   `movie_details_${id}`,
                   JSON.stringify(updatedContent),
                 );
@@ -3357,7 +3356,7 @@ export default function MovieDetails() {
               // Update cachedMetadata with the new data to prevent flickering before onSnapshot fires
               setCachedMetadata((prev) => {
                 const newCache = { ...prev.data, ...updateData };
-                safeStorage.setItem(
+                localStorage.setItem(
                   `content_cache_${id}`,
                   JSON.stringify(newCache),
                 );

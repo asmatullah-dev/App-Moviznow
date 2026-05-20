@@ -640,7 +640,7 @@ export default function ErrorLinks() {
   const handleUrlBlur = async (url: string) => {
     if (!url) return;
     
-    if (url.includes('hubcloud') || url.includes('moviesdrive') || url.includes('vcloud') || url.includes('hubdrive')) {
+    if (url.includes('hubcloud') || url.includes('moviesdrives') || url.includes('vcloud')) {
       try {
         const res = await fetch("/api/hubcloud/extract", {
           method: "POST",
