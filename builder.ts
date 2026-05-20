@@ -11,11 +11,11 @@ let code = fs.readFileSync(filePath, 'utf8');
 
 const originalSignature = 'linkExtractionRouter.post("/api/hubcloud/direct-link", async (req, res) => {\\n    try {\\n      const { url, checkOnly } = req.body;';
 
-const newSignature = \`
+const newSignature = `
   async function performExtraction(url: string, checkOnly: boolean, depth = 0): Promise<any> {
-    try {\`;
+    try {`;
 
-const endOfCodeToReplace = \`      const bodyText = $("body").text();
+const endOfCodeToReplace = `      const bodyText = $("body").text();
       let sizeInfo = "";
       const sizeMatch = bodyText.match(/File Size\\s*([\\d.]+\\s*[A-Za-z]+)/i);
       if (sizeMatch && sizeMatch[1]) {
@@ -78,13 +78,13 @@ const endOfCodeToReplace = \`      const bodyText = $("body").text();
     } catch (e: any) {
       console.error(e);
       return { url };
-    }\`;
+    }`;
 
 // Let's locate the ending
 code = code.replace(originalSignature, newSignature);
 
 // Replacing the return json logic
-const returnLogic = \`      res.json({
+const returnLogic = `      res.json({
         url: workingLink,
         candidates: returnCandidates,
         size: sizeInfo,
@@ -92,12 +92,12 @@ const returnLogic = \`      res.json({
     } catch (e: any) {
       console.error(e);
       res.json({ url: req.body.url });
-    }\`;
+    }`;
 
 code = code.replace(returnLogic, endOfCodeToReplace);
 
 // We still need to expose the API route!
-code = code.replace('  });\\n', \`  }
+code = code.replace('  });\n', `  }
 
   linkExtractionRouter.post("/api/hubcloud/direct-link", async (req, res) => {
     try {
@@ -119,7 +119,7 @@ code = code.replace('  });\\n', \`  }
       console.error(e);
       res.json({ url: req.body.url });
     }
-  });\\n\`);
+  });\n`);
 
 // Also fix res.json return inside checkOnly
 code = code.replace(/return res\\.json\\(\\{ ok: true \\}\\);/g, 'return { ok: true };');
