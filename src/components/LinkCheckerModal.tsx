@@ -109,30 +109,15 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
   useModalBehavior(isOpen, onClose);
 
-  // Auto-start check if requested
-  React.useEffect(() => {
-    if (isOpen && autoStart && initialInput && results.length === 0 && !loading) {
-      if (input === initialInput && links.length > 0) {
-        handleCheck(links);
-      }
-    }
-  }, [isOpen, autoStart, initialInput, input, links, results.length, loading]);
-
-  // Auto-paste from clipboard when modal opens
-  // Removed automatic paste
-  
-  // Auto-paste from clipboard when window gains focus
-  // Removed automatic paste
-  
-  // Periodic clipboard check while modal is open
-  // Removed periodic check
-
   const links = useMemo(() => {
     if (!autoExtract) {
       return input.split(/\r?\n/).map((s) => normalizeUrl(s)).filter(Boolean);
     }
     return splitLinks(input).map(normalizeUrl).filter(Boolean);
   }, [input, autoExtract]);
+
+  // Auto-start check tracker
+  const autoStartedInputRef = React.useRef<string | null>(null);
 
   const extractedMeta = useMemo(() => {
     const map: Record<string, {
@@ -151,6 +136,11 @@ export const LinkCheckerModal: React.FC<Props> = ({
     }
     return map;
   }, [input, links, languages, qualities]);
+
+  const extractedMetaRef = React.useRef(extractedMeta);
+  React.useEffect(() => {
+    extractedMetaRef.current = extractedMeta;
+  }, [extractedMeta]);
 
   const firstType = useMemo(() => (links[0] ? guessLinkType(links[0]) : "General link"), [links]);
 
@@ -231,7 +221,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
         const u = queue.shift()!;
         
         try {
-          const result = await performFullLinkScan(u, extractedMeta, languages, qualities);
+          const result = await performFullLinkScan(u, extractedMetaRef.current, languages, qualities);
 
           allResults.push(result);
           completedCount++;
@@ -634,8 +624,20 @@ export const LinkCheckerModal: React.FC<Props> = ({
       setExpanded({});
       setIsReviewingBatch(false);
       setBatchReviewItems([]);
+
+      if (autoStart && initialInput && autoStartedInputRef.current !== initialInput) {
+        const initialLinks = autoExtract 
+          ? splitLinks(initialInput).map(normalizeUrl).filter(Boolean)
+          : initialInput.split(/\r?\n/).map((s) => normalizeUrl(s)).filter(Boolean);
+        if (initialLinks.length > 0) {
+          autoStartedInputRef.current = initialInput;
+          handleCheck(initialLinks);
+        }
+      }
+    } else {
+      autoStartedInputRef.current = null;
     }
-  }, [isOpen, initialInput]);
+  }, [isOpen, initialInput, autoStart, autoExtract]);
 
   const reset = () => {
     setInput("");

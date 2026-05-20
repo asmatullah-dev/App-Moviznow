@@ -129,20 +129,20 @@ export default function Trial() {
     }
     
     if (standardized.length < 10) {
-      setPhoneError('Please enter a valid phone number with correct length');
+      setPhoneError('Please enter a valid WhatsApp number with correct length');
       return;
     }
 
     try {
       setIsSubmittingPhone(true);
-      await updateUserProfileData({ phone: standardized }, undefined, true);
-      await refreshProfile(true);
+      await updateUserProfileData({ phone: standardized });
+      await refreshProfile();
       setStatus('loading');
       setMessage('Activating your trial...');
       await activateTrial();
     } catch (error: any) {
-      console.error('Error saving phone number:', error);
-      setPhoneError(error.message || 'Failed to save phone number. Please try again.');
+      console.error('Error saving WhatsApp number:', error);
+      setPhoneError(error.message || 'Failed to save WhatsApp number. Please try again.');
       setIsSubmittingPhone(false);
     }
   };

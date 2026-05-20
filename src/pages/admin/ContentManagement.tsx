@@ -2977,33 +2977,40 @@ export default function ContentManagement() {
       return data;
     };
 
+    const extractUrls = (items: any[]) => {
+      items?.forEach((ld: any) => {
+        if (ld?.url) urls.push(ld.url);
+        if (ld?.links && Array.isArray(ld.links)) {
+          ld.links.forEach((l: any) => {
+            if (l?.url) urls.push(l.url);
+          });
+        }
+      });
+    };
+
     if (content.type === 'movie' && content.movieLinks) {
-       const parsed = safeParse(content.movieLinks);
-       parsed.forEach((ml: any) => ml.links?.forEach((ld: any) => urls.push(ld.url)));
+       extractUrls(safeParse(content.movieLinks));
     } else if (content.type === 'series') {
        if (content.seasons) {
           const parsed = safeParse(content.seasons);
           parsed.forEach((s: any) => {
-            s.zipLinks?.forEach((ml: any) => ml.links?.forEach((ld: any) => urls.push(ld.url)));
-            s.mkvLinks?.forEach((ml: any) => ml.links?.forEach((ld: any) => urls.push(ld.url)));
+            extractUrls(s.zipLinks || []);
+            extractUrls(s.mkvLinks || []);
             s.episodes?.forEach((e: any) => {
-               e.links?.forEach((ml: any) => ml.links?.forEach((ld: any) => urls.push(ld.url)));
+               extractUrls(e.links || []);
             });
           });
        }
        if (content.fullSeasonZip) {
-          const parsed = safeParse(content.fullSeasonZip);
-          parsed.forEach((ml: any) => ml.links?.forEach((ld: any) => urls.push(ld.url)));
+          extractUrls(safeParse(content.fullSeasonZip));
        }
        if (content.fullSeasonMkv) {
-          const parsed = safeParse(content.fullSeasonMkv);
-          parsed.forEach((ml: any) => ml.links?.forEach((ld: any) => urls.push(ld.url)));
+          extractUrls(safeParse(content.fullSeasonMkv));
        }
     }
     
     if ((content as any).telegramLinks) {
-      const parsed = safeParse((content as any).telegramLinks);
-      parsed.forEach((ml: any) => ml.links?.forEach((ld: any) => urls.push(ld.url)));
+      extractUrls(safeParse((content as any).telegramLinks));
     }
     
     // Also grab trailer directly if we want
