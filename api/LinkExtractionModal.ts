@@ -183,6 +183,7 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
       
       extractionCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
 
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
       res.json(responseData);
     } catch (e: any) {
       console.error("Hubcloud extract error:", e.message);
@@ -250,11 +251,13 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
         return { url };
       }
 
+      console.log(`Extracting HubCloud: ${url}`);
       const response = await axios.get(url, {
         headers,
         validateStatus: () => true,
         timeout: 4500, // Slightly tighter first call
       });
+      console.log(`Response status: ${response.status}`);
       let $ = cheerio.load(response.data);
 
       const titleText = $("title").text().toLowerCase();
@@ -266,6 +269,7 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
         response.status === 503;
 
       if (isCf) {
+        console.log("Cloudflare detected, trying Microlink...");
         try {
           // Rapidly check if Microlink is even available (common rate limiting on Vercel)
           const dlRes = await axios.get(
@@ -273,6 +277,7 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
             { timeout: 7000 },
           );
           if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
+            console.log("Microlink returned content.");
             const proxyTitle =
               cheerio.load(dlRes.data.data.body)("title").text().toLowerCase() || "";
             if (
@@ -282,12 +287,14 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
             ) {
               $ = cheerio.load(dlRes.data.data.body);
             } else {
+              console.log("Microlink also returned Cloudflare.");
               return { url: url, isCloudflare: true };
             }
           } else {
             return { url: url, isCloudflare: true };
           }
         } catch (err) {
+          console.error("Microlink error:", err);
           return { url: url, isCloudflare: true };
         }
       }
@@ -300,18 +307,58 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
         $('a:contains("Generate Download Link")').attr("href") ||
         $('a:contains("Generate Link")').attr("href") ||
         $('a:contains("Download Now")').attr("href") ||
+        $('a:contains("Direct Download")').attr("href") ||
+        $('a:contains("Click to Download")').attr("href") ||
         $("a.btn-zip").attr("href") ||
         $("a.btn-primary").attr("href") ||
-        $("a.btn-success").attr("href");
+        $("a.btn-success").attr("href") ||
+        $("a.btn-info").attr("href");
 
-      // Extract url from script for vcloud if href is missing
+      // Specific for HubDrive/MoviesDrive forms
+      if (!nextUrl) {
+        const form = $('form');
+        if (form.length > 0) {
+          const action = form.attr('action');
+          if (action) {
+            console.log(`Found form action: ${action}`);
+            // Check if form has a button that looks like download
+            const hasDownloadBtn = form.find('button, input[type="submit"]').filter(function() {
+              const t = $(this).text().toLowerCase() || $(this).val()?.toString().toLowerCase() || "";
+              return t.includes('download') || t.includes('generate') || t.includes('link');
+            }).length > 0;
+
+            if (hasDownloadBtn) {
+              nextUrl = action;
+            }
+          }
+        }
+      }
+
+      console.log(`Next URL: ${nextUrl}`);
+
+      // Extract url from script for vcloud/hubcloud if href is missing
       if (!nextUrl) {
          const scriptHtml = $.html();
          const match = scriptHtml.match(/var\s+url\s*=\s*['"]([^'"]+)['"]/i) || 
-                       scriptHtml.match(/location\.href\s*=\s*['"]([^'"]+)['"]/i);
-         if (match && match[1]) {
+                       scriptHtml.match(/location\.href\s*=\s*['"]([^'"]+)['"]/i) ||
+                       scriptHtml.match(/window\.location\.replace\(['"]([^'"]+)['"]\)/i) ||
+                       scriptHtml.match(/window\.location\s*=\s*['"]([^'"]+)['"]/i) ||
+                       scriptHtml.match(/location\.replace\(['"]([^'"]+)['"]\)/i) ||
+                       scriptHtml.match(/setTimeout\(.*['"]([^'"]+)['"].*\)/i);
+         if (match && match[1] && match[1].startsWith('http')) {
             nextUrl = match[1];
          }
+      }
+
+      if (!nextUrl) {
+         console.log("Failed to find nextUrl, searching in all links...");
+         $("a").each((i, el) => {
+           const href = $(el).attr("href") || "";
+           const text = $(el).text().toLowerCase();
+           if (href && (text.includes("download") || text.includes("generate")) && (href.includes("hubcloud") || href.includes("hubdrive") || href.includes("vcloud"))) {
+             nextUrl = href;
+           }
+         });
       }
 
       let $2 = null;
@@ -364,10 +411,14 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
       }
 
       const candidateLinks: { text: string; href: string }[] = [];
-      $2("a.btn").each((i, el) => {
+      $2("a.btn, a.btn-primary, a.btn-success, a.btn-info, a.btn-danger, a.btn-warning, button.btn").each((i, el) => {
         let href = $2(el).attr("href") || "";
         const text = $2(el).text().toLowerCase();
         const id = $2(el).attr("id");
+
+        if (!href && $2(el).is('button')) {
+           // check if button triggers a script
+        }
 
         if (id) {
           $2("script").each((_, scriptEl) => {
@@ -638,6 +689,7 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
       }
 
       extractionCache.set(cacheKey, { data, timestamp: Date.now() });
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
       return res.json(data);
     } catch (e: any) {
       console.error(e);
