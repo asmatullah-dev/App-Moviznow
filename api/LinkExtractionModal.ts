@@ -97,7 +97,7 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
         try {
           // Use Microlink proxy API to bypass Cloudflare
           const dlRes = await axios.get(
-            `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
+            `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true&prerender=true`,
             { timeout: 8000 },
           );
           if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
@@ -264,7 +264,7 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
       if (isCf) {
         try {
           const dlRes = await axios.get(
-            `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
+            `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true&prerender=true`,
             { timeout: 8000 },
           );
           if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
@@ -328,7 +328,7 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
         if (isCf2) {
           try {
             const dlRes2 = await axios.get(
-              `https://api.microlink.io/?url=${encodeURIComponent(nextUrl)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
+              `https://api.microlink.io/?url=${encodeURIComponent(nextUrl)}&meta=false&data.body.selector=body&data.body.attr=html&force=true&prerender=true`,
               { timeout: 8000 },
             );
             if (dlRes2.data && dlRes2.data.data && dlRes2.data.data.body) {
