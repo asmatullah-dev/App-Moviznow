@@ -8,6 +8,13 @@ import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 import axios from "axios";
 import * as cheerio from "cheerio";
+import http from "http";
+import https from "https";
+
+const httpAgent = new http.Agent({ family: 4 });
+const httpsAgent = new https.Agent({ family: 4, rejectUnauthorized: false });
+axios.defaults.httpAgent = httpAgent;
+axios.defaults.httpsAgent = httpsAgent;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -697,33 +704,27 @@ async function startServer() {
         !currentHost.includes("raj.lat")
       ) {
         try {
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 8000);
-          const redirectCheck = await fetch(currentUrl, {
-            method: "HEAD",
+          const redirectCheck = await axios.head(currentUrl, {
             headers,
-            redirect: "follow",
-            signal: controller.signal,
+            maxRedirects: 5,
+            timeout: 8000,
+            validateStatus: () => true
           });
-          clearTimeout(timeout);
-          if (redirectCheck.url && redirectCheck.url !== currentUrl) {
-            currentUrl = redirectCheck.url;
+          if (redirectCheck.request?.res?.responseUrl && redirectCheck.request.res.responseUrl !== currentUrl) {
+            currentUrl = redirectCheck.request.res.responseUrl;
             currentParsed = new URL(currentUrl);
             currentHost = currentParsed.hostname.replace(/^www\./, "");
           }
         } catch (e) {
           try {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 8000);
-            const redirectCheckGet = await fetch(currentUrl, {
-              method: "GET",
+            const redirectCheckGet = await axios.get(currentUrl, {
               headers: { ...headers, Range: "bytes=0-0" },
-              redirect: "follow",
-              signal: controller.signal,
+              maxRedirects: 5,
+              timeout: 8000,
+              validateStatus: () => true
             });
-            clearTimeout(timeout);
-            if (redirectCheckGet.url && redirectCheckGet.url !== currentUrl) {
-              currentUrl = redirectCheckGet.url;
+            if (redirectCheckGet.request?.res?.responseUrl && redirectCheckGet.request.res.responseUrl !== currentUrl) {
+              currentUrl = redirectCheckGet.request.res.responseUrl;
               currentParsed = new URL(currentUrl);
               currentHost = currentParsed.hostname.replace(/^www\./, "");
             }
@@ -741,20 +742,17 @@ async function startServer() {
         if (match?.[1]) {
           const fileId = match[1];
           try {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 8000);
-              const infoRes = await fetch(
+              const infoRes = await axios.get(
                 `https://pixeldrain.com/api/file/${fileId}/info`,
                 {
-                  method: "GET",
                   headers: {
                     ...headers,
                     Accept: "application/json,text/plain,*/*",
                   },
-                  signal: controller.signal
+                  timeout: 8000,
+                  validateStatus: () => true
                 },
               );
-              clearTimeout(timeout);
               
               if (infoRes.status === 404) {
                 return res.json({
@@ -780,25 +778,25 @@ async function startServer() {
                 });
               }
               
-              if (infoRes.ok) {
-                const data = await infoRes.json().catch(() => null);
+              if (infoRes.status >= 200 && infoRes.status < 300) {
+                const data = infoRes.data;
                 if (data) {
 
-
-              const dlRes = await fetch(
+              const dlRes = await axios.get(
                 `https://pixeldrain.com/api/file/${fileId}`,
                 {
-                  method: "GET",
                   headers: { ...headers, Range: "bytes=0-0" },
-                  redirect: "manual",
+                  maxRedirects: 0,
+                  timeout: 8000,
+                  validateStatus: () => true
                 },
               ).catch(() => null);
 
               const contentType =
-                dlRes?.headers.get("content-type") || "pixeldrain/file";
-              const disposition =
-                dlRes?.headers.get("content-disposition") || "";
-              const contentLength = dlRes?.headers.get("content-length");
+                dlRes?.headers?.["content-type"] || "pixeldrain/file";
+              const dispositionRaw = dlRes?.headers?.["content-disposition"] || "";
+              const disposition = Array.isArray(dispositionRaw) ? dispositionRaw.join(' ') : dispositionRaw;
+              const contentLength = dlRes?.headers?.["content-length"];
               const fileSize =
                 typeof data?.size === "number"
                   ? data.size
@@ -902,15 +900,21 @@ async function startServer() {
       // RAJ / GATE CHECK
       if (currentHost === "hub.raj.lat" || currentHost.endsWith(".raj.lat")) {
         try {
-          const fetchRes = await fetch(currentUrl, {
-            method: "GET",
+          const fetchRes = await axios.get(currentUrl, {
             headers,
-            redirect: "manual",
+            maxRedirects: 0,
+            validateStatus: () => true,
+            timeout: 8000
           });
-          const location = fetchRes.headers.get("location") || undefined;
-          const contentType = fetchRes.headers.get("content-type") || undefined;
-          const disposition = fetchRes.headers.get("content-disposition") || "";
-          const contentLength = fetchRes.headers.get("content-length");
+          const locationRaw = fetchRes.headers["location"] || undefined;
+          const location = Array.isArray(locationRaw) ? locationRaw.join('') : locationRaw;
+          const contentTypeRaw = fetchRes.headers["content-type"] || undefined;
+          const contentType = Array.isArray(contentTypeRaw) ? contentTypeRaw.join('') : contentTypeRaw;
+          const dispositionRaw = fetchRes.headers["content-disposition"] || "";
+          const disposition = Array.isArray(dispositionRaw) ? dispositionRaw.join(' ') : dispositionRaw;
+          const contentLengthInfo = fetchRes.headers["content-length"];
+          const contentLength = Array.isArray(contentLengthInfo) ? contentLengthInfo[0] : contentLengthInfo;
+          
           const fileSize = contentLength ? Number(contentLength) : undefined;
           const fileSizeText = formatBytes(fileSize);
           const isAttachment = /attachment/i.test(disposition);
@@ -925,7 +929,7 @@ async function startServer() {
             ? decodeURIComponent(fileNameMatch[1])
             : undefined;
 
-          if (isDirectDownload && (fetchRes.ok || isPartial)) {
+          if (isDirectDownload && ((fetchRes.status >= 200 && fetchRes.status < 300) || isPartial)) {
             return res.json({
               ok: true,
               status: fetchRes.status,
@@ -955,7 +959,7 @@ async function startServer() {
             });
           }
 
-          const html = await fetchRes.text().catch(() => "");
+          const html = (typeof fetchRes.data === 'string' ? fetchRes.data : JSON.stringify(fetchRes.data || "")) || "";
           const lower = html.toLowerCase();
           if (
             lower.includes("not found") ||
@@ -994,7 +998,7 @@ async function startServer() {
               host: currentHost,
             });
           }
-          if (fetchRes.ok) {
+          if (fetchRes.status >= 200 && fetchRes.status < 300) {
             return res.json({
               ok: true,
               status: fetchRes.status,
@@ -1011,45 +1015,39 @@ async function startServer() {
 
       // GENERAL CHECK
       try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 12000);
-
-        let res_fetch: Response;
+        let res_fetch: any;
         try {
-          res_fetch = await fetch(currentUrl, {
-            method: "HEAD",
+          res_fetch = await axios.head(currentUrl, {
             headers,
-            redirect: "follow",
-            signal: controller.signal,
+            maxRedirects: 5,
+            timeout: 12000,
+            validateStatus: () => true
           });
-          if (!res_fetch.ok || res_fetch.status === 405) {
-            const getController = new AbortController();
-            const getTimeout = setTimeout(() => getController.abort(), 12000);
-            res_fetch = await fetch(currentUrl, {
-              method: "GET",
+          if (res_fetch.status >= 400 || res_fetch.status === 405) {
+            res_fetch = await axios.get(currentUrl, {
               headers: { ...headers, Range: "bytes=0-0" },
-              redirect: "follow",
-              signal: getController.signal,
+              maxRedirects: 5,
+              timeout: 12000,
+              validateStatus: () => true
             });
-            clearTimeout(getTimeout);
           }
         } catch (fetchErr: any) {
-          clearTimeout(timeout);
           return res.json({
             ok: false,
             statusLabel: "UNKNOWN",
-            message: "Network error or timeout reaching host: " + (fetchErr.message || String(fetchErr)) + (fetchErr.cause ? ` (${fetchErr.cause.message || String(fetchErr.cause)})` : ""),
+            message: "Network error or timeout reaching host: " + (fetchErr.message || String(fetchErr)),
             finalUrl: currentUrl,
             source: "general-check",
             host: currentHost,
           });
         }
 
-        clearTimeout(timeout);
-
-        const contentType = res_fetch.headers.get("content-type") || undefined;
-        const disposition = res_fetch.headers.get("content-disposition") || "";
-        const contentLength = res_fetch.headers.get("content-length");
+        const contentType = res_fetch.headers["content-type"] || undefined;
+        let disposition = res_fetch.headers["content-disposition"] || "";
+        if (Array.isArray(disposition)) {
+           disposition = disposition.join(' ');
+        }
+        const contentLength = res_fetch.headers["content-length"];
         const fileSize = contentLength ? Number(contentLength) : undefined;
         const fileSizeText = formatBytes(fileSize);
         const isAttachment = /attachment/i.test(disposition);
@@ -1064,7 +1062,7 @@ async function startServer() {
           ? decodeURIComponent(fileNameMatch[1])
           : undefined;
 
-        if (res_fetch.ok || res_fetch.status === 206) {
+        if (res_fetch.status < 400 || res_fetch.status === 206) {
           return res.json({
             ok: true,
             status: res_fetch.status,
@@ -1072,7 +1070,7 @@ async function startServer() {
             message: isDirectDownload
               ? "Valid direct file / download link detected."
               : "Link is reachable",
-            finalUrl: res_fetch.url,
+            finalUrl: res_fetch.request?.res?.responseUrl || currentUrl,
             contentType,
             isDirectDownload,
             fileName,
@@ -1088,12 +1086,12 @@ async function startServer() {
           status: res_fetch.status,
           statusLabel: "BROKEN",
           message: `HTTP ${res_fetch.status}`,
-          finalUrl: res_fetch.url || currentUrl,
+          finalUrl: res_fetch.request?.res?.responseUrl || currentUrl,
           contentType,
           source: "general-check",
           host: currentHost,
         });
-      } catch {
+      } catch (error: any) {
         return res.json({
           ok: false,
           statusLabel: "UNKNOWN",
