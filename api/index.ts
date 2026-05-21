@@ -16,22 +16,45 @@ import https from "https";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Initialize Firebase Admin
-if (!admin.apps.length) {
-  let credential;
-  if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-    credential = admin.credential.cert(
-      JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON),
-    );
+// Initialize Firebase Admin gracefully to prevent startup crashes on serverless environments like Vercel
+let db: admin.firestore.Firestore | null = null;
+try {
+  if (!admin.apps.length) {
+    let credential;
+    if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+      try {
+        credential = admin.credential.cert(
+          JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON),
+        );
+      } catch (jsonErr: any) {
+        console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON:", jsonErr.message);
+      }
+    }
+    
+    // Fallback to applicationDefault only if JSON cert is not provided, and wrap in try/catch to avoid crash
+    if (!credential) {
+      try {
+        credential = admin.credential.applicationDefault();
+      } catch (appDefaultErr: any) {
+        console.warn("Could not load Firebase applicationDefault credentials:", appDefaultErr.message);
+      }
+    }
+
+    if (credential) {
+      admin.initializeApp({
+        credential,
+        projectId: firebaseConfig.projectId,
+      });
+      db = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
+    } else {
+      console.warn("Firebase credentials not available. Firebase features are disabled/limited.");
+    }
   } else {
-    credential = admin.credential.applicationDefault();
+    db = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
   }
-  admin.initializeApp({
-    credential,
-    projectId: firebaseConfig.projectId,
-  });
+} catch (error: any) {
+  console.error("Firebase Admin Initialization Error:", error.message);
 }
-const db = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
 
 import crypto from "crypto";
 
@@ -72,7 +95,11 @@ async function getSyncApps(
 
   // Try fallback to the default app if no specific source key provided/parsable
   if (!sourceApp) {
-    sourceApp = admin.app();
+    try {
+      sourceApp = admin.app();
+    } catch {
+      sourceApp = null;
+    }
   }
 
   let targetApp = getAppFromKey(targetKey, "sync_tgt");
@@ -96,6 +123,12 @@ async function startServer() {
       if (!links || !Array.isArray(links)) {
         console.log("Invalid links array");
         return res.status(400).json({ error: "Links array required" });
+      }
+
+      if (!db) {
+        return res.status(503).json({
+          error: "Firebase Firestore is not configured/initialized on this environment (missing FIREBASE_SERVICE_ACCOUNT_JSON in Vercel)",
+        });
       }
 
       // Start background process
@@ -614,6 +647,11 @@ async function startServer() {
           return res.status(400).json({ error: "Missing uid or adminUid" });
 
         // Verify admin
+        if (!db) {
+          return res.status(503).json({
+            error: "Firebase Firestore is not configured/initialized on this environment",
+          });
+        }
         const adminDoc = await db.collection("users").doc(adminUid).get();
         if (
           !adminDoc.exists ||
@@ -705,7 +743,7 @@ async function startServer() {
           const redirectCheck = await axios.head(currentUrl, {
             headers,
             maxRedirects: 5,
-            timeout: 8000,
+            timeout: 4000,
             validateStatus: () => true
           });
           if (redirectCheck.request?.res?.responseUrl && redirectCheck.request.res.responseUrl !== currentUrl) {
@@ -718,7 +756,7 @@ async function startServer() {
             const redirectCheckGet = await axios.get(currentUrl, {
               headers: { ...headers, Range: "bytes=0-0" },
               maxRedirects: 5,
-              timeout: 8000,
+              timeout: 4000,
               validateStatus: () => true
             });
             if (redirectCheckGet.request?.res?.responseUrl && redirectCheckGet.request.res.responseUrl !== currentUrl) {
@@ -747,7 +785,7 @@ async function startServer() {
                     ...headers,
                     Accept: "application/json,text/plain,*/*",
                   },
-                  timeout: 8000,
+                  timeout: 4000,
                   validateStatus: () => true
                 },
               );
@@ -785,7 +823,7 @@ async function startServer() {
                 {
                   headers: { ...headers, Range: "bytes=0-0" },
                   maxRedirects: 0,
-                  timeout: 8000,
+                  timeout: 4000,
                   validateStatus: () => true
                 },
               ).catch(() => null);
@@ -793,7 +831,7 @@ async function startServer() {
               const contentType =
                 dlRes?.headers?.["content-type"] || "pixeldrain/file";
               const dispositionRaw = dlRes?.headers?.["content-disposition"] || "";
-              const disposition = Array.isArray(dispositionRaw) ? dispositionRaw.join(' ') : dispositionRaw;
+              const disposition = Array.isArray(dispositionRaw) ? dispositionRaw.join(' ') : String(dispositionRaw);
               const contentLength = dlRes?.headers?.["content-length"];
               const fileSize =
                 typeof data?.size === "number"
@@ -902,14 +940,18 @@ async function startServer() {
             headers,
             maxRedirects: 0,
             validateStatus: () => true,
-            timeout: 8000
+            timeout: 4000
           });
-          const locationRaw = fetchRes.headers["location"] || undefined;
-          const location = Array.isArray(locationRaw) ? locationRaw.join('') : locationRaw;
-          const contentTypeRaw = fetchRes.headers["content-type"] || undefined;
-          const contentType = Array.isArray(contentTypeRaw) ? contentTypeRaw.join('') : contentTypeRaw;
+          const locationRaw = fetchRes.headers["location"];
+          const location = locationRaw 
+            ? (Array.isArray(locationRaw) ? locationRaw.join('') : String(locationRaw)) 
+            : undefined;
+          const contentTypeRaw = fetchRes.headers["content-type"];
+          const contentType = contentTypeRaw 
+            ? (Array.isArray(contentTypeRaw) ? contentTypeRaw.join('') : String(contentTypeRaw)) 
+            : undefined;
           const dispositionRaw = fetchRes.headers["content-disposition"] || "";
-          const disposition = Array.isArray(dispositionRaw) ? dispositionRaw.join(' ') : dispositionRaw;
+          const disposition = Array.isArray(dispositionRaw) ? dispositionRaw.join(' ') : String(dispositionRaw);
           const contentLengthInfo = fetchRes.headers["content-length"];
           const contentLength = Array.isArray(contentLengthInfo) ? contentLengthInfo[0] : contentLengthInfo;
           
@@ -1018,14 +1060,14 @@ async function startServer() {
           res_fetch = await axios.head(currentUrl, {
             headers,
             maxRedirects: 5,
-            timeout: 12000,
+            timeout: 4000,
             validateStatus: () => true
           });
           if (res_fetch.status >= 400 || res_fetch.status === 405) {
             res_fetch = await axios.get(currentUrl, {
               headers: { ...headers, Range: "bytes=0-0" },
               maxRedirects: 5,
-              timeout: 12000,
+              timeout: 4000,
               validateStatus: () => true
             });
           }
@@ -1041,10 +1083,8 @@ async function startServer() {
         }
 
         const contentType = res_fetch.headers["content-type"] || undefined;
-        let disposition = res_fetch.headers["content-disposition"] || "";
-        if (Array.isArray(disposition)) {
-           disposition = disposition.join(' ');
-        }
+        const rawDisp = res_fetch.headers["content-disposition"] || "";
+        const disposition = Array.isArray(rawDisp) ? rawDisp.join(' ') : String(rawDisp);
         const contentLength = res_fetch.headers["content-length"];
         const fileSize = contentLength ? Number(contentLength) : undefined;
         const fileSizeText = formatBytes(fileSize);
@@ -1795,7 +1835,7 @@ async function startServer() {
       }
     });
   } else {
-    const distPath = path.resolve(__dirname, "../dist");
+    const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath, { index: false })); // Disable default index.html serving
 
     // Explicitly serve PWA files with correct MIME types
