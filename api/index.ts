@@ -11,10 +11,7 @@ import * as cheerio from "cheerio";
 import http from "http";
 import https from "https";
 
-const httpAgent = new http.Agent({ family: 4 });
-const httpsAgent = new https.Agent({ family: 4, rejectUnauthorized: false });
-axios.defaults.httpAgent = httpAgent;
-axios.defaults.httpsAgent = httpsAgent;
+// Removed custom agents that break Vercel deployments
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -134,10 +131,10 @@ async function startServer() {
         const checkPixeldrainLink = async (url: string) => {
           if (!url || url.trim() === "") return { error: "Empty link" };
           const fileMatch = url.match(
-            /pixeldrain\.(?:com|dev)\/(?:u|api\/file)\/([a-zA-Z0-9]+)/,
+            /pixeldrain\.(?:com|dev|net)\/(?:u|api\/file)\/([a-zA-Z0-9]+)/,
           );
           const listMatch = url.match(
-            /pixeldrain\.(?:com|dev)\/(?:l|api\/list)\/([a-zA-Z0-9]+)/,
+            /pixeldrain\.(?:com|dev|net)\/(?:l|api\/list)\/([a-zA-Z0-9]+)/,
           );
 
           try {
@@ -504,7 +501,7 @@ async function startServer() {
             let fetchUrl = link.url;
             // If it's a pixeldrain link, use the API for faster checking
             const pdMatch = fetchUrl.match(
-              /pixeldrain\.(?:com|dev)\/(?:u|api\/file)\/([a-zA-Z0-9]+)/,
+              /pixeldrain\.(?:com|dev|net)\/(?:u|api\/file)\/([a-zA-Z0-9]+)/,
             );
             if (pdMatch) {
               fetchUrl = `https://pixeldrain.com/api/file/${pdMatch[1]}/info`;
@@ -701,6 +698,7 @@ async function startServer() {
       if (
         !currentHost.includes("pixeldrain.com") &&
         !currentHost.includes("pixeldrain.dev") &&
+        !currentHost.includes("pixeldrain.net") &&
         !currentHost.includes("raj.lat")
       ) {
         try {
@@ -738,7 +736,7 @@ async function startServer() {
         currentHost.includes("pixeldrain.dev") ||
         currentHost.includes("pixeldrain.net")
       ) {
-        const match = currentParsed.pathname.match(/\/u\/([^/?#]+)/);
+        const match = currentParsed.pathname.match(/\/(?:u|api\/file)\/([^/?#]+)/);
         if (match?.[1]) {
           const fileId = match[1];
           try {
@@ -848,7 +846,7 @@ async function startServer() {
                 });
               }
 
-              if (dlRes.ok || dlRes.status === 206 || dlRes.status === 302) {
+              if ((dlRes.status >= 200 && dlRes.status < 300) || dlRes.status === 302) {
                 return res.json({
                   ok: true,
                   status: dlRes.status || 200,
