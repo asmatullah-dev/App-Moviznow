@@ -1033,12 +1033,12 @@ async function startServer() {
             });
             clearTimeout(getTimeout);
           }
-        } catch (fetchErr) {
+        } catch (fetchErr: any) {
           clearTimeout(timeout);
           return res.json({
             ok: false,
             statusLabel: "UNKNOWN",
-            message: "Network error or timeout reaching host",
+            message: "Network error or timeout reaching host: " + (fetchErr.message || String(fetchErr)) + (fetchErr.cause ? ` (${fetchErr.cause.message || String(fetchErr.cause)})` : ""),
             finalUrl: currentUrl,
             source: "general-check",
             host: currentHost,
@@ -1103,12 +1103,12 @@ async function startServer() {
           host: currentHost,
         });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Check Link Error:", error);
       res.status(500).json({
         ok: false,
         statusLabel: "UNKNOWN",
-        message: "Unexpected server error",
+        message: "Unexpected server error: " + (error.message || String(error)),
       });
     }
   });

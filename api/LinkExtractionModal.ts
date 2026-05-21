@@ -1,15 +1,6 @@
 import { Router } from 'express';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import http from 'http';
-import https from 'https';
-
-const httpAgent = new http.Agent({ family: 4 });
-const httpsAgent = new https.Agent({ family: 4, rejectUnauthorized: false });
-
-axios.defaults.httpAgent = httpAgent;
-axios.defaults.httpsAgent = httpsAgent;
-axios.defaults.timeout = 8000;
 
 export const linkExtractionRouter = Router();
 
@@ -53,6 +44,7 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
           timeout: 8000,
         });
       } catch (err: any) {
+        console.error("LinkExtractionModal fetch error:", err.message);
         response = {
           status: 403,
           data: '<title>cloudflare</title>',
