@@ -3,7 +3,6 @@ import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
-import firebaseConfig from "../firebase-applet-config.json" assert { type: "json" };
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 import axios from "axios";
@@ -15,6 +14,29 @@ import https from "https";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Read Firebase Config safely to prevent static JSON import crash on Vercel
+let firebaseConfig: any = {};
+try {
+  const configPath = path.resolve(process.cwd(), "firebase-applet-config.json");
+  if (fs.existsSync(configPath)) {
+    firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+  } else {
+    const parentConfigPath = path.resolve(__dirname, "../firebase-applet-config.json");
+    if (fs.existsSync(parentConfigPath)) {
+      firebaseConfig = JSON.parse(fs.readFileSync(parentConfigPath, "utf-8"));
+    } else {
+      const nestedConfigPath = path.resolve(__dirname, "firebase-applet-config.json");
+      if (fs.existsSync(nestedConfigPath)) {
+        firebaseConfig = JSON.parse(fs.readFileSync(nestedConfigPath, "utf-8"));
+      } else {
+        console.warn("No firebase-applet-config.json found at runtime paths.");
+      }
+    }
+  }
+} catch (configErr) {
+  console.error("Error loading firebase-applet-config.json:", configErr);
+}
 
 // Initialize Firebase Admin gracefully to prevent startup crashes on serverless environments like Vercel
 let db: admin.firestore.Firestore | null = null;
