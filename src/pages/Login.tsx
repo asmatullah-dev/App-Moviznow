@@ -77,7 +77,7 @@ export default function Login() {
 
   const formatIdentifier = (input: string) => {
     const trimmed = input.trim();
-    // If it looks like a phone number (contains digits, maybe starts with + or 0)
+    // If it looks like a WhatsApp number (contains digits, maybe starts with + or 0)
     if (/^[\d+]+$/.test(trimmed)) {
       return standardizePhone(trimmed);
     }
@@ -142,7 +142,7 @@ export default function Login() {
           setStep('create_password');
         }
       } else {
-        // Not registered, check if it's a phone number and if it's whitelisted
+        // Not registered, check if it's a WhatsApp number and if it's whitelisted
         const isEmail = identifier.includes('@');
         if (!isEmail) {
           const standardizedPhone = standardizePhone(rawTrimmed);
@@ -336,7 +336,7 @@ export default function Login() {
                   placeholder="0311..."
                 />
               </div>
-              <p className="text-[10px] text-zinc-400 mt-1">For phone numbers, +92 will be added automatically if missing.</p>
+              <p className="text-[10px] text-zinc-400 mt-1">For WhatsApp numbers, +92 will be added automatically if missing.</p>
             </div>
             <button
               type="submit"

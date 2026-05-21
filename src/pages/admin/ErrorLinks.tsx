@@ -302,7 +302,7 @@ export default function ErrorLinks() {
               info: {
                 contentId: content.id,
                 contentTitle: content.title,
-                contentType: 'movie',
+                contentType: 'series',
                 location: 'Full Season ZIP',
                 link,
                 linkIndex: idx,
@@ -321,7 +321,7 @@ export default function ErrorLinks() {
               info: {
                 contentId: content.id,
                 contentTitle: content.title,
-                contentType: 'movie',
+                contentType: 'series',
                 location: 'Full Season MKV',
                 link,
                 linkIndex: idx,
@@ -470,39 +470,37 @@ export default function ErrorLinks() {
       const updatedContent = { ...content };
       let deleted = false;
       
-      if (info.contentType === 'movie') {
-        if (info.listType === 'movie') {
-          const links = parseLinks(content.movieLinks);
-          const idx = links.findIndex(l => l.url === info.link.url) !== -1 
-            ? links.findIndex(l => l.url === info.link.url)
-            : info.linkIndex;
-          if (idx !== -1 && links[idx]) {
-            links.splice(idx, 1);
-            updatedContent.movieLinks = JSON.stringify(links);
-            deleted = true;
-          }
-        } else if (info.listType === 'zip') {
-          const links = parseLinks(content.fullSeasonZip);
-          const idx = links.findIndex(l => l.url === info.link.url) !== -1 
-            ? links.findIndex(l => l.url === info.link.url)
-            : info.linkIndex;
-          if (idx !== -1 && links[idx]) {
-            links.splice(idx, 1);
-            updatedContent.fullSeasonZip = JSON.stringify(links);
-            deleted = true;
-          }
-        } else if (info.listType === 'mkv') {
-          const links = parseLinks(content.fullSeasonMkv);
-          const idx = links.findIndex(l => l.url === info.link.url) !== -1 
-            ? links.findIndex(l => l.url === info.link.url)
-            : info.linkIndex;
-          if (idx !== -1 && links[idx]) {
-            links.splice(idx, 1);
-            updatedContent.fullSeasonMkv = JSON.stringify(links);
-            deleted = true;
-          }
+      if (info.listType === 'movie') {
+        const links = parseLinks(content.movieLinks);
+        const idx = links.findIndex(l => l.url === info.link.url) !== -1 
+          ? links.findIndex(l => l.url === info.link.url)
+          : info.linkIndex;
+        if (idx !== -1 && links[idx]) {
+          links.splice(idx, 1);
+          updatedContent.movieLinks = JSON.stringify(links);
+          deleted = true;
         }
-      } else if (content.type === 'series' && content.seasons) {
+      } else if (info.listType === 'zip' && info.seasonIndex === undefined && content.fullSeasonZip) {
+        const links = parseLinks(content.fullSeasonZip);
+        const idx = links.findIndex(l => l.url === info.link.url) !== -1 
+          ? links.findIndex(l => l.url === info.link.url)
+          : info.linkIndex;
+        if (idx !== -1 && links[idx]) {
+          links.splice(idx, 1);
+          updatedContent.fullSeasonZip = JSON.stringify(links);
+          deleted = true;
+        }
+      } else if (info.listType === 'mkv' && info.seasonIndex === undefined && content.fullSeasonMkv) {
+        const links = parseLinks(content.fullSeasonMkv);
+        const idx = links.findIndex(l => l.url === info.link.url) !== -1 
+          ? links.findIndex(l => l.url === info.link.url)
+          : info.linkIndex;
+        if (idx !== -1 && links[idx]) {
+          links.splice(idx, 1);
+          updatedContent.fullSeasonMkv = JSON.stringify(links);
+          deleted = true;
+        }
+      } else if (content.seasons && info.seasonIndex !== undefined) {
         try {
           const seasons: Season[] = Array.isArray(content.seasons) ? content.seasons : JSON.parse(content.seasons || '[]');
           const sIdx = info.seasonIndex!;
@@ -640,7 +638,7 @@ export default function ErrorLinks() {
   const handleUrlBlur = async (url: string) => {
     if (!url) return;
     
-    if (url.includes('hubcloud') || url.includes('moviesdrives') || url.includes('vcloud')) {
+    if (url.includes('hubcloud') || url.includes('moviesdrive') || url.includes('vcloud') || url.includes('hubdrive')) {
       try {
         const res = await fetch("/api/hubcloud/extract", {
           method: "POST",
@@ -712,7 +710,7 @@ export default function ErrorLinks() {
           };
           updateData.movieLinks = JSON.stringify(links);
         }
-      } else if (editingLink.listType === 'zip' && content.type === 'movie') {
+      } else if (editingLink.listType === 'zip' && content.fullSeasonZip) {
         const links = parseLinks(content.fullSeasonZip);
         if (links[editingLink.linkIndex]) {
           links[editingLink.linkIndex] = {
@@ -724,7 +722,7 @@ export default function ErrorLinks() {
           };
           updateData.fullSeasonZip = JSON.stringify(links);
         }
-      } else if (editingLink.listType === 'mkv' && content.type === 'movie') {
+      } else if (editingLink.listType === 'mkv' && content.fullSeasonMkv) {
         const links = parseLinks(content.fullSeasonMkv);
         if (links[editingLink.linkIndex]) {
           links[editingLink.linkIndex] = {
@@ -736,7 +734,7 @@ export default function ErrorLinks() {
           };
           updateData.fullSeasonMkv = JSON.stringify(links);
         }
-      } else if (content.type === 'series' && content.seasons) {
+      } else if (content.seasons) {
         try {
           const seasons: Season[] = Array.isArray(content.seasons) ? content.seasons : JSON.parse(content.seasons || '[]');
           const sIdx = editingLink.seasonIndex!;

@@ -38,6 +38,7 @@ export type LinkCheckResult = {
   year?: number;
   mismatchWarnings?: string[];
   confidenceScore?: number;
+  candidates?: { text: string; href: string }[];
 };
 
 export function normalizeUrl(input: string) {
@@ -613,16 +614,49 @@ export async function performFullLinkScan(
 
   // HubCloud interception
   let hubcloudTitle = "";
-  if (url.includes("hubcloud") || url.includes("moviesdrives") || url.includes("vcloud")) {
+  if (url.includes("hubcloud") || url.includes("moviesdrive") || url.includes("vcloud") || url.includes("hubdrive")) {
     try {
-      const res = await fetch("/api/hubcloud/extract", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
-      });
-      if (res.ok) {
-        const data = await res.json();
+      const extractController = new AbortController();
+      const extractTimeout = setTimeout(() => extractController.abort(), 7000);
+      
+      const directController = new AbortController();
+      const directTimeout = setTimeout(() => directController.abort(), 8000);
+
+      const [res, dLinkRes] = await Promise.allSettled([
+        fetch("/api/hubcloud/extract", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+          signal: extractController.signal
+        }),
+        fetch("/api/hubcloud/direct-link", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url, checkOnly: false }),
+          signal: directController.signal
+        })
+      ]);
+      
+      clearTimeout(extractTimeout);
+      clearTimeout(directTimeout);
+
+      let candidatesInfo: undefined | any[] = undefined;
+      
+      if (dLinkRes.status === "fulfilled" && dLinkRes.value.ok) {
+        try {
+          const dLinkData = await dLinkRes.value.json();
+          if (dLinkData && dLinkData.candidates) {
+            candidatesInfo = dLinkData.candidates;
+          }
+        } catch (e) {
+          console.error("Direct link parsing error", e);
+        }
+      }
+
+      if (res.status === "fulfilled" && res.value.ok) {
+        const data = await res.value.json();
         if (data.size && data.unit) {
+          hubcloudTitle = data.title || "";
           hubcloudTitle = data.title || "";
           base = {
             url,
@@ -630,6 +664,7 @@ export async function performFullLinkScan(
             statusLabel: "WORKING",
             fileName: hubcloudTitle || undefined,
             fileSizeText: `${data.size} ${data.unit}`,
+            candidates: candidatesInfo
           };
           finalUrlToUse = url;
         } else if (data.isNotFound) {
@@ -647,6 +682,7 @@ export async function performFullLinkScan(
             ok: true,
             statusLabel: "WORKING",
             fileName: hubcloudTitle || undefined,
+            candidates: candidatesInfo
           };
           finalUrlToUse = url;
         } else {
@@ -655,6 +691,7 @@ export async function performFullLinkScan(
             ok: true,
             statusLabel: "WORKING",
             message: "Assuming working (size extraction failed)",
+            candidates: candidatesInfo
           };
           finalUrlToUse = url;
         }
@@ -664,6 +701,7 @@ export async function performFullLinkScan(
           ok: true,
           statusLabel: "WORKING",
           message: "Assuming working (timeout/blocked)",
+          candidates: candidatesInfo
         };
         finalUrlToUse = url;
       }

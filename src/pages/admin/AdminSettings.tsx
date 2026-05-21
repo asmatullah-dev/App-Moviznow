@@ -265,7 +265,7 @@ export default function AdminSettings() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Support WhatsApp / Phone Number (e.g. 3363284466)</label>
+              <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Support WhatsApp Number (e.g. 3363284466)</label>
               <div className="relative">
                 <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
                 <input
