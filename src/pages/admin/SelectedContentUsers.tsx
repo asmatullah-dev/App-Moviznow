@@ -9,7 +9,6 @@ import { smartSearch } from '../../utils/searchUtils';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
 import { useContent } from '../../contexts/ContentContext';
 import { useUsers } from '../../contexts/UsersContext';
-import { safeStorage } from '../../utils/safeStorage';
 
 export default function SelectedContentUsers() {
   const { users: allUsers, loading: usersLoading } = useUsers();
@@ -29,7 +28,7 @@ export default function SelectedContentUsers() {
         assignedContent: assignedContent,
       });
       setUsers(prev => prev.map(u => u.uid === selectedUser.uid ? { ...u, assignedContent } : u));
-      safeStorage.removeItem(`pending_access_${selectedUser.uid}`);
+      localStorage.removeItem(`pending_access_${selectedUser.uid}`);
       setSelectedUser(null);
       setAssignedIds(new Set());
     } catch (error) {
@@ -40,7 +39,7 @@ export default function SelectedContentUsers() {
 
   const handleExit = async () => {
     if (selectedUser) {
-      const pendingAccess = safeStorage.getItem(`pending_access_${selectedUser.uid}`);
+      const pendingAccess = localStorage.getItem(`pending_access_${selectedUser.uid}`);
       if (pendingAccess) {
         try {
           const assignedContent = JSON.parse(pendingAccess);
@@ -48,7 +47,7 @@ export default function SelectedContentUsers() {
             assignedContent: assignedContent,
           });
           setUsers(prev => prev.map(u => u.uid === selectedUser.uid ? { ...u, assignedContent } : u));
-          safeStorage.removeItem(`pending_access_${selectedUser.uid}`);
+          localStorage.removeItem(`pending_access_${selectedUser.uid}`);
         } catch (error) {
           console.error('Error syncing access on exit:', error);
         }
@@ -66,7 +65,7 @@ export default function SelectedContentUsers() {
 
   useEffect(() => {
     if (selectedUser) {
-      safeStorage.setItem(`pending_access_${selectedUser.uid}`, JSON.stringify(Array.from(assignedIds)));
+      localStorage.setItem(`pending_access_${selectedUser.uid}`, JSON.stringify(Array.from(assignedIds)));
     }
   }, [assignedIds, selectedUser]);
 
@@ -76,7 +75,7 @@ export default function SelectedContentUsers() {
 
   const handleManageAccess = (user: UserProfile) => {
     setSelectedUser(user);
-    const cached = safeStorage.getItem(`pending_access_${user.uid}`);
+    const cached = localStorage.getItem(`pending_access_${user.uid}`);
     if (cached) {
       try {
         setAssignedIds(new Set(JSON.parse(cached)));

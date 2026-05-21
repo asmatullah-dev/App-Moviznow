@@ -1,82 +1,32 @@
-import { linkExtractionRouter } from "./LinkExtractionModal";
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
+import firebaseConfig from "../firebase-applet-config.json" assert { type: "json" };
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 import axios from "axios";
 import * as cheerio from "cheerio";
-import http from "http";
-import https from "https";
-
-// Removed custom agents that break Vercel deployments
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Read Firebase Config safely to prevent static JSON import crash on Vercel
-let firebaseConfig: any = {};
-try {
-  const configPath = path.resolve(process.cwd(), "firebase-applet-config.json");
-  if (fs.existsSync(configPath)) {
-    firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+// Initialize Firebase Admin
+if (!admin.apps.length) {
+  let credential;
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+    credential = admin.credential.cert(
+      JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON),
+    );
   } else {
-    const parentConfigPath = path.resolve(__dirname, "../firebase-applet-config.json");
-    if (fs.existsSync(parentConfigPath)) {
-      firebaseConfig = JSON.parse(fs.readFileSync(parentConfigPath, "utf-8"));
-    } else {
-      const nestedConfigPath = path.resolve(__dirname, "firebase-applet-config.json");
-      if (fs.existsSync(nestedConfigPath)) {
-        firebaseConfig = JSON.parse(fs.readFileSync(nestedConfigPath, "utf-8"));
-      } else {
-        console.warn("No firebase-applet-config.json found at runtime paths.");
-      }
-    }
+    credential = admin.credential.applicationDefault();
   }
-} catch (configErr) {
-  console.error("Error loading firebase-applet-config.json:", configErr);
+  admin.initializeApp({
+    credential,
+    projectId: firebaseConfig.projectId,
+  });
 }
-
-// Initialize Firebase Admin gracefully to prevent startup crashes on serverless environments like Vercel
-let db: admin.firestore.Firestore | null = null;
-try {
-  if (!admin.apps.length) {
-    let credential;
-    if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-      try {
-        credential = admin.credential.cert(
-          JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON),
-        );
-      } catch (jsonErr: any) {
-        console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON:", jsonErr.message);
-      }
-    }
-    
-    // Fallback to applicationDefault only if JSON cert is not provided, and wrap in try/catch to avoid crash
-    if (!credential) {
-      try {
-        credential = admin.credential.applicationDefault();
-      } catch (appDefaultErr: any) {
-        console.warn("Could not load Firebase applicationDefault credentials:", appDefaultErr.message);
-      }
-    }
-
-    if (credential) {
-      admin.initializeApp({
-        credential,
-        projectId: firebaseConfig.projectId,
-      });
-      db = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
-    } else {
-      console.warn("Firebase credentials not available. Firebase features are disabled/limited.");
-    }
-  } else {
-    db = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
-  }
-} catch (error: any) {
-  console.error("Firebase Admin Initialization Error:", error.message);
-}
+const db = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
 
 import crypto from "crypto";
 
@@ -117,11 +67,7 @@ async function getSyncApps(
 
   // Try fallback to the default app if no specific source key provided/parsable
   if (!sourceApp) {
-    try {
-      sourceApp = admin.app();
-    } catch {
-      sourceApp = null;
-    }
+    sourceApp = admin.app();
   }
 
   let targetApp = getAppFromKey(targetKey, "sync_tgt");
@@ -145,12 +91,6 @@ async function startServer() {
       if (!links || !Array.isArray(links)) {
         console.log("Invalid links array");
         return res.status(400).json({ error: "Links array required" });
-      }
-
-      if (!db) {
-        return res.status(503).json({
-          error: "Firebase Firestore is not configured/initialized on this environment (missing FIREBASE_SERVICE_ACCOUNT_JSON in Vercel)",
-        });
       }
 
       // Start background process
@@ -186,10 +126,10 @@ async function startServer() {
         const checkPixeldrainLink = async (url: string) => {
           if (!url || url.trim() === "") return { error: "Empty link" };
           const fileMatch = url.match(
-            /pixeldrain\.(?:com|dev|net)\/(?:u|api\/file)\/([a-zA-Z0-9]+)/,
+            /pixeldrain\.(?:com|dev)\/(?:u|api\/file)\/([a-zA-Z0-9]+)/,
           );
           const listMatch = url.match(
-            /pixeldrain\.(?:com|dev|net)\/(?:l|api\/list)\/([a-zA-Z0-9]+)/,
+            /pixeldrain\.(?:com|dev)\/(?:l|api\/list)\/([a-zA-Z0-9]+)/,
           );
 
           try {
@@ -200,17 +140,12 @@ async function startServer() {
               apiUrl = `https://pixeldrain.com/api/list/${listMatch[1]}`;
             else return { error: null };
 
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 8000);
-            const res = await fetch(apiUrl, { signal: controller.signal });
-            clearTimeout(timeout);
-            
+            const res = await fetch(apiUrl);
             if (res.status === 451) return { error: "Unavailable from Server" };
-            if (res.status >= 400 && res.status !== 404) return { error: `HTTP ${res.status}` };
-            
-            const data = await res.json().catch(() => null);
+            if (!res.ok) return { error: `HTTP ${res.status}` };
 
-            if (!data || data.success === false)
+            const data = await res.json();
+            if (data.success === false)
               return { error: "File not found or deleted" };
 
             let sizeInBytes = 0;
@@ -556,7 +491,7 @@ async function startServer() {
             let fetchUrl = link.url;
             // If it's a pixeldrain link, use the API for faster checking
             const pdMatch = fetchUrl.match(
-              /pixeldrain\.(?:com|dev|net)\/(?:u|api\/file)\/([a-zA-Z0-9]+)/,
+              /pixeldrain\.(?:com|dev)\/(?:u|api\/file)\/([a-zA-Z0-9]+)/,
             );
             if (pdMatch) {
               fetchUrl = `https://pixeldrain.com/api/file/${pdMatch[1]}/info`;
@@ -573,11 +508,11 @@ async function startServer() {
               return { ...link, errorDetail: `HTTP ${response.status}` };
             }
             return { ...link, errorDetail: null };
-          } catch (err: any) {
-             if (err.name === "AbortError" || err.message?.includes("Abort")) {
-                return { ...link, errorDetail: "Timeout" };
-             }
-             return { ...link, errorDetail: "Network error" };
+          } catch (e: any) {
+            if (e.name === "AbortError") {
+              return { ...link, errorDetail: "Timeout" };
+            }
+            return { ...link, errorDetail: "Network error" };
           }
         }),
       );
@@ -669,11 +604,6 @@ async function startServer() {
           return res.status(400).json({ error: "Missing uid or adminUid" });
 
         // Verify admin
-        if (!db) {
-          return res.status(503).json({
-            error: "Firebase Firestore is not configured/initialized on this environment",
-          });
-        }
         const adminDoc = await db.collection("users").doc(adminUid).get();
         if (
           !adminDoc.exists ||
@@ -712,9 +642,6 @@ async function startServer() {
   }
 
   // Advanced Link Checker API
-  const checkLinkCache = new Map<string, { data: any, timestamp: number }>();
-  const CHECK_LINK_CACHE_TTL = 30 * 1000;
-
   app.post(["/api/check-link", "/check-link"], async (req, res) => {
     try {
       const { url } = req.body;
@@ -723,13 +650,6 @@ async function startServer() {
           .status(400)
           .json({ ok: false, statusLabel: "BROKEN", message: "Missing URL" });
       }
-
-      const cacheKey = url;
-      const cached = checkLinkCache.get(cacheKey);
-      if (cached && Date.now() - cached.timestamp < CHECK_LINK_CACHE_TTL) {
-         return res.json(cached.data);
-      }
-
 
       let parsed: URL;
       try {
@@ -758,31 +678,36 @@ async function startServer() {
       if (
         !currentHost.includes("pixeldrain.com") &&
         !currentHost.includes("pixeldrain.dev") &&
-        !currentHost.includes("pixeldrain.net") &&
         !currentHost.includes("raj.lat")
       ) {
         try {
-          const redirectCheck = await axios.head(currentUrl, {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 8000);
+          const redirectCheck = await fetch(currentUrl, {
+            method: "HEAD",
             headers,
-            maxRedirects: 5,
-            timeout: 4000,
-            validateStatus: () => true
+            redirect: "follow",
+            signal: controller.signal,
           });
-          if (redirectCheck.request?.res?.responseUrl && redirectCheck.request.res.responseUrl !== currentUrl) {
-            currentUrl = redirectCheck.request.res.responseUrl;
+          clearTimeout(timeout);
+          if (redirectCheck.url && redirectCheck.url !== currentUrl) {
+            currentUrl = redirectCheck.url;
             currentParsed = new URL(currentUrl);
             currentHost = currentParsed.hostname.replace(/^www\./, "");
           }
         } catch (e) {
           try {
-            const redirectCheckGet = await axios.get(currentUrl, {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 8000);
+            const redirectCheckGet = await fetch(currentUrl, {
+              method: "GET",
               headers: { ...headers, Range: "bytes=0-0" },
-              maxRedirects: 5,
-              timeout: 4000,
-              validateStatus: () => true
+              redirect: "follow",
+              signal: controller.signal,
             });
-            if (redirectCheckGet.request?.res?.responseUrl && redirectCheckGet.request.res.responseUrl !== currentUrl) {
-              currentUrl = redirectCheckGet.request.res.responseUrl;
+            clearTimeout(timeout);
+            if (redirectCheckGet.url && redirectCheckGet.url !== currentUrl) {
+              currentUrl = redirectCheckGet.url;
               currentParsed = new URL(currentUrl);
               currentHost = currentParsed.hostname.replace(/^www\./, "");
             }
@@ -796,65 +721,62 @@ async function startServer() {
         currentHost.includes("pixeldrain.dev") ||
         currentHost.includes("pixeldrain.net")
       ) {
-        const match = currentParsed.pathname.match(/\/(?:u|api\/file)\/([^/?#]+)/);
+        const match = currentParsed.pathname.match(/\/u\/([^/?#]+)/);
         if (match?.[1]) {
           const fileId = match[1];
           try {
-              const infoRes = await axios.get(
-                `https://pixeldrain.com/api/file/${fileId}/info`,
-                {
-                  headers: {
-                    ...headers,
-                    Accept: "application/json,text/plain,*/*",
-                  },
-                  timeout: 4000,
-                  validateStatus: () => true
+            const infoRes = await fetch(
+              `https://pixeldrain.com/api/file/${fileId}/info`,
+              {
+                method: "GET",
+                headers: {
+                  ...headers,
+                  Accept: "application/json,text/plain,*/*",
                 },
-              );
-              
-              if (infoRes.status === 404) {
-                return res.json({
-                  ok: false,
-                  status: 404,
-                  statusLabel: "BROKEN",
-                  message: "Pixeldrain file not found or deleted",
-                  finalUrl: currentUrl,
-                  source: "pixeldrain-api",
-                  host: currentHost,
-                });
-              }
+              },
+            );
 
-              if (infoRes.status === 429) {
-                return res.json({
-                  ok: false,
-                  status: 429,
-                  statusLabel: "UNAVAILABLE",
-                  message: "Pixeldrain temporarily unavailable or rate-limited",
-                  finalUrl: currentUrl,
-                  source: "pixeldrain-api",
-                  host: currentHost,
-                });
-              }
-              
-              if (infoRes.status >= 200 && infoRes.status < 300) {
-                const data = infoRes.data;
-                if (data) {
+            if (infoRes.status === 404) {
+              return res.json({
+                ok: false,
+                status: 404,
+                statusLabel: "BROKEN",
+                message: "Pixeldrain file not found or deleted",
+                finalUrl: currentUrl,
+                source: "pixeldrain-api",
+                host: currentHost,
+              });
+            }
 
-              const dlRes = await axios.get(
+            if (infoRes.status === 429) {
+              return res.json({
+                ok: false,
+                status: 429,
+                statusLabel: "UNAVAILABLE",
+                message: "Pixeldrain temporarily unavailable or rate-limited",
+                finalUrl: currentUrl,
+                source: "pixeldrain-api",
+                host: currentHost,
+              });
+            }
+
+            if (infoRes.ok) {
+              const data: any = await infoRes.json();
+
+              const dlRes = await fetch(
                 `https://pixeldrain.com/api/file/${fileId}`,
                 {
+                  method: "GET",
                   headers: { ...headers, Range: "bytes=0-0" },
-                  maxRedirects: 0,
-                  timeout: 4000,
-                  validateStatus: () => true
+                  redirect: "manual",
                 },
               ).catch(() => null);
 
               const contentType =
-                dlRes?.headers?.["content-type"] || "pixeldrain/file";
-              const dispositionRaw = dlRes?.headers?.["content-disposition"] || "";
-              const disposition = Array.isArray(dispositionRaw) ? dispositionRaw.join(' ') : String(dispositionRaw);
-              const contentLength = dlRes?.headers?.["content-length"];
+                dlRes?.headers.get("content-type") || "pixeldrain/file";
+              const disposition =
+                dlRes?.headers.get("content-disposition") || "";
+              const contentLength = dlRes?.headers.get("content-length");
               const fileSize =
                 typeof data?.size === "number"
                   ? data.size
@@ -906,7 +828,7 @@ async function startServer() {
                 });
               }
 
-              if ((dlRes.status >= 200 && dlRes.status < 300) || dlRes.status === 302) {
+              if (dlRes.ok || dlRes.status === 206 || dlRes.status === 302) {
                 return res.json({
                   ok: true,
                   status: dlRes.status || 200,
@@ -941,7 +863,6 @@ async function startServer() {
                 host: currentHost,
               });
             }
-            }
           } catch {
             return res.json({
               ok: false,
@@ -958,25 +879,15 @@ async function startServer() {
       // RAJ / GATE CHECK
       if (currentHost === "hub.raj.lat" || currentHost.endsWith(".raj.lat")) {
         try {
-          const fetchRes = await axios.get(currentUrl, {
+          const fetchRes = await fetch(currentUrl, {
+            method: "GET",
             headers,
-            maxRedirects: 0,
-            validateStatus: () => true,
-            timeout: 4000
+            redirect: "manual",
           });
-          const locationRaw = fetchRes.headers["location"];
-          const location = locationRaw 
-            ? (Array.isArray(locationRaw) ? locationRaw.join('') : String(locationRaw)) 
-            : undefined;
-          const contentTypeRaw = fetchRes.headers["content-type"];
-          const contentType = contentTypeRaw 
-            ? (Array.isArray(contentTypeRaw) ? contentTypeRaw.join('') : String(contentTypeRaw)) 
-            : undefined;
-          const dispositionRaw = fetchRes.headers["content-disposition"] || "";
-          const disposition = Array.isArray(dispositionRaw) ? dispositionRaw.join(' ') : String(dispositionRaw);
-          const contentLengthInfo = fetchRes.headers["content-length"];
-          const contentLength = Array.isArray(contentLengthInfo) ? contentLengthInfo[0] : contentLengthInfo;
-          
+          const location = fetchRes.headers.get("location") || undefined;
+          const contentType = fetchRes.headers.get("content-type") || undefined;
+          const disposition = fetchRes.headers.get("content-disposition") || "";
+          const contentLength = fetchRes.headers.get("content-length");
           const fileSize = contentLength ? Number(contentLength) : undefined;
           const fileSizeText = formatBytes(fileSize);
           const isAttachment = /attachment/i.test(disposition);
@@ -991,7 +902,7 @@ async function startServer() {
             ? decodeURIComponent(fileNameMatch[1])
             : undefined;
 
-          if (isDirectDownload && ((fetchRes.status >= 200 && fetchRes.status < 300) || isPartial)) {
+          if (isDirectDownload && (fetchRes.ok || isPartial)) {
             return res.json({
               ok: true,
               status: fetchRes.status,
@@ -1021,7 +932,7 @@ async function startServer() {
             });
           }
 
-          const html = (typeof fetchRes.data === 'string' ? fetchRes.data : JSON.stringify(fetchRes.data || "")) || "";
+          const html = await fetchRes.text().catch(() => "");
           const lower = html.toLowerCase();
           if (
             lower.includes("not found") ||
@@ -1060,7 +971,7 @@ async function startServer() {
               host: currentHost,
             });
           }
-          if (fetchRes.status >= 200 && fetchRes.status < 300) {
+          if (fetchRes.ok) {
             return res.json({
               ok: true,
               status: fetchRes.status,
@@ -1077,40 +988,45 @@ async function startServer() {
 
       // GENERAL CHECK
       try {
-        let res_fetch: any;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 12000);
+
+        let res_fetch: Response;
         try {
-          res_fetch = await axios.head(currentUrl, {
+          res_fetch = await fetch(currentUrl, {
+            method: "HEAD",
             headers,
-            maxRedirects: 5,
-            timeout: 4000,
-            validateStatus: () => true
+            redirect: "follow",
+            signal: controller.signal,
           });
-          if (res_fetch.status >= 400 || res_fetch.status === 405) {
-            res_fetch = await axios.get(currentUrl, {
+          if (!res_fetch.ok || res_fetch.status === 405) {
+            const getController = new AbortController();
+            const getTimeout = setTimeout(() => getController.abort(), 12000);
+            res_fetch = await fetch(currentUrl, {
+              method: "GET",
               headers: { ...headers, Range: "bytes=0-0" },
-              maxRedirects: 5,
-              timeout: 4000,
-              validateStatus: () => true
+              redirect: "follow",
+              signal: getController.signal,
             });
+            clearTimeout(getTimeout);
           }
-        } catch (fetchErr: any) {
+        } catch (fetchErr) {
+          clearTimeout(timeout);
           return res.json({
             ok: false,
             statusLabel: "UNKNOWN",
-            message: "Network error or timeout reaching host: " + (fetchErr.message || String(fetchErr)),
+            message: "Network error or timeout reaching host",
             finalUrl: currentUrl,
             source: "general-check",
             host: currentHost,
           });
         }
 
-        const contentTypeRaw = res_fetch.headers["content-type"];
-        const contentType = contentTypeRaw 
-          ? (Array.isArray(contentTypeRaw) ? contentTypeRaw.join('') : String(contentTypeRaw)) 
-          : undefined;
-        const rawDisp = res_fetch.headers["content-disposition"] || "";
-        const disposition = Array.isArray(rawDisp) ? rawDisp.join(' ') : String(rawDisp);
-        const contentLength = res_fetch.headers["content-length"];
+        clearTimeout(timeout);
+
+        const contentType = res_fetch.headers.get("content-type") || undefined;
+        const disposition = res_fetch.headers.get("content-disposition") || "";
+        const contentLength = res_fetch.headers.get("content-length");
         const fileSize = contentLength ? Number(contentLength) : undefined;
         const fileSizeText = formatBytes(fileSize);
         const isAttachment = /attachment/i.test(disposition);
@@ -1125,7 +1041,7 @@ async function startServer() {
           ? decodeURIComponent(fileNameMatch[1])
           : undefined;
 
-        if (res_fetch.status < 400 || res_fetch.status === 206) {
+        if (res_fetch.ok || res_fetch.status === 206) {
           return res.json({
             ok: true,
             status: res_fetch.status,
@@ -1133,7 +1049,7 @@ async function startServer() {
             message: isDirectDownload
               ? "Valid direct file / download link detected."
               : "Link is reachable",
-            finalUrl: res_fetch.request?.res?.responseUrl || currentUrl,
+            finalUrl: res_fetch.url,
             contentType,
             isDirectDownload,
             fileName,
@@ -1149,12 +1065,12 @@ async function startServer() {
           status: res_fetch.status,
           statusLabel: "BROKEN",
           message: `HTTP ${res_fetch.status}`,
-          finalUrl: res_fetch.request?.res?.responseUrl || currentUrl,
+          finalUrl: res_fetch.url || currentUrl,
           contentType,
           source: "general-check",
           host: currentHost,
         });
-      } catch (error: any) {
+      } catch {
         return res.json({
           ok: false,
           statusLabel: "UNKNOWN",
@@ -1164,12 +1080,12 @@ async function startServer() {
           host: currentHost,
         });
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error("Check Link Error:", error);
       res.status(500).json({
         ok: false,
         statusLabel: "UNKNOWN",
-        message: "Unexpected server error: " + (error.message || String(error)),
+        message: "Unexpected server error",
       });
     }
   });
@@ -1353,7 +1269,518 @@ async function startServer() {
     );
   };
 
-  app.use(linkExtractionRouter);
+  app.post("/api/hubcloud/extract", async (req, res) => {
+    try {
+      const { url } = req.body;
+      if (
+        !url ||
+        (!url.includes("hubcloud") && !url.includes("moviesdrives") && !url.includes("vcloud"))
+      ) {
+        return res.status(400).json({ error: "Invalid HubCloud URL" });
+      }
+
+      const headers = {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
+      };
+
+      const response = await axios.get(url, {
+        headers,
+        validateStatus: () => true,
+        timeout: 8000,
+      });
+      const $ = cheerio.load(response.data);
+
+      let sizeStr =
+        $('li:contains("File Size") i').text() ||
+        $('li:contains("File Size")').text() ||
+        $('li:contains("Size") i').text() ||
+        $('li:contains("Size")').text();
+      sizeStr = sizeStr.replace("File Size", "").replace("Size", "").trim();
+
+      let size = "";
+      let unit = "";
+      if (sizeStr) {
+        const parts = sizeStr.split(" ");
+        if (parts.length >= 2) {
+          let num = parseFloat(parts[0]);
+          unit = parts[1].toUpperCase();
+
+          if (!isNaN(num)) {
+            // Convert from Hubcloud's Base-1024 to our Base-1000
+            const multiplier =
+              unit === "GB"
+                ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000)
+                : unit === "MB"
+                  ? (1024 * 1024) / (1000 * 1000)
+                  : unit === "KB"
+                    ? 1024 / 1000
+                    : 1;
+            num = num * multiplier;
+            size =
+              num >= 100
+                ? num.toFixed(0)
+                : num >= 10
+                  ? num.toFixed(1)
+                  : num.toFixed(2);
+            size = size.replace(/\.00$/, "").replace(/\.0$/, "");
+          } else {
+            size = parts[0];
+          }
+        } else {
+          size = sizeStr;
+        }
+      }
+
+      let title = $("title").text() || $(".card-header").text() || "";
+      const isCloudflare = title.toLowerCase().includes("just a moment");
+
+      if (isCloudflare) {
+        try {
+          // Use Microlink proxy API to bypass Cloudflare
+          const dlRes = await axios.get(
+            `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html`,
+            { timeout: 10000 },
+          );
+          if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
+            const proxyHtml = dlRes.data.data.body;
+            const $proxy = cheerio.load(proxyHtml);
+            let sStr =
+              $proxy('li:contains("File Size") i').text() ||
+              $proxy('li:contains("File Size")').text() ||
+              $proxy('li:contains("Size") i').text() ||
+              $proxy('li:contains("Size")').text();
+            sStr = sStr.replace("File Size", "").replace("Size", "").trim();
+            if (sStr) {
+              sizeStr = sStr;
+            }
+
+            const proxyTitle =
+              $proxy("title").text() || $proxy(".card-header").text() || "";
+            if (
+              proxyTitle &&
+              !proxyTitle.toLowerCase().includes("just a moment")
+            ) {
+              title = proxyTitle;
+
+              // Recalculate size stuff based on fixed html
+              if (sizeStr) {
+                const parts = sizeStr.split(" ");
+                if (parts.length >= 2) {
+                  let num = parseFloat(parts[0]);
+                  unit = parts[1].toUpperCase();
+                  if (!isNaN(num)) {
+                    const multiplier =
+                      unit === "GB"
+                        ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000)
+                        : unit === "MB"
+                          ? (1024 * 1024) / (1000 * 1000)
+                          : unit === "KB"
+                            ? 1024 / 1000
+                            : 1;
+                    num = num * multiplier;
+                    size =
+                      num >= 100
+                        ? num.toFixed(0)
+                        : num >= 10
+                          ? num.toFixed(1)
+                          : num.toFixed(2);
+                    size = size.replace(/\.00$/, "").replace(/\.0$/, "");
+                  } else {
+                    size = parts[0];
+                  }
+                } else {
+                  size = sizeStr;
+                }
+              }
+            } else {
+              title = "Unknown (Cloudflare Block)";
+            }
+          } else {
+            title = "Unknown (Cloudflare Block)";
+          }
+        } catch (err) {
+          title = "Unknown (Cloudflare Block)";
+        }
+      }
+
+      const isNotFound =
+        response.status === 404 || title.toLowerCase().includes("not found");
+      const isWorking =
+        response.status < 400 ||
+        response.status === 403 ||
+        response.status === 503 ||
+        title === "Unknown (Cloudflare Block)";
+
+      res.json({
+        size,
+        unit,
+        title: title.trim(),
+        isWorking: isWorking && !isNotFound,
+        isNotFound,
+      });
+    } catch (e: any) {
+      console.error("Hubcloud extract error:", e.message);
+      // Even if it fails (like timeout on Vercel), return a generic response instead of 500
+      // since the link might actually be working but just blocked by Vercel's datacenter IPs
+      if (e.code === "ECONNABORTED" || e.message.includes("timeout")) {
+        return res.json({
+          size: "",
+          unit: "",
+          title: "Unknown (Timeout)",
+          isWorking: true, // Assume it works if it just timed out
+          isNotFound: false,
+        });
+      }
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/hubcloud/direct-link", async (req, res) => {
+    try {
+      const { url, checkOnly } = req.body;
+
+      const headers = {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+      };
+
+      if (checkOnly && url) {
+        try {
+          const checkRes = await axios.get(url, {
+            headers: { ...headers, Range: "bytes=0-0" },
+            maxRedirects: 0,
+            validateStatus: () => true,
+            timeout: 2500,
+          });
+          if (
+            checkRes.status < 400 ||
+            checkRes.status === 405 ||
+            checkRes.status === 416
+          ) {
+            return res.json({ ok: true });
+          }
+          if (
+            checkRes.status >= 300 &&
+            checkRes.status < 400 &&
+            checkRes.headers.location
+          ) {
+            return res.json({ ok: true, location: checkRes.headers.location });
+          }
+          return res.json({ ok: false });
+        } catch (e) {
+          return res.json({ ok: false });
+        }
+      }
+
+      if (
+        !url ||
+        (!url.includes("hubcloud") && !url.includes("moviesdrives") && !url.includes("vcloud"))
+      ) {
+        return res.json({ url });
+      }
+
+      const response = await axios.get(url, {
+        headers,
+        validateStatus: () => true,
+        timeout: 5000,
+      });
+      let $ = cheerio.load(response.data);
+
+      if ($("title").text().toLowerCase().includes("just a moment")) {
+        try {
+          const dlRes = await axios.get(
+            `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html`,
+            { timeout: 10000 },
+          );
+          if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
+            const proxyTitle =
+              cheerio.load(dlRes.data.data.body)("title").text() || "";
+            if (!proxyTitle.toLowerCase().includes("just a moment")) {
+              $ = cheerio.load(dlRes.data.data.body);
+            } else {
+              return res.json({ url: url, isCloudflare: true });
+            }
+          } else {
+            return res.json({ url: url, isCloudflare: true });
+          }
+        } catch (err) {
+          return res.json({ url: url, isCloudflare: true });
+        }
+      }
+
+      let nextUrl =
+        $("#download").attr("href") ||
+        $('a:contains("Generate Direct Download Link")').attr("href") ||
+        $("a.btn-zip").attr("href");
+
+      // Extract url from script for vcloud if href is missing
+      if (!nextUrl) {
+         const scriptHtml = $.html();
+         const match = scriptHtml.match(/var\s+url\s*=\s*['"]([^'"]+)['"]/i);
+         if (match && match[1]) {
+            nextUrl = match[1];
+         }
+      }
+
+      if (!nextUrl) {
+        return res.json({ url });
+      }
+
+      let res2 = await axios.get(nextUrl, {
+        headers,
+        validateStatus: () => true,
+        timeout: 5000,
+      });
+      let $2 = cheerio.load(res2.data);
+
+      if ($2("title").text().toLowerCase().includes("just a moment")) {
+        try {
+          const dlRes2 = await axios.get(
+            `https://api.microlink.io/?url=${encodeURIComponent(nextUrl)}&meta=false&data.body.selector=body&data.body.attr=html`,
+            { timeout: 10000 },
+          );
+          if (dlRes2.data && dlRes2.data.data && dlRes2.data.data.body) {
+            $2 = cheerio.load(dlRes2.data.data.body);
+          }
+        } catch (err) {
+          // Ignore and continue with original $2
+        }
+      }
+
+      const candidateLinks: { text: string; href: string }[] = [];
+      $2("a.btn").each((i, el) => {
+        let href = $2(el).attr("href") || "";
+        const text = $2(el).text().toLowerCase();
+        const id = $2(el).attr("id");
+
+        if (id) {
+          $2("script").each((_, scriptEl) => {
+            const scriptContent = $2(scriptEl).html();
+            if (!scriptContent) return;
+
+            if (
+              scriptContent.includes(`getElementById("${id}")`) ||
+              scriptContent.includes(`getElementById('${id}')`)
+            ) {
+              const assignmentMatch = scriptContent.match(
+                new RegExp(
+                  `getElementById\\(['"]${id}['"]\\)\\.href\\s*=\\s*([a-zA-Z0-9_]+)`,
+                ),
+              );
+              if (assignmentMatch && assignmentMatch[1]) {
+                const varName = assignmentMatch[1];
+                const varMatch = scriptContent.match(
+                  new RegExp(
+                    `(?:var|let|const)\\s+${varName}\\s*=\\s*['"]([^'"]+)['"]`,
+                  ),
+                );
+                if (varMatch && varMatch[1]) {
+                  href = varMatch[1];
+                }
+              } else {
+                const directMatch = scriptContent.match(
+                  new RegExp(
+                    `getElementById\\(['"]${id}['"]\\)\\.href\\s*=\\s*['"]([^'"]+)['"]`,
+                  ),
+                );
+                if (directMatch && directMatch[1]) {
+                  href = directMatch[1];
+                }
+              }
+            }
+          });
+        }
+        if (href && !text.includes("telegram"))
+          candidateLinks.push({ text, href });
+      });
+
+      if (candidateLinks.length === 0) {
+        return res.json({ url });
+      }
+
+      // Sort: pixeldrain first, then .workers.dev, then others
+      candidateLinks.sort((a, b) => {
+        const isA_PD =
+          /pixeldrain|pixel\.drain|pixeldra\.in/i.test(a.text) ||
+          /pixeldrain|pixel\.drain|pixeldra\.in/i.test(a.href);
+        const isB_PD =
+          /pixeldrain|pixel\.drain|pixeldra\.in/i.test(b.text) ||
+          /pixeldrain|pixel\.drain|pixeldra\.in/i.test(b.href);
+        if (isA_PD && !isB_PD) return -1;
+        if (!isA_PD && isB_PD) return 1;
+
+        const isA_Worker = /\.workers\.dev/i.test(a.href);
+        const isB_Worker = /\.workers\.dev/i.test(b.href);
+        if (isA_Worker && !isB_Worker) return -1;
+        if (!isA_Worker && isB_Worker) return 1;
+
+        return 0;
+      });
+
+      // Find first working link
+      let workingLink = url; // fallback to original hubcloud url
+
+      const checkPromises = candidateLinks.map(async (candidate, index) => {
+        let checkUrl = candidate.href;
+        const checkRes = await axios.get(checkUrl, {
+          headers: { ...headers, Range: "bytes=0-0" },
+          maxRedirects: 0,
+          validateStatus: () => true,
+          timeout: 2500, // Reduced to avoid hitting vercel function 10s limit
+        });
+
+        let resultLink = candidate.href;
+        let isWorking = false;
+
+        if (
+          checkRes.status >= 300 &&
+          checkRes.status < 400 &&
+          checkRes.headers.location
+        ) {
+          resultLink = checkRes.headers.location;
+          try {
+            const nextRes = await axios.get(resultLink, {
+              headers: { ...headers, Range: "bytes=0-0" },
+              maxRedirects: 0,
+              validateStatus: () => true,
+              timeout: 2500,
+            });
+            if (
+              nextRes.status >= 300 &&
+              nextRes.status < 400 &&
+              nextRes.headers.location
+            ) {
+              resultLink = nextRes.headers.location;
+            }
+            // Check if specifically returning 404/error on destination
+            if (
+              nextRes.status < 400 ||
+              nextRes.status === 405 ||
+              nextRes.status === 416
+            ) {
+              isWorking = true;
+            } else {
+              isWorking = false; // The destination is 404 or worse
+            }
+          } catch (e) {
+            isWorking = true; // Still assume it works if we just hit timeout
+          }
+        } else if (
+          checkRes.status < 400 ||
+          checkRes.status === 405 ||
+          checkRes.status === 416
+        ) {
+          isWorking = true;
+        }
+
+        if (isWorking) {
+          return { index, link: resultLink };
+        }
+        throw new Error("Not working");
+      });
+
+      try {
+        const results = await Promise.allSettled(checkPromises);
+        let bestIndex = -1;
+
+        for (const result of results) {
+          if (result.status === "fulfilled") {
+            if (bestIndex === -1 || result.value.index < bestIndex) {
+              bestIndex = result.value.index;
+              workingLink = result.value.link;
+            }
+          }
+        }
+
+        // If all rejected and we have candidates, fallback to first
+        if (bestIndex === -1 && candidateLinks.length > 0) {
+          workingLink = candidateLinks[0].href;
+        }
+      } catch (e) {
+        if (candidateLinks.length > 0) {
+          workingLink = candidateLinks[0].href;
+        }
+      }
+
+      // First Priority for Pixeldrain: Rewrite to pixeldrain.dev/u/
+      // Matches both api/file/xxx and /u/xxx
+      if (
+        /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+)/i.test(
+          workingLink,
+        )
+      ) {
+        workingLink = workingLink.replace(
+          /.*(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+).*/i,
+          "https://pixeldrain.dev/u/$1",
+        );
+      }
+
+      const returnCandidates = candidateLinks.map((c) => {
+        let href = c.href;
+        if (
+          /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+)/i.test(
+            href,
+          )
+        ) {
+          href = href.replace(
+            /.*(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+).*/i,
+            "https://pixeldrain.dev/u/$1",
+          );
+        }
+        return { text: c.text.trim(), href };
+      });
+
+      const bodyText = $("body").text();
+      let sizeInfo = "";
+      const sizeMatch = bodyText.match(/File Size\s*([\d.]+\s*[A-Za-z]+)/i);
+      if (sizeMatch && sizeMatch[1]) {
+        sizeInfo = sizeMatch[1].trim();
+
+        // Convert to base-1000
+        const parts = sizeInfo.split(" ");
+        if (parts.length >= 2) {
+          let num = parseFloat(parts[0]);
+          let unit = parts[1].toUpperCase();
+          if (!isNaN(num)) {
+            const multiplier =
+              unit === "GB"
+                ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000)
+                : unit === "MB"
+                  ? (1024 * 1024) / (1000 * 1000)
+                  : unit === "KB"
+                    ? 1024 / 1000
+                    : 1;
+            num = num * multiplier;
+            let newSize =
+              num >= 100
+                ? num.toFixed(0)
+                : num >= 10
+                  ? num.toFixed(1)
+                  : num.toFixed(2);
+            newSize = newSize.replace(/\.00$/, "").replace(/\.0$/, "");
+            sizeInfo = `${newSize} ${unit}`;
+          }
+        }
+      }
+
+      res.json({
+        url: workingLink,
+        candidates: returnCandidates,
+        size: sizeInfo,
+      });
+    } catch (e: any) {
+      console.error(e);
+      res.json({ url: req.body.url });
+    }
+  });
 
   // Sync Endpoints
   app.post("/api/sync/status", async (req, res) => {
@@ -1860,7 +2287,7 @@ async function startServer() {
       }
     });
   } else {
-    const distPath = path.join(process.cwd(), "dist");
+    const distPath = path.resolve(__dirname, "../dist");
     app.use(express.static(distPath, { index: false })); // Disable default index.html serving
 
     // Explicitly serve PWA files with correct MIME types

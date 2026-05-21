@@ -317,10 +317,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 if (pendCClicks) updatesToPush.contentClicks = JSON.parse(pendCClicks);
                 const pendLClicks = safeStorage.getItem("pending_link_clicks");
                 if (pendLClicks) updatesToPush.linkClicks = JSON.parse(pendLClicks);
-                
-                // Sync any deferred string/boolean profile fields
-                if (localProfile?.phone !== serverProfile?.phone && localProfile?.phone !== undefined) updatesToPush.phone = localProfile.phone;
-                if (localProfile?.displayName !== serverProfile?.displayName && localProfile?.displayName !== undefined) updatesToPush.displayName = localProfile.displayName;
             }
             if (mergedProfile.timeSpent !== undefined) updatesToPush.timeSpent = mergedProfile.timeSpent;
             
@@ -1186,18 +1182,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const phoneUsers = await findUsersByEmailOrPhone(standardizedPhone);
         if (phoneUsers.some((u) => u.hasPassword)) {
           throw new Error(
-            "This WhatsApp number is already registered to another account.",
+            "This phone number is already registered to another account.",
           );
         }
 
         const isWhitelisted = await isPhoneWhitelisted(standardizedPhone);
         if (!isWhitelisted) {
           throw new Error(
-            "This WhatsApp number is not authorized for new account creation.",
+            "This phone number is not authorized for new account creation.",
           );
         }
       } else {
-        throw new Error("WhatsApp Number is required for new account creation.");
+        throw new Error("Phone number is required for new account creation.");
       }
 
       if (phone) {
@@ -1260,7 +1256,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const isWhitelisted = await isPhoneWhitelisted(standardizedPhone);
         if (!isWhitelisted) {
           throw new Error(
-            "This WhatsApp number is not authorized for new account creation.",
+            "This phone number is not authorized for new account creation.",
           );
         }
       }
@@ -1460,7 +1456,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const existingPhones = await findUsersByEmailOrPhone(standardizedNewPhone);
         if (existingPhones.some((u) => u.uid !== user.uid)) {
           throw new Error(
-            "This WhatsApp number is already in use by another account.",
+            "This phone number is already in use by another account.",
           );
         }
         data.phone = standardizedNewPhone;

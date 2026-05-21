@@ -17,7 +17,7 @@ const QualityInputs: React.FC<QualityInputsProps> = ({ links, onChange, droppabl
     if (!url) return;
     
     // Check if it's a HubCloud or MoviesDrives link
-    if (url.includes('hubcloud') || url.includes('moviesdrive') || url.includes('vcloud') || url.includes('hubdrive')) {
+    if (url.includes('hubcloud') || url.includes('moviesdrives') || url.includes('vcloud')) {
       try {
         const res = await fetch("/api/hubcloud/extract", {
           method: "POST",
