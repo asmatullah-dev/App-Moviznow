@@ -1082,7 +1082,10 @@ async function startServer() {
           });
         }
 
-        const contentType = res_fetch.headers["content-type"] || undefined;
+        const contentTypeRaw = res_fetch.headers["content-type"];
+        const contentType = contentTypeRaw 
+          ? (Array.isArray(contentTypeRaw) ? contentTypeRaw.join('') : String(contentTypeRaw)) 
+          : undefined;
         const rawDisp = res_fetch.headers["content-disposition"] || "";
         const disposition = Array.isArray(rawDisp) ? rawDisp.join(' ') : String(rawDisp);
         const contentLength = res_fetch.headers["content-length"];
