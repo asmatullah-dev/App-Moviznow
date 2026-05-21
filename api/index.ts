@@ -141,31 +141,15 @@ async function startServer() {
               apiUrl = `https://pixeldrain.com/api/list/${listMatch[1]}`;
             else return { error: null };
 
-            let data: any;
-            let status = 0;
-            try {
-              const controller = new AbortController();
-              const timeout = setTimeout(() => controller.abort(), 2500);
-              const res = await fetch(apiUrl, { signal: controller.signal });
-              clearTimeout(timeout);
-              status = res.status;
-              if (status >= 400 && status !== 404 && status !== 451) {
-                throw new Error(`HTTP ${status}`);
-              }
-              data = await res.json();
-            } catch (err) {
-              const mlUrl = `https://api.microlink.io/?url=${encodeURIComponent(apiUrl)}&meta=false&data.body.selector=body&data.body.attr=text&force=true`;
-              const mlRes = await fetch(mlUrl);
-              const mlData = await mlRes.json();
-              status = mlData.statusCode || 200;
-              data = mlData.data?.body;
-              if (typeof data === 'string') {
-                try { data = JSON.parse(data); } catch(e){}
-              }
-            }
-
-            if (status === 451) return { error: "Unavailable from Server" };
-            if (status >= 400 && status !== 404) return { error: `HTTP ${status}` };
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 8000);
+            const res = await fetch(apiUrl, { signal: controller.signal });
+            clearTimeout(timeout);
+            
+            if (res.status === 451) return { error: "Unavailable from Server" };
+            if (res.status >= 400 && res.status !== 404) return { error: `HTTP ${res.status}` };
+            
+            const data = await res.json().catch(() => null);
 
             if (!data || data.success === false)
               return { error: "File not found or deleted" };
@@ -519,39 +503,23 @@ async function startServer() {
               fetchUrl = `https://pixeldrain.com/api/file/${pdMatch[1]}/info`;
             }
 
-            let res_status = 0;
-            let is_ok = false;
-            try {
-              const response = await fetch(fetchUrl, {
-                method: pdMatch ? "GET" : "HEAD",
-                signal: controller.signal,
-              });
-              clearTimeout(timeoutId);
-              res_status = response.status;
-              is_ok = response.ok;
-              if (pdMatch && !response.ok && response.status !== 404 && response.status !== 451) {
-                 throw new Error(`HTTP ${response.status}`);
-              }
-            } catch (err: any) {
-              clearTimeout(timeoutId);
-              if (pdMatch) {
-                 const mlUrl = `https://api.microlink.io/?url=${encodeURIComponent(fetchUrl)}&meta=false&data.body.selector=body&data.body.attr=text&force=true`;
-                 const mlRes = await fetch(mlUrl);
-                 const mlData = await mlRes.json();
-                 res_status = mlData.statusCode || 200;
-                 is_ok = res_status >= 200 && res_status < 400;
-              } else {
-                 if (err.name === "AbortError") {
-                   return { ...link, errorDetail: "Timeout" };
-                 }
-                 return { ...link, errorDetail: "Network error" };
-              }
-            }
+            const response = await fetch(fetchUrl, {
+              method: pdMatch ? "GET" : "HEAD",
+              signal: controller.signal,
+            });
 
-            if (!is_ok) {
-              return { ...link, errorDetail: `HTTP ${res_status}` };
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+              return { ...link, errorDetail: `HTTP ${response.status}` };
             }
             return { ...link, errorDetail: null };
+          } catch (err: any) {
+             if (err.name === "AbortError" || err.message?.includes("Abort")) {
+                return { ...link, errorDetail: "Timeout" };
+             }
+             return { ...link, errorDetail: "Network error" };
+          }
         }),
       );
 
@@ -773,12 +741,8 @@ async function startServer() {
         if (match?.[1]) {
           const fileId = match[1];
           try {
-            let infoResStatus = 0;
-            let infoResOk = false;
-            let data: any = null;
-            try {
-              const controller = new AbortController();
-              const timeout = setTimeout(() => controller.abort(), 2500);
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 8000);
               const infoRes = await fetch(
                 `https://pixeldrain.com/api/file/${fileId}/info`,
                 {
@@ -791,49 +755,35 @@ async function startServer() {
                 },
               );
               clearTimeout(timeout);
-              infoResStatus = infoRes.status;
-              infoResOk = infoRes.ok;
-              if (infoRes.status >= 400 && infoRes.status !== 404 && infoRes.status !== 451 && infoRes.status !== 429) {
-                 throw new Error(`HTTP ${infoRes.status}`);
+              
+              if (infoRes.status === 404) {
+                return res.json({
+                  ok: false,
+                  status: 404,
+                  statusLabel: "BROKEN",
+                  message: "Pixeldrain file not found or deleted",
+                  finalUrl: currentUrl,
+                  source: "pixeldrain-api",
+                  host: currentHost,
+                });
               }
-              data = await infoRes.json().catch(() => null);
-            } catch(e) {
-               const mlUrl = `https://api.microlink.io/?url=${encodeURIComponent(`https://pixeldrain.com/api/file/${fileId}/info`)}&meta=false&data.body.selector=body&data.body.attr=text&force=true`;
-               const mlRes = await fetch(mlUrl);
-               const mlData = await mlRes.json();
-               infoResStatus = mlData.statusCode || 200;
-               infoResOk = infoResStatus >= 200 && infoResStatus < 400;
-               data = mlData.data?.body;
-               if (typeof data === 'string') {
-                 try { data = JSON.parse(data); } catch(err){}
-               }
-            }
 
-            if (infoResStatus === 404) {
-              return res.json({
-                ok: false,
-                status: 404,
-                statusLabel: "BROKEN",
-                message: "Pixeldrain file not found or deleted",
-                finalUrl: currentUrl,
-                source: "pixeldrain-api",
-                host: currentHost,
-              });
-            }
+              if (infoRes.status === 429) {
+                return res.json({
+                  ok: false,
+                  status: 429,
+                  statusLabel: "UNAVAILABLE",
+                  message: "Pixeldrain temporarily unavailable or rate-limited",
+                  finalUrl: currentUrl,
+                  source: "pixeldrain-api",
+                  host: currentHost,
+                });
+              }
+              
+              if (infoRes.ok) {
+                const data = await infoRes.json().catch(() => null);
+                if (data) {
 
-            if (infoResStatus === 429) {
-              return res.json({
-                ok: false,
-                status: 429,
-                statusLabel: "UNAVAILABLE",
-                message: "Pixeldrain temporarily unavailable or rate-limited",
-                finalUrl: currentUrl,
-                source: "pixeldrain-api",
-                host: currentHost,
-              });
-            }
-
-            if (infoResOk && data) {
 
               const dlRes = await fetch(
                 `https://pixeldrain.com/api/file/${fileId}`,
@@ -934,6 +884,7 @@ async function startServer() {
                 source: "pixeldrain-api+download-probe",
                 host: currentHost,
               });
+            }
             }
           } catch {
             return res.json({

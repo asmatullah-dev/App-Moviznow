@@ -1,6 +1,15 @@
 import { Router } from 'express';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import http from 'http';
+import https from 'https';
+
+const httpAgent = new http.Agent({ family: 4 });
+const httpsAgent = new https.Agent({ family: 4, rejectUnauthorized: false });
+
+axios.defaults.httpAgent = httpAgent;
+axios.defaults.httpsAgent = httpsAgent;
+axios.defaults.timeout = 8000;
 
 export const linkExtractionRouter = Router();
 
@@ -41,7 +50,7 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
         response = await axios.get(url, {
           headers,
           validateStatus: () => true,
-          timeout: 2500,
+          timeout: 8000,
         });
       } catch (err: any) {
         response = {
@@ -102,72 +111,7 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
         response.status === 503;
 
       if (isCloudflare) {
-        try {
-          // Use Microlink proxy API to bypass Cloudflare
-          const dlRes = await axios.get(
-            `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
-            { timeout: 8000 },
-          );
-          if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
-            const proxyHtml = dlRes.data.data.body;
-            const $proxy = cheerio.load(proxyHtml);
-            let sStr =
-              $proxy('li:contains("File Size") i').text() ||
-              $proxy('li:contains("File Size")').text() ||
-              $proxy('li:contains("Size") i').text() ||
-              $proxy('li:contains("Size")').text();
-            sStr = sStr.replace("File Size", "").replace("Size", "").trim();
-            if (sStr) {
-              sizeStr = sStr;
-            }
-
-            const proxyTitle =
-              $proxy("title").text() || $proxy(".card-header").text() || "";
-            if (
-              proxyTitle &&
-              !proxyTitle.toLowerCase().includes("just a moment")
-            ) {
-              title = proxyTitle;
-
-              // Recalculate size stuff based on fixed html
-              if (sizeStr) {
-                const parts = sizeStr.split(" ");
-                if (parts.length >= 2) {
-                  let num = parseFloat(parts[0]);
-                  unit = parts[1].toUpperCase();
-                  if (!isNaN(num)) {
-                    const multiplier =
-                      unit === "GB"
-                        ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000)
-                        : unit === "MB"
-                          ? (1024 * 1024) / (1000 * 1000)
-                          : unit === "KB"
-                            ? 1024 / 1000
-                            : 1;
-                    num = num * multiplier;
-                    size =
-                      num >= 100
-                        ? num.toFixed(0)
-                        : num >= 10
-                          ? num.toFixed(1)
-                          : num.toFixed(2);
-                    size = size.replace(/\.00$/, "").replace(/\.0$/, "");
-                  } else {
-                    size = parts[0];
-                  }
-                } else {
-                  size = sizeStr;
-                }
-              }
-            } else {
-              title = "Unknown (Cloudflare Block)";
-            }
-          } else {
-            title = "Unknown (Cloudflare Block)";
-          }
-        } catch (err) {
-          title = "Unknown (Cloudflare Block)";
-        }
+        title = "Unknown (Cloudflare Block)";
       }
 
       const isNotFound =
@@ -222,7 +166,7 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
             headers: { ...headers, Range: "bytes=0-0" },
             maxRedirects: 0,
             validateStatus: () => true,
-            timeout: 2500,
+            timeout: 8000,
           });
           if (
             checkRes.status < 400 ||
@@ -259,7 +203,7 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
         response = await axios.get(url, {
           headers,
           validateStatus: () => true,
-          timeout: 2500,
+          timeout: 8000,
         });
       } catch (err: any) {
         response = {
@@ -278,29 +222,7 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
         response.status === 503;
 
       if (isCf) {
-        try {
-          const dlRes = await axios.get(
-            `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
-            { timeout: 8000 },
-          );
-          if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
-            const proxyTitle =
-              cheerio.load(dlRes.data.data.body)("title").text().toLowerCase() || "";
-            if (
-              !proxyTitle.includes("just a moment") &&
-              !proxyTitle.includes("cloudflare") &&
-              !proxyTitle.includes("ddos protection")
-            ) {
-              $ = cheerio.load(dlRes.data.data.body);
-            } else {
-              return { url: url, isCloudflare: true };
-            }
-          } else {
-            return { url: url, isCloudflare: true };
-          }
-        } catch (err) {
-          return { url: url, isCloudflare: true };
-        }
+        return { url: url, isCloudflare: true };
       }
 
       let nextUrl =
@@ -331,7 +253,7 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
           res2 = await axios.get(nextUrl, {
             headers,
             validateStatus: () => true,
-            timeout: 2500,
+            timeout: 8000,
           });
         } catch (err: any) {
           res2 = {
@@ -350,17 +272,7 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
           res2.status === 503;
 
         if (isCf2) {
-          try {
-            const dlRes2 = await axios.get(
-              `https://api.microlink.io/?url=${encodeURIComponent(nextUrl)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
-              { timeout: 8000 },
-            );
-            if (dlRes2.data && dlRes2.data.data && dlRes2.data.data.body) {
-              $2 = cheerio.load(dlRes2.data.data.body);
-            }
-          } catch (err) {
-            // Ignore and continue with original $2
-          }
+          // Cloudflare block on second step
         }
       }
 
@@ -443,7 +355,7 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
           headers: { ...headers, Range: "bytes=0-0" },
           maxRedirects: 0,
           validateStatus: () => true,
-          timeout: 2500, // Reduced to avoid hitting vercel function 10s limit
+          timeout: 8000, // Reduced to avoid hitting vercel function 10s limit
         });
 
         let resultLink = candidate.href;
@@ -460,7 +372,7 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
               headers: { ...headers, Range: "bytes=0-0" },
               maxRedirects: 0,
               validateStatus: () => true,
-              timeout: 2500,
+              timeout: 8000,
             });
             if (
               nextRes.status >= 300 &&
