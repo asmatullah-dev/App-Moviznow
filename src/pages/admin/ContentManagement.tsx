@@ -3021,7 +3021,14 @@ export default function ContentManagement() {
       parsed.forEach((t: any) => urls.push(t.url));
     }
 
-    const urlString = urls.filter(Boolean).filter((val, i, arr) => arr.indexOf(val) === i).join('\n');
+    const urlString = urls
+      .filter(Boolean)
+      .filter((url) => {
+        const lowerUrl = url.toLowerCase();
+        return !lowerUrl.includes("youtube.com") && !lowerUrl.includes("youtu.be");
+      })
+      .filter((val, i, arr) => arr.indexOf(val) === i)
+      .join('\n');
     setContentLinkCheckerInput(urlString);
     setCheckLinksContent(content);
     setIsContentLinkCheckerOpen(true);

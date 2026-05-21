@@ -126,6 +126,29 @@ export function guessLinkType(url: string) {
   return "General link";
 }
 
+export function extractFilenameFromUrl(url: string): string | undefined {
+  try {
+    const parsed = new URL(url);
+    // 1. Check common query parameters for a filename (with extension)
+    const params = ["file", "filename", "name", "title", "file_name", "download"];
+    for (const p of params) {
+      const val = parsed.searchParams.get(p);
+      if (val && /\.(mkv|mp4|zip|rar|7z|avi|mov|wmv|flv|ts|3gp|srt|ass)$/i.test(val)) {
+        return decodeURIComponent(val);
+      }
+    }
+    // 2. Check the path name (last non-empty segment)
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    const lastSegment = segments.length > 0 ? decodeURIComponent(segments[segments.length - 1]) : "";
+    if (lastSegment && /\.(mkv|mp4|zip|rar|7z|avi|mov|wmv|flv|ts|3gp|srt|ass)$/i.test(lastSegment)) {
+      return lastSegment;
+    }
+  } catch (e) {
+    // URL parsing failed or URL is invalid
+  }
+  return undefined;
+}
+
 export function normalizeCodec(v?: string) {
   if (!v) return undefined;
   const s = v.toUpperCase().replace(/\./g, "").replace(/\s+/g, "");
@@ -788,6 +811,28 @@ export async function performFullLinkScan(
       finalUrlToUse = base.finalUrl || base.url;
     } catch (e) {
       // Ignore retry error and stick with original base
+    }
+  }
+
+  // DOUBLE-CHECK ALGORITHM FOR UNKNOWN/FAILED LINKS (Double-check after an automatic wait)
+  if (!base.ok || base.statusLabel === "UNKNOWN") {
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      const doubleCheckBase = await serverCheckLink(finalUrlToUse, signal);
+      if (doubleCheckBase.ok) {
+        base = doubleCheckBase;
+      }
+    } catch (err) {
+      console.warn("Automatic double check request failed:", err);
+    }
+  }
+
+  // DOUBLE-CHECK FOR MISSING FILENAME (Assign filename from URL if working but missing content-disposition info)
+  if (base.ok && !base.fileName) {
+    const extractedName = extractFilenameFromUrl(url);
+    if (extractedName) {
+      base.fileName = extractedName;
+      base.statusLabel = "WORKING";
     }
   }
 
