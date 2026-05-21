@@ -655,16 +655,14 @@ export async function performFullLinkScan(
 
       if (res.status === "fulfilled" && res.value.ok) {
         const data = await res.value.json();
-        const isCf = data.title && data.title.includes("Cloudflare Block");
         if (data.size && data.unit) {
           hubcloudTitle = data.title || "";
           hubcloudTitle = data.title || "";
           base = {
             url,
             ok: true,
-            statusLabel: isCf ? "PROTECTED" : "WORKING",
-            message: isCf ? "Link is alive but protected by Cloudflare/anti-bot (server IP blocked)." : undefined,
-            fileName: isCf ? undefined : (hubcloudTitle || undefined),
+            statusLabel: "WORKING",
+            fileName: hubcloudTitle || undefined,
             fileSizeText: `${data.size} ${data.unit}`,
             candidates: candidatesInfo
           };
@@ -682,9 +680,8 @@ export async function performFullLinkScan(
           base = {
             url,
             ok: true,
-            statusLabel: isCf ? "PROTECTED" : "WORKING",
-            message: isCf ? "Link is alive but protected by Cloudflare/anti-bot (server IP blocked)." : undefined,
-            fileName: isCf ? undefined : (hubcloudTitle || undefined),
+            statusLabel: "WORKING",
+            fileName: hubcloudTitle || undefined,
             candidates: candidatesInfo
           };
           finalUrlToUse = url;
@@ -692,8 +689,8 @@ export async function performFullLinkScan(
           base = {
             url,
             ok: true,
-            statusLabel: isCf ? "PROTECTED" : "WORKING",
-            message: isCf ? "Link is alive but protected by Cloudflare/anti-bot (server IP blocked)." : "Assuming working (size extraction failed)",
+            statusLabel: "WORKING",
+            message: "Assuming working (size extraction failed)",
             candidates: candidatesInfo
           };
           finalUrlToUse = url;
@@ -822,7 +819,7 @@ export async function performFullLinkScan(
     year: fileMeta.year || postMeta.year || base.year,
   };
 
-  if (result.ok && !result.fileName && result.statusLabel !== "PROTECTED" && result.statusLabel !== "REDIRECT") {
+  if (result.ok && !result.fileName) {
     result.statusLabel = "MISSING_FILENAME";
     result.message = "Missing filename";
   }
@@ -846,7 +843,7 @@ export async function performFullLinkScan(
   }
 
   // Filename validation
-  if (result.ok && result.fileName && result.statusLabel !== "PROTECTED" && result.statusLabel !== "REDIRECT") {
+  if (result.ok && result.fileName) {
     const hasQuality = !!result.qualityLabel;
     const hasLanguage = !!result.audioLabel;
 

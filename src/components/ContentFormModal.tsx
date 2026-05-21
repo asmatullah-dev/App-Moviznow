@@ -223,22 +223,6 @@ const QualityInputs: React.FC<QualityInputsProps> = ({ links, onChange, droppabl
                         className="flex-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500"
                       />
                     </div>
-                    <div className="flex gap-2 items-center">
-                      <input
-                        type="text"
-                        placeholder="Status Reason / Comment (Optional)"
-                        value={link.reason || ''}
-                        onChange={(e) => {
-                          onChange(prev => {
-                            const currentLinks = Array.isArray(prev) ? prev : [];
-                            const newLinks = [...currentLinks];
-                            newLinks[idx] = { ...newLinks[idx], reason: e.target.value };
-                            return newLinks;
-                          });
-                        }}
-                        className="flex-1 bg-zinc-150/40 dark:bg-zinc-950/35 border border-zinc-200 dark:border-zinc-800/60 rounded-lg px-2.5 py-1 text-xs text-zinc-600 dark:text-zinc-400 focus:outline-none focus:border-emerald-500/80"
-                      />
-                    </div>
                   </div>
                 )}
               </Draggable>

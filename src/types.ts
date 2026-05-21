@@ -113,7 +113,6 @@ export interface LinkDef {
   isFullSeasonMKV?: boolean;
   isFullSeasonZIP?: boolean;
   isSample?: boolean;
-  reason?: string;
 }
 
 export type QualityLinks = LinkDef[];

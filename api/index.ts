@@ -141,12 +141,33 @@ async function startServer() {
               apiUrl = `https://pixeldrain.com/api/list/${listMatch[1]}`;
             else return { error: null };
 
-            const res = await fetch(apiUrl);
-            if (res.status === 451) return { error: "Unavailable from Server" };
-            if (!res.ok) return { error: `HTTP ${res.status}` };
+            let data: any;
+            let status = 0;
+            try {
+              const controller = new AbortController();
+              const timeout = setTimeout(() => controller.abort(), 2500);
+              const res = await fetch(apiUrl, { signal: controller.signal });
+              clearTimeout(timeout);
+              status = res.status;
+              if (status >= 400 && status !== 404 && status !== 451) {
+                throw new Error(`HTTP ${status}`);
+              }
+              data = await res.json();
+            } catch (err) {
+              const mlUrl = `https://api.microlink.io/?url=${encodeURIComponent(apiUrl)}&meta=false&data.body.selector=body&data.body.attr=text&force=true`;
+              const mlRes = await fetch(mlUrl);
+              const mlData = await mlRes.json();
+              status = mlData.statusCode || 200;
+              data = mlData.data?.body;
+              if (typeof data === 'string') {
+                try { data = JSON.parse(data); } catch(e){}
+              }
+            }
 
-            const data = await res.json();
-            if (data.success === false)
+            if (status === 451) return { error: "Unavailable from Server" };
+            if (status >= 400 && status !== 404) return { error: `HTTP ${status}` };
+
+            if (!data || data.success === false)
               return { error: "File not found or deleted" };
 
             let sizeInBytes = 0;
@@ -498,23 +519,39 @@ async function startServer() {
               fetchUrl = `https://pixeldrain.com/api/file/${pdMatch[1]}/info`;
             }
 
-            const response = await fetch(fetchUrl, {
-              method: pdMatch ? "GET" : "HEAD",
-              signal: controller.signal,
-            });
+            let res_status = 0;
+            let is_ok = false;
+            try {
+              const response = await fetch(fetchUrl, {
+                method: pdMatch ? "GET" : "HEAD",
+                signal: controller.signal,
+              });
+              clearTimeout(timeoutId);
+              res_status = response.status;
+              is_ok = response.ok;
+              if (pdMatch && !response.ok && response.status !== 404 && response.status !== 451) {
+                 throw new Error(`HTTP ${response.status}`);
+              }
+            } catch (err: any) {
+              clearTimeout(timeoutId);
+              if (pdMatch) {
+                 const mlUrl = `https://api.microlink.io/?url=${encodeURIComponent(fetchUrl)}&meta=false&data.body.selector=body&data.body.attr=text&force=true`;
+                 const mlRes = await fetch(mlUrl);
+                 const mlData = await mlRes.json();
+                 res_status = mlData.statusCode || 200;
+                 is_ok = res_status >= 200 && res_status < 400;
+              } else {
+                 if (err.name === "AbortError") {
+                   return { ...link, errorDetail: "Timeout" };
+                 }
+                 return { ...link, errorDetail: "Network error" };
+              }
+            }
 
-            clearTimeout(timeoutId);
-
-            if (!response.ok) {
-              return { ...link, errorDetail: `HTTP ${response.status}` };
+            if (!is_ok) {
+              return { ...link, errorDetail: `HTTP ${res_status}` };
             }
             return { ...link, errorDetail: null };
-          } catch (e: any) {
-            if (e.name === "AbortError") {
-              return { ...link, errorDetail: "Timeout" };
-            }
-            return { ...link, errorDetail: "Network error" };
-          }
         }),
       );
 
@@ -730,42 +767,61 @@ async function startServer() {
       if (
         currentHost.includes("pixeldrain.com") ||
         currentHost.includes("pixeldrain.dev") ||
-        currentHost.includes("pixeldrain.net") ||
-        currentHost.includes("pixeldra.in") ||
-        currentHost.includes("pixel.drain")
+        currentHost.includes("pixeldrain.net")
       ) {
-        const fileMatch = currentParsed.pathname.match(/\/(?:u|api\/file)\/([a-zA-Z0-9_-]+)/i);
-        const listMatch = currentParsed.pathname.match(/\/(?:l|api\/list)\/([a-zA-Z0-9_-]+)/i);
-
-        if (fileMatch?.[1] || listMatch?.[1]) {
-          const fileId = fileMatch?.[1];
-          const listId = listMatch?.[1];
+        const match = currentParsed.pathname.match(/\/u\/([^/?#]+)/);
+        if (match?.[1]) {
+          const fileId = match[1];
           try {
-            const apiUrl = fileId 
-              ? `https://pixeldrain.com/api/file/${fileId}/info`
-              : `https://pixeldrain.com/api/list/${listId}`;
+            let infoResStatus = 0;
+            let infoResOk = false;
+            let data: any = null;
+            try {
+              const controller = new AbortController();
+              const timeout = setTimeout(() => controller.abort(), 2500);
+              const infoRes = await fetch(
+                `https://pixeldrain.com/api/file/${fileId}/info`,
+                {
+                  method: "GET",
+                  headers: {
+                    ...headers,
+                    Accept: "application/json,text/plain,*/*",
+                  },
+                  signal: controller.signal
+                },
+              );
+              clearTimeout(timeout);
+              infoResStatus = infoRes.status;
+              infoResOk = infoRes.ok;
+              if (infoRes.status >= 400 && infoRes.status !== 404 && infoRes.status !== 451 && infoRes.status !== 429) {
+                 throw new Error(`HTTP ${infoRes.status}`);
+              }
+              data = await infoRes.json().catch(() => null);
+            } catch(e) {
+               const mlUrl = `https://api.microlink.io/?url=${encodeURIComponent(`https://pixeldrain.com/api/file/${fileId}/info`)}&meta=false&data.body.selector=body&data.body.attr=text&force=true`;
+               const mlRes = await fetch(mlUrl);
+               const mlData = await mlRes.json();
+               infoResStatus = mlData.statusCode || 200;
+               infoResOk = infoResStatus >= 200 && infoResStatus < 400;
+               data = mlData.data?.body;
+               if (typeof data === 'string') {
+                 try { data = JSON.parse(data); } catch(err){}
+               }
+            }
 
-            const infoRes = await fetch(apiUrl, {
-              method: "GET",
-              headers: {
-                ...headers,
-                Accept: "application/json,text/plain,*/*",
-              },
-            });
-
-            if (infoRes.status === 404) {
+            if (infoResStatus === 404) {
               return res.json({
                 ok: false,
                 status: 404,
                 statusLabel: "BROKEN",
-                message: fileId ? "Pixeldrain file not found or deleted" : "Pixeldrain list not found or deleted",
+                message: "Pixeldrain file not found or deleted",
                 finalUrl: currentUrl,
                 source: "pixeldrain-api",
                 host: currentHost,
               });
             }
 
-            if (infoRes.status === 429) {
+            if (infoResStatus === 429) {
               return res.json({
                 ok: false,
                 status: 429,
@@ -777,30 +833,7 @@ async function startServer() {
               });
             }
 
-            if (infoRes.ok) {
-              const data: any = await infoRes.json();
-              
-              if (listId) {
-                const files = data.files || [];
-                const totalSize = files.reduce((acc: number, f: any) => acc + (f.size || 0), 0);
-                const fileSizeText = formatBytes(totalSize);
-                const title = data.title || `Pixeldrain List (${files.length} files)`;
-
-                return res.json({
-                  ok: true,
-                  status: 200,
-                  statusLabel: "WORKING",
-                  message: `Pixeldrain list is working: ${title}`,
-                  finalUrl: currentUrl,
-                  contentType: "application/json",
-                  isDirectDownload: false,
-                  fileName: title,
-                  fileSize: totalSize,
-                  fileSizeText,
-                  source: "pixeldrain-list-api",
-                  host: currentHost,
-                });
-              }
+            if (infoResOk && data) {
 
               const dlRes = await fetch(
                 `https://pixeldrain.com/api/file/${fileId}`,
@@ -902,8 +935,7 @@ async function startServer() {
                 host: currentHost,
               });
             }
-          } catch (e) {
-            console.error("Pixeldrain check error:", e);
+          } catch {
             return res.json({
               ok: false,
               statusLabel: "UNAVAILABLE",
@@ -1080,46 +1112,6 @@ async function startServer() {
         const fileName = fileNameMatch?.[1]
           ? decodeURIComponent(fileNameMatch[1])
           : undefined;
-
-        const serverHeader = res_fetch.headers.get("server") || "";
-        let isGeneralCloudflare = 
-          res_fetch.status === 403 || 
-          res_fetch.status === 503 || 
-          serverHeader.toLowerCase().includes("cloudflare") ||
-          serverHeader.toLowerCase().includes("ddos-guard");
-
-        // Try reading html body to check for cloudflare text if not flagged yet but marked as error
-        if (!isGeneralCloudflare && contentType && contentType.includes("html") && res_fetch.status >= 400) {
-          try {
-            const responseClone = res_fetch.clone();
-            const textContent = await responseClone.text().catch(() => "");
-            const lowerContent = textContent.toLowerCase();
-            if (
-              lowerContent.includes("cloudflare") ||
-              lowerContent.includes("just a moment") ||
-              lowerContent.includes("ddos") ||
-              lowerContent.includes("captcha") ||
-              lowerContent.includes("checking your browser") ||
-              lowerContent.includes("access denied")
-            ) {
-              isGeneralCloudflare = true;
-            }
-          } catch (e) {}
-        }
-
-        if (isGeneralCloudflare) {
-          return res.json({
-            ok: true,
-            status: res_fetch.status || 200,
-            statusLabel: "PROTECTED",
-            message: "Link is alive but protected by Cloudflare/anti-bot (server IP blocked).",
-            finalUrl: res_fetch.url || currentUrl,
-            contentType,
-            isDirectDownload: false,
-            source: "general-check-protection",
-            host: currentHost,
-          });
-        }
 
         if (res_fetch.ok || res_fetch.status === 206) {
           return res.json({

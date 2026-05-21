@@ -226,7 +226,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
           allResults.push(result);
           completedCount++;
 
-          if (result.statusLabel === "WORKING" || result.statusLabel === "SMALL_FILE" || result.statusLabel === "MISSING_FILENAME" || result.statusLabel === "MISSING_METADATA" || result.statusLabel === "SIZE_MISMATCH" || result.statusLabel === "PROTECTED" || result.statusLabel === "REDIRECT") {
+          if (result.statusLabel === "WORKING" || result.statusLabel === "SMALL_FILE" || result.statusLabel === "MISSING_FILENAME" || result.statusLabel === "MISSING_METADATA" || result.statusLabel === "SIZE_MISMATCH") {
             setSelectedUrls((prev) => new Set(prev).add(result.url));
           }
         } catch (e: any) {
@@ -417,7 +417,6 @@ export const LinkCheckerModal: React.FC<Props> = ({
         url: normalizeUrl(r.finalUrl || r.url),
         size: sizeStr,
         unit: unit,
-        reason: r.message || (r.statusLabel ? `Checked as: ${r.statusLabel}` : undefined),
       };
 
       if (detectedS !== undefined) linkItem.season = detectedS;

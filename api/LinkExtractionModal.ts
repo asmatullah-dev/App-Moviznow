@@ -36,11 +36,19 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
         Pragma: "no-cache",
       };
 
-      const response = await axios.get(url, {
-        headers,
-        validateStatus: () => true,
-        timeout: 8000,
-      });
+      let response;
+      try {
+        response = await axios.get(url, {
+          headers,
+          validateStatus: () => true,
+          timeout: 2500,
+        });
+      } catch (err: any) {
+        response = {
+          status: 403,
+          data: '<title>cloudflare</title>',
+        };
+      }
       const $ = cheerio.load(response.data);
 
       let sizeStr =
@@ -246,11 +254,19 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
         return { url };
       }
 
-      const response = await axios.get(url, {
-        headers,
-        validateStatus: () => true,
-        timeout: 5000,
-      });
+      let response;
+      try {
+        response = await axios.get(url, {
+          headers,
+          validateStatus: () => true,
+          timeout: 2500,
+        });
+      } catch (err: any) {
+        response = {
+          status: 403,
+          data: '<title>cloudflare</title>'
+        };
+      }
       let $ = cheerio.load(response.data);
 
       const titleText = $("title").text().toLowerCase();
@@ -301,13 +317,6 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
          }
       }
 
-      // Resolve relative nextUrl against original url
-      if (nextUrl && !nextUrl.startsWith("http")) {
-        try {
-          nextUrl = new URL(nextUrl, url).toString();
-        } catch (e) {}
-      }
-
       let $2 = null;
 
       if (!nextUrl) {
@@ -317,11 +326,19 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
           return { url };
         }
       } else {
-        let res2 = await axios.get(nextUrl, {
-          headers,
-          validateStatus: () => true,
-          timeout: 5000,
-        });
+        let res2;
+        try {
+          res2 = await axios.get(nextUrl, {
+            headers,
+            validateStatus: () => true,
+            timeout: 2500,
+          });
+        } catch (err: any) {
+          res2 = {
+            status: 403,
+            data: '<title>cloudflare</title>'
+          };
+        }
         $2 = cheerio.load(res2.data);
 
         const titleText2 = $2("title").text().toLowerCase();
@@ -390,17 +407,8 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
             }
           });
         }
-        if (href) {
-          if (!href.startsWith("http")) {
-            try {
-              const baseUrl = nextUrl || url;
-              href = new URL(href, baseUrl).toString();
-            } catch (err) {}
-          }
-          if (!text.includes("telegram")) {
-            candidateLinks.push({ text, href });
-          }
-        }
+        if (href && !text.includes("telegram"))
+          candidateLinks.push({ text, href });
       });
 
       if (candidateLinks.length === 0) {
