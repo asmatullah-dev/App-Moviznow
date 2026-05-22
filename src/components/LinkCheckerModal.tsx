@@ -95,6 +95,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
 }) => {
   const [input, setInput] = useState(initialInput);
   const [autoClipboard, setAutoClipboard] = useState(false);
+  const [clipboardStatus, setClipboardStatus] = useState<"active" | "unfocused" | "denied" | "idle">("idle");
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<LinkCheckResult[]>([]);
   const [selectedUrls, setSelectedUrls] = useState<Set<string>>(new Set());
@@ -578,9 +579,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
     onClose();
   };
 
-  const pasteFromClipboard = async (isAuto = false) => {
+  const pasteFromClipboard = async (isAuto = false, suppliedText?: string) => {
     try {
-      const text = await navigator.clipboard.readText();
+      const text = suppliedText !== undefined ? suppliedText : await navigator.clipboard.readText();
       if (!text) return;
 
       const newLinks = splitLinks(text).map(normalizeUrl).filter(Boolean);
@@ -640,11 +641,20 @@ export const LinkCheckerModal: React.FC<Props> = ({
   }, [isOpen, initialInput, autoStart, disableAutoClipboard]);
 
   useEffect(() => {
-    if (!isOpen || disableAutoClipboard || !autoClipboard) return;
+    if (!isOpen || disableAutoClipboard || !autoClipboard) {
+      setClipboardStatus("idle");
+      return;
+    }
 
     const checkClipboardText = async () => {
+      // Proactively check focus
+      if (!document.hasFocus()) {
+        setClipboardStatus("unfocused");
+      }
+
       try {
         const text = await navigator.clipboard.readText();
+        setClipboardStatus("active");
         if (!text || text.trim() === "") return;
 
         const trimmedText = text.trim();
@@ -654,14 +664,27 @@ export const LinkCheckerModal: React.FC<Props> = ({
         if (extracted.length === 0) return;
 
         lastClipboardTextRef.current = trimmedText;
-        await pasteFromClipboard(true);
-      } catch (err) {
-        // Quietly fail for auto-pasting to avoid browser permission popups
+        await pasteFromClipboard(true, trimmedText);
+      } catch (err: any) {
+        if (
+          err?.name === "NotAllowedError" || 
+          err?.message?.includes("focus") || 
+          err?.message?.includes("focused") ||
+          !document.hasFocus()
+        ) {
+          setClipboardStatus("unfocused");
+        } else {
+          setClipboardStatus("denied");
+        }
       }
     };
 
     const interval = setInterval(checkClipboardText, 3000);
     window.addEventListener("focus", checkClipboardText);
+    window.addEventListener("mouseenter", checkClipboardText);
+    window.addEventListener("pointerenter", checkClipboardText);
+    window.addEventListener("click", checkClipboardText);
+    document.addEventListener("visibilitychange", checkClipboardText);
 
     // Initial run in case something is already on the clipboard when turned on
     checkClipboardText();
@@ -669,6 +692,10 @@ export const LinkCheckerModal: React.FC<Props> = ({
     return () => {
       clearInterval(interval);
       window.removeEventListener("focus", checkClipboardText);
+      window.removeEventListener("mouseenter", checkClipboardText);
+      window.removeEventListener("pointerenter", checkClipboardText);
+      window.removeEventListener("click", checkClipboardText);
+      document.removeEventListener("visibilitychange", checkClipboardText);
     };
   }, [isOpen, disableAutoClipboard, autoClipboard]);
 
@@ -859,7 +886,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                   <textarea value={input} onChange={(e) => setInput(e.target.value)} placeholder="Paste links or a full movie post here..." rows={6} className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-4 py-3 text-sm text-zinc-900 dark:text-white placeholder:text-zinc-500 outline-none focus:ring-2 focus:ring-cyan-500 transition-colors duration-300" />
 
                   {!disableAutoClipboard && (
-                    <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex flex-col gap-2">
                       <label className="inline-flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300 cursor-pointer select-none">
                         <input
                           type="checkbox"
@@ -869,6 +896,28 @@ export const LinkCheckerModal: React.FC<Props> = ({
                         />
                         Auto-detect and paste links from clipboard (Every 3s)
                       </label>
+                      {autoClipboard && (
+                        <div className="text-xs pl-6 transition-all duration-300">
+                          {clipboardStatus === "active" && (
+                            <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1.5 animate-fade-in">
+                              <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                              Active (Monitoring clipboard)
+                            </span>
+                          )}
+                          {clipboardStatus === "unfocused" && (
+                            <span className="text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1.5 animate-fade-in" title="Modern browsers only allow clipboard reads when the window is focused or hovered. Hover or click anywhere on this floating window to instantly resume detection.">
+                              <span className="inline-block w-2 h-2 rounded-full bg-amber-400" />
+                              Standing by (Hover mouse or click this window to resume automatic detection)
+                            </span>
+                          )}
+                          {clipboardStatus === "denied" && (
+                            <span className="text-rose-600 dark:text-rose-400 font-medium flex items-center gap-1.5 animate-fade-in">
+                              <span className="inline-block w-2 h-2 rounded-full bg-rose-500" />
+                              Access restricted (Please grant clipboard permission or use manual "Paste" button below)
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
 
