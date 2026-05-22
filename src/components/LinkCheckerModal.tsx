@@ -676,9 +676,6 @@ export const LinkCheckerModal: React.FC<Props> = ({
     const forceWindowFocusAndCheck = () => {
       try {
         window.focus();
-        if (textareaRef.current) {
-          textareaRef.current.focus({ preventScroll: true });
-        }
       } catch (e) {}
       checkClipboardText();
     };
