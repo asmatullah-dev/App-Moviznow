@@ -324,7 +324,21 @@ export default function MovieDetails() {
     );
   }, [content, fullContent]);
 
+  // Reset states if content becomes available after loading to prevent getting stuck with empty data
   useEffect(() => {
+    if (content && fetchFailed) {
+      setFetchFailed(false);
+      if (id) {
+        hasFetchedFull.current[id] = false;
+      }
+    }
+  }, [content, id, fetchFailed]);
+
+  useEffect(() => {
+    if (contentLoading && !content) {
+      return;
+    }
+
     if (
       (isMinimal || isStale) &&
       id &&
@@ -373,7 +387,7 @@ export default function MovieDetails() {
       };
       fetchFullContent();
     }
-  }, [isMinimal, isStale, id, fetchFailed, isOffline, content]);
+  }, [isMinimal, isStale, id, fetchFailed, isOffline, content, contentLoading]);
 
   const mergedContent = useMemo(() => {
     if (!content && !fullContent) return null;
