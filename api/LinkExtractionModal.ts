@@ -5,7 +5,7 @@ import * as cheerio from 'cheerio';
 export const linkExtractionRouter = Router();
 
 const extractionCache = new Map<string, { data: any, timestamp: number }>();
-const CACHE_TTL = 30 * 1000; // 30 seconds
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
 
   linkExtractionRouter.post("/api/hubcloud/extract", async (req, res) => {
     try {
@@ -178,7 +178,16 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
         isNotFound,
       };
       
-      extractionCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
+      const isSuccessful = 
+        responseData.isWorking && 
+        !responseData.isNotFound && 
+        responseData.title && 
+        !responseData.title.toLowerCase().includes("cloudflare block") && 
+        !responseData.title.toLowerCase().includes("timeout");
+
+      if (isSuccessful) {
+        extractionCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
+      }
 
       res.json(responseData);
     } catch (e: any) {
@@ -249,7 +258,7 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
       const response = await axios.get(url, {
         headers,
         validateStatus: () => true,
-        timeout: 5000,
+        timeout: 3000,
       });
       let $ = cheerio.load(response.data);
 
@@ -313,7 +322,7 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
         let res2 = await axios.get(nextUrl, {
           headers,
           validateStatus: () => true,
-          timeout: 5000,
+          timeout: 3000,
         });
         $2 = cheerio.load(res2.data);
 
@@ -431,33 +440,7 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
           checkRes.headers.location
         ) {
           resultLink = checkRes.headers.location;
-          try {
-            const nextRes = await axios.get(resultLink, {
-              headers: { ...headers, Range: "bytes=0-0" },
-              maxRedirects: 0,
-              validateStatus: () => true,
-              timeout: 2500,
-            });
-            if (
-              nextRes.status >= 300 &&
-              nextRes.status < 400 &&
-              nextRes.headers.location
-            ) {
-              resultLink = nextRes.headers.location;
-            }
-            // Check if specifically returning 404/error on destination
-            if (
-              nextRes.status < 400 ||
-              nextRes.status === 405 ||
-              nextRes.status === 416
-            ) {
-              isWorking = true;
-            } else {
-              isWorking = false; // The destination is 404 or worse
-            }
-          } catch (e) {
-            isWorking = true; // Still assume it works if we just hit timeout
-          }
+          isWorking = true; // Instantly mark as working and bypass expensive nested destination check
         } else if (
           checkRes.status < 400 ||
           checkRes.status === 405 ||
@@ -603,18 +586,23 @@ const CACHE_TTL = 30 * 1000; // 30 seconds
 
       // Return ok stuff for checkOnly
       if (checkOnly && data && data.ok !== undefined) {
-         extractionCache.set(cacheKey, { data, timestamp: Date.now() });
+         if (data.ok) {
+            extractionCache.set(cacheKey, { data, timestamp: Date.now() });
+         }
          return res.json(data);
       }
 
       // If cloudflare error
       if (data.isCloudflare) {
          const responseData = { url: data.url, isCloudflare: true };
-         extractionCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
          return res.json(responseData);
       }
 
-      extractionCache.set(cacheKey, { data, timestamp: Date.now() });
+      // Only cache if extraction was successful (i.e. url has changed and is different from the input url)
+      const isSuccessfulLink = data && data.url && data.url !== url;
+      if (isSuccessfulLink) {
+         extractionCache.set(cacheKey, { data, timestamp: Date.now() });
+      }
       return res.json(data);
     } catch (e: any) {
       console.error(e);

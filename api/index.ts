@@ -644,7 +644,7 @@ async function startServer() {
 
   // Advanced Link Checker API
   const checkLinkCache = new Map<string, { data: any, timestamp: number }>();
-  const CHECK_LINK_CACHE_TTL = 30 * 1000;
+  const CHECK_LINK_CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
 
   app.post(["/api/check-link", "/check-link"], async (req, res) => {
     try {
@@ -660,6 +660,14 @@ async function startServer() {
       if (cached && Date.now() - cached.timestamp < CHECK_LINK_CACHE_TTL) {
          return res.json(cached.data);
       }
+
+      const originalJson = res.json.bind(res);
+      res.json = (data: any) => {
+        if (data && data.ok === true && data.statusLabel === "WORKING") {
+          checkLinkCache.set(cacheKey, { data, timestamp: Date.now() });
+        }
+        return originalJson(data);
+      };
 
 
       let parsed: URL;

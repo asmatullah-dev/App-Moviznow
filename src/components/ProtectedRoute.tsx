@@ -15,7 +15,22 @@ export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRout
   const { settings, loading: settingsLoading } = useSettings();
   const location = useLocation();
 
-  const isChecking = authLoading || (user && !profile && authProfileLoading) || settingsLoading;
+  const [maxWaitReached, setMaxWaitReached] = React.useState(false);
+
+  React.useEffect(() => {
+    // Safety cap: never show the initial logo loading screen for more than 800ms if we have cached data
+    const timer = setTimeout(() => {
+      setMaxWaitReached(true);
+    }, 800);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const hasCachedUser = !!localStorage.getItem('profile_cache');
+  const isChecking = (authLoading && !hasCachedUser) || (!maxWaitReached && (
+    authLoading || 
+    (user && !profile && authProfileLoading) || 
+    settingsLoading
+  ));
 
   if (isChecking) {
     return (
@@ -52,7 +67,8 @@ export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRout
 
   // If admin is required, we must wait for the profile to check roles
   if (requireAdmin) {
-    if (authProfileLoading || !profile) {
+    // If we already have the profile in memory, do not block on background authProfileLoading sync
+    if (!profile) {
       return (
         <div className="min-h-screen bg-white dark:bg-zinc-950 flex flex-col items-center justify-center gap-6 transition-colors duration-300">
           <div className="flex flex-col items-center animate-pulse">
