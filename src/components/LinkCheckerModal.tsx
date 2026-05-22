@@ -63,6 +63,7 @@ type Props = {
   onResults?: (results: LinkCheckResult[]) => void;
   languages?: Language[];
   qualities?: Quality[];
+  disableAutoClipboard?: boolean;
 };
 
 const badgeMap: Record<StatusLabel, string> = {
@@ -90,9 +91,10 @@ export const LinkCheckerModal: React.FC<Props> = ({
   onResults,
   languages = [],
   qualities = [],
+  disableAutoClipboard = false,
 }) => {
   const [input, setInput] = useState(initialInput);
-  const [autoExtract, setAutoExtract] = useState(true);
+  const [autoClipboard, setAutoClipboard] = useState(false);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<LinkCheckResult[]>([]);
   const [selectedUrls, setSelectedUrls] = useState<Set<string>>(new Set());
@@ -110,11 +112,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
   useModalBehavior(isOpen, onClose);
 
   const links = useMemo(() => {
-    if (!autoExtract) {
-      return input.split(/\r?\n/).map((s) => normalizeUrl(s)).filter(Boolean);
-    }
     return splitLinks(input).map(normalizeUrl).filter(Boolean);
-  }, [input, autoExtract]);
+  }, [input]);
 
   // Auto-start check tracker
   const autoStartedInputRef = React.useRef<string | null>(null);
@@ -611,6 +610,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
     }
   };
 
+  const lastClipboardTextRef = React.useRef<string>("");
+
   useEffect(() => {
     if (isOpen) {
       if (initialInput) {
@@ -624,11 +625,10 @@ export const LinkCheckerModal: React.FC<Props> = ({
       setExpanded({});
       setIsReviewingBatch(false);
       setBatchReviewItems([]);
+      setAutoClipboard(false);
 
       if (autoStart && initialInput && autoStartedInputRef.current !== initialInput) {
-        const initialLinks = autoExtract 
-          ? splitLinks(initialInput).map(normalizeUrl).filter(Boolean)
-          : initialInput.split(/\r?\n/).map((s) => normalizeUrl(s)).filter(Boolean);
+        const initialLinks = splitLinks(initialInput).map(normalizeUrl).filter(Boolean);
         if (initialLinks.length > 0) {
           autoStartedInputRef.current = initialInput;
           handleCheck(initialLinks);
@@ -637,7 +637,40 @@ export const LinkCheckerModal: React.FC<Props> = ({
     } else {
       autoStartedInputRef.current = null;
     }
-  }, [isOpen, initialInput, autoStart, autoExtract]);
+  }, [isOpen, initialInput, autoStart, disableAutoClipboard]);
+
+  useEffect(() => {
+    if (!isOpen || disableAutoClipboard || !autoClipboard) return;
+
+    const checkClipboardText = async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (!text || text.trim() === "") return;
+
+        const trimmedText = text.trim();
+        if (trimmedText === lastClipboardTextRef.current) return;
+
+        const extracted = splitLinks(trimmedText);
+        if (extracted.length === 0) return;
+
+        lastClipboardTextRef.current = trimmedText;
+        await pasteFromClipboard(true);
+      } catch (err) {
+        // Quietly fail for auto-pasting to avoid browser permission popups
+      }
+    };
+
+    const interval = setInterval(checkClipboardText, 3000);
+    window.addEventListener("focus", checkClipboardText);
+
+    // Initial run in case something is already on the clipboard when turned on
+    checkClipboardText();
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", checkClipboardText);
+    };
+  }, [isOpen, disableAutoClipboard, autoClipboard]);
 
   const reset = () => {
     setInput("");
@@ -825,12 +858,19 @@ export const LinkCheckerModal: React.FC<Props> = ({
                   <label className="text-sm font-medium text-zinc-700 dark:text-zinc-200">Paste one or multiple links / full movie post</label>
                   <textarea value={input} onChange={(e) => setInput(e.target.value)} placeholder="Paste links or a full movie post here..." rows={6} className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-4 py-3 text-sm text-zinc-900 dark:text-white placeholder:text-zinc-500 outline-none focus:ring-2 focus:ring-cyan-500 transition-colors duration-300" />
 
-                  <div className="flex flex-wrap items-center gap-3">
-                    <label className="inline-flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
-                      <input type="checkbox" checked={autoExtract} onChange={(e) => setAutoExtract(e.target.checked)} className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950" />
-                      Auto extract links from full post/message
-                    </label>
-                  </div>
+                  {!disableAutoClipboard && (
+                    <div className="flex flex-wrap items-center gap-3">
+                      <label className="inline-flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={autoClipboard}
+                          onChange={(e) => setAutoClipboard(e.target.checked)}
+                          className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-cyan-500 focus:ring-cyan-500"
+                        />
+                        Auto-detect and paste links from clipboard (Every 3s)
+                      </label>
+                    </div>
+                  )}
 
                   <div className="flex flex-wrap gap-2">
                     <button onClick={() => pasteFromClipboard(false)} className="inline-flex items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-8 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-2 transition-colors w-32"><ClipboardPaste className="h-4 w-4" />Paste</button>

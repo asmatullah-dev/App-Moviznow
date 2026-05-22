@@ -5011,6 +5011,7 @@ export default function ContentManagement() {
         title={`Check Links - ${checkLinksContent?.title || ''}`}
         initialInput={contentLinkCheckerInput}
         autoStart={true}
+        disableAutoClipboard={true}
         languages={languages}
         qualities={qualities}
       />
