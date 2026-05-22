@@ -707,16 +707,42 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         if (!authProfileLoading && !profile) setLoading(false);
         return;
     }
+
+    const now = Date.now();
+    const lastSuccessfulMetaCheckStr = safeStorage.getItem('last_successful_meta_check');
+    const lastSuccessfulMetaCheck = lastSuccessfulMetaCheckStr ? parseInt(lastSuccessfulMetaCheckStr) : 0;
+    
+    // "turn off running app if data not read and not get or last read data is more that 30 hours passed then pause app and show last updated data"
+    const isOver30Hours = now - lastSuccessfulMetaCheck > 30 * 60 * 60 * 1000;
+    
+    if (isOver30Hours && lastSuccessfulMetaCheck > 0 && !navigator.onLine) {
+        window.dispatchEvent(new CustomEvent('app_paused_offline', { 
+            detail: { 
+                paused: true, 
+                lastSynced: new Date(lastSuccessfulMetaCheck).toLocaleString() 
+            } 
+        }));
+    } else {
+        window.dispatchEvent(new CustomEvent('app_paused_offline', { 
+            detail: { paused: false } 
+        }));
+    }
+
     if (!navigator.onLine) {
+        setLoading(false);
+        return;
+    }
+    
+    // Strict check: don't load data if Whatsapp number is missing
+    if (!profile.phone && profile.role !== 'admin' && profile.role !== 'owner') {
         setLoading(false);
         return;
     }
     
     const isAdmin = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
     
-    const now = Date.now();
-    // PKT is UTC+5. Shift back by 9 hours to align the daily update cycle with 9 AM PKT.
-    const shiftedTime = new Date(now + (5 - 9) * 60 * 60 * 1000);
+    // PKT is UTC+5. Shift back by 7 hours to align the daily update cycle with 7 AM PKT.
+    const shiftedTime = new Date(now + (5 - 7) * 60 * 60 * 1000);
     const checkPeriod = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
 
     // Period check to avoid redundant auto-checks
@@ -726,7 +752,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     const noLocalData = contentList.length === 0;
 
     if (!force && lastCheckPeriod === checkPeriod && !noLocalData) {
-        // Already checked for this period (the 9AM cycle)
+        // Already checked for this period (the 7AM cycle)
         setLoading(false);
         return;
     }
@@ -762,6 +788,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     
     // Record that we checked in this period
     safeStorage.setItem('last_meta_check_period', checkPeriod);
+    safeStorage.setItem('last_successful_meta_check', Date.now().toString());
 
     if (force || noLocalData || lastCheckPeriod !== checkPeriod) {
         window.dispatchEvent(new CustomEvent('sync_status', { detail: updatedSomething ? 'success' : 'up-to-date' }));

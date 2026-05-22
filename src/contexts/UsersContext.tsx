@@ -52,15 +52,15 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     const pendingStr = safeStorage.getItem('pending_user_updates');
     if (!pendingStr) return;
     
-    // Check 9AM restriction for auto-syncs
+    // Check 7AM restriction for auto-syncs
     const now = Date.now();
-    // PKT is UTC+5. Shift back by 9 hours to align the daily update cycle with 9 AM PKT.
-    const shiftedTime = new Date(now + (5 - 9) * 60 * 60 * 1000);
+    // PKT is UTC+5. Shift back by 7 hours to align the daily update cycle with 7 AM PKT.
+    const shiftedTime = new Date(now + (5 - 7) * 60 * 60 * 1000);
     const checkPeriod = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
     const lastCheckPeriod = safeStorage.getItem('last_user_finalize_period');
     
     if (lastCheckPeriod === checkPeriod && !force) {
-        console.log("Users sync deferred: Already synced in this 9 AM PKT period.");
+        console.log("Users sync deferred: Already synced in this 7 AM PKT period.");
         return;
     }
     
@@ -102,7 +102,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       setHasPendingChanges(false);
       
       const nowSync = Date.now();
-      const shiftedSync = new Date(nowSync + (5 - 9) * 60 * 60 * 1000);
+      const shiftedSync = new Date(nowSync + (5 - 7) * 60 * 60 * 1000);
       const periodSync = `${shiftedSync.getUTCFullYear()}-${shiftedSync.getUTCMonth() + 1}-${shiftedSync.getUTCDate()}`;
       safeStorage.setItem('last_user_finalize_period', periodSync);
 
@@ -120,8 +120,8 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     }
 
     const now = Date.now();
-    // PKT is UTC+5. Shift back by 9 hours to align the daily update cycle with 9 AM PKT.
-    const shiftedTime = new Date(now + (5 - 9) * 60 * 60 * 1000);
+    // PKT is UTC+5. Shift back by 7 hours to align the daily update cycle with 7 AM PKT.
+    const shiftedTime = new Date(now + (5 - 7) * 60 * 60 * 1000);
     const checkPeriod = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
 
     const cachedStr = safeStorage.getItem('cached_all_users');
@@ -181,8 +181,15 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           
           const uidsToFetch = new Set<string>();
           Object.entries(serverUsersVersion).forEach(([uid, mtime]) => {
-             if (typeof mtime === 'number' && mtime > lastFetchTime) {
-                uidsToFetch.add(uid);
+             if (typeof mtime === 'number') {
+               if (mtime === -1) {
+                 if (currentUsersMap.has(uid)) {
+                   currentUsersMap.delete(uid);
+                   updatedSomething = true;
+                 }
+               } else if (mtime > lastFetchTime) {
+                 uidsToFetch.add(uid);
+               }
              }
           });
 
@@ -213,7 +220,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       
       // Mark as checked in this period
       const nowChecked = Date.now();
-      const shiftedChecked = new Date(nowChecked + (5 - 9) * 60 * 60 * 1000);
+      const shiftedChecked = new Date(nowChecked + (5 - 7) * 60 * 60 * 1000);
       const periodChecked = `${shiftedChecked.getUTCFullYear()}-${shiftedChecked.getUTCMonth() + 1}-${shiftedChecked.getUTCDate()}`;
       safeStorage.setItem('last_chunk_users_check_period', periodChecked);
       

@@ -72,11 +72,18 @@ function MediaModalController({ isOpen, onClose }: { isOpen: boolean; onClose: (
 
 export default function App() {
   const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
+  const [pauseStatus, setPauseStatus] = useState<{ paused: boolean, lastSynced?: string }>({ paused: false });
 
   useEffect(() => {
     if (window.history.scrollRestoration) {
       window.history.scrollRestoration = 'manual';
     }
+  }, []);
+
+  useEffect(() => {
+    const handlePause = (e: any) => setPauseStatus(e.detail);
+    window.addEventListener('app_paused_offline', handlePause);
+    return () => window.removeEventListener('app_paused_offline', handlePause);
   }, []);
 
   useModalBehavior(isMediaModalOpen, () => setIsMediaModalOpen(false));
@@ -90,6 +97,19 @@ export default function App() {
               <NotificationProvider>
                 <CartProvider>
                   <PWAProvider>
+                    {pauseStatus.paused && (
+                      <div className="fixed inset-0 z-[9999] bg-zinc-950/80 backdrop-blur-md flex flex-col items-center justify-center p-4">
+                        <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl p-8 max-w-sm w-full text-center space-y-4">
+                          <h2 className="text-xl font-bold">App Paused</h2>
+                          <p className="text-zinc-600 dark:text-zinc-400">
+                            You have been offline for over 30 hours. Data was last synced on {pauseStatus.lastSynced}. 
+                          </p>
+                          <p className="text-zinc-600 dark:text-zinc-400">
+                            Please connect to the internet to update your app data and continue.
+                          </p>
+                        </div>
+                      </div>
+                    )}
                     <OfflineBanner />
                     <SyncBanner />
                     <SystemNotificationWrapper />

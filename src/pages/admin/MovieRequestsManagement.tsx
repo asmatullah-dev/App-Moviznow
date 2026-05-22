@@ -58,7 +58,7 @@ export default function MovieRequestsManagement() {
   useModalBehavior(isPickerOpen, () => setIsPickerOpen(false));
   useModalBehavior(!!requestToComment, () => setRequestToComment(null));
 
-  const { users: allUsers } = useUsers();
+  const { users: allUsers, updateUserFields } = useUsers();
 
   useEffect(() => {
     const aggregated = new Map<string, MovieRequest>();
@@ -112,9 +112,6 @@ export default function MovieRequestsManagement() {
     const targetRequest = requests.find(r => r.id === requestKey);
     if (!targetRequest) return;
 
-    const { writeBatch } = await import('firebase/firestore');
-    const batch = writeBatch(db);
-
     targetRequest.requestedBy.forEach(uid => {
       const user = allUsers.find(u => u.uid === uid);
       if (user && user.movieRequests) {
@@ -130,12 +127,9 @@ export default function MovieRequestsManagement() {
               : r
           );
         }
-        batch.update(doc(db, 'users', uid), { movieRequests: updatedReqs });
-        batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [uid]: Date.now() } }, { merge: true });
+        updateUserFields(uid, { movieRequests: updatedReqs });
       }
     });
-
-    await batch.commit();
   };
 
   const handleUpdateStatus = async (request: MovieRequest, status: 'completed' | 'rejected' | 'pending') => {

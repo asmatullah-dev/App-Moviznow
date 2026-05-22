@@ -3,7 +3,7 @@ import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
 import { collection, doc, updateDoc, getDoc, onSnapshot, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit } from 'firebase/firestore';
 import { UserProfile, Role, Status, AnalyticsEvent, Content } from '../../types';
-import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, Bell } from 'lucide-react';
+import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, Bell, RefreshCw } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -150,7 +150,7 @@ export default function UserManagement() {
     let mounted = true;
     if (mounted) {
        window.dispatchEvent(new CustomEvent('sync_status', { detail: 'syncing' }));
-       refreshUsers(false).then((res) => {
+       refreshUsers(true).then((res) => {
          if (mounted) {
            if (res.updatedSomething) {
              window.dispatchEvent(new CustomEvent('sync_status', { detail: 'success' }));
@@ -548,6 +548,7 @@ export default function UserManagement() {
         
         await batch.commit();
         setAlertConfig({ isOpen: true, title: 'Success', message: 'User and all associated data deleted successfully' });
+        refreshUsers(true).catch(console.error);
       } else {
         // First time: suspend
         updateUserFields(currentDeleteConfirm, {
@@ -1016,8 +1017,13 @@ export default function UserManagement() {
             newUserData.managedBy = profile.uid;
           }
 
-          await setDoc(doc(db, 'users', newUserId), newUserData);
+          const batch = writeBatch(db);
+          batch.set(doc(db, 'users', newUserId), newUserData);
+          batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [newUserId]: Date.now() } }, { merge: true });
+          await batch.commit();
+          
           setAlertConfig({ isOpen: true, title: 'Success', message: 'Pending user added successfully.' });
+          refreshUsers(true).catch(console.error);
         }
       }
       
@@ -1025,6 +1031,9 @@ export default function UserManagement() {
       setNewUserForm({ email: '', phone: '', displayName: '', role: 'user', status: 'pending', expiryDate: '' });
       setFoundUser(null);
       setSearchStatus('idle');
+      if (foundUser) {
+        refreshUsers(true).catch(console.error);
+      }
     } catch (error) {
       console.error('Error adding/claiming user:', error);
       setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to add/claim user.' });
@@ -1053,22 +1062,38 @@ export default function UserManagement() {
         </div>
         { ((profile?.role as string) === 'user_manager' || (profile?.role as string) === 'manager' || profile?.role === 'admin' || profile?.role === 'owner') && (
           <div className="flex gap-2">
+            {hasPendingChanges && (
+              <Button
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent('sync_status', { detail: 'syncing' }));
+                  finalizeUserChanges(true).then(() => {
+                    window.dispatchEvent(new CustomEvent('sync_status', { detail: 'success' }));
+                  }).catch(() => {
+                    window.dispatchEvent(new CustomEvent('sync_status', { detail: 'error' }));
+                  });
+                }}
+                variant="ghost"
+                className="bg-yellow-500/10 text-yellow-600 hover:bg-yellow-500/20 px-3"
+                icon={<RefreshCw className={`w-5 h-5 ${usersLoading ? 'animate-spin' : ''}`} />}
+                title="Sync pending changes"
+              />
+            )}
             {(profile?.role === 'admin' || profile?.role === 'owner') && (
               <Button
                 onClick={() => setIsWhitelistModalOpen(true)}
                 variant="secondary"
+                className="px-3"
                 icon={<Phone className="w-5 h-5" />}
-              >
-                Phone Whitelist
-              </Button>
+                title="Phone Whitelist"
+              />
             )}
             <Button
               onClick={() => setIsAddUserModalOpen(true)}
               variant="emerald"
+              className="px-3"
               icon={<UserPlus className="w-5 h-5" />}
-            >
-              {(profile?.role === 'admin' || profile?.role === 'owner') ? 'Add User' : 'Add Pending User'}
-            </Button>
+              title={(profile?.role === 'admin' || profile?.role === 'owner') ? 'Add User' : 'Add Pending User'}
+            />
           </div>
         )}
       </div>

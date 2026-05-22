@@ -74,7 +74,7 @@ export default function Settings() {
       <header className="sticky top-0 z-40 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800">
         <div className="max-w-3xl mx-auto px-4 h-16 flex items-center gap-4">
           <button 
-            onClick={() => navigate(-1)}
+            onClick={() => window.history.length > 2 ? navigate(-1) : navigate('/')}
             className="p-2 -ml-2 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -139,7 +139,7 @@ export default function Settings() {
                              supportPhone = '92' + supportPhone;
                            }
                            const adminPhone = supportPhone.replace('+', '');
-                           return `https://wa.me/${adminPhone}?text=${encodeURIComponent(`Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nI need to change my email address.`)}`;
+                           return `https://wa.me/${adminPhone}?text=${encodeURIComponent(`Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nI need to change my email address.\n\nYour new email: `)}`;
                          })()} target="_blank" rel="noreferrer" className="text-emerald-500 hover:underline">Contact admin</a> if needed.</span>
                       )}
                   </p>

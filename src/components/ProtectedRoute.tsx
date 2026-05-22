@@ -1,9 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth, standardizePhone } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { auth } from '../firebase';
-import { Loader2, AlertCircle } from 'lucide-react';
+import { Loader2, AlertCircle, MessageCircle } from 'lucide-react';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -11,11 +11,14 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRouteProps) {
-  const { user, profile, loading: authProfileLoading, authLoading } = useAuth();
+  const { user, profile, loading: authProfileLoading, authLoading, updateUserProfileData, refreshProfile } = useAuth();
   const { settings, loading: settingsLoading } = useSettings();
   const location = useLocation();
 
   const [maxWaitReached, setMaxWaitReached] = React.useState(false);
+  const [whatsappNumber, setWhatsappNumber] = useState("");
+  const [whatsappError, setWhatsappError] = useState<string | null>(null);
+  const [isSavingWhatsapp, setIsSavingWhatsapp] = useState(false);
 
   React.useEffect(() => {
     // Safety cap: never show the initial logo loading screen for more than 800ms if we have cached data
@@ -26,8 +29,7 @@ export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRout
   }, []);
 
   const hasCachedUser = !!localStorage.getItem('profile_cache');
-  const isChecking = (authLoading && !hasCachedUser) || (!maxWaitReached && (
-    authLoading || 
+  const isChecking = (!hasCachedUser && authLoading) || (!maxWaitReached && (
     (user && !profile && authProfileLoading) || 
     settingsLoading
   ));
@@ -44,14 +46,101 @@ export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRout
     );
   }
 
-  if (!user) {
+  // If we have a cached user but auth is still loading, allow rendering the app
+  // If auth finishes and there is no user, it will redirect to login then.
+  if (!user && !authLoading) {
     console.log('ProtectedRoute: No user, redirecting to login');
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
+  // If we're using a cached profile but wait... if suspended, still redirect
   if (profile?.status === 'suspended') {
     console.log('ProtectedRoute: User is suspended, redirecting to login');
     return <Navigate to="/login" state={{ from: location, suspended: true }} replace />;
+  }
+
+  // Check for Whatsapp number
+  if (profile && !profile.phone && profile.role !== 'admin' && profile.role !== 'owner') {
+    const handleSaveWhatsapp = async () => {
+      if (!whatsappNumber.trim()) return;
+
+      setWhatsappError(null);
+      setIsSavingWhatsapp(true);
+
+      try {
+        const standardized = standardizePhone(whatsappNumber);
+        if (!standardized) {
+          setWhatsappError("Please enter a valid WhatsApp number");
+          setIsSavingWhatsapp(false);
+          return;
+        }
+
+        await updateUserProfileData({ phone: standardized });
+        await refreshProfile();
+      } catch (error: any) {
+        console.error("Failed to save WhatsApp number", error);
+        setWhatsappError(
+          error.message || "Failed to save number. Please try again.",
+        );
+      } finally {
+        setIsSavingWhatsapp(false);
+      }
+    };
+
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white dark:bg-zinc-950 p-4">
+        <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-md w-full relative">
+          <div className="flex justify-center mb-4">
+            <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center">
+              <MessageCircle className="w-8 h-8 text-emerald-500" />
+            </div>
+          </div>
+          <h3 className="text-xl font-bold mb-2 text-center text-zinc-900 dark:text-white transition-colors duration-300">
+            WhatsApp Number is Required
+          </h3>
+          <p className="text-zinc-500 dark:text-zinc-400 mb-6 text-center text-sm">
+            Please enter your WhatsApp number to continue. This is required
+            for membership updates and support.
+          </p>
+          <div className="space-y-4">
+            {whatsappError && (
+              <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                <p className="text-xs text-red-500">{whatsappError}</p>
+              </div>
+            )}
+            <input
+              type="tel"
+              placeholder="e.g. 03001234567"
+              value={whatsappNumber}
+              onChange={(e) => {
+                setWhatsappNumber(e.target.value);
+                setWhatsappError(null);
+              }}
+              className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500 text-zinc-900 dark:text-white placeholder-zinc-500 dark:placeholder-zinc-400 transition-colors duration-300"
+            />
+            <div className="flex flex-col gap-2">
+              <div className="flex gap-3 mt-4">
+                <button
+                  onClick={handleSaveWhatsapp}
+                  disabled={!whatsappNumber.trim() || isSavingWhatsapp}
+                  className="w-full bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-500/50 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2"
+                >
+                  {isSavingWhatsapp ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    "Save Number"
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const isStaff = ['owner', 'admin', 'content_manager', 'user_manager', 'manager'].includes(profile?.role || '');

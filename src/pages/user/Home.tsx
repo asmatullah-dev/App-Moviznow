@@ -147,10 +147,6 @@ export default function Home({
     );
   });
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
-  const [showWhatsappPrompt, setShowWhatsappPrompt] = useState(false);
-  const [whatsappNumber, setWhatsappNumber] = useState("");
-  const [whatsappError, setWhatsappError] = useState<string | null>(null);
-  const [isSavingWhatsapp, setIsSavingWhatsapp] = useState(false);
 
   const [selectedCollection, setSelectedCollection] =
     useState<AppCollection | null>(() => {
@@ -226,7 +222,6 @@ export default function Home({
   );
 
   useModalBehavior(isLogoutModalOpen, () => setIsLogoutModalOpen(false));
-  useModalBehavior(showWhatsappPrompt, () => setShowWhatsappPrompt(false));
   useModalBehavior(!!selectedCollection, () => setSelectedCollection(null));
 
   const clearFilters = () => {
@@ -267,43 +262,7 @@ export default function Home({
 
   const hideScrollingTabs = hasActiveFilters || currentPage > 1;
 
-  useEffect(() => {
-    if (
-      profile &&
-      !profile.phone &&
-      profile.role !== "admin" &&
-      profile.role !== "owner"
-    ) {
-      setShowWhatsappPrompt(true);
-    }
-  }, [profile]);
 
-  const handleSaveWhatsapp = async () => {
-    if (!profile || !whatsappNumber.trim()) return;
-
-    setWhatsappError(null);
-    setIsSavingWhatsapp(true);
-
-    try {
-      const standardized = standardizePhone(whatsappNumber);
-      if (!standardized) {
-        setWhatsappError("Please enter a valid WhatsApp number");
-        setIsSavingWhatsapp(false);
-        return;
-      }
-
-      await updateUserProfileData({ phone: standardized });
-      await refreshProfile();
-      setShowWhatsappPrompt(false);
-    } catch (error: any) {
-      console.error("Failed to save WhatsApp number", error);
-      setWhatsappError(
-        error.message || "Failed to save number. Please try again.",
-      );
-    } finally {
-      setIsSavingWhatsapp(false);
-    }
-  };
 
   const [recentlyViewed, setRecentlyViewed] = useState<Content[]>([]);
 
@@ -1247,60 +1206,7 @@ export default function Home({
         onCancel={() => setIsLogoutModalOpen(false)}
       />
 
-      {showWhatsappPrompt && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-md w-full relative">
-            <div className="flex justify-center mb-4">
-              <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center">
-                <MessageCircle className="w-8 h-8 text-emerald-500" />
-              </div>
-            </div>
-            <h3 className="text-xl font-bold mb-2 text-center text-emerald-500">
-              WhatsApp Number is Required
-            </h3>
-            <p className="text-zinc-500 dark:text-zinc-400 mb-6 text-center text-sm">
-              Please enter your WhatsApp number to continue. This is required
-              for membership updates and support.
-            </p>
-            <div className="space-y-4">
-              {whatsappError && (
-                <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 flex items-start gap-3">
-                  <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-                  <p className="text-xs text-red-500">{whatsappError}</p>
-                </div>
-              )}
-              <input
-                type="tel"
-                placeholder="e.g. 03001234567"
-                value={whatsappNumber}
-                onChange={(e) => {
-                  setWhatsappNumber(e.target.value);
-                  setWhatsappError(null);
-                }}
-                className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500 text-zinc-900 dark:text-white placeholder-zinc-500 dark:placeholder-zinc-400 transition-colors duration-300"
-              />
-              <div className="flex flex-col gap-2">
-                <div className="flex gap-3 mt-4">
-                  <button
-                    onClick={handleSaveWhatsapp}
-                    disabled={!whatsappNumber.trim() || isSavingWhatsapp}
-                    className="w-full bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-500/50 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2"
-                  >
-                    {isSavingWhatsapp ? (
-                      <>
-                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        <span>Saving...</span>
-                      </>
-                    ) : (
-                      "Save Number"
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+
 
       {/* Collection Modal */}
       <AnimatePresence>

@@ -803,7 +803,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const lastSyncDateStr = localStorage.getItem(dailySyncKey);
         const lastSessionStart = localStorage.getItem(sessionKey);
         const now = Date.now();
-        const shiftedTime = new Date(now + (5 - 9) * 60 * 60 * 1000);
+        const shiftedTime = new Date(now + (5 - 7) * 60 * 60 * 1000);
         const pktDate = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
 
         const isDailySync = lastSyncDateStr !== pktDate;
@@ -831,10 +831,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
         
-        // Add pending local state lists if daily sync applies or it's past 9AM and needs sync
+        // Add pending local state lists if daily sync applies or it's past 7AM and needs sync
         const needsSync = safeStorage.getItem("needs_user_sync") === "true";
-        const isPast9AM = new Date(now + 5 * 3600000).getUTCHours() >= 9;
-        if (isDailySync || (isPast9AM && needsSync)) {
+        const isPast7AM = new Date(now + 5 * 3600000).getUTCHours() >= 7;
+        if (isDailySync || (isPast7AM && needsSync)) {
             const pendingFavorites = safeStorage.getItem("pending_favorites_array");
             if (pendingFavorites) pendingUpdates.favorites = JSON.parse(pendingFavorites);
 

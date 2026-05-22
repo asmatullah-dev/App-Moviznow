@@ -1,8 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../../firebase';
-import { collection, onSnapshot, doc, updateDoc, deleteDoc, getDoc, addDoc, getDocs } from 'firebase/firestore';
 import { AlertTriangle, Edit2, Trash2, Bell, CheckCircle2, X, Save } from 'lucide-react';
-import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
 import { useContent } from '../../contexts/ContentContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { useUsers } from '../../contexts/UsersContext';
@@ -25,7 +22,7 @@ interface ReportedLink {
 }
 
 export default function ReportedLinks() {
-  const { getContent, updateContentFields } = useContent();
+  const { getContent, updateContentFields, contentList } = useContent();
   const { sendNotification } = useNotifications();
   const [reports, setReports] = useState<ReportedLink[]>([]);
   const [loading, setLoading] = useState(true);
@@ -40,23 +37,77 @@ export default function ReportedLinks() {
   useModalBehavior(!!editingReport, () => setEditingReport(null));
   useModalBehavior(isLinkCheckerModalOpen, () => setIsLinkCheckerModalOpen(false));
 
-  const { users: allUsers } = useUsers();
+  const { users: allUsers, updateUserFields } = useUsers();
   
+  // Reusable parsing for extracting links out of stringified JSON
+  const parseLinks = (linksStr: string | undefined): QualityLinks => {
+    if (!linksStr) return [];
+    try {
+      const parsed = JSON.parse(linksStr);
+      if (Array.isArray(parsed)) return parsed;
+    } catch (e) {
+      console.error("Error parsing links", e);
+    }
+    return [];
+  };
+
   useEffect(() => {
     const data: ReportedLink[] = [];
     allUsers.forEach(u => {
       if (u.reported_links) {
         u.reported_links.forEach((r: any) => {
+          let updatedContentTitle = r.contentTitle;
+          let updatedLinkName = r.linkName;
+          let updatedLinkUrl = r.linkUrl;
+
+          // Hydrate from latest content if available
+          const content = contentList.find(c => c.id === r.contentId);
+          if (content) {
+            updatedContentTitle = content.title || r.contentTitle;
+
+            let foundLink: any = null;
+            if (content.type === 'movie' && content.movieLinks) {
+              const links = parseLinks(content.movieLinks);
+              foundLink = links.find(l => l.id === r.linkId);
+            } else if (content.type === 'series' && content.seasons) {
+              const seasons = (Array.isArray(content.seasons) ? content.seasons : JSON.parse(content.seasons || '[]')) as Season[];
+              for (const season of seasons) {
+                if (season.zipLinks) {
+                  foundLink = season.zipLinks.find(l => l.id === r.linkId);
+                  if (foundLink) break;
+                }
+                if (season.mkvLinks) {
+                  foundLink = season.mkvLinks.find(l => l.id === r.linkId);
+                  if (foundLink) break;
+                }
+                if (season.episodes) {
+                  for (const ep of season.episodes) {
+                    if (ep.links) {
+                      foundLink = ep.links.find(l => l.id === r.linkId);
+                      if (foundLink) break;
+                    }
+                  }
+                }
+                if (foundLink) break;
+              }
+            }
+
+            if (foundLink) {
+              updatedLinkName = foundLink.name || r.linkName;
+              updatedLinkUrl = foundLink.url || r.linkUrl;
+            }
+          }
+
           data.push({
             id: r.id,
             userId: u.uid,
             userName: u.displayName || u.email || 'Unknown',
             contentId: r.contentId,
-            contentTitle: r.contentTitle,
+            contentTitle: updatedContentTitle,
             contentType: r.contentType,
             linkId: r.linkId,
-            linkName: r.linkName,
-            linkUrl: r.linkUrl,
+            linkName: updatedLinkName,
+            linkUrl: updatedLinkUrl,
             status: r.status,
             createdAt: r.createdAt
           } as ReportedLink);
@@ -71,7 +122,7 @@ export default function ReportedLinks() {
     });
     setReports(data);
     setLoading(false);
-  }, [allUsers]);
+  }, [allUsers, contentList]);
 
   const handleDelete = async (id: string, userId: string) => {
     if (!window.confirm('Are you sure you want to delete this report?')) return;
@@ -79,11 +130,7 @@ export default function ReportedLinks() {
       const user = allUsers.find(u => u.uid === userId);
       if (user && user.reported_links) {
         const updated = user.reported_links.filter(r => r.id !== id);
-        const { writeBatch } = await import('firebase/firestore');
-        const batch = writeBatch(db);
-        batch.update(doc(db, 'users', userId), { reported_links: updated });
-        batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [userId]: Date.now() } }, { merge: true });
-        await batch.commit();
+        updateUserFields(userId, { reported_links: updated });
       }
     } catch (error) {
       console.error("Error deleting report:", error);
@@ -101,11 +148,7 @@ export default function ReportedLinks() {
       const user = allUsers.find(u => u.uid === report.userId);
       if (user && user.reported_links) {
         const updated = user.reported_links.map(r => r.id === report.id ? { ...r, status: 'resolved' } : r);
-        const { writeBatch } = await import('firebase/firestore');
-        const batch = writeBatch(db);
-        batch.update(doc(db, 'users', report.userId), { reported_links: updated });
-        batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [report.userId]: Date.now() } }, { merge: true });
-        await batch.commit();
+        updateUserFields(report.userId, { reported_links: updated });
       }
       
       if (report.userId) {
@@ -128,17 +171,6 @@ export default function ReportedLinks() {
     } finally {
       setNotifying(null);
     }
-  };
-
-  const parseLinks = (linksStr: string | undefined): QualityLinks => {
-    if (!linksStr) return [];
-    try {
-      const parsed = JSON.parse(linksStr);
-      if (Array.isArray(parsed)) return parsed;
-    } catch (e) {
-      console.error("Error parsing links", e);
-    }
-    return [];
   };
 
   const handleEditClick = async (report: ReportedLink) => {
@@ -308,9 +340,11 @@ export default function ReportedLinks() {
 
       if (updated) {
         // Mark report as resolved
-        await updateDoc(doc(db, 'reported_links', editingReport.id), {
-          status: 'resolved'
-        });
+        const user = allUsers.find(u => u.uid === editingReport.userId);
+        if (user && user.reported_links) {
+          const updatedReports = user.reported_links.map(r => r.id === editingReport.id ? { ...r, status: 'resolved' } : r);
+          updateUserFields(editingReport.userId, { reported_links: updatedReports });
+        }
         setEditingReport(null);
         alert("Link updated successfully");
       } else {

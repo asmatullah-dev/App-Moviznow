@@ -17,7 +17,7 @@ const CACHE_KEY = 'admin_orders_cache';
 const PHONES_CACHE_KEY = 'admin_user_phones_cache';
 
 export default function OrdersManagement() {
-  const { users: allUsers } = useUsers();
+  const { users: allUsers, updateUserFields } = useUsers();
   const { settings } = useSettings();
   const [orders, setOrders] = useState<Order[]>(() => {
     const cached = safeStorage.getItem(CACHE_KEY);
@@ -166,7 +166,6 @@ export default function OrdersManagement() {
   const handleApprove = async (order: Order) => {
     setProcessingId(order.id);
     try {
-      const userRef = doc(db, 'users', order.userId);
       const userData = allUsers.find(u => u.uid === order.userId);
       
       if (!userData) {
@@ -175,54 +174,46 @@ export default function OrdersManagement() {
         return;
       }
 
-      const batch = writeBatch(db);
+      const updates: any = {};
 
       if (order.type === 'membership') {
         const months = order.months || 1;
         
-        // Calculate new expiry date
         let newExpiryDate = new Date();
         if (userData.expiryDate && new Date(userData.expiryDate) > new Date()) {
-          // If already has active expiry, extend from that date
           newExpiryDate = new Date(userData.expiryDate);
         }
         newExpiryDate.setMonth(newExpiryDate.getMonth() + months);
 
-        batch.update(userRef, {
-          role: 'user', // Change to user if trial
-          status: 'active',
-          expiryDate: newExpiryDate.toISOString()
-        });
+        updates.role = 'user';
+        updates.status = 'active';
+        updates.expiryDate = newExpiryDate.toISOString();
       } else if (order.type === 'content' && order.items) {
         const contentIds = order.items.map(item => 
           item.type === 'season' ? `${item.contentId}:${item.seasonId}` : item.contentId
         );
 
-        const updates: any = {
-          assignedContent: arrayUnion(...contentIds)
-        };
+        updates.assignedContent = Array.from(new Set([...(userData.assignedContent || []), ...contentIds]));
 
-        // If user is pending, activate them and set role to selected_content
         if (userData.status === 'pending') {
           updates.status = 'active';
           updates.role = 'selected_content';
         }
-        
-        batch.update(userRef, updates); // Apply the content updates
-      } // <--- This closes the else if block!
+      }
 
       const updatedOrders = userData.orders?.map(o => o.id === order.id ? { ...o, status: 'approved' } : o) || [];
-      batch.update(userRef, { orders: updatedOrders });
-      batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [order.userId]: Date.now() } }, { merge: true });
+      updates.orders = updatedOrders;
+
+      updateUserFields(order.userId, updates);
 
       // Record in Income Management
+      const batch = writeBatch(db);
       batch.set(doc(collection(db, 'income')), {
         amount: order.amount,
         description: `${order.type === 'membership' ? 'Membership Renewal' : 'Content Purchase'} (${order.id})`,
         date: new Date().toISOString(),
         userName: order.userName || 'Unknown User'
       });
-
       await batch.commit();
     } catch (error) {
       console.error('Error approving order:', error);
@@ -237,12 +228,8 @@ export default function OrdersManagement() {
       const orderUser = allUsers.find(u => u.orders?.some(o => o.id === orderId));
       if (!orderUser) throw new Error("User not found");
 
-      const updatedOrders = orderUser.orders!.map(o => o.id === orderId ? { ...o, status: 'declined' } : o);
-      
-      const batch = writeBatch(db);
-      batch.update(doc(db, 'users', orderUser.uid), { orders: updatedOrders });
-      batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [orderUser.uid]: Date.now() } }, { merge: true });
-      await batch.commit();
+      const updatedOrders = orderUser.orders!.map(o => o.id === orderId ? { ...o, status: 'declined' as const } : o);
+      updateUserFields(orderUser.uid, { orders: updatedOrders });
     } catch (error) {
       console.error('Error declining order:', error);
     } finally {
@@ -257,11 +244,7 @@ export default function OrdersManagement() {
       if (!orderUser) throw new Error("User not found");
 
       const updatedOrders = orderUser.orders!.filter(o => o.id !== orderId);
-      
-      const batch = writeBatch(db);
-      batch.update(doc(db, 'users', orderUser.uid), { orders: updatedOrders });
-      batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [orderUser.uid]: Date.now() } }, { merge: true });
-      await batch.commit();
+      updateUserFields(orderUser.uid, { orders: updatedOrders });
     } catch (error) {
       console.error('Error deleting order:', error);
     } finally {
