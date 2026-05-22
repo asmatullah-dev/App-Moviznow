@@ -76,8 +76,21 @@ export function normalizeUrl(input: string) {
       url.hash = "";
       return url.toString().replace(/\/$/, "");
     } else {
-      // For other links, remove query parameters and hash
-      url.search = "";
+      // For other links, remove hash and tracking query parameters, but retain functional query parameters
+      const paramsToKeep = new URLSearchParams();
+      url.searchParams.forEach((val, key) => {
+        const lowerKey = key.toLowerCase();
+        if (
+          !lowerKey.startsWith("utm_") &&
+          lowerKey !== "fbclid" &&
+          lowerKey !== "gclid" &&
+          lowerKey !== "affiliate"
+        ) {
+          paramsToKeep.set(key, val);
+        }
+      });
+      const searchStr = paramsToKeep.toString();
+      url.search = searchStr ? `?${searchStr}` : "";
       url.hash = "";
       return url.toString().replace(/\/$/, "");
     }
@@ -829,7 +842,11 @@ export async function performFullLinkScan(
 
   // DOUBLE-CHECK FOR MISSING FILENAME (Assign filename from URL if working but missing content-disposition info)
   if (base.ok && !base.fileName) {
-    const extractedName = extractFilenameFromUrl(url);
+    const extractedName =
+      extractFilenameFromUrl(finalUrlToUse) ||
+      extractFilenameFromUrl(base.finalUrl || "") ||
+      extractFilenameFromUrl(base.url || "") ||
+      extractFilenameFromUrl(url);
     if (extractedName) {
       base.fileName = extractedName;
       base.statusLabel = "WORKING";
@@ -865,8 +882,16 @@ export async function performFullLinkScan(
   };
 
   if (result.ok && !result.fileName) {
-    result.statusLabel = "MISSING_FILENAME";
-    result.message = "Missing filename";
+    const fallbackName =
+      extractFilenameFromUrl(result.finalUrl || "") ||
+      extractFilenameFromUrl(result.url);
+    if (fallbackName) {
+      result.fileName = fallbackName;
+      result.statusLabel = "WORKING";
+    } else {
+      result.statusLabel = "MISSING_FILENAME";
+      result.message = "Missing filename";
+    }
   }
 
   if (result.ok && result.fileSize && result.fileSize < 20 * 1000 * 1000) {
