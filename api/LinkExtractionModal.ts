@@ -223,7 +223,7 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
             headers: { ...headers, Range: "bytes=0-0" },
             maxRedirects: 0,
             validateStatus: () => true,
-            timeout: 2500,
+            timeout: 5000,
           });
           if (
             checkRes.status < 400 ||
@@ -258,7 +258,7 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
       const response = await axios.get(url, {
         headers,
         validateStatus: () => true,
-        timeout: 3000,
+        timeout: 10000,
       });
       let $ = cheerio.load(response.data);
 
@@ -322,7 +322,7 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
         let res2 = await axios.get(nextUrl, {
           headers,
           validateStatus: () => true,
-          timeout: 3000,
+          timeout: 8000,
         });
         $2 = cheerio.load(res2.data);
 
@@ -428,7 +428,7 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
           headers: { ...headers, Range: "bytes=0-0" },
           maxRedirects: 0,
           validateStatus: () => true,
-          timeout: 2500, // Reduced to avoid hitting vercel function 10s limit
+          timeout: 5000, // Reduced to avoid hitting vercel function 10s limit
         });
 
         let resultLink = candidate.href;

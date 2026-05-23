@@ -324,21 +324,7 @@ export default function MovieDetails() {
     );
   }, [content, fullContent]);
 
-  // Reset states if content becomes available after loading to prevent getting stuck with empty data
   useEffect(() => {
-    if (content && fetchFailed) {
-      setFetchFailed(false);
-      if (id) {
-        hasFetchedFull.current[id] = false;
-      }
-    }
-  }, [content, id, fetchFailed]);
-
-  useEffect(() => {
-    if (contentLoading && !content) {
-      return;
-    }
-
     if (
       (isMinimal || isStale) &&
       id &&
@@ -387,18 +373,51 @@ export default function MovieDetails() {
       };
       fetchFullContent();
     }
-  }, [isMinimal, isStale, id, fetchFailed, isOffline, content, contentLoading]);
+  }, [isMinimal, isStale, id, fetchFailed, isOffline, content]);
 
   const mergedContent = useMemo(() => {
     if (!content && !fullContent) return null;
     // Prioritize cachedMetadata (TMDB updates/local edits), then fresh fullContent from DB, then partial content from list
     const metadata = cachedMetadata.id === id ? cachedMetadata.data : {};
     const validFullContent = fullContent?.id === id ? fullContent : {};
-    return {
+    
+    const merged: any = {
       ...(content || {}),
       ...validFullContent,
       ...metadata,
-    } as Content;
+    };
+
+    // Rescue links from validFullContent if metadata incorrectly overwrote them
+    if (metadata.seasons && validFullContent.seasons) {
+      try {
+        const metaSeasons = typeof metadata.seasons === 'string' ? JSON.parse(metadata.seasons) : metadata.seasons;
+        const fullSeasons = typeof validFullContent.seasons === 'string' ? JSON.parse(validFullContent.seasons) : validFullContent.seasons;
+        
+        const rescuedSeasons = fullSeasons.map((fs: any) => {
+          const ms = metaSeasons.find((m: any) => m.seasonNumber === fs.seasonNumber);
+          if (!ms) return fs;
+          const rescued = { ...fs, year: ms.year || fs.year, title: ms.title || fs.title };
+          if (fs.episodes && ms.episodes) {
+            rescued.episodes = fs.episodes.map((fe: any) => {
+              const me = ms.episodes.find((m: any) => m.episodeNumber === fe.episodeNumber);
+              if (!me) return fe;
+              return { 
+                ...fe, 
+                title: me.title || fe.title, 
+                description: me.description || fe.description, 
+                duration: me.duration || fe.duration 
+              };
+            });
+          }
+          return rescued;
+        });
+        merged.seasons = JSON.stringify(rescuedSeasons);
+      } catch (e) {
+        console.error("Error rescuing seasons links:", e);
+      }
+    }
+
+    return merged as Content;
   }, [content, cachedMetadata, fullContent, id]);
 
   const seasons = useMemo(() => {
@@ -1700,6 +1719,43 @@ export default function MovieDetails() {
     .map((l) => l.name)
     .join(", ");
 
+  const getLinksArray = (linksData: any): QualityLinks => {
+    if (!linksData) return [];
+    if (Array.isArray(linksData)) return linksData;
+
+    const parseObject = (obj: any) => {
+      return Object.entries(obj)
+        .map(([name, link]: [string, any]) => ({
+          id: Math.random().toString(36).substr(2, 9),
+          name,
+          url: link?.url || "",
+          size: link?.size || "",
+          unit: (link?.unit || "MB") as "MB" | "GB",
+        }))
+        .filter((l) => l.url);
+    };
+
+    if (typeof linksData === "object") {
+      return parseObject(linksData);
+    }
+
+    if (typeof linksData === "string") {
+      try {
+        let parsed = JSON.parse(linksData);
+        while (typeof parsed === "string") {
+          parsed = JSON.parse(parsed);
+        }
+        if (Array.isArray(parsed)) return parsed;
+        if (typeof parsed === "object" && parsed !== null) {
+          return parseObject(parsed);
+        }
+      } catch (e) {
+        console.error("Failed to parse linksData", linksData, e);
+      }
+    }
+    return [];
+  };
+
   const renderLinks = (
     links: QualityLinks,
     isZip?: boolean,
@@ -2467,9 +2523,7 @@ export default function MovieDetails() {
                 mergedContent.movieLinks &&
                 (() => {
                   try {
-                    const links = Array.isArray(mergedContent.movieLinks)
-                      ? mergedContent.movieLinks
-                      : JSON.parse(mergedContent.movieLinks || "[]");
+                    const links = getLinksArray(mergedContent.movieLinks);
                     const rendered = renderLinks(
                       links,
                       false,
@@ -2510,13 +2564,13 @@ export default function MovieDetails() {
                         },
                       );
 
-                      return sortedSeasons.map((season: Season) => {
+                      return sortedSeasons.map((season: Season, sIdx) => {
                         const isAccessible =
                           hasFullAccess || allowedSeasons.includes(season.id);
 
                         return (
                           <div
-                            key={season.id}
+                            key={season.id || `season-${sIdx}`}
                             className={`bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden ${!isAccessible && profile ? "opacity-75" : ""}`}
                           >
                             <div className="bg-white/50 dark:bg-zinc-950/50 p-6 border-b border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -2595,12 +2649,8 @@ export default function MovieDetails() {
 
                             <div className="p-6 space-y-8">
                               {(() => {
-                                const zipLinks = (season.zipLinks || []).filter(
-                                  (l) => l && l.url,
-                                );
-                                const mkvLinks = (season.mkvLinks || []).filter(
-                                  (l) => l && l.url,
-                                );
+                                const zipLinks = getLinksArray(season.zipLinks);
+                                const mkvLinks = getLinksArray(season.mkvLinks);
 
                                 return (
                                   <>
@@ -2643,7 +2693,7 @@ export default function MovieDetails() {
 
                                     {season.episodes &&
                                       season.episodes.filter(
-                                        (ep) => ep.links && ep.links.length > 0,
+                                        (ep) => getLinksArray(ep.links).length > 0,
                                       ).length > 0 && (
                                         <div>
                                           <h4 className="font-semibold text-zinc-500 dark:text-zinc-400 mb-4 text-sm uppercase tracking-wider">
@@ -2653,12 +2703,11 @@ export default function MovieDetails() {
                                             {season.episodes
                                               .filter(
                                                 (ep) =>
-                                                  ep.links &&
-                                                  ep.links.length > 0,
+                                                  getLinksArray(ep.links).length > 0,
                                               )
-                                              .map((ep) => (
+                                              .map((ep, eIdx) => (
                                                 <div
-                                                  key={ep.id}
+                                                  key={ep.id || `ep-${eIdx}`}
                                                   className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 flex flex-col gap-4"
                                                 >
                                                   <div className="flex flex-col gap-2">
@@ -2708,11 +2757,10 @@ export default function MovieDetails() {
                                                       )}
                                                   </div>
 
-                                                  {ep.links &&
-                                                    ep.links.length > 0 && (
+                                                  {getLinksArray(ep.links).length > 0 && (
                                                       <div className="flex justify-center">
                                                         {renderLinks(
-                                                          ep.links,
+                                                          getLinksArray(ep.links),
                                                           false,
                                                           `S${season.seasonNumber} E${ep.episodeNumber}`,
                                                           !isAccessible,
@@ -2762,9 +2810,9 @@ export default function MovieDetails() {
                     className="flex overflow-x-auto gap-4 pb-4 snap-x snap-mandatory hide-scrollbar"
                     style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
                   >
-                    {recommendedMovies.map((recContent) => (
+                    {recommendedMovies.map((recContent, rmIdx) => (
                       <div
-                        key={recContent.id}
+                        key={recContent.id || `rec-${rmIdx}`}
                         className="min-w-[160px] sm:min-w-[200px] md:min-w-[240px] snap-start"
                       >
                         <ContentCard

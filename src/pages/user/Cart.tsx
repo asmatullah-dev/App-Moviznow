@@ -54,9 +54,12 @@ export default function Cart() {
         createdAt: new Date().toISOString(),
       };
 
-      await updateDoc(doc(db, 'users', profile.uid), {
-        orders: arrayUnion(orderData)
-      });
+      const pendingOrdersStr = safeStorage.getItem("pending_orders_array") || "[]";
+      const pendingOrders = JSON.parse(pendingOrdersStr);
+      pendingOrders.push(orderData);
+      safeStorage.setItem("pending_orders_array", JSON.stringify(pendingOrders));
+      safeStorage.setItem("needs_user_sync", "true");
+
       setOrderId(newOrderId);
       setConfirmed(true);
       clearCart();

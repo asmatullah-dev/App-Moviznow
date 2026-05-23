@@ -1,6 +1,5 @@
-import { doc, updateDoc, increment } from 'firebase/firestore';
 import { logEvent as firebaseLogEvent } from 'firebase/analytics';
-import { db, analytics, analyticsPromise } from '../firebase';
+import { analytics, analyticsPromise } from '../firebase';
 
 export const logEvent = async (
   type: 'session_start' | 'content_click' | 'link_click' | 'time_spent',
@@ -26,14 +25,6 @@ export const logEvent = async (
         ...data
       });
     }
-
-    // Keep sessionsCount in Firestore for the User Profile UI
-    if (type === 'session_start' && !skipFirestore) {
-      const userRef = doc(db, 'users', userId);
-      await updateDoc(userRef, {
-        sessionsCount: increment(1)
-      });
-    }
   } catch (error) {
     console.error('Error logging analytics event:', error);
   }
@@ -43,14 +34,8 @@ export const updateTimeSpent = async (userId: string, minutes: number) => {
   if (!userId || minutes <= 0) return;
   
   try {
-    // Keep timeSpent in Firestore for the User Profile UI
-    const userRef = doc(db, 'users', userId);
-    await updateDoc(userRef, {
-      timeSpent: increment(minutes)
-    });
-    
     // Also log an event to GA4
-    await logEvent('time_spent', userId, { duration: minutes });
+    await logEvent('time_spent', userId, { duration: minutes }, true);
   } catch (error) {
     console.error('Error updating time spent:', error);
   }

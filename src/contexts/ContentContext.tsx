@@ -1261,33 +1261,11 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
   };
 
   const getContent = async (id: string): Promise<Content | null> => {
-    let item = contentList.find(c => c.id === id);
-    let chunkId = item?.chunkId;
-
-    if (!chunkId) {
-      const keys = Object.keys(localStorage).filter(k => k.startsWith('content_chunk_'));
-      for (const key of keys) {
-        try {
-          const chunkStr = safeStorage.getItem(key);
-          if (chunkStr) {
-            const items = JSON.parse(chunkStr);
-            if (items[id]) {
-              chunkId = key.replace('content_chunk_', '');
-              if (!item) {
-                item = expandContent({ ...items[id], id }, chunkId);
-              }
-              break;
-            }
-          }
-        } catch (e) {}
-      }
-    }
-
+    const item = contentList.find(c => c.id === id);
     if (!item) return null;
-
-    const isFull = !item._isMinimal && (!!item.movieLinks || (item.type === 'series' && item.seasons));
+    const isFull = !(item as any)._isMinimal;
     if (isFull) return item;
-
+    let chunkId = item.chunkId;
     if (!chunkId) {
         const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
         let localMeta: Record<string, any> = {};
@@ -1300,32 +1278,14 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
             }
         }
     }
-
     if (!chunkId) return item;
-
     try {
-      let chunkStr = safeStorage.getItem('content_chunk_' + chunkId);
-      
-      // On-demand Firestore fetch fallback for missing chunks
-      if (!chunkStr && navigator.onLine) {
-        try {
-          const chunkDoc = await getDoc(doc(db, 'content_chunks', chunkId));
-          if (chunkDoc.exists()) {
-            const items = chunkDoc.data().items || {};
-            safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(items));
-            chunkStr = JSON.stringify(items);
-          }
-        } catch (err) {
-          console.error("Error fetching content chunk from Firestore in getContent:", err);
-        }
-      }
-
+      const chunkStr = safeStorage.getItem('content_chunk_' + chunkId);
       if (chunkStr) {
          const items = JSON.parse(chunkStr);
          if (items[id]) {
             const expanded = expandContent({ ...items[id], id }, chunkId);
             expanded.order = item.order;
-            expanded._isMinimal = false; // Mark as fully resolved
             return expanded;
          }
       }

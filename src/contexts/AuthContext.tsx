@@ -846,6 +846,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
             const pendingLinkClicks = safeStorage.getItem("pending_link_clicks");
             if (pendingLinkClicks) pendingUpdates.linkClicks = JSON.parse(pendingLinkClicks);
+            
+            const pendingOrders = safeStorage.getItem("pending_orders_array");
+            if (pendingOrders) {
+               const { arrayUnion } = await import('firebase/firestore');
+               pendingUpdates.orders = arrayUnion(...JSON.parse(pendingOrders));
+            }
         }
 
         const hasLocalProfile = !!safeStorage.getItem("profile_cache");
@@ -862,6 +868,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 safeStorage.removeItem("pending_watch_later_array");
                 safeStorage.removeItem("pending_content_clicks");
                 safeStorage.removeItem("pending_link_clicks");
+                safeStorage.removeItem("pending_orders_array");
             } catch (err) {
                 console.error("Daily sync failed:", err);
             }
@@ -1528,12 +1535,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (pendCClicks) data.contentClicks = JSON.parse(pendCClicks);
         const pendLClicks = safeStorage.getItem("pending_link_clicks");
         if (pendLClicks) data.linkClicks = JSON.parse(pendLClicks);
+        const pendOrders = safeStorage.getItem("pending_orders_array");
+        if (pendOrders) {
+          const { arrayUnion } = await import('firebase/firestore');
+          data.orders = arrayUnion(...JSON.parse(pendOrders));
+        }
         
         safeStorage.setItem("needs_user_sync", "false");
         safeStorage.removeItem("pending_favorites_array");
         safeStorage.removeItem("pending_watch_later_array");
         safeStorage.removeItem("pending_content_clicks");
         safeStorage.removeItem("pending_link_clicks");
+        safeStorage.removeItem("pending_orders_array");
       }
       
       const pendingUpdatesStr = safeStorage.getItem("pending_user_updates");

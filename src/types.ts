@@ -189,7 +189,6 @@ export interface Content {
   country?: string; // Added country
   order?: number; // Added order for sorting
   chunkId?: string; // Added chunkId for lazy loading
-  _isMinimal?: boolean; // Added _isMinimal flag for lazy loading
 }
 
 export interface CartItem {
