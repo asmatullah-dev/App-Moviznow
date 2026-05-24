@@ -1537,8 +1537,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (pendLClicks) data.linkClicks = JSON.parse(pendLClicks);
         const pendOrders = safeStorage.getItem("pending_orders_array");
         if (pendOrders) {
-          const { arrayUnion } = await import('firebase/firestore');
-          data.orders = arrayUnion(...JSON.parse(pendOrders));
+          data.orders = [...(profile.orders || []), ...JSON.parse(pendOrders)];
         }
         
         safeStorage.setItem("needs_user_sync", "false");

@@ -378,8 +378,8 @@ export default function MovieDetails() {
   const mergedContent = useMemo(() => {
     if (!content && !fullContent) return null;
     // Prioritize cachedMetadata (TMDB updates/local edits), then fresh fullContent from DB, then partial content from list
-    const metadata = cachedMetadata.id === id ? cachedMetadata.data : {};
-    const validFullContent = fullContent?.id === id ? fullContent : {};
+    const metadata: any = cachedMetadata.id === id ? cachedMetadata.data : {};
+    const validFullContent: any = fullContent?.id === id ? fullContent : {};
     
     const merged: any = {
       ...(content || {}),
@@ -1356,18 +1356,37 @@ export default function MovieDetails() {
 
       if (shouldExtract) {
         try {
-          const res = await fetch("/api/hubcloud/direct-link", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url }),
-          });
+          const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`);
           if (res.ok) {
             const data = await res.json();
-            if (data.url && data.url !== url) {
-              finalUrl = data.url;
+            const dLinkHtml = data.contents;
+            let extractedUrl = url;
+            let cf = false;
+            let newCandidates = [];
+
+            if (dLinkHtml) {
+              if (dLinkHtml.includes("cf-browser-verification") || dLinkHtml.includes("Cloudflare")) {
+                cf = true;
+              } else {
+                 const parser = new DOMParser();
+                 const doc = parser.parseFromString(dLinkHtml, "text/html");
+                 const possibleLinks = Array.from(doc.querySelectorAll('a.btn, a[href*="pixeldrain"], a[href*="hubcloud"]'));
+                 newCandidates = possibleLinks.map(a => ({
+                     href: a.getAttribute("href"),
+                     text: a.textContent
+                 })).filter(a => a.href && (a.href.includes("pixeldrain") || a.href.includes("hubcloud")));
+                 
+                 if (newCandidates.length > 0) {
+                   extractedUrl = newCandidates[0].href;
+                 }
+              }
+            }
+
+            if (extractedUrl && extractedUrl !== url) {
+              finalUrl = extractedUrl;
               finalTinyUrl = undefined; // Drop the old tinyurl since url changed!
-              finalCandidates = data.candidates;
-              finalSize = data.size;
+              finalCandidates = newCandidates;
+              
               // Save to cache
               hubcloudCacheRef.current[url] = {
                 url: finalUrl,
@@ -1375,7 +1394,7 @@ export default function MovieDetails() {
                 size: finalSize,
                 timestamp: Date.now(),
               };
-            } else if (data.isCloudflare) {
+            } else if (cf) {
               finalUrl = url;
               finalTinyUrl = tinyUrl;
               finalSize = "Cloudflare Blocked";

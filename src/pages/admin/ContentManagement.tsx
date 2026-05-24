@@ -2640,16 +2640,23 @@ export default function ContentManagement() {
         extractedUrl.includes("hubdrive")
       ) {
         try {
-          const res = await fetch("/api/hubcloud/direct-link", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: extractedUrl }),
-          });
+          const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(extractedUrl)}`);
           if (res.ok) {
             const data = await res.json();
-            if (data.url && data.url !== extractedUrl) {
-              extractedUrl = data.url;
-              finalHasUpdates = true;
+            const dLinkHtml = data.contents;
+            if (dLinkHtml) {
+                 const parser = new DOMParser();
+                 const doc = parser.parseFromString(dLinkHtml, "text/html");
+                 const possibleLinks = Array.from(doc.querySelectorAll('a.btn, a[href*="pixeldrain"], a[href*="hubcloud"]'));
+                 const newCandidates = possibleLinks.map(a => ({
+                     href: a.getAttribute("href"),
+                     text: a.textContent
+                 })).filter(a => a.href && (a.href.includes("pixeldrain") || a.href.includes("hubcloud")));
+                 
+                 if (newCandidates.length > 0) {
+                   extractedUrl = newCandidates[0].href;
+                   finalHasUpdates = true;
+                 }
             }
           }
         } catch (e) {

@@ -665,10 +665,8 @@ export async function performFullLinkScan(
           body: JSON.stringify({ url }),
           signal: extractController.signal
         }),
-        fetch("/api/hubcloud/direct-link", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url, checkOnly: false }),
+        // Client-Side extraction via public open proxy to circumvent vercel backend load limit
+        fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`, {
           signal: directController.signal
         })
       ]);
@@ -680,9 +678,16 @@ export async function performFullLinkScan(
       
       if (dLinkRes.status === "fulfilled" && dLinkRes.value.ok) {
         try {
-          const dLinkData = await dLinkRes.value.json();
-          if (dLinkData && dLinkData.candidates) {
-            candidatesInfo = dLinkData.candidates;
+          const dLinkJson = await dLinkRes.value.json();
+          const dLinkHtml = dLinkJson.contents;
+          if (dLinkHtml) {
+             const parser = new DOMParser();
+             const doc = parser.parseFromString(dLinkHtml, "text/html");
+             const possibleLinks = Array.from(doc.querySelectorAll('a.btn, a[href*="pixeldrain"], a[href*="hubcloud"]'));
+             candidatesInfo = possibleLinks.map(a => ({
+                 href: a.getAttribute("href"),
+                 text: a.textContent
+             })).filter(a => a.href && (a.href.includes("pixeldrain") || a.href.includes("hubcloud")));
           }
         } catch (e) {
           console.error("Direct link parsing error", e);

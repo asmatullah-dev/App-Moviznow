@@ -8,6 +8,7 @@ import { db } from '../../firebase';
 import { doc, setDoc, serverTimestamp, query, where, orderBy, limit, collection, getDocs } from 'firebase/firestore';
 import { motion } from 'framer-motion';
 import PreviousOrders from '../../components/PreviousOrders';
+import { safeStorage } from '../../utils/safeStorage';
 
 import PaymentMethods from '../../components/PaymentMethods';
 

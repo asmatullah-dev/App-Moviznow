@@ -40,6 +40,8 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
         headers,
         validateStatus: () => true,
         timeout: 8000,
+        maxContentLength: 5242880,
+        maxBodyLength: 5242880,
       });
       const $ = cheerio.load(response.data);
 
@@ -224,7 +226,11 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
             maxRedirects: 0,
             validateStatus: () => true,
             timeout: 5000,
+            responseType: "stream",
           });
+          if (checkRes.data && typeof checkRes.data.destroy === "function") {
+            checkRes.data.destroy();
+          }
           if (
             checkRes.status < 400 ||
             checkRes.status === 405 ||
@@ -259,6 +265,8 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
         headers,
         validateStatus: () => true,
         timeout: 10000,
+        maxContentLength: 5242880,
+        maxBodyLength: 5242880,
       });
       let $ = cheerio.load(response.data);
 
@@ -323,6 +331,8 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
           headers,
           validateStatus: () => true,
           timeout: 8000,
+          maxContentLength: 5242880,
+          maxBodyLength: 5242880,
         });
         $2 = cheerio.load(res2.data);
 
@@ -429,7 +439,11 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
           maxRedirects: 0,
           validateStatus: () => true,
           timeout: 5000, // Reduced to avoid hitting vercel function 10s limit
+          responseType: "stream",
         });
+        if (checkRes.data && typeof checkRes.data.destroy === "function") {
+          checkRes.data.destroy();
+        }
 
         let resultLink = candidate.href;
         let isWorking = false;
