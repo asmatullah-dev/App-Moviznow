@@ -1356,36 +1356,18 @@ export default function MovieDetails() {
 
       if (shouldExtract) {
         try {
-          const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`);
+          const res = await fetch("/api/hubcloud/direct-link", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url }),
+          });
           if (res.ok) {
             const data = await res.json();
-            const dLinkHtml = data.contents;
-            let extractedUrl = url;
-            let cf = false;
-            let newCandidates = [];
-
-            if (dLinkHtml) {
-              if (dLinkHtml.includes("cf-browser-verification") || dLinkHtml.includes("Cloudflare")) {
-                cf = true;
-              } else {
-                 const parser = new DOMParser();
-                 const doc = parser.parseFromString(dLinkHtml, "text/html");
-                 const possibleLinks = Array.from(doc.querySelectorAll('a.btn, a[href*="pixeldrain"], a[href*="hubcloud"]'));
-                 newCandidates = possibleLinks.map(a => ({
-                     href: a.getAttribute("href"),
-                     text: a.textContent
-                 })).filter(a => a.href && (a.href.includes("pixeldrain") || a.href.includes("hubcloud")));
-                 
-                 if (newCandidates.length > 0) {
-                   extractedUrl = newCandidates[0].href;
-                 }
-              }
-            }
-
-            if (extractedUrl && extractedUrl !== url) {
-              finalUrl = extractedUrl;
+            if (data.url && data.url !== url) {
+              finalUrl = data.url;
               finalTinyUrl = undefined; // Drop the old tinyurl since url changed!
-              finalCandidates = newCandidates;
+              finalCandidates = data.candidates;
+              finalSize = data.size;
               
               // Save to cache
               hubcloudCacheRef.current[url] = {
@@ -1394,7 +1376,7 @@ export default function MovieDetails() {
                 size: finalSize,
                 timestamp: Date.now(),
               };
-            } else if (cf) {
+            } else if (data.isCloudflare) {
               finalUrl = url;
               finalTinyUrl = tinyUrl;
               finalSize = "Cloudflare Blocked";
