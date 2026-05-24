@@ -58,7 +58,7 @@ import { logEvent } from "../../services/analytics";
 import AlertModal from "../../components/AlertModal";
 import ConfirmModal from "../../components/ConfirmModal";
 import { clsx } from "clsx";
-import { motion, AnimatePresence } from "motion/react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   formatContentTitle,
   formatReleaseDate,

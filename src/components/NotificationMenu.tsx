@@ -8,7 +8,7 @@ import { AppNotification } from '../types';
 import { formatDistanceToNow } from 'date-fns';
 import { Link } from 'react-router-dom';
 import { useModalBehavior } from '../hooks/useModalBehavior';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface NotificationMenuProps {}
 

@@ -685,6 +685,7 @@ export default function Home({
         <AnimatePresence>
           {showFilters && (
             <motion.div
+              key="filters"
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: "auto", opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
@@ -1212,6 +1213,7 @@ export default function Home({
       <AnimatePresence>
         {selectedCollection && (
           <motion.div
+            key="collection-modal"
             ref={collectionScrollRef}
             initial={{ opacity: 0, y: "100%" }}
             animate={{ opacity: 1, y: 0 }}

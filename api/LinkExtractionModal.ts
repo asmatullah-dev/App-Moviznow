@@ -581,7 +581,20 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
         size: sizeInfo,
       };
     } catch (e: any) {
-      console.error(e);
+      if (e.isAxiosError && e.message.includes('maxContentLength exceed') || e.message.includes('maxContentLength')) {
+        let finalUrl = url;
+        if (e.request && e.request.res && e.request.res.responseUrl) {
+           finalUrl = e.request.res.responseUrl;
+        } else if (e.request && e.request._currentUrl) {
+           finalUrl = e.request._currentUrl;
+        } else if (e.config && e.config.url) {
+           finalUrl = e.config.url;
+        }
+        if (finalUrl !== url && !finalUrl.includes('hubcloud') && !finalUrl.includes('moviesdrive') && !finalUrl.includes('vcloud') && !finalUrl.includes('hubdrive')) {
+           return { url: finalUrl };
+        }
+      }
+      console.error("Link extraction error:", e.message);
       return { url };
     }
   }
