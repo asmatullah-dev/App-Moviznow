@@ -96,7 +96,72 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
         response.status === 503;
 
       if (isCloudflare) {
-        title = "Unknown (Cloudflare Block)";
+        try {
+          // Use Microlink proxy API to bypass Cloudflare
+          const dlRes = await axios.get(
+            `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
+            { timeout: 8000 },
+          );
+          if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
+            const proxyHtml = dlRes.data.data.body;
+            const $proxy = cheerio.load(proxyHtml);
+            let sStr =
+              $proxy('li:contains("File Size") i').text() ||
+              $proxy('li:contains("File Size")').text() ||
+              $proxy('li:contains("Size") i').text() ||
+              $proxy('li:contains("Size")').text();
+            sStr = sStr.replace("File Size", "").replace("Size", "").trim();
+            if (sStr) {
+              sizeStr = sStr;
+            }
+
+            const proxyTitle =
+              $proxy("title").text() || $proxy(".card-header").text() || "";
+            if (
+              proxyTitle &&
+              !proxyTitle.toLowerCase().includes("just a moment")
+            ) {
+              title = proxyTitle;
+
+              // Recalculate size stuff based on fixed html
+              if (sizeStr) {
+                const parts = sizeStr.split(" ");
+                if (parts.length >= 2) {
+                  let num = parseFloat(parts[0]);
+                  unit = parts[1].toUpperCase();
+                  if (!isNaN(num)) {
+                    const multiplier =
+                      unit === "GB"
+                        ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000)
+                        : unit === "MB"
+                          ? (1024 * 1024) / (1000 * 1000)
+                          : unit === "KB"
+                            ? 1024 / 1000
+                            : 1;
+                    num = num * multiplier;
+                    size =
+                      num >= 100
+                        ? num.toFixed(0)
+                        : num >= 10
+                          ? num.toFixed(1)
+                          : num.toFixed(2);
+                    size = size.replace(/\.00$/, "").replace(/\.0$/, "");
+                  } else {
+                    size = parts[0];
+                  }
+                } else {
+                  size = sizeStr;
+                }
+              }
+            } else {
+              title = "Unknown (Cloudflare Block)";
+            }
+          } else {
+            title = "Unknown (Cloudflare Block)";
+          }
+        } catch (err) {
+          title = "Unknown (Cloudflare Block)";
+        }
       }
 
       const isNotFound =
@@ -214,7 +279,29 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
         response.status === 503;
 
       if (isCf) {
-        return { url: url, isCloudflare: true };
+        try {
+          const dlRes = await axios.get(
+            `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
+            { timeout: 8000 },
+          );
+          if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
+            const proxyTitle =
+              cheerio.load(dlRes.data.data.body)("title").text().toLowerCase() || "";
+            if (
+              !proxyTitle.includes("just a moment") &&
+              !proxyTitle.includes("cloudflare") &&
+              !proxyTitle.includes("ddos protection")
+            ) {
+              $ = cheerio.load(dlRes.data.data.body);
+            } else {
+              return { url: url, isCloudflare: true };
+            }
+          } else {
+            return { url: url, isCloudflare: true };
+          }
+        } catch (err) {
+          return { url: url, isCloudflare: true };
+        }
       }
 
       let nextUrl =
@@ -256,6 +343,20 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
           titleText2.includes("ddos protection") ||
           res2.status === 403 ||
           res2.status === 503;
+
+        if (isCf2) {
+          try {
+            const dlRes2 = await axios.get(
+              `https://api.microlink.io/?url=${encodeURIComponent(nextUrl)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
+              { timeout: 8000 },
+            );
+            if (dlRes2.data && dlRes2.data.data && dlRes2.data.data.body) {
+              $2 = cheerio.load(dlRes2.data.data.body);
+            }
+          } catch (err) {
+            // Ignore and continue with original $2
+          }
+        }
       }
 
       const candidateLinks: { text: string; href: string }[] = [];
