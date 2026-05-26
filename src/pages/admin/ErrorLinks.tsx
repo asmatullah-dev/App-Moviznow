@@ -17,7 +17,7 @@ const parseLinks = (linksStr: string | undefined): QualityLinks => {
   try {
     const parsed = JSON.parse(linksStr);
     if (Array.isArray(parsed)) return parsed;
-    if (typeof parsed === 'object') {
+    if (typeof parsed === 'object' && parsed !== null) {
       return Object.entries(parsed).map(([name, link]: [string, any]) => ({
         id: Math.random().toString(36).substr(2, 9),
         name,
@@ -88,7 +88,8 @@ export default function ErrorLinks() {
   useModalBehavior(isAddLinksModalOpen, () => setIsAddLinksModalOpen(false));
   useModalBehavior(!!editingLink, () => setEditingLink(null));
 
-  const categorizeError = (detail: string): string => {
+  const categorizeError = (detail: string | undefined): string => {
+    if (!detail) return 'Unknown';
     const d = detail.toLowerCase();
     if (d.includes('broken') || d.includes('404')) return 'Broken';
     if (d.includes('protected') || d.includes('password')) return 'Protected';
@@ -179,7 +180,7 @@ export default function ErrorLinks() {
       .filter(link => {
         const matchesType = filterErrorType === 'all' || link.errorCategory === filterErrorType;
         const matchesSearch = !searchTerm || 
-          link.contentTitle.toLowerCase().includes(searchTerm.toLowerCase());
+          (link.contentTitle || '').toLowerCase().includes(searchTerm.toLowerCase());
         return matchesType && matchesSearch;
       })
       .sort((a, b) => {
@@ -246,8 +247,8 @@ export default function ErrorLinks() {
                   ...err,
                   link: item.link,
                   errorDetail: result.message || result.statusLabel || "Unknown Error",
-                  fetchedSize: result.fileSizeText?.split(' ')[0],
-                  fetchedUnit: result.fileSizeText?.split(' ')[1] as 'MB' | 'GB'
+                  fetchedSize: result.fileSizeText ? result.fileSizeText.split(' ')[0] : undefined,
+                  fetchedUnit: result.fileSizeText ? result.fileSizeText.split(' ')[1] as 'MB' | 'GB' : undefined
                 };
               }
               return err;
@@ -420,8 +421,8 @@ export default function ErrorLinks() {
             ...original.info,
             errorDetail: errorDetail,
             errorCategory: categorizeError(errorDetail),
-            fetchedSize: res.fileSizeText?.split(' ')[0],
-            fetchedUnit: res.fileSizeText?.split(' ')[1] as 'MB' | 'GB',
+            fetchedSize: res.fileSizeText ? res.fileSizeText.split(' ')[0] : undefined,
+            fetchedUnit: res.fileSizeText ? res.fileSizeText.split(' ')[1] as 'MB' | 'GB' : undefined,
             createdAt: new Date().toISOString()
           });
         }

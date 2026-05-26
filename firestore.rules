@@ -140,15 +140,12 @@ service cloud.firestore {
       allow create: if isOwner(userId) && isValidUser(request.resource.data) &&
                        (isAdmin() || request.resource.data.get('role', 'user') in ['user', 'trial', 'selected_content']);
       
-      allow update: if (isOwner(userId) || isAdminOrEditor() || (isUserManager() && resource.data.get('managedBy', null) == request.auth.uid)) &&
-                       isValidUser(request.resource.data) && (
-                         isAdminOrEditor() ||
-                         (isUserManager() && resource.data.get('managedBy', null) == request.auth.uid && request.resource.data.get('managedBy', null) == request.auth.uid) ||
-                         // Allow if no sensitive fields are changed
-                         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'status', 'expiryDate', 'trialActivated', 'managedBy', 'permissions', 'assignedContent'])
-                         // Or it's a valid trial activation
-                         || (isOwner(userId) && isTrialActivation(userId))
-                       );
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+                       (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'status', 'expiryDate', 'trialActivated', 'managedBy', 'permissions', 'assignedContent'])
+                       || isTrialActivation(userId)) ||
+                       (isAdminOrEditor() && isValidUser(request.resource.data)) ||
+                       (isUserManager() && resource.data.get('managedBy', null) == request.auth.uid && request.resource.data.get('managedBy', null) == request.auth.uid && isValidUser(request.resource.data));
+
 
       // 2. Admin/Manager/Identity Access
       allow get: if isOwner(userId) || isAdminOrEditor() || isUserManager() || (resource != null && isIdentityMatch(resource.data));

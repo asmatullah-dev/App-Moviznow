@@ -1054,7 +1054,7 @@ export default function ContentManagement() {
       const parsed = JSON.parse(linksStr);
       if (Array.isArray(parsed)) return parsed;
       // Convert old format
-      if (typeof parsed === "object") {
+      if (typeof parsed === "object" && parsed !== null) {
         return Object.entries(parsed)
           .map(([name, link]: [string, any]) => ({
             id: Math.random().toString(36).substr(2, 9),
@@ -3045,7 +3045,7 @@ export default function ContentManagement() {
     }
 
     let text = `🎬 *${content.title}${content.year ? ` (${content.year})` : ""}*\n\n`;
-    text += `Type: ${content.type.charAt(0).toUpperCase() + content.type.slice(1)}\n`;
+    text += `Type: ${content.type ? content.type.charAt(0).toUpperCase() + content.type.slice(1) : ''}\n`;
 
     const contentGenres = genres
       .filter((g) => content.genreIds?.includes(g.id))
@@ -3534,7 +3534,7 @@ export default function ContentManagement() {
       try {
         const parsed = typeof data === "string" ? JSON.parse(data) : data;
         if (Array.isArray(parsed)) return parsed;
-        if (typeof parsed === "object") {
+        if (typeof parsed === "object" && parsed !== null) {
           return Object.entries(parsed).map(([name, val]: [string, any]) => ({
             name,
             url: typeof val === "string" ? val : val?.url || "",

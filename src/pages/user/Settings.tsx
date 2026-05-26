@@ -238,14 +238,14 @@ export default function Settings() {
                   <div className="flex items-center gap-3">
                     <div className={clsx(
                       "w-10 h-10 rounded-full flex items-center justify-center",
-                      Notification.permission === 'granted' ? "bg-emerald-500/10 text-emerald-500" : "bg-zinc-100 dark:bg-zinc-800 text-zinc-400"
+                      ('Notification' in window && Notification.permission === 'granted') ? "bg-emerald-500/10 text-emerald-500" : "bg-zinc-100 dark:bg-zinc-800 text-zinc-400"
                     )}>
-                      {Notification.permission === 'granted' ? <Bell className="w-5 h-5" /> : <BellOff className="w-5 h-5" />}
+                      {('Notification' in window && Notification.permission === 'granted') ? <Bell className="w-5 h-5" /> : <BellOff className="w-5 h-5" />}
                     </div>
                     <div>
-                      <p className="font-semibold text-sm">Status: {Notification.permission.charAt(0).toUpperCase() + Notification.permission.slice(1)}</p>
+                      <p className="font-semibold text-sm">Status: {('Notification' in window && Notification.permission) ? Notification.permission.charAt(0).toUpperCase() + Notification.permission.slice(1) : 'Unknown'}</p>
                       <p className="text-[10px] text-zinc-500 dark:text-zinc-400">
-                        {Notification.permission === 'granted' 
+                        {('Notification' in window && Notification.permission === 'granted') 
                           ? 'You are receiving notifications' 
                           : 'Notifications are currently blocked or not requested'}
                       </p>
@@ -260,7 +260,7 @@ export default function Settings() {
                         const token = await requestNotificationPermission(true);
                         if (token) {
                           setSuccess('Notifications registered successfully!');
-                        } else if (Notification.permission === 'denied') {
+                        } else if ('Notification' in window && Notification.permission === 'denied') {
                           setError('Notification permission denied. Please allow it in browser settings.');
                         }
                       } finally {
@@ -269,7 +269,7 @@ export default function Settings() {
                     }}
                     className="px-4 py-2 text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-xl transition-colors"
                   >
-                    {Notification.permission === 'granted' ? 'Refresh Token' : 'Enable Notifications'}
+                    {('Notification' in window && Notification.permission === 'granted') ? 'Refresh Token' : 'Enable Notifications'}
                   </button>
                 </div>
               </div>

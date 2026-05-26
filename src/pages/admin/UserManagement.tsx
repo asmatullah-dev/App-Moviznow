@@ -1278,7 +1278,7 @@ export default function UserManagement() {
                          user.role === 'content_manager' ? 'Content Manager' :
                          user.role === 'user_manager' ? 'User Manager' :
                          user.role === 'manager' ? 'Manager' :
-                         user.role.charAt(0).toUpperCase() + user.role.slice(1).replace('_', ' ')}
+                         user.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1).replace('_', ' ') : 'Unknown'}
                       </span>
                       {user.role !== 'owner' && (
                         <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider
@@ -1482,7 +1482,7 @@ export default function UserManagement() {
                            selectedUser.role === 'content_manager' ? 'Content Manager' :
                            selectedUser.role === 'user_manager' ? 'User Manager' :
                            selectedUser.role === 'manager' ? 'Manager' :
-                           selectedUser.role.charAt(0).toUpperCase() + selectedUser.role.slice(1).replace('_', ' ')}
+                           selectedUser.role ? selectedUser.role.charAt(0).toUpperCase() + selectedUser.role.slice(1).replace('_', ' ') : 'Unknown'}
                         </div>
                       </div>
                       {(profile?.role === 'admin' || profile?.role === 'owner') && (

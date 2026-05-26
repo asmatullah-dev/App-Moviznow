@@ -145,7 +145,7 @@ export default function UserManagers() {
                                    manager.role === 'content_manager' ? 'Content Manager' :
                                    manager.role === 'user_manager' ? 'User Manager' :
                                    manager.role === 'manager' ? 'Manager' :
-                                   manager.role.charAt(0).toUpperCase() + manager.role.slice(1).replace('_', ' ')}
+                                   manager.role ? manager.role.charAt(0).toUpperCase() + manager.role.slice(1).replace('_', ' ') : 'Unknown'}
                   </span>
                 </div>
                 <span className="bg-emerald-500/10 text-emerald-500 px-2 py-1 rounded-md font-medium text-xs">
