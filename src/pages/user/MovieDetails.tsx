@@ -65,7 +65,6 @@ import {
   formatRuntime,
   getContrastColor,
 } from "../../utils/contentUtils";
-import { generateTinyUrl } from "../../utils/tinyurl";
 import {
   MediaModal,
   findTMDBByImdb,
@@ -1849,8 +1848,8 @@ export default function MovieDetails() {
 
     let shareUrl = window.location.href;
 
-    // Try to shorten the URL without the number alias
-    shareUrl = await generateTinyUrl(shareUrl, false);
+    // We no longer use tinyurl for shareUrl
+    // shareUrl = await generateTinyUrl(shareUrl, false);
 
     const contentQuality =
       qualities.find((q) => q.id === mergedContent.qualityId)?.name || "N/A";
