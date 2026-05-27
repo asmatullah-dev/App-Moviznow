@@ -261,6 +261,12 @@ const ContentCard = memo(
                 Draft
               </div>
             )}
+            {content.status === "selected_content" && (
+              <div className="bg-pink-500/90 text-white backdrop-blur-md px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                <Lock className="w-3 h-3" />
+                SCO
+              </div>
+            )}
           </div>
         </div>
         <div className="p-2 md:p-3 flex-1 flex flex-col">
@@ -3944,17 +3950,9 @@ export default function ContentManagement() {
   const handleBulkStatusChange = async (
     status: "published" | "draft" | "selected_content",
   ) => {
-    if (
-      !window.confirm(
-        `Are you sure you want to change the status of ${selectedContent.length} items to ${status}?`,
-      )
-    )
-      return;
-
     const currentSelected = [...selectedContent];
-    setSelectedContent([]);
 
-    const updates: { id: string; [key: string]: any }[] = [];
+    const updates: { id: string; chunkId?: string; fields: Partial<Content> }[] = [];
 
     let currentMax = Math.max(0, ...contentList.map((c) => c.order || 0));
     currentSelected.forEach((id) => {
@@ -3964,35 +3962,43 @@ export default function ContentManagement() {
         if (
           (profile?.role === "content_manager" ||
             profile?.role === "manager") &&
-          content.status === "published"
+          (content.status === "published" || !content.status)
         ) {
           return;
         }
 
-        const updateData: any = { id, chunkId: content.chunkId, status };
+        const fields: Partial<Content> = { status };
 
         // When moving from draft to published, consider it as new and increment order
         if (content.status === "draft" && status === "published") {
-          updateData.createdAt = new Date().toISOString();
+          fields.createdAt = new Date().toISOString();
           currentMax += 1;
-          updateData.order = currentMax;
+          fields.order = currentMax;
         }
 
-        updates.push(updateData);
+        updates.push({
+          id,
+          chunkId: content.chunkId,
+          fields,
+        });
       }
     });
 
     try {
       if (updates.length > 0) {
-        await updateContentFields(
-          updates.map((u) => ({
-            id: u.id,
-            chunkId: u.chunkId,
-            fields: Object.fromEntries(
-              Object.entries(u).filter(([k]) => k !== "id" && k !== "chunkId"),
-            ),
-          })),
-        );
+        await updateContentFields(updates);
+        setSelectedContent([]);
+        setAlertConfig({
+          isOpen: true,
+          title: "Success",
+          message: `Successfully changed status of ${updates.length} items to ${status}.`,
+        });
+      } else {
+        setAlertConfig({
+          isOpen: true,
+          title: "Notice",
+          message: "No valid items were updated. (Check role permissions).",
+        });
       }
     } catch (error) {
       console.error("Error updating content:", error);
@@ -4550,21 +4556,22 @@ export default function ContentManagement() {
                       {selectedContent.length} selected
                     </span>
                     <select
+                      value=""
                       onChange={(e) => {
-                        if (e.target.value === "delete") {
+                        const val = e.target.value;
+                        if (val === "delete") {
                           setShowBulkDeleteConfirm(true);
-                        } else if (e.target.value === "merge") {
+                        } else if (val === "merge") {
                           initiateMerge();
-                        } else if (e.target.value === "batch_fetch") {
+                        } else if (val === "batch_fetch") {
                           setIsBatchFetchModalOpen(true);
                           setBatchFetchMode("media");
-                        } else if (e.target.value === "batch_links") {
+                        } else if (val === "batch_links") {
                           setIsBatchFetchModalOpen(true);
                           setBatchFetchMode("links");
-                        } else if (e.target.value) {
-                          handleBulkStatusChange(e.target.value as any);
+                        } else if (val) {
+                          handleBulkStatusChange(val as any);
                         }
-                        e.target.value = "";
                       }}
                       className="bg-transparent border-none text-sm focus:outline-none text-emerald-500 font-medium cursor-pointer"
                     >
@@ -4724,6 +4731,7 @@ export default function ContentManagement() {
               <option value="all">Status</option>
               <option value="published">Published</option>
               <option value="draft">Draft</option>
+              <option value="selected_content">SCO</option>
             </select>
             {(profile?.role === "admin" || profile?.role === "owner") && (
               <select

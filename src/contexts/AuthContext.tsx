@@ -347,6 +347,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (Object.keys(updatesToPush).length > 0) {
               batch.set(userRef, updatesToPush, { merge: true });
             }
+            // Add user version to chunk_meta to prevent infinite writes
+            batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentUser.uid]: newVersion } }, { merge: true });
             await batch.commit();
 
             if (isDailySync) localStorage.setItem(dailySyncKey, pktDate);
@@ -1568,7 +1570,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const userRefPath = doc(db, "users", user.uid);
       
       try {
-        await updateDoc(userRefPath, data);
+        const { writeBatch } = await import('firebase/firestore');
+        const batch = writeBatch(db);
+        batch.set(userRefPath, data, { merge: true });
+        batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [user.uid]: now } }, { merge: true });
+        await batch.commit();
         console.log("Users doc updated successfully.");
       } catch (err: any) {
         handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`);
@@ -1593,6 +1599,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { writeBatch } = await import('firebase/firestore');
       const batch = writeBatch(db);
       batch.update(userRef, { hasPassword: true });
+      batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [user.uid]: Date.now() } }, { merge: true });
       await batch.commit();
       if (profile) {
         setProfile({ ...profile, hasPassword: true });

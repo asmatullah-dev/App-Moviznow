@@ -2,7 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { LazyLoadImage } from 'react-lazy-load-image-component';
-import { Heart, Clock, ShoppingCart, Play, X } from 'lucide-react';
+import { Heart, Clock, ShoppingCart, Play, X, Lock } from 'lucide-react';
 import { Content, Quality, Language, Genre } from '../types';
 import { formatContentTitle, getContrastColor } from '../utils/contentUtils';
 import { clsx } from 'clsx';
@@ -216,6 +216,14 @@ const ContentCard = React.memo(({
                 isSmall ? 'text-[6px]' : 'text-[8px]'
               )}>
                 Draft
+              </div>
+            )}
+            {content.status === 'selected_content' && canSeeDraft && (
+              <div className={clsx(
+                "px-1 py-0.5 rounded-sm font-bold uppercase tracking-wider bg-pink-500 text-white shadow-sm flex items-center gap-0.5",
+                isSmall ? 'text-[6px]' : 'text-[8px]'
+              )}>
+                <Lock className={isSmall ? "w-2 h-2" : "w-2.5 h-2.5"} /> SCO
               </div>
             )}
             {isLocked && (

@@ -91,6 +91,18 @@ export default function UserManagement() {
     return diffMinutes < 4; // Consider online if active in last 4 minutes (heartbeat is 2m)
   };
 
+  const safeFormat = (dateStr: string | null | undefined, fmt: string) => {
+    if (!dateStr) return 'N/A';
+    const d = new Date(dateStr);
+    return isNaN(d.getTime()) ? 'Invalid Date' : format(d, fmt);
+  };
+
+  const safeDistance = (dateStr: string | null | undefined) => {
+    if (!dateStr) return 'Never';
+    const d = new Date(dateStr);
+    return isNaN(d.getTime()) ? 'Invalid Date' : formatDistanceToNow(d, { addSuffix: true });
+  };
+
   const handleSearchUser = async () => {
     if (!newUserForm.phone && !newUserForm.email) {
       setAlertConfig({ isOpen: true, title: 'Error', message: 'Please provide a WhatsApp Number or Email.' });
@@ -506,62 +518,53 @@ export default function UserManagement() {
     const currentDeleteConfirm = deleteConfirm;
     
     try {
-      if (userToDelete?.status === 'suspended') {
-        // Second time: delete all user data
-        const batch = writeBatch(db);
-        
-        // 1. Delete user document
-        batch.delete(doc(db, 'users', currentDeleteConfirm));
-        batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentDeleteConfirm]: -1 } }, { merge: true });
-        
-        // Parallelize all data fetches
-        const metaDoc = await getDoc(doc(db, 'chunk_meta', 'versions'));
-        
-        // 4. Update consolidated FCM tokens document across chunks
-        if (metaDoc.exists()) {
-          const metaData = metaDoc.data();
-          const latestId = (metaData.fcm_tokens && metaData.fcm_tokens.latestChunkId) || 'fcm_chunk_0';
-          const match = latestId.match(/(\d+)$/);
-          const maxIndex = match ? parseInt(match[1]) : 0;
+      const batch = writeBatch(db);
+      
+      // 1. Delete user document
+      batch.delete(doc(db, 'users', currentDeleteConfirm));
+      batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentDeleteConfirm]: -1 } }, { merge: true });
+      
+      // Parallelize all data fetches
+      const metaDoc = await getDoc(doc(db, 'chunk_meta', 'versions'));
+      
+      // 4. Update consolidated FCM tokens document across chunks
+      if (metaDoc.exists()) {
+        const metaData = metaDoc.data();
+        const latestId = (metaData.fcm_tokens && metaData.fcm_tokens.latestChunkId) || 'fcm_chunk_0';
+        const match = latestId.match(/(\d+)$/);
+        const maxIndex = match ? parseInt(match[1]) : 0;
 
-          // Process all chunks
-          for (let i = 0; i <= maxIndex; i++) {
-            const cid = 'fcm_chunk_' + i;
-            const cDoc = await getDoc(doc(db, 'fcm_tokens', cid));
-            if (cDoc.exists()) {
-              const tokensData = cDoc.data() || {};
-              let changed = false;
-              Object.keys(tokensData).forEach(token => {
-                if (tokensData[token].userId === currentDeleteConfirm) {
-                  delete tokensData[token];
-                  changed = true;
-                }
-              });
-              if (changed) {
-                batch.set(doc(db, 'fcm_tokens', cid), tokensData);
+        // Process all chunks
+        for (let i = 0; i <= maxIndex; i++) {
+          const cid = 'fcm_chunk_' + i;
+          const cDoc = await getDoc(doc(db, 'fcm_tokens', cid));
+          if (cDoc.exists()) {
+            const tokensData = cDoc.data() || {};
+            let changed = false;
+            Object.keys(tokensData).forEach(token => {
+              if (tokensData[token].userId === currentDeleteConfirm) {
+                delete tokensData[token];
+                changed = true;
               }
+            });
+            if (changed) {
+              batch.set(doc(db, 'fcm_tokens', cid), tokensData);
             }
           }
         }
-
-        // No separate notification documents to delete; they are embedded
-        
-        await batch.commit();
-        setAlertConfig({ isOpen: true, title: 'Success', message: 'User and all associated data deleted successfully' });
-        refreshUsers(true).catch(console.error);
-      } else {
-        // First time: suspend
-        updateUserFields(currentDeleteConfirm, {
-          status: 'suspended'
-        });
-        await finalizeUserChanges(true);
-        setAlertConfig({ isOpen: true, title: 'Success', message: 'User suspended successfully' });
       }
+
+      await batch.commit();
+
+      // OPTIONAL: Immediately hide it from UI if refreshUsers takes time
+      // But refreshUsers should pick up the -1 mtime anyway
+      await refreshUsers(true);
+
+      setAlertConfig({ isOpen: true, title: 'Success', message: 'User and all associated data deleted successfully' });
       setDeleteConfirm(null);
     } catch (error) {
-      console.error('Error in delete/suspend action:', error);
-      setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to complete action' });
-      setProcessing(prev => ({ ...prev, delete: false }));
+      console.error('Error in delete action:', error);
+      setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to delete user' });
       handleFirestoreError(error, OperationType.DELETE, `users/${currentDeleteConfirm}`);
     } finally {
       setProcessing(prev => ({ ...prev, delete: false }));
@@ -1278,7 +1281,8 @@ export default function UserManagement() {
                          user.role === 'content_manager' ? 'Content Manager' :
                          user.role === 'user_manager' ? 'User Manager' :
                          user.role === 'manager' ? 'Manager' :
-                         user.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1).replace('_', ' ') : 'Unknown'}
+                         user.role === 'user' ? 'User' :
+                         user.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1).replace('_', ' ') : 'User'}
                       </span>
                       {user.role !== 'owner' && (
                         <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider
@@ -1297,7 +1301,7 @@ export default function UserManagement() {
                           </span>
                         )}
                         <span className={`text-[10px] font-medium ${isUserOnline(user.lastActive) ? 'text-emerald-500' : 'text-zinc-500 dark:text-zinc-400'}`}>
-                          {isUserOnline(user.lastActive) ? 'Online' : (user.lastActive ? formatDistanceToNow(new Date(user.lastActive), { addSuffix: true }) : 'Never')}
+                          {isUserOnline(user.lastActive) ? 'Online' : (user.lastActive ? safeDistance(user.lastActive) : 'Never')}
                         </span>
                       </div>
                     </div>
@@ -1305,7 +1309,7 @@ export default function UserManagement() {
                   <td className="px-3 md:px-4 py-4">
                     <div className="flex flex-col gap-1">
                       <span className="text-zinc-600 dark:text-zinc-300 font-medium">
-                        {user.role === 'owner' ? 'Lifetime' : user.expiryDate ? format(new Date(user.expiryDate), 'MMM dd, yyyy') : '-'}
+                        {user.role === 'owner' ? 'Lifetime' : user.expiryDate ? safeFormat(user.expiryDate, 'MMM dd, yyyy') : '-'}
                       </span>
                       {(profile?.role === 'admin' || profile?.role === 'owner') && user.managedBy && (
                         <span className="text-zinc-500 dark:text-zinc-400 text-xs">
@@ -1482,7 +1486,8 @@ export default function UserManagement() {
                            selectedUser.role === 'content_manager' ? 'Content Manager' :
                            selectedUser.role === 'user_manager' ? 'User Manager' :
                            selectedUser.role === 'manager' ? 'Manager' :
-                           selectedUser.role ? selectedUser.role.charAt(0).toUpperCase() + selectedUser.role.slice(1).replace('_', ' ') : 'Unknown'}
+                          selectedUser.role === 'user' ? 'User' :
+                           selectedUser.role ? selectedUser.role.charAt(0).toUpperCase() + selectedUser.role.slice(1).replace('_', ' ') : 'User'}
                         </div>
                       </div>
                       {(profile?.role === 'admin' || profile?.role === 'owner') && (
@@ -1508,11 +1513,11 @@ export default function UserManagement() {
                     <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
                       <div>
                         <div className="text-zinc-500 text-[10px] uppercase font-bold mb-0.5">Joined</div>
-                        <div className="font-bold text-zinc-900 dark:text-white text-sm">{format(new Date(selectedUser.createdAt), 'MMM dd, yyyy')}</div>
+                        <div className="font-bold text-zinc-900 dark:text-white text-sm">{safeFormat(selectedUser.createdAt, 'MMM dd, yyyy')}</div>
                       </div>
                       <div className="text-right">
                         <div className="text-zinc-500 text-[10px] uppercase font-bold mb-0.5">Expiry Date</div>
-                        <div className="font-bold text-zinc-900 dark:text-white text-sm">{selectedUser.role === 'owner' ? 'Lifetime' : selectedUser.expiryDate ? format(new Date(selectedUser.expiryDate), 'MMM dd, yyyy') : 'N/A'}</div>
+                        <div className="font-bold text-zinc-900 dark:text-white text-sm">{selectedUser.role === 'owner' ? 'Lifetime' : selectedUser.expiryDate ? safeFormat(selectedUser.expiryDate, 'MMM dd, yyyy') : 'N/A'}</div>
                       </div>
                     </div>
 
@@ -1530,7 +1535,7 @@ export default function UserManagement() {
                     )}
                   </div>
 
-                  {selectedUser.role === 'selected_content' && (
+                  {['selected_content', 'user', 'trial'].includes(selectedUser.role) && (
                     <div className="border-t border-zinc-200 dark:border-zinc-800 pt-6">
                       <div className="flex items-center justify-between mb-4">
                         <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Assigned Content</h4>
@@ -1697,13 +1702,13 @@ export default function UserManagement() {
                                         {!userAna.hasScanned ? (
                                           <span className="text-zinc-400 italic font-normal">Not Scanned</span>
                                         ) : (
-                                          isUserOnline(userAna.lastActive) ? 'Online' : (userAna.lastActive ? format(new Date(userAna.lastActive), 'MMM dd, HH:mm') : 'Never')
+                                          isUserOnline(userAna.lastActive) ? 'Online' : (userAna.lastActive ? safeFormat(userAna.lastActive, 'MMM dd, HH:mm') : 'Never')
                                         )}
                                       </div>
                                     </div>
                                     {userAna.hasScanned && userAna.lastActive && (
                                       <div className="text-[10px] text-zinc-500">
-                                        {formatDistanceToNow(new Date(userAna.lastActive), { addSuffix: true })}
+                                        {safeDistance(userAna.lastActive)}
                                       </div>
                                     )}
                                   </div>
@@ -1968,9 +1973,16 @@ export default function UserManagement() {
                                 <p className="text-xs text-zinc-500 capitalize">{content.type} • {content.year}</p>
                               </div>
                             </div>
-                            {content.status === 'draft' && (
-                              <span className="bg-yellow-500/20 text-yellow-500 text-xs px-2 py-1 rounded font-medium">Draft</span>
-                            )}
+                            <div className="flex items-center gap-2">
+                              {content.status === 'draft' && (
+                                <span className="bg-yellow-500/20 text-yellow-500 text-xs px-2 py-1 rounded font-medium">Draft</span>
+                              )}
+                              {content.status === 'selected_content' && (
+                                <span className="bg-pink-500/20 text-pink-500 text-xs px-2 py-1 rounded font-medium flex items-center gap-1">
+                                  <Lock className="w-3 h-3" /> SCO
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </label>
                         
@@ -2033,11 +2045,9 @@ export default function UserManagement() {
 
       <ConfirmModal
         isOpen={!!deleteConfirm}
-        title={users.find(u => u.uid === deleteConfirm)?.status === 'suspended' ? "Delete User Data" : "Suspend User"}
-        message={users.find(u => u.uid === deleteConfirm)?.status === 'suspended' 
-          ? "Are you sure you want to PERMANENTLY delete this user and all their associated data (orders, requests, analytics)? This action cannot be undone." 
-          : "Are you sure you want to suspend this user? They will no longer be able to access the application."}
-        confirmText={users.find(u => u.uid === deleteConfirm)?.status === 'suspended' ? "Delete Everything" : "Suspend"}
+        title="Delete User Data"
+        message="Are you sure you want to PERMANENTLY delete this user and all their associated data (orders, requests, analytics)? This action cannot be undone."
+        confirmText="Delete Everything"
         onConfirm={handleDelete}
         onCancel={() => setDeleteConfirm(null)}
         loading={processing.delete}

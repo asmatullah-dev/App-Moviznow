@@ -277,26 +277,10 @@ export default function Home({
     }
   }, []);
 
-  const uniqueYears = useMemo(() => {
-    const years = new Set<number>();
-    contentList.forEach((c) => {
-      if (c.year && !isNaN(Number(c.year))) years.add(Number(c.year));
-      if (c.type === "series" && c.seasons) {
-        try {
-          const seasons = Array.isArray(c.seasons)
-            ? c.seasons
-            : JSON.parse(c.seasons || "[]");
-          seasons.forEach((s: any) => {
-            if (s.year && !isNaN(Number(s.year))) years.add(Number(s.year));
-          });
-        } catch (e) {}
-      }
-    });
-    return Array.from(years).sort((a, b) => b - a);
-  }, [contentList]);
-
-  const recentlyAddedContent = useMemo(() => {
+  const permittedContentList = useMemo(() => {
     let result = [...contentList];
+
+    // Filter out drafts and selected_content for non-admins and non-editors
     if (
       profile?.role !== "admin" &&
       profile?.role !== "content_manager" &&
@@ -313,13 +297,36 @@ export default function Home({
         return true;
       });
     }
+    return result;
+  }, [contentList, profile]);
+
+  const uniqueYears = useMemo(() => {
+    const years = new Set<number>();
+    permittedContentList.forEach((c) => {
+      if (c.year && !isNaN(Number(c.year))) years.add(Number(c.year));
+      if (c.type === "series" && c.seasons) {
+        try {
+          const seasons = Array.isArray(c.seasons)
+            ? c.seasons
+            : JSON.parse(c.seasons || "[]");
+          seasons.forEach((s: any) => {
+            if (s.year && !isNaN(Number(s.year))) years.add(Number(s.year));
+          });
+        } catch (e) {}
+      }
+    });
+    return Array.from(years).sort((a, b) => b - a);
+  }, [permittedContentList]);
+
+  const recentlyAddedContent = useMemo(() => {
+    let result = [...permittedContentList];
     return result
       .sort(
         (a, b) =>
           new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
       )
       .slice(0, 10);
-  }, [contentList, profile]);
+  }, [permittedContentList]);
 
   const getRoleColor = (role: string) => {
     switch (role) {
@@ -352,25 +359,7 @@ export default function Home({
   };
 
   const filteredAndSortedContent = useMemo(() => {
-    let result = [...contentList];
-
-    // Filter out drafts and selected_content for non-admins and non-editors
-    if (
-      profile?.role !== "admin" &&
-      profile?.role !== "content_manager" &&
-      profile?.role !== "manager" &&
-      profile?.role !== "owner"
-    ) {
-      result = result.filter((c) => {
-        if (c.status === "draft") return false;
-        if (c.status === "selected_content") {
-          return profile?.assignedContent?.some(
-            (id) => id === c.id || id.startsWith(`${c.id}:`),
-          );
-        }
-        return true;
-      });
-    }
+    let result = [...permittedContentList];
 
     if (debouncedSearch) {
       result = smartSearch(result, debouncedSearch);
@@ -446,7 +435,7 @@ export default function Home({
 
     return result;
   }, [
-    contentList,
+    permittedContentList,
     debouncedSearch,
     sort,
     selectedType,
@@ -877,7 +866,7 @@ export default function Home({
                 style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
               >
                 {trendingCollection.contentIds.map((id) => {
-                  const content = contentList.find((c) => c.id === id);
+                  const content = permittedContentList.find((c) => c.id === id);
                   if (!content) return null;
                   return (
                     <div
@@ -924,7 +913,7 @@ export default function Home({
                 style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
               >
                 {newlyAddedCollection.contentIds.map((id) => {
-                  const content = contentList.find((c) => c.id === id);
+                  const content = permittedContentList.find((c) => c.id === id);
                   if (!content) return null;
                   return (
                     <div
@@ -964,7 +953,7 @@ export default function Home({
               >
                 {otherCollections.map((collection) => {
                   const firstContentId = collection.contentIds[0];
-                  const firstContent = contentList.find(
+                  const firstContent = permittedContentList.find(
                     (c) => c.id === firstContentId,
                   );
                   const posterUrl =
@@ -1265,7 +1254,7 @@ export default function Home({
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6">
                   {(() => {
                     let items = selectedCollection.contentIds
-                      .map((id) => contentList.find((c) => c.id === id))
+                      .map((id) => permittedContentList.find((c) => c.id === id))
                       .filter((c): c is Content => !!c && c.status !== "draft");
 
                     if (collectionSort === "newest") {

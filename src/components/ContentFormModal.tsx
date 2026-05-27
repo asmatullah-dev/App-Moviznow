@@ -354,11 +354,15 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                             <>
                               <label className={`flex-1 flex items-center justify-center gap-1 p-1.5 rounded-lg border cursor-pointer transition-colors text-xs ${status === 'published' ? 'bg-emerald-500/10 border-emerald-500 text-emerald-500' : 'bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400'}`}>
                                 <input type="radio" name="status" value="published" checked={status === 'published'} onChange={() => setStatus('published')} className="hidden" />
-                                <Eye className="w-3.5 h-3.5" /> Pub
+                                <Eye className="w-3 h-3" /> Pub
                               </label>
                               <label className={`flex-1 flex items-center justify-center gap-1 p-1.5 rounded-lg border cursor-pointer transition-colors text-xs ${status === 'draft' ? 'bg-yellow-500/10 border-yellow-500 text-yellow-500' : 'bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400'}`}>
                                 <input type="radio" name="status" value="draft" checked={status === 'draft'} onChange={() => setStatus('draft')} className="hidden" />
-                                <EyeOff className="w-3.5 h-3.5" /> Draft
+                                <EyeOff className="w-3 h-3" /> Draft
+                              </label>
+                              <label className={`flex-1 flex items-center justify-center gap-1 p-1.5 rounded-lg border cursor-pointer transition-colors text-xs ${status === 'selected_content' ? 'bg-pink-500/10 border-pink-500 text-pink-500' : 'bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400'}`}>
+                                <input type="radio" name="status" value="selected_content" checked={status === 'selected_content'} onChange={() => setStatus('selected_content')} className="hidden" />
+                                <Lock className="w-3 h-3" /> SCO
                               </label>
                             </>
                           )}

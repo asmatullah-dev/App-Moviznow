@@ -139,13 +139,14 @@ export default function UserManagers() {
               
               <div className="flex items-center justify-between text-sm text-zinc-500 dark:text-zinc-400 pt-4 border-t border-zinc-100 dark:border-zinc-800 transition-colors duration-300">
                 <div className="flex flex-col">
-                  <span>Joined {format(new Date(manager.createdAt), 'MMM yyyy')}</span>
+                  <span>Joined {manager.createdAt && !isNaN(new Date(manager.createdAt).getTime()) ? format(new Date(manager.createdAt), 'MMM yyyy') : 'Unknown Date'}</span>
                   <span className={`text-[10px] font-bold uppercase mt-1 ${manager.role === 'user_manager' || manager.role === 'manager' ? 'text-emerald-500' : 'text-zinc-500 dark:text-zinc-500'}`}>
                     Current Role: {manager.role === 'selected_content' ? 'Selected Content' : 
                                    manager.role === 'content_manager' ? 'Content Manager' :
                                    manager.role === 'user_manager' ? 'User Manager' :
                                    manager.role === 'manager' ? 'Manager' :
-                                   manager.role ? manager.role.charAt(0).toUpperCase() + manager.role.slice(1).replace('_', ' ') : 'Unknown'}
+                                   manager.role === 'user' ? 'User' :
+                                   manager.role ? manager.role.charAt(0).toUpperCase() + manager.role.slice(1).replace('_', ' ') : 'User'}
                   </span>
                 </div>
                 <span className="bg-emerald-500/10 text-emerald-500 px-2 py-1 rounded-md font-medium text-xs">
