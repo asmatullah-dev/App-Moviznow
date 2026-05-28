@@ -72,12 +72,12 @@ const ContentCard = React.memo(({
   }, [content, seasons]);
 
   const getCanPlay = (c: any) => {
-    const isAssigned = profile?.assignedContent?.some((id: string) => id === c.id || id.startsWith(`${c.id}:`));
+    const isContentAssigned = profile?.assignedContent?.some((id: string) => id === c.id || id.startsWith(`${c.id}:`));
     return profile?.role === 'admin' ||
       profile?.role === 'owner' ||
       profile?.role === 'manager' ||
       profile?.role === 'content_manager' ||
-      isAssigned ||
+      isContentAssigned ||
       (profile?.status === 'active' &&
         !(profile?.role === "selected_content" || c.status === "selected_content"));
   };
