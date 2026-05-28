@@ -2645,21 +2645,29 @@ export default function ContentManagement() {
         extractedUrl.includes("vcloud") ||
         extractedUrl.includes("hubdrive")
       ) {
-        try {
-          const res = await fetch("/api/hubcloud/direct-link", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: extractedUrl }),
-          });
-          if (res.ok) {
-            const data = await res.json();
-            if (data.url && data.url !== extractedUrl) {
-              extractedUrl = data.url;
-              finalHasUpdates = true;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            const res = await fetch("/api/hubcloud/direct-link", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ url: extractedUrl }),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (data.url && data.url !== extractedUrl) {
+                extractedUrl = data.url;
+                finalHasUpdates = true;
+                break;
+              }
             }
+          } catch (e) {
+            console.error(`Hubcloud extract failed for share (attempt ${attempt})`, e);
           }
-        } catch (e) {
-          console.error("Hubcloud extract failed for share", e);
+          if (attempt < 3 && !finalHasUpdates) {
+             await new Promise(resolve => setTimeout(resolve, 800));
+          } else if (finalHasUpdates) {
+             break;
+          }
         }
       }
 

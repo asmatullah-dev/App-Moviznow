@@ -1052,7 +1052,7 @@ export default function MovieDetails() {
                   season.episodes = existingEpisodes.map((existingEp: any) => {
                     const tmdbEp = tmdbSeason.episodes.find(
                       (ep: any) =>
-                        parseInt(ep.episode) ===
+                        parseInt(ep.episode_number || ep.episode) ===
                         parseInt(existingEp.episodeNumber.toString()),
                     );
                     if (tmdbEp) {
@@ -1066,7 +1066,7 @@ export default function MovieDetails() {
                         existingEp.description &&
                         !/^episode/i.test(existingEp.description)
                           ? existingEp.description
-                          : tmdbEp.description || "";
+                          : tmdbEp.overview || tmdbEp.description || "";
                       const newDur =
                         existingEp.duration ||
                         (tmdbEp.runtime ? `${tmdbEp.runtime}m` : "");
@@ -1173,9 +1173,9 @@ export default function MovieDetails() {
     profile?.role === "owner" ||
     profile?.role === "content_manager" ||
     profile?.role === "manager" ||
+    isAssigned ||
     (profile?.status === "active" &&
-      (!(isSelectedContent || mergedContent.status === "selected_content") ||
-        isAssigned));
+      !(isSelectedContent || mergedContent.status === "selected_content"));
 
   const allowedSeasons =
     profile?.assignedContent
@@ -1186,10 +1186,10 @@ export default function MovieDetails() {
     profile?.role === "owner" ||
     profile?.role === "content_manager" ||
     profile?.role === "manager" ||
+    profile?.assignedContent?.includes(mergedContent.id) ||
     (profile &&
       profile.status === "active" &&
-      !(isSelectedContent || mergedContent.status === "selected_content")) ||
-    profile?.assignedContent?.includes(mergedContent.id);
+      !(isSelectedContent || mergedContent.status === "selected_content"));
 
   const toggleWatchLater = async () => {
     if (!profile) return;
@@ -1523,6 +1523,8 @@ export default function MovieDetails() {
         copyUrl.includes("pixel.drain") ||
         copyUrl.includes("pixeldra.in");
 
+      // We don't use tinyurl anymore as per request
+      /*
       if (!isPixeldrain) {
         if (linkPopup.tinyUrl) {
           copyUrl = linkPopup.tinyUrl;
@@ -1535,6 +1537,7 @@ export default function MovieDetails() {
           }
         }
       }
+      */
 
       navigator.clipboard
         .writeText(copyUrl)

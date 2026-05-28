@@ -277,7 +277,7 @@ export function detectMetadataForLink(
       Arabic: ["ara", "ar"],
       Russian: ["rus", "ru"],
       Portuguese: ["por", "pt"],
-      Dutch: ["dut", "nld", "nl"],
+      Dutch: ["dut", "nld"],
       Turkish: ["tur", "tr"],
       Vietnamese: ["vie", "vi"],
       Thai: ["tha", "th"],
@@ -470,7 +470,7 @@ export function detectFromFilename(
       Arabic: ["ara", "ar"],
       Russian: ["rus", "ru"],
       Portuguese: ["por", "pt"],
-      Dutch: ["dut", "nld", "nl"],
+      Dutch: ["dut", "nld"],
       Turkish: ["tur", "tr"],
       Vietnamese: ["vie", "vi"],
       Thai: ["tha", "th"],
@@ -651,104 +651,120 @@ export async function performFullLinkScan(
   // HubCloud interception
   let hubcloudTitle = "";
   if (url.includes("hubcloud") || url.includes("moviesdrive") || url.includes("vcloud") || url.includes("hubdrive")) {
-    try {
-      const extractController = new AbortController();
-      const extractTimeout = setTimeout(() => extractController.abort(), 7000);
-      
-      const directController = new AbortController();
-      const directTimeout = setTimeout(() => directController.abort(), 8000);
+    base = {
+      url,
+      ok: true,
+      statusLabel: "WORKING",
+      message: "Assuming working (initial)",
+    };
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const extractController = new AbortController();
+        const extractTimeout = setTimeout(() => extractController.abort(), 7000);
+        
+        const directController = new AbortController();
+        const directTimeout = setTimeout(() => directController.abort(), 8000);
 
-      const [res, dLinkRes] = await Promise.allSettled([
-        fetch("/api/hubcloud/extract", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url }),
-          signal: extractController.signal
-        }),
-        fetch("/api/hubcloud/direct-link", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url, checkOnly: false }),
-          signal: directController.signal
-        })
-      ]);
-      
-      clearTimeout(extractTimeout);
-      clearTimeout(directTimeout);
+        const [res, dLinkRes] = await Promise.allSettled([
+          fetch("/api/hubcloud/extract", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url }),
+            signal: extractController.signal
+          }),
+          fetch("/api/hubcloud/direct-link", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url, checkOnly: false }),
+            signal: directController.signal
+          })
+        ]);
+        
+        clearTimeout(extractTimeout);
+        clearTimeout(directTimeout);
 
-      let candidatesInfo: undefined | any[] = undefined;
-      
-      if (dLinkRes.status === "fulfilled" && dLinkRes.value.ok) {
-        try {
-          const dLinkData = await dLinkRes.value.json();
-          if (dLinkData && dLinkData.candidates) {
-            candidatesInfo = dLinkData.candidates;
+        let candidatesInfo: undefined | any[] = undefined;
+        
+        if (dLinkRes.status === "fulfilled" && dLinkRes.value.ok) {
+          try {
+            const dLinkData = await dLinkRes.value.json();
+            if (dLinkData && dLinkData.candidates) {
+              candidatesInfo = dLinkData.candidates;
+            }
+          } catch (e) {
+            console.error("Direct link parsing error", e);
           }
-        } catch (e) {
-          console.error("Direct link parsing error", e);
         }
-      }
 
-      if (res.status === "fulfilled" && res.value.ok) {
-        const data = await res.value.json();
-        if (data.size && data.unit) {
-          hubcloudTitle = data.title || "";
-          hubcloudTitle = data.title || "";
-          base = {
-            url,
-            ok: true,
-            statusLabel: "WORKING",
-            fileName: hubcloudTitle || undefined,
-            fileSizeText: `${data.size} ${data.unit}`,
-            candidates: candidatesInfo
-          };
-          finalUrlToUse = url;
-        } else if (data.isNotFound) {
-          base = {
-            url,
-            ok: false,
-            statusLabel: "BROKEN",
-            message: "File Not Found",
-          };
-          finalUrlToUse = url;
-        } else if (data.isWorking) {
-          hubcloudTitle = data.title || "";
-          base = {
-            url,
-            ok: true,
-            statusLabel: "WORKING",
-            fileName: hubcloudTitle || undefined,
-            candidates: candidatesInfo
-          };
-          finalUrlToUse = url;
+        if (res.status === "fulfilled" && res.value.ok) {
+          const data = await res.value.json();
+          if (data.size && data.unit) {
+            hubcloudTitle = data.title || "";
+            base = {
+              url,
+              ok: true,
+              statusLabel: hubcloudTitle ? "WORKING" : "WORKING",
+              fileName: hubcloudTitle || undefined,
+              fileSizeText: `${data.size} ${data.unit}`,
+              candidates: candidatesInfo
+            };
+            if (!hubcloudTitle) base.statusLabel = "MISSING_FILENAME";
+            finalUrlToUse = url;
+            if (hubcloudTitle) break;
+          } else if (data.isNotFound) {
+            base = {
+              url,
+              ok: false,
+              statusLabel: "BROKEN",
+              message: "File Not Found",
+            };
+            finalUrlToUse = url;
+            break;
+          } else if (data.isWorking) {
+            hubcloudTitle = data.title || "";
+            base = {
+              url,
+              ok: true,
+              statusLabel: "WORKING",
+              fileName: hubcloudTitle || undefined,
+              candidates: candidatesInfo
+            };
+            finalUrlToUse = url;
+            if (!hubcloudTitle) base.statusLabel = "MISSING_FILENAME";
+            if (hubcloudTitle) break;
+          } else {
+            base = {
+              url,
+              ok: true,
+              statusLabel: "WORKING",
+              message: "Assuming working (size extraction failed)",
+              candidates: candidatesInfo
+            };
+            finalUrlToUse = url;
+          }
         } else {
           base = {
             url,
             ok: true,
             statusLabel: "WORKING",
-            message: "Assuming working (size extraction failed)",
+            message: "Assuming working (timeout/blocked)",
             candidates: candidatesInfo
           };
           finalUrlToUse = url;
         }
-      } else {
+      } catch {
         base = {
           url,
           ok: true,
           statusLabel: "WORKING",
-          message: "Assuming working (timeout/blocked)",
-          candidates: candidatesInfo
+          message: "Assuming working (network error)",
         };
         finalUrlToUse = url;
       }
-    } catch {
-      base = {
-        url,
-        ok: true,
-        statusLabel: "WORKING",
-        message: "Assuming working (network error)",
-      };
-      finalUrlToUse = url;
+      
+      if (attempt < 3) {
+        await new Promise(resolve => setTimeout(resolve, 800));
+      }
     }
   } else if (url.includes("?token=") || url.includes("&token=")) {
     try {
