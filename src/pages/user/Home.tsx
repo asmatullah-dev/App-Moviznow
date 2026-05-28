@@ -358,6 +358,17 @@ export default function Home({
     }
   };
 
+  const getCanPlay = (c: any) => {
+    const isAssigned = profile?.assignedContent?.some(id => id === c.id || id.startsWith(`${c.id}:`));
+    return profile?.role === 'admin' ||
+      profile?.role === 'owner' ||
+      profile?.role === 'manager' ||
+      profile?.role === 'content_manager' ||
+      isAssigned ||
+      (profile?.status === 'active' &&
+        !(profile?.role === "selected_content" || c.status === "selected_content"));
+  };
+
   const filteredAndSortedContent = useMemo(() => {
     let result = [...permittedContentList];
 
@@ -393,13 +404,19 @@ export default function Home({
       });
     }
 
-    // If searching and default or newest sort, use the score-based sort from smartSearch
-    if (debouncedSearch && (sort === "default" || sort === "newest")) {
-      return result;
-    }
-
+    // If searching and default or newest sort, allow smartSearch to dictate order but still prioritize accessible content
     result.sort((a, b) => {
-      // For selected_content users, prioritize assigned content
+      // Always show accessible content before restricted content
+      const aCanPlay = getCanPlay(a) ? 1 : 0;
+      const bCanPlay = getCanPlay(b) ? 1 : 0;
+      
+      if (aCanPlay !== bCanPlay) return bCanPlay - aCanPlay;
+      
+      if (debouncedSearch && (sort === "default" || sort === "newest")) {
+        return 0; // maintain search score order
+      }
+
+      // For selected_content users, prioritize assigned content within their allowed pool (if any)
       if (profile?.role === "selected_content") {
         const aAssigned = profile.assignedContent?.some(
           (id) => id === a.id || id.startsWith(`${a.id}:`),
@@ -865,14 +882,21 @@ export default function Home({
                 className="flex overflow-x-auto gap-4 pb-4 snap-x snap-mandatory flex-nowrap hide-scrollbar"
                 style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
               >
-                {trendingCollection.contentIds.map((id) => {
-                  const content = permittedContentList.find((c) => c.id === id);
-                  if (!content) return null;
-                  return (
-                    <div
-                      key={content.id}
-                      className="w-[140px] sm:w-[180px] shrink-0 snap-start"
-                    >
+                {trendingCollection.contentIds
+                  .map((id) => permittedContentList.find((c) => c.id === id))
+                  .filter(Boolean)
+                  .sort((a, b) => {
+                    const aCanPlay = getCanPlay(a) ? 1 : 0;
+                    const bCanPlay = getCanPlay(b) ? 1 : 0;
+                    return bCanPlay - aCanPlay;
+                  })
+                  .map((content) => {
+                    if (!content) return null;
+                    return (
+                      <div
+                        key={content.id}
+                        className="w-[140px] sm:w-[180px] shrink-0 snap-start"
+                      >
                       <ContentCard
                         content={content}
                         profile={profile}
@@ -912,14 +936,21 @@ export default function Home({
                 className="flex overflow-x-auto gap-4 pb-4 snap-x snap-mandatory flex-nowrap hide-scrollbar"
                 style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
               >
-                {newlyAddedCollection.contentIds.map((id) => {
-                  const content = permittedContentList.find((c) => c.id === id);
-                  if (!content) return null;
-                  return (
-                    <div
-                      key={content.id}
-                      className="w-[140px] sm:w-[180px] shrink-0 snap-start"
-                    >
+                {newlyAddedCollection.contentIds
+                  .map((id) => permittedContentList.find((c) => c.id === id))
+                  .filter(Boolean)
+                  .sort((a, b) => {
+                    const aCanPlay = getCanPlay(a) ? 1 : 0;
+                    const bCanPlay = getCanPlay(b) ? 1 : 0;
+                    return bCanPlay - aCanPlay;
+                  })
+                  .map((content) => {
+                    if (!content) return null;
+                    return (
+                      <div
+                        key={content.id}
+                        className="w-[140px] sm:w-[180px] shrink-0 snap-start"
+                      >
                       <ContentCard
                         content={content}
                         profile={profile}
@@ -1266,6 +1297,13 @@ export default function Home({
                     } else if (collectionSort === "az") {
                       items.sort((a, b) => a.title.localeCompare(b.title));
                     }
+
+                    // Always show accessible content first
+                    items.sort((a, b) => {
+                      const aCanPlay = getCanPlay(a) ? 1 : 0;
+                      const bCanPlay = getCanPlay(b) ? 1 : 0;
+                      return bCanPlay - aCanPlay;
+                    });
 
                     return items.map((content) => (
                       <ContentCard

@@ -24,6 +24,21 @@ export default function WatchLater() {
       )
     ))
   ).sort((a, b) => {
+    const getCanPlay = (c: any) => {
+      const isAssigned = profile?.assignedContent?.some(id => id === c.id || id.startsWith(`${c.id}:`));
+      return profile?.role === 'admin' ||
+        profile?.role === 'owner' ||
+        profile?.role === 'manager' ||
+        profile?.role === 'content_manager' ||
+        isAssigned ||
+        (profile?.status === 'active' &&
+          !(profile?.role === "selected_content" || c.status === "selected_content"));
+    };
+
+    const aCanPlay = getCanPlay(a) ? 1 : 0;
+    const bCanPlay = getCanPlay(b) ? 1 : 0;
+    if (aCanPlay !== bCanPlay) return bCanPlay - aCanPlay;
+
     const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
     const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
     if (timeB !== timeA) return timeB - timeA;
