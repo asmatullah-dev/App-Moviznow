@@ -227,7 +227,7 @@ export default function MovieRequests() {
                 <div className="flex items-center gap-3">
                   {request.status === 'completed' && request.linkedContentId && (
                     <Link
-                      to={`/movie/${request.linkedContentId}`}
+                      to={`/${request.type === 'series' ? 'series' : 'movie'}/${request.linkedContentId}`}
                       className="px-4 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-2 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500 hover:text-white"
                     >
                       <Eye className="w-4 h-4" />

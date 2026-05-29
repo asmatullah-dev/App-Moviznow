@@ -45,7 +45,7 @@ import { format } from "date-fns";
 import ConfirmModal from "../../components/ConfirmModal";
 import { formatContentTitle, getContrastColor } from "../../utils/contentUtils";
 import { smartSearch } from "../../utils/searchUtils";
-import { LazyLoadImage } from "react-lazy-load-image-component";
+
 import ContentCard from "../../components/ContentCard";
 import { ScrollableRow } from "../../components/ScrollableRow";
 import { useModalBehavior } from "../../hooks/useModalBehavior";

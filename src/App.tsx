@@ -125,6 +125,7 @@ export default function App() {
                         {/* User Routes */}
                         <Route path="/" element={<ProtectedRoute><Home onOpenMediaModal={() => setIsMediaModalOpen(true)} /></ProtectedRoute>} />
                         <Route path="/movie/:id" element={<ProtectedRoute><MovieDetails /></ProtectedRoute>} />
+                        <Route path="/series/:id" element={<ProtectedRoute><MovieDetails /></ProtectedRoute>} />
                         <Route path="/watch-later" element={<ProtectedRoute><WatchLater /></ProtectedRoute>} />
                         <Route path="/favorites" element={<ProtectedRoute><Favorites /></ProtectedRoute>} />
                         <Route path="/requests" element={<ProtectedRoute><MovieRequests /></ProtectedRoute>} />

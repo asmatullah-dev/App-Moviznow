@@ -206,7 +206,7 @@ const ContentCard = memo(
         </label>
         <div className="relative aspect-[2/3] rounded-t-xl overflow-hidden">
           <Link
-            to={anySelected ? "#" : `/movie/${content.id}`}
+            to={anySelected ? "#" : `/${content.type === 'series' ? 'series' : 'movie'}/${content.id}`}
             onClick={(e) => {
               if (anySelected) {
                 e.preventDefault();
@@ -2137,7 +2137,7 @@ export default function ContentManagement() {
             title,
             body,
             imageUrl: content.posterUrl,
-            url: `/movie/${content.id}`,
+            url: `/${content.type === 'series' ? 'series' : 'movie'}/${content.id}`,
           }),
         });
       } catch (fcmError) {
@@ -2359,9 +2359,9 @@ export default function ContentManagement() {
             }
           }
           if (mode === "whatsapp") {
-            executeWhatsappShare(updatedContent);
+            await executeWhatsappShare(updatedContent);
           } else {
-            executeShare(updatedContent);
+            await executeShare(updatedContent);
           }
         } else {
           // Failed to find TMDB item, show share anyway option
@@ -2404,9 +2404,9 @@ export default function ContentManagement() {
       }
     }
     if (mode === "whatsapp") {
-      executeWhatsappShare(content);
+      await executeWhatsappShare(content);
     } else {
-      executeShare(content);
+      await executeShare(content);
     }
   };
 

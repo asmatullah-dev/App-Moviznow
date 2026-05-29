@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth, standardizePhone } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { Film, Mail, Phone, ArrowLeft, Eye, EyeOff, Lock, User as UserIcon, Loader2 } from 'lucide-react';
-import { LazyLoadImage } from 'react-lazy-load-image-component';
+
 import { ConfirmationResult } from 'firebase/auth';
 import { UserProfile } from '../types';
 

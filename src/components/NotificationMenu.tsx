@@ -117,7 +117,7 @@ export const NotificationMenu = React.memo(() => {
                   <div className="divide-y divide-zinc-200 dark:divide-zinc-800/50">
                     {notifications.map(notification => {
                       const isNew = new Date(notification.createdAt) > lastCheck;
-                      const targetUrl = notification.buttonUrl || (notification.contentId ? `/movie/${notification.contentId}` : null);
+                      const targetUrl = notification.buttonUrl || (notification.contentId ? `/${notification.type === 'series' ? 'series' : 'movie'}/${notification.contentId}` : null);
                       const actionLabel = notification.buttonLabel || (notification.contentId ? (notification.type === 'series' ? 'View Series' : 'View Movie') : null);
   
                       const content = (

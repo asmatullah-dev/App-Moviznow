@@ -229,9 +229,10 @@ export default function UserManagement() {
         
         // Auto-expire users whose expiry date has passed
         if (user.status === 'active' && user.expiryDate && user.role !== 'owner') {
-          const expiryDate = new Date(user.expiryDate);
-          const expiryEnd = new Date(expiryDate.getTime() + 24 * 60 * 60 * 1000);
-          if (now > expiryEnd) {
+          const expiryDateStr = user.expiryDate.split('T')[0];
+          const parts = expiryDateStr.split('-');
+          const expiryBoundary = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]) + 1);
+          if (now >= expiryBoundary) {
             updates.status = 'expired';
             needsUpdate = true;
           }

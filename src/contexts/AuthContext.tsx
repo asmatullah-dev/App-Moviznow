@@ -419,9 +419,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           data.expiryDate &&
           data.role !== "owner"
         ) {
-          const expiryDate = new Date(data.expiryDate);
-          expiryDate.setDate(expiryDate.getDate() + 1);
-          if (expiryDate < expiryNow) {
+          // Parse expiry date by YYYY-MM-DD to avoid timezone shifting
+          const expiryDateStr = data.expiryDate.split('T')[0]; 
+          const parts = expiryDateStr.split('-');
+          // Create expiration boundary at 00:00:00 local time on the day AFTER the expiry date
+          const expiryBoundary = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]) + 1);
+          if (expiryNow >= expiryBoundary) {
             updates.status = "expired";
             data.status = "expired";
           }

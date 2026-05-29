@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
-import { LazyLoadImage } from 'react-lazy-load-image-component';
+
 import { Heart, Clock, ShoppingCart, Play, X, Lock, Star } from 'lucide-react';
 import { Content, Quality, Language, Genre } from '../types';
 import { formatContentTitle, getContrastColor } from '../utils/contentUtils';
@@ -164,19 +164,17 @@ const ContentCard = React.memo(({
           {/* Inner Content */}
           <div className="relative flex flex-col h-full bg-zinc-50 dark:bg-zinc-900 rounded-[14px] overflow-hidden">
           <Link 
-             to={`/movie/${content.id}`} 
+             to={`/${content.type === 'series' ? 'series' : 'movie'}/${content.id}`} 
              onClick={() => trackContentClick(content.id, content.title, content.type)}
              className="absolute inset-0 z-20" aria-label={`View details for ${content.title}`} />
           
           <div className="relative aspect-[2/3] w-full bg-zinc-100 dark:bg-zinc-800 block z-10">
-            <LazyLoadImage
+            <img
             src={content.posterUrl || settings?.defaultAppImage || 'https://picsum.photos/seed/movie/400/600'}
             alt={content.title}
-            effect="blur"
-            threshold={300}
+            loading="lazy"
             className="w-full h-full object-cover"
             referrerPolicy="no-referrer"
-            wrapperClassName="w-full h-full bg-zinc-100 dark:bg-zinc-800"
           />
           
           {/* Overlay on hover */}

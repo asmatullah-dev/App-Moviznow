@@ -77,7 +77,7 @@ import {
   fetchSeriesSeasons,
 } from "../../components/MediaModal";
 import ContentCard from "../../components/ContentCard";
-import { LazyLoadImage } from "react-lazy-load-image-component";
+
 import { useModalBehavior } from "../../hooks/useModalBehavior";
 import { useSettings } from "../../contexts/SettingsContext";
 
@@ -1850,6 +1850,13 @@ export default function MovieDetails() {
     setIsShareLoading(true);
 
     let shareUrl = window.location.href;
+    
+    // Ensure the share URL uses /series for series and /movie for movies
+    if (mergedContent.type === 'series' && shareUrl.includes('/movie/')) {
+      shareUrl = shareUrl.replace('/movie/', '/series/');
+    } else if (mergedContent.type === 'movie' && shareUrl.includes('/series/')) {
+      shareUrl = shareUrl.replace('/series/', '/movie/');
+    }
 
     // We no longer use tinyurl for shareUrl
     // shareUrl = await generateTinyUrl(shareUrl, false);
@@ -1923,7 +1930,7 @@ export default function MovieDetails() {
       {/* Hero Section */}
       <div className="relative min-h-[60vh] md:min-h-[70vh] w-full flex flex-col justify-end">
         <div className="absolute inset-0 overflow-hidden">
-          <LazyLoadImage
+          <img
             src={
               mergedContent.posterUrl ||
               settings?.defaultAppImage ||
@@ -1932,7 +1939,7 @@ export default function MovieDetails() {
             alt={mergedContent.title}
             className="w-full h-full object-cover opacity-30"
             referrerPolicy="no-referrer"
-            wrapperClassName="w-full h-full absolute inset-0"
+            loading="lazy"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-white dark:from-zinc-950 via-white/60 dark:via-zinc-950/60 to-transparent" />
         </div>
@@ -1957,7 +1964,7 @@ export default function MovieDetails() {
           className="relative z-10 flex items-end justify-center p-8 pt-32 pb-4 w-full"
         >
           <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center md:items-end gap-8 text-center md:text-left w-full">
-            <LazyLoadImage
+            <img
               src={
                 mergedContent.posterUrl ||
                 settings?.defaultAppImage ||
@@ -1967,7 +1974,7 @@ export default function MovieDetails() {
               className="w-48 md:w-64 rounded-2xl shadow-2xl cursor-pointer hover:scale-105 transition-transform border border-zinc-200 dark:border-zinc-800"
               referrerPolicy="no-referrer"
               onClick={() => setIsPosterExpanded(true)}
-              wrapperClassName="w-48 md:w-64 shrink-0"
+              loading="lazy"
             />
 
             <div className="flex-1">
@@ -3064,7 +3071,7 @@ export default function MovieDetails() {
                   <line x1="6" y1="6" x2="18" y2="18"></line>
                 </svg>
               </button>
-              <LazyLoadImage
+              <img
                 src={
                   mergedContent.posterUrl ||
                   settings?.defaultAppImage ||
@@ -3074,7 +3081,7 @@ export default function MovieDetails() {
                 className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
                 referrerPolicy="no-referrer"
                 onClick={(e) => e.stopPropagation()}
-                wrapperClassName="max-w-full max-h-[90vh]"
+                loading="lazy"
               />
             </motion.div>
           </motion.div>
