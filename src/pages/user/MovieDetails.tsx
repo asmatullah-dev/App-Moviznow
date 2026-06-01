@@ -1869,7 +1869,7 @@ export default function MovieDetails() {
       `🗣️ Language: ${contentLangs || "N/A"}\n` +
       `🎭 Genre: ${contentGenres || "N/A"}\n` +
       `🖨️ Print Quality: ${contentQuality}\n\n` +
-      `🔗 Watch here: moviznow.com/${mergedContent.id}\n` +
+      `🔗 Watch here: MovizNow.com/${mergedContent.id}\n` +
       `📞 WhatsApp: ${(() => {
         let sn = settings?.supportNumber || "3363284466";
         if (sn.startsWith("92")) sn = "0" + sn.substring(2);

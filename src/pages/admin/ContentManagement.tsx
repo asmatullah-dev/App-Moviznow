@@ -2499,7 +2499,7 @@ export default function ContentManagement() {
       const parts = [origin, contentGenres, typeStr].filter(Boolean);
       const partsStr = parts.join(" ");
       let text = `*${content.title} ${content.year || ""}*\n${partsStr}\n\n`;
-      text += `🔗 Watch here: moviznow.com/${content.id}\n`;
+      text += `🔗 Watch here: MovizNow.com/${content.id}\n`;
       let sn = settings?.supportNumber || "3363284466";
       if (sn.startsWith("92")) sn = "0" + sn.substring(2);
       else if (!sn.startsWith("0")) sn = "0" + sn;
@@ -2969,7 +2969,7 @@ export default function ContentManagement() {
     }
 
     text += `\n🍿 Enjoy watching on ${settings?.headerText || "MovizNow"}!\n`;
-    text += `🔗 Watch here: moviznow.com/${updatedContent.id}\n`;
+    text += `🔗 Watch here: MovizNow.com/${updatedContent.id}\n`;
     let sn = settings?.supportNumber || "3363284466";
     if (sn.startsWith("92")) sn = "0" + sn.substring(2);
     else if (!sn.startsWith("0")) sn = "0" + sn;
