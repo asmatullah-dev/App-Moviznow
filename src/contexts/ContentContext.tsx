@@ -210,14 +210,40 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         // Handle content chunks
         if (contentPendingStr) {
             const pendingChunkIds = JSON.parse(contentPendingStr) as string[];
+            const pendingItemsMapStr = safeStorage.getItem('pending_item_updates') || '{}';
+            const pendingItemsMap = JSON.parse(pendingItemsMapStr);
+
             for (const cid of pendingChunkIds) {
                 const chunkStr = safeStorage.getItem('content_chunk_' + cid);
                 if (chunkStr) {
                     const parsedItems = JSON.parse(chunkStr);
-                    batch.set(doc(db, 'content_chunks', cid), { 
-                        items: parsedItems,
-                        updatedAt: serverTimestamp()
-                    });
+                    const itemIds = pendingItemsMap[cid];
+                    
+                    if (Array.isArray(itemIds) && itemIds.length > 0 && itemIds.length < 200) {
+                        try {
+                            const updatePayload: Record<string, any> = { updatedAt: serverTimestamp() };
+                            for (const itemId of itemIds) {
+                                if (parsedItems[itemId]) {
+                                    updatePayload[`items.${itemId}`] = parsedItems[itemId];
+                                } else {
+                                    updatePayload[`items.${itemId}`] = deleteField();
+                                }
+                            }
+                            batch.update(doc(db, 'content_chunks', cid), updatePayload);
+                        } catch (e) {
+                            // document doesn't exist, fallback
+                            batch.set(doc(db, 'content_chunks', cid), { 
+                                items: parsedItems,
+                                updatedAt: serverTimestamp()
+                            });
+                        }
+                    } else {
+                        batch.set(doc(db, 'content_chunks', cid), { 
+                            items: parsedItems,
+                            updatedAt: serverTimestamp()
+                        });
+                    }
+                    
                     versionsUpdate[cid] = {
                         version: now,
                         count: Object.keys(parsedItems).length
@@ -281,6 +307,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
                 }
             }
             safeStorage.removeItem('pending_chunk_updates');
+            safeStorage.removeItem('pending_item_updates');
         }
 
         if (collectionPendingStr) {
@@ -869,6 +896,12 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
                             const pendingIds = new Set(JSON.parse(pendingStr));
                             pendingIds.add(cid);
                             safeStorage.setItem('pending_chunk_updates', JSON.stringify(Array.from(pendingIds)));
+
+                            const pendingItemsStr = safeStorage.getItem('pending_item_updates') || '{}';
+                            const pendingItemsMap = JSON.parse(pendingItemsStr);
+                            if (!pendingItemsMap[cid]) pendingItemsMap[cid] = [];
+                            if (!pendingItemsMap[cid].includes(content.id)) pendingItemsMap[cid].push(content.id);
+                            safeStorage.setItem('pending_item_updates', JSON.stringify(pendingItemsMap));
                             
                             const extMeta = localMeta[cid];
                             localMeta[cid] = { version: Date.now(), count: Object.keys(items).length };
@@ -895,6 +928,13 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         const pendingIds = new Set(JSON.parse(pendingStr));
         pendingIds.add(chunkId);
         safeStorage.setItem('pending_chunk_updates', JSON.stringify(Array.from(pendingIds)));
+
+        const pendingItemsStr = safeStorage.getItem('pending_item_updates') || '{}';
+        const pendingItemsMap = JSON.parse(pendingItemsStr);
+        if (!pendingItemsMap[chunkId]) pendingItemsMap[chunkId] = [];
+        if (!pendingItemsMap[chunkId].includes(content.id)) pendingItemsMap[chunkId].push(content.id);
+        safeStorage.setItem('pending_item_updates', JSON.stringify(pendingItemsMap));
+
         setHasPendingChanges(true);
     }
     setContentList(prev => {
@@ -995,6 +1035,29 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         const pendingIds = new Set(JSON.parse(pendingStr));
         affectedChunkIds.forEach(cid => pendingIds.add(cid));
         safeStorage.setItem('pending_chunk_updates', JSON.stringify(Array.from(pendingIds)));
+
+        const pendingItemsStr = safeStorage.getItem('pending_item_updates') || '{}';
+        const pendingItemsMap = JSON.parse(pendingItemsStr);
+        updates.forEach(u => {
+            let cid = u.chunkId || contentList.find(c => c.id === u.id)?.chunkId;
+            if (!cid) {
+                const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+                let localMeta: Record<string, any> = {};
+                try { localMeta = JSON.parse(localMetaString); } catch(e) {}
+                for (const potentialCid of Object.keys(localMeta)) {
+                    if (safeStorage.getItem('content_chunk_' + potentialCid)?.includes(`"${u.id}"`)) {
+                        cid = potentialCid;
+                        break;
+                    }
+                }
+            }
+            if (cid) {
+                if (!pendingItemsMap[cid]) pendingItemsMap[cid] = [];
+                if (!pendingItemsMap[cid].includes(u.id)) pendingItemsMap[cid].push(u.id);
+            }
+        });
+        safeStorage.setItem('pending_item_updates', JSON.stringify(pendingItemsMap));
+
         setHasPendingChanges(true);
     }
 
@@ -1058,6 +1121,29 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         const pendingIds = new Set(JSON.parse(pendingStr));
         affectedChunkIds.forEach(cid => pendingIds.add(cid));
         safeStorage.setItem('pending_chunk_updates', JSON.stringify(Array.from(pendingIds)));
+
+        const pendingItemsStr = safeStorage.getItem('pending_item_updates') || '{}';
+        const pendingItemsMap = JSON.parse(pendingItemsStr);
+        items.forEach(u => {
+            let cid = u.chunkId || contentList.find(c => c.id === u.id)?.chunkId;
+            if (!cid) {
+                const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+                let localMeta: Record<string, any> = {};
+                try { localMeta = JSON.parse(localMetaString); } catch(e) {}
+                for (const potentialCid of Object.keys(localMeta)) {
+                    if (safeStorage.getItem('content_chunk_' + potentialCid)?.includes(`"${u.id}"`)) {
+                        cid = potentialCid;
+                        break;
+                    }
+                }
+            }
+            if (cid) {
+                if (!pendingItemsMap[cid]) pendingItemsMap[cid] = [];
+                if (!pendingItemsMap[cid].includes(u.id)) pendingItemsMap[cid].push(u.id);
+            }
+        });
+        safeStorage.setItem('pending_item_updates', JSON.stringify(pendingItemsMap));
+
         setHasPendingChanges(true);
     }
 
