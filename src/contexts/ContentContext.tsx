@@ -219,24 +219,19 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
                     const parsedItems = JSON.parse(chunkStr);
                     const itemIds = pendingItemsMap[cid];
                     
-                    if (Array.isArray(itemIds) && itemIds.length > 0 && itemIds.length < 200) {
-                        try {
-                            const updatePayload: Record<string, any> = { updatedAt: serverTimestamp() };
-                            for (const itemId of itemIds) {
-                                if (parsedItems[itemId]) {
-                                    updatePayload[`items.${itemId}`] = parsedItems[itemId];
-                                } else {
-                                    updatePayload[`items.${itemId}`] = deleteField();
-                                }
+                    if (Array.isArray(itemIds) && itemIds.length > 0) {
+                        const updateMap: Record<string, any> = {};
+                        for (const itemId of itemIds) {
+                            if (parsedItems[itemId]) {
+                                updateMap[itemId] = parsedItems[itemId];
+                            } else {
+                                updateMap[itemId] = deleteField();
                             }
-                            batch.update(doc(db, 'content_chunks', cid), updatePayload);
-                        } catch (e) {
-                            // document doesn't exist, fallback
-                            batch.set(doc(db, 'content_chunks', cid), { 
-                                items: parsedItems,
-                                updatedAt: serverTimestamp()
-                            });
                         }
+                        batch.set(doc(db, 'content_chunks', cid), {
+                            items: updateMap,
+                            updatedAt: serverTimestamp()
+                        }, { merge: true });
                     } else {
                         batch.set(doc(db, 'content_chunks', cid), { 
                             items: parsedItems,
@@ -981,15 +976,19 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     const affectedChunkIds = new Set<string>();
     const { minifyContent } = await import('../utils/chunkUtils');
 
+    // Group updates by chunkId to avoid O(N*M) repeated JSON stringifying/parsing
+    const chunkUpdates: Record<string, typeof updates> = {};
+
+    let localMeta: Record<string, any> = {};
+    const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+    try { localMeta = JSON.parse(localMetaString); } catch(e) {}
+
     for (const update of updates) {
         let chunkId = update.chunkId;
         if (!chunkId) {
             chunkId = contentList.find(c => c.id === update.id)?.chunkId;
         }
         if (!chunkId) {
-            const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
-            let localMeta: Record<string, any> = {};
-            try { localMeta = JSON.parse(localMetaString); } catch(e) {}
             for (const cid of Object.keys(localMeta)) {
                 const chunkStr = safeStorage.getItem('content_chunk_' + cid);
                 if (chunkStr && chunkStr.includes(`"${update.id}"`)) {
@@ -1001,34 +1000,45 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         if (!chunkId) continue;
         
         affectedChunkIds.add(chunkId);
+        if (!chunkUpdates[chunkId]) {
+            chunkUpdates[chunkId] = [];
+        }
+        chunkUpdates[chunkId].push(update);
+    }
+
+    for (const chunkId of Object.keys(chunkUpdates)) {
         const chunkStr = safeStorage.getItem('content_chunk_' + chunkId);
         if (chunkStr) {
             const items = JSON.parse(chunkStr);
-            if (items[update.id]) {
-                const minifiedPayload = minifyContent(update.fields);
-                const updatedItem = { ...items[update.id], ...minifiedPayload };
-                // Clean empty values to save chunk space
-                Object.keys(updatedItem).forEach(key => {
-                    const val = updatedItem[key];
-                    if (val === null || val === undefined || val === '' || val === false || val === '[]') {
-                        delete updatedItem[key];
-                    } else if (Array.isArray(val) && val.length === 0) {
-                        delete updatedItem[key];
-                    }
-                });
-                
-                items[update.id] = updatedItem;
-                safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(items));
-                
-                // Update local metadata immediately
-                const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
-                let localMeta: Record<string, any> = {};
-                try { localMeta = JSON.parse(localMetaString); } catch(e) {}
-                localMeta[chunkId] = { version: Date.now(), count: Object.keys(items).length };
-                safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
-            }
+            const chunkSpecificUpdates = chunkUpdates[chunkId];
+
+            chunkSpecificUpdates.forEach((update) => {
+                if (items[update.id]) {
+                    const minifiedPayload = minifyContent(update.fields);
+                    const updatedItem = { ...items[update.id], ...minifiedPayload };
+                    
+                    // Clean empty values to save chunk space
+                    Object.keys(updatedItem).forEach(key => {
+                        const val = updatedItem[key];
+                        if (val === null || val === undefined || val === '' || val === false || val === '[]') {
+                            delete updatedItem[key];
+                        } else if (Array.isArray(val) && val.length === 0) {
+                            delete updatedItem[key];
+                        }
+                    });
+                    
+                    items[update.id] = updatedItem;
+                }
+            });
+
+            safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(items));
+            // Update local metadata immediately
+            localMeta[chunkId] = { version: Date.now(), count: Object.keys(items).length };
         }
     }
+    
+    // Save metadata back
+    safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
 
     if (isAdminOrEditor && affectedChunkIds.size > 0) {
         const pendingStr = safeStorage.getItem('pending_chunk_updates') || '[]';
@@ -1038,23 +1048,11 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
         const pendingItemsStr = safeStorage.getItem('pending_item_updates') || '{}';
         const pendingItemsMap = JSON.parse(pendingItemsStr);
-        updates.forEach(u => {
-            let cid = u.chunkId || contentList.find(c => c.id === u.id)?.chunkId;
-            if (!cid) {
-                const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
-                let localMeta: Record<string, any> = {};
-                try { localMeta = JSON.parse(localMetaString); } catch(e) {}
-                for (const potentialCid of Object.keys(localMeta)) {
-                    if (safeStorage.getItem('content_chunk_' + potentialCid)?.includes(`"${u.id}"`)) {
-                        cid = potentialCid;
-                        break;
-                    }
-                }
-            }
-            if (cid) {
-                if (!pendingItemsMap[cid]) pendingItemsMap[cid] = [];
+        Object.keys(chunkUpdates).forEach(cid => {
+            if (!pendingItemsMap[cid]) pendingItemsMap[cid] = [];
+            chunkUpdates[cid].forEach(u => {
                 if (!pendingItemsMap[cid].includes(u.id)) pendingItemsMap[cid].push(u.id);
-            }
+            });
         });
         safeStorage.setItem('pending_item_updates', JSON.stringify(pendingItemsMap));
 
@@ -1081,15 +1079,17 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     const isAdminOrEditor = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
     const affectedChunkIds = new Set<string>();
 
+    const chunkUpdates: Record<string, typeof items> = {};
+    let localMeta: Record<string, any> = {};
+    const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+    try { localMeta = JSON.parse(localMetaString); } catch(e) {}
+
     for (const item of items) {
         let chunkId = item.chunkId;
         if (!chunkId) {
             chunkId = contentList.find(c => c.id === item.id)?.chunkId;
         }
         if (!chunkId) {
-            const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
-            let localMeta: Record<string, any> = {};
-            try { localMeta = JSON.parse(localMetaString); } catch(e) {}
             for (const cid of Object.keys(localMeta)) {
                 const chunkStr = safeStorage.getItem('content_chunk_' + cid);
                 if (chunkStr && chunkStr.includes(`"${item.id}"`)) {
@@ -1101,20 +1101,29 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         if (!chunkId) continue;
         
         affectedChunkIds.add(chunkId);
+        if (!chunkUpdates[chunkId]) {
+            chunkUpdates[chunkId] = [];
+        }
+        chunkUpdates[chunkId].push(item);
+    }
+
+    for (const chunkId of Object.keys(chunkUpdates)) {
         const chunkStr = safeStorage.getItem('content_chunk_' + chunkId);
         if (chunkStr) {
             const chunkItems = JSON.parse(chunkStr);
-            delete chunkItems[item.id];
+            const chunkSpecificDeletes = chunkUpdates[chunkId];
+
+            chunkSpecificDeletes.forEach(item => {
+                delete chunkItems[item.id];
+            });
+
             safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(chunkItems));
-            
-            // Update local metadata immediately
-            const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
-            let localMeta: Record<string, any> = {};
-            try { localMeta = JSON.parse(localMetaString); } catch(e) {}
             localMeta[chunkId] = { version: Date.now(), count: Object.keys(chunkItems).length };
-            safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
         }
     }
+    
+    // Save metadata back
+    safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
 
     if (isAdminOrEditor && affectedChunkIds.size > 0) {
         const pendingStr = safeStorage.getItem('pending_chunk_updates') || '[]';
@@ -1124,23 +1133,11 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
         const pendingItemsStr = safeStorage.getItem('pending_item_updates') || '{}';
         const pendingItemsMap = JSON.parse(pendingItemsStr);
-        items.forEach(u => {
-            let cid = u.chunkId || contentList.find(c => c.id === u.id)?.chunkId;
-            if (!cid) {
-                const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
-                let localMeta: Record<string, any> = {};
-                try { localMeta = JSON.parse(localMetaString); } catch(e) {}
-                for (const potentialCid of Object.keys(localMeta)) {
-                    if (safeStorage.getItem('content_chunk_' + potentialCid)?.includes(`"${u.id}"`)) {
-                        cid = potentialCid;
-                        break;
-                    }
-                }
-            }
-            if (cid) {
-                if (!pendingItemsMap[cid]) pendingItemsMap[cid] = [];
+        Object.keys(chunkUpdates).forEach(cid => {
+            if (!pendingItemsMap[cid]) pendingItemsMap[cid] = [];
+            chunkUpdates[cid].forEach(u => {
                 if (!pendingItemsMap[cid].includes(u.id)) pendingItemsMap[cid].push(u.id);
-            }
+            });
         });
         safeStorage.setItem('pending_item_updates', JSON.stringify(pendingItemsMap));
 
@@ -1148,7 +1145,11 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     }
 
     const idsToDelete = new Set(items.map(i => i.id));
-    setContentList(prev => prev.filter(c => !idsToDelete.has(c.id)));
+    setContentList(prev => {
+        const next = prev.filter(c => !idsToDelete.has(c.id));
+        safeStorage.setItem('content_cache', JSON.stringify(next));
+        return next;
+    });
 
     if (!isAdminOrEditor) {
         const { deleteContentsFromChunks } = await import('../utils/chunkUtils');

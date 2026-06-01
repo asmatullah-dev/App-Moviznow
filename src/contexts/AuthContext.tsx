@@ -348,8 +348,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               batch.set(userRef, updatesToPush, { merge: true });
             }
             // Add user version to chunk_meta to prevent infinite writes
-            batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentUser.uid]: newVersion } }, { merge: true });
-            await batch.commit();
+            const metaRef = doc(db, 'chunk_meta', 'versions');
+            let skipCommit = false;
+            try {
+               const { updateDoc } = await import('firebase/firestore');
+               await updateDoc(metaRef, { [`users.${currentUser.uid}`]: newVersion });
+            } catch (e) {
+               batch.set(metaRef, { users: { [currentUser.uid]: newVersion } }, { merge: true });
+               await batch.commit();
+               skipCommit = true;
+            }
+            if (!skipCommit) await batch.commit();
 
             if (isDailySync) localStorage.setItem(dailySyncKey, pktDate);
             safeStorage.setItem("needs_user_sync", "false");
