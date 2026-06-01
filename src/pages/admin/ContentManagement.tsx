@@ -2498,7 +2498,12 @@ export default function ContentManagement() {
 
       const parts = [origin, contentGenres, typeStr].filter(Boolean);
       const partsStr = parts.join(" ");
-      const text = `*${content.title} ${content.year || ""}*\n${partsStr}`;
+      let text = `*${content.title} ${content.year || ""}*\n${partsStr}\n\n`;
+      text += `🔗 Watch here: moviznow.com/${content.id}\n`;
+      let sn = settings?.supportNumber || "3363284466";
+      if (sn.startsWith("92")) sn = "0" + sn.substring(2);
+      else if (!sn.startsWith("0")) sn = "0" + sn;
+      text += `📞 WhatsApp: ${sn}`;
 
       let files: File[] = [];
       if (content.posterUrl) {
@@ -2562,7 +2567,7 @@ export default function ContentManagement() {
     } catch (err: any) {
       if (err.name !== "AbortError") {
         try {
-          const fallbackText = `*${content.title} ${content.year || ""}*\n\n${content.posterUrl ? content.posterUrl + "\n\n" : ""}`;
+          const fallbackText = text;
           await navigator.clipboard.writeText(fallbackText);
           setAlertConfig({
             isOpen: true,
@@ -2621,11 +2626,45 @@ export default function ContentManagement() {
       text += `📅 Release: ${formatReleaseDateForShare(content.releaseDate)}\n`;
     if (content.subtitles) text += `📝 Subtitles: Available\n`;
 
-    if (content.sampleUrl) text += `📽️ Sample: ${content.sampleUrl}\n`;
+    let processedSampleUrl = content.sampleUrl;
+    if (processedSampleUrl && (processedSampleUrl.includes("hubcloud") || processedSampleUrl.includes("moviesdrive") || processedSampleUrl.includes("vcloud") || processedSampleUrl.includes("hubdrive"))) {
+      let sampleExtractionSuccess = false;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const res = await fetch("/api/hubcloud/direct-link", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: processedSampleUrl }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.url && data.url !== processedSampleUrl) {
+              processedSampleUrl = data.url;
+              sampleExtractionSuccess = true;
+              break;
+            }
+          }
+        } catch (e) {
+          console.error(`Hubcloud extract failed for sampleUrl (attempt ${attempt})`, e);
+        }
+        if (attempt < 3 && !sampleExtractionSuccess) {
+           await new Promise(resolve => setTimeout(resolve, 800));
+        } else if (sampleExtractionSuccess) {
+           break;
+        }
+      }
+    }
+
+    if (processedSampleUrl) text += `📽️ Sample: ${processedSampleUrl}\n`;
     text += `\n`;
 
     let hasUpdates = false;
     let updatedContent = { ...content };
+
+    if (processedSampleUrl && processedSampleUrl !== content.sampleUrl) {
+      updatedContent.sampleUrl = processedSampleUrl;
+      hasUpdates = true;
+    }
 
     const processLink = async (link: LinkDef) => {
       if (!link.url) return link;
@@ -2918,8 +2957,9 @@ export default function ContentManagement() {
             id: updatedContent.id,
             chunkId: updatedContent.chunkId,
             fields: {
-              movieLinks: JSON.stringify(updatedContent.movieLinks || []),
-              seasons: JSON.stringify(updatedContent.seasons || []),
+              movieLinks: updatedContent.movieLinks,
+              seasons: updatedContent.seasons,
+              sampleUrl: updatedContent.sampleUrl,
             },
           },
         ]);
@@ -2929,17 +2969,20 @@ export default function ContentManagement() {
     }
 
     text += `\n🍿 Enjoy watching on ${settings?.headerText || "MovizNow"}!\n`;
+    text += `🔗 Watch here: moviznow.com/${updatedContent.id}\n`;
     let sn = settings?.supportNumber || "3363284466";
     if (sn.startsWith("92")) sn = "0" + sn.substring(2);
     else if (!sn.startsWith("0")) sn = "0" + sn;
     text += `📞 WhatsApp: ${sn}`;
 
+    const shareData: any = {
+      title: updatedContent.title,
+      text: text,
+    };
+
     if (navigator.share) {
       try {
-        await navigator.share({
-          title: updatedContent.title,
-          text: text,
-        });
+        await navigator.share(shareData);
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
           // Fallback to clipboard
@@ -2948,13 +2991,14 @@ export default function ContentManagement() {
             setAlertConfig({
               isOpen: true,
               title: "Success",
-              message:
-                "Share content copied to clipboard! You can now paste it in WhatsApp.",
+              message: "Share content copied to clipboard!",
             });
           } catch (clipErr) {
-            // Last resort: WhatsApp direct link
-            const encodedText = encodeURIComponent(text);
-            window.open(`https://wa.me/?text=${encodedText}`, "_blank");
+            setAlertConfig({
+              isOpen: true,
+              title: "Error",
+              message: "Failed to share or copy to clipboard.",
+            });
           }
         }
       }
@@ -2965,12 +3009,14 @@ export default function ContentManagement() {
         setAlertConfig({
           isOpen: true,
           title: "Success",
-          message:
-            "Share content copied to clipboard! You can now paste it in WhatsApp.",
+          message: "Share content copied to clipboard!",
         });
       } catch (clipErr) {
-        const encodedText = encodeURIComponent(text);
-        window.open(`https://wa.me/?text=${encodedText}`, "_blank");
+        setAlertConfig({
+          isOpen: true,
+          title: "Error",
+          message: "Failed to copy to clipboard.",
+        });
       }
     }
     setLoadingShareId(null);

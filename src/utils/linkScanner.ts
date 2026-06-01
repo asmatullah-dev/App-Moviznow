@@ -710,7 +710,7 @@ export async function performFullLinkScan(
             };
             if (!hubcloudTitle) base.statusLabel = "MISSING_FILENAME";
             finalUrlToUse = url;
-            if (hubcloudTitle) break;
+            break;
           } else if (data.isNotFound) {
             base = {
               url,
@@ -731,7 +731,7 @@ export async function performFullLinkScan(
             };
             finalUrlToUse = url;
             if (!hubcloudTitle) base.statusLabel = "MISSING_FILENAME";
-            if (hubcloudTitle) break;
+            break;
           } else {
             base = {
               url,
@@ -741,6 +741,7 @@ export async function performFullLinkScan(
               candidates: candidatesInfo
             };
             finalUrlToUse = url;
+            if (candidatesInfo) break;
           }
         } else {
           base = {
@@ -751,6 +752,7 @@ export async function performFullLinkScan(
             candidates: candidatesInfo
           };
           finalUrlToUse = url;
+          if (candidatesInfo) break;
         }
       } catch {
         base = {

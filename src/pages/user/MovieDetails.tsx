@@ -1869,7 +1869,13 @@ export default function MovieDetails() {
       `🗣️ Language: ${contentLangs || "N/A"}\n` +
       `🎭 Genre: ${contentGenres || "N/A"}\n` +
       `🖨️ Print Quality: ${contentQuality}\n\n` +
-      `Watch it here: ${shareUrl}`;
+      `🔗 Watch here: moviznow.com/${mergedContent.id}\n` +
+      `📞 WhatsApp: ${(() => {
+        let sn = settings?.supportNumber || "3363284466";
+        if (sn.startsWith("92")) sn = "0" + sn.substring(2);
+        else if (!sn.startsWith("0")) sn = "0" + sn;
+        return sn;
+      })()}`;
 
     const textForShare = baseText;
     const textForClipboard = baseText;
@@ -1880,22 +1886,6 @@ export default function MovieDetails() {
     };
 
     try {
-      // Try to include poster image
-      if (
-        mergedContent.posterUrl &&
-        navigator.canShare &&
-        navigator.canShare({ files: [] })
-      ) {
-        try {
-          const response = await fetch(mergedContent.posterUrl);
-          const blob = await response.blob();
-          const file = new File([blob], "poster.jpg", { type: blob.type });
-          shareData.files = [file];
-        } catch (e) {
-          console.error("Failed to fetch poster for sharing", e);
-        }
-      }
-
       if (navigator.share && navigator.canShare(shareData)) {
         await navigator.share(shareData);
       } else {
