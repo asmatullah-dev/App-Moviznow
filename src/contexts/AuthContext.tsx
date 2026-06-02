@@ -310,7 +310,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const isLogin = justLoggedInRef.current || reason === 'login';
       const isSignOut = reason === 'logout';
       const shouldWrite = (serverProfile || localProfile) && 
-        (isVersionMissing || isLogin || isSignOut || (isDailySync && hasLocalChanges) || (force && reason !== 'manual'));
+        (isVersionMissing || isLogin || isSignOut || (hasLocalChanges && (isDailySync || force)));
 
       if (shouldWrite) {
         try {

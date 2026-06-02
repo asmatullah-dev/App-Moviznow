@@ -21,11 +21,11 @@ export default function MaintenancePage() {
   }, [settings, navigate]);
   
   useEffect(() => {
-    // Auto-refresh settings periodically
+    // Auto-refresh periodically without forcing network requests
     const interval = setInterval(() => {
       refreshSettings().catch(console.error);
-      refreshProfile(true, 'auto').catch(console.error);
-    }, 30000); // 30 seconds
+      refreshProfile(false, 'auto').catch(console.error);
+    }, 60000); // 1 minute
     return () => clearInterval(interval);
   }, [refreshSettings, refreshProfile]);
 
