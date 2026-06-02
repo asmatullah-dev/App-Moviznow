@@ -2,11 +2,23 @@ import React, { useEffect, useState } from 'react';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { useSettings } from '../contexts/SettingsContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 export default function MaintenancePage() {
   const { settings, refreshSettings } = useSettings();
   const { profile, refreshProfile } = useAuth();
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    // If maintenance is turned off, redirect to home
+    const isMaintenanceActive = settings?.isMaintenanceModeEnabled && 
+      (!settings.maintenanceEndTime || new Date(settings.maintenanceEndTime) > new Date());
+    
+    if (settings && !isMaintenanceActive) {
+      navigate('/', { replace: true });
+    }
+  }, [settings, navigate]);
   
   useEffect(() => {
     // Auto-refresh settings periodically
@@ -20,7 +32,7 @@ export default function MaintenancePage() {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      await refreshSettings();
+      await refreshSettings(true);
       await refreshProfile(true, 'manual');
     } finally {
       setIsRefreshing(false);

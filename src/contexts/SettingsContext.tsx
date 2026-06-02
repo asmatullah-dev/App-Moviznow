@@ -8,7 +8,7 @@ import { AppSettings } from '../types';
 interface SettingsContextType {
   settings: AppSettings | null;
   loading: boolean;
-  refreshSettings: () => Promise<void>;
+  refreshSettings: (force?: boolean) => Promise<void>;
 }
 
 const SettingsContext = createContext<SettingsContextType>({
@@ -26,13 +26,13 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
   const [loading, setLoading] = useState(() => !localStorage.getItem('settings_cache'));
 
-  const refreshSettings = useCallback(async () => {
+  const refreshSettings = useCallback(async (force: boolean = false) => {
     try {
-      const meta = await getChunkMeta();
+      const meta = await getChunkMeta(force);
       const serverVersion = meta.settings || 0;
       const localVersion = parseInt(localStorage.getItem('cached_settings_version') || '0', 10);
 
-      if (!localStorage.getItem('settings_cache') || serverVersion > localVersion) {
+      if (force || !localStorage.getItem('settings_cache') || serverVersion > localVersion) {
         const docRef = doc(db, 'settings', 'app_settings');
         const docSnap = await getDoc(docRef);
         
