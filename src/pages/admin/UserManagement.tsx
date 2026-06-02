@@ -175,8 +175,7 @@ export default function UserManagement() {
     
     return () => {
       mounted = false;
-      // Best effort to save on unmount (finalizeUserChanges handles checking internally)
-      finalizeUserChanges(true).catch(console.error);
+      // No auto sync on exit, manual sync only
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1000,6 +999,24 @@ export default function UserManagement() {
           setAlertConfig({ isOpen: true, title: 'Error', message: 'No pending user found with that phone or email. Managers can only claim existing pending users.' });
         } else {
           // No matches, create new pending user
+          
+          if (standardizedPhone) {
+            const existing = await findUsersByEmailOrPhone(standardizedPhone);
+            if (existing.length > 0) {
+               setAlertConfig({ isOpen: true, title: 'Error', message: 'A user with this WhatsApp number already exists. Please search for them instead.' });
+               setProcessing(prev => ({ ...prev, addUser: false }));
+               return;
+            }
+          }
+          if (emailToMatch && emailToMatch.indexOf('@moviznow.com') === -1) {
+            const existing = await findUsersByEmailOrPhone(emailToMatch);
+            if (existing.length > 0) {
+               setAlertConfig({ isOpen: true, title: 'Error', message: 'A user with this email already exists.' });
+               setProcessing(prev => ({ ...prev, addUser: false }));
+               return;
+            }
+          }
+          
           const newUserId = `pending_${Date.now()}`;
           const newUserData: any = {
             uid: newUserId,

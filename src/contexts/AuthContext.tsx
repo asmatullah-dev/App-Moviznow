@@ -194,18 +194,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const dailySyncKey = `last_daily_sync_${currentUser.uid}`;
       const lastSyncDateStr = localStorage.getItem(dailySyncKey);
       
-      const shiftedTime = new Date(now + (5 - 9) * 60 * 60 * 1000);
+      const shiftedTime = new Date(now + (5 - 7) * 60 * 60 * 1000);
       const pktDate = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
       const isDailySync = lastSyncDateStr !== pktDate;
 
       if (localProfile && !profile) {
          setProfile(localProfile);
+         setLoading(false); // Unblock immediately if we have cached data
       }
 
       // 1. Firstly read chunk_meta
       let serverVersion = localVersion;
       let isVersionMissing = false;
-      if (force || isDailySync || !localProfile) {
+      if (navigator.onLine && (force || isDailySync || !localProfile)) {
         try {
           const { getChunkMeta } = await import('../utils/chunkMeta');
           const meta = await getChunkMeta(force);
@@ -227,20 +228,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       let docSnap;
       
       // 7. Before updating user data, first check version from content_meta, if different new version first read the user data doc
-      if (versionChanged || !localProfile) {
-        docSnap = await getDoc(userRef);
-        if (docSnap.exists()) {
-          serverProfile = docSnap.data() as UserProfile;
-          updatedSomething = true;
+      if (navigator.onLine && (versionChanged || !localProfile)) {
+        try {
+          docSnap = await getDoc(userRef);
+          if (docSnap.exists()) {
+            serverProfile = docSnap.data() as UserProfile;
+            updatedSomething = true;
+          }
+        } catch (e) {
+          console.error("Error reading user data from Firestore, using local fallback", e);
+          if (!localProfile) {
+            // Can't run without local profile if getDoc fails
+            throw e;
+          }
         }
-      } else {
+      } else if (navigator.onLine) {
         // Just checking if we need to retrieve snapshot for later (legacy checks)
          const cachedDocSnapStr = safeStorage.getItem("profile_doc_snap");
          if (!cachedDocSnapStr && !localProfile) {
+            try {
               docSnap = await getDoc(userRef);
               if (docSnap.exists()) {
                  serverProfile = docSnap.data() as UserProfile;
               }
+            } catch (e) {}
          }
       }
 
@@ -794,11 +805,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        if (safeStorage.getItem("needs_user_sync") === "true") {
-           refreshProfile(true, 'manual').catch(console.error);
-        }
-      }
+      // Removing visibility tracking manual sync as per requirement.
+      // Profile syncing will only happen at 7AM, login/logout, or explicit phone update.
     };
     window.addEventListener("visibilitychange", handleVisibilityChange);
     return () => window.removeEventListener("visibilitychange", handleVisibilityChange);
@@ -937,8 +945,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const twelveHoursMs = 12 * 60 * 60 * 1000;
             const forceSync = Date.now() - lastSyncTime >= twelveHoursMs;
 
-            // Sync to Firestore every 5 minutes (300 seconds) or every 12 hours to reduce write operations
-            if ((accSeconds >= 10 || forceSync) && navigator.onLine) {
+            // We no longer trigger partial time syncs. We just accumulate locally.
+            // When daily sync or logout happens, it will be flushed.
+            if (forceSync && navigator.onLine) {
               let secondsToSync = accSeconds;
 
               if (secondsToSync > 0) {
@@ -1459,11 +1468,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const now = Date.now();
     const dailySyncKey = `last_daily_sync_${user.uid}`;
     const lastSyncDateStr = localStorage.getItem(dailySyncKey);
-    const shiftedTime = new Date(now + (5 - 9) * 60 * 60 * 1000);
+    const shiftedTime = new Date(now + (5 - 7) * 60 * 60 * 1000);
     const pktDate = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
     const isDailySync = lastSyncDateStr !== pktDate;
+    const isPhoneUpdate = !!(data.phone && data.phone !== profile.phone);
 
-    if (!isDailySync && !force) {
+    if (!isDailySync && !force && !isPhoneUpdate) {
       console.log("Profile update deferred: Already updated in this 9 AM PKT period.");
       // Still update local profile and set needs_user_sync so it catches up tomorrow
       setProfile({ ...profile, ...data });
@@ -1583,10 +1593,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       try {
         const { writeBatch } = await import('firebase/firestore');
-        const batch = writeBatch(db);
+        let batch = writeBatch(db);
         batch.set(userRefPath, data, { merge: true });
-        batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [user.uid]: now } }, { merge: true });
-        await batch.commit();
+        
+        let skipCommit = false;
+        try {
+           const { updateDoc } = await import('firebase/firestore');
+           await updateDoc(doc(db, 'chunk_meta', 'versions'), { [`users.${user.uid}`]: now });
+        } catch (e) {
+           batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [user.uid]: now } }, { merge: true });
+           await batch.commit();
+           skipCommit = true;
+        }
+        if (!skipCommit) await batch.commit();
+        
         console.log("Users doc updated successfully.");
       } catch (err: any) {
         handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`);
@@ -1611,8 +1631,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { writeBatch } = await import('firebase/firestore');
       const batch = writeBatch(db);
       batch.update(userRef, { hasPassword: true });
-      batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [user.uid]: Date.now() } }, { merge: true });
-      await batch.commit();
+      
+      let skipCommit = false;
+      try {
+         const { updateDoc } = await import('firebase/firestore');
+         await updateDoc(doc(db, 'chunk_meta', 'versions'), { [`users.${user.uid}`]: Date.now() });
+      } catch (e) {
+         batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [user.uid]: Date.now() } }, { merge: true });
+         await batch.commit();
+         skipCommit = true;
+      }
+      if (!skipCommit) await batch.commit();
       if (profile) {
         setProfile({ ...profile, hasPassword: true });
       }

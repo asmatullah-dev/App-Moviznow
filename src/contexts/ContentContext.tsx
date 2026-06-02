@@ -796,7 +796,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     
     // Refresh users list if admin and push pending user changes
     if (isAdmin) {
-      finalizeUserChanges(true).catch(console.error);
+      finalizeUserChanges(force).catch(console.error);
       try {
           const { updatedSomething: usersUpdated } = await refreshUsers(force);
           if (usersUpdated) updatedSomething = true;

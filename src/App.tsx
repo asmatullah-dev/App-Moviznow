@@ -100,11 +100,11 @@ export default function App() {
                     {pauseStatus.paused && (
                       <div className="fixed inset-0 z-[9999] bg-zinc-950/80 backdrop-blur-md flex flex-col items-center justify-center p-4">
                         <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl p-8 max-w-sm w-full text-center space-y-4">
-                          <h2 className="text-xl font-bold">App Paused</h2>
-                          <p className="text-zinc-600 dark:text-zinc-400">
+                          <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Data is not up to date</h2>
+                          <p className="text-zinc-600 dark:text-zinc-400 text-sm">
                             You have been offline for over 30 hours. Data was last synced on {pauseStatus.lastSynced}. 
                           </p>
-                          <p className="text-zinc-600 dark:text-zinc-400">
+                          <p className="text-zinc-600 dark:text-zinc-400 text-sm">
                             Please connect to the internet to update your app data and continue.
                           </p>
                         </div>

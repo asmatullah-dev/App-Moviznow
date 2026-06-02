@@ -1,11 +1,31 @@
-import React from 'react';
-import { AlertCircle } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { AlertCircle, RefreshCw } from 'lucide-react';
 import { useSettings } from '../contexts/SettingsContext';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function MaintenancePage() {
-  const { settings } = useSettings();
-  const { profile } = useAuth();
+  const { settings, refreshSettings } = useSettings();
+  const { profile, refreshProfile } = useAuth();
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  useEffect(() => {
+    // Auto-refresh settings periodically
+    const interval = setInterval(() => {
+      refreshSettings().catch(console.error);
+      refreshProfile(true, 'auto').catch(console.error);
+    }, 30000); // 30 seconds
+    return () => clearInterval(interval);
+  }, [refreshSettings, refreshProfile]);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await refreshSettings();
+      await refreshProfile(true, 'manual');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
   
   let supportPhone = settings?.supportNumber || '3363284466';
   if (supportPhone.startsWith('0')) {
@@ -27,6 +47,14 @@ export default function MaintenancePage() {
           {settings?.maintenanceMessage || 'The application is currently unavailable. Please check back later.'}
         </p>
         <div className="pt-4 flex flex-col sm:flex-row gap-3 justify-center">
+          <button
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="flex items-center justify-center gap-2 px-6 py-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white rounded-xl font-medium hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
           {settings?.isAdminContactEnabled !== false && (
             <button
               onClick={() => window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank')}

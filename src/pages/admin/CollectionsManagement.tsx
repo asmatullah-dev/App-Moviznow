@@ -32,14 +32,8 @@ export default function CollectionsManagement() {
   }, [hasPendingChanges]);
 
   useEffect(() => {
-    return () => {
-      // Sync on leave
-      if (hasPendingRef.current) {
-        console.log("Auto-syncing collections on exit...");
-        finalizeChanges().catch(err => console.error("Auto-sync failed:", err));
-      }
-    };
-  }, [finalizeChanges]);
+    // No auto sync on exit, manual sync only
+  }, []);
 
   const handleAdd = async () => {
     try {

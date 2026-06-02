@@ -52,15 +52,9 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     const pendingStr = safeStorage.getItem('pending_user_updates');
     if (!pendingStr) return;
     
-    // Check 7AM restriction for auto-syncs
-    const now = Date.now();
-    // PKT is UTC+5. Shift back by 7 hours to align the daily update cycle with 7 AM PKT.
-    const shiftedTime = new Date(now + (5 - 7) * 60 * 60 * 1000);
-    const checkPeriod = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
-    const lastCheckPeriod = safeStorage.getItem('last_user_finalize_period');
-    
-    if (lastCheckPeriod === checkPeriod && !force) {
-        console.log("Users sync deferred: Already synced in this 7 AM PKT period.");
+    // Only allow sync when forced via the UI buttons for admins
+    if (!force) {
+        console.log("Users sync deferred: Only manual sync is allowed.");
         return;
     }
     

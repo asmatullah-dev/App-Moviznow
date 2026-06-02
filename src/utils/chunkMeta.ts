@@ -7,8 +7,8 @@ let memoryCache: Record<string, any> | null = null;
 
 const shouldFetchMeta = () => {
   const now = Date.now();
-  // PKT is UTC+5. Shift back by 9 hours to align the daily update cycle with 9 AM PKT.
-  const shiftedTime = new Date(now + (5 - 9) * 60 * 60 * 1000);
+  // PKT is UTC+5. Shift back by 7 hours to align the daily update cycle with 7 AM PKT.
+  const shiftedTime = new Date(now + (5 - 7) * 60 * 60 * 1000);
   const checkPeriod = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
 
   const lastCheckPeriod = safeStorage.getItem('last_chunk_meta_period');
@@ -55,7 +55,7 @@ export const getChunkMeta = async (forceRefresh = false) => {
         safeStorage.setItem('last_chunk_meta_fetch_time', Date.now().toString());
 
         const nowInternal = Date.now();
-        const shiftedTimeInternal = new Date(nowInternal + (5 - 9) * 60 * 60 * 1000);
+        const shiftedTimeInternal = new Date(nowInternal + (5 - 7) * 60 * 60 * 1000);
         const periodInternal = `${shiftedTimeInternal.getUTCFullYear()}-${shiftedTimeInternal.getUTCMonth() + 1}-${shiftedTimeInternal.getUTCDate()}`;
         safeStorage.setItem('last_chunk_meta_period', periodInternal);
 
