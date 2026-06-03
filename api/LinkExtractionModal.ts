@@ -39,7 +39,7 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
       const response = await axios.get(url, {
         headers,
         validateStatus: () => true,
-        timeout: 8000,
+        timeout: 25000,
         maxContentLength: 5242880,
         maxBodyLength: 5242880,
       });
@@ -100,7 +100,7 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
           // Use Microlink proxy API to bypass Cloudflare
           const dlRes = await axios.get(
             `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
-            { timeout: 8000 },
+            { timeout: 25000 },
           );
           if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
             const proxyHtml = dlRes.data.data.body;
@@ -264,7 +264,7 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
       const response = await axios.get(url, {
         headers,
         validateStatus: () => true,
-        timeout: 10000,
+        timeout: 25000,
         maxContentLength: 5242880,
         maxBodyLength: 5242880,
       });
@@ -282,7 +282,7 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
         try {
           const dlRes = await axios.get(
             `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
-            { timeout: 8000 },
+            { timeout: 25000 },
           );
           if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
             const proxyTitle =
@@ -330,7 +330,7 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
         let res2 = await axios.get(nextUrl, {
           headers,
           validateStatus: () => true,
-          timeout: 8000,
+          timeout: 25000,
           maxContentLength: 5242880,
           maxBodyLength: 5242880,
         });
@@ -348,7 +348,7 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
           try {
             const dlRes2 = await axios.get(
               `https://api.microlink.io/?url=${encodeURIComponent(nextUrl)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
-              { timeout: 8000 },
+              { timeout: 25000 },
             );
             if (dlRes2.data && dlRes2.data.data && dlRes2.data.data.body) {
               $2 = cheerio.load(dlRes2.data.data.body);
@@ -421,6 +421,7 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
         if (isA_PD && !isB_PD) return -1;
         if (!isA_PD && isB_PD) return 1;
 
+        const isA_FSL = /fsl|servers*2/i.test(a.text) || /fsl|servers*2/i.test(a.href);const isB_FSL = /fsl|servers*2/i.test(b.text) || /fsl|servers*2/i.test(b.href);if (isA_FSL && !isB_FSL) return -1;if (!isA_FSL && isB_FSL) return 1;
         const isA_Worker = /\.workers\.dev/i.test(a.href);
         const isB_Worker = /\.workers\.dev/i.test(b.href);
         if (isA_Worker && !isB_Worker) return -1;
@@ -430,67 +431,9 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
       });
 
       // Find first working link
-      let workingLink = url; // fallback to original hubcloud url
+      let workingLink = url; if (candidateLinks.length > 0) { workingLink = candidateLinks[0].href; }
 
-      const checkPromises = candidateLinks.map(async (candidate, index) => {
-        let checkUrl = candidate.href;
-        const checkRes = await axios.get(checkUrl, {
-          headers: { ...headers, Range: "bytes=0-0" },
-          maxRedirects: 0,
-          validateStatus: () => true,
-          timeout: 5000, // Reduced to avoid hitting vercel function 10s limit
-          responseType: "stream",
-        });
-        if (checkRes.data && typeof checkRes.data.destroy === "function") {
-          checkRes.data.destroy();
-        }
-
-        let resultLink = candidate.href;
-        let isWorking = false;
-
-        if (
-          checkRes.status >= 300 &&
-          checkRes.status < 400 &&
-          checkRes.headers.location
-        ) {
-          resultLink = checkRes.headers.location;
-          isWorking = true; // Instantly mark as working and bypass expensive nested destination check
-        } else if (
-          checkRes.status < 400 ||
-          checkRes.status === 405 ||
-          checkRes.status === 416
-        ) {
-          isWorking = true;
-        }
-
-        if (isWorking) {
-          return { index, link: resultLink };
-        }
-        throw new Error("Not working");
-      });
-
-      try {
-        const results = await Promise.allSettled(checkPromises);
-        let bestIndex = -1;
-
-        for (const result of results) {
-          if (result.status === "fulfilled") {
-            if (bestIndex === -1 || result.value.index < bestIndex) {
-              bestIndex = result.value.index;
-              workingLink = result.value.link;
-            }
-          }
-        }
-
-        // If all rejected and we have candidates, fallback to first
-        if (bestIndex === -1 && candidateLinks.length > 0) {
-          workingLink = candidateLinks[0].href;
-        }
-      } catch (e) {
-        if (candidateLinks.length > 0) {
-          workingLink = candidateLinks[0].href;
-        }
-      }
+      /* Skipping expensive checks to speed up extraction */
 
       // First Priority for Pixeldrain: Rewrite to pixeldrain.dev/u/
       // Matches both api/file/xxx and /u/xxx

@@ -660,10 +660,10 @@ export async function performFullLinkScan(
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         const extractController = new AbortController();
-        const extractTimeout = setTimeout(() => extractController.abort(), 7000);
+        const extractTimeout = setTimeout(() => extractController.abort(), 25000);
         
         const directController = new AbortController();
-        const directTimeout = setTimeout(() => directController.abort(), 8000);
+        const directTimeout = setTimeout(() => directController.abort(), 25000);
 
         const [res, dLinkRes] = await Promise.allSettled([
           fetch("/api/hubcloud/extract", {

@@ -2628,6 +2628,7 @@ export default function ContentManagement() {
     if (content.subtitles) text += `📝 Subtitles: Available\n`;
 
     let processedSampleUrl = content.sampleUrl;
+
     if (processedSampleUrl && (processedSampleUrl.includes("hubcloud") || processedSampleUrl.includes("moviesdrive") || processedSampleUrl.includes("vcloud") || processedSampleUrl.includes("hubdrive"))) {
       let sampleExtractionSuccess = false;
       for (let attempt = 1; attempt <= 3; attempt++) {
@@ -2654,18 +2655,23 @@ export default function ContentManagement() {
            break;
         }
       }
+      if (!sampleExtractionSuccess) {
+         processedSampleUrl = '';
+      }
     }
 
     if (processedSampleUrl) text += `📽️ Sample: ${processedSampleUrl}\n`;
     text += `\n`;
 
-    let hasUpdates = false;
     let updatedContent = { ...content };
 
-    if (processedSampleUrl && processedSampleUrl !== content.sampleUrl) {
-      updatedContent.sampleUrl = processedSampleUrl;
-      hasUpdates = true;
-    }
+    const getLinkPriority = (l: LinkDef) => {
+      const lName = (l.name || "").toLowerCase();
+      const lUrl = (l.url || "").toLowerCase();
+      if (lName.includes("pixeldrain") || lUrl.includes("pixeldrain")) return 1;
+      if (lName.includes("fsl") || lUrl.includes("fsl") || lName.includes("server 2") || lName.includes("server2")) return 2;
+      return 3;
+    };
 
     const processLink = async (link: LinkDef) => {
       if (!link.url) return link;
@@ -2676,8 +2682,7 @@ export default function ContentManagement() {
       }
 
       let extractedUrl = link.url;
-      let finalHasUpdates = false;
-
+      
       // Extract HubCloud links
       if (
         extractedUrl.includes("hubcloud") ||
@@ -2686,6 +2691,7 @@ export default function ContentManagement() {
         extractedUrl.includes("hubdrive")
       ) {
         for (let attempt = 1; attempt <= 3; attempt++) {
+          let currentExtracted = false;
           try {
             const res = await fetch("/api/hubcloud/direct-link", {
               method: "POST",
@@ -2696,37 +2702,36 @@ export default function ContentManagement() {
               const data = await res.json();
               if (data.url && data.url !== extractedUrl) {
                 extractedUrl = data.url;
-                finalHasUpdates = true;
-                break;
+                currentExtracted = true;
               }
             }
           } catch (e) {
             console.error(`Hubcloud extract failed for share (attempt ${attempt})`, e);
           }
-          if (attempt < 3 && !finalHasUpdates) {
+          if (attempt < 3 && !currentExtracted) {
              await new Promise(resolve => setTimeout(resolve, 800));
-          } else if (finalHasUpdates) {
+          } else if (currentExtracted) {
              break;
           }
         }
       }
 
-      let prevTinyUrl = link.tinyUrl;
-      if (finalHasUpdates) {
-        prevTinyUrl = undefined; // Need new tinyUrl since main URL changed
+      // Explicit check - NO tiny url for pixeldrain
+      if (
+        extractedUrl.includes("pixeldrain.com") ||
+        extractedUrl.includes("pixeldrain.dev") ||
+        extractedUrl.includes("pixeldrain.net")
+      ) {
+        return { ...link, url: extractedUrl, tinyUrl: "" };
       }
 
+      let prevTinyUrl = link.tinyUrl;
       const isBadTinyUrl =
         prevTinyUrl &&
         typeof prevTinyUrl === "string" &&
         prevTinyUrl.toLowerCase().includes("<html");
 
-      if (
-        !extractedUrl.includes("pixeldrain.com") &&
-        !extractedUrl.includes("pixeldrain.dev") &&
-        !extractedUrl.includes("pixeldrain.net") &&
-        (!prevTinyUrl || isBadTinyUrl)
-      ) {
+      if (!prevTinyUrl || isBadTinyUrl) {
         const tinyUrl = await generateTinyUrl(
           extractedUrl,
           true,
@@ -2737,20 +2742,13 @@ export default function ContentManagement() {
           tinyUrl !== extractedUrl &&
           !tinyUrl.toLowerCase().includes("<html")
         ) {
-          hasUpdates = true;
           return { ...link, url: extractedUrl, tinyUrl };
         } else if (isBadTinyUrl) {
-          hasUpdates = true;
           return { ...link, url: extractedUrl, tinyUrl: "" };
         }
       }
 
-      if (finalHasUpdates) {
-        hasUpdates = true;
-        return { ...link, url: extractedUrl, tinyUrl: prevTinyUrl };
-      }
-
-      return link;
+      return { ...link, url: extractedUrl, tinyUrl: prevTinyUrl };
     };
 
     if (updatedContent.type === "movie" && updatedContent.movieLinks) {
@@ -2761,13 +2759,12 @@ export default function ContentManagement() {
         links[i] = processedLinks[i];
       }
 
-      if (hasUpdates) {
-        updatedContent.movieLinks = JSON.stringify(links);
-      }
-
-      const sortedLinks = [...links].sort(
-        (a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
-      );
+      const sortedLinks = [...links].sort((a, b) => {
+        const pA = getLinkPriority(a);
+        const pB = getLinkPriority(b);
+        if (pA !== pB) return pA - pB;
+        return getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit);
+      });
 
       const zipLinks = sortedLinks.filter((l) =>
         l.name.toLowerCase().includes("zip"),
@@ -2867,22 +2864,24 @@ export default function ContentManagement() {
 
       await Promise.all(linkPromises);
 
-      if (hasUpdates) {
-        updatedContent.seasons = JSON.stringify(parsedSeasons);
-      }
-
       seasonsToShare.forEach((season) => {
         text += `\n📺 *Season ${season.seasonNumber}${season.year ? ` (${season.year})` : updatedContent.year ? ` (${updatedContent.year})` : ""}*\n`;
         const zipLinks = parseLinks(JSON.stringify(season.zipLinks))
           .filter((l) => l && l.url)
-          .sort(
-            (a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
-          );
+          .sort((a, b) => {
+            const pA = getLinkPriority(a);
+            const pB = getLinkPriority(b);
+            if (pA !== pB) return pA - pB;
+            return getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit);
+          });
         const mkvLinks = parseLinks(JSON.stringify(season.mkvLinks || []))
           .filter((l) => l && l.url)
-          .sort(
-            (a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
-          );
+          .sort((a, b) => {
+            const pA = getLinkPriority(a);
+            const pB = getLinkPriority(b);
+            if (pA !== pB) return pA - pB;
+            return getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit);
+          });
 
         if (zipLinks.length > 0) {
           text += `📦 *Full Season ZIP:*\n`;
@@ -2933,10 +2932,12 @@ export default function ContentManagement() {
             text += `\n🎬 *Episodes:*\n`;
             season.episodes.forEach((ep) => {
               text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}\n`;
-              const epLinks = parseLinks(JSON.stringify(ep.links)).sort(
-                (a, b) =>
-                  getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
-              );
+              const epLinks = parseLinks(JSON.stringify(ep.links)).sort((a, b) => {
+                  const pA = getLinkPriority(a);
+                  const pB = getLinkPriority(b);
+                  if (pA !== pB) return pA - pB;
+                  return getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit);
+              });
               epLinks.forEach((link) => {
                 if (link && link.url) {
                   const finalUrl = link.tinyUrl || link.url;
@@ -2949,24 +2950,6 @@ export default function ContentManagement() {
           }
         }
       });
-    }
-
-    if (hasUpdates) {
-      try {
-        await updateContentFields([
-          {
-            id: updatedContent.id,
-            chunkId: updatedContent.chunkId,
-            fields: {
-              movieLinks: updatedContent.movieLinks,
-              seasons: updatedContent.seasons,
-              sampleUrl: updatedContent.sampleUrl,
-            },
-          },
-        ]);
-      } catch (error) {
-        console.error("Error saving tinyUrls to db:", error);
-      }
     }
 
     text += `\n🍿 Enjoy watching on ${settings?.headerText || "MovizNow"}!\n`;
