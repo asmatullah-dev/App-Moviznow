@@ -4,8 +4,9 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useSettings } from '../../contexts/SettingsContext';
 import { ArrowLeft, Trash2, Copy, Check, Send, Loader2, Wallet, Smartphone, CreditCard, Banknote } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { db } from '../../firebase';
-import { doc, setDoc, serverTimestamp, query, where, orderBy, limit, collection, getDocs } from 'firebase/firestore';
+import AlertModal from '../../components/AlertModal';
+
+
 import { motion } from 'framer-motion';
 import PreviousOrders from '../../components/PreviousOrders';
 import { safeStorage } from '../../utils/safeStorage';
@@ -14,13 +15,15 @@ import PaymentMethods from '../../components/PaymentMethods';
 
 export default function Cart() {
   const { cart, removeFromCart, totalPrice, clearCart } = useCart();
-  const { profile } = useAuth();
+  const { profile, updateUserProfileData } = useAuth();
   const { settings } = useSettings();
   const navigate = useNavigate();
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [orderId, setOrderId] = useState<string | null>(null);
+  const [whatsappNumber, setWhatsappNumber] = useState(profile?.phone || '');
+  const [alertConfig, setAlertConfig] = useState<{isOpen: boolean; title: string; message: string;}>({ isOpen: false, title: '', message: '' });
 
   React.useEffect(() => {
     if (profile?.status === 'expired') {
@@ -34,80 +37,53 @@ export default function Cart() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleConfirm = async (): Promise<string | null> => {
-    if (!profile || cart.length === 0) return null;
-    setLoading(true);
-    try {
-      const newOrderId = Math.floor(10000000 + Math.random() * 90000000).toString();
-
-      const { updateDoc, arrayUnion } = await import('firebase/firestore');
-      
-      const orderData = {
-        id: newOrderId,
-        userId: profile.uid,
-        userName: profile.displayName || 'Unknown',
-        userEmail: profile.email,
-        userRole: profile.role,
-        type: 'content',
-        amount: totalPrice,
-        items: cart,
-        status: 'pending',
-        createdAt: new Date().toISOString(),
-      };
-
-      const pendingOrdersStr = safeStorage.getItem("pending_orders_array") || "[]";
-      const pendingOrders = JSON.parse(pendingOrdersStr);
-      pendingOrders.push(orderData);
-      safeStorage.setItem("pending_orders_array", JSON.stringify(pendingOrders));
-      safeStorage.setItem("needs_user_sync", "true");
-
-      setOrderId(newOrderId);
-      setConfirmed(true);
-      clearCart();
-      return newOrderId;
-    } catch (error) {
-      console.error('Error creating order:', error);
-      alert('Failed to create order. Please try again.');
-      return null;
-    } finally {
-      setLoading(false);
-    }
+  const handleConfirm = async (): Promise<string | null> => { 
+    if (!profile || cart.length === 0) return null; 
+    if (!whatsappNumber || whatsappNumber.length < 10) { 
+      setAlertConfig({isOpen: true, title: 'Invalid Phone Number', message: 'Please enter a valid WhatsApp number'}); 
+      return null; 
+    } 
+    setLoading(true); 
+    try { 
+      const newOrderId = Math.floor(10000000 + Math.random() * 90000000).toString(); 
+      const orderData = { id: newOrderId, userId: profile.uid, userName: profile.displayName || 'Unknown', userEmail: profile.email, userRole: profile.role, type: 'content', amount: totalPrice, items: cart, status: 'pending', createdAt: new Date().toISOString() }; 
+      const pendingOrdersStr = safeStorage.getItem('pending_orders_array') || '[]'; 
+      const pendingOrders = JSON.parse(pendingOrdersStr); 
+      pendingOrders.push(orderData); 
+      safeStorage.setItem('pending_orders_array', JSON.stringify(pendingOrders)); 
+      safeStorage.setItem('needs_user_sync', 'true'); 
+      await updateUserProfileData({ phone: whatsappNumber }, undefined, true); 
+      setOrderId(newOrderId); 
+      setConfirmed(true); 
+      clearCart(); 
+      return newOrderId; 
+    } catch (error) { 
+      console.error('Error creating order:', error); 
+      setAlertConfig({isOpen: true, title: 'Error', message: 'Failed to create order. Please try again.'}); 
+      return null; 
+    } finally { 
+      setLoading(false); 
+    } 
   };
 
   const handleSendPaymentScreenshot = async () => {
     if (!profile) return;
-    
     setLoading(true);
     try {
       let currentOrderId = orderId;
       if (!confirmed) {
-          // If not confirmed, create the order first
           currentOrderId = await handleConfirm();
-          setLoading(true); // handleConfirm sets it to false, so we set it back to true
-          if (!currentOrderId) return; // Failed to create order
+          if (!currentOrderId) { setLoading(false); return; }
       }
-
-      // Get last order from profile
-      const orders = profile.orders || [];
-      const lastOrder = orders.length > 0 ? [...orders].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] : null;
-
-      const message = `Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nPlease approve my order. Order ID: ${currentOrderId}\nItems: ${lastOrder?.items?.length || 0}\nTotal Amount: Rs ${lastOrder?.amount || totalPrice}`;
-      
+      const message = `Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${whatsappNumber || profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nPlease approve my order. Order ID: ${currentOrderId}\nItems: ${cart?.length || 0}\nTotal Amount: Rs ${totalPrice}`;
       let supportPhone = settings?.supportNumber || '3363284466';
-      if (supportPhone.startsWith('0')) {
-        supportPhone = '92' + supportPhone.substring(1);
-      } else if (!supportPhone.startsWith('92')) {
-        supportPhone = '92' + supportPhone;
-      }
+      if (supportPhone.startsWith('0')) supportPhone = '92' + supportPhone.substring(1);
+      else if (!supportPhone.startsWith('92')) supportPhone = '92' + supportPhone;
       const adminPhone = supportPhone.replace('+', '');
       const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
-      
-      clearCart();
       window.open(whatsappUrl, '_blank');
       navigate('/');
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   return (
@@ -157,7 +133,23 @@ export default function Cart() {
           </div>
         </div>
 
-        {settings?.isPaymentEnabled !== false && (
+                {!profile?.phone && (
+          <div className="bg-zinc-50 dark:bg-zinc-900 rounded-xl p-6 mb-6 shadow-2xl border border-zinc-200 dark:border-zinc-800/50">
+            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+              <Smartphone className="w-5 h-5 text-emerald-500" />
+              WhatsApp Number
+            </h2>
+            <input
+              type="tel"
+              value={whatsappNumber}
+              onChange={(e) => setWhatsappNumber(e.target.value)}
+              placeholder="e.g. 03001234567"
+              className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-zinc-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all outline-none"
+            />
+          </div>
+        )}
+
+{settings?.isPaymentEnabled !== false && (
           <div className="bg-zinc-50 dark:bg-zinc-900 rounded-xl p-6 mb-6 shadow-2xl border border-zinc-200 dark:border-zinc-800/50">
             <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
               <Wallet className="w-5 h-5 text-emerald-500" />
@@ -198,6 +190,13 @@ export default function Cart() {
 
         <PreviousOrders />
       </div>
+
+      <AlertModal
+        isOpen={alertConfig.isOpen}
+        onClose={() => setAlertConfig(prev => ({ ...prev, isOpen: false }))}
+        title={alertConfig.title}
+        message={alertConfig.message}
+      />
     </motion.div>
   );
 }

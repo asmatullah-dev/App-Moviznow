@@ -1128,7 +1128,7 @@ export default function ContentManagement() {
     setSelectedLanguages(contentToUse.languageIds || []);
     setSelectedQuality(contentToUse.qualityId || "");
     setSubtitles(contentToUse.subtitles || false);
-    setCast((contentToUse.cast || []).join(", "));
+    setCast(Array.isArray(contentToUse.cast) ? contentToUse.cast.join(", ") : (contentToUse.cast || ""));
     setCountry(contentToUse.country || "");
     setYear(contentToUse.year || new Date().getFullYear());
     setReleaseDate(contentToUse.releaseDate || "");
@@ -1487,15 +1487,8 @@ export default function ContentManagement() {
         setSubtitles(metadata.subtitles);
       }
 
-      if (metadata.type) {
-        const normalizedType =
-          metadata.type?.toLowerCase() === "series" ||
-          metadata.type?.toLowerCase() === "tv"
-            ? "series"
-            : "movie";
-        setType(normalizedType);
-        activeType = normalizedType;
-      }
+// Type auto-switching disabled as per user request to prevent incorrect movie links going to seasons.
+      // User explicitly set type on the form.
     }
 
     if (activeType === "movie") {
@@ -2500,11 +2493,7 @@ export default function ContentManagement() {
       const parts = [origin, contentGenres, typeStr].filter(Boolean);
       const partsStr = parts.join(" ");
       text = `*${content.title} ${content.year || ""}*\n${partsStr}\n\n`;
-      text += `🔗 Watch here: MovizNow.com/${content.id}\n`;
-      let sn = settings?.supportNumber || "3363284466";
-      if (sn.startsWith("92")) sn = "0" + sn.substring(2);
-      else if (!sn.startsWith("0")) sn = "0" + sn;
-      text += `📞 WhatsApp: ${sn}`;
+      text = text.trim();
 
       let files: File[] = [];
       if (content.posterUrl) {
@@ -2516,10 +2505,6 @@ export default function ContentManagement() {
           });
           files = [file];
         } catch (e) {
-          console.error(
-            "Direct fetch failed, falling back to proxy for WhatsApp sharing",
-            e,
-          );
           try {
             const proxyResponse = await fetch(
               `/api/image-proxy?url=${encodeURIComponent(content.posterUrl)}`,
@@ -2534,10 +2519,7 @@ export default function ContentManagement() {
               throw new Error("Proxy fetch also failed");
             }
           } catch (proxyError) {
-            console.error(
-              "Could not fetch poster for WhatsApp sharing via proxy",
-              proxyError,
-            );
+            // Fallback silently
           }
         }
       }
@@ -2660,7 +2642,15 @@ export default function ContentManagement() {
       }
     }
 
-    if (processedSampleUrl) text += `📽️ Sample: ${processedSampleUrl}\n`;
+    if (processedSampleUrl) {
+      if (!processedSampleUrl.includes('pixeldrain.com') && !processedSampleUrl.includes('pixeldrain.dev') && !processedSampleUrl.includes('pixeldrain.net') && !processedSampleUrl.includes('t.me')) {
+        const tinyUrl = await generateTinyUrl(processedSampleUrl, true, settings?.supportNumber || '3363284466');
+        if (tinyUrl && !tinyUrl.toLowerCase().includes('<html')) {
+          processedSampleUrl = tinyUrl;
+        }
+      }
+      text += "📽️ Sample: " + processedSampleUrl + String.fromCharCode(10);
+    }
     text += `\n`;
 
     let updatedContent = { ...content };
@@ -2958,6 +2948,8 @@ export default function ContentManagement() {
     if (sn.startsWith("92")) sn = "0" + sn.substring(2);
     else if (!sn.startsWith("0")) sn = "0" + sn;
     text += `📞 WhatsApp: ${sn}`;
+    
+    text = text.trim();
 
     const shareData: any = {
       title: updatedContent.title,
@@ -3110,10 +3102,19 @@ export default function ContentManagement() {
 
     if (content.imdbLink) text += `⭐ IMDb: ${content.imdbLink}\n`;
     if (content.trailerUrl) text += `🎥 Trailer: ${content.trailerUrl}\n`;
-    if (content.sampleUrl) text += `📽️ Sample: ${content.sampleUrl}\n`;
+    if (content.sampleUrl) {
+      let tmpSample = content.sampleUrl;
+      if (!tmpSample.includes('pixeldrain.com') && !tmpSample.includes('pixeldrain.dev') && !tmpSample.includes('pixeldrain.net') && !tmpSample.includes('t.me')) {
+        const tinyUrl = await generateTinyUrl(tmpSample, false, settings?.supportNumber || '3363284466');
+        if (tinyUrl && !tinyUrl.toLowerCase().includes('<html')) {
+          tmpSample = tinyUrl;
+        }
+      }
+      text += '📽️ Sample: ' + tmpSample + String.fromCharCode(10);
+    }
     if (content.posterUrl) text += `🖼️ Poster: ${content.posterUrl}\n`;
     if (content.cast && content.cast.length > 0)
-      text += `👥 Cast: ${content.cast.join(", ")}\n`;
+      text += `👥 Cast: ${Array.isArray(content.cast) ? content.cast.join(", ") : content.cast}\n`;
     if (content.description)
       text += `📝 Description: ${content.description}\n\n`;
 
@@ -3164,6 +3165,8 @@ export default function ContentManagement() {
         text += `\n⚠️ Error parsing season data.\n`;
       }
     }
+    
+    text = text.trim();
 
     try {
       await navigator.clipboard.writeText(text);

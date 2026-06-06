@@ -8,6 +8,8 @@ import { Save, AlertCircle, GripVertical, Plus, Trash2, Layout, Wallet, Phone, I
 import { clsx } from 'clsx';
 import { Navigate } from 'react-router-dom';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
+import ConfirmModal from '../../components/ConfirmModal';
+import AlertModal from '../../components/AlertModal';
 import { AppSettings, BankAccount } from '../../types';
 
 export default function AdminSettings() {
@@ -53,6 +55,7 @@ export default function AdminSettings() {
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [alertConfig, setAlertConfig] = useState<{isOpen: boolean; title: string; message: string;}>({ isOpen: false, title: '', message: '' });
   const [isUpdatingIndex, setIsUpdatingIndex] = useState(false);
   const [isMigrating, setIsMigrating] = useState(false);
   const [migrationProgress, setMigrationProgress] = useState(0);
@@ -750,9 +753,9 @@ export default function AdminSettings() {
                 onClick={async () => {
                   try {
                     const token = await requestNotificationPermission(true);
-                    if (token) alert('Token refreshed successfully!');
+                    if (token) setAlertConfig({isOpen: true, title: 'Success', message: 'Token refreshed successfully!'});
                   } catch (e) {
-                    alert('Error: ' + e);
+                    setAlertConfig({isOpen: true, title: 'Error', message: 'Error: ' + e});
                   }
                 }}
                 className="px-6 py-2.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-xl font-bold text-sm hover:opacity-90 transition-opacity whitespace-nowrap active:scale-95"
@@ -882,6 +885,13 @@ export default function AdminSettings() {
           </button>
         </div>
       </form>
+
+      <AlertModal
+        isOpen={alertConfig.isOpen}
+        onClose={() => setAlertConfig(prev => ({ ...prev, isOpen: false }))}
+        title={alertConfig.title}
+        message={alertConfig.message}
+      />
     </div>
   );
 }

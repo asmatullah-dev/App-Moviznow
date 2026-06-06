@@ -6,6 +6,7 @@ import { Film, Mail, Phone, ArrowLeft, Eye, EyeOff, Lock, User as UserIcon, Load
 
 import { ConfirmationResult } from 'firebase/auth';
 import { UserProfile } from '../types';
+import AlertModal from '../components/AlertModal';
 
 type LoginStep = 'social' | 'identifier' | 'password' | 'reset-password' | 'create_password';
 
@@ -222,14 +223,14 @@ export default function Login() {
       try {
         const { getAuth, sendPasswordResetEmail } = await import('firebase/auth');
         await sendPasswordResetEmail(getAuth(), registeredUser.email);
-        alert('A password reset link has been sent to your email.');
+        setAlertConfig({isOpen: true, title: 'Success', message: 'A password reset link has been sent to your email.'});
       } catch (error: any) {
         console.error("Error sending reset email:", error);
-        alert(error.message || 'Failed to send reset email.');
+        setAlertConfig({isOpen: true, title: 'Error', message: error.message || 'Failed to send reset email.'});
       }
     } else {
       if (settings?.isAdminContactEnabled === false) {
-        alert("Password reset via admin contact is currently disabled.");
+        setAlertConfig({isOpen: true, title: 'Notice', message: "Password reset via admin contact is currently disabled."});
         return;
       }
       // Open WhatsApp to admin

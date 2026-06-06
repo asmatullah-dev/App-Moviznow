@@ -7,25 +7,13 @@ import {
   useNavigationType,
 } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
-import { db } from "../../firebase";
-import {
-  doc,
-  getDoc,
-  updateDoc,
-  arrayUnion,
-  arrayRemove,
-  deleteDoc,
-  addDoc,
-  collection,
-  serverTimestamp,
-  query,
-  where,
-  getDocs,
-} from "firebase/firestore";
+
+
 import { Content, QualityLinks, Season, Trailer } from "../../types";
 import { useAuth } from "../../contexts/AuthContext";
 import { useContent } from "../../contexts/ContentContext";
 import { useCart } from "../../contexts/CartContext";
+import { useHaptics } from "../../hooks/useHaptics";
 import { safeStorage } from "../../utils/safeStorage";
 import {
   Film,
@@ -83,12 +71,14 @@ import { useSettings } from "../../contexts/SettingsContext";
 
 export default function MovieDetails() {
   const { id } = useParams<{ id: string }>();
+  const { vibrate } = useHaptics();
   const {
     profile,
     loading: profileLoading,
     toggleFavorite: authToggleFavorite,
     toggleWatchLater: authToggleWatchLater,
     trackLinkClick,
+    updateUserProfileData,
   } = useAuth();
   const {
     contentList,
@@ -1193,6 +1183,7 @@ export default function MovieDetails() {
 
   const toggleWatchLater = async () => {
     if (!profile) return;
+    vibrate(50);
     setIsWatchLaterLoading(true);
     try {
       await authToggleWatchLater(mergedContent.id);
@@ -1205,6 +1196,7 @@ export default function MovieDetails() {
 
   const toggleFavorite = async () => {
     if (!profile) return;
+    vibrate(50);
     setIsFavoriteLoading(true);
     try {
       await authToggleFavorite(mergedContent.id);
@@ -1631,7 +1623,7 @@ export default function MovieDetails() {
         return;
       }
 
-      const { updateDoc, arrayUnion } = await import("firebase/firestore");
+      
       const reportId = Math.floor(
         10000000 + Math.random() * 90000000,
       ).toString();
@@ -1650,9 +1642,11 @@ export default function MovieDetails() {
         createdAt: new Date().toISOString(),
       };
 
-      await updateDoc(doc(db, "users", profile.uid), {
-        reported_links: arrayUnion(reportData),
-      });
+      await updateUserProfileData(
+        { reported_links: [...(profile.reported_links || []), reportData] },
+        undefined,
+        true
+      );
       setAlertConfig({
         isOpen: true,
         title: "Report Submitted",
@@ -1847,6 +1841,7 @@ export default function MovieDetails() {
 
   const handleShare = async () => {
     if (!mergedContent) return;
+    vibrate(50);
     setIsShareLoading(true);
 
     let shareUrl = window.location.href;
@@ -1877,13 +1872,44 @@ export default function MovieDetails() {
         return sn;
       })()}`;
 
-    const textForShare = baseText;
-    const textForClipboard = baseText;
+    const textForShare = baseText.trim();
+    const textForClipboard = baseText.trim();
 
-    const shareData: ShareData = {
+    let files: File[] = [];
+    if (mergedContent.posterUrl) {
+      try {
+        const response = await fetch(mergedContent.posterUrl);
+        const blob = await response.blob();
+        const file = new File([blob], "poster.jpg", {
+          type: blob.type || "image/jpeg",
+        });
+        files = [file];
+      } catch (e) {
+        try {
+          const proxyResponse = await fetch(
+            `/api/image-proxy?url=${encodeURIComponent(mergedContent.posterUrl)}`,
+          );
+          if (proxyResponse.ok) {
+            const blob = await proxyResponse.blob();
+            const file = new File([blob], "poster.jpg", {
+              type: blob.type || "image/jpeg",
+            });
+            files = [file];
+          }
+        } catch (proxyError) {
+          // Fallback silently
+        }
+      }
+    }
+
+    const shareData: any = {
       title: `${formatContentTitle(mergedContent)} (${mergedContent.year})`,
       text: textForShare,
     };
+
+    if (files.length > 0 && navigator.canShare && navigator.canShare({ files })) {
+      shareData.files = files;
+    }
 
     try {
       if (navigator.share && navigator.canShare(shareData)) {

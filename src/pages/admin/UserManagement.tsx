@@ -931,8 +931,31 @@ export default function UserManagement() {
       result.sort((a, b) => {
         let comparison = 0;
         switch (sortField) {
-          case 'createdAt':
-            comparison = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+                    case 'createdAt':
+            {
+              const getT = (val: any) => {
+                if (!val) return 0;
+                if (val.toMillis) return val.toMillis();
+                if (val.seconds) return val.seconds * 1000;
+                return new Date(val).getTime();
+              };
+              const timeA = getT(a.createdAt);
+              const timeB = getT(b.createdAt);
+              comparison = (isNaN(timeA) ? 0 : timeA) - (isNaN(timeB) ? 0 : timeB);
+            }
+            break;
+          case 'lastActive':
+            {
+              const getT = (val: any) => {
+                if (!val) return 0;
+                if (val.toMillis) return val.toMillis();
+                if (val.seconds) return val.seconds * 1000;
+                return new Date(val).getTime();
+              };
+              const timeA = getT(a.lastActive);
+              const timeB = getT(b.lastActive);
+              comparison = (isNaN(timeA) ? 0 : timeA) - (isNaN(timeB) ? 0 : timeB);
+            }
             break;
           case 'displayName':
             comparison = (a.displayName || '').localeCompare(b.displayName || '');
@@ -952,11 +975,6 @@ export default function UserManagement() {
             } else {
               comparison = new Date(a.expiryDate!).getTime() - new Date(b.expiryDate!).getTime();
             }
-            break;
-          case 'lastActive':
-            const activeA = a.lastActive ? new Date(a.lastActive).getTime() : 0;
-            const activeB = b.lastActive ? new Date(b.lastActive).getTime() : 0;
-            comparison = activeA - activeB;
             break;
         }
         return sortOrder === 'asc' ? comparison : -comparison;

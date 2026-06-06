@@ -5,6 +5,7 @@ import { useNotifications } from '../../contexts/NotificationContext';
 import { useUsers } from '../../contexts/UsersContext';
 import { Content, QualityLinks, Season } from '../../types';
 import { LinkCheckerModal } from '../../components/LinkCheckerModal';
+import AlertModal from '../../components/AlertModal';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
 
 interface ReportedLink {
@@ -23,6 +24,7 @@ interface ReportedLink {
 
 export default function ReportedLinks() {
   const { getContent, updateContentFields, contentList } = useContent();
+  const [alertConfig, setAlertConfig] = useState<{isOpen: boolean; title: string; message: string;}>({ isOpen: false, title: '', message: '' });
   const { sendNotification } = useNotifications();
   const [reports, setReports] = useState<ReportedLink[]>([]);
   const [loading, setLoading] = useState(true);
@@ -71,25 +73,25 @@ export default function ReportedLinks() {
               foundLink = links.find(l => l.id === r.linkId);
             } else if (content.type === 'series' && content.seasons) {
               const seasons = (Array.isArray(content.seasons) ? content.seasons : JSON.parse(content.seasons || '[]')) as Season[];
-              for (const season of seasons) {
-                if (season.zipLinks) {
-                  foundLink = season.zipLinks.find(l => l.id === r.linkId);
-                  if (foundLink) break;
-                }
-                if (season.mkvLinks) {
-                  foundLink = season.mkvLinks.find(l => l.id === r.linkId);
-                  if (foundLink) break;
-                }
-                if (season.episodes) {
-                  for (const ep of season.episodes) {
-                    if (ep.links) {
-                      foundLink = ep.links.find(l => l.id === r.linkId);
-                      if (foundLink) break;
-                    }
-                  }
-                }
-                if (foundLink) break;
-              }
+        for (const season of seasons) {
+          const zipLinks = parseLinks(typeof season.zipLinks === 'string' ? season.zipLinks : JSON.stringify(season.zipLinks || []));
+          const mkvLinks = parseLinks(typeof season.mkvLinks === 'string' ? season.mkvLinks : JSON.stringify(season.mkvLinks || []));
+          
+          foundLink = zipLinks.find(l => l.id === r.linkId);
+          if (foundLink) break;
+          
+          foundLink = mkvLinks.find(l => l.id === r.linkId);
+          if (foundLink) break;
+
+          if (season.episodes) {
+            for (const ep of season.episodes) {
+              const epLinks = parseLinks(typeof ep.links === 'string' ? ep.links : JSON.stringify(ep.links || []));
+              foundLink = epLinks.find(l => l.id === r.linkId);
+              if (foundLink) break;
+            }
+          }
+          if (foundLink) break;
+        }
             }
 
             if (foundLink) {
@@ -134,7 +136,7 @@ export default function ReportedLinks() {
       }
     } catch (error) {
       console.error("Error deleting report:", error);
-      alert("Failed to delete report");
+      setAlertConfig({isOpen: true, title: 'Alert', message: "Failed to delete report"});
     }
   };
 
@@ -167,7 +169,7 @@ export default function ReportedLinks() {
       setTimeout(() => setNotified(null), 3000); // Reset after 3 seconds
     } catch (error) {
       console.error("Error notifying user:", error);
-      alert("Failed to notify user");
+      setAlertConfig({isOpen: true, title: 'Error', message: "Failed to notify user"});
     } finally {
       setNotifying(null);
     }
@@ -177,7 +179,7 @@ export default function ReportedLinks() {
     try {
       const content = await getContent(report.contentId);
       if (!content) {
-        alert("Content not found");
+        setAlertConfig({isOpen: true, title: 'Error', message: "Content not found"});
         return;
       }
       
@@ -189,20 +191,20 @@ export default function ReportedLinks() {
       } else if (content.type === 'series' && content.seasons) {
         const seasons = (Array.isArray(content.seasons) ? content.seasons : JSON.parse(content.seasons || '[]')) as Season[];
         for (const season of seasons) {
-          if (season.zipLinks) {
-            foundLink = season.zipLinks.find(l => l.id === report.linkId);
-            if (foundLink) break;
-          }
-          if (season.mkvLinks) {
-            foundLink = season.mkvLinks.find(l => l.id === report.linkId);
-            if (foundLink) break;
-          }
+          const zipLinks = parseLinks(typeof season.zipLinks === 'string' ? season.zipLinks : JSON.stringify(season.zipLinks || []));
+          const mkvLinks = parseLinks(typeof season.mkvLinks === 'string' ? season.mkvLinks : JSON.stringify(season.mkvLinks || []));
+          
+          foundLink = zipLinks.find(l => l.id === report.linkId);
+          if (foundLink) break;
+          
+          foundLink = mkvLinks.find(l => l.id === report.linkId);
+          if (foundLink) break;
+
           if (season.episodes) {
             for (const ep of season.episodes) {
-              if (ep.links) {
-                foundLink = ep.links.find(l => l.id === report.linkId);
-                if (foundLink) break;
-              }
+              const epLinks = parseLinks(typeof ep.links === 'string' ? ep.links : JSON.stringify(ep.links || []));
+              foundLink = epLinks.find(l => l.id === report.linkId);
+              if (foundLink) break;
             }
           }
           if (foundLink) break;
@@ -216,11 +218,11 @@ export default function ReportedLinks() {
         setEditName(foundLink.name || '');
         setEditingReport(report);
       } else {
-        alert("Link not found in content. It might have been deleted already.");
+        setAlertConfig({isOpen: true, title: 'Alert', message: "Link not found in content. It might have been deleted already."});
       }
     } catch (error) {
       console.error("Error fetching content for edit:", error);
-      alert("Failed to fetch content details");
+      setAlertConfig({isOpen: true, title: 'Error', message: "Failed to fetch content details"});
     }
   };
 
@@ -302,32 +304,34 @@ export default function ReportedLinks() {
         for (let s = 0; s < seasons.length; s++) {
           const season = seasons[s];
           
-          if (season.zipLinks) {
-            const idx = season.zipLinks.findIndex(l => l.id === editingReport.linkId);
-            if (idx !== -1) {
-              season.zipLinks[idx] = { ...season.zipLinks[idx], url: editUrl, size: editSize, unit: editUnit, name: editName };
-              updated = true;
-              break;
-            }
+          const zipLinks = parseLinks(typeof season.zipLinks === 'string' ? season.zipLinks : JSON.stringify(season.zipLinks || []));
+          const idxZ = zipLinks.findIndex(l => l.id === editingReport.linkId);
+          if (idxZ !== -1) {
+            zipLinks[idxZ] = { ...zipLinks[idxZ], url: editUrl, size: editSize, unit: editUnit, name: editName };
+            season.zipLinks = zipLinks;
+            updated = true;
+            break;
           }
-          if (season.mkvLinks) {
-            const idx = season.mkvLinks.findIndex(l => l.id === editingReport.linkId);
-            if (idx !== -1) {
-              season.mkvLinks[idx] = { ...season.mkvLinks[idx], url: editUrl, size: editSize, unit: editUnit, name: editName };
-              updated = true;
-              break;
-            }
+
+          const mkvLinks = parseLinks(typeof season.mkvLinks === 'string' ? season.mkvLinks : JSON.stringify(season.mkvLinks || []));
+          const idxM = mkvLinks.findIndex(l => l.id === editingReport.linkId);
+          if (idxM !== -1) {
+            mkvLinks[idxM] = { ...mkvLinks[idxM], url: editUrl, size: editSize, unit: editUnit, name: editName };
+            season.mkvLinks = mkvLinks;
+            updated = true;
+            break;
           }
+
           if (season.episodes) {
             for (let e = 0; e < season.episodes.length; e++) {
               const ep = season.episodes[e];
-              if (ep.links) {
-                const idx = ep.links.findIndex(l => l.id === editingReport.linkId);
-                if (idx !== -1) {
-                  ep.links[idx] = { ...ep.links[idx], url: editUrl, size: editSize, unit: editUnit, name: editName };
-                  updated = true;
-                  break;
-                }
+              const epLinks = parseLinks(typeof ep.links === 'string' ? ep.links : JSON.stringify(ep.links || []));
+              const idxE = epLinks.findIndex(l => l.id === editingReport.linkId);
+              if (idxE !== -1) {
+                epLinks[idxE] = { ...epLinks[idxE], url: editUrl, size: editSize, unit: editUnit, name: editName };
+                ep.links = epLinks;
+                updated = true;
+                break;
               }
             }
             if (updated) break;
@@ -346,13 +350,13 @@ export default function ReportedLinks() {
           updateUserFields(editingReport.userId, { reported_links: updatedReports });
         }
         setEditingReport(null);
-        alert("Link updated successfully");
+        setAlertConfig({isOpen: true, title: 'Success', message: "Link updated successfully"});
       } else {
-        alert("Could not find the link to update in the content document.");
+        setAlertConfig({isOpen: true, title: 'Error', message: "Could not find the link to update in the content document."});
       }
     } catch (error) {
       console.error("Error saving edited link:", error);
-      alert("Failed to save changes");
+      setAlertConfig({isOpen: true, title: 'Error', message: "Failed to save changes"});
     } finally {
       setSaving(false);
     }
@@ -580,6 +584,13 @@ export default function ReportedLinks() {
           }
           setIsLinkCheckerModalOpen(false);
         }}
+      />
+
+      <AlertModal
+        isOpen={alertConfig.isOpen}
+        onClose={() => setAlertConfig(prev => ({ ...prev, isOpen: false }))}
+        title={alertConfig.title}
+        message={alertConfig.message}
       />
     </div>
   );

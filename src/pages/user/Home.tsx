@@ -1,16 +1,6 @@
-import { useState, useEffect, useMemo, useRef } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { db } from "../../firebase";
-import {
-  doc,
-  updateDoc,
-  collection,
-  onSnapshot,
-  query,
-  where,
-  getDocs,
-  limit,
-} from "firebase/firestore";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useNavigate, Link } from "react-router-dom";
+
 import { Content, Role, Collection as AppCollection } from "../../types";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "../../contexts/AuthContext";
@@ -59,12 +49,14 @@ import { CartButton } from "../../components/CartButton";
 
 import { ThemeToggle } from "../../components/ThemeToggle";
 import { useSettings } from "../../contexts/SettingsContext";
+import { useHaptics } from "../../hooks/useHaptics";
 
 export default function Home({
   onOpenMediaModal,
 }: {
   onOpenMediaModal: () => void;
 }) {
+  const { vibrate } = useHaptics();
   const {
     profile,
     logout,
@@ -225,6 +217,7 @@ export default function Home({
   useModalBehavior(!!selectedCollection, () => setSelectedCollection(null));
 
   const clearFilters = () => {
+    vibrate(50);
     setSort("default");
     setSelectedType("");
     setSelectedGenre("");
@@ -714,6 +707,7 @@ export default function Home({
                   {search && (
                     <button
                       onClick={() => {
+                        vibrate(50);
                         setSearch("");
                         searchInputRef.current?.focus();
                       }}
@@ -993,7 +987,10 @@ export default function Home({
                   return (
                     <button
                       key={collection.id}
-                      onClick={() => setSelectedCollection(collection)}
+                      onClick={() => {
+                        vibrate(50);
+                        setSelectedCollection(collection);
+                      }}
                       className="w-[140px] h-[210px] sm:w-[180px] sm:h-[270px] shrink-0 snap-start relative transition-all hover:scale-[1.02] group shadow-sm cursor-pointer transform-gpu"
                     >
                       <div className="absolute -inset-[1px] bg-gradient-to-br from-emerald-500 to-emerald-700 rounded-2xl z-0 transition-all duration-300 group-hover:blur-sm" />
@@ -1089,6 +1086,7 @@ export default function Home({
                 <div className="flex items-center justify-center gap-1 sm:gap-2 flex-wrap">
                   <button
                     onClick={() => {
+                      vibrate(50);
                       setCurrentPage((prev) => Math.max(1, prev - 1));
                       window.scrollTo({ top: 0, behavior: "smooth" });
                     }}
@@ -1113,6 +1111,7 @@ export default function Home({
                             <button
                               key={i}
                               onClick={() => {
+                                vibrate(50);
                                 setCurrentPage(i);
                                 window.scrollTo({ top: 0, behavior: "smooth" });
                               }}
@@ -1167,6 +1166,7 @@ export default function Home({
 
                   <button
                     onClick={() => {
+                      vibrate(50);
                       setCurrentPage((prev) => Math.min(totalPages, prev + 1));
                       window.scrollTo({ top: 0, behavior: "smooth" });
                     }}

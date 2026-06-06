@@ -13,6 +13,7 @@ import { Loader2 } from 'lucide-react';
 import { SystemNotificationWrapper } from './components/SystemNotificationWrapper';
 import { MediaModal } from './components/MediaModal';
 import { useModalBehavior } from './hooks/useModalBehavior';
+import { useGlobalButtonHaptics } from './hooks/useHaptics';
 import { OfflineBanner } from './components/OfflineBanner';
 import { SyncBanner } from './components/SyncBanner';
 
@@ -73,6 +74,8 @@ function MediaModalController({ isOpen, onClose }: { isOpen: boolean; onClose: (
 export default function App() {
   const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
   const [pauseStatus, setPauseStatus] = useState<{ paused: boolean, lastSynced?: string }>({ paused: false });
+
+  useGlobalButtonHaptics();
 
   useEffect(() => {
     if (window.history.scrollRestoration) {

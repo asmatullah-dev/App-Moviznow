@@ -9,6 +9,7 @@ import { clsx } from 'clsx';
 import { useCart } from '../contexts/CartContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useHaptics } from '../hooks/useHaptics';
 
 interface ContentCardProps {
   content: Content;
@@ -36,6 +37,7 @@ const ContentCard = React.memo(({
   const { addToCart, cart } = useCart();
   const { profile: sysProfile, trackContentClick } = useAuth();
   const { settings } = useSettings();
+  const { vibrate } = useHaptics();
   const [isTrailerSelectionOpen, setIsTrailerSelectionOpen] = React.useState(false);
   const [selectedTrailerUrl, setSelectedTrailerUrl] = React.useState<string | null>(null);
 
@@ -293,6 +295,7 @@ const ContentCard = React.memo(({
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
+              vibrate(50);
               onToggleFavorite(content.id);
             }}
             className={clsx(
@@ -307,6 +310,7 @@ const ContentCard = React.memo(({
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
+              vibrate(50);
               onToggleWatchLater(content.id);
             }}
             className={clsx(

@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { AlertCircle, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useModalBehavior } from '../hooks/useModalBehavior';
+import { useHaptics } from '../hooks/useHaptics';
 
 interface AlertModalProps {
   isOpen: boolean;
@@ -21,6 +22,13 @@ export default function AlertModal({
   children
 }: AlertModalProps) {
   useModalBehavior(isOpen, onClose);
+  const { vibrate } = useHaptics();
+
+  useEffect(() => {
+    if (isOpen) {
+      vibrate([50, 50, 50]); // A small distinct pattern for alerts
+    }
+  }, [isOpen, vibrate]);
 
   return (
     <AnimatePresence>

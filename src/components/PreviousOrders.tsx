@@ -6,6 +6,7 @@ import { useSettings } from '../contexts/SettingsContext';
 import { ChevronDown, ChevronUp, Package, Clock, CheckCircle, XCircle, Send, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ConfirmModal from './ConfirmModal';
+import AlertModal from './AlertModal';
 
 export default function PreviousOrders() {
   const { profile } = useAuth();
@@ -23,6 +24,8 @@ export default function PreviousOrders() {
     message: '',
     onConfirm: () => {},
   });
+
+  const [alertConfig, setAlertConfig] = useState<{isOpen: boolean; title: string; message: string;}>({ isOpen: false, title: '', message: '' });
 
   const orders = React.useMemo(() => {
     if (!profile?.orders) return [];
@@ -42,7 +45,7 @@ export default function PreviousOrders() {
       setConfirmModal(prev => ({ ...prev, isOpen: false }));
     } catch (error) {
       console.error('Error cancelling order:', error);
-      alert('Failed to cancel order');
+      setAlertConfig({isOpen: true, title: 'Error', message: 'Failed to cancel order'});
     }
   };
 
@@ -152,6 +155,13 @@ export default function PreviousOrders() {
         onConfirm={confirmModal.onConfirm}
         onCancel={() => setConfirmModal({ ...confirmModal, isOpen: false })}
         confirmText={confirmModal.confirmText}
+      />
+      
+      <AlertModal
+        isOpen={alertConfig.isOpen}
+        onClose={() => setAlertConfig(prev => ({ ...prev, isOpen: false }))}
+        title={alertConfig.title}
+        message={alertConfig.message}
       />
     </div>
   );

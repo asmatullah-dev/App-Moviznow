@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { ArrowLeft, Copy, Check, Send, Loader2, Wallet, Smartphone, CreditCard, Banknote } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { db } from '../../firebase';
-import { doc, setDoc, serverTimestamp, query, where, orderBy, limit, collection, getDocs } from 'firebase/firestore';
+import AlertModal from '../../components/AlertModal';
+
+
 import { motion } from 'framer-motion';
 import PreviousOrders from '../../components/PreviousOrders';
 
@@ -12,7 +13,8 @@ import PaymentMethods from '../../components/PaymentMethods';
 import { useSettings } from '../../contexts/SettingsContext';
 
 export default function TopUp() {
-  const { profile } = useAuth();
+  const { profile, updateUserProfileData } = useAuth();
+  const [whatsappNumber, setWhatsappNumber] = useState(profile?.phone || '');
   const { settings } = useSettings();
   const navigate = useNavigate();
   const location = useLocation();
@@ -23,6 +25,7 @@ export default function TopUp() {
   const [orderId, setOrderId] = useState<string | null>(null);
   const [pendingMembershipOrder, setPendingMembershipOrder] = useState<any>(null);
   const [isCheckingPendingOrder, setIsCheckingPendingOrder] = useState(true);
+  const [alertConfig, setAlertConfig] = useState<{isOpen: boolean; title: string; message: string;}>({ isOpen: false, title: '', message: '' });
 
   useEffect(() => {
     const checkPendingOrder = async () => {
@@ -30,22 +33,16 @@ export default function TopUp() {
         setIsCheckingPendingOrder(false);
         return;
       }
-      const q = query(
-        collection(db, 'orders'),
-        where('userId', '==', profile.uid),
-        where('status', '==', 'pending'),
-        where('type', '==', 'membership')
-      );
-      const snapshot = await getDocs(q);
-      if (!snapshot.empty) {
-        setPendingMembershipOrder(snapshot.docs[0].data());
-        setOrderId(snapshot.docs[0].id);
+      const pOrder = profile.orders?.find(o => o.status === 'pending' && o.type === 'membership');
+      if (pOrder) {
+        setPendingMembershipOrder(pOrder);
+        setOrderId(pOrder.id);
         setConfirmed(true);
       }
       setIsCheckingPendingOrder(false);
     };
     checkPendingOrder();
-  }, [profile?.uid]);
+  }, [profile?.orders, profile?.uid]);
 
   const isExtend = location.state?.isExtend;
   const isExpired = profile?.status === 'expired';
@@ -58,13 +55,15 @@ export default function TopUp() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleConfirm = async (): Promise<string | null> => {
+    const handleConfirm = async (): Promise<string | null> => {
     if (!profile) return null;
+    if (!whatsappNumber || whatsappNumber.length < 10) {
+      setAlertConfig({isOpen: true, title: 'Invalid Phone Number', message: 'Please enter a valid WhatsApp number'});
+      return null;
+    }
     setLoading(true);
     try {
       const newOrderId = Math.floor(10000000 + Math.random() * 90000000).toString();
-
-      const { updateDoc, arrayUnion } = await import('firebase/firestore');
 
       const orderData = {
         id: newOrderId,
@@ -79,22 +78,28 @@ export default function TopUp() {
         createdAt: new Date().toISOString(),
       };
 
-      await updateDoc(doc(db, 'users', profile.uid), {
-        orders: arrayUnion(orderData)
-      });
+      const { safeStorage } = await import('../../utils/safeStorage');
+      const pendingOrdersStr = safeStorage.getItem("pending_orders_array") || "[]";
+      const pendingOrders = JSON.parse(pendingOrdersStr);
+      pendingOrders.push(orderData);
+      safeStorage.setItem("pending_orders_array", JSON.stringify(pendingOrders));
+      safeStorage.setItem("needs_user_sync", "true");
+
+      await updateUserProfileData({ phone: whatsappNumber }, undefined, true);
+
       setOrderId(newOrderId);
       setConfirmed(true);
       return newOrderId;
     } catch (error) {
       console.error('Error creating order:', error);
-      alert('Failed to create order. Please try again.');
+      setAlertConfig({isOpen: true, title: 'Error', message: 'Failed to create order. Please try again.'});
       return null;
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSendPaymentScreenshot = async () => {
+    const handleSendPaymentScreenshot = async () => {
     if (!profile) return;
     
     setLoading(true);
@@ -102,29 +107,17 @@ export default function TopUp() {
       let currentOrderId = orderId;
       if (!confirmed) {
           currentOrderId = await handleConfirm();
-          setLoading(true);
-          if (!currentOrderId) return;
+          if (!currentOrderId) { setLoading(false); return; }
       }
       
-      // Fetch the last membership order
-      const q = query(
-        collection(db, 'orders'),
-        where('userId', '==', profile.uid),
-        where('type', '==', 'membership'),
-        orderBy('createdAt', 'desc'),
-        limit(1)
-      );
-      const snapshot = await getDocs(q);
-      const lastOrder = snapshot.docs[0]?.data();
+      const orders = profile.orders || [];
+      const lastOrder = orders.length > 0 ? [...orders].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] : null;
 
-      const message = `Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nPlease approve my membership top-up. Order ID: ${currentOrderId}\nMonths: ${lastOrder?.months || months}\nAmount: Rs ${lastOrder?.amount || months * (settings?.membershipFee || 200)}`;
+      const message = `Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${whatsappNumber || profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nPlease approve my membership top-up. Order ID: ${currentOrderId}\nMonths: ${lastOrder?.months || months}\nAmount: Rs ${lastOrder?.amount || months * (settings?.membershipFee || 200)}`;
       
       let supportPhone = settings?.supportNumber || '3363284466';
-      if (supportPhone.startsWith('0')) {
-        supportPhone = '92' + supportPhone.substring(1);
-      } else if (!supportPhone.startsWith('92')) {
-        supportPhone = '92' + supportPhone;
-      }
+      if (supportPhone.startsWith('0')) supportPhone = '92' + supportPhone.substring(1);
+      else if (!supportPhone.startsWith('92')) supportPhone = '92' + supportPhone;
       const adminPhone = supportPhone.replace('+', '');
       const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
       
@@ -187,7 +180,23 @@ export default function TopUp() {
           </div>
         )}
 
-        {settings?.isPaymentEnabled !== false && (
+                {!profile?.phone && (
+          <div className="bg-zinc-50 dark:bg-zinc-900 rounded-xl p-6 mb-6 shadow-2xl border border-zinc-200 dark:border-zinc-800/50">
+            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+              <Smartphone className="w-5 h-5 text-emerald-500" />
+              WhatsApp Number
+            </h2>
+            <input
+              type="tel"
+              value={whatsappNumber}
+              onChange={(e) => setWhatsappNumber(e.target.value)}
+              placeholder="e.g. 03001234567"
+              className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-zinc-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all outline-none"
+            />
+          </div>
+        )}
+
+{settings?.isPaymentEnabled !== false && (
           <div className="bg-zinc-50 dark:bg-zinc-900 rounded-xl p-6 mb-6 shadow-2xl border border-zinc-200 dark:border-zinc-800/50">
             <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
               <Wallet className="w-5 h-5 text-emerald-500" />
@@ -228,6 +237,13 @@ export default function TopUp() {
 
         <PreviousOrders />
       </div>
+
+      <AlertModal
+        isOpen={alertConfig.isOpen}
+        onClose={() => setAlertConfig(prev => ({ ...prev, isOpen: false }))}
+        title={alertConfig.title}
+        message={alertConfig.message}
+      />
     </motion.div>
   );
 }

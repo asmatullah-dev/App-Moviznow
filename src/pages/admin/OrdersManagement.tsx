@@ -134,25 +134,34 @@ export default function OrdersManagement() {
       const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
       const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
       
-      const ordersToDelete = orders.filter(order => {
-        const createdAt = (order.createdAt as any)?.seconds 
-          ? new Date((order.createdAt as any).seconds * 1000) 
-          : new Date(order.createdAt);
+      const batch = writeBatch(db);
+      let changesMade = false;
+
+      allUsers.forEach(user => {
+        if (!user.orders || user.orders.length === 0) return;
         
-        if (order.status === 'pending' && createdAt < sevenDaysAgo) return true;
-        if (order.status === 'cancelled' && createdAt < twentyFourHoursAgo) return true;
-        return false;
+        let changed = false;
+        const keptOrders = user.orders.filter(order => {
+          const createdAt = (order.createdAt as any)?.seconds 
+            ? new Date((order.createdAt as any).seconds * 1000) 
+            : new Date(order.createdAt);
+          
+          if (order.status === 'pending' && createdAt < sevenDaysAgo) { changed = true; return false; }
+          if (order.status === 'cancelled' && createdAt < twentyFourHoursAgo) { changed = true; return false; }
+          return true;
+        });
+
+        if (changed) {
+          batch.update(doc(db, 'users', user.uid), { orders: keptOrders });
+          updateUserFields(user.uid, { orders: keptOrders });
+          changesMade = true;
+        }
       });
 
-      if (ordersToDelete.length > 0) {
-        // Use a batch for faster deletion
-        const batch = writeBatch(db);
-        ordersToDelete.forEach(order => {
-          batch.delete(doc(db, 'orders', order.id));
-        });
+      if (changesMade) {
         try {
           await batch.commit();
-          console.log(`Auto-deleted ${ordersToDelete.length} old orders`);
+          console.log(`Auto-deleted old orders`);
         } catch (err) {
           console.error("Failed to commit auto-delete batch:", err);
         }

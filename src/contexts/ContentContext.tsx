@@ -236,7 +236,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
                         batch.set(doc(db, 'content_chunks', cid), { 
                             items: parsedItems,
                             updatedAt: serverTimestamp()
-                        });
+                        }, { merge: true });
                     }
                     
                     versionsUpdate[cid] = {
@@ -298,7 +298,8 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         if (contentPendingStr) {
             for (const key of Object.keys(versionsUpdate)) {
                 if (key !== 'collections' && key !== 'lastGlobalUpdate' && key !== 'metadata') {
-                    localMeta[key] = versionsUpdate[key];
+                    // Force refresh of chunk locally so we download other admin's changes merged
+                    localMeta[key] = { version: 0, count: 0 };
                 }
             }
             safeStorage.removeItem('pending_chunk_updates');
@@ -307,17 +308,22 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
         if (collectionPendingStr) {
             safeStorage.removeItem('pending_collection_updates');
-            localMeta.collections = versionsUpdate.collections.version;
+            localMeta.collections = 0; // Force sync of collections as well
         }
 
         if (metadataPending) {
             safeStorage.removeItem('pending_metadata_updates');
-            localMeta.metadata = versionsUpdate.metadata.version;
+            localMeta.metadata = 0; // Force sync of metadata
         }
 
         safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
         setHasPendingChanges(false);
         console.log(`Sync successful.`);
+        
+        // Immediately fetch the merged result
+        setTimeout(() => {
+             syncWithServer(true).catch(console.error);
+        }, 500);
     } catch (e) {
         console.error("Sync failed", e);
         throw e;
@@ -477,7 +483,6 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
     for (const [chunkId, versionMeta] of Object.entries(versions)) {
         if (chunkId === 'collections' || chunkId === 'notifications' || chunkId === 'lastGlobalUpdate' || chunkId === 'metadata' || chunkId === 'users' || chunkId === 'fcm_tokens') continue;
-        if (pendingChunkIds.has(chunkId)) continue; // SKIP pending chunks to avoid overwriting with old server data
 
         const version = typeof versionMeta === 'object' ? (versionMeta as any).version : versionMeta;
         const localV = localMeta[chunkId];
@@ -490,11 +495,33 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     }
     
     if (chunksToFetch.length > 0) {
+        const pendingItemsMapStr = safeStorage.getItem('pending_item_updates') || '{}';
+        const pendingItemsMap = JSON.parse(pendingItemsMapStr);
+
         await Promise.all(chunksToFetch.map(async (chunkId) => {
             try {
                 const chunkDoc = await getDoc(doc(db, 'content_chunks', chunkId));
                 if (chunkDoc.exists()) {
-                    const items = chunkDoc.data().items || {};
+                    let items = chunkDoc.data().items || {};
+                    
+                    if (pendingChunkIds.has(chunkId)) {
+                        const itemIds = pendingItemsMap[chunkId];
+                        const localChunkStr = safeStorage.getItem('content_chunk_' + chunkId);
+                        const localItems = localChunkStr ? JSON.parse(localChunkStr) : {};
+                        
+                        if (Array.isArray(itemIds) && itemIds.length > 0) {
+                            for (const itemId of itemIds) {
+                                if (localItems[itemId]) {
+                                    items[itemId] = localItems[itemId];
+                                } else {
+                                    delete items[itemId];
+                                }
+                            }
+                        } else {
+                            items = { ...items, ...localItems };
+                        }
+                    }
+                    
                     safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(items));
                     localMeta[chunkId] = typeof versions[chunkId] === 'object' ? versions[chunkId] : { version: versions[chunkId], count: Object.keys(items).length };
                 }

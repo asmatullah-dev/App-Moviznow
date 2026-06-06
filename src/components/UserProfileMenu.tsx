@@ -14,6 +14,7 @@ import { format } from 'date-fns';
 import ConfirmModal from './ConfirmModal';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useContent } from '../contexts/ContentContext';
+import { useHaptics } from '../hooks/useHaptics';
 
 export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogoutModal?: () => void }) => {
   const { profile, logout, refreshProfile } = useAuth();
@@ -22,6 +23,7 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
   const { checkForUpdates } = useContent();
   const { refreshSettings } = useSettings();
   const { refreshUsers } = useUsers();
+  const { enabled: isHapticsEnabled, toggleHaptics } = useHaptics();
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
@@ -188,6 +190,25 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                 </div>
               </div>
 
+              <div className="px-3 py-2 flex items-center justify-between">
+                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Haptics</span>
+                <button
+                  onClick={toggleHaptics}
+                  className={clsx(
+                    "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-transparent focus:outline-none transition-colors duration-200 ease-in-out",
+                    isHapticsEnabled ? "bg-emerald-500" : "bg-zinc-200 dark:bg-zinc-700"
+                  )}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={clsx(
+                      "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                      isHapticsEnabled ? "translate-x-4" : "translate-x-0"
+                    )}
+                  />
+                </button>
+              </div>
+
               <div className="h-px bg-zinc-200 dark:bg-zinc-800 my-1"></div>
 
               <Link to="/watch-later" onClick={() => setIsOpen(false)} className="flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
@@ -223,6 +244,7 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
               
               <button 
                 onClick={async () => {
+                  vibrate(50);
                   setIsOpen(false);
                   // checkForUpdates(true) is our master sync function that handles profile, content, and users sync
                   await Promise.all([
