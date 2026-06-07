@@ -19,15 +19,18 @@ export function useHaptics() {
     safeStorage.setItem('haptics_enabled', String(next));
     setEnabled(next);
     window.dispatchEvent(new Event('haptics_changed'));
-    if (next && navigator.vibrate) {
-      navigator.vibrate(50);
+    if (next && typeof window !== 'undefined' && window.navigator && window.navigator.vibrate) {
+      window.navigator.vibrate(50);
     }
   }, [enabled]);
 
   const vibrate = useCallback((pattern: number | number[] = 50) => {
-    if (enabled && navigator.vibrate) {
-      // Small delay helps avoid blocking main thread on some devices
-      setTimeout(() => navigator.vibrate(pattern), 0);
+    if (enabled && typeof window !== 'undefined' && window.navigator && 'vibrate' in window.navigator) {
+      try {
+        window.navigator.vibrate(pattern);
+      } catch (e) {
+        console.error('Vibration error:', e);
+      }
     }
   }, [enabled]);
 
@@ -38,16 +41,19 @@ export function useGlobalButtonHaptics() {
   const { enabled, vibrate } = useHaptics();
 
   useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (!enabled) return;
+    const handleTouchOrClick = (e: Event) => {
+      if (!enabled || !window.navigator.vibrate) return;
       const target = e.target as HTMLElement;
-      // Vibrate for any button or link click
-      if (target.closest('button') || target.closest('a')) {
-        vibrate(10); // Lighter vibration for general clicks
+      if (target.closest('button') || target.closest('a') || target.closest('[role="button"]')) {
+        try {
+          window.navigator.vibrate(30);
+        } catch (err) {}
       }
     };
     
-    document.addEventListener('click', handleClick, { passive: true });
-    return () => document.removeEventListener('click', handleClick);
-  }, [enabled, vibrate]);
+    // Chrome on Android requires explicit user activation (like a click or touchstart)
+    // Using click or pointerup ensures we have the proper activation state.
+    document.addEventListener('click', handleTouchOrClick, { passive: true, capture: true });
+    return () => document.removeEventListener('click', handleTouchOrClick, { capture: true });
+  }, [enabled]);
 }

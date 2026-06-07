@@ -7,7 +7,7 @@
 
 class SafeStorage {
   private memoryStorage: Map<string, string> = new Map();
-  private isAvailable: boolean;
+  public isAvailable: boolean;
 
   constructor() {
     this.isAvailable = this.checkAvailability();

@@ -80,6 +80,7 @@ interface AuthContextType {
   trackContentClick: (contentId: string, title: string, type: string) => void;
   trackLinkClick: (url: string, title?: string) => void;
   refreshProfile: (force?: boolean, reason?: 'auto' | 'manual' | 'login' | 'logout') => Promise<boolean>;
+  isSyncing: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -129,27 +130,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(auth.currentUser);
   const [profile, setProfile] = useState<UserProfile | null>(() => {
     const cached = safeStorage.getItem("profile_cache");
-    return cached ? JSON.parse(cached) : null;
+    const timestampStr = safeStorage.getItem("profile_cache_timestamp");
+    if (cached && timestampStr) {
+      const timestamp = parseInt(timestampStr, 10);
+      const now = Date.now();
+      if (now - timestamp <= 30 * 60 * 60 * 1000) {
+        return JSON.parse(cached);
+      }
+    }
+    return null;
   });
-  const [loading, setLoading] = useState(
-    () => !safeStorage.getItem("profile_cache"),
-  );
+  const [loading, setLoading] = useState(() => {
+    const cached = safeStorage.getItem("profile_cache");
+    const timestampStr = safeStorage.getItem("profile_cache_timestamp");
+    if (cached && timestampStr) {
+      const timestamp = parseInt(timestampStr, 10);
+      const now = Date.now();
+      if (now - timestamp <= 30 * 60 * 60 * 1000) {
+        return false;
+      }
+    }
+    return true;
+  });
   const [authLoading, setAuthLoading] = useState(!auth.currentUser);
   const [error, setError] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [isSyncing, setIsSyncing] = useState(false);
   const sessionStartTimeRef = useRef<number | null>(null);
   const justLoggedInRef = useRef(false);
 
   const getLocalSessionId = () => {
     try {
-      let id = localStorage.getItem("device_session_id");
+      let id = safeStorage.getItem("device_session_id");
       if (!id) {
         id = Math.random().toString(36).substring(2) + Date.now().toString(36);
-        localStorage.setItem("device_session_id", id);
+        safeStorage.setItem("device_session_id", id);
       }
       return id;
     } catch (e) {
-      // Fallback for incognito/strict privacy modes where localStorage throws
       if (!(window as any)._fallbackSessionId) {
         (window as any)._fallbackSessionId =
           Math.random().toString(36).substring(2) + Date.now().toString(36);
@@ -207,6 +225,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       let serverVersion = localVersion;
       let isVersionMissing = false;
       if (navigator.onLine && (force || isDailySync || !localProfile)) {
+        setIsSyncing(true);
         try {
           const { getChunkMeta } = await import('../utils/chunkMeta');
           const meta = await getChunkMeta(force);
@@ -228,7 +247,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       let docSnap;
       
       // 7. Before updating user data, first check version from content_meta, if different new version first read the user data doc
-      if (navigator.onLine && (versionChanged || !localProfile)) {
+      if (navigator.onLine && (versionChanged || !localProfile || force)) {
         try {
           docSnap = await getDoc(userRef);
           if (docSnap.exists()) {
@@ -394,6 +413,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (mergedProfile && Object.keys(mergedProfile).length > 0) {
           safeStorage.setItem("profile_cache", JSON.stringify(mergedProfile));
+      safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
           setProfile(mergedProfile);
       }
 
@@ -418,12 +438,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const localSessionId = getLocalSessionId();
 
         // 1-Device Lock Check
-        if (!hasAdminPrivileges && !justLoggedInRef.current) {
+        if (!hasAdminPrivileges && !justLoggedInRef.current && safeStorage.isAvailable) {
           if (data.sessionId && data.sessionId !== localSessionId) {
             console.log("Logged in from another device. Logging out.");
             signOut(auth);
             setError(
-              "You have been logged out because your account was accessed from another device.",
+              "You have been logged out because your account was accessed from another device."
             );
             return false;
           } else if (!data.sessionId) {
@@ -783,10 +803,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             await fbBatch.commit();
           } catch (e) {}
         }
-        safeStorage.setItem(
-          "profile_cache",
+        safeStorage.setItem("profile_cache",
           JSON.stringify(newProfile),
         );
+      safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
         safeStorage.setItem(localVersionKey, (serverVersion || Date.now()).toString());
         setProfile(newProfile);
       }
@@ -798,6 +818,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         `users/${currentUser.uid}`,
       );
     } finally {
+      setIsSyncing(false);
       setLoading(false);
       return updatedSomething;
     }
@@ -1478,6 +1499,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Still update local profile and set needs_user_sync so it catches up tomorrow
       setProfile({ ...profile, ...data });
       safeStorage.setItem("profile_cache", JSON.stringify({ ...profile, ...data }));
+      safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
       safeStorage.setItem("needs_user_sync", "true");
       return;
     }
@@ -1588,7 +1610,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } catch (e) {}
       }
 
-      // Update Firestore
+      // Save local first!
+      const updatedProfile = { ...profile, ...data };
+      setProfile(updatedProfile);
+      safeStorage.setItem("profile_cache", JSON.stringify(updatedProfile));
+      safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
+      
       const userRefPath = doc(db, "users", user.uid);
       
       try {
@@ -1610,6 +1637,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.log("Users doc updated successfully.");
       } catch (err: any) {
         handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`);
+        safeStorage.setItem("needs_user_sync", "true");
+        return;
       }
       
       if (isDailySync) localStorage.setItem(dailySyncKey, pktDate);
@@ -1675,6 +1704,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const updatedProfile = { ...profile, favorites: newFavorites };
     setProfile(updatedProfile);
     safeStorage.setItem("profile_cache", JSON.stringify(updatedProfile));
+      safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
 
     // Save pending change array
     safeStorage.setItem("pending_favorites_array", JSON.stringify(newFavorites));
@@ -1692,6 +1722,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const updatedProfile = { ...profile, watchLater: newWatchLater };
     setProfile(updatedProfile);
     safeStorage.setItem("profile_cache", JSON.stringify(updatedProfile));
+      safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
 
     // Save pending change array
     safeStorage.setItem("pending_watch_later_array", JSON.stringify(newWatchLater));
@@ -1710,6 +1741,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const updatedProfile = { ...profile, contentClicks: newClicks };
     setProfile(updatedProfile);
     safeStorage.setItem("profile_cache", JSON.stringify(updatedProfile));
+      safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
     safeStorage.setItem("pending_content_clicks", JSON.stringify(newClicks));
     safeStorage.setItem("needs_user_sync", "true");
   };
@@ -1726,6 +1758,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const updatedProfile = { ...profile, linkClicks: newClicks };
     setProfile(updatedProfile);
     safeStorage.setItem("profile_cache", JSON.stringify(updatedProfile));
+      safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
     safeStorage.setItem("pending_link_clicks", JSON.stringify(newClicks));
     safeStorage.setItem("needs_user_sync", "true");
   };
@@ -1753,6 +1786,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         trackContentClick,
         trackLinkClick,
         refreshProfile,
+        isSyncing,
       }}
     >
       {children}

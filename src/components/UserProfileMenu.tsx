@@ -17,13 +17,13 @@ import { useContent } from '../contexts/ContentContext';
 import { useHaptics } from '../hooks/useHaptics';
 
 export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogoutModal?: () => void }) => {
-  const { profile, logout, refreshProfile } = useAuth();
+  const { profile, logout, refreshProfile, isSyncing } = useAuth();
   const { theme, setTheme } = useTheme();
   const { isInstallable, installApp } = usePWA();
   const { checkForUpdates } = useContent();
   const { refreshSettings } = useSettings();
   const { refreshUsers } = useUsers();
-  const { enabled: isHapticsEnabled, toggleHaptics } = useHaptics();
+  const { enabled: isHapticsEnabled, toggleHaptics, vibrate } = useHaptics();
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
@@ -195,15 +195,15 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                 <button
                   onClick={toggleHaptics}
                   className={clsx(
-                    "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-transparent focus:outline-none transition-colors duration-200 ease-in-out",
+                    "relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent focus:outline-none transition-colors duration-200 ease-in-out",
                     isHapticsEnabled ? "bg-emerald-500" : "bg-zinc-200 dark:bg-zinc-700"
                   )}
                 >
                   <span
                     aria-hidden="true"
                     className={clsx(
-                      "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
-                      isHapticsEnabled ? "translate-x-4" : "translate-x-0"
+                      "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                      isHapticsEnabled ? "translate-x-5" : "translate-x-0"
                     )}
                   />
                 </button>
@@ -245,18 +245,26 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
               <button 
                 onClick={async () => {
                   vibrate(50);
-                  setIsOpen(false);
-                  // checkForUpdates(true) is our master sync function that handles profile, content, and users sync
-                  await Promise.all([
-                    checkForUpdates(true),
-                    refreshSettings(),
-                    refreshProfile(true)
-                  ]);
+                  // Don't close immediately if we want to show loading, but closing is fine too.
+                  // Actually let's close, but maybe show a toast by changing state?
+                  // We don't have a toast component imported, let's just use the current closing logic
+                  // but maybe wait for resolution before closing so user sees loading state?
+                  try {
+                    // Start sync with loading UX (button could disable, but simplest is keeping it as is)
+                    await Promise.all([
+                      checkForUpdates(true),
+                      refreshSettings(),
+                      refreshProfile(true, 'manual')
+                    ]);
+                  } finally {
+                    setIsOpen(false);
+                  }
                 }} 
                 className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                 title="Refresh Content & Account Sync"
               >
-                <RefreshCw className="w-4 h-4 text-zinc-400" /> Refresh App Data
+                <RefreshCw className={clsx("w-4 h-4 text-zinc-400", isSyncing && "animate-spin text-emerald-500")} /> 
+                {isSyncing ? "Refreshing..." : "Refresh App Data"}
               </button>
 
               <button 

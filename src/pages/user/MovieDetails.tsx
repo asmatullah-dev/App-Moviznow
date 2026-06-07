@@ -1923,8 +1923,10 @@ export default function MovieDetails() {
           message: "Link and details copied to clipboard!",
         });
       }
-    } catch (err) {
-      console.error("Error sharing:", err);
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        console.error("Error sharing:", err);
+      }
     } finally {
       setIsShareLoading(false);
     }
@@ -3190,13 +3192,27 @@ export default function MovieDetails() {
                 {getYouTubeEmbedUrl(
                   activeTrailerUrl || mergedContent.trailerUrl || "",
                 ) ? (
-                  <iframe
-                    src={`${getYouTubeEmbedUrl(activeTrailerUrl || mergedContent.trailerUrl || "")}?autoplay=1`}
-                    title="Trailer"
-                    className="w-full h-full border-0"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                  ></iframe>
+                  <div className="w-full h-full relative group">
+                    <iframe
+                      src={`${getYouTubeEmbedUrl(activeTrailerUrl || mergedContent.trailerUrl || "")}?autoplay=1&origin=${encodeURIComponent(window.location.origin)}`}
+                      title="Trailer"
+                      className="w-full h-full border-0"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                    ></iframe>
+                    <div className="absolute top-4 right-12 z-50">
+                      <a
+                        href={activeTrailerUrl || mergedContent.trailerUrl || ""}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="bg-black/60 backdrop-blur-md text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-black/80 transition-colors border border-white/10 shadow-lg flex items-center gap-1.5"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Youtube className="w-3.5 h-3.5" />
+                        Open externally
+                      </a>
+                    </div>
+                  </div>
                 ) : (
                   <div className="w-full h-full flex flex-col items-center justify-center text-zinc-900 dark:text-white gap-4 bg-zinc-50 dark:bg-zinc-900">
                     <Play className="w-16 h-16 opacity-50" />
