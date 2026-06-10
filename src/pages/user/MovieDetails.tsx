@@ -77,7 +77,6 @@ export default function MovieDetails() {
     loading: profileLoading,
     toggleFavorite: authToggleFavorite,
     toggleWatchLater: authToggleWatchLater,
-    trackLinkClick,
     updateUserProfileData,
   } = useAuth();
   const {
@@ -509,6 +508,36 @@ export default function MovieDetails() {
       return "";
     };
 
+    const getLanguageString = () => {
+      if (mergedContent.languageIds && Array.isArray(mergedContent.languageIds)) {
+        const names = languages
+          .filter((l) => mergedContent.languageIds?.includes(l.id))
+          .map((l) => l.name);
+        if (names.length > 0) return names.join(", ");
+      }
+      if (
+        (mergedContent as any).language &&
+        typeof (mergedContent as any).language === 'string'
+      ) {
+        return (mergedContent as any).language;
+      }
+      return "";
+    };
+
+    const getQualityString = () => {
+      if (mergedContent.qualityId) {
+        const matchingQuality = qualities.find((q) => q.id === mergedContent.qualityId);
+        if (matchingQuality) return matchingQuality.name;
+      }
+      if (
+        (mergedContent as any).quality &&
+        typeof (mergedContent as any).quality === 'string'
+      ) {
+        return (mergedContent as any).quality;
+      }
+      return "";
+    };
+
     return {
       title: mergedContent.title,
       year: mergedContent.year,
@@ -517,6 +546,8 @@ export default function MovieDetails() {
       castArray: castArray,
       posterUrl: mergedContent.posterUrl,
       genres: getGenresString(),
+      language: getLanguageString(),
+      quality: getQualityString(),
       releaseDate: mergedContent.releaseDate,
       duration: mergedContent.runtime,
       country: mergedContent.country,
@@ -1299,10 +1330,7 @@ export default function MovieDetails() {
     if (!checkEligibility()) return;
 
     if (linkId !== "sample") {
-      const contentPrefix = mergedContent
-        ? `${mergedContent.title}${seasonInfo ? ` S${seasonInfo.number}` : ""} - `
-        : "";
-      trackLinkClick(url, `${contentPrefix}${linkName || "Unknown Link"}`);
+      // tracking removed
     }
 
     if (isOffline) {
@@ -1924,7 +1952,11 @@ export default function MovieDetails() {
         });
       }
     } catch (err: any) {
-      if (err.name !== 'AbortError') {
+      const isCanceled = err.name === 'AbortError' || 
+                         (err.message && err.message.toLowerCase().includes('cancel')) ||
+                         (typeof err === 'string' && err.toLowerCase().includes('cancel'));
+      
+      if (!isCanceled) {
         console.error("Error sharing:", err);
       }
     } finally {
@@ -2371,6 +2403,16 @@ export default function MovieDetails() {
                             </span>
                           </div>
                         )}
+                      {displayData.quality && (
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-zinc-500 text-xs font-medium">
+                            Quality
+                          </span>
+                          <span className="text-sm font-medium text-cyan-700/80 dark:text-cyan-400/80">
+                            {displayData.quality}
+                          </span>
+                        </div>
+                      )}
                       {displayData.genres && (
                         <div className="flex items-baseline gap-2">
                           <span className="text-zinc-500 text-xs font-medium">
@@ -2381,13 +2423,13 @@ export default function MovieDetails() {
                           </span>
                         </div>
                       )}
-                      {contentLangs && (
+                      {displayData.language && (
                         <div className="flex items-baseline gap-2">
                           <span className="text-zinc-500 text-xs font-medium">
                             Language
                           </span>
                           <span className="text-sm font-medium text-cyan-700/80 dark:text-cyan-400/80">
-                            {contentLangs}
+                            {displayData.language}
                           </span>
                         </div>
                       )}
@@ -3194,7 +3236,7 @@ export default function MovieDetails() {
                 ) ? (
                   <div className="w-full h-full relative group">
                     <iframe
-                      src={`${getYouTubeEmbedUrl(activeTrailerUrl || mergedContent.trailerUrl || "")}?autoplay=1&origin=${encodeURIComponent(window.location.origin)}`}
+                      src={`${getYouTubeEmbedUrl(activeTrailerUrl || mergedContent.trailerUrl || "")}?autoplay=1`}
                       title="Trailer"
                       className="w-full h-full border-0"
                       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"

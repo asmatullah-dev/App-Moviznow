@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useCart } from '../../contexts/CartContext';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth, standardizePhone } from '../../contexts/AuthContext';
 import { useSettings } from '../../contexts/SettingsContext';
 import { ArrowLeft, Trash2, Copy, Check, Send, Loader2, Wallet, Smartphone, CreditCard, Banknote } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -76,10 +76,7 @@ export default function Cart() {
           if (!currentOrderId) { setLoading(false); return; }
       }
       const message = `Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${whatsappNumber || profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nPlease approve my order. Order ID: ${currentOrderId}\nItems: ${cart?.length || 0}\nTotal Amount: Rs ${totalPrice}`;
-      let supportPhone = settings?.supportNumber || '3363284466';
-      if (supportPhone.startsWith('0')) supportPhone = '92' + supportPhone.substring(1);
-      else if (!supportPhone.startsWith('92')) supportPhone = '92' + supportPhone;
-      const adminPhone = supportPhone.replace('+', '');
+      const adminPhone = standardizePhone(settings?.supportNumber || '3363284466').replace('+', '');
       const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
       window.open(whatsappUrl, '_blank');
       navigate('/');

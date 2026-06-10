@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, getDocs, orderBy, updateDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth, standardizePhone } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { ChevronDown, ChevronUp, Package, Clock, CheckCircle, XCircle, Send, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -77,13 +77,7 @@ export default function PreviousOrders() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          let supportPhone = settings?.supportNumber || '3363284466';
-                          if (supportPhone.startsWith('0')) {
-                            supportPhone = '92' + supportPhone.substring(1);
-                          } else if (!supportPhone.startsWith('92')) {
-                            supportPhone = '92' + supportPhone;
-                          }
-                          const adminPhone = supportPhone.replace('+', '');
+                          const adminPhone = standardizePhone(settings?.supportNumber || '3363284466').replace('+', '');
                           const message = `${order.type === 'membership' ? 'Membership Top Up' : 'Add Content'}\nOrder ID: ${order.id}\nAmount: Rs ${order.amount}`;
                           const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
                           window.open(whatsappUrl, '_blank');

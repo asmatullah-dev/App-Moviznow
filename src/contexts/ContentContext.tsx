@@ -503,11 +503,11 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
                 const chunkDoc = await getDoc(doc(db, 'content_chunks', chunkId));
                 if (chunkDoc.exists()) {
                     let items = chunkDoc.data().items || {};
+                    const localChunkStr = safeStorage.getItem('content_chunk_' + chunkId);
+                    const localItems = localChunkStr ? JSON.parse(localChunkStr) : {};
                     
                     if (pendingChunkIds.has(chunkId)) {
                         const itemIds = pendingItemsMap[chunkId];
-                        const localChunkStr = safeStorage.getItem('content_chunk_' + chunkId);
-                        const localItems = localChunkStr ? JSON.parse(localChunkStr) : {};
                         
                         if (Array.isArray(itemIds) && itemIds.length > 0) {
                             for (const itemId of itemIds) {
@@ -520,6 +520,10 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
                         } else {
                             items = { ...items, ...localItems };
                         }
+                    } else {
+                        // The server is the source of truth, but we don't want to lose local attributes 
+                        // if they are not tracked on server. Actually, chunks ARE fully tracked on server.
+                        // So we can just use items natively.
                     }
                     
                     safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(items));
@@ -538,80 +542,54 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         const isAdmin = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
         let metadataMeta = versions.metadata;
 
-        const fetchLegacy = async (name: string, setFn: any, cacheKey: string) => {
-            const snap = await getDocs(collection(db, name));
-            const raw = snap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
-            let items: any[] = [];
-            const allDoc = raw.find((d: any) => d.id === 'all');
-            if (allDoc && allDoc.list) items = [...allDoc.list];
-            raw.filter((d: any) => d.id !== 'all').forEach((newItem: any) => {
-                const idx = items.findIndex(i => i.id === newItem.id);
-                if (idx !== -1) items[idx] = newItem;
-                else items.push(newItem);
-            });
-            const sorted = items.sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
-            setFn(sorted);
-            safeStorage.setItem(cacheKey, JSON.stringify(sorted));
-            return sorted;
-        };
+        const metadataVersion = metadataMeta ? (typeof metadataMeta === 'object' ? metadataMeta.version : metadataMeta) : 0;
+        const localMetaV = localMeta.metadata;
+        const localMetaVersion = typeof localMetaV === 'object' ? localMetaV.version : localMetaV;
+        const genresCacheStr = safeStorage.getItem('genres_cache');
+        const hasMetadata = !!genresCacheStr && genresCacheStr !== '[]';
+        const hasPendingMetadata = !!safeStorage.getItem('pending_metadata_updates');
+        
+        if (!hasPendingMetadata && (!hasMetadata || !localMetaVersion || localMetaVersion < metadataVersion)) {
+            try {
+                const metaDoc = await getDoc(doc(db, 'content_chunks', 'metadata'));
+                if (metaDoc.exists()) {
+                    const data = metaDoc.data();
+                    
+                    let chunksGenres = data.genres || [];
+                    let chunksLanguages = data.languages || [];
+                    let chunksQualities = data.qualities || [];
 
-        if (!metadataMeta && isAdmin) {
-            console.log("Migrating legacy metadata to chunks...");
-            const mGenres = await fetchLegacy('genres', setGenres, 'genres_cache');
-            const mLanguages = await fetchLegacy('languages', setLanguages, 'languages_cache');
-            const mQualities = await fetchLegacy('qualities', setQualities, 'qualities_cache');
-            
-            const batch = writeBatch(db);
-            const now = Date.now();
-            
-            batch.set(doc(db, 'content_chunks', 'metadata'), {
-                genres: mGenres,
-                languages: mLanguages,
-                qualities: mQualities,
-                updatedAt: serverTimestamp()
-            });
+                    const localGenres = JSON.parse(safeStorage.getItem('genres_cache') || '[]');
+                    const localLanguages = JSON.parse(safeStorage.getItem('languages_cache') || '[]');
+                    const localQualities = JSON.parse(safeStorage.getItem('qualities_cache') || '[]');
 
-            metadataMeta = {
-                version: now,
-                updatedAt: serverTimestamp()
-            };
+                    const mergeArrays = (local: any[], server: any[]) => {
+                        const merged = [...local];
+                        server.forEach(s => {
+                            const idx = merged.findIndex(l => l.id === s.id || l.name === s.name);
+                            if (idx !== -1) merged[idx] = s;
+                            else merged.push(s);
+                        });
+                        return merged;
+                    };
 
-            batch.set(doc(db, 'chunk_meta', 'versions'), { 
-                metadata: metadataMeta
-            }, { merge: true });
+                    chunksGenres = mergeArrays(localGenres, chunksGenres);
+                    chunksLanguages = mergeArrays(localLanguages, chunksLanguages);
+                    chunksQualities = mergeArrays(localQualities, chunksQualities);
 
-            await batch.commit();
-            localMeta.metadata = metadataMeta.version;
-            safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
-        } else if (metadataMeta) {
-            const metadataVersion = typeof metadataMeta === 'object' ? metadataMeta.version : metadataMeta;
-            const localMetaV = localMeta.metadata;
-            const localMetaVersion = typeof localMetaV === 'object' ? localMetaV.version : localMetaV;
-            const hasMetadata = !!safeStorage.getItem('genres_cache');
-            const hasPendingMetadata = !!safeStorage.getItem('pending_metadata_updates');
-            
-            if (!hasPendingMetadata && (!hasMetadata || !localMetaVersion || localMetaVersion < metadataVersion)) {
-                try {
-                    const metaDoc = await getDoc(doc(db, 'content_chunks', 'metadata'));
-                    if (metaDoc.exists()) {
-                        const data = metaDoc.data();
-                        safeStorage.setItem('genres_cache', JSON.stringify(data.genres || []));
-                        safeStorage.setItem('languages_cache', JSON.stringify(data.languages || []));
-                        safeStorage.setItem('qualities_cache', JSON.stringify(data.qualities || []));
+                    safeStorage.setItem('genres_cache', JSON.stringify(chunksGenres));
+                    safeStorage.setItem('languages_cache', JSON.stringify(chunksLanguages));
+                    safeStorage.setItem('qualities_cache', JSON.stringify(chunksQualities));
+                    if (metadataVersion) {
                         localMeta.metadata = metadataVersion;
                         safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
-                        setGenres((data.genres || []).sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
-                        setLanguages((data.languages || []).sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
-                        setQualities((data.qualities || []).sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
-                        updatedSomething = true;
                     }
-                } catch(e) { console.error("Error fetching metadata chunk", e) }
-            }
-        } else if (!hasLoadedRef.current) {
-            // fallback if metadata doesn't exist and not admin
-            if (!safeStorage.getItem('genres_cache')) await fetchLegacy('genres', setGenres, 'genres_cache');
-            if (!safeStorage.getItem('languages_cache')) await fetchLegacy('languages', setLanguages, 'languages_cache');
-            if (!safeStorage.getItem('qualities_cache')) await fetchLegacy('qualities', setQualities, 'qualities_cache');
+                    setGenres([...chunksGenres].sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
+                    setLanguages([...chunksLanguages].sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
+                    setQualities([...chunksQualities].sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
+                    updatedSomething = true;
+                }
+            } catch(e) { console.error("Error fetching metadata chunk", e) }
         }
 
         // Handle collections with versioning and chunks

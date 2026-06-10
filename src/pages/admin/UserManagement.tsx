@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
-import { collection, doc, updateDoc, getDoc, onSnapshot, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit } from 'firebase/firestore';
+import { collection, doc, updateDoc, getDoc, onSnapshot, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit, deleteField } from 'firebase/firestore';
 import { UserProfile, Role, Status, AnalyticsEvent, Content } from '../../types';
 import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, Bell, RefreshCw } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
@@ -57,7 +57,7 @@ export default function UserManagement() {
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [isEditingOverlay, setIsEditingOverlay] = useState(false);
   const [isAnalyticsLoading, setIsAnalyticsLoading] = useState(false);
-  const [scannedAnalytics, setScannedAnalytics] = useState<Record<string, { timeSpent: number, favoritesCount: number, watchLaterCount: number, lastActive: string | null, hasScanned: boolean, sessionsCount: number, mostClickedContent: { id: string, count: number, type: string, title?: string }[], mostClickedLinks: { count: number, url: string, title?: string }[] }>>({});
+  const [scannedAnalytics, setScannedAnalytics] = useState<Record<string, { timeSpent: number, favoritesCount: number, watchLaterCount: number, lastActive: string | null, hasScanned: boolean, sessionsCount: number }>>({});
   const [userRequests, setUserRequests] = useState<any[]>([]);
   const [assignedContentTitles, setAssignedContentTitles] = useState<string[]>([]);
   const [allContent, setAllContent] = useState<any[]>([]);
@@ -175,7 +175,8 @@ export default function UserManagement() {
     
     return () => {
       mounted = false;
-      // No auto sync on exit, manual sync only
+      // Sync after exiting of tab
+      finalizeUserChanges(true).catch(console.error);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -237,6 +238,15 @@ export default function UserManagement() {
           }
         }
 
+        // Wipe tracking data offline then sync
+        if (('contentClicks' in user) || ('linkClicks' in user)) {
+          (updates as any).contentClicks = '__DELETE_FIELD__';
+          (updates as any).linkClicks = '__DELETE_FIELD__';
+          needsUpdate = true;
+          delete (user as any).contentClicks;
+          delete (user as any).linkClicks;
+        }
+
         if (needsUpdate) {
           updateUserFields(user.uid, updates);
         }
@@ -286,23 +296,12 @@ export default function UserManagement() {
         setSelectedUser(freshUser);
       }
 
-      // 2. Process Analytics IMMEDIATELY from LOCAL data (no network wait)
-      const cClicksObj = freshUser.contentClicks || {};
-      const ccList = Object.keys(cClicksObj).map(id => ({ ...cClicksObj[id], id }));
-      ccList.sort((a,b) => b.count - a.count);
-
-      const lClicksObj = freshUser.linkClicks || {};
-      const lcList = Object.keys(lClicksObj).map(id => ({ ...lClicksObj[id], id }));
-      lcList.sort((a,b) => b.count - a.count);
-
       const newAnalytics = { 
         timeSpent: freshUser.timeSpent || 0,
         favoritesCount: (freshUser.favorites || []).length,
         watchLaterCount: (freshUser.watchLater || []).length,
         lastActive: freshUser.lastActive || null,
         sessionsCount: freshUser.sessionsCount || 0,
-        mostClickedContent: ccList.slice(0, 5),
-        mostClickedLinks: lcList.slice(0, 5),
         hasScanned: true
       };
       
@@ -337,7 +336,7 @@ export default function UserManagement() {
   };
 
   const getUserAnalytics = (uid: string) => {
-    return scannedAnalytics[uid] || { timeSpent: 0, favoritesCount: 0, watchLaterCount: 0, lastActive: null, hasScanned: false, sessionsCount: 0, mostClickedContent: [], mostClickedLinks: [] };
+    return scannedAnalytics[uid] || { timeSpent: 0, favoritesCount: 0, watchLaterCount: 0, lastActive: null, hasScanned: false, sessionsCount: 0 };
   };
 
   const handleRowClick = (user: UserProfile, e: React.MouseEvent) => {
@@ -356,13 +355,13 @@ export default function UserManagement() {
       } catch (e) {
         setScannedAnalytics(prev => ({ 
           ...prev, 
-          [user.uid]: { timeSpent: 0, favoritesCount: 0, watchLaterCount: 0, lastActive: null, hasScanned: false, sessionsCount: 0, mostClickedContent: [], mostClickedLinks: [] } 
+          [user.uid]: { timeSpent: 0, favoritesCount: 0, watchLaterCount: 0, lastActive: null, hasScanned: false, sessionsCount: 0 } 
         }));
       }
     } else {
       setScannedAnalytics(prev => ({ 
         ...prev, 
-        [user.uid]: { timeSpent: 0, favoritesCount: 0, watchLaterCount: 0, lastActive: null, hasScanned: false, sessionsCount: 0, mostClickedContent: [], mostClickedLinks: [] } 
+        [user.uid]: { timeSpent: 0, favoritesCount: 0, watchLaterCount: 0, lastActive: null, hasScanned: false, sessionsCount: 0 } 
       }));
     }
     
@@ -1320,6 +1319,7 @@ export default function UserManagement() {
                          user.role === 'user' ? 'User' :
                          user.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1).replace('_', ' ') : 'User'}
                       </span>
+                      <div className="flex items-center gap-2 mt-1">
                       {user.role !== 'owner' && (
                         <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider
                           ${user.status === 'active' ? 'bg-emerald-500/10 text-emerald-500' : 
@@ -1329,6 +1329,13 @@ export default function UserManagement() {
                           {user.status}
                         </span>
                       )}
+                      {user.notification === 'yes' && (
+                        <span title="Notifications Enabled"><Bell className="w-4 h-4 text-emerald-500 dark:text-emerald-400" /></span>
+                      )}
+                      {user.notification === 'no' && (
+                        <span title="Notifications Disabled"><Bell className="w-4 h-4 text-zinc-300 dark:text-zinc-600" /></span>
+                      )}
+                      </div>
                       <div className="flex items-center gap-2 mt-0.5">
                         {isUserOnline(user.lastActive) && (
                           <span className="relative flex h-2 w-2">
@@ -1834,51 +1841,7 @@ export default function UserManagement() {
                                       `${userAna.sessionsCount || 0}`
                                     )}
                                   </span>
-                                </div>
-                                <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
-                                  <div className="flex items-center justify-between mb-2">
-                                    <div className="flex items-center gap-3 text-zinc-600 dark:text-zinc-300">
-                                      <Film className="w-4 h-4 text-emerald-500" />
-                                      <span className="text-xs font-medium">Most Clicked Content</span>
-                                    </div>
                                   </div>
-                                  {userAna.hasScanned && (userAna.mostClickedContent || []).length > 0 ? (
-                                    <div className="mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-900 overflow-y-auto custom-scrollbar">
-                                      <div className="flex flex-col gap-1 text-[10px] text-zinc-500 dark:text-zinc-400">
-                                        {userAna.mostClickedContent.map((c, idx) => (
-                                           <div key={idx} className="flex justify-between items-center">
-                                             <span className="truncate pr-2">{c.title || c.id}</span>
-                                             <span className="font-bold text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded">{c.count} clicks</span>
-                                           </div>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <div className="text-[10px] text-zinc-400 italic">No content clicks</div>
-                                  )}
-                                </div>
-                                <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
-                                  <div className="flex items-center justify-between mb-2">
-                                    <div className="flex items-center gap-3 text-zinc-600 dark:text-zinc-300">
-                                      <Tv className="w-4 h-4 text-emerald-500" />
-                                      <span className="text-xs font-medium">Most Clicked Links</span>
-                                    </div>
-                                  </div>
-                                  {userAna.hasScanned && (userAna.mostClickedLinks || []).length > 0 ? (
-                                    <div className="mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-900 overflow-y-auto custom-scrollbar">
-                                      <div className="flex flex-col gap-1 text-[10px] text-zinc-500 dark:text-zinc-400">
-                                        {userAna.mostClickedLinks.map((l, idx) => (
-                                           <div key={idx} className="flex justify-between items-center">
-                                             <span className="truncate pr-2" title={l.url}>{l.title || l.url}</span>
-                                             <span className="font-bold text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded">{l.count} clicks</span>
-                                           </div>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <div className="text-[10px] text-zinc-400 italic">No link clicks</div>
-                                  )}
-                                </div>
                               </>
                             );
                           })()}

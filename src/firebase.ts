@@ -145,6 +145,16 @@ export const requestNotificationPermission = async (force: boolean = false) => {
               }, { merge: true });
             }
 
+            if (auth.currentUser) {
+              try {
+                 await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+                   notification: 'yes'
+                 });
+              } catch (e) {
+                 console.log("Failed to update user profile with notification status");
+              }
+            }
+
             localStorage.setItem(CACHE_KEY, JSON.stringify({ token, timestamp: now }));
             
             // Also register with server for topic subscription
@@ -159,6 +169,16 @@ export const requestNotificationPermission = async (force: boolean = false) => {
         }
         
         return token;
+      } else {
+        if (auth.currentUser) {
+           try {
+              await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+                notification: 'no'
+              });
+           } catch (e) {
+              console.log("Failed to update user profile with notification status");
+           }
+        }
       }
     }
   } catch (error) {

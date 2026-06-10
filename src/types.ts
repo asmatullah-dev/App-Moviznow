@@ -29,8 +29,7 @@ export interface UserProfile {
   reported_links?: any[];
   movieRequests?: any[];
   trialActivated?: boolean;
-  contentClicks?: Record<string, { count: number, title: string, type: string, lastClicked: string }>;
-  linkClicks?: Record<string, { count: number, url: string, title?: string, lastClicked: string }>;
+  notification?: 'yes' | 'no';
 }
 
 export interface AppNotification {

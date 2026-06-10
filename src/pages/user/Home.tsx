@@ -1189,13 +1189,9 @@ export default function Home({
           <p>Need help or want to renew membership?</p>
           <button
             onClick={() => {
-              let supportPhone = settings?.supportNumber || "3363284466";
-              if (supportPhone.startsWith("0")) {
-                supportPhone = "92" + supportPhone.substring(1);
-              } else if (!supportPhone.startsWith("92")) {
-                supportPhone = "92" + supportPhone;
-              }
-              const adminPhone = supportPhone.replace("+", "");
+              const adminPhone = standardizePhone(
+                settings?.supportNumber || "3363284466"
+              ).replace("+", "");
               const msg = `Hello Admin,\n\nName: ${profile?.displayName || "Unknown"}\nEmail: ${profile?.email || "N/A"}\nPhone: ${profile?.phone || "N/A"}\nRole & Status: ${String(
                 profile?.role || "Unknown",
               )
@@ -1211,9 +1207,7 @@ export default function Home({
             className="inline-flex items-center gap-2 text-emerald-500 hover:text-emerald-400 mt-2 font-medium cursor-pointer bg-transparent border-none"
           >
             <MessageCircle className="w-4 h-4" /> WhatsApp:{" "}
-            {(settings?.supportNumber || "3363284466").startsWith("0")
-              ? settings?.supportNumber || "3363284466"
-              : `0${settings?.supportNumber || "3363284466"}`}
+            {standardizePhone(settings?.supportNumber || "3363284466")}
           </button>
         </footer>
       )}

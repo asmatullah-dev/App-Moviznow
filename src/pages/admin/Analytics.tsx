@@ -7,8 +7,6 @@ export default function Analytics() {
   const { users: allUsers, loading: usersLoading } = useUsers();
   const [topUsersBySessions, setTopUsersBySessions] = useState<UserProfile[]>([]);
   const [topUsersByTime, setTopUsersByTime] = useState<UserProfile[]>([]);
-  const [topContent, setTopContent] = useState<{ id: string; title: string; type: string; count: number }[]>([]);
-  const [topLinks, setTopLinks] = useState<{ url: string; title: string; count: number }[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -22,34 +20,6 @@ export default function Analytics() {
 
       const sortedByTime = [...allUsers].sort((a, b) => (b.timeSpent || 0) - (a.timeSpent || 0)).slice(0, 10);
       setTopUsersByTime(sortedByTime);
-
-      const contentAgg: Record<string, { id: string; title: string; type: string; count: number }> = {};
-      const linksAgg: Record<string, { url: string; title: string; count: number }> = {};
-
-      allUsers.forEach(user => {
-        if (user.contentClicks) {
-          Object.entries(user.contentClicks).forEach(([contentId, data]) => {
-            if (!contentAgg[contentId]) {
-              contentAgg[contentId] = { id: contentId, title: data.title, type: data.type, count: 0 };
-            }
-            contentAgg[contentId].count += data.count;
-          });
-        }
-        if (user.linkClicks) {
-          Object.entries(user.linkClicks).forEach(([url, data]) => {
-            if (!linksAgg[url]) {
-              linksAgg[url] = { url, title: data.title || url, count: 0 };
-            }
-            linksAgg[url].count += data.count;
-          });
-        }
-      });
-
-      const sortedTopContent = Object.values(contentAgg).sort((a, b) => b.count - a.count).slice(0, 10);
-      const sortedTopLinks = Object.values(linksAgg).sort((a, b) => b.count - a.count).slice(0, 10);
-
-      setTopContent(sortedTopContent);
-      setTopLinks(sortedTopLinks);
     } catch (error) {
       console.error('Error processing analytics:', error);
     } finally {
@@ -144,58 +114,6 @@ export default function Analytics() {
               </div>
             )) : (
               <p className="text-zinc-500 dark:text-zinc-400 text-center py-4 transition-colors duration-300">No user time data available.</p>
-            )}
-          </div>
-        </div>
-
-        {/* Most Clicked Content */}
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 transition-colors duration-300">
-          <h2 className="text-xl font-bold text-zinc-900 dark:text-white mb-6 flex items-center gap-2 transition-colors duration-300">
-            <Film className="w-5 h-5 text-emerald-500" />
-            Most Viewed Content
-          </h2>
-          <div className="space-y-4">
-            {topContent.length > 0 ? topContent.map((content, index) => (
-              <div key={content.id} className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-950 rounded-xl border border-zinc-200 dark:border-zinc-800 transition-colors duration-300">
-                <div className="flex items-center gap-4">
-                  <span className="text-xl font-bold text-zinc-500 dark:text-zinc-400 dark:text-zinc-600 w-6 transition-colors duration-300">{index + 1}</span>
-                  <div>
-                    <p className="font-medium text-zinc-900 dark:text-white transition-colors duration-300">{content.title}</p>
-                    <p className="text-xs text-zinc-500 dark:text-zinc-400 uppercase transition-colors duration-300">{content.type}</p>
-                  </div>
-                </div>
-                <span className="bg-emerald-500/10 text-emerald-500 px-3 py-1 rounded-full text-sm font-medium">
-                  {content.count} views
-                </span>
-              </div>
-            )) : (
-              <p className="text-zinc-500 dark:text-zinc-400 text-center py-4 transition-colors duration-300">No content view data available.</p>
-            )}
-          </div>
-        </div>
-
-        {/* Most Clicked Links */}
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 transition-colors duration-300">
-          <h2 className="text-xl font-bold text-zinc-900 dark:text-white mb-6 flex items-center gap-2 transition-colors duration-300">
-            <Link className="w-5 h-5 text-emerald-500" />
-            Most Clicked Links
-          </h2>
-          <div className="space-y-4">
-            {topLinks.length > 0 ? topLinks.map((link, index) => (
-              <div key={link.url} className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-950 rounded-xl border border-zinc-200 dark:border-zinc-800 transition-colors duration-300">
-                <div className="flex items-center gap-4 max-w-[70%]">
-                  <span className="text-xl font-bold text-zinc-500 dark:text-zinc-400 dark:text-zinc-600 w-6 transition-colors duration-300 shrink-0">{index + 1}</span>
-                  <div className="min-w-0">
-                    <p className="font-medium text-zinc-900 dark:text-white transition-colors duration-300 truncate">{link.title}</p>
-                    <a href={link.url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:text-blue-600 truncate block transition-colors duration-300">{link.url}</a>
-                  </div>
-                </div>
-                <span className="bg-emerald-500/10 text-emerald-500 px-3 py-1 rounded-full text-sm font-medium shrink-0">
-                  {link.count} clicks
-                </span>
-              </div>
-            )) : (
-              <p className="text-zinc-500 dark:text-zinc-400 text-center py-4 transition-colors duration-300">No link click data available.</p>
             )}
           </div>
         </div>

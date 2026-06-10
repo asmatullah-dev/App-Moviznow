@@ -77,8 +77,6 @@ interface AuthContextType {
   logout: () => Promise<void>;
   toggleFavorite: (contentId: string) => Promise<void>;
   toggleWatchLater: (contentId: string) => Promise<void>;
-  trackContentClick: (contentId: string, title: string, type: string) => void;
-  trackLinkClick: (url: string, title?: string) => void;
   refreshProfile: (force?: boolean, reason?: 'auto' | 'manual' | 'login' | 'logout') => Promise<boolean>;
   isSyncing: boolean;
 }
@@ -282,16 +280,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             ...serverProfile,
             favorites: safeStorage.getItem("needs_user_sync") === "true" && safeStorage.getItem("pending_favorites_array") 
                 ? JSON.parse(safeStorage.getItem("pending_favorites_array")!) 
-                : serverProfile.favorites || localProfile?.favorites || [],
+                : Array.from(new Set([...(localProfile?.favorites || []), ...(serverProfile.favorites || [])])),
             watchLater: safeStorage.getItem("needs_user_sync") === "true" && safeStorage.getItem("pending_watch_later_array") 
                 ? JSON.parse(safeStorage.getItem("pending_watch_later_array")!) 
-                : serverProfile.watchLater || localProfile?.watchLater || [],
-            contentClicks: safeStorage.getItem("needs_user_sync") === "true" && safeStorage.getItem("pending_content_clicks")
-                ? JSON.parse(safeStorage.getItem("pending_content_clicks")!)
-                : serverProfile.contentClicks || localProfile?.contentClicks || {},
-            linkClicks: safeStorage.getItem("needs_user_sync") === "true" && safeStorage.getItem("pending_link_clicks")
-                ? JSON.parse(safeStorage.getItem("pending_link_clicks")!)
-                : serverProfile.linkClicks || localProfile?.linkClicks || {},
+                : Array.from(new Set([...(localProfile?.watchLater || []), ...(serverProfile.watchLater || [])])),
+            orders: (() => {
+                const localOrders = localProfile?.orders || [];
+                const serverOrders = serverProfile.orders || [];
+                const merged = [...localOrders];
+                serverOrders.forEach(so => {
+                    if (!merged.find(lo => lo.id === so.id)) merged.push(so);
+                });
+                return merged;
+            })(),
             timeSpent: Math.max(serverProfile.timeSpent || 0, localProfile?.timeSpent || 0)
         };
       }
@@ -343,10 +344,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 if (pendFavs) updatesToPush.favorites = JSON.parse(pendFavs);
                 const pendWL = safeStorage.getItem("pending_watch_later_array");
                 if (pendWL) updatesToPush.watchLater = JSON.parse(pendWL);
-                const pendCClicks = safeStorage.getItem("pending_content_clicks");
-                if (pendCClicks) updatesToPush.contentClicks = JSON.parse(pendCClicks);
-                const pendLClicks = safeStorage.getItem("pending_link_clicks");
-                if (pendLClicks) updatesToPush.linkClicks = JSON.parse(pendLClicks);
                 
                 // Sync any deferred string/boolean profile fields
                 if (localProfile?.phone !== serverProfile?.phone && localProfile?.phone !== undefined) updatesToPush.phone = localProfile.phone;
@@ -883,12 +880,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
             const pendingWatchLater = safeStorage.getItem("pending_watch_later_array");
             if (pendingWatchLater) pendingUpdates.watchLater = JSON.parse(pendingWatchLater);
-            
-            const pendingContentClicks = safeStorage.getItem("pending_content_clicks");
-            if (pendingContentClicks) pendingUpdates.contentClicks = JSON.parse(pendingContentClicks);
-
-            const pendingLinkClicks = safeStorage.getItem("pending_link_clicks");
-            if (pendingLinkClicks) pendingUpdates.linkClicks = JSON.parse(pendingLinkClicks);
             
             const pendingOrders = safeStorage.getItem("pending_orders_array");
             if (pendingOrders) {
@@ -1577,10 +1568,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (pendFavs) data.favorites = JSON.parse(pendFavs);
         const pendWL = safeStorage.getItem("pending_watch_later_array");
         if (pendWL) data.watchLater = JSON.parse(pendWL);
-        const pendCClicks = safeStorage.getItem("pending_content_clicks");
-        if (pendCClicks) data.contentClicks = JSON.parse(pendCClicks);
-        const pendLClicks = safeStorage.getItem("pending_link_clicks");
-        if (pendLClicks) data.linkClicks = JSON.parse(pendLClicks);
         const pendOrders = safeStorage.getItem("pending_orders_array");
         if (pendOrders) {
           data.orders = [...(profile.orders || []), ...JSON.parse(pendOrders)];
@@ -1729,40 +1716,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     safeStorage.setItem("needs_user_sync", "true");
   };
 
-  const trackContentClick = (contentId: string, title: string, type: string) => {
-    if (!profile || !user) return;
-    const currentClicks = profile.contentClicks || {};
-    const count = (currentClicks[contentId]?.count || 0) + 1;
-    const newClicks = {
-      ...currentClicks,
-      [contentId]: { count, title, type, lastClicked: new Date().toISOString() }
-    };
-    
-    const updatedProfile = { ...profile, contentClicks: newClicks };
-    setProfile(updatedProfile);
-    safeStorage.setItem("profile_cache", JSON.stringify(updatedProfile));
-      safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
-    safeStorage.setItem("pending_content_clicks", JSON.stringify(newClicks));
-    safeStorage.setItem("needs_user_sync", "true");
-  };
-
-  const trackLinkClick = (url: string, title?: string) => {
-    if (!profile || !user) return;
-    const currentClicks = profile.linkClicks || {};
-    const count = (currentClicks[url]?.count || 0) + 1;
-    const newClicks = {
-      ...currentClicks,
-      [url]: { count, url, title: title || currentClicks[url]?.title || '', lastClicked: new Date().toISOString() }
-    };
-
-    const updatedProfile = { ...profile, linkClicks: newClicks };
-    setProfile(updatedProfile);
-    safeStorage.setItem("profile_cache", JSON.stringify(updatedProfile));
-      safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
-    safeStorage.setItem("pending_link_clicks", JSON.stringify(newClicks));
-    safeStorage.setItem("needs_user_sync", "true");
-  };
-
   return (
     <AuthContext.Provider
       value={{
@@ -1783,8 +1736,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         logout,
         toggleFavorite,
         toggleWatchLater,
-        trackContentClick,
-        trackLinkClick,
         refreshProfile,
         isSyncing,
       }}

@@ -223,14 +223,14 @@ export default function Login() {
       try {
         const { getAuth, sendPasswordResetEmail } = await import('firebase/auth');
         await sendPasswordResetEmail(getAuth(), registeredUser.email);
-        setAlertConfig({isOpen: true, title: 'Success', message: 'A password reset link has been sent to your email.'});
+        alert('A password reset link has been sent to your email.');
       } catch (error: any) {
         console.error("Error sending reset email:", error);
-        setAlertConfig({isOpen: true, title: 'Error', message: error.message || 'Failed to send reset email.'});
+        setCustomError(error.message || 'Failed to send reset email.');
       }
     } else {
       if (settings?.isAdminContactEnabled === false) {
-        setAlertConfig({isOpen: true, title: 'Notice', message: "Password reset via admin contact is currently disabled."});
+        alert("Password reset via admin contact is currently disabled.");
         return;
       }
       // Open WhatsApp to admin

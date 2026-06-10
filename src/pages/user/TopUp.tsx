@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth, standardizePhone } from '../../contexts/AuthContext';
 import { ArrowLeft, Copy, Check, Send, Loader2, Wallet, Smartphone, CreditCard, Banknote } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import AlertModal from '../../components/AlertModal';
@@ -115,10 +115,7 @@ export default function TopUp() {
 
       const message = `Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${whatsappNumber || profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nPlease approve my membership top-up. Order ID: ${currentOrderId}\nMonths: ${lastOrder?.months || months}\nAmount: Rs ${lastOrder?.amount || months * (settings?.membershipFee || 200)}`;
       
-      let supportPhone = settings?.supportNumber || '3363284466';
-      if (supportPhone.startsWith('0')) supportPhone = '92' + supportPhone.substring(1);
-      else if (!supportPhone.startsWith('92')) supportPhone = '92' + supportPhone;
-      const adminPhone = supportPhone.replace('+', '');
+      const adminPhone = standardizePhone(settings?.supportNumber || '3363284466').replace('+', '');
       const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
       
       window.open(whatsappUrl, '_blank');
