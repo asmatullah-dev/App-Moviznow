@@ -16,6 +16,7 @@ import { useModalBehavior } from './hooks/useModalBehavior';
 import { useGlobalButtonHaptics } from './hooks/useHaptics';
 import { OfflineBanner } from './components/OfflineBanner';
 import { SyncBanner } from './components/SyncBanner';
+import { AnalyticsTracker } from './components/AnalyticsTracker';
 
 // Pages
 const MaintenancePage = lazy(() => import('./pages/MaintenancePage'));
@@ -117,6 +118,7 @@ export default function App() {
                     <SyncBanner />
                     <SystemNotificationWrapper />
                     <BrowserRouter>
+                    <AnalyticsTracker />
                     <MediaModalController isOpen={isMediaModalOpen} onClose={() => setIsMediaModalOpen(false)} />
                     <Suspense fallback={<LoadingFallback />}>
                       <Routes>

@@ -5,7 +5,141 @@ import * as cheerio from 'cheerio';
 export const linkExtractionRouter = Router();
 
 const extractionCache = new Map<string, { data: any, timestamp: number }>();
+const inFlightRequests = new Map<string, Promise<any>>();
 const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
+
+const htmlCache = new Map<string, { data: any, status: number, headers: any, timestamp: number }>();
+const inFlightHtmlRequests = new Map<string, Promise<any>>();
+const HTML_CACHE_TTL = 10 * 60 * 1000;
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, value] of extractionCache.entries()) {
+    if (now - value.timestamp >= CACHE_TTL) {
+      extractionCache.delete(key);
+    }
+  }
+  for (const [key, value] of htmlCache.entries()) {
+    if (now - value.timestamp >= HTML_CACHE_TTL) {
+      htmlCache.delete(key);
+    }
+  }
+}, 5 * 60 * 1000);
+
+async function fetchDirect(url: string, timeout = 6000) {
+  const headers = {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    Accept:
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "no-cache",
+    Pragma: "no-cache",
+  };
+  return axios.get(url, {
+    headers,
+    validateStatus: () => true,
+    timeout,
+    maxContentLength: 5242880,
+    maxBodyLength: 5242880,
+  });
+}
+
+function isCloudflareResponse(response: any) {
+  if (!response) return true;
+  if (response.status === 403 || response.status === 503 || response.status >= 500) return true;
+  if (response.status === 404) return false;
+  if (!response.data || typeof response.data !== "string") return false;
+  const dataLower = response.data.substring(0, 10000).toLowerCase();
+  if (
+    dataLower.includes("<title>just a moment</title>") ||
+    dataLower.includes("<title>cloudflare") ||
+    dataLower.includes("<title>ddos protection</title>") ||
+    dataLower.includes("<title>attention required!")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+async function fetchWithApi(url: string, timeout = 10000) {
+  if (url.includes("vcloud")) {
+    const scraperApiUrl = `http://api.scraperapi.com?api_key=${process.env.SCRAPER_API_KEY || "9cd207e5fa77b2c6ef6072a7ea4c4326"}&url=${encodeURIComponent(url)}`;
+    return axios.get(scraperApiUrl, {
+      validateStatus: () => true,
+      timeout,
+      maxContentLength: 5242880,
+      maxBodyLength: 5242880,
+    });
+  } else {
+    const microlinkUrl = `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`;
+    const res = await axios.get(microlinkUrl, {
+      validateStatus: () => true,
+      timeout,
+    });
+    if (res.data && res.data.data && res.data.data.body) {
+      return {
+        data: res.data.data.body,
+        status: 200,
+        headers: res.headers,
+      };
+    }
+    return { data: "", status: res.status || 500, headers: res.headers || {} };
+  }
+}
+
+async function fetchHtmlFallback(url: string) {
+  let response;
+  try {
+    response = await fetchDirect(url, 6000);
+    if (!isCloudflareResponse(response)) return response;
+  } catch (err) {}
+
+  try {
+    response = await fetchWithApi(url, 10000);
+    if (!isCloudflareResponse(response)) return response;
+  } catch (err) {}
+
+  try {
+    response = await fetchWithApi(url, 12000);
+  } catch (err) {
+    response = { data: "", status: 500, headers: {} };
+  }
+  return response;
+}
+
+async function fetchHtml(url: string) {
+  const cacheKey = url;
+  const cached = htmlCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < HTML_CACHE_TTL) {
+    return cached;
+  }
+  if (inFlightHtmlRequests.has(cacheKey)) {
+    return await inFlightHtmlRequests.get(cacheKey);
+  }
+
+  const promise = (async () => {
+    let response = await fetchHtmlFallback(url);
+    const result = {
+      data: response?.data || "",
+      status: response?.status || 500,
+      headers: response?.headers || {},
+      timestamp: Date.now(),
+    };
+    htmlCache.set(cacheKey, result);
+    return result;
+  })();
+
+  inFlightHtmlRequests.set(cacheKey, promise);
+  try {
+    const result = await promise;
+    inFlightHtmlRequests.delete(cacheKey);
+    return result;
+  } catch (err) {
+    inFlightHtmlRequests.delete(cacheKey);
+    throw err;
+  }
+}
 
   linkExtractionRouter.post("/api/hubcloud/extract", async (req, res) => {
     try {
@@ -26,172 +160,125 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
         return res.json(cached.data);
       }
 
-      const headers = {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        Accept:
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Cache-Control": "no-cache",
-        Pragma: "no-cache",
-      };
-
-      const response = await axios.get(url, {
-        headers,
-        validateStatus: () => true,
-        timeout: 25000,
-        maxContentLength: 5242880,
-        maxBodyLength: 5242880,
-      });
-      const $ = cheerio.load(response.data);
-
-      let sizeStr =
-        $('td:contains("File Size")').next('td').text() ||
-        $('li:contains("File Size") i').text() ||
-        $('li:contains("File Size")').text() ||
-        $('li:contains("Size") i').text() ||
-        $('li:contains("Size")').text();
-      sizeStr = sizeStr.replace("File Size", "").replace("Size", "").trim();
-
-      let size = "";
-      let unit = "";
-      if (sizeStr) {
-        const parts = sizeStr.split(" ");
-        if (parts.length >= 2) {
-          let num = parseFloat(parts[0]);
-          unit = parts[1].toUpperCase();
-
-          if (!isNaN(num)) {
-            // Convert from Hubcloud's Base-1024 to our Base-1000
-            const multiplier =
-              unit === "GB"
-                ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000)
-                : unit === "MB"
-                  ? (1024 * 1024) / (1000 * 1000)
-                  : unit === "KB"
-                    ? 1024 / 1000
-                    : 1;
-            num = num * multiplier;
-            size =
-              num >= 100
-                ? num.toFixed(0)
-                : num >= 10
-                  ? num.toFixed(1)
-                  : num.toFixed(2);
-            size = size.replace(/\.00$/, "").replace(/\.0$/, "");
-          } else {
-            size = parts[0];
-          }
-        } else {
-          size = sizeStr;
-        }
+      // If we already successfully extracted the direct link, use that info to instantly approve the status
+      const directCacheKey = `direct_${url}_false`;
+      const directCached = extractionCache.get(directCacheKey);
+      if (directCached && Date.now() - directCached.timestamp < CACHE_TTL) {
+         if (directCached.data && directCached.data.url && directCached.data.url !== url) {
+             return res.json({
+               size: directCached.data.size || "",
+               unit: "",
+               title: "Extracted Link (Cached)",
+               isWorking: true,
+               isNotFound: false
+             });
+         }
       }
 
-      let title = $("title").text() || $(".card-header").text() || "";
-      const isCloudflare =
-        title.toLowerCase().includes("just a moment") ||
-        title.toLowerCase().includes("cloudflare") ||
-        title.toLowerCase().includes("ddos protection") ||
-        response.status === 403 ||
-        response.status === 503;
+      if (inFlightRequests.has(cacheKey)) {
+        const data = await inFlightRequests.get(cacheKey);
+        return res.json(data);
+      }
 
-      if (isCloudflare) {
-        try {
-          // Use Microlink proxy API to bypass Cloudflare
-          const dlRes = await axios.get(
-            `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
-            { timeout: 25000 },
-          );
-          if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
-            const proxyHtml = dlRes.data.data.body;
-            const $proxy = cheerio.load(proxyHtml);
-            let sStr =
-              $proxy('li:contains("File Size") i').text() ||
-              $proxy('li:contains("File Size")').text() ||
-              $proxy('li:contains("Size") i').text() ||
-              $proxy('li:contains("Size")').text();
-            sStr = sStr.replace("File Size", "").replace("Size", "").trim();
-            if (sStr) {
-              sizeStr = sStr;
-            }
+      const performFetch = async () => {
+        const response = await fetchHtml(url);
+        const $ = cheerio.load(response.data);
 
-            const proxyTitle =
-              $proxy("title").text() || $proxy(".card-header").text() || "";
-            if (
-              proxyTitle &&
-              !proxyTitle.toLowerCase().includes("just a moment")
-            ) {
-              title = proxyTitle;
+        let sizeStr =
+          $('td:contains("File Size")').next('td').text() ||
+          $('li:contains("File Size") i').text() ||
+          $('li:contains("File Size")').text() ||
+          $('li:contains("Size") i').text() ||
+          $('li:contains("Size")').text();
+        sizeStr = sizeStr.replace("File Size", "").replace("Size", "").trim();
 
-              // Recalculate size stuff based on fixed html
-              if (sizeStr) {
-                const parts = sizeStr.split(" ");
-                if (parts.length >= 2) {
-                  let num = parseFloat(parts[0]);
-                  unit = parts[1].toUpperCase();
-                  if (!isNaN(num)) {
-                    const multiplier =
-                      unit === "GB"
-                        ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000)
-                        : unit === "MB"
-                          ? (1024 * 1024) / (1000 * 1000)
-                          : unit === "KB"
-                            ? 1024 / 1000
-                            : 1;
-                    num = num * multiplier;
-                    size =
-                      num >= 100
-                        ? num.toFixed(0)
-                        : num >= 10
-                          ? num.toFixed(1)
-                          : num.toFixed(2);
-                    size = size.replace(/\.00$/, "").replace(/\.0$/, "");
-                  } else {
-                    size = parts[0];
-                  }
-                } else {
-                  size = sizeStr;
-                }
-              }
+        let size = "";
+        let unit = "";
+        if (sizeStr) {
+          const parts = sizeStr.split(" ");
+          if (parts.length >= 2) {
+            let num = parseFloat(parts[0]);
+            unit = parts[1].toUpperCase();
+
+            if (!isNaN(num)) {
+              // Convert from Hubcloud's Base-1024 to our Base-1000
+              const multiplier =
+                unit === "GB"
+                  ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000)
+                  : unit === "MB"
+                    ? (1024 * 1024) / (1000 * 1000)
+                    : unit === "KB"
+                      ? 1024 / 1000
+                      : 1;
+              num = num * multiplier;
+              size =
+                num >= 100
+                  ? num.toFixed(0)
+                  : num >= 10
+                    ? num.toFixed(1)
+                    : num.toFixed(2);
+              size = size.replace(/\.00$/, "").replace(/\.0$/, "");
             } else {
-              title = "Unknown (Cloudflare Block)";
+              size = parts[0];
             }
           } else {
-            title = "Unknown (Cloudflare Block)";
+            size = sizeStr;
           }
-        } catch (err) {
+        }
+
+        let title = $("title").text() || $(".card-header").text() || "";
+        const isCloudflare =
+          title.toLowerCase().includes("just a moment") ||
+          title.toLowerCase().includes("cloudflare") ||
+          title.toLowerCase().includes("ddos protection") ||
+          response.status === 403 ||
+          response.status === 503;
+
+        if (isCloudflare && !title) {
+          title = "Unknown (Cloudflare Block)";
+        } else if (isCloudflare && title.toLowerCase().includes("just a moment")) {
           title = "Unknown (Cloudflare Block)";
         }
-      }
 
-      const isNotFound =
-        response.status === 404 || title.toLowerCase().includes("not found");
-      const isWorking =
-        response.status < 400 ||
-        response.status === 403 ||
-        response.status === 503 ||
-        title === "Unknown (Cloudflare Block)";
+        const isNotFound =
+          response.status === 404 || title.toLowerCase().includes("not found");
+        const isWorking =
+          response.status < 400 ||
+          response.status === 403 ||
+          response.status === 503 ||
+          title === "Unknown (Cloudflare Block)";
 
-      const responseData = {
-        size,
-        unit,
-        title: title.trim(),
-        isWorking: isWorking && !isNotFound,
-        isNotFound,
+        const responseData = {
+          size,
+          unit,
+          title: title.trim(),
+          isWorking: isWorking && !isNotFound,
+          isNotFound,
+        };
+        
+        const isSuccessful = 
+          responseData.isWorking && 
+          !responseData.isNotFound && 
+          responseData.title && 
+          !responseData.title.toLowerCase().includes("cloudflare block") && 
+          !responseData.title.toLowerCase().includes("timeout");
+
+        if (isSuccessful) {
+          extractionCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
+        }
+
+        return responseData;
       };
-      
-      const isSuccessful = 
-        responseData.isWorking && 
-        !responseData.isNotFound && 
-        responseData.title && 
-        !responseData.title.toLowerCase().includes("cloudflare block") && 
-        !responseData.title.toLowerCase().includes("timeout");
 
-      if (isSuccessful) {
-        extractionCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
+      try {
+        inFlightRequests.set(cacheKey, performFetch());
+        const data = await inFlightRequests.get(cacheKey);
+        inFlightRequests.delete(cacheKey);
+        return res.json(data);
+      } catch (err) {
+        inFlightRequests.delete(cacheKey);
+        throw err;
       }
-
-      res.json(responseData);
     } catch (e: any) {
       console.error("Hubcloud extract error:", e.message);
       // Even if it fails (like timeout on Vercel), return a generic response instead of 500
@@ -221,16 +308,32 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
 
       if (checkOnly && url) {
         try {
-          const checkRes = await axios.get(url, {
+          let checkRes = await axios.get(url, {
             headers: { ...headers, Range: "bytes=0-0" },
             maxRedirects: 0,
             validateStatus: () => true,
             timeout: 5000,
             responseType: "stream",
           });
+
+          // Fallback to scraper for vcloud if direct fails (e.g. 403, 503)
+          if ((checkRes.status === 403 || checkRes.status === 503) && url.includes("vcloud")) {
+             if (checkRes.data && typeof checkRes.data.destroy === "function") {
+               checkRes.data.destroy();
+             }
+             const checkUrl = `http://api.scraperapi.com?api_key=${process.env.SCRAPER_API_KEY || "9cd207e5fa77b2c6ef6072a7ea4c4326"}&url=${encodeURIComponent(url)}`;
+             checkRes = await axios.get(checkUrl, {
+               maxRedirects: 0,
+               validateStatus: () => true,
+               timeout: 10000,
+               responseType: "stream",
+             });
+          }
+
           if (checkRes.data && typeof checkRes.data.destroy === "function") {
             checkRes.data.destroy();
           }
+
           if (
             checkRes.status < 400 ||
             checkRes.status === 405 ||
@@ -261,13 +364,7 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
         return { url };
       }
 
-      const response = await axios.get(url, {
-        headers,
-        validateStatus: () => true,
-        timeout: 25000,
-        maxContentLength: 5242880,
-        maxBodyLength: 5242880,
-      });
+      let response = await fetchHtml(url);
       let $ = cheerio.load(response.data);
 
       const titleText = $("title").text().toLowerCase();
@@ -279,29 +376,7 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
         response.status === 503;
 
       if (isCf) {
-        try {
-          const dlRes = await axios.get(
-            `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
-            { timeout: 25000 },
-          );
-          if (dlRes.data && dlRes.data.data && dlRes.data.data.body) {
-            const proxyTitle =
-              cheerio.load(dlRes.data.data.body)("title").text().toLowerCase() || "";
-            if (
-              !proxyTitle.includes("just a moment") &&
-              !proxyTitle.includes("cloudflare") &&
-              !proxyTitle.includes("ddos protection")
-            ) {
-              $ = cheerio.load(dlRes.data.data.body);
-            } else {
-              return { url: url, isCloudflare: true };
-            }
-          } else {
-            return { url: url, isCloudflare: true };
-          }
-        } catch (err) {
-          return { url: url, isCloudflare: true };
-        }
+        return { url: url, isCloudflare: true };
       }
 
       let nextUrl =
@@ -327,13 +402,7 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
           return { url };
         }
       } else {
-        let res2 = await axios.get(nextUrl, {
-          headers,
-          validateStatus: () => true,
-          timeout: 25000,
-          maxContentLength: 5242880,
-          maxBodyLength: 5242880,
-        });
+        let res2 = await fetchHtml(nextUrl);
         $2 = cheerio.load(res2.data);
 
         const titleText2 = $2("title").text().toLowerCase();
@@ -345,17 +414,8 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
           res2.status === 503;
 
         if (isCf2) {
-          try {
-            const dlRes2 = await axios.get(
-              `https://api.microlink.io/?url=${encodeURIComponent(nextUrl)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`,
-              { timeout: 25000 },
-            );
-            if (dlRes2.data && dlRes2.data.data && dlRes2.data.data.body) {
-              $2 = cheerio.load(dlRes2.data.data.body);
-            }
-          } catch (err) {
-            // Ignore and continue with original $2
-          }
+           // We could return isCloudflare here if it's completely unbypassable
+           // but keeping original behavior we just ignore and continue with what we have
         }
       }
 
@@ -545,35 +605,51 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
   linkExtractionRouter.post("/api/hubcloud/direct-link", async (req, res) => {
     try {
       const { url, checkOnly } = req.body;
-      const cacheKey = `direct_${url}_${checkOnly}`;
+      const isCheckOnly = Boolean(checkOnly);
+      const cacheKey = `direct_${url}_${isCheckOnly}`;
       
       const cached = extractionCache.get(cacheKey);
       if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
         return res.json(cached.data);
       }
 
-      const data = await performExtraction(url, checkOnly, 0);
-
-      // Return ok stuff for checkOnly
-      if (checkOnly && data && data.ok !== undefined) {
-         if (data.ok) {
-            extractionCache.set(cacheKey, { data, timestamp: Date.now() });
-         }
-         return res.json(data);
+      // In-flight coalescing
+      if (inFlightRequests.has(cacheKey)) {
+        const data = await inFlightRequests.get(cacheKey);
+        return res.json(data);
       }
 
-      // If cloudflare error
-      if (data.isCloudflare) {
-         const responseData = { url: data.url, isCloudflare: true };
-         return res.json(responseData);
-      }
+      const extractPromise = performExtraction(url, isCheckOnly, 0);
+      inFlightRequests.set(cacheKey, extractPromise);
 
-      // Only cache if extraction was successful (i.e. url has changed and is different from the input url)
-      const isSuccessfulLink = data && data.url && data.url !== url;
-      if (isSuccessfulLink) {
-         extractionCache.set(cacheKey, { data, timestamp: Date.now() });
+      try {
+        const data = await extractPromise;
+        inFlightRequests.delete(cacheKey);
+
+        // Return ok stuff for checkOnly
+        if (isCheckOnly && data && data.ok !== undefined) {
+           if (data.ok) {
+              extractionCache.set(cacheKey, { data, timestamp: Date.now() });
+           }
+           return res.json(data);
+        }
+
+        // If cloudflare error
+        if (data.isCloudflare) {
+           const responseData = { url: data.url, isCloudflare: true };
+           return res.json(responseData);
+        }
+
+        // Only cache if extraction was successful (i.e. url has changed and is different from the input url)
+        const isSuccessfulLink = data && data.url && data.url !== url;
+        if (isSuccessfulLink) {
+           extractionCache.set(cacheKey, { data, timestamp: Date.now() });
+        }
+        return res.json(data);
+      } catch (err) {
+        inFlightRequests.delete(cacheKey);
+        throw err;
       }
-      return res.json(data);
     } catch (e: any) {
       console.error(e);
       res.json({ url: req.body.url });

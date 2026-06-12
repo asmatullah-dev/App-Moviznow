@@ -128,6 +128,7 @@ export default function MovieDetails() {
   const [linkPopup, setLinkPopup] = useState<{
     isOpen: boolean;
     url: string;
+    originalUrl?: string;
     name: string;
     id: string;
     isZip?: boolean;
@@ -1354,6 +1355,7 @@ export default function MovieDetails() {
       setLinkPopup({
         isOpen: true,
         url,
+        originalUrl: url,
         name: linkName || "Unknown Link",
         id: linkId || "unknown",
         isZip,
@@ -1362,16 +1364,46 @@ export default function MovieDetails() {
 
       let shouldExtract = true;
       const now = Date.now();
-      const cached = hubcloudCacheRef.current[url];
+      
+      let cachedLocal: any = null;
+      try {
+        const cacheStr = localStorage.getItem('hubcloud_extraction_cache');
+        if (cacheStr) {
+          const cacheObj = JSON.parse(cacheStr);
+          
+          // Prune old entries (> 10 mins) to prevent localStorage bloat
+          const prunedObj: Record<string, any> = {};
+          let changed = false;
+          for (const key in cacheObj) {
+             if (now - cacheObj[key].timestamp < 600000) {
+                prunedObj[key] = cacheObj[key];
+             } else {
+                changed = true;
+             }
+          }
+          if (changed) {
+             localStorage.setItem('hubcloud_extraction_cache', JSON.stringify(prunedObj));
+          }
+          
+          if (prunedObj[url]) {
+            cachedLocal = prunedObj[url];
+          }
+        }
+      } catch (e) {}
 
-      // If we have a cached link within 30 seconds, use it directly
-      if (cached && now - cached.timestamp < 30000) {
+      const cached = hubcloudCacheRef.current[url] || cachedLocal;
+
+      // If we have a cached link within 10 minutes (600,000 ms), use it directly
+      if (cached && now - cached.timestamp < 600000) {
         shouldExtract = false;
         finalUrl = cached.url;
         finalTinyUrl = undefined;
         finalCandidates = cached.candidates;
         finalSize = cached.size;
+        hubcloudCacheRef.current[url] = cached; // Update memory cache
       }
+
+      let isCloudflareBlocked = false;
 
       if (shouldExtract) {
         try {
@@ -1388,31 +1420,32 @@ export default function MovieDetails() {
               finalCandidates = data.candidates;
               finalSize = data.size;
               
-              // Save to cache
-              hubcloudCacheRef.current[url] = {
+              // Save to cache (memory and localStorage)
+              const cacheEntry = {
                 url: finalUrl,
                 candidates: finalCandidates,
                 size: finalSize,
                 timestamp: Date.now(),
               };
+              hubcloudCacheRef.current[url] = cacheEntry;
+              try {
+                const cacheStr = localStorage.getItem('hubcloud_extraction_cache');
+                const cacheObj = cacheStr ? JSON.parse(cacheStr) : {};
+                cacheObj[url] = cacheEntry;
+                localStorage.setItem('hubcloud_extraction_cache', JSON.stringify(cacheObj));
+              } catch (e) {}
             } else if (data.isCloudflare) {
               finalUrl = url;
               finalTinyUrl = tinyUrl;
               finalSize = "Cloudflare Blocked";
-              hubcloudCacheRef.current[url] = {
-                url: finalUrl,
-                size: finalSize,
-                timestamp: Date.now(),
-                isCloudflare: true,
-              };
+              isCloudflareBlocked = true;
+              // We do NOT cache failed extractions
             }
           }
         } catch (e) {
           console.error("Failed to resolve link", e);
         }
       }
-
-      const isCloudflareBlocked = hubcloudCacheRef.current[url]?.isCloudflare;
 
       setExtractingLinkId((prev) => (prev === clickId ? null : prev));
       setLinkPopup((prev) => {
@@ -1422,6 +1455,7 @@ export default function MovieDetails() {
           return {
             ...prev,
             url: finalUrl,
+            originalUrl: url,
             name: linkName || "Unknown Link",
             id: linkId || "unknown",
             isZip,
@@ -1439,6 +1473,7 @@ export default function MovieDetails() {
     setLinkPopup({
       isOpen: true,
       url: finalUrl,
+      originalUrl: url,
       name: linkName || "Unknown Link",
       id: linkId || "unknown",
       isZip,
@@ -1665,7 +1700,7 @@ export default function MovieDetails() {
         contentType: mergedContent.type,
         linkId: linkPopup.id,
         linkName: linkPopup.name,
-        linkUrl: linkPopup.url,
+        linkUrl: linkPopup.originalUrl || linkPopup.url,
         status: "pending",
         createdAt: new Date().toISOString(),
       };
