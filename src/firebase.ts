@@ -25,7 +25,14 @@ export const messaging = typeof window !== 'undefined' ? getMessaging(app) : nul
 
 export const analyticsPromise = typeof window !== 'undefined' 
   ? isSupported()
-      .then(yes => (yes && extendedConfig.measurementId) ? getAnalytics(app) : null)
+      .then(yes => {
+        console.log("Analytics strongly supported status:", yes, "measurementId:", extendedConfig.measurementId);
+        if (yes && extendedConfig.measurementId) {
+          console.log("Initializing GA with Measurement ID:", extendedConfig.measurementId);
+          return getAnalytics(app);
+        }
+        return null;
+      })
       .catch((e) => {
         console.warn("Analytics not supported or failed to initialize", e);
         return null;
