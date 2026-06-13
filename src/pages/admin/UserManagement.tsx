@@ -916,7 +916,7 @@ export default function UserManagement() {
     result = result.filter(u => u.role !== 'owner');
     
     if (searchTerm) {
-      result = smartSearch(result, searchTerm, ['displayName', 'email', 'phone']);
+      result = smartSearch(result, searchTerm, ['displayName', 'email', 'phone', 'uid']);
     }
     if (filterRole !== 'all') {
       result = result.filter(u => u.role === filterRole);
@@ -1144,7 +1144,7 @@ export default function UserManagement() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
             <input
               type="text"
-              placeholder="Search users by name, email, or phone..."
+              placeholder="Search users by name, email, phone or ID..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-9 pr-4 py-2 focus:outline-none focus:border-emerald-500 text-sm"

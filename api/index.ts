@@ -1384,6 +1384,9 @@ async function startServer() {
             "content_chunks",
             "chunk_meta",
             "collections",
+            "settings",
+            "notification_chunks",
+            "collection_chunks"
           ]
         : [
             "genres",
@@ -1392,6 +1395,7 @@ async function startServer() {
             "content_chunks",
             "chunk_meta",
             "collections",
+            "collection_chunks"
           ];
       const results: any = {};
 
@@ -1517,6 +1521,9 @@ async function startServer() {
             "content_chunks",
             "chunk_meta",
             "collections",
+            "settings",
+            "notification_chunks",
+            "collection_chunks"
           ]
         : [
             "genres",
@@ -1525,6 +1532,7 @@ async function startServer() {
             "content_chunks",
             "chunk_meta",
             "collections",
+            "collection_chunks"
           ];
       const logs: string[] = [];
 
@@ -1676,6 +1684,9 @@ async function startServer() {
             "content_chunks",
             "chunk_meta",
             "collections",
+            "settings",
+            "notification_chunks",
+            "collection_chunks"
           ]
         : [
             "genres",
@@ -1684,6 +1695,7 @@ async function startServer() {
             "content_chunks",
             "chunk_meta",
             "collections",
+            "collection_chunks"
           ];
       const logs: string[] = [];
 
