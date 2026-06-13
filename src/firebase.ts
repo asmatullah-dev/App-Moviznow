@@ -39,8 +39,8 @@ export const analyticsPromise = typeof window !== 'undefined'
           }
         }
         
-        // Always try to load the standalone gtag if we have a custom measurement ID
-        if (customMeasurementId) {
+        // Ensure standalone gtag is always initialized with the correct ID
+        if (customMeasurementId && !document.querySelector(`script[src*="${customMeasurementId}"]`)) {
           console.log("Initializing Standalone GA with Measurement ID:", customMeasurementId);
           const script = document.createElement('script');
           script.async = true;
@@ -78,12 +78,40 @@ export const requestNotificationPermission = async (force: boolean = false) => {
   try {
     const permission = await Notification.requestPermission();
     if (permission === 'granted') {
+      let isForced = force;
+      // Auto-migrate users once to the new FCM token system in the background
+      const MIGRATION_KEY = 'fcm_v10_migrated_auto_v1';
+      if (!force && !localStorage.getItem(MIGRATION_KEY)) {
+        isForced = true;
+        localStorage.setItem(MIGRATION_KEY, 'true');
+      }
+
       // Register service worker explicitly to ensure it's the right one
       let registration;
       if ('serviceWorker' in navigator) {
+        if (isForced) {
+          try {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            for (let reg of registrations) {
+              await reg.unregister();
+            }
+            console.log("Unregistered old service workers.");
+          } catch(e) {}
+        }
         // Pass Firebase config via query parameters to the service worker so it dynamically updates on remix
         const configParams = new URLSearchParams(firebaseConfig as any).toString();
         registration = await navigator.serviceWorker.register(`/sw.js?${configParams}`);
+      }
+
+      if (isForced) {
+        try {
+          // Import deleteToken at the top or use it directly
+          const { deleteToken } = await import('firebase/messaging');
+          await deleteToken(messaging);
+          console.log("Deleted old FCM token to force new registration.");
+        } catch (e) {
+          console.warn("Could not delete old token", e);
+        }
       }
 
       const vapidKey = import.meta.env.VITE_FCM_VAPID_KEY;
@@ -110,7 +138,7 @@ export const requestNotificationPermission = async (force: boolean = false) => {
           if (lastUpdate) parsedCache = JSON.parse(lastUpdate);
         } catch(e) {}
 
-        const needsUpdate = force || !parsedCache || 
+        const needsUpdate = isForced || !parsedCache || 
                             parsedCache.token !== token || 
                             parsedCache.userId !== currentUserId ||
                             (now - parsedCache.timestamp > oneDay);

@@ -20,12 +20,18 @@ export const logEvent = async (
     // Log to Google Analytics if initialized
     const gaInstance = analytics || await analyticsPromise;
     if (gaInstance) {
-      firebaseLogEvent(gaInstance, type, {
-        user_id: userId,
-        ...data
-      });
-    } else if (typeof window !== 'undefined' && 'gtag' in window) {
-      // Fallback to standalone gtag
+      try {
+        firebaseLogEvent(gaInstance, type, {
+          user_id: userId,
+          ...data
+        });
+      } catch (e) {
+        // ignore
+      }
+    }
+    
+    // Always log to standalone gtag if available (more reliable)
+    if (typeof window !== 'undefined' && 'gtag' in window) {
       // @ts-ignore
       window.gtag('event', type, {
         user_id: userId,
