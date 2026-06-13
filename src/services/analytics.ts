@@ -24,6 +24,13 @@ export const logEvent = async (
         user_id: userId,
         ...data
       });
+    } else if (typeof window !== 'undefined' && 'gtag' in window) {
+      // Fallback to standalone gtag
+      // @ts-ignore
+      window.gtag('event', type, {
+        user_id: userId,
+        ...data
+      });
     }
   } catch (error) {
     console.error('Error logging analytics event:', error);

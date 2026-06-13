@@ -1,22 +1,26 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { initializeFirestore, doc, getDoc, updateDoc, setDoc, collection, enableIndexedDbPersistence, serverTimestamp } from 'firebase/firestore';
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, getDoc, updateDoc, setDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 import { getAnalytics, isSupported } from 'firebase/analytics';
 import firebaseConfig from '../firebase-applet-config.json';
 
-// Support injecting GA Measurement ID via Environment Variables for easier configuration
+// Base config without injecting measurementId to avoid Firebase SDK mismatch warnings
+const { measurementId: _omittedMeasurementId, ...restConfig } = firebaseConfig;
 const extendedConfig = {
-  ...firebaseConfig,
-  measurementId: firebaseConfig.measurementId || import.meta.env.VITE_GA_MEASUREMENT_ID || ""
+  ...restConfig
 };
+
+// Use VITE_GA_MEASUREMENT_ID or fallback to config
+const customMeasurementId = import.meta.env.VITE_GA_MEASUREMENT_ID || firebaseConfig.measurementId || "";
 
 export const app = initializeApp(extendedConfig);
 
 // Use initializeFirestore with experimentalForceLongPolling: true to fix connection issues in sandboxed environments
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
+  localCache: typeof window !== 'undefined' ? persistentLocalCache({ tabManager: persistentMultipleTabManager() }) : undefined
 }, extendedConfig.firestoreDatabaseId);
 
 export const auth = getAuth(app);
@@ -26,12 +30,37 @@ export const messaging = typeof window !== 'undefined' ? getMessaging(app) : nul
 export const analyticsPromise = typeof window !== 'undefined' 
   ? isSupported()
       .then(yes => {
-        console.log("Analytics strongly supported status:", yes, "measurementId:", extendedConfig.measurementId);
-        if (yes && extendedConfig.measurementId) {
-          console.log("Initializing GA with Measurement ID:", extendedConfig.measurementId);
-          return getAnalytics(app);
+        let analyticsInstance = null;
+        if (yes) {
+          try {
+            analyticsInstance = getAnalytics(app);
+          } catch(e) {
+            console.warn("Could not initialize Firebase Analytics:", e);
+          }
         }
-        return null;
+        
+        // Always try to load the standalone gtag if we have a custom measurement ID
+        if (customMeasurementId) {
+          console.log("Initializing Standalone GA with Measurement ID:", customMeasurementId);
+          const script = document.createElement('script');
+          script.async = true;
+          script.src = `https://www.googletagmanager.com/gtag/js?id=${customMeasurementId}`;
+          document.head.appendChild(script);
+          
+          // @ts-ignore
+          window.dataLayer = window.dataLayer || [];
+          // @ts-ignore
+          window.gtag = function() { 
+            // @ts-ignore
+            window.dataLayer.push(arguments); 
+          };
+          // @ts-ignore
+          window.gtag('js', new Date());
+          // @ts-ignore
+          window.gtag('config', customMeasurementId, { send_page_view: true });
+        }
+        
+        return analyticsInstance;
       })
       .catch((e) => {
         console.warn("Analytics not supported or failed to initialize", e);
@@ -41,19 +70,6 @@ export const analyticsPromise = typeof window !== 'undefined'
 
 export let analytics: any = null;
 analyticsPromise.then(a => { analytics = a; });
-
-// Enable offline persistence
-if (typeof window !== 'undefined') {
-  enableIndexedDbPersistence(db).catch((err) => {
-    if (err.code === 'failed-precondition') {
-      // Multiple tabs open, persistence can only be enabled in one tab at a a time.
-      console.warn('Firestore persistence failed: Multiple tabs open');
-    } else if (err.code === 'unimplemented') {
-      // The current browser does not support all of the features required to enable persistence
-      console.warn('Firestore persistence is not supported by this browser');
-    }
-  });
-}
 
 // Function to request notification permission and get token
 export const requestNotificationPermission = async (force: boolean = false) => {
@@ -83,7 +99,7 @@ export const requestNotificationPermission = async (force: boolean = false) => {
       
       if (token) {
         // Optimized: Only store token in Firestore if it changed or hasn't been updated in 24 hours
-        const CACHE_KEY = `fcm_token_v2_last_update_${auth.currentUser?.uid || 'anon'}`;
+        const CACHE_KEY = `fcm_token_v3_last_update_${auth.currentUser?.uid || 'anon'}`;
         const lastUpdate = localStorage.getItem(CACHE_KEY);
         const now = Date.now();
         const oneDay = 24 * 60 * 60 * 1000;

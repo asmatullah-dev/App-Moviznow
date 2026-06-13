@@ -16,6 +16,14 @@ export function AnalyticsTracker() {
             page_title: document.title,
             page_location: window.location.href,
           });
+        } else if (typeof window !== 'undefined' && 'gtag' in window) {
+          // Fallback to standalone gtag
+          // @ts-ignore
+          window.gtag('event', 'page_view', {
+            page_path: location.pathname + location.search,
+            page_title: document.title,
+            page_location: window.location.href,
+          });
         }
       } catch (error) {
         console.error('Error tracking page view:', error);
