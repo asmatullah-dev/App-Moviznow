@@ -83,14 +83,21 @@ export const requestNotificationPermission = async (force: boolean = false) => {
       
       if (token) {
         // Optimized: Only store token in Firestore if it changed or hasn't been updated in 24 hours
-        const CACHE_KEY = `fcm_token_last_update_${auth.currentUser?.uid || 'anon'}`;
+        const CACHE_KEY = `fcm_token_v2_last_update_${auth.currentUser?.uid || 'anon'}`;
         const lastUpdate = localStorage.getItem(CACHE_KEY);
         const now = Date.now();
         const oneDay = 24 * 60 * 60 * 1000;
+        const currentUserId = auth.currentUser?.uid || 'anonymous';
 
-        const needsUpdate = force || !lastUpdate || 
-                            JSON.parse(lastUpdate).token !== token || 
-                            (now - JSON.parse(lastUpdate).timestamp > oneDay);
+        let parsedCache: any = null;
+        try {
+          if (lastUpdate) parsedCache = JSON.parse(lastUpdate);
+        } catch(e) {}
+
+        const needsUpdate = force || !parsedCache || 
+                            parsedCache.token !== token || 
+                            parsedCache.userId !== currentUserId ||
+                            (now - parsedCache.timestamp > oneDay);
 
         if (needsUpdate) {
           try {
@@ -162,13 +169,13 @@ export const requestNotificationPermission = async (force: boolean = false) => {
               }
             }
 
-            localStorage.setItem(CACHE_KEY, JSON.stringify({ token, timestamp: now }));
+            localStorage.setItem(CACHE_KEY, JSON.stringify({ token, timestamp: now, userId: currentUserId }));
             
             // Also register with server for topic subscription
             await fetch('/api/notifications/subscribe', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ token })
+              body: JSON.stringify({ token, userId: auth.currentUser?.uid })
             });
           } catch (e) {
             console.warn('Error saving FCM token:', e);

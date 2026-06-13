@@ -530,7 +530,7 @@ async function startServer() {
     ["/api/notifications/subscribe", "/notifications/subscribe"],
     async (req, res) => {
       try {
-        const { token } = req.body;
+        const { token, userId } = req.body;
         if (!token) return res.status(400).json({ error: "Token required" });
 
         // Check if messaging is available (requires service account)
@@ -539,6 +539,11 @@ async function startServer() {
             throw new Error("Firebase Admin not initialized");
           }
           await admin.messaging().subscribeToTopic(token, "all_users");
+          
+          if (userId) {
+            await admin.messaging().subscribeToTopic(token, `user_${userId}`);
+          }
+          
           res.json({ success: true });
         } catch (fcmError: any) {
           const isAuthError =
@@ -566,21 +571,45 @@ async function startServer() {
     ["/api/notifications/send", "/notifications/send"],
     async (req, res) => {
       try {
-        const { title, body, imageUrl, url } = req.body;
-
-        const message = {
-          data: {
-            title,
-            body,
-            imageUrl: imageUrl || "",
-            url: url || "/",
-          },
-          topic: "all_users",
-        };
+        const { title, body, imageUrl, url, buttonUrl, targetUserIds } = req.body;
+        const targetUrl = buttonUrl || url || "/";
 
         try {
-          const response = await admin.messaging().send(message);
-          res.json({ success: true, messageId: response });
+          if (Array.isArray(targetUserIds) && targetUserIds.length > 0) {
+            const messages = targetUserIds.map((uid: string) => ({
+              data: {
+                title,
+                body,
+                imageUrl: imageUrl || "",
+                url: targetUrl,
+              },
+              topic: `user_${uid}`,
+            }));
+            
+            let successCount = 0;
+            let failureCount = 0;
+            
+            for (let i = 0; i < messages.length; i += 500) {
+              const batch = messages.slice(i, i + 500);
+              const response = await admin.messaging().sendEach(batch);
+              successCount += response.successCount;
+              failureCount += response.failureCount;
+            }
+            res.json({ success: true, successCount, failureCount });
+          } else {
+            const message = {
+              data: {
+                title,
+                body,
+                imageUrl: imageUrl || "",
+                url: targetUrl,
+              },
+              topic: "all_users",
+            };
+
+            const response = await admin.messaging().send(message);
+            res.json({ success: true, messageId: response });
+          }
         } catch (fcmError: any) {
           console.error("FCM Send failed:", fcmError.message);
           res.status(500).json({
