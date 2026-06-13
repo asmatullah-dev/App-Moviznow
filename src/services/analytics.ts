@@ -1,5 +1,6 @@
 import { logEvent as firebaseLogEvent } from 'firebase/analytics';
 import { analytics, analyticsPromise } from '../firebase';
+import { safeStorage } from '../utils/safeStorage';
 
 export const logEvent = async (
   type: 'session_start' | 'content_click' | 'link_click' | 'time_spent',
@@ -15,6 +16,19 @@ export const logEvent = async (
   skipFirestore = false
 ) => {
   if (!userId) return;
+
+  // Don't track if the user is an owner
+  try {
+    const cachedProfile = safeStorage.getItem('profile_cache');
+    if (cachedProfile) {
+      const profile = JSON.parse(cachedProfile);
+      if (profile.role === 'owner') {
+        return;
+      }
+    }
+  } catch (e) {
+    // Ignore parse error
+  }
 
   try {
     // Log to Google Analytics if initialized

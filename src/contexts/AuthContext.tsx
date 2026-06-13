@@ -745,8 +745,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             currentUser.displayName || mergedOldData.displayName || "",
           photoURL:
             currentUser.photoURL || mergedOldData.photoURL || "",
-          // Increment session data for the current session
-          sessionsCount: (mergedOldData.sessionsCount || 0) + 1,
+          // Increment session data for the current session, unless it's an owner
+          sessionsCount: isOwner ? (mergedOldData.sessionsCount || 0) : ((mergedOldData.sessionsCount || 0) + 1),
           hasPassword: hasPassword,
           sessionId: getLocalSessionId(),
           // Enforce roles based on the high-privileged list or the old data
@@ -863,10 +863,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             !lastSessionStart ||
             now - parseInt(lastSessionStart) > twelveHours
           ) {
+            let isOwnerUser = currentUser.email?.toLowerCase() === "asmatn628@gmail.com";
+            try {
+              const cachedProfileStr = safeStorage.getItem('profile_cache');
+              if (cachedProfileStr) {
+                const p = JSON.parse(cachedProfileStr);
+                if (p.role === 'owner') isOwnerUser = true;
+              }
+            } catch(e) {}
+
             logEvent("session_start", currentUser.uid, {}, true); // Log to GA, skip individual Firestore write
             localStorage.setItem(sessionKey, now.toString());
             
-            pendingUpdates.sessionsCount = increment(1);
+            if (!isOwnerUser) {
+              pendingUpdates.sessionsCount = increment(1);
+            }
             pendingUpdates.lastActive = new Date().toISOString();
           }
         }
@@ -924,6 +935,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Track time spent accurately every second and save to local storage
     const timeTrackerInterval = setInterval(() => {
       if (auth.currentUser && sessionStartTimeRef.current) {
+        // Skip analytics for owner account
+        try {
+          const cachedProfileStr = safeStorage.getItem('profile_cache');
+          if (cachedProfileStr) {
+            const p = JSON.parse(cachedProfileStr);
+            if (p.role === 'owner') return;
+          }
+        } catch(e) {}
+
         if (document.visibilityState === "visible") {
           const uid = auth.currentUser.uid;
           const globalTickKey = `last_global_tick_${uid}`;
@@ -1042,6 +1062,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         auth.currentUser &&
         navigator.onLine
       ) {
+        // Skip analytics for owner account
+        try {
+          const cachedProfileStr = safeStorage.getItem('profile_cache');
+          if (cachedProfileStr) {
+            const p = JSON.parse(cachedProfileStr);
+            if (p.role === 'owner') return;
+          }
+        } catch (e) {}
+
         const uid = auth.currentUser.uid;
         const cacheKey = `accumulated_time_seconds_${uid}`;
         const lastSyncKey = `last_time_sync_${uid}`;

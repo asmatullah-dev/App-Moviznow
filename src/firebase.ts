@@ -30,6 +30,22 @@ export const messaging = typeof window !== 'undefined' ? getMessaging(app) : nul
 export const analyticsPromise = typeof window !== 'undefined' 
   ? isSupported()
       .then(yes => {
+        let isOwner = false;
+        try {
+          const cachedProfile = window.localStorage.getItem('profile_cache');
+          if (cachedProfile) {
+            const profile = JSON.parse(cachedProfile);
+            if (profile.role === 'owner') {
+               isOwner = true;
+            }
+          }
+        } catch (e) {}
+
+        if (isOwner) {
+           console.log("Analytics disabled for owner.");
+           return null; // Do not initialize GA or standalone gtag for owners
+        }
+
         let analyticsInstance = null;
         if (yes) {
           try {

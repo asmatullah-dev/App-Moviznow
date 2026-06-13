@@ -2,12 +2,26 @@ import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { logEvent as firebaseLogEvent } from 'firebase/analytics';
 import { analytics, analyticsPromise } from '../firebase';
+import { safeStorage } from '../utils/safeStorage';
 
 export function AnalyticsTracker() {
   const location = useLocation();
 
   useEffect(() => {
     const trackPage = async () => {
+      // Don't track if the user is an owner
+      try {
+        const cachedProfile = safeStorage.getItem('profile_cache');
+        if (cachedProfile) {
+          const profile = JSON.parse(cachedProfile);
+          if (profile.role === 'owner') {
+            return;
+          }
+        }
+      } catch (e) {
+        // Ignore parse error
+      }
+
       try {
         const gaInstance = analytics || await analyticsPromise;
         if (gaInstance) {
