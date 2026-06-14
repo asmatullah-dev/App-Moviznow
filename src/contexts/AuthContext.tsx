@@ -466,8 +466,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // Create expiration boundary at 00:00:00 local time on the day AFTER the expiry date
           const expiryBoundary = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]) + 1);
           if (expiryNow >= expiryBoundary) {
-            updates.status = "expired";
-            data.status = "expired";
+            let isReallyExpired = true;
+            if (!serverProfile && navigator.onLine) {
+              try {
+                const freshSnap = await getDoc(userRef);
+                if (freshSnap.exists()) {
+                  const freshData = freshSnap.data() as UserProfile;
+                  serverProfile = freshData;
+                  if (freshData.expiryDate) {
+                    const fExpStr = freshData.expiryDate.split('T')[0];
+                    const fParts = fExpStr.split('-');
+                    const freshBoundary = new Date(parseInt(fParts[0]), parseInt(fParts[1]) - 1, parseInt(fParts[2]) + 1);
+                    if (expiryNow < freshBoundary || freshData.status !== "active") {
+                      isReallyExpired = false;
+                      data.expiryDate = freshData.expiryDate;
+                      data.status = freshData.status;
+                      if (mergedProfile) {
+                        mergedProfile.expiryDate = freshData.expiryDate;
+                        mergedProfile.status = freshData.status;
+                      }
+                    }
+                  }
+                }
+              } catch (e) {
+                console.error("Failed to fresh fetch for expiry check", e);
+              }
+            }
+            
+            if (isReallyExpired) {
+              updates.status = "expired";
+              data.status = "expired";
+              if (mergedProfile) {
+                mergedProfile.status = "expired";
+              }
+            }
           }
         }
 

@@ -45,10 +45,13 @@ export const logEvent = async (
     }
     
     // Always log to standalone gtag if available (more reliable)
+    // @ts-ignore
+    const appVer = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.0.0';
     if (typeof window !== 'undefined' && 'gtag' in window) {
       // @ts-ignore
       window.gtag('event', type, {
         user_id: userId,
+        app_version: appVer,
         ...data
       });
     }

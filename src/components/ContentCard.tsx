@@ -42,6 +42,34 @@ const ContentCard = React.memo(({
   const [selectedTrailerUrl, setSelectedTrailerUrl] = React.useState<string | null>(null);
   const [isClicked, setIsClicked] = React.useState(false);
 
+  React.useEffect(() => {
+    const checkClicked = () => {
+      const lastClicked = sessionStorage.getItem('last_clicked_card');
+      setIsClicked(lastClicked === content.id);
+    };
+    checkClicked();
+    window.addEventListener('card_clicked', checkClicked);
+    
+    const unclick = () => {
+      if (sessionStorage.getItem('last_clicked_card') === content.id) {
+         sessionStorage.removeItem('last_clicked_card');
+         setIsClicked(false);
+      }
+    };
+    
+    // Listen for scrolling on window to reset the clicked state
+    window.addEventListener('scroll', unclick, { passive: true });
+    window.addEventListener('wheel', unclick, { passive: true });
+    window.addEventListener('touchmove', unclick, { passive: true });
+    
+    return () => {
+      window.removeEventListener('card_clicked', checkClicked);
+      window.removeEventListener('scroll', unclick);
+      window.removeEventListener('wheel', unclick);
+      window.removeEventListener('touchmove', unclick);
+    };
+  }, [content.id]);
+
   const isInCart = cart.some(item => item.contentId === content.id);
 
   const seasons = React.useMemo(() => {
@@ -159,7 +187,7 @@ const ContentCard = React.memo(({
       animate={isClicked ? { scale: 1.05, zIndex: 50, opacity: 1, y: 0 } : { opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.3 }}
       className={clsx("group relative flex flex-col h-full transform-gpu", {
-        "transition-all hover:scale-[1.02] active:scale-[0.98]": !isClicked
+        "transition-all duration-300 hover:scale-[1.05] active:scale-[1.05]": !isClicked
       })}
     >
       {/* Color Gradient Layer (1px) */}
@@ -170,7 +198,10 @@ const ContentCard = React.memo(({
           <div className="relative flex flex-col h-full bg-zinc-50 dark:bg-zinc-900 rounded-[14px] overflow-hidden">
           <Link 
              to={`/${content.type === 'series' ? 'series' : 'movie'}/${content.id}`} 
-             onClick={() => setIsClicked(true)}
+             onClick={() => {
+               sessionStorage.setItem('last_clicked_card', content.id);
+               window.dispatchEvent(new Event('card_clicked'));
+             }}
              className="absolute inset-0 z-20" aria-label={`View details for ${content.title}`} />
           
           <div className="relative aspect-[2/3] w-full bg-zinc-100 dark:bg-zinc-800 block z-10">

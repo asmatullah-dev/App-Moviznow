@@ -34,7 +34,7 @@ export default function PreviousOrders() {
 
   const handleCancelOrder = async (orderId: string) => {
     try {
-      const updatedOrders = orders.map(o => o.id === orderId ? { ...o, status: 'cancelled' } : o);
+      const updatedOrders = orders.map(o => o.id === orderId ? { ...o, status: 'cancelled' as const } : o);
       
       // A user cancelling an order shouldn't force an immediate Firestore write unless they really need it
       // Let's pass true because order status change might be expected instantly (or false based on prompt)

@@ -1185,7 +1185,7 @@ export default function Home({
 
       {/* Footer */}
       {settings?.isAdminContactEnabled !== false && (
-        <footer className="border-t border-zinc-200 dark:border-zinc-800 py-8 text-center text-zinc-500">
+        <footer className="border-t border-zinc-200 dark:border-zinc-800 pt-8 pb-2 text-center text-zinc-500">
           <p>Need help or want to renew membership?</p>
           <button
             onClick={() => {
@@ -1318,6 +1318,10 @@ export default function Home({
           </motion.div>
         )}
       </AnimatePresence>
+      <div className="text-center pb-8 pt-2 text-xs text-zinc-500 dark:text-zinc-600 font-mono">
+        {/* @ts-ignore */}
+        v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.0.0'}
+      </div>
     </div>
   );
 }

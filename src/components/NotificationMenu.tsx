@@ -13,7 +13,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 interface NotificationMenuProps {}
 
 export const NotificationMenu = React.memo(() => {
-  const { profile } = useAuth();
+  const { profile, updateUserProfileData } = useAuth();
   const { notifications, loading } = useNotifications();
   const [isOpen, setIsOpen] = useState(false);
   const [localLastCheck, setLocalLastCheck] = useState<Date | null>(null);

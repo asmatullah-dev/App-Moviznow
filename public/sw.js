@@ -17,23 +17,33 @@ if (firebaseConfig.apiKey && firebaseConfig.projectId) {
 
   messaging.onBackgroundMessage((payload) => {
     console.log('[sw.js] Received background message ', payload);
-    const notificationTitle = payload.notification?.title || payload.data?.title || 'New Notification';
-    const notificationOptions = {
-      body: payload.notification?.body || payload.data?.body,
-      icon: payload.data?.imageUrl || '/logo.svg',
-      image: payload.data?.imageUrl,
-      data: Object.assign({}, payload.data, {
-        url: payload.data?.url || '/'
-      })
-    };
+    
+    // If the payload already contains a `notification` component, Firebase's SDK
+    // will automatically display it. We should not show a manual one to avoid duplicates.
+    if (payload.notification) {
+      console.log('[sw.js] Notification handled automatically by SDK.');
+      return;
+    }
+    
+    if (payload.data) {
+      const notificationTitle = payload.data.title || 'New Notification';
+      const notificationOptions = {
+        body: payload.data.body,
+        icon: payload.data.imageUrl || '/logo.svg',
+        image: payload.data.imageUrl,
+        data: Object.assign({}, payload.data, {
+          url: payload.data.url || '/'
+        })
+      };
 
-    self.registration.showNotification(notificationTitle, notificationOptions);
+      self.registration.showNotification(notificationTitle, notificationOptions);
+    }
   });
 } else {
   console.warn('[sw.js] Missing Firebase config in URL parameters. Push notifications inactive.');
 }
 
-const CACHE = "pwabuilder-page";
+const CACHE = "pwabuilder-page-v2.0";
 const offlineFallbackPage = "offline.html";
 
 self.addEventListener("message", (event) => {

@@ -18,10 +18,17 @@ if (typeof importScripts === 'function') {
       // Add this log to verify the handler is actually running
       console.log('[firebase-messaging-sw.js] Payload data:', payload.data);
       
+      // If the payload already contains a `notification` component, Firebase's SDK
+      // will automatically display it. We should not show a manual one to avoid duplicates.
+      if (payload.notification) {
+        console.log('[firebase-messaging-sw.js] Notification handled automatically by SDK.');
+        return;
+      }
+      
       if (payload.data) {
-        const notificationTitle = payload.data.title || payload.notification?.title || 'New Notification';
+        const notificationTitle = payload.data.title || 'New Notification';
         const notificationOptions = {
-          body: payload.data.body || payload.notification?.body,
+          body: payload.data.body,
           icon: payload.data.imageUrl || '/launcher.svg',
           image: payload.data.imageUrl,
           data: Object.assign({}, payload.data, {

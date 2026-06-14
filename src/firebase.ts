@@ -74,7 +74,11 @@ export const analyticsPromise = typeof window !== 'undefined'
           // @ts-ignore
           window.gtag('js', new Date());
           // @ts-ignore
-          window.gtag('config', customMeasurementId, { send_page_view: true });
+          window.gtag('config', customMeasurementId, { 
+            send_page_view: true,
+            // @ts-ignore
+            app_version: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.0.0'
+          });
         }
         
         return analyticsInstance;
@@ -301,9 +305,12 @@ export const requestNotificationPermission = async (force: boolean = false) => {
 if (messaging) {
   onMessage(messaging, (payload) => {
     console.log('[FCM] Received foreground message:', payload);
-    const { title, body, imageUrl, url } = payload.data || {};
+    const title = payload.data?.title || payload.notification?.title || 'New Notification';
+    const body = payload.data?.body || payload.notification?.body;
+    const imageUrl = payload.data?.imageUrl || payload.notification?.image;
+    const url = payload.data?.url;
     
-    if (Notification.permission === 'granted' && payload.data) {
+    if (Notification.permission === 'granted' && (payload.data || payload.notification)) {
       navigator.serviceWorker.getRegistrations().then((registrations) => {
         console.log('[FCM] Found registrations:', registrations.length);
         const myReg = registrations.find(
@@ -311,7 +318,7 @@ if (messaging) {
         );
         if (myReg) {
           console.log('[FCM] Showing notification via Service Worker');
-          myReg.showNotification(title || 'New Notification', {
+          myReg.showNotification(title, {
             body: body,
             icon: imageUrl || '/launcher.svg',
             image: imageUrl,
@@ -322,7 +329,7 @@ if (messaging) {
           } as any);
         } else {
           console.log('[FCM] Showing notification via browser Notification API');
-          new Notification(title || 'New Notification', {
+          const notif = new Notification(title, {
             body: body,
             icon: imageUrl || '/launcher.svg',
             image: imageUrl,
@@ -331,10 +338,13 @@ if (messaging) {
             tag: payload.messageId,
             renotify: true
           } as any);
+          if (url) {
+            notif.onclick = () => window.open(url, '_blank');
+          }
         }
       });
     } else {
-      console.log('[FCM] Notification not shown:', { permission: Notification.permission, hasData: !!payload.data });
+      console.log('[FCM] Notification not shown:', { permission: Notification.permission, hasDataOrNotif: !!(payload.data || payload.notification) });
     }
   });
 }

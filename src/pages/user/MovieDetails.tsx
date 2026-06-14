@@ -1165,6 +1165,16 @@ export default function MovieDetails() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!contentLoading && !mergedContent && fetchFailed && !hasAttemptedGlobalRefresh) {
+      setHasAttemptedGlobalRefresh(true);
+      if (!isOffline) {
+        checkForUpdates(true).catch(e => console.error("Error refreshing content:", e));
+        refreshProfile(true).catch(e => console.error("Error refreshing user:", e));
+      }
+    }
+  }, [contentLoading, mergedContent, fetchFailed, hasAttemptedGlobalRefresh, isOffline, checkForUpdates, refreshProfile]);
+
   if (loading || profileLoading) {
     return (
       <div className="min-h-screen bg-white dark:bg-zinc-950 flex items-center justify-center">
@@ -1180,16 +1190,6 @@ export default function MovieDetails() {
       profile?.role === "manager" ||
       mergedContent.status !== "draft"
     : false;
-
-  useEffect(() => {
-    if (!contentLoading && !mergedContent && fetchFailed && !hasAttemptedGlobalRefresh) {
-      setHasAttemptedGlobalRefresh(true);
-      if (!isOffline) {
-        checkForUpdates(true).catch(e => console.error("Error refreshing content:", e));
-        refreshProfile(true).catch(e => console.error("Error refreshing user:", e));
-      }
-    }
-  }, [contentLoading, mergedContent, fetchFailed, hasAttemptedGlobalRefresh, isOffline, checkForUpdates, refreshProfile]);
 
   if (!mergedContent || !isAuthorized) {
     return (
