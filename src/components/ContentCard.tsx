@@ -40,6 +40,7 @@ const ContentCard = React.memo(({
   const { vibrate } = useHaptics();
   const [isTrailerSelectionOpen, setIsTrailerSelectionOpen] = React.useState(false);
   const [selectedTrailerUrl, setSelectedTrailerUrl] = React.useState<string | null>(null);
+  const [isClicked, setIsClicked] = React.useState(false);
 
   const isInCart = cart.some(item => item.contentId === content.id);
 
@@ -154,10 +155,12 @@ const ContentCard = React.memo(({
 
   return (
     <motion.div 
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
+      initial={{ opacity: 0, y: 10, scale: 1 }}
+      animate={isClicked ? { scale: 1.05, zIndex: 50, opacity: 1, y: 0 } : { opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.3 }}
-      className="group relative transition-all hover:scale-[1.02] flex flex-col h-full transform-gpu"
+      className={clsx("group relative flex flex-col h-full transform-gpu", {
+        "transition-all hover:scale-[1.02] active:scale-[0.98]": !isClicked
+      })}
     >
       {/* Color Gradient Layer (1px) */}
       <div className="relative rounded-[15.5px] p-[1px] bg-[linear-gradient(to_bottom_right,#ff0000,#ef4444,#f97316,#facc15,#4ade80,#06b6d4,#3b82f6,#a855f7)] z-10 flex flex-col h-full">
@@ -167,6 +170,7 @@ const ContentCard = React.memo(({
           <div className="relative flex flex-col h-full bg-zinc-50 dark:bg-zinc-900 rounded-[14px] overflow-hidden">
           <Link 
              to={`/${content.type === 'series' ? 'series' : 'movie'}/${content.id}`} 
+             onClick={() => setIsClicked(true)}
              className="absolute inset-0 z-20" aria-label={`View details for ${content.title}`} />
           
           <div className="relative aspect-[2/3] w-full bg-zinc-100 dark:bg-zinc-800 block z-10">

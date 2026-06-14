@@ -39,11 +39,9 @@ export const NotificationMenu = React.memo(() => {
       setLocalLastCheck(now);
       // Update lastNotificationCheck when opening the menu
       try {
-        const { doc, updateDoc } = await import('firebase/firestore');
-        const userRef = doc(db, 'users', profile.uid);
-        await updateDoc(userRef, {
+        await updateUserProfileData({
           lastNotificationCheck: now.toISOString()
-        });
+        }, undefined, false);
       } catch (error) {
         console.error('Error updating lastNotificationCheck:', error);
       }

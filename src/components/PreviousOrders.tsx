@@ -9,7 +9,7 @@ import ConfirmModal from './ConfirmModal';
 import AlertModal from './AlertModal';
 
 export default function PreviousOrders() {
-  const { profile } = useAuth();
+  const { profile, updateUserProfileData } = useAuth();
   const { settings } = useSettings();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [confirmModal, setConfirmModal] = useState<{
@@ -34,12 +34,14 @@ export default function PreviousOrders() {
 
   const handleCancelOrder = async (orderId: string) => {
     try {
-      const { updateDoc, doc } = await import('firebase/firestore');
       const updatedOrders = orders.map(o => o.id === orderId ? { ...o, status: 'cancelled' } : o);
       
-      await updateDoc(doc(db, 'users', profile!.uid), {
+      // A user cancelling an order shouldn't force an immediate Firestore write unless they really need it
+      // Let's pass true because order status change might be expected instantly (or false based on prompt)
+      // The prompt specifically says "order changes ... will sync to Firestore"
+      await updateUserProfileData({
         orders: updatedOrders
-      });
+      }, undefined, true);
       // Admin might need to be notified about cancellation too, but usually it's just user canceling pending
       
       setConfirmModal(prev => ({ ...prev, isOpen: false }));

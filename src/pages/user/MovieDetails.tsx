@@ -78,6 +78,7 @@ export default function MovieDetails() {
     toggleFavorite: authToggleFavorite,
     toggleWatchLater: authToggleWatchLater,
     updateUserProfileData,
+    refreshProfile,
   } = useAuth();
   const {
     contentList,
@@ -89,9 +90,12 @@ export default function MovieDetails() {
     getContent,
     updateContentFields,
     deleteContent,
+    checkForUpdates,
   } = useContent();
   const { cart, addToCart } = useCart();
   const { settings } = useSettings();
+  const [hasAttemptedGlobalRefresh, setHasAttemptedGlobalRefresh] = useState(false);
+
   const content = useMemo(() => {
     console.log("DEBUG: id=", id, "contentList length=", contentList.length);
     if (contentList.length > 0) {
@@ -258,6 +262,7 @@ export default function MovieDetails() {
     setLiveRating(null);
     setFetchFailed(false);
     setFetchingImdb(false);
+    setHasAttemptedGlobalRefresh(false);
     hasLoggedView.current = false;
     hasAttemptedRatingFetch.current = {};
     hasAttemptedStaticFetch.current = {};
@@ -1176,10 +1181,30 @@ export default function MovieDetails() {
       mergedContent.status !== "draft"
     : false;
 
+  useEffect(() => {
+    if (!contentLoading && !mergedContent && fetchFailed && !hasAttemptedGlobalRefresh) {
+      setHasAttemptedGlobalRefresh(true);
+      if (!isOffline) {
+        checkForUpdates(true).catch(e => console.error("Error refreshing content:", e));
+        refreshProfile(true).catch(e => console.error("Error refreshing user:", e));
+      }
+    }
+  }, [contentLoading, mergedContent, fetchFailed, hasAttemptedGlobalRefresh, isOffline, checkForUpdates, refreshProfile]);
+
   if (!mergedContent || !isAuthorized) {
     return (
-      <div className="min-h-screen bg-white dark:bg-zinc-950 flex items-center justify-center text-zinc-900 dark:text-white">
-        Content not found
+      <div className="min-h-screen bg-white dark:bg-zinc-950 flex flex-col items-center justify-center text-zinc-900 dark:text-white p-4">
+        {(!contentLoading && fetchFailed && !hasAttemptedGlobalRefresh) ? (
+          <div className="flex flex-col items-center gap-4">
+            <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">Searching global library...</p>
+          </div>
+        ) : (
+          <div className="text-center space-y-4">
+             <h2 className="text-xl font-bold">Content not found or unavailable</h2>
+             <p className="text-sm text-zinc-500 dark:text-zinc-400">This content may have been removed or you don't have access to it.</p>
+          </div>
+        )}
       </div>
     );
   }

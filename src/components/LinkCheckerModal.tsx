@@ -517,6 +517,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
     let detectedSeason: number | undefined;
     let detectedEpisode: number | undefined;
 
+    let seriesCount = 0;
+
     validResults.forEach(r => {
       const source = `${r.fileName || ""} ${r.finalUrl || ""} ${input}`.toLowerCase();
       
@@ -530,29 +532,41 @@ export const LinkCheckerModal: React.FC<Props> = ({
         detectedSubtitles = true;
       }
 
+      let isSeriesLink = false;
       if (r.isFullSeasonMKV || r.isFullSeasonZIP || /full season|all episodes|complete/i.test(source)) {
-        detectedType = "series";
+        isSeriesLink = true;
       }
 
       // Detect Series vs Movie
       const combinedMatch = source.match(/\bs(\d+)e(\d+)(?![a-z0-9])/i);
       if (combinedMatch) {
-        detectedType = "series";
+         isSeriesLink = true;
         detectedSeason = parseInt(combinedMatch[1]);
         detectedEpisode = parseInt(combinedMatch[2]);
       } else {
         const seriesMatch = source.match(/\b(s(\d+)|season\s*(\d+))(?![a-z0-9])/i);
         if (seriesMatch) {
-          detectedType = "series";
+           isSeriesLink = true;
           detectedSeason = parseInt(seriesMatch[2] || seriesMatch[3]);
           
           const episodeMatch = source.match(/(?:e(\d+)|episode\s*(\d+))(?![a-z0-9])/i);
           if (episodeMatch) {
             detectedEpisode = parseInt(episodeMatch[1] || episodeMatch[2]);
           }
+        } else {
+           const episodeMatch = source.match(/(?:e(\d+)|episode\s*(\d+))(?![a-z0-9])/i);
+           if (episodeMatch && !source.match(/\b(movie|film)\b/i)) {
+               isSeriesLink = true;
+               detectedEpisode = parseInt(episodeMatch[1] || episodeMatch[2]);
+           }
         }
       }
+      if (isSeriesLink) seriesCount++;
     });
+
+    if (seriesCount > 3 || validResults.some(r => r.isFullSeasonMKV || r.isFullSeasonZIP || /full season|all episodes|complete/i.test(`${r.fileName || ""} ${r.finalUrl || ""}`))) {
+       detectedType = "series";
+    }
 
     const combinedNames = validResults.map(r => r.fileName || '').join(' ') + ' ' + input;
     const { title: extractedTitle, year: extractedYear } = extractTitleAndYear(combinedNames);

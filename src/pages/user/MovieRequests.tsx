@@ -31,7 +31,7 @@ interface MovieRequest {
 }
 
 export default function MovieRequests() {
-  const { profile } = useAuth();
+  const { profile, updateUserProfileData } = useAuth();
   const { cart } = useCart();
   const [requests, setRequests] = useState<MovieRequest[]>([]);
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
@@ -86,9 +86,9 @@ export default function MovieRequests() {
           requestCount: 1
         };
 
-        await updateDoc(doc(db, 'users', profile.uid), {
-          movieRequests: arrayUnion(requestData)
-        });
+        await updateUserProfileData({
+          movieRequests: [...(profile.movieRequests || []), requestData]
+        }, undefined, false);
         alert("Request submitted successfully!");
       }
 

@@ -345,9 +345,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 const pendWL = safeStorage.getItem("pending_watch_later_array");
                 if (pendWL) updatesToPush.watchLater = JSON.parse(pendWL);
                 
-                // Sync any deferred string/boolean profile fields
-                if (localProfile?.phone !== serverProfile?.phone && localProfile?.phone !== undefined) updatesToPush.phone = localProfile.phone;
-                if (localProfile?.displayName !== serverProfile?.displayName && localProfile?.displayName !== undefined) updatesToPush.displayName = localProfile.displayName;
+                // Sync any deferred string/boolean/array profile fields
+                const syncableKeys = ['phone', 'displayName', 'lastNotificationCheck', 'notification', 'movieRequests', 'orders', 'settings', 'timeSpent'];
+                syncableKeys.forEach(key => {
+                   if (localProfile && localProfile[key] !== undefined && JSON.stringify(localProfile[key]) !== JSON.stringify(serverProfile?.[key])) {
+                       updatesToPush[key] = localProfile[key];
+                   }
+                });
             }
             if (mergedProfile.timeSpent !== undefined) updatesToPush.timeSpent = mergedProfile.timeSpent;
             
@@ -357,13 +361,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               try {
                 const pendingAll = JSON.parse(pendingUpdatesStr);
                 const myPending = pendingAll[currentUser.uid];
-                if (myPending && myPending.timeSpent !== undefined) {
-                   updatesToPush.timeSpent = Math.max(updatesToPush.timeSpent || 0, myPending.timeSpent);
-                   // Remove my pending time as it's about to be written
-                   delete myPending.timeSpent;
-                   if (Object.keys(myPending).length === 0) {
-                     delete pendingAll[currentUser.uid];
+                if (myPending) {
+                   if (myPending.timeSpent !== undefined) {
+                     updatesToPush.timeSpent = Math.max(updatesToPush.timeSpent || 0, myPending.timeSpent);
+                     delete myPending.timeSpent;
                    }
+                   Object.assign(updatesToPush, myPending);
+                   delete pendingAll[currentUser.uid];
                    safeStorage.setItem("pending_user_updates", JSON.stringify(pendingAll));
                 }
               } catch (e) {}
@@ -986,7 +990,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 // Critical multi-tab lock: Deduct exactly what we consume immediately BEFORE the async request
                 const actualSecondsToConsume = secondsToSync;
 
-                // Double-check the cache before deducting to prevent race conditions across tabs
+                // Prevent double-counting if multiple tabs are active (wall-clock precision lock)
                 let currentSafeSeconds = parseInt(
                   safeStorage.getItem(cacheKey) || "0",
                   10,
@@ -1007,42 +1011,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 safeStorage.setItem(cacheKey, remainingSeconds.toString());
                 safeStorage.setItem(lastSyncKey, optimisticSyncTime);
 
-                // Deferred local write for time tracking (avoids constant Firestore writes)
-                const lastActiveStr = new Date().toISOString();
-                
-                // Update local cached_all_users
+                // Update local cached_all_users for UI updates, but avoid triggering "pending changes"
                 const cachedUsersStr = safeStorage.getItem('cached_all_users') || '[]';
                 let cachedUsers: any[] = [];
                 try { cachedUsers = JSON.parse(cachedUsersStr); } catch (e) {}
                 const userIndex = cachedUsers.findIndex(u => u.uid === uid);
-                let currentTotalSeconds = 0;
                 
                 if (userIndex !== -1) {
-                  currentTotalSeconds = cachedUsers[userIndex].timeSpent || 0;
-                  cachedUsers[userIndex].timeSpent = currentTotalSeconds + secondsToSync;
-                  cachedUsers[userIndex].lastActive = lastActiveStr;
+                  cachedUsers[userIndex].timeSpent = (cachedUsers[userIndex].timeSpent || 0) + secondsToSync;
+                  cachedUsers[userIndex].lastActive = new Date().toISOString();
                   safeStorage.setItem('cached_all_users', JSON.stringify(cachedUsers));
                   
                   // Only dispatch custom event if user is currently loaded
                   window.dispatchEvent(new CustomEvent('user_local_update', { 
-                    detail: { uid, fields: { timeSpent: cachedUsers[userIndex].timeSpent, lastActive: lastActiveStr } }
+                    detail: { uid, fields: { timeSpent: cachedUsers[userIndex].timeSpent, lastActive: cachedUsers[userIndex].lastActive } }
                   }));
                 }
 
-                // Add absolute value to pending_user_updates to defer Firestore write
-                const pendingStr = safeStorage.getItem('pending_user_updates') || '{}';
-                let pending: any = {};
-                try { pending = JSON.parse(pendingStr); } catch(e) {}
-                
-                pending[uid] = pending[uid] || {};
-                const baseTime = typeof pending[uid].timeSpent === 'number' ? pending[uid].timeSpent : currentTotalSeconds;
-                pending[uid].timeSpent = baseTime + secondsToSync;
-                pending[uid].lastActive = lastActiveStr;
-                
-                safeStorage.setItem('pending_user_updates', JSON.stringify(pending));
-                
-                // Dispatch event so that UsersContext or other observing context can trigger setHasPendingChanges
-                window.dispatchEvent(new Event('pending_user_updates_changed'));
+                // Removed writing to pending_user_updates here as per user request to avoid auto updating pending state.
+                // Time spent will be synced when another event triggers profile update.
 
                 logEvent("time_spent", uid, { duration: secondsToSync })
                   .catch((err) => {
@@ -1095,53 +1082,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             return; // Another tab synced it
           }
 
-          const remainingSeconds = Math.max(
-            0,
-            currentSafeSeconds - actualSecondsToConsume,
-          );
           const optimisticSyncTime = Date.now().toString();
 
-          // Synchronously deduct before async
-          safeStorage.setItem(cacheKey, remainingSeconds.toString());
-          safeStorage.setItem(lastSyncKey, optimisticSyncTime);
-
-          const lastActiveStr = new Date().toISOString();
-          
-          // Update local cached_all_users
-          const cachedUsersStr = safeStorage.getItem('cached_all_users') || '[]';
-          let cachedUsers: any[] = [];
-          try { cachedUsers = JSON.parse(cachedUsersStr); } catch (e) {}
-          const userIndex = cachedUsers.findIndex(u => u.uid === uid);
-          let currentTotalSeconds = 0;
-          
-          if (userIndex !== -1) {
-            currentTotalSeconds = cachedUsers[userIndex].timeSpent || 0;
-            cachedUsers[userIndex].timeSpent = currentTotalSeconds + secondsToSync;
-            cachedUsers[userIndex].lastActive = lastActiveStr;
-            safeStorage.setItem('cached_all_users', JSON.stringify(cachedUsers));
-            
-            // Only dispatch custom event if user is currently loaded
-            window.dispatchEvent(new CustomEvent('user_local_update', { 
-              detail: { uid, fields: { timeSpent: cachedUsers[userIndex].timeSpent, lastActive: lastActiveStr } }
-            }));
-          }
-
-          // Add absolute value to pending_user_updates to defer Firestore write
-          const pendingStr = safeStorage.getItem('pending_user_updates') || '{}';
-          let pending: any = {};
-          try { pending = JSON.parse(pendingStr); } catch(e) {}
-          
-          pending[uid] = pending[uid] || {};
-          const baseTime = typeof pending[uid].timeSpent === 'number' ? pending[uid].timeSpent : currentTotalSeconds;
-          pending[uid].timeSpent = baseTime + secondsToSync;
-          pending[uid].lastActive = lastActiveStr;
-          
-          safeStorage.setItem('pending_user_updates', JSON.stringify(pending));
-          
-          // Dispatch event
-          window.dispatchEvent(new Event('pending_user_updates_changed'));
-
-          logEvent("time_spent", uid, { duration: secondsToSync }).catch(err => console.error(err));
+          // We zero out the cache since we consumed it, BUT wait!
+          // Since we are NOT syncing to pending_updates or Firestore here,
+          // we actually just want to keep it in `accumulated_time_seconds` until refreshProfile or another action flush it.
+          // Therefore, doing anything in handleVisibilityChange for time tracking is unnecessary.
+          // I will just leave this empty for `timeSpent`, the cacheKey remains accumulated.
+          return;
         }
       }
     };
@@ -1615,12 +1563,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         try {
           const pendingAll = JSON.parse(pendingUpdatesStr);
           const myPending = pendingAll[user.uid];
-          if (myPending && myPending.timeSpent !== undefined) {
-             data.timeSpent = Math.max(data.timeSpent || profile.timeSpent || 0, myPending.timeSpent);
-             delete myPending.timeSpent;
-             if (Object.keys(myPending).length === 0) {
-               delete pendingAll[user.uid];
+          if (myPending) {
+             if (myPending.timeSpent !== undefined) {
+               data.timeSpent = Math.max(data.timeSpent || profile.timeSpent || 0, myPending.timeSpent);
+               delete myPending.timeSpent;
              }
+             Object.assign(data, myPending);
+             delete pendingAll[user.uid];
              safeStorage.setItem("pending_user_updates", JSON.stringify(pendingAll));
           }
         } catch (e) {}

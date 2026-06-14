@@ -5,6 +5,7 @@ import { getStorage } from 'firebase/storage';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 import { getAnalytics, isSupported } from 'firebase/analytics';
 import firebaseConfig from '../firebase-applet-config.json';
+import { safeStorage } from './utils/safeStorage';
 
 // Base config without injecting measurementId to avoid Firebase SDK mismatch warnings
 const { measurementId: _omittedMeasurementId, ...restConfig } = firebaseConfig;
@@ -221,9 +222,27 @@ export const requestNotificationPermission = async (force: boolean = false) => {
 
             if (auth.currentUser) {
               try {
-                 await updateDoc(doc(db, 'users', auth.currentUser.uid), {
-                   notification: 'yes'
-                 });
+                 const uid = auth.currentUser.uid;
+                 const pendingStr = safeStorage.getItem('pending_user_updates') || '{}';
+                 let pendingAll = JSON.parse(pendingStr);
+                 pendingAll[uid] = pendingAll[uid] || {};
+                 pendingAll[uid].notification = 'yes';
+                 safeStorage.setItem('pending_user_updates', JSON.stringify(pendingAll));
+                 safeStorage.setItem('needs_user_sync', 'true');
+                 
+                 // Also update profile cache
+                 const cachedStr = safeStorage.getItem('profile_cache');
+                 if (cachedStr) {
+                   try {
+                      const profileCache = JSON.parse(cachedStr);
+                      profileCache.notification = 'yes';
+                      safeStorage.setItem('profile_cache', JSON.stringify(profileCache));
+                      // Dispatch a generic auth update to refresh context if needed
+                      window.dispatchEvent(new Event('profile_cache_updated'));
+                   } catch(e){}
+                 }
+
+                 window.dispatchEvent(new Event('pending_user_updates_changed'));
               } catch (e) {
                  console.log("Failed to update user profile with notification status");
               }
@@ -246,9 +265,27 @@ export const requestNotificationPermission = async (force: boolean = false) => {
       } else {
         if (auth.currentUser) {
            try {
-              await updateDoc(doc(db, 'users', auth.currentUser.uid), {
-                notification: 'no'
-              });
+              const uid = auth.currentUser.uid;
+              const pendingStr = safeStorage.getItem('pending_user_updates') || '{}';
+              let pendingAll = JSON.parse(pendingStr);
+              pendingAll[uid] = pendingAll[uid] || {};
+              pendingAll[uid].notification = 'no';
+              safeStorage.setItem('pending_user_updates', JSON.stringify(pendingAll));
+              safeStorage.setItem('needs_user_sync', 'true');
+              
+              // Also update profile cache
+              const cachedStr = safeStorage.getItem('profile_cache');
+              if (cachedStr) {
+                try {
+                   const profileCache = JSON.parse(cachedStr);
+                   profileCache.notification = 'no';
+                   safeStorage.setItem('profile_cache', JSON.stringify(profileCache));
+                   // Dispatch a generic auth update to refresh context if needed
+                   window.dispatchEvent(new Event('profile_cache_updated'));
+                } catch(e){}
+              }
+
+              window.dispatchEvent(new Event('pending_user_updates_changed'));
            } catch (e) {
               console.log("Failed to update user profile with notification status");
            }

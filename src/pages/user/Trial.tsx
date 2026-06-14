@@ -135,7 +135,7 @@ export default function Trial() {
 
     try {
       setIsSubmittingPhone(true);
-      await updateUserProfileData({ phone: standardized });
+      await updateUserProfileData({ phone: standardized }, undefined, true);
       await refreshProfile();
       setStatus('loading');
       setMessage('Activating your trial...');

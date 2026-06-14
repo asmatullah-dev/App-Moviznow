@@ -76,7 +76,7 @@ export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRout
           return;
         }
 
-        await updateUserProfileData({ phone: standardized });
+        await updateUserProfileData({ phone: standardized }, undefined, true);
         await refreshProfile();
       } catch (error: any) {
         console.error("Failed to save WhatsApp number", error);
