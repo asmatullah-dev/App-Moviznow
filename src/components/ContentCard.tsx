@@ -43,32 +43,15 @@ const ContentCard = React.memo(({
   const [isClicked, setIsClicked] = React.useState(false);
 
   React.useEffect(() => {
-    const checkClicked = () => {
-      const lastClicked = sessionStorage.getItem('last_clicked_card');
-      setIsClicked(lastClicked === content.id);
-    };
-    checkClicked();
-    window.addEventListener('card_clicked', checkClicked);
-    
-    const unclick = () => {
-      if (sessionStorage.getItem('last_clicked_card') === content.id) {
-         sessionStorage.removeItem('last_clicked_card');
-         setIsClicked(false);
-      }
-    };
-    
-    // Listen for scrolling on window to reset the clicked state
-    window.addEventListener('scroll', unclick, { passive: true });
-    window.addEventListener('wheel', unclick, { passive: true });
-    window.addEventListener('touchmove', unclick, { passive: true });
-    
-    return () => {
-      window.removeEventListener('card_clicked', checkClicked);
-      window.removeEventListener('scroll', unclick);
-      window.removeEventListener('wheel', unclick);
-      window.removeEventListener('touchmove', unclick);
-    };
-  }, [content.id]);
+    let timer: any;
+    if (isClicked) {
+      // Automatically reset the click state after a short delay so it doesn't get stuck
+      timer = setTimeout(() => {
+        setIsClicked(false);
+      }, 500);
+    }
+    return () => clearTimeout(timer);
+  }, [isClicked]);
 
   const isInCart = cart.some(item => item.contentId === content.id);
 
@@ -199,8 +182,7 @@ const ContentCard = React.memo(({
           <Link 
              to={`/${content.type === 'series' ? 'series' : 'movie'}/${content.id}`} 
              onClick={() => {
-               sessionStorage.setItem('last_clicked_card', content.id);
-               window.dispatchEvent(new Event('card_clicked'));
+               setIsClicked(true);
              }}
              className="absolute inset-0 z-20" aria-label={`View details for ${content.title}`} />
           
