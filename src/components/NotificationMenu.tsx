@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Bell, X } from 'lucide-react';
 import { collection, query, orderBy, doc, updateDoc, limit, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -72,25 +73,27 @@ export const NotificationMenu = React.memo(() => {
         )}
       </button>
 
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
-            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-          >
+      {typeof document !== 'undefined' && document.body && createPortal(
+        <AnimatePresence>
+          {isOpen && (
             <motion.div 
-              ref={menuRef}
-              initial={{ scale: 0.95, opacity: 0, y: 10 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 10 }}
-              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-              style={{ willChange: 'transform, opacity' }}
-              className="w-full max-w-md bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
             >
-              <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between bg-white dark:bg-zinc-950 shrink-0">
+              <motion.div 
+                ref={menuRef}
+                initial={{ scale: 0.95, opacity: 0, y: 10 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.95, opacity: 0, y: 10 }}
+                transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                style={{ willChange: 'transform, opacity' }}
+                className="w-full max-w-md bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]"
+              >
+                <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between bg-white dark:bg-zinc-950 shrink-0">
+
                 <div className="flex items-center gap-3">
                   <h3 className="font-bold text-zinc-900 dark:text-white">Notifications</h3>
                   {unreadCount > 0 && (
@@ -177,7 +180,9 @@ export const NotificationMenu = React.memo(() => {
             </motion.div>
           </motion.div>
         )}
-      </AnimatePresence>
+      </AnimatePresence>,
+      document.body
+      )}
     </>
   );
 });

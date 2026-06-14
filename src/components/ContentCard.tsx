@@ -184,7 +184,7 @@ const ContentCard = React.memo(({
   return (
     <motion.div 
       initial={{ opacity: 0, y: 10, scale: 1 }}
-      animate={isClicked ? { scale: 1.05, zIndex: 50, opacity: 1, y: 0 } : { opacity: 1, y: 0, scale: 1 }}
+      animate={isClicked ? { scale: 1.05, zIndex: 30, opacity: 1, y: 0 } : { opacity: 1, y: 0, scale: 1, zIndex: 1 }}
       transition={{ duration: 0.3 }}
       className={clsx("group relative flex flex-col h-full transform-gpu", {
         "transition-all duration-300 hover:scale-[1.05] active:scale-[1.05]": !isClicked
