@@ -73,11 +73,20 @@ export const analyticsPromise = typeof window !== 'undefined'
           };
           // @ts-ignore
           window.gtag('js', new Date());
+          
+          const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.0.0';
+          
+          // @ts-ignore
+          window.gtag('set', {
+            app_version: currentVersion,
+            app_name: 'MovizNow'
+          });
+
           // @ts-ignore
           window.gtag('config', customMeasurementId, { 
             send_page_view: true,
-            // @ts-ignore
-            app_version: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.0.0'
+            app_version: currentVersion,
+            app_name: 'MovizNow'
           });
         }
         
