@@ -62,8 +62,8 @@ function isCloudflareResponse(response: any) {
   return false;
 }
 
-async function fetchWithApi(url: string, timeout = 10000) {
-  if (url.includes("vcloud")) {
+async function fetchWithApi(url: string, timeout = 10000, isVcloud = false) {
+  if (isVcloud || url.includes("vcloud")) {
     const scraperApiUrl = `http://api.scraperapi.com?api_key=${process.env.SCRAPER_API_KEY || "9cd207e5fa77b2c6ef6072a7ea4c4326"}&url=${encodeURIComponent(url)}`;
     return axios.get(scraperApiUrl, {
       validateStatus: () => true,
@@ -88,7 +88,7 @@ async function fetchWithApi(url: string, timeout = 10000) {
   }
 }
 
-async function fetchHtmlFallback(url: string) {
+async function fetchHtmlFallback(url: string, isVcloud = false) {
   let response;
   try {
     response = await fetchDirect(url, 6000);
@@ -96,19 +96,19 @@ async function fetchHtmlFallback(url: string) {
   } catch (err) {}
 
   try {
-    response = await fetchWithApi(url, 10000);
+    response = await fetchWithApi(url, 10000, isVcloud);
     if (!isCloudflareResponse(response)) return response;
   } catch (err) {}
 
   try {
-    response = await fetchWithApi(url, 12000);
+    response = await fetchWithApi(url, 12000, isVcloud);
   } catch (err) {
     response = { data: "", status: 500, headers: {} };
   }
   return response;
 }
 
-async function fetchHtml(url: string) {
+async function fetchHtml(url: string, isVcloud = false) {
   const cacheKey = url;
   const cached = htmlCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < HTML_CACHE_TTL) {
@@ -119,7 +119,7 @@ async function fetchHtml(url: string) {
   }
 
   const promise = (async () => {
-    let response = await fetchHtmlFallback(url);
+    let response = await fetchHtmlFallback(url, isVcloud);
     const result = {
       data: response?.data || "",
       status: response?.status || 500,
@@ -143,10 +143,12 @@ async function fetchHtml(url: string) {
 
   linkExtractionRouter.post("/api/hubcloud/extract", async (req, res) => {
     try {
-      const { url } = req.body;
+      const { url, forceExtract, isVcloud } = req.body;
+      const isVcloudBool = Boolean(isVcloud);
       if (
         !url ||
-        (!url.includes("hubcloud") &&
+        (!forceExtract && 
+         !url.includes("hubcloud") &&
           !url.includes("moviesdrive") &&
           !url.includes("vcloud") &&
           !url.includes("hubdrive"))
@@ -181,7 +183,7 @@ async function fetchHtml(url: string) {
       }
 
       const performFetch = async () => {
-        const response = await fetchHtml(url);
+        const response = await fetchHtml(url, isVcloudBool);
         const $ = cheerio.load(response.data);
 
         let sizeStr =
@@ -296,7 +298,7 @@ async function fetchHtml(url: string) {
     }
   });
 
-  async function performExtraction(url: string, checkOnly: boolean, depth = 0): Promise<any> {
+  async function performExtraction(url: string, checkOnly: boolean, depth = 0, isVcloud = false): Promise<any> {
     try {
       if (depth > 2) return { url, candidates: [], size: "" };
       const headers = {
@@ -317,7 +319,7 @@ async function fetchHtml(url: string) {
           });
 
           // Fallback to scraper for vcloud if direct fails (e.g. 403, 503)
-          if ((checkRes.status === 403 || checkRes.status === 503) && url.includes("vcloud")) {
+          if ((checkRes.status === 403 || checkRes.status === 503) && (isVcloud || url.includes("vcloud"))) {
              if (checkRes.data && typeof checkRes.data.destroy === "function") {
                checkRes.data.destroy();
              }
@@ -356,7 +358,8 @@ async function fetchHtml(url: string) {
 
       if (
         !url ||
-        (!url.includes("hubcloud") &&
+        (!isVcloud && 
+          !url.includes("hubcloud") &&
           !url.includes("moviesdrive") &&
           !url.includes("vcloud") &&
           !url.includes("hubdrive"))
@@ -364,7 +367,7 @@ async function fetchHtml(url: string) {
         return { url };
       }
 
-      let response = await fetchHtml(url);
+      let response = await fetchHtml(url, isVcloud);
       let $ = cheerio.load(response.data);
 
       const titleText = $("title").text().toLowerCase();
@@ -402,7 +405,7 @@ async function fetchHtml(url: string) {
           return { url };
         }
       } else {
-        let res2 = await fetchHtml(nextUrl);
+        let res2 = await fetchHtml(nextUrl, isVcloud);
         $2 = cheerio.load(res2.data);
 
         const titleText2 = $2("title").text().toLowerCase();
@@ -604,8 +607,9 @@ async function fetchHtml(url: string) {
 
   linkExtractionRouter.post("/api/hubcloud/direct-link", async (req, res) => {
     try {
-      const { url, checkOnly } = req.body;
+      const { url, checkOnly, isVcloud } = req.body;
       const isCheckOnly = Boolean(checkOnly);
+      const isVcloudBool = Boolean(isVcloud);
       const cacheKey = `direct_${url}_${isCheckOnly}`;
       
       const cached = extractionCache.get(cacheKey);
@@ -619,7 +623,7 @@ async function fetchHtml(url: string) {
         return res.json(data);
       }
 
-      const extractPromise = performExtraction(url, isCheckOnly, 0);
+      const extractPromise = performExtraction(url, isCheckOnly, 0, isVcloudBool);
       inFlightRequests.set(cacheKey, extractPromise);
 
       try {

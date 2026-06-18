@@ -12,7 +12,13 @@ import { useUsers } from '../../contexts/UsersContext';
 import { safeStorage } from '../../utils/safeStorage';
 
 export default function SelectedContentUsers() {
-  const { users: allUsers, loading: usersLoading } = useUsers();
+  const { users: allUsers, loading: usersLoading, finalizeUserChanges, hasPendingChanges, updateUserFields } = useUsers();
+
+  useEffect(() => {
+    return () => {
+       finalizeUserChanges(true).catch(console.error);
+    };
+  }, [finalizeUserChanges]);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const { contentList } = useContent();
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);

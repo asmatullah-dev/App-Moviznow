@@ -3,7 +3,7 @@ import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
 import { collection, doc, updateDoc, getDoc, onSnapshot, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit, deleteField } from 'firebase/firestore';
 import { UserProfile, Role, Status, AnalyticsEvent, Content } from '../../types';
-import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, Bell, RefreshCw } from 'lucide-react';
+import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, Bell, RefreshCw, Link2 as LinkIcon } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -1517,6 +1517,15 @@ export default function UserManagement() {
                       <p className="text-zinc-500 dark:text-zinc-400 text-sm">{selectedUser.email?.endsWith('@moviznow.com') ? 'No Email' : selectedUser.email}</p>
                       <p className="text-zinc-500 dark:text-zinc-400 text-sm">{selectedUser.phone || 'No WhatsApp Number'}</p>
                       <p className="text-zinc-500 dark:text-zinc-400 mt-1 font-mono text-[10px] break-all border border-zinc-200 dark:border-zinc-800 rounded px-1.5 py-0.5 inline-block">ID: {selectedUser.uid}</p>
+                      
+                      <div className="flex flex-col gap-1 pt-2 mt-2 border-t border-zinc-200 dark:border-zinc-800">
+                        <div className="text-xs text-zinc-600 dark:text-zinc-400">
+                          <span className="font-semibold text-zinc-900 dark:text-zinc-200">Device:</span>{' '}
+                          {selectedUser.device ? (
+                            `${selectedUser.device.os} - ${selectedUser.device.model} (${selectedUser.device.type || 'desktop'})`
+                          ) : 'N/A'}
+                        </div>
+                      </div>
                     </div>
                   </div>
 
@@ -1557,6 +1566,22 @@ export default function UserManagement() {
                       <div>
                         <div className="text-zinc-500 text-[10px] uppercase font-bold mb-0.5">Joined</div>
                         <div className="font-bold text-zinc-900 dark:text-white text-sm">{safeFormat(selectedUser.createdAt, 'MMM dd, yyyy')}</div>
+                      </div>
+                      <div className="text-center px-2 border-x border-zinc-100 dark:border-zinc-800/50">
+                        <div className="text-zinc-500 text-[10px] uppercase font-bold mb-0.5">Gender / Age</div>
+                        <div className="font-bold text-zinc-900 dark:text-white text-sm flex items-center justify-center gap-1.5 flex-wrap">
+                          <span className="capitalize">{typeof selectedUser.gender === 'string' ? (selectedUser.gender.toLowerCase() === 'male' ? 'M' : selectedUser.gender.toLowerCase() === 'female' ? 'F' : 'NA') : 'NA'}</span>
+                          <span className="text-zinc-400 dark:text-zinc-500">·</span>
+                          <span>{(() => {
+                             if (!selectedUser.age) return 'NA';
+                             if (String(selectedUser.age).includes('(')) return selectedUser.age;
+                             const d = new Date(selectedUser.age);
+                             if (isNaN(d.getTime())) return selectedUser.age;
+                             const yrs = new Date().getFullYear() - d.getFullYear();
+                             const m = d.toLocaleString('en-US', { month: 'short' });
+                             return `${m} ${d.getDate()}, ${d.getFullYear()} (${yrs}Y)`;
+                          })()}</span>
+                        </div>
                       </div>
                       <div className="text-right">
                         <div className="text-zinc-500 text-[10px] uppercase font-bold mb-0.5">Expiry Date</div>
@@ -1829,6 +1854,30 @@ export default function UserManagement() {
                                     </div>
                                   )}
                                 </div>
+                                <div className="col-span-1 sm:col-span-2 bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-3 text-zinc-600 dark:text-zinc-300">
+                                      <Clock className="w-4 h-4 text-emerald-500" />
+                                      <span className="text-xs font-medium">Recent Activity (Last 5)</span>
+                                    </div>
+                                    <span className="font-bold text-zinc-900 dark:text-white text-xs">
+                                      {!userAna.hasScanned ? (
+                                        <span className="text-zinc-400 italic font-normal">Not Scanned</span>
+                                      ) : (
+                                        selectedUser.clickHistory?.length || 0
+                                      )}
+                                    </span>
+                                  </div>
+                                  {userAna.hasScanned && (selectedUser.clickHistory || []).length > 0 && (
+                                    <div className="mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-900 max-h-32 overflow-y-auto custom-scrollbar flex flex-col gap-1.5">
+                                      {selectedUser.clickHistory!.map((entry, idx) => (
+                                          <div key={idx} className="text-[10px] leading-relaxed text-zinc-500 dark:text-zinc-400 break-words border-l-2 border-emerald-500/20 pl-2">
+                                            {typeof entry === 'string' ? entry : entry.label}
+                                          </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
                                 <div className="flex items-center justify-between bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
                                   <div className="flex items-center gap-3 text-zinc-600 dark:text-zinc-300">
                                     <Layers className="w-4 h-4 text-emerald-500" />
@@ -1841,7 +1890,34 @@ export default function UserManagement() {
                                       `${userAna.sessionsCount || 0}`
                                     )}
                                   </span>
+                                </div>
+                                <div className="col-span-1 sm:col-span-2 bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-3 text-zinc-600 dark:text-zinc-300">
+                                      <LinkIcon className="w-4 h-4 text-emerald-500" />
+                                      <span className="text-xs font-medium">Reported Links</span>
+                                    </div>
+                                    <span className="font-bold text-zinc-900 dark:text-white text-xs">
+                                      {selectedUser.reported_links?.length || 0}
+                                    </span>
                                   </div>
+                                  {(selectedUser.reported_links || []).length > 0 && (
+                                    <div className="mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-900 max-h-32 overflow-y-auto custom-scrollbar flex flex-col gap-1.5">
+                                      {selectedUser.reported_links!.map((report, idx) => (
+                                          <div key={idx} className="text-[10px] leading-relaxed break-words border-l-2 pl-2 border-amber-500/20 text-zinc-600 dark:text-zinc-300">
+                                            <span className="font-bold">{report.contentTitle}</span> - {report.linkName || report.linkUrl}
+                                            <br />
+                                            <span className={clsx("font-semibold mr-1", report.status === 'resolved' ? "text-emerald-500" : "text-amber-500")}>
+                                              [{report.status ? report.status.toUpperCase() : 'PENDING'}]
+                                            </span>
+                                            <span className="text-zinc-400">
+                                              {report.createdAt ? new Date(report.createdAt).toLocaleDateString() : ''}
+                                            </span>
+                                          </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
                               </>
                             );
                           })()}

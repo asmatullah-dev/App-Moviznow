@@ -16,10 +16,11 @@ interface MovieRequest {
   id: string;
   title: string;
   type: 'movie' | 'series';
+  year?: string;
   userId: string;
   userEmail: string;
   userName: string;
-  status: 'pending' | 'completed' | 'rejected';
+  status: 'pending' | 'added' | 'rejected';
   createdAt: string;
   requestedBy: string[];
   userIds?: string[];
@@ -58,7 +59,13 @@ export default function MovieRequestsManagement() {
   useModalBehavior(isPickerOpen, () => setIsPickerOpen(false));
   useModalBehavior(!!requestToComment, () => setRequestToComment(null));
 
-  const { users: allUsers, updateUserFields } = useUsers();
+  const { users: allUsers, updateUserFields, finalizeUserChanges, hasPendingChanges } = useUsers();
+
+  useEffect(() => {
+    return () => {
+       finalizeUserChanges(true).catch(console.error);
+    };
+  }, [finalizeUserChanges]);
 
   useEffect(() => {
     const aggregated = new Map<string, MovieRequest>();
@@ -77,6 +84,7 @@ export default function MovieRequestsManagement() {
               id: key,
               title: req.title,
               type: req.type,
+              year: req.year,
               userId: user.uid,
               userEmail: user.email || '',
               userName: user.displayName || 'User',
@@ -132,9 +140,9 @@ export default function MovieRequestsManagement() {
     });
   };
 
-  const handleUpdateStatus = async (request: MovieRequest, status: 'completed' | 'rejected' | 'pending') => {
+  const handleUpdateStatus = async (request: MovieRequest, status: 'completed' | 'added' | 'rejected' | 'pending') => {
     try {
-      await updateRequestsForUsers(request.title, request.type, { status });
+      await updateRequestsForUsers(request.title, request.type, { status, updatedAt: new Date().toISOString() });
     } catch (error) {
       console.error("Error updating status:", error);
       alert("Failed to update status.");
@@ -172,8 +180,9 @@ export default function MovieRequestsManagement() {
       const req = requests.find(r => r.id === selectedRequestId);
       if (req) {
         await updateRequestsForUsers(req.title, req.type, { 
-          status: 'completed',
-          linkedContentId: contentId 
+          status: 'added',
+          contentId: contentId,
+          updatedAt: new Date().toISOString()
         });
       }
       setIsPickerOpen(false);
@@ -217,8 +226,8 @@ export default function MovieRequestsManagement() {
             <span className="text-xl font-bold text-yellow-500">{requests.filter(r => r.status === 'pending').length}</span>
           </div>
           <div className="flex flex-col items-center px-4">
-            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Completed</span>
-            <span className="text-xl font-bold text-emerald-500">{requests.filter(r => r.status === 'completed').length}</span>
+            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Added</span>
+            <span className="text-xl font-bold text-emerald-500">{requests.filter(r => r.status === 'added').length}</span>
           </div>
         </div>
       </div>
@@ -244,7 +253,7 @@ export default function MovieRequestsManagement() {
           >
             <option value="all">All Status</option>
             <option value="pending">Pending</option>
-            <option value="completed">Completed</option>
+            <option value="added">Added</option>
             <option value="rejected">Rejected</option>
           </select>
 
@@ -316,7 +325,7 @@ export default function MovieRequestsManagement() {
                           {request.type === 'movie' ? <Film className="w-5 h-5" /> : <Tv className="w-5 h-5" />}
                         </div>
                         <div>
-                          <p className="font-bold text-zinc-100">{request.title}</p>
+                          <p className="font-bold text-zinc-100">{request.title} {request.type === 'series' ? 'Series' : request.year}</p>
                           <p className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider">{request.type}</p>
                         </div>
                       </div>
@@ -344,20 +353,20 @@ export default function MovieRequestsManagement() {
                         className={clsx(
                           "text-xs font-bold px-3 py-1.5 rounded-lg border focus:outline-none transition-colors w-20 text-zinc-100",
                           request.status === 'pending' && "bg-yellow-500/10 text-yellow-500 border-yellow-500/20",
-                          request.status === 'completed' && "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
+                          request.status === 'added' && "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
                           request.status === 'rejected' && "bg-red-500/10 text-red-500 border-red-500/20"
                         )}
                       >
                         <option value="pending">Pending</option>
-                        <option value="completed">Completed</option>
+                        <option value="added">Added</option>
                         <option value="rejected">Rejected</option>
                       </select>
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2 transition-opacity">
-                        {request.status === 'completed' && (request as any).linkedContentId && (
+                        {request.status === 'added' && (request as any).contentId && (
                           <a
-                            href={`/${request.type === 'series' ? 'series' : 'movie'}/${(request as any).linkedContentId}`}
+                            href={`/${request.type === 'series' ? 'series' : 'movie'}/${(request as any).contentId}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-colors"

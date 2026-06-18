@@ -21,6 +21,8 @@ import {
   ConfirmationResult,
   updateProfile,
   updatePassword,
+  setPersistence,
+  browserLocalPersistence,
 } from "firebase/auth";
 import {
   doc,
@@ -77,11 +79,17 @@ interface AuthContextType {
   logout: () => Promise<void>;
   toggleFavorite: (contentId: string) => Promise<void>;
   toggleWatchLater: (contentId: string) => Promise<void>;
-  refreshProfile: (force?: boolean, reason?: 'auto' | 'manual' | 'login' | 'logout') => Promise<boolean>;
+  refreshProfile: (
+    force?: boolean,
+    reason?: "auto" | "manual" | "login" | "logout",
+  ) => Promise<boolean>;
   isSyncing: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+// Ensure local persistence mode before doing any auth logic to prevent unexpected logouts
+setPersistence(auth, browserLocalPersistence).catch(console.error);
 
 export const standardizePhone = (phone: string) => {
   if (!phone) return "";
@@ -92,15 +100,15 @@ export const standardizePhone = (phone: string) => {
 
   // Pakistan specific standardization: target is +923XXXXXXXXX (13 chars)
   // Standard mobile number in PK is 10 digits starting with 3 (e.g. 3001234567)
-  
+
   let base = digits;
-  
+
   // Repeatedly remove prefixes that are common in Pakistan
   // 1. Remove 92 if it's there and leaves at least 10 digits
   if (base.startsWith("92") && base.length > 10) {
     base = base.substring(2);
   }
-  
+
   // 2. Remove 0 if it's there and leaves exactly 10 digits (e.g. 0300... -> 300...)
   if (base.startsWith("0") && base.length === 11) {
     base = base.substring(1);
@@ -163,12 +171,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!id) {
         id = Math.random().toString(36).substring(2) + Date.now().toString(36);
         safeStorage.setItem("device_session_id", id);
+        (window as any)._isNewSessionId = true;
       }
       return id;
     } catch (e) {
       if (!(window as any)._fallbackSessionId) {
         (window as any)._fallbackSessionId =
           Math.random().toString(36).substring(2) + Date.now().toString(36);
+        (window as any)._isNewSessionId = true;
       }
       return (window as any)._fallbackSessionId;
     }
@@ -185,209 +195,323 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const refreshProfile = useCallback(async (force = false, reason: 'auto' | 'manual' | 'login' | 'logout' = 'auto'): Promise<boolean> => {
-    let updatedSomething = false;
-    const currentUser = auth.currentUser;
-    if (!currentUser) {
-      safeStorage.removeItem("profile_cache");
-      setProfile(null);
-      setLoading(false);
-      return false;
-    }
-
-    const userRef = doc(db, "users", currentUser.uid);
-    const cachedProfileStr = safeStorage.getItem("profile_cache");
-    let localProfile = cachedProfileStr ? JSON.parse(cachedProfileStr) : null;
-    
-    // Only show loading if we have no profile data to show
-    if (!profile && !localProfile) setLoading(true);
-
-    try {
-      const localVersionKey = `profile_version_${currentUser.uid}`;
-      const localVersion = parseInt(safeStorage.getItem(localVersionKey) || "0", 10);
-      
-      const now = Date.now();
-      const dailySyncKey = `last_daily_sync_${currentUser.uid}`;
-      const lastSyncDateStr = localStorage.getItem(dailySyncKey);
-      
-      const shiftedTime = new Date(now + (5 - 7) * 60 * 60 * 1000);
-      const pktDate = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
-      const isDailySync = lastSyncDateStr !== pktDate;
-
-      if (localProfile && !profile) {
-         setProfile(localProfile);
-         setLoading(false); // Unblock immediately if we have cached data
+  const refreshProfile = useCallback(
+    async (
+      force = false,
+      reason: "auto" | "manual" | "login" | "logout" = "auto",
+    ): Promise<boolean> => {
+      let updatedSomething = false;
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        safeStorage.removeItem("profile_cache");
+        setProfile(null);
+        setLoading(false);
+        return false;
       }
 
-      // 1. Firstly read chunk_meta
-      let serverVersion = localVersion;
-      let isVersionMissing = false;
-      if (navigator.onLine && (force || isDailySync || !localProfile)) {
-        setIsSyncing(true);
-        try {
-          const { getChunkMeta } = await import('../utils/chunkMeta');
-          const meta = await getChunkMeta(force);
-          const chunkUsersMeta = meta.users || {};
-          if (currentUser.uid in chunkUsersMeta) {
-             serverVersion = chunkUsersMeta[currentUser.uid];
-          } else {
-             isVersionMissing = true;
-          }
-        } catch (e) {
-          console.error("Failed to fetch chunk_meta for profile:", e);
-        }
-      }
+      const userRef = doc(db, "users", currentUser.uid);
+      const cachedProfileStr = safeStorage.getItem("profile_cache");
+      let localProfile = cachedProfileStr ? JSON.parse(cachedProfileStr) : null;
 
-      // 2. If version changes found
-      const versionChanged = serverVersion > localVersion || localVersion === 0;
+      // Only show loading if we have no profile data to show
+      if (!profile && !localProfile) setLoading(true);
 
-      let serverProfile: UserProfile | null = null;
-      let docSnap;
-      
-      // 7. Before updating user data, first check version from content_meta, if different new version first read the user data doc
-      if (navigator.onLine && (versionChanged || !localProfile || force)) {
-        try {
-          docSnap = await getDoc(userRef);
-          if (docSnap.exists()) {
-            serverProfile = docSnap.data() as UserProfile;
-            updatedSomething = true;
-          }
-        } catch (e) {
-          console.error("Error reading user data from Firestore, using local fallback", e);
-          if (!localProfile) {
-            // Can't run without local profile if getDoc fails
-            throw e;
+      try {
+        const localVersionKey = `profile_version_${currentUser.uid}`;
+        const localVersion = parseInt(
+          safeStorage.getItem(localVersionKey) || "0",
+          10,
+        );
+
+        const now = Date.now();
+        const dailySyncKey = `last_daily_sync_${currentUser.uid}`;
+        const lastSyncDateStr = localStorage.getItem(dailySyncKey);
+
+        const shiftedTime = new Date(now + (5 - 7) * 60 * 60 * 1000);
+        const pktDate = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
+        const isDailySync = lastSyncDateStr !== pktDate;
+
+        if (localProfile && !profile) {
+          setProfile(localProfile);
+          setLoading(false); // Unblock immediately if we have cached data
+        }
+
+        // 1. Firstly read chunk_meta
+        let serverVersion = localVersion;
+        let isVersionMissing = false;
+        if (navigator.onLine && (force || isDailySync || !localProfile)) {
+          setIsSyncing(true);
+          try {
+            const { getChunkMeta } = await import("../utils/chunkMeta");
+            const meta = await getChunkMeta(force);
+            const chunkUsersMeta = meta.users || {};
+            if (currentUser.uid in chunkUsersMeta) {
+              serverVersion = chunkUsersMeta[currentUser.uid];
+            } else {
+              isVersionMissing = true;
+            }
+          } catch (e) {
+            console.error("Failed to fetch chunk_meta for profile:", e);
           }
         }
-      } else if (navigator.onLine) {
-        // Just checking if we need to retrieve snapshot for later (legacy checks)
-         const cachedDocSnapStr = safeStorage.getItem("profile_doc_snap");
-         if (!cachedDocSnapStr && !localProfile) {
+
+        // 2. If version changes found
+        const versionChanged =
+          serverVersion > localVersion || localVersion === 0;
+
+        let serverProfile: UserProfile | null = null;
+        let docSnap;
+
+        // 7. Before updating user data, first check version from content_meta, if different new version first read the user data doc
+        if (navigator.onLine && (versionChanged || !localProfile || force)) {
+          try {
+            docSnap = await getDoc(userRef);
+            if (docSnap.exists()) {
+              serverProfile = docSnap.data() as UserProfile;
+              updatedSomething = true;
+            }
+          } catch (e) {
+            console.error(
+              "Error reading user data from Firestore, using local fallback",
+              e,
+            );
+            if (!localProfile) {
+              // Can't run without local profile if getDoc fails
+              throw e;
+            }
+          }
+        } else if (navigator.onLine) {
+          // Just checking if we need to retrieve snapshot for later (legacy checks)
+          const cachedDocSnapStr = safeStorage.getItem("profile_doc_snap");
+          if (!cachedDocSnapStr && !localProfile) {
             try {
               docSnap = await getDoc(userRef);
               if (docSnap.exists()) {
-                 serverProfile = docSnap.data() as UserProfile;
+                serverProfile = docSnap.data() as UserProfile;
               }
             } catch (e) {}
-         }
-      }
+          }
+        }
 
-      // 3. Update user data if changed versions then sync it with local storage version like time in app, favorites, watch later... merge data intelligently first in local storage
-      let mergedProfile: UserProfile | null = localProfile ? { ...localProfile } as UserProfile : null;
-      if (serverProfile) {
-        mergedProfile = {
+        // 3. Update user data if changed versions then sync it with local storage version like time in app, favorites, watch later... merge data intelligently first in local storage
+        let mergedProfile: UserProfile | null = localProfile
+          ? ({ ...localProfile } as UserProfile)
+          : null;
+        if (serverProfile) {
+          mergedProfile = {
             ...(localProfile || {}),
             ...serverProfile,
-            favorites: safeStorage.getItem("needs_user_sync") === "true" && safeStorage.getItem("pending_favorites_array") 
-                ? JSON.parse(safeStorage.getItem("pending_favorites_array")!) 
-                : Array.from(new Set([...(localProfile?.favorites || []), ...(serverProfile.favorites || [])])),
-            watchLater: safeStorage.getItem("needs_user_sync") === "true" && safeStorage.getItem("pending_watch_later_array") 
-                ? JSON.parse(safeStorage.getItem("pending_watch_later_array")!) 
-                : Array.from(new Set([...(localProfile?.watchLater || []), ...(serverProfile.watchLater || [])])),
+            favorites:
+              safeStorage.getItem("needs_user_sync") === "true" &&
+              safeStorage.getItem("pending_favorites_array")
+                ? JSON.parse(safeStorage.getItem("pending_favorites_array")!)
+                : Array.from(
+                    new Set([
+                      ...(localProfile?.favorites || []),
+                      ...(serverProfile.favorites || []),
+                    ]),
+                  ),
+            watchLater:
+              safeStorage.getItem("needs_user_sync") === "true" &&
+              safeStorage.getItem("pending_watch_later_array")
+                ? JSON.parse(safeStorage.getItem("pending_watch_later_array")!)
+                : Array.from(
+                    new Set([
+                      ...(localProfile?.watchLater || []),
+                      ...(serverProfile.watchLater || []),
+                    ]),
+                  ),
             orders: (() => {
-                const localOrders = localProfile?.orders || [];
-                const serverOrders = serverProfile.orders || [];
-                const merged = [...localOrders];
-                serverOrders.forEach(so => {
-                    if (!merged.find(lo => lo.id === so.id)) merged.push(so);
-                });
-                return merged;
+              const localOrders = localProfile?.orders || [];
+              const serverOrders = serverProfile.orders || [];
+              const merged = [...localOrders];
+              serverOrders.forEach((so) => {
+                if (!merged.find((lo) => lo.id === so.id)) merged.push(so);
+              });
+              return merged;
             })(),
-            timeSpent: Math.max(serverProfile.timeSpent || 0, localProfile?.timeSpent || 0)
-        };
-      }
-
-      // Flush any accumulated seconds before sync
-      const cacheKey = `accumulated_time_seconds_${currentUser.uid}`;
-      let accSecs = parseInt(safeStorage.getItem(cacheKey) || "0", 10);
-      if (accSecs > 0) {
-        safeStorage.setItem(cacheKey, "0");
-        const pendingStr = safeStorage.getItem('pending_user_updates') || '{}';
-        try {
-          let pendingAll = JSON.parse(pendingStr);
-          pendingAll[currentUser.uid] = pendingAll[currentUser.uid] || {};
-          let currentBase = typeof pendingAll[currentUser.uid].timeSpent === 'number' ? pendingAll[currentUser.uid].timeSpent : (localProfile?.timeSpent || 0);
-          pendingAll[currentUser.uid].timeSpent = currentBase + accSecs;
-          safeStorage.setItem('pending_user_updates', JSON.stringify(pendingAll));
-        } catch(e){}
-      }
-
-      // 4. Update user data doc and update chunk_meta version for user ONLY when necessary daily or local change
-      const needsUserSync = safeStorage.getItem("needs_user_sync") === "true";
-      let pendingTimeSpent = false;
-      try {
-        const pdStr = safeStorage.getItem("pending_user_updates");
-        if (pdStr) {
-           const pObj = JSON.parse(pdStr);
-           if (pObj[currentUser.uid] && pObj[currentUser.uid].timeSpent !== undefined) pendingTimeSpent = true;
+            timeSpent: Math.max(
+              serverProfile.timeSpent || 0,
+              localProfile?.timeSpent || 0,
+            ),
+          };
         }
-      } catch(e){}
-      
-      const hasLocalChanges = needsUserSync || (accSecs > 0) || pendingTimeSpent;
-      
-      // Strict rule: Only write to Firestore if forced or if it's the daily sync window (after 9 AM PKT)
-      // If needsUserSync is true but it's not the daily sync time, it stays in local storage until next day
-      const isLogin = justLoggedInRef.current || reason === 'login';
-      const isSignOut = reason === 'logout';
-      const shouldWrite = (serverProfile || localProfile) && 
-        (isVersionMissing || isLogin || isSignOut || (hasLocalChanges && (isDailySync || force)));
 
-      if (shouldWrite) {
+        if (mergedProfile) {
+          let modified = false;
+          const nowTime = Date.now();
+          const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+          if (mergedProfile.reported_links) {
+            const filtered = mergedProfile.reported_links.filter((r: any) => {
+              if (r.status !== "pending" && r.updatedAt) {
+                const rDate = new Date(r.updatedAt).getTime();
+                if (nowTime - rDate > SEVEN_DAYS_MS) return false;
+              }
+              return true;
+            });
+            if (filtered.length !== mergedProfile.reported_links.length) {
+              mergedProfile.reported_links = filtered;
+              modified = true;
+            }
+          }
+
+          if (mergedProfile.movieRequests) {
+            const filtered = mergedProfile.movieRequests.filter((r: any) => {
+              if (r.status !== "pending" && r.updatedAt) {
+                const rDate = new Date(r.updatedAt).getTime();
+                if (nowTime - rDate > SEVEN_DAYS_MS) return false;
+              }
+              return true;
+            });
+            if (filtered.length !== mergedProfile.movieRequests.length) {
+              mergedProfile.movieRequests = filtered;
+              modified = true;
+            }
+          }
+
+          if (modified) {
+            safeStorage.setItem("needs_user_sync", "true");
+          }
+        }
+
+        // Flush any accumulated seconds before sync
+        const cacheKey = `accumulated_time_seconds_${currentUser.uid}`;
+        let accSecs = parseInt(safeStorage.getItem(cacheKey) || "0", 10);
+        if (accSecs > 0) {
+          safeStorage.setItem(cacheKey, "0");
+          const pendingStr =
+            safeStorage.getItem("pending_user_updates") || "{}";
+          try {
+            let pendingAll = JSON.parse(pendingStr);
+            pendingAll[currentUser.uid] = pendingAll[currentUser.uid] || {};
+            let currentBase =
+              typeof pendingAll[currentUser.uid].timeSpent === "number"
+                ? pendingAll[currentUser.uid].timeSpent
+                : localProfile?.timeSpent || 0;
+            pendingAll[currentUser.uid].timeSpent = currentBase + accSecs;
+            safeStorage.setItem(
+              "pending_user_updates",
+              JSON.stringify(pendingAll),
+            );
+          } catch (e) {}
+        }
+
+        // 4. Update user data doc and update chunk_meta version for user ONLY when necessary daily or local change
+        const needsUserSync = safeStorage.getItem("needs_user_sync") === "true";
+        let pendingUpdatesExist = false;
         try {
-            const { writeBatch } = await import('firebase/firestore');
+          const pdStr = safeStorage.getItem("pending_user_updates");
+          if (pdStr) {
+            const pObj = JSON.parse(pdStr);
+            if (
+              pObj[currentUser.uid] &&
+              Object.keys(pObj[currentUser.uid]).length > 0
+            )
+              pendingUpdatesExist = true;
+          }
+        } catch (e) {}
+
+        const hasLocalChanges =
+          needsUserSync || accSecs > 0 || pendingUpdatesExist;
+
+        // Strict rule: Only write to Firestore if forced or if it's the daily sync window (after 9 AM PKT)
+        // If needsUserSync is true but it's not the daily sync time, it stays in local storage until next day
+        const isLogin = justLoggedInRef.current || reason === "login";
+        const isSignOut = reason === "logout";
+        const shouldWrite =
+          (serverProfile || localProfile) &&
+          (isVersionMissing ||
+            isLogin ||
+            isSignOut ||
+            force ||
+            (hasLocalChanges && isDailySync));
+
+        if (shouldWrite) {
+          try {
+            const { writeBatch } = await import("firebase/firestore");
             const batch = writeBatch(db);
             const newVersion = Date.now();
-            
+
             const updatesToPush: any = {};
             if (needsUserSync) {
-                const pendFavs = safeStorage.getItem("pending_favorites_array");
-                if (pendFavs) updatesToPush.favorites = JSON.parse(pendFavs);
-                const pendWL = safeStorage.getItem("pending_watch_later_array");
-                if (pendWL) updatesToPush.watchLater = JSON.parse(pendWL);
-                
-                // Sync any deferred string/boolean/array profile fields
-                const syncableKeys = ['phone', 'displayName', 'lastNotificationCheck', 'notification', 'movieRequests', 'orders', 'settings', 'timeSpent'];
-                syncableKeys.forEach(key => {
-                   if (localProfile && localProfile[key] !== undefined && JSON.stringify(localProfile[key]) !== JSON.stringify(serverProfile?.[key])) {
-                       updatesToPush[key] = localProfile[key];
-                   }
-                });
+              const pendFavs = safeStorage.getItem("pending_favorites_array");
+              if (pendFavs) updatesToPush.favorites = JSON.parse(pendFavs);
+              const pendWL = safeStorage.getItem("pending_watch_later_array");
+              if (pendWL) updatesToPush.watchLater = JSON.parse(pendWL);
+
+              // Sync any deferred string/boolean/array profile fields
+              const syncableKeys = [
+                "phone",
+                "displayName",
+                "lastNotificationCheck",
+                "notification",
+                "movieRequests",
+                "orders",
+                "settings",
+                "timeSpent",
+              ];
+              syncableKeys.forEach((key) => {
+                if (
+                  localProfile &&
+                  localProfile[key] !== undefined &&
+                  JSON.stringify(localProfile[key]) !==
+                    JSON.stringify(serverProfile?.[key])
+                ) {
+                  updatesToPush[key] = localProfile[key];
+                }
+              });
             }
-            if (mergedProfile.timeSpent !== undefined) updatesToPush.timeSpent = mergedProfile.timeSpent;
-            
+            if (mergedProfile.timeSpent !== undefined)
+              updatesToPush.timeSpent = mergedProfile.timeSpent;
+
             // Check if there's any pending timeSpent in pending_user_updates for THIS user
-            const pendingUpdatesStr = safeStorage.getItem("pending_user_updates");
+            const pendingUpdatesStr = safeStorage.getItem(
+              "pending_user_updates",
+            );
             if (pendingUpdatesStr) {
               try {
                 const pendingAll = JSON.parse(pendingUpdatesStr);
                 const myPending = pendingAll[currentUser.uid];
                 if (myPending) {
-                   if (myPending.timeSpent !== undefined) {
-                     updatesToPush.timeSpent = Math.max(updatesToPush.timeSpent || 0, myPending.timeSpent);
-                     delete myPending.timeSpent;
-                   }
-                   Object.assign(updatesToPush, myPending);
-                   delete pendingAll[currentUser.uid];
-                   safeStorage.setItem("pending_user_updates", JSON.stringify(pendingAll));
+                  if (myPending.timeSpent !== undefined) {
+                    updatesToPush.timeSpent = Math.max(
+                      updatesToPush.timeSpent || 0,
+                      myPending.timeSpent,
+                    );
+                    delete myPending.timeSpent;
+                  }
+                  Object.assign(updatesToPush, myPending);
+                  delete pendingAll[currentUser.uid];
+                  safeStorage.setItem(
+                    "pending_user_updates",
+                    JSON.stringify(pendingAll),
+                  );
                 }
               } catch (e) {}
             }
-            
+
             updatesToPush.lastActive = new Date().toISOString();
 
             if (Object.keys(updatesToPush).length > 0) {
               batch.set(userRef, updatesToPush, { merge: true });
             }
             // Add user version to chunk_meta to prevent infinite writes
-            const metaRef = doc(db, 'chunk_meta', 'versions');
+            const metaRef = doc(db, "chunk_meta", "versions");
             let skipCommit = false;
             try {
-               const { updateDoc } = await import('firebase/firestore');
-               await updateDoc(metaRef, { [`users.${currentUser.uid}`]: newVersion });
+              const { updateDoc } = await import("firebase/firestore");
+              await updateDoc(metaRef, {
+                [`users.${currentUser.uid}`]: newVersion,
+              });
             } catch (e) {
-               batch.set(metaRef, { users: { [currentUser.uid]: newVersion } }, { merge: true });
-               await batch.commit();
-               skipCommit = true;
+              batch.set(
+                metaRef,
+                { users: { [currentUser.uid]: newVersion } },
+                { merge: true },
+              );
+              await batch.commit();
+              skipCommit = true;
             }
             if (!skipCommit) await batch.commit();
 
@@ -401,461 +525,504 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             mergedProfile = { ...mergedProfile, ...updatesToPush };
             if (hasLocalChanges || versionChanged) updatedSomething = true;
             console.log("Profile changes synced & merged to Firestore");
-        } catch (err) {
-            handleFirestoreError(err, OperationType.WRITE, `users/${currentUser.uid}`);
-            console.error("Manual/Daily profile sync failed:", err);
-        }
-      } else {
-        if (isDailySync) localStorage.setItem(dailySyncKey, pktDate);
-        if (serverProfile) {
-            safeStorage.setItem(localVersionKey, serverVersion.toString());
-        }
-      }
-
-      if (mergedProfile && Object.keys(mergedProfile).length > 0) {
-          safeStorage.setItem("profile_cache", JSON.stringify(mergedProfile));
-      safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
-          setProfile(mergedProfile);
-      }
-
-      // Admin & Session checks
-      if (mergedProfile || serverProfile) {
-        const data = mergedProfile && Object.keys(mergedProfile).length > 0 ? mergedProfile : serverProfile as UserProfile;
-
-        const userEmailLower = currentUser.email?.toLowerCase();
-        const isOwner = userEmailLower === "asmatn628@gmail.com";
-        const isAdmin = [
-          "asmatullah9327@gmail.com",
-          "kabirahmaddev@gmail.com",
-          "wamoviesstation@gmail.com"
-        ].includes(userEmailLower || "");
-        const hasAdminPrivileges =
-          isOwner ||
-          isAdmin ||
-          data.role === "owner" ||
-          data.role === "admin";
-
-        const updates: any = {};
-        const localSessionId = getLocalSessionId();
-
-        // 1-Device Lock Check
-        if (!hasAdminPrivileges && !justLoggedInRef.current && safeStorage.isAvailable) {
-          if (data.sessionId && data.sessionId !== localSessionId) {
-            console.log("Logged in from another device. Logging out.");
-            signOut(auth);
-            setError(
-              "You have been logged out because your account was accessed from another device."
+          } catch (err) {
+            handleFirestoreError(
+              err,
+              OperationType.WRITE,
+              `users/${currentUser.uid}`,
             );
-            return false;
-          } else if (!data.sessionId) {
-            updates.sessionId = localSessionId;
-            data.sessionId = localSessionId;
+            console.error("Manual/Daily profile sync failed:", err);
+          }
+        } else {
+          if (isDailySync) localStorage.setItem(dailySyncKey, pktDate);
+          if (serverProfile) {
+            safeStorage.setItem(localVersionKey, serverVersion.toString());
           }
         }
 
-        // Auto-expire logic
-        const expiryNow = new Date();
-        if (
-          data.status === "active" &&
-          data.expiryDate &&
-          data.role !== "owner"
-        ) {
-          // Parse expiry date by YYYY-MM-DD to avoid timezone shifting
-          const expiryDateStr = data.expiryDate.split('T')[0]; 
-          const parts = expiryDateStr.split('-');
-          // Create expiration boundary at 00:00:00 local time on the day AFTER the expiry date
-          const expiryBoundary = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]) + 1);
-          if (expiryNow >= expiryBoundary) {
-            let isReallyExpired = true;
-            if (!serverProfile && navigator.onLine) {
-              try {
-                const freshSnap = await getDoc(userRef);
-                if (freshSnap.exists()) {
-                  const freshData = freshSnap.data() as UserProfile;
-                  serverProfile = freshData;
-                  if (freshData.expiryDate) {
-                    const fExpStr = freshData.expiryDate.split('T')[0];
-                    const fParts = fExpStr.split('-');
-                    const freshBoundary = new Date(parseInt(fParts[0]), parseInt(fParts[1]) - 1, parseInt(fParts[2]) + 1);
-                    if (expiryNow < freshBoundary || freshData.status !== "active") {
-                      isReallyExpired = false;
-                      data.expiryDate = freshData.expiryDate;
-                      data.status = freshData.status;
-                      if (mergedProfile) {
-                        mergedProfile.expiryDate = freshData.expiryDate;
-                        mergedProfile.status = freshData.status;
+        if (mergedProfile && Object.keys(mergedProfile).length > 0) {
+          safeStorage.setItem("profile_cache", JSON.stringify(mergedProfile));
+          safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
+          setProfile(mergedProfile);
+        }
+
+        // Admin & Session checks
+        if (mergedProfile || serverProfile) {
+          const data =
+            mergedProfile && Object.keys(mergedProfile).length > 0
+              ? mergedProfile
+              : (serverProfile as UserProfile);
+
+          const userEmailLower = currentUser.email?.toLowerCase();
+          const isOwner = userEmailLower === "asmatn628@gmail.com";
+          const isAdmin = [
+            "asmatullah9327@gmail.com",
+            "kabirahmaddev@gmail.com",
+            "wamoviesstation@gmail.com",
+          ].includes(userEmailLower || "");
+          const hasAdminPrivileges =
+            isOwner ||
+            isAdmin ||
+            data.role === "owner" ||
+            data.role === "admin";
+
+          const updates: any = {};
+          const localSessionId = getLocalSessionId();
+
+          // 1-Device Lock Check
+          if (!hasAdminPrivileges && safeStorage.isAvailable) {
+            if (justLoggedInRef.current || (window as any)._isNewSessionId) {
+              // Set new session ID, evicting previous devices
+              updates.sessionId = localSessionId;
+              data.sessionId = localSessionId;
+              (window as any)._isNewSessionId = false; // reset after initial assignment
+            } else {
+              if (data.sessionId && data.sessionId !== localSessionId) {
+                console.log("Logged in from another device. Logging out.");
+                signOut(auth);
+                setError(
+                  "You have been logged out because your account was accessed from another device.",
+                );
+                return false;
+              } else if (!data.sessionId) {
+                updates.sessionId = localSessionId;
+                data.sessionId = localSessionId;
+              }
+            }
+          }
+
+          // Auto-expire logic
+          const expiryNow = new Date();
+          if (
+            data.status === "active" &&
+            data.expiryDate &&
+            data.role !== "owner"
+          ) {
+            // Parse expiry date by YYYY-MM-DD to avoid timezone shifting
+            const expiryDateStr = data.expiryDate.split("T")[0];
+            const parts = expiryDateStr.split("-");
+            // Create expiration boundary at 00:00:00 local time on the day AFTER the expiry date
+            const expiryBoundary = new Date(
+              parseInt(parts[0]),
+              parseInt(parts[1]) - 1,
+              parseInt(parts[2]) + 1,
+            );
+            if (expiryNow >= expiryBoundary) {
+              let isReallyExpired = true;
+              if (!serverProfile && navigator.onLine) {
+                try {
+                  const freshSnap = await getDoc(userRef);
+                  if (freshSnap.exists()) {
+                    const freshData = freshSnap.data() as UserProfile;
+                    serverProfile = freshData;
+                    if (freshData.expiryDate) {
+                      const fExpStr = freshData.expiryDate.split("T")[0];
+                      const fParts = fExpStr.split("-");
+                      const freshBoundary = new Date(
+                        parseInt(fParts[0]),
+                        parseInt(fParts[1]) - 1,
+                        parseInt(fParts[2]) + 1,
+                      );
+                      if (
+                        expiryNow < freshBoundary ||
+                        freshData.status !== "active"
+                      ) {
+                        isReallyExpired = false;
+                        data.expiryDate = freshData.expiryDate;
+                        data.status = freshData.status;
+                        if (mergedProfile) {
+                          mergedProfile.expiryDate = freshData.expiryDate;
+                          mergedProfile.status = freshData.status;
+                        }
                       }
                     }
                   }
+                } catch (e) {
+                  console.error("Failed to fresh fetch for expiry check", e);
                 }
-              } catch (e) {
-                console.error("Failed to fresh fetch for expiry check", e);
               }
-            }
-            
-            if (isReallyExpired) {
-              updates.status = "expired";
-              data.status = "expired";
-              if (mergedProfile) {
-                mergedProfile.status = "expired";
+
+              if (isReallyExpired) {
+                updates.status = "expired";
+                data.status = "expired";
+                if (mergedProfile) {
+                  mergedProfile.status = "expired";
+                }
               }
             }
           }
-        }
 
-        // Role enforcement
-        if (
-          isOwner &&
-          (data.role !== "owner" ||
-            data.status !== "active" ||
-            data.expiryDate !== "Lifetime")
-        ) {
-          updates.role = "owner";
-          updates.status = "active";
-          updates.expiryDate = "Lifetime";
-          data.role = "owner";
-          data.status = "active";
-          data.expiryDate = "Lifetime";
-        } else if (
-          isAdmin &&
-          (data.role !== "admin" || data.status !== "active")
-        ) {
-          updates.role = "admin";
-          updates.status = "active";
-          data.role = "admin";
-          data.status = "active";
-        }
-
-        const hasPassword = currentUser.providerData.some(
-          (p) => p.providerId === "password",
-        );
-        if (!data.hasPassword && hasPassword) {
-          updates.hasPassword = true;
-          data.hasPassword = true;
-        }
-
-      // Perform consolidated update if needed
-      if (Object.keys(updates).length > 0 && (isDailySync || isLogin || isSignOut || (force && reason !== 'manual'))) {
-          try {
-            const { writeBatch } = await import('firebase/firestore');
-            const batch = writeBatch(db);
-            batch.set(userRef, updates, { merge: true });
-            await batch.commit();
-          } catch (err) {
-            handleFirestoreError(err, OperationType.WRITE, `users/${currentUser.uid}`);
-            console.error(
-              "Failed to perform consolidated profile update:",
-              err,
-            );
-          }
-        }
-
-        setProfile(data);
-      } else {
-        // Create new user profile
-        const userEmailLower = currentUser.email?.toLowerCase();
-        const isOwner = userEmailLower === "asmatn628@gmail.com";
-        const isAdmin = [
-          "asmatullah9327@gmail.com",
-          "kabirahmaddev@gmail.com",
-          "wamoviesstation@gmail.com"
-        ].includes(userEmailLower || "");
-        const defaultRoleToSet = isOwner
-          ? "owner"
-          : isAdmin
-            ? "admin"
-            : "user";
-        const defaultStatusToSet =
-          isOwner || isAdmin ? "active" : "pending";
-        const hasPassword = currentUser.providerData.some(
-          (p) => p.providerId === "password",
-        );
-
-        // Extract phone from dummy email if available
-        let extractedPhone = "";
-        if (currentUser.email?.endsWith("@moviznow.com")) {
-          const phonePart = currentUser.email.replace(
-            "@moviznow.com",
-            "",
-          );
-          extractedPhone = standardizePhone(phonePart);
-        }
-        const pendingPhone = sessionStorage.getItem('pending_signup_phone');
-        if (pendingPhone) {
-          sessionStorage.removeItem('pending_signup_phone');
-        }
-        const standardizedUserPhone = standardizePhone(
-          currentUser.phoneNumber || extractedPhone || pendingPhone || "",
-        );
-
-        let mergedOldData: any = {};
-        let oldDocIds: string[] = [];
-
-        try {
-          const searchRef = collection(db, "users");
-          const findMatches = async (field: string, value: string) => {
-            if (!value) return [];
-            const q = query(
-              searchRef,
-              where(field, "==", value),
-              limit(5),
-            );
-            const snap = await getDocs(q);
-            return snap.docs.filter((d) => d.id !== currentUser.uid);
-          };
-
-          let matchDocs: any[] = [];
+          // Role enforcement
           if (
-            currentUser.email &&
-            !currentUser.email.endsWith("@moviznow.com")
+            isOwner &&
+            (data.role !== "owner" ||
+              data.status !== "active" ||
+              data.expiryDate !== "Lifetime")
           ) {
-            // Try exact match
-            const emailMatches = await findMatches(
-              "email",
-              currentUser.email,
-            );
-            matchDocs = [...matchDocs, ...emailMatches];
-
-            // Try lowercase match
-            const lowerEmail = currentUser.email.toLowerCase();
-            if (lowerEmail !== currentUser.email) {
-              const lowerEmailMatches = await findMatches(
-                "email",
-                lowerEmail,
-              );
-              matchDocs = [...matchDocs, ...lowerEmailMatches];
-            }
+            updates.role = "owner";
+            updates.status = "active";
+            updates.expiryDate = "Lifetime";
+            data.role = "owner";
+            data.status = "active";
+            data.expiryDate = "Lifetime";
+          } else if (
+            isAdmin &&
+            (data.role !== "admin" || data.status !== "active")
+          ) {
+            updates.role = "admin";
+            updates.status = "active";
+            data.role = "admin";
+            data.status = "active";
           }
 
-          if (standardizedUserPhone) {
-            // Try standardized
-            const phoneMatches = await findMatches(
-              "phone",
-              standardizedUserPhone,
-            );
-            matchDocs = [...matchDocs, ...phoneMatches];
-
-            // Try raw digits if different
-            const rawDigits = standardizedUserPhone.replace(/\D/g, "");
-            if (rawDigits && rawDigits !== standardizedUserPhone) {
-              const rawMatches = await findMatches("phone", rawDigits);
-              matchDocs = [...matchDocs, ...rawMatches];
-            }
-
-            // Try without leading 0 or +92 if present
-            let baseNumber = rawDigits;
-            if (baseNumber.startsWith("92"))
-              baseNumber = baseNumber.substring(2);
-            if (baseNumber.startsWith("0"))
-              baseNumber = baseNumber.substring(1);
-            if (baseNumber && baseNumber !== rawDigits) {
-              const baseMatches = await findMatches(
-                "phone",
-                baseNumber,
-              );
-              const zeroPrefixMatches = await findMatches(
-                "phone",
-                `0${baseNumber}`,
-              );
-              const plus92Matches = await findMatches(
-                "phone",
-                `+92${baseNumber}`,
-              );
-              matchDocs = [
-                ...matchDocs,
-                ...baseMatches,
-                ...zeroPrefixMatches,
-                ...plus92Matches,
-              ];
-            }
-          }
-
-          // Deduplicate by ID
-          const uniqueMatchDocs = matchDocs.filter(
-            (doc, index, self) =>
-              index === self.findIndex((t) => t.id === doc.id),
+          const hasPassword = currentUser.providerData.some(
+            (p) => p.providerId === "password",
           );
-
-          if (uniqueMatchDocs.length > 0) {
-            oldDocIds = uniqueMatchDocs.map((d) => d.id);
-            mergedOldData = uniqueMatchDocs.reduce((acc, doc) => {
-              const data = doc.data() as UserProfile;
-
-              // Role Priority: owner > admin > manager > ... > user
-              const rolePriority: Record<string, number> = {
-                owner: 100,
-                admin: 90,
-                manager: 80,
-                user_manager: 75,
-                content_manager: 70,
-                selected_content: 60,
-                user: 10,
-                trial: 5,
-              };
-              const getRoleRank = (r: string) => rolePriority[r] || 0;
-              const betterRole =
-                getRoleRank(data.role) > getRoleRank(acc.role || "")
-                  ? data.role
-                  : acc.role || data.role;
-
-              // Status Priority: active > pending > expired > suspended
-              const statusPriority: Record<string, number> = {
-                active: 100,
-                pending: 50,
-                expired: 20,
-                suspended: 0,
-              };
-              const getStatusRank = (s: string) =>
-                statusPriority[s] || 0;
-              const betterStatus =
-                getStatusRank(data.status) >
-                getStatusRank(acc.status || "")
-                  ? data.status
-                  : acc.status || data.status;
-
-              // Expiry Date Logic: "Lifetime" wins, otherwise latest date
-              let betterExpiry = acc.expiryDate;
-              if (
-                data.expiryDate === "Lifetime" ||
-                acc.expiryDate === "Lifetime"
-              ) {
-                betterExpiry = "Lifetime";
-              } else if (
-                data.expiryDate &&
-                (!acc.expiryDate || data.expiryDate > acc.expiryDate)
-              ) {
-                betterExpiry = data.expiryDate;
-              }
-
-              return {
-                ...acc,
-                ...data,
-                role: betterRole,
-                status: betterStatus,
-                expiryDate: betterExpiry,
-                favorites: [
-                  ...new Set([
-                    ...(acc.favorites || []),
-                    ...(data.favorites || []),
-                  ]),
-                ],
-                watchLater: [
-                  ...new Set([
-                    ...(acc.watchLater || []),
-                    ...(data.watchLater || []),
-                  ]),
-                ],
-                assignedContent: [
-                  ...new Set([
-                    ...(acc.assignedContent || []),
-                    ...(data.assignedContent || []),
-                  ]),
-                ],
-                sessionsCount:
-                  (acc.sessionsCount || 0) + (data.sessionsCount || 0),
-                timeSpent: (acc.timeSpent || 0) + (data.timeSpent || 0),
-                createdAt:
-                  acc.createdAt && acc.createdAt < data.createdAt
-                    ? acc.createdAt
-                    : data.createdAt,
-                lastActive:
-                  acc.lastActive &&
-                  acc.lastActive > (data.lastActive || "")
-                    ? acc.lastActive
-                    : data.lastActive || acc.lastActive,
-              };
-            }, {} as any);
+          if (!data.hasPassword && hasPassword) {
+            updates.hasPassword = true;
+            data.hasPassword = true;
           }
-        } catch (e) {
-          console.error("Failed to check for existing accounts:", e);
-        }
 
-        const newProfile: UserProfile = {
-          // Start with all aggregated data from old accounts
-          ...mergedOldData,
-          // Ensure identity fields match exactly what was used for this successful login
-          uid: currentUser.uid,
-          email: currentUser.email || mergedOldData.email || "",
-          phone: standardizedUserPhone || mergedOldData.phone || "",
-          displayName:
-            currentUser.displayName || mergedOldData.displayName || "",
-          photoURL:
-            currentUser.photoURL || mergedOldData.photoURL || "",
-          // Increment session data for the current session, unless it's an owner
-          sessionsCount: isOwner ? (mergedOldData.sessionsCount || 0) : ((mergedOldData.sessionsCount || 0) + 1),
-          hasPassword: hasPassword,
-          sessionId: getLocalSessionId(),
-          // Enforce roles based on the high-privileged list or the old data
-          role: isOwner
+          // Perform consolidated update if needed
+          if (
+            Object.keys(updates).length > 0 &&
+            (isDailySync ||
+              isLogin ||
+              isSignOut ||
+              (force && reason !== "manual"))
+          ) {
+            try {
+              const { writeBatch } = await import("firebase/firestore");
+              const batch = writeBatch(db);
+              batch.set(userRef, updates, { merge: true });
+              await batch.commit();
+            } catch (err) {
+              handleFirestoreError(
+                err,
+                OperationType.WRITE,
+                `users/${currentUser.uid}`,
+              );
+              console.error(
+                "Failed to perform consolidated profile update:",
+                err,
+              );
+            }
+          }
+
+          setProfile(data);
+        } else {
+          // Create new user profile
+          const userEmailLower = currentUser.email?.toLowerCase();
+          const isOwner = userEmailLower === "asmatn628@gmail.com";
+          const isAdmin = [
+            "asmatullah9327@gmail.com",
+            "kabirahmaddev@gmail.com",
+            "wamoviesstation@gmail.com",
+          ].includes(userEmailLower || "");
+          const defaultRoleToSet = isOwner
             ? "owner"
             : isAdmin
               ? "admin"
-              : mergedOldData.role || defaultRoleToSet,
-          status:
-            isOwner || isAdmin
-              ? "active"
-              : mergedOldData.status || defaultStatusToSet,
-          expiryDate: isOwner
-            ? "Lifetime"
-            : mergedOldData.expiryDate || null,
-          // Ensure we have a creation date
-          createdAt:
-            mergedOldData.createdAt || new Date().toISOString(),
-          lastActive: new Date().toISOString(),
-          // Ensure arrays are initialized if missing
-          favorites: mergedOldData.favorites || [],
-          watchLater: mergedOldData.watchLater || [],
-          assignedContent: mergedOldData.assignedContent || [],
-        };
-
-        try {
-          const batch = writeBatch(db);
-          // Set the new user record
-          batch.set(userRef, newProfile);
-
-          // Delete all old records that were merged
-          const metaUpdates: Record<string, number> = { [currentUser.uid]: Date.now() };
-          oldDocIds.forEach((oldId) => {
-            batch.delete(doc(db, "users", oldId));
-            console.log(
-              `Merged and scheduled deletion of old profile: ${oldId}`,
-            );
-          });
-
-          await batch.commit();
-          console.log(
-            `Successfully combined ${oldDocIds.length} accounts into new UID ${currentUser.uid}`,
+              : "user";
+          const defaultStatusToSet = isOwner || isAdmin ? "active" : "pending";
+          const hasPassword = currentUser.providerData.some(
+            (p) => p.providerId === "password",
           );
-        } catch (err) {
-          console.error("Failed to merge/create user profile:", err);
-          // Fallback attempt if batch fails
+
+          // Extract phone from dummy email if available
+          let extractedPhone = "";
+          if (currentUser.email?.endsWith("@moviznow.com")) {
+            const phonePart = currentUser.email.replace("@moviznow.com", "");
+            extractedPhone = standardizePhone(phonePart);
+          }
+          const pendingPhone = sessionStorage.getItem("pending_signup_phone");
+          if (pendingPhone) {
+            sessionStorage.removeItem("pending_signup_phone");
+          }
+          const standardizedUserPhone = standardizePhone(
+            currentUser.phoneNumber || extractedPhone || pendingPhone || "",
+          );
+
+          let mergedOldData: any = {};
+          let oldDocIds: string[] = [];
+
           try {
-            const { writeBatch } = await import('firebase/firestore');
-            const fbBatch = writeBatch(db);
-            fbBatch.set(userRef, newProfile);
-            await fbBatch.commit();
+            const searchRef = collection(db, "users");
+            const findMatches = async (field: string, value: string) => {
+              if (!value) return [];
+              const q = query(searchRef, where(field, "==", value), limit(5));
+              const snap = await getDocs(q);
+              return snap.docs.filter((d) => d.id !== currentUser.uid);
+            };
+
+            let matchDocs: any[] = [];
+            if (
+              currentUser.email &&
+              !currentUser.email.endsWith("@moviznow.com")
+            ) {
+              // Try exact match
+              const emailMatches = await findMatches(
+                "email",
+                currentUser.email,
+              );
+              matchDocs = [...matchDocs, ...emailMatches];
+
+              // Try lowercase match
+              const lowerEmail = currentUser.email.toLowerCase();
+              if (lowerEmail !== currentUser.email) {
+                const lowerEmailMatches = await findMatches(
+                  "email",
+                  lowerEmail,
+                );
+                matchDocs = [...matchDocs, ...lowerEmailMatches];
+              }
+            }
+
+            if (standardizedUserPhone) {
+              // Try standardized
+              const phoneMatches = await findMatches(
+                "phone",
+                standardizedUserPhone,
+              );
+              matchDocs = [...matchDocs, ...phoneMatches];
+
+              // Try raw digits if different
+              const rawDigits = standardizedUserPhone.replace(/\D/g, "");
+              if (rawDigits && rawDigits !== standardizedUserPhone) {
+                const rawMatches = await findMatches("phone", rawDigits);
+                matchDocs = [...matchDocs, ...rawMatches];
+              }
+
+              // Try without leading 0 or +92 if present
+              let baseNumber = rawDigits;
+              if (baseNumber.startsWith("92"))
+                baseNumber = baseNumber.substring(2);
+              if (baseNumber.startsWith("0"))
+                baseNumber = baseNumber.substring(1);
+              if (baseNumber && baseNumber !== rawDigits) {
+                const baseMatches = await findMatches("phone", baseNumber);
+                const zeroPrefixMatches = await findMatches(
+                  "phone",
+                  `0${baseNumber}`,
+                );
+                const plus92Matches = await findMatches(
+                  "phone",
+                  `+92${baseNumber}`,
+                );
+                matchDocs = [
+                  ...matchDocs,
+                  ...baseMatches,
+                  ...zeroPrefixMatches,
+                  ...plus92Matches,
+                ];
+              }
+            }
+
+            // Deduplicate by ID
+            const uniqueMatchDocs = matchDocs.filter(
+              (doc, index, self) =>
+                index === self.findIndex((t) => t.id === doc.id),
+            );
+
+            if (uniqueMatchDocs.length > 0) {
+              oldDocIds = uniqueMatchDocs.map((d) => d.id);
+              mergedOldData = uniqueMatchDocs.reduce((acc, doc) => {
+                const data = doc.data() as UserProfile;
+
+                // Role Priority: owner > admin > manager > ... > user
+                const rolePriority: Record<string, number> = {
+                  owner: 100,
+                  admin: 90,
+                  manager: 80,
+                  user_manager: 75,
+                  content_manager: 70,
+                  selected_content: 60,
+                  user: 10,
+                  trial: 5,
+                };
+                const getRoleRank = (r: string) => rolePriority[r] || 0;
+                const betterRole =
+                  getRoleRank(data.role) > getRoleRank(acc.role || "")
+                    ? data.role
+                    : acc.role || data.role;
+
+                // Status Priority: active > pending > expired > suspended
+                const statusPriority: Record<string, number> = {
+                  active: 100,
+                  pending: 50,
+                  expired: 20,
+                  suspended: 0,
+                };
+                const getStatusRank = (s: string) => statusPriority[s] || 0;
+                const betterStatus =
+                  getStatusRank(data.status) > getStatusRank(acc.status || "")
+                    ? data.status
+                    : acc.status || data.status;
+
+                // Expiry Date Logic: "Lifetime" wins, otherwise latest date
+                let betterExpiry = acc.expiryDate;
+                if (
+                  data.expiryDate === "Lifetime" ||
+                  acc.expiryDate === "Lifetime"
+                ) {
+                  betterExpiry = "Lifetime";
+                } else if (
+                  data.expiryDate &&
+                  (!acc.expiryDate || data.expiryDate > acc.expiryDate)
+                ) {
+                  betterExpiry = data.expiryDate;
+                }
+
+                return {
+                  ...acc,
+                  ...data,
+                  role: betterRole,
+                  status: betterStatus,
+                  expiryDate: betterExpiry,
+                  favorites: [
+                    ...new Set([
+                      ...(acc.favorites || []),
+                      ...(data.favorites || []),
+                    ]),
+                  ],
+                  watchLater: [
+                    ...new Set([
+                      ...(acc.watchLater || []),
+                      ...(data.watchLater || []),
+                    ]),
+                  ],
+                  assignedContent: [
+                    ...new Set([
+                      ...(acc.assignedContent || []),
+                      ...(data.assignedContent || []),
+                    ]),
+                  ],
+                  sessionsCount:
+                    (acc.sessionsCount || 0) + (data.sessionsCount || 0),
+                  timeSpent: (acc.timeSpent || 0) + (data.timeSpent || 0),
+                  createdAt:
+                    acc.createdAt && acc.createdAt < data.createdAt
+                      ? acc.createdAt
+                      : data.createdAt,
+                  lastActive:
+                    acc.lastActive && acc.lastActive > (data.lastActive || "")
+                      ? acc.lastActive
+                      : data.lastActive || acc.lastActive,
+                };
+              }, {} as any);
+            }
+          } catch (e) {
+            console.error("Failed to check for existing accounts:", e);
+          }
+
+          const newProfile: UserProfile = {
+            // Start with all aggregated data from old accounts
+            ...mergedOldData,
+            // Ensure identity fields match exactly what was used for this successful login
+            uid: currentUser.uid,
+            email: currentUser.email || mergedOldData.email || "",
+            phone: standardizedUserPhone || mergedOldData.phone || "",
+            displayName:
+              currentUser.displayName || mergedOldData.displayName || "",
+            photoURL: currentUser.photoURL || mergedOldData.photoURL || "",
+            // Increment session data for the current session, unless it's an owner
+            sessionsCount: isOwner
+              ? mergedOldData.sessionsCount || 0
+              : (mergedOldData.sessionsCount || 0) + 1,
+            hasPassword: hasPassword,
+            sessionId: getLocalSessionId(),
+            // Enforce roles based on the high-privileged list or the old data
+            role: isOwner
+              ? "owner"
+              : isAdmin
+                ? "admin"
+                : mergedOldData.role || defaultRoleToSet,
+            status:
+              isOwner || isAdmin
+                ? "active"
+                : mergedOldData.status || defaultStatusToSet,
+            expiryDate: isOwner ? "Lifetime" : mergedOldData.expiryDate || null,
+            // Ensure we have a creation date
+            createdAt: mergedOldData.createdAt || new Date().toISOString(),
+            lastActive: new Date().toISOString(),
+            // Ensure arrays are initialized if missing
+            favorites: mergedOldData.favorites || [],
+            watchLater: mergedOldData.watchLater || [],
+            assignedContent: mergedOldData.assignedContent || [],
+          };
+
+          try {
+            const pendingUpdatesStr = safeStorage.getItem(
+              "pending_user_updates",
+            );
+            if (pendingUpdatesStr) {
+              const pendingAll = JSON.parse(pendingUpdatesStr);
+              if (pendingAll[currentUser.uid]) {
+                const myPending = pendingAll[currentUser.uid];
+                // Apply pending profile updates during profile creation
+                Object.assign(newProfile, myPending);
+                delete pendingAll[currentUser.uid];
+                safeStorage.setItem(
+                  "pending_user_updates",
+                  JSON.stringify(pendingAll),
+                );
+              }
+            }
           } catch (e) {}
+
+          try {
+            const batch = writeBatch(db);
+            // Set the new user record
+            batch.set(userRef, newProfile);
+
+            // Delete all old records that were merged
+            const metaUpdates: Record<string, number> = {
+              [currentUser.uid]: Date.now(),
+            };
+            oldDocIds.forEach((oldId) => {
+              batch.delete(doc(db, "users", oldId));
+              console.log(
+                `Merged and scheduled deletion of old profile: ${oldId}`,
+              );
+            });
+
+            await batch.commit();
+            console.log(
+              `Successfully combined ${oldDocIds.length} accounts into new UID ${currentUser.uid}`,
+            );
+          } catch (err) {
+            console.error("Failed to merge/create user profile:", err);
+            // Fallback attempt if batch fails
+            try {
+              const { writeBatch } = await import("firebase/firestore");
+              const fbBatch = writeBatch(db);
+              fbBatch.set(userRef, newProfile);
+              await fbBatch.commit();
+            } catch (e) {}
+          }
+          safeStorage.setItem("profile_cache", JSON.stringify(newProfile));
+          safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
+          safeStorage.setItem(
+            localVersionKey,
+            (serverVersion || Date.now()).toString(),
+          );
+          setProfile(newProfile);
         }
-        safeStorage.setItem("profile_cache",
-          JSON.stringify(newProfile),
+      } catch (error) {
+        console.error("Error updating/creating profile:", error);
+        handleFirestoreError(
+          error,
+          OperationType.GET,
+          `users/${currentUser.uid}`,
         );
-      safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
-        safeStorage.setItem(localVersionKey, (serverVersion || Date.now()).toString());
-        setProfile(newProfile);
+      } finally {
+        setIsSyncing(false);
+        setLoading(false);
+        return updatedSomething;
       }
-    } catch (error) {
-      console.error("Error updating/creating profile:", error);
-      handleFirestoreError(
-        error,
-        OperationType.GET,
-        `users/${currentUser.uid}`,
-      );
-    } finally {
-      setIsSyncing(false);
-      setLoading(false);
-      return updatedSomething;
-    }
-  }, []);
+    },
+    [],
+  );
 
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -863,7 +1030,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Profile syncing will only happen at 7AM, login/logout, or explicit phone update.
     };
     window.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => window.removeEventListener("visibilitychange", handleVisibilityChange);
+    return () =>
+      window.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [refreshProfile]);
 
   useEffect(() => {
@@ -899,60 +1067,134 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             !lastSessionStart ||
             now - parseInt(lastSessionStart) > twelveHours
           ) {
-            let isOwnerUser = currentUser.email?.toLowerCase() === "asmatn628@gmail.com";
+            let isOwnerUser =
+              currentUser.email?.toLowerCase() === "asmatn628@gmail.com";
             try {
-              const cachedProfileStr = safeStorage.getItem('profile_cache');
+              const cachedProfileStr = safeStorage.getItem("profile_cache");
               if (cachedProfileStr) {
                 const p = JSON.parse(cachedProfileStr);
-                if (p.role === 'owner') isOwnerUser = true;
+                if (p.role === "owner") isOwnerUser = true;
               }
-            } catch(e) {}
+            } catch (e) {}
 
             logEvent("session_start", currentUser.uid, {}, true); // Log to GA, skip individual Firestore write
             localStorage.setItem(sessionKey, now.toString());
-            
+
             if (!isOwnerUser) {
               pendingUpdates.sessionsCount = increment(1);
             }
             pendingUpdates.lastActive = new Date().toISOString();
+
+            const { getDeviceDetails } = await import("../utils/deviceInfo");
+            const deviceDetails = await getDeviceDetails();
+            if (deviceDetails) {
+              try {
+                const pendingStr =
+                  safeStorage.getItem("pending_user_updates") || "{}";
+                let pendingAll = JSON.parse(pendingStr);
+                pendingAll[currentUser.uid] = pendingAll[currentUser.uid] || {};
+                pendingAll[currentUser.uid].device = deviceDetails;
+                safeStorage.setItem(
+                  "pending_user_updates",
+                  JSON.stringify(pendingAll),
+                );
+              } catch (e) {}
+            }
           }
         }
-        
+
         // Add pending local state lists if daily sync applies or it's past 7AM and needs sync
         const needsSync = safeStorage.getItem("needs_user_sync") === "true";
         const isPast7AM = new Date(now + 5 * 3600000).getUTCHours() >= 7;
         if (isDailySync || (isPast7AM && needsSync)) {
-            const pendingFavorites = safeStorage.getItem("pending_favorites_array");
-            if (pendingFavorites) pendingUpdates.favorites = JSON.parse(pendingFavorites);
+          const pendingFavorites = safeStorage.getItem(
+            "pending_favorites_array",
+          );
+          if (pendingFavorites)
+            pendingUpdates.favorites = JSON.parse(pendingFavorites);
 
-            const pendingWatchLater = safeStorage.getItem("pending_watch_later_array");
-            if (pendingWatchLater) pendingUpdates.watchLater = JSON.parse(pendingWatchLater);
-            
-            const pendingOrders = safeStorage.getItem("pending_orders_array");
-            if (pendingOrders) {
-               const { arrayUnion } = await import('firebase/firestore');
-               pendingUpdates.orders = arrayUnion(...JSON.parse(pendingOrders));
-            }
+          const pendingWatchLater = safeStorage.getItem(
+            "pending_watch_later_array",
+          );
+          if (pendingWatchLater)
+            pendingUpdates.watchLater = JSON.parse(pendingWatchLater);
+
+          const pendingOrders = safeStorage.getItem("pending_orders_array");
+          if (pendingOrders) {
+            const { arrayUnion } = await import("firebase/firestore");
+            pendingUpdates.orders = arrayUnion(...JSON.parse(pendingOrders));
+          }
+        }
+
+        let mergedPendingKeys = false;
+        // When other user data is updating, include the pending user updates (like gender, age, device)
+        if (
+          Object.keys(pendingUpdates).length > 0 ||
+          isDailySync ||
+          (isPast7AM && needsSync)
+        ) {
+          const pendingUpdatesStr = safeStorage.getItem("pending_user_updates");
+          if (pendingUpdatesStr) {
+            try {
+              const pendingAll = JSON.parse(pendingUpdatesStr);
+              if (pendingAll[currentUser.uid]) {
+                const myPending = pendingAll[currentUser.uid];
+                // timeSpent is accumulated later so delete it to not mess up integer vs accumulation logic if any
+                Object.assign(pendingUpdates, myPending);
+                mergedPendingKeys = true;
+              }
+            } catch (e) {}
+          }
         }
 
         const hasLocalProfile = !!safeStorage.getItem("profile_cache");
         if (Object.keys(pendingUpdates).length > 0 && hasLocalProfile) {
-            try {
-                const { writeBatch } = await import('firebase/firestore');
-                const batch = writeBatch(db);
-                batch.set(userRef, pendingUpdates, { merge: true });
-                await batch.commit();
+          try {
+            const { writeBatch } = await import("firebase/firestore");
+            const batch = writeBatch(db);
+            batch.set(userRef, pendingUpdates, { merge: true });
 
-                if (isDailySync) localStorage.setItem(dailySyncKey, pktDate);
-                safeStorage.setItem("needs_user_sync", "false");
-                safeStorage.removeItem("pending_favorites_array");
-                safeStorage.removeItem("pending_watch_later_array");
-                safeStorage.removeItem("pending_content_clicks");
-                safeStorage.removeItem("pending_link_clicks");
-                safeStorage.removeItem("pending_orders_array");
-            } catch (err) {
-                console.error("Daily sync failed:", err);
+            let skipCommit = false;
+            try {
+              const { updateDoc } = await import("firebase/firestore");
+              await updateDoc(doc(db, "chunk_meta", "versions"), {
+                [`users.${currentUser.uid}`]: Date.now(),
+              });
+            } catch (e) {
+              batch.set(
+                doc(db, "chunk_meta", "versions"),
+                { users: { [currentUser.uid]: Date.now() } },
+                { merge: true },
+              );
+              await batch.commit();
+              skipCommit = true;
             }
+            if (!skipCommit) await batch.commit();
+
+            if (isDailySync) localStorage.setItem(dailySyncKey, pktDate);
+            safeStorage.setItem("needs_user_sync", "false");
+            safeStorage.removeItem("pending_favorites_array");
+            safeStorage.removeItem("pending_watch_later_array");
+            safeStorage.removeItem("pending_content_clicks");
+            safeStorage.removeItem("pending_link_clicks");
+            safeStorage.removeItem("pending_orders_array");
+
+            if (mergedPendingKeys) {
+              try {
+                const pStr = safeStorage.getItem("pending_user_updates");
+                if (pStr) {
+                  const pAll = JSON.parse(pStr);
+                  delete pAll[currentUser.uid];
+                  safeStorage.setItem(
+                    "pending_user_updates",
+                    JSON.stringify(pAll),
+                  );
+                }
+              } catch (e) {}
+            }
+          } catch (err) {
+            console.error("Daily sync failed:", err);
+          }
         }
 
         refreshProfile();
@@ -973,12 +1215,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (auth.currentUser && sessionStartTimeRef.current) {
         // Skip analytics for owner account
         try {
-          const cachedProfileStr = safeStorage.getItem('profile_cache');
+          const cachedProfileStr = safeStorage.getItem("profile_cache");
           if (cachedProfileStr) {
             const p = JSON.parse(cachedProfileStr);
-            if (p.role === 'owner') return;
+            if (p.role === "owner") return;
           }
-        } catch(e) {}
+        } catch (e) {}
 
         if (document.visibilityState === "visible") {
           const uid = auth.currentUser.uid;
@@ -1044,29 +1286,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 safeStorage.setItem(lastSyncKey, optimisticSyncTime);
 
                 // Update local cached_all_users for UI updates, but avoid triggering "pending changes"
-                const cachedUsersStr = safeStorage.getItem('cached_all_users') || '[]';
+                const cachedUsersStr =
+                  safeStorage.getItem("cached_all_users") || "[]";
                 let cachedUsers: any[] = [];
-                try { cachedUsers = JSON.parse(cachedUsersStr); } catch (e) {}
-                const userIndex = cachedUsers.findIndex(u => u.uid === uid);
-                
+                try {
+                  cachedUsers = JSON.parse(cachedUsersStr);
+                } catch (e) {}
+                const userIndex = cachedUsers.findIndex((u) => u.uid === uid);
+
                 if (userIndex !== -1) {
-                  cachedUsers[userIndex].timeSpent = (cachedUsers[userIndex].timeSpent || 0) + secondsToSync;
+                  cachedUsers[userIndex].timeSpent =
+                    (cachedUsers[userIndex].timeSpent || 0) + secondsToSync;
                   cachedUsers[userIndex].lastActive = new Date().toISOString();
-                  safeStorage.setItem('cached_all_users', JSON.stringify(cachedUsers));
-                  
+                  safeStorage.setItem(
+                    "cached_all_users",
+                    JSON.stringify(cachedUsers),
+                  );
+
                   // Only dispatch custom event if user is currently loaded
-                  window.dispatchEvent(new CustomEvent('user_local_update', { 
-                    detail: { uid, fields: { timeSpent: cachedUsers[userIndex].timeSpent, lastActive: cachedUsers[userIndex].lastActive } }
-                  }));
+                  window.dispatchEvent(
+                    new CustomEvent("user_local_update", {
+                      detail: {
+                        uid,
+                        fields: {
+                          timeSpent: cachedUsers[userIndex].timeSpent,
+                          lastActive: cachedUsers[userIndex].lastActive,
+                        },
+                      },
+                    }),
+                  );
                 }
 
                 // Removed writing to pending_user_updates here as per user request to avoid auto updating pending state.
                 // Time spent will be synced when another event triggers profile update.
 
-                logEvent("time_spent", uid, { duration: secondsToSync })
-                  .catch((err) => {
-                    console.error("Failed to sync time spent to analytics:", err);
-                  });
+                logEvent("time_spent", uid, { duration: secondsToSync }).catch(
+                  (err) => {
+                    console.error(
+                      "Failed to sync time spent to analytics:",
+                      err,
+                    );
+                  },
+                );
               }
             }
           }
@@ -1083,10 +1344,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       ) {
         // Skip analytics for owner account
         try {
-          const cachedProfileStr = safeStorage.getItem('profile_cache');
+          const cachedProfileStr = safeStorage.getItem("profile_cache");
           if (cachedProfileStr) {
             const p = JSON.parse(cachedProfileStr);
-            if (p.role === 'owner') return;
+            if (p.role === "owner") return;
           }
         } catch (e) {}
 
@@ -1142,7 +1403,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setError(null);
       justLoggedInRef.current = true;
       const provider = new GoogleAuthProvider();
+      provider.addScope("https://www.googleapis.com/auth/user.gender.read");
+      provider.addScope("https://www.googleapis.com/auth/user.birthday.read");
       const result = await signInWithPopup(auth, provider);
+
+      let gender, ageStr;
+      try {
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        if (credential?.accessToken) {
+          const res = await fetch("https://people.googleapis.com/v1/people/me?personFields=genders,birthdays", {
+            headers: { Authorization: `Bearer ${credential.accessToken}` }
+          });
+          const person = await res.json();
+          if (person.genders && person.genders.length > 0) {
+            gender = person.genders[0].value;
+          }
+          if (person.birthdays && person.birthdays.length > 0) {
+            const birthday = person.birthdays.find((b: any) => b.date && b.date.year) || person.birthdays[0];
+            if (birthday && birthday.date && birthday.date.year) {
+              const y = birthday.date.year;
+              const m = birthday.date.month || 1;
+              const d = birthday.date.day || 1;
+              const dateObj = new Date(y, m - 1, d);
+              const monthName = dateObj.toLocaleString("en-US", { month: "short" });
+              const calcAge = new Date().getFullYear() - y;
+              ageStr = `${monthName} ${d}, ${y} (${calcAge}Y)`;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to extract additional user info", e);
+      }
 
       // Force refresh app data
       safeStorage.removeItem("profile_cache");
@@ -1155,24 +1446,86 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const snap = await getDoc(userRef);
       const localSessionId = getLocalSessionId();
 
+      const updates: any = {};
+      const { getDeviceDetails } = await import("../utils/deviceInfo");
+      const deviceDetails = await getDeviceDetails();
+
+      if (ageStr !== undefined || gender !== undefined || deviceDetails) {
+        try {
+          const pendingStr =
+            safeStorage.getItem("pending_user_updates") || "{}";
+          let pendingAll = JSON.parse(pendingStr);
+          pendingAll[result.user.uid] = pendingAll[result.user.uid] || {};
+          if (ageStr !== undefined) pendingAll[result.user.uid].age = ageStr;
+          if (gender !== undefined) pendingAll[result.user.uid].gender = gender;
+          if (deviceDetails) pendingAll[result.user.uid].device = deviceDetails;
+          safeStorage.setItem(
+            "pending_user_updates",
+            JSON.stringify(pendingAll),
+          );
+        } catch (e) {}
+      }
+
+      try {
+        const pendingStr = safeStorage.getItem("pending_user_updates");
+        if (pendingStr) {
+          const pendingAll = JSON.parse(pendingStr);
+          if (pendingAll[result.user.uid]) {
+            Object.assign(updates, pendingAll[result.user.uid]);
+            delete pendingAll[result.user.uid];
+            safeStorage.setItem(
+              "pending_user_updates",
+              JSON.stringify(pendingAll),
+            );
+          }
+        }
+      } catch (e) {}
+
+      let docExists = false;
       if (snap.exists()) {
+        docExists = true;
         const data = snap.data();
-        const updates: any = { sessionId: localSessionId };
+        updates.sessionId = localSessionId;
         if (!data.email && result.user.email) {
           updates.email = result.user.email;
         }
-        try {
-          const { writeBatch } = await import('firebase/firestore');
-          const batch = writeBatch(db);
-          batch.update(userRef, updates);
-          await batch.commit();
-        } catch (e) {}
+      }
+
+      const applyUpdates = async () => {
+        if (Object.keys(updates).length > 0) {
+          try {
+            const { setDoc } = await import("firebase/firestore");
+            await setDoc(userRef, updates, { merge: true });
+            setProfile((prev: any) => {
+              if (!prev) return prev;
+              const newProfile = { ...prev, ...updates };
+              safeStorage.setItem("profile_cache", JSON.stringify(newProfile));
+              return newProfile;
+            });
+          } catch (e) {}
+        }
+      };
+
+      if (docExists) {
+         await applyUpdates();
+      } else {
+        // If it doesn't exist, it will be created by onAuthStateChanged shortly
+        setTimeout(applyUpdates, 3000);
       }
       setTimeout(() => {
         justLoggedInRef.current = false;
       }, 10000);
     } catch (err: any) {
       justLoggedInRef.current = false;
+
+      // Ignore user closing the popup
+      if (
+        err?.code === "auth/popup-closed-by-user" ||
+        err?.code === "auth/cancelled-popup-request"
+      ) {
+        return;
+      }
+
       console.error("Login error:", err);
       setError(err.message || "Failed to login");
     }
@@ -1183,19 +1536,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setError(null);
       justLoggedInRef.current = true;
       const result = await signInWithEmailAndPassword(auth, email, password);
-      
+
       // Force refresh app data
       safeStorage.removeItem("profile_cache");
       safeStorage.removeItem("cached_chunk_users_versions");
       safeStorage.removeItem("cached_all_users");
       localStorage.removeItem(`last_daily_sync_${result.user.uid}`);
-      
+
       try {
-        const { writeBatch } = await import('firebase/firestore');
+        const { writeBatch } = await import("firebase/firestore");
         const batch = writeBatch(db);
-        batch.update(doc(db, "users", result.user.uid), {
-          sessionId: getLocalSessionId(),
-        });
+        const updates: any = { sessionId: getLocalSessionId() };
+
+        try {
+          const pendingStr = safeStorage.getItem("pending_user_updates");
+          if (pendingStr) {
+            const pendingAll = JSON.parse(pendingStr);
+            if (pendingAll[result.user.uid]) {
+              Object.assign(updates, pendingAll[result.user.uid]);
+              delete pendingAll[result.user.uid];
+              safeStorage.setItem(
+                "pending_user_updates",
+                JSON.stringify(pendingAll),
+              );
+            }
+          }
+        } catch (e) {}
+
+        batch.update(doc(db, "users", result.user.uid), updates);
         await batch.commit();
       } catch (e) {}
       setTimeout(() => {
@@ -1248,12 +1616,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           );
         }
       } else {
-        throw new Error("WhatsApp Number is required for new account creation.");
+        throw new Error(
+          "WhatsApp Number is required for new account creation.",
+        );
       }
 
       if (phone) {
         const standardizedPhone = standardizePhone(phone);
-        sessionStorage.setItem('pending_signup_phone', standardizedPhone);
+        sessionStorage.setItem("pending_signup_phone", standardizedPhone);
       }
 
       justLoggedInRef.current = true;
@@ -1265,8 +1635,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           password,
         );
       } catch (authErr: any) {
-        if (authErr.code === 'auth/operation-not-allowed') {
-          throw new Error("Email/Password accounts are not enabled. Please enable 'Email/Password' in the Firebase Auth console.");
+        if (authErr.code === "auth/operation-not-allowed") {
+          throw new Error(
+            "Email/Password accounts are not enabled. Please enable 'Email/Password' in the Firebase Auth console.",
+          );
         }
         throw authErr;
       }
@@ -1294,7 +1666,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const isEmail = identifier.includes("@");
       const standardizedPhone = isEmail ? "" : standardizePhone(identifier);
-      
+
       const signupEmail = isEmail ? identifier : email;
 
       if (!signupEmail) {
@@ -1325,7 +1697,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (standardizedPhone) {
-        sessionStorage.setItem('pending_signup_phone', standardizedPhone);
+        sessionStorage.setItem("pending_signup_phone", standardizedPhone);
       }
 
       justLoggedInRef.current = true;
@@ -1337,11 +1709,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           password,
         );
       } catch (authErr: any) {
-        if (authErr.code === 'auth/operation-not-allowed') {
-          throw new Error("Email/Password accounts are not enabled. Please enable 'Email/Password' in the Firebase Auth console to support phone signups.");
+        if (authErr.code === "auth/operation-not-allowed") {
+          throw new Error(
+            "Email/Password accounts are not enabled. Please enable 'Email/Password' in the Firebase Auth console to support phone signups.",
+          );
         }
-        if (authErr.code === 'auth/email-already-in-use') {
-          throw new Error(`The email address ${signupEmail} is already registered. Please log in with that email or Google login.`);
+        if (authErr.code === "auth/email-already-in-use") {
+          throw new Error(
+            `The email address ${signupEmail} is already registered. Please log in with that email or Google login.`,
+          );
         }
         throw authErr;
       }
@@ -1404,23 +1780,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         query(
           collection(db, "users"),
           where("email", "==", lowercaseIdentifier),
-          limit(5)
+          limit(5),
         ),
-        "email_exact"
+        "email_exact",
       );
 
       // 2. Check phone variations
       // Clean identifier: remove everything except digits and possibly a leading +
       const cleanedForSearch = trimmed.replace(/[^\d+]/g, "");
-      const isLikelyPhone = cleanedForSearch.length >= 7 && /^[\d+]+$/.test(cleanedForSearch);
+      const isLikelyPhone =
+        cleanedForSearch.length >= 7 && /^[\d+]+$/.test(cleanedForSearch);
 
       if (isLikelyPhone) {
         const standardized = standardizePhone(cleanedForSearch);
-        
+
         let digitsOnly = cleanedForSearch.replace(/\D/g, "");
         let baseNumber = digitsOnly;
         if (baseNumber.startsWith("92")) baseNumber = baseNumber.substring(2);
-        else if (baseNumber.startsWith("0")) baseNumber = baseNumber.substring(1);
+        else if (baseNumber.startsWith("0"))
+          baseNumber = baseNumber.substring(1);
 
         const phoneFormats = [
           cleanedForSearch,
@@ -1443,20 +1821,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             query(
               collection(db, "users"),
               where("phone", "in", phoneFormats),
-              limit(5)
+              limit(5),
             ),
-            "phone_in"
+            "phone_in",
           );
         }
-        
+
         if (emailFormats.length > 0) {
           await evaluateQuery(
             query(
               collection(db, "users"),
               where("email", "in", emailFormats),
-              limit(5)
+              limit(5),
             ),
-            "email_in"
+            "email_in",
           );
         }
       } else {
@@ -1465,9 +1843,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           query(
             collection(db, "users"),
             where("phone", "==", trimmed),
-            limit(5)
+            limit(5),
           ),
-          "phone_exact"
+          "phone_exact",
         );
       }
 
@@ -1485,24 +1863,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   ) => {
     if (!auth.currentUser || !user || !profile)
       throw new Error("No user logged in");
-    
+
     const now = Date.now();
     const dailySyncKey = `last_daily_sync_${user.uid}`;
-    const lastSyncDateStr = localStorage.getItem(dailySyncKey);
-    const shiftedTime = new Date(now + (5 - 7) * 60 * 60 * 1000);
-    const pktDate = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
-    const isDailySync = lastSyncDateStr !== pktDate;
-    const isPhoneUpdate = !!(data.phone && data.phone !== profile.phone);
-
-    if (!isDailySync && !force && !isPhoneUpdate) {
-      console.log("Profile update deferred: Already updated in this 9 AM PKT period.");
-      // Still update local profile and set needs_user_sync so it catches up tomorrow
-      setProfile({ ...profile, ...data });
-      safeStorage.setItem("profile_cache", JSON.stringify({ ...profile, ...data }));
-      safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
-      safeStorage.setItem("needs_user_sync", "true");
-      return;
-    }
 
     try {
       setError(null);
@@ -1510,7 +1873,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Check for phone duplicate if changing
       if (data.phone && data.phone !== profile.phone) {
         const standardizedNewPhone = standardizePhone(data.phone);
-        const existingPhones = await findUsersByEmailOrPhone(standardizedNewPhone);
+        const existingPhones =
+          await findUsersByEmailOrPhone(standardizedNewPhone);
         if (existingPhones.some((u) => u.uid !== user.uid)) {
           throw new Error(
             "This WhatsApp number is already in use by another account.",
@@ -1560,14 +1924,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       let accSecs = parseInt(safeStorage.getItem(cacheKey) || "0", 10);
       if (accSecs > 0) {
         safeStorage.setItem(cacheKey, "0");
-        const pendingStr = safeStorage.getItem('pending_user_updates') || '{}';
+        const pendingStr = safeStorage.getItem("pending_user_updates") || "{}";
         try {
           let pendingAll = JSON.parse(pendingStr);
           pendingAll[user.uid] = pendingAll[user.uid] || {};
-          let currentBase = typeof pendingAll[user.uid].timeSpent === 'number' ? pendingAll[user.uid].timeSpent : (profile.timeSpent || 0);
+          let currentBase =
+            typeof pendingAll[user.uid].timeSpent === "number"
+              ? pendingAll[user.uid].timeSpent
+              : profile.timeSpent || 0;
           pendingAll[user.uid].timeSpent = currentBase + accSecs;
-          safeStorage.setItem('pending_user_updates', JSON.stringify(pendingAll));
-        } catch(e){}
+          safeStorage.setItem(
+            "pending_user_updates",
+            JSON.stringify(pendingAll),
+          );
+        } catch (e) {}
       }
 
       // Include pending local updates if there are any
@@ -1581,7 +1951,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (pendOrders) {
           data.orders = [...(profile.orders || []), ...JSON.parse(pendOrders)];
         }
-        
+
         safeStorage.setItem("needs_user_sync", "false");
         safeStorage.removeItem("pending_favorites_array");
         safeStorage.removeItem("pending_watch_later_array");
@@ -1589,20 +1959,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         safeStorage.removeItem("pending_link_clicks");
         safeStorage.removeItem("pending_orders_array");
       }
-      
+
       const pendingUpdatesStr = safeStorage.getItem("pending_user_updates");
       if (pendingUpdatesStr) {
         try {
           const pendingAll = JSON.parse(pendingUpdatesStr);
           const myPending = pendingAll[user.uid];
           if (myPending) {
-             if (myPending.timeSpent !== undefined) {
-               data.timeSpent = Math.max(data.timeSpent || profile.timeSpent || 0, myPending.timeSpent);
-               delete myPending.timeSpent;
-             }
-             Object.assign(data, myPending);
-             delete pendingAll[user.uid];
-             safeStorage.setItem("pending_user_updates", JSON.stringify(pendingAll));
+            if (myPending.timeSpent !== undefined) {
+              data.timeSpent = Math.max(
+                data.timeSpent || profile.timeSpent || 0,
+                myPending.timeSpent,
+              );
+              delete myPending.timeSpent;
+            }
+            Object.assign(data, myPending);
+            delete pendingAll[user.uid];
+            safeStorage.setItem(
+              "pending_user_updates",
+              JSON.stringify(pendingAll),
+            );
           }
         } catch (e) {}
       }
@@ -1612,33 +1988,53 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setProfile(updatedProfile);
       safeStorage.setItem("profile_cache", JSON.stringify(updatedProfile));
       safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
-      
+
       const userRefPath = doc(db, "users", user.uid);
-      
+
       try {
-        const { writeBatch } = await import('firebase/firestore');
+        const { writeBatch } = await import("firebase/firestore");
         let batch = writeBatch(db);
         batch.set(userRefPath, data, { merge: true });
-        
+
         let skipCommit = false;
         try {
-           const { updateDoc } = await import('firebase/firestore');
-           await updateDoc(doc(db, 'chunk_meta', 'versions'), { [`users.${user.uid}`]: now });
+          const { updateDoc } = await import("firebase/firestore");
+          await updateDoc(doc(db, "chunk_meta", "versions"), {
+            [`users.${user.uid}`]: now,
+          });
         } catch (e) {
-           batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [user.uid]: now } }, { merge: true });
-           await batch.commit();
-           skipCommit = true;
+          batch.set(
+            doc(db, "chunk_meta", "versions"),
+            { users: { [user.uid]: now } },
+            { merge: true },
+          );
+          await batch.commit();
+          skipCommit = true;
         }
         if (!skipCommit) await batch.commit();
-        
+
         console.log("Users doc updated successfully.");
       } catch (err: any) {
         handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`);
+
+        try {
+          const pendingStr = safeStorage.getItem("pending_user_updates");
+          let pendingAll = pendingStr ? JSON.parse(pendingStr) : {};
+          pendingAll[user.uid] = { ...(pendingAll[user.uid] || {}), ...data };
+          safeStorage.setItem(
+            "pending_user_updates",
+            JSON.stringify(pendingAll),
+          );
+        } catch (e) {}
+
         safeStorage.setItem("needs_user_sync", "true");
         return;
       }
-      
-      if (isDailySync) localStorage.setItem(dailySyncKey, pktDate);
+
+      const shiftedTime = new Date(Date.now() + (5 - 7) * 60 * 60 * 1000);
+      const pktDate = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
+      const isDailySync = safeStorage.getItem(dailySyncKey) !== pktDate;
+      if (isDailySync) safeStorage.setItem(dailySyncKey, pktDate);
       safeStorage.setItem("needs_user_sync", "false");
 
       setProfile({ ...profile, ...data });
@@ -1654,18 +2050,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await updatePassword(auth.currentUser, newPassword);
       const userRef = doc(db, "users", user.uid);
-      const { writeBatch } = await import('firebase/firestore');
+      const { writeBatch } = await import("firebase/firestore");
       const batch = writeBatch(db);
       batch.update(userRef, { hasPassword: true });
-      
+
       let skipCommit = false;
       try {
-         const { updateDoc } = await import('firebase/firestore');
-         await updateDoc(doc(db, 'chunk_meta', 'versions'), { [`users.${user.uid}`]: Date.now() });
+        const { updateDoc } = await import("firebase/firestore");
+        await updateDoc(doc(db, "chunk_meta", "versions"), {
+          [`users.${user.uid}`]: Date.now(),
+        });
       } catch (e) {
-         batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [user.uid]: Date.now() } }, { merge: true });
-         await batch.commit();
-         skipCommit = true;
+        batch.set(
+          doc(db, "chunk_meta", "versions"),
+          { users: { [user.uid]: Date.now() } },
+          { merge: true },
+        );
+        await batch.commit();
+        skipCommit = true;
       }
       if (!skipCommit) await batch.commit();
       if (profile) {
@@ -1680,11 +2082,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     try {
-      await refreshProfile(true, 'logout');
-      window.dispatchEvent(new Event('force_flush_all_data'));
+      await refreshProfile(true, "logout");
+      window.dispatchEvent(new Event("force_flush_all_data"));
       // give listeners a brief moment to catch up
-      await new Promise(r => setTimeout(r, 500));
-    } catch(e) {
+      await new Promise((r) => setTimeout(r, 500));
+    } catch (e) {
       console.error("Flush before logout error", e);
     }
     await signOut(auth);
@@ -1701,10 +2103,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const updatedProfile = { ...profile, favorites: newFavorites };
     setProfile(updatedProfile);
     safeStorage.setItem("profile_cache", JSON.stringify(updatedProfile));
-      safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
+    safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
 
     // Save pending change array
-    safeStorage.setItem("pending_favorites_array", JSON.stringify(newFavorites));
+    safeStorage.setItem(
+      "pending_favorites_array",
+      JSON.stringify(newFavorites),
+    );
     safeStorage.setItem("needs_user_sync", "true");
   };
 
@@ -1719,10 +2124,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const updatedProfile = { ...profile, watchLater: newWatchLater };
     setProfile(updatedProfile);
     safeStorage.setItem("profile_cache", JSON.stringify(updatedProfile));
-      safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
+    safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
 
     // Save pending change array
-    safeStorage.setItem("pending_watch_later_array", JSON.stringify(newWatchLater));
+    safeStorage.setItem(
+      "pending_watch_later_array",
+      JSON.stringify(newWatchLater),
+    );
     safeStorage.setItem("needs_user_sync", "true");
   };
 

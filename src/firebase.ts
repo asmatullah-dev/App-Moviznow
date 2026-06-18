@@ -3,7 +3,7 @@ import { getAuth } from 'firebase/auth';
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, getDoc, updateDoc, setDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
-import { getAnalytics, isSupported } from 'firebase/analytics';
+import { getAnalytics, isSupported, setUserProperties } from 'firebase/analytics';
 import firebaseConfig from '../firebase-applet-config.json';
 import { safeStorage } from './utils/safeStorage';
 
@@ -14,7 +14,7 @@ const extendedConfig = {
 };
 
 // Use VITE_GA_MEASUREMENT_ID or fallback to config
-const customMeasurementId = import.meta.env.VITE_GA_MEASUREMENT_ID || firebaseConfig.measurementId || "";
+export const customMeasurementId = import.meta.env.VITE_GA_MEASUREMENT_ID || firebaseConfig.measurementId || "";
 
 export const app = initializeApp(extendedConfig);
 
@@ -51,6 +51,11 @@ export const analyticsPromise = typeof window !== 'undefined'
         if (yes) {
           try {
             analyticsInstance = getAnalytics(app);
+            const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.0.0';
+            setUserProperties(analyticsInstance, { 
+               app_version: currentVersion,
+               app_name: 'MovizNow'
+            });
           } catch(e) {
             console.warn("Could not initialize Firebase Analytics:", e);
           }

@@ -12,7 +12,13 @@ import Button from '../../components/Button';
 import { useUsers } from '../../contexts/UsersContext';
 
 export default function UserManagers() {
-  const { users: allUsers, loading: usersLoading } = useUsers();
+  const { users: allUsers, loading: usersLoading, finalizeUserChanges, hasPendingChanges, updateUserFields } = useUsers();
+
+  useEffect(() => {
+    return () => {
+       finalizeUserChanges(true).catch(console.error);
+    };
+  }, [finalizeUserChanges]);
   const [managers, setManagers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState(() => sessionStorage.getItem('user_managers_search') || '');

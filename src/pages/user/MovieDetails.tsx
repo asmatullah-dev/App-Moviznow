@@ -1373,7 +1373,11 @@ export default function MovieDetails() {
     let finalCandidates: { text: string; href: string }[] | undefined;
     let finalSize: string | undefined;
 
-    if (url.includes("hubcloud") || url.includes("moviesdrive") || url.includes("vcloud") || url.includes("hubdrive")) {
+    const isVcloudHost = url.includes("vcloud");
+    const isVcloudName = linkName ? linkName.toLowerCase().includes("vcloud") : false;
+    const isVcloud = isVcloudHost || isVcloudName;
+
+    if (url.includes("hubcloud") || url.includes("moviesdrive") || url.includes("hubdrive") || isVcloud) {
       const clickId = url;
       setExtractingLinkId(clickId);
       // Immediately open the popup with a temporary "extracting" state, so user gets feedback
@@ -1435,7 +1439,7 @@ export default function MovieDetails() {
           const res = await fetch("/api/hubcloud/direct-link", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url }),
+            body: JSON.stringify({ url, isVcloud, forceExtract: isVcloudName }),
           });
           if (res.ok) {
             const data = await res.json();
@@ -1697,9 +1701,26 @@ export default function MovieDetails() {
 
     setIsReporting(true);
     try {
-      const alreadyReported = profile.reported_links?.some(
-        (r: any) => r.linkId === linkPopup.id && r.status === "pending",
-      );
+      const activeReports = (profile.reported_links || []).filter((r:any) => r.status === 'pending').length;
+      if (activeReports >= 5) {
+        setAlertConfig({
+          isOpen: true,
+          title: "Limit Reached",
+          message: "You can only have 5 pending reported links at a time.",
+        });
+        setIsReporting(false);
+        return;
+      }
+
+      const alreadyReported = profile.reported_links?.some((r: any) => {
+        if (r.status !== "pending") return false;
+        
+        const hasValidIdCheck = r.linkId && linkPopup.id && linkPopup.id !== "unknown" && linkPopup.id !== "sample" && r.linkId === linkPopup.id;
+        const currentUrl = linkPopup.originalUrl || linkPopup.url;
+        const hasValidUrlCheck = r.linkUrl && currentUrl && r.linkUrl === currentUrl;
+        
+        return hasValidIdCheck || hasValidUrlCheck;
+      });
 
       if (alreadyReported) {
         setAlertConfig({

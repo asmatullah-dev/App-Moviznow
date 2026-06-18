@@ -1,12 +1,20 @@
-import React, { useState, useEffect } from 'react';
-import { AlertTriangle, Edit2, Trash2, Bell, CheckCircle2, X, Save } from 'lucide-react';
-import { useContent } from '../../contexts/ContentContext';
-import { useNotifications } from '../../contexts/NotificationContext';
-import { useUsers } from '../../contexts/UsersContext';
-import { Content, QualityLinks, Season } from '../../types';
-import { LinkCheckerModal } from '../../components/LinkCheckerModal';
-import AlertModal from '../../components/AlertModal';
-import { useModalBehavior } from '../../hooks/useModalBehavior';
+import React, { useState, useEffect } from "react";
+import {
+  AlertTriangle,
+  Edit2,
+  Trash2,
+  Bell,
+  CheckCircle2,
+  X,
+  Save,
+} from "lucide-react";
+import { useContent } from "../../contexts/ContentContext";
+import { useNotifications } from "../../contexts/NotificationContext";
+import { useUsers } from "../../contexts/UsersContext";
+import { Content, QualityLinks, Season } from "../../types";
+import { LinkCheckerModal } from "../../components/LinkCheckerModal";
+import AlertModal from "../../components/AlertModal";
+import { useModalBehavior } from "../../hooks/useModalBehavior";
 
 interface ReportedLink {
   id: string;
@@ -14,33 +22,45 @@ interface ReportedLink {
   userName: string;
   contentId: string;
   contentTitle: string;
-  contentType: 'movie' | 'series';
+  contentType: "movie" | "series";
   linkId: string;
   linkName: string;
   linkUrl: string;
-  status: 'pending' | 'resolved';
+  status: "pending" | "resolved";
   createdAt: any;
 }
 
 export default function ReportedLinks() {
   const { getContent, updateContentFields, contentList } = useContent();
-  const [alertConfig, setAlertConfig] = useState<{isOpen: boolean; title: string; message: string;}>({ isOpen: false, title: '', message: '' });
+  const [alertConfig, setAlertConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+  }>({ isOpen: false, title: "", message: "" });
   const { sendNotification } = useNotifications();
   const [reports, setReports] = useState<ReportedLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingReport, setEditingReport] = useState<ReportedLink | null>(null);
-  const [editUrl, setEditUrl] = useState('');
-  const [editSize, setEditSize] = useState('');
-  const [editUnit, setEditUnit] = useState<'MB' | 'GB'>('MB');
-  const [editName, setEditName] = useState('');
+  const [editUrl, setEditUrl] = useState("");
+  const [editSize, setEditSize] = useState("");
+  const [editUnit, setEditUnit] = useState<"MB" | "GB">("MB");
+  const [editName, setEditName] = useState("");
   const [saving, setSaving] = useState(false);
   const [isLinkCheckerModalOpen, setIsLinkCheckerModalOpen] = useState(false);
 
   useModalBehavior(!!editingReport, () => setEditingReport(null));
-  useModalBehavior(isLinkCheckerModalOpen, () => setIsLinkCheckerModalOpen(false));
+  useModalBehavior(isLinkCheckerModalOpen, () =>
+    setIsLinkCheckerModalOpen(false),
+  );
 
-  const { users: allUsers, updateUserFields } = useUsers();
-  
+  const { users: allUsers, updateUserFields, finalizeUserChanges, hasPendingChanges } = useUsers();
+
+  useEffect(() => {
+    return () => {
+       finalizeUserChanges(true).catch(console.error);
+    };
+  }, [finalizeUserChanges]);
+
   // Reusable parsing for extracting links out of stringified JSON
   const parseLinks = (linksStr: string | undefined): QualityLinks => {
     if (!linksStr) return [];
@@ -55,7 +75,7 @@ export default function ReportedLinks() {
 
   useEffect(() => {
     const data: ReportedLink[] = [];
-    allUsers.forEach(u => {
+    allUsers.forEach((u) => {
       if (u.reported_links) {
         u.reported_links.forEach((r: any) => {
           let updatedContentTitle = r.contentTitle;
@@ -63,35 +83,51 @@ export default function ReportedLinks() {
           let updatedLinkUrl = r.linkUrl;
 
           // Hydrate from latest content if available
-          const content = contentList.find(c => c.id === r.contentId);
+          const content = contentList.find((c) => c.id === r.contentId);
           if (content) {
             updatedContentTitle = content.title || r.contentTitle;
 
             let foundLink: any = null;
-            if (content.type === 'movie' && content.movieLinks) {
+            if (content.type === "movie" && content.movieLinks) {
               const links = parseLinks(content.movieLinks);
-              foundLink = links.find(l => l.id === r.linkId);
-            } else if (content.type === 'series' && content.seasons) {
-              const seasons = (Array.isArray(content.seasons) ? content.seasons : JSON.parse(content.seasons || '[]')) as Season[];
-        for (const season of seasons) {
-          const zipLinks = parseLinks(typeof season.zipLinks === 'string' ? season.zipLinks : JSON.stringify(season.zipLinks || []));
-          const mkvLinks = parseLinks(typeof season.mkvLinks === 'string' ? season.mkvLinks : JSON.stringify(season.mkvLinks || []));
-          
-          foundLink = zipLinks.find(l => l.id === r.linkId);
-          if (foundLink) break;
-          
-          foundLink = mkvLinks.find(l => l.id === r.linkId);
-          if (foundLink) break;
+              foundLink = links.find((l) => l.id === r.linkId);
+            } else if (content.type === "series" && content.seasons) {
+              const seasons = (
+                Array.isArray(content.seasons)
+                  ? content.seasons
+                  : JSON.parse(content.seasons || "[]")
+              ) as Season[];
+              for (const season of seasons) {
+                const zipLinks = parseLinks(
+                  typeof season.zipLinks === "string"
+                    ? season.zipLinks
+                    : JSON.stringify(season.zipLinks || []),
+                );
+                const mkvLinks = parseLinks(
+                  typeof season.mkvLinks === "string"
+                    ? season.mkvLinks
+                    : JSON.stringify(season.mkvLinks || []),
+                );
 
-          if (season.episodes) {
-            for (const ep of season.episodes) {
-              const epLinks = parseLinks(typeof ep.links === 'string' ? ep.links : JSON.stringify(ep.links || []));
-              foundLink = epLinks.find(l => l.id === r.linkId);
-              if (foundLink) break;
-            }
-          }
-          if (foundLink) break;
-        }
+                foundLink = zipLinks.find((l) => l.id === r.linkId);
+                if (foundLink) break;
+
+                foundLink = mkvLinks.find((l) => l.id === r.linkId);
+                if (foundLink) break;
+
+                if (season.episodes) {
+                  for (const ep of season.episodes) {
+                    const epLinks = parseLinks(
+                      typeof ep.links === "string"
+                        ? ep.links
+                        : JSON.stringify(ep.links || []),
+                    );
+                    foundLink = epLinks.find((l) => l.id === r.linkId);
+                    if (foundLink) break;
+                  }
+                }
+                if (foundLink) break;
+              }
             }
 
             if (foundLink) {
@@ -103,7 +139,7 @@ export default function ReportedLinks() {
           data.push({
             id: r.id,
             userId: u.uid,
-            userName: u.displayName || u.email || 'Unknown',
+            userName: u.displayName || u.email || "Unknown",
             contentId: r.contentId,
             contentTitle: updatedContentTitle,
             contentType: r.contentType,
@@ -111,15 +147,15 @@ export default function ReportedLinks() {
             linkName: updatedLinkName,
             linkUrl: updatedLinkUrl,
             status: r.status,
-            createdAt: r.createdAt
+            createdAt: r.createdAt,
           } as ReportedLink);
         });
       }
     });
 
     data.sort((a, b) => {
-      if (a.status === 'pending' && b.status === 'resolved') return -1;
-      if (a.status === 'resolved' && b.status === 'pending') return 1;
+      if (a.status === "pending" && b.status === "resolved") return -1;
+      if (a.status === "resolved" && b.status === "pending") return 1;
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
     setReports(data);
@@ -127,16 +163,20 @@ export default function ReportedLinks() {
   }, [allUsers, contentList]);
 
   const handleDelete = async (id: string, userId: string) => {
-    if (!window.confirm('Are you sure you want to delete this report?')) return;
+    if (!window.confirm("Are you sure you want to delete this report?")) return;
     try {
-      const user = allUsers.find(u => u.uid === userId);
+      const user = allUsers.find((u) => u.uid === userId);
       if (user && user.reported_links) {
-        const updated = user.reported_links.filter(r => r.id !== id);
+        const updated = user.reported_links.filter((r) => r.id !== id);
         updateUserFields(userId, { reported_links: updated });
       }
     } catch (error) {
       console.error("Error deleting report:", error);
-      setAlertConfig({isOpen: true, title: 'Alert', message: "Failed to delete report"});
+      setAlertConfig({
+        isOpen: true,
+        title: "Alert",
+        message: "Failed to delete report",
+      });
     }
   };
 
@@ -147,29 +187,35 @@ export default function ReportedLinks() {
   const handleNotify = async (report: ReportedLink) => {
     setNotifying(report.id);
     try {
-      const user = allUsers.find(u => u.uid === report.userId);
+      const user = allUsers.find((u) => u.uid === report.userId);
       if (user && user.reported_links) {
-        const updated = user.reported_links.map(r => r.id === report.id ? { ...r, status: 'resolved' } : r);
+        const updated = user.reported_links.map((r) =>
+          r.id === report.id ? { ...r, status: "resolved" } : r,
+        );
         updateUserFields(report.userId, { reported_links: updated });
       }
-      
+
       if (report.userId) {
         // Add a notification using chunks
         await sendNotification({
-          title: 'Reported Link Fixed',
+          title: "Reported Link Fixed",
           body: `The link "${report.linkName}" for ${report.contentTitle} has been fixed and is now working.`,
           contentId: report.contentId,
           type: report.contentType,
-          createdBy: 'system',
-          targetUserId: report.userId // This already targets the specific user
+          createdBy: "system",
+          targetUserId: report.userId, // This already targets the specific user
         });
       }
-      
+
       setNotified(report.id);
       setTimeout(() => setNotified(null), 3000); // Reset after 3 seconds
     } catch (error) {
       console.error("Error notifying user:", error);
-      setAlertConfig({isOpen: true, title: 'Error', message: "Failed to notify user"});
+      setAlertConfig({
+        isOpen: true,
+        title: "Error",
+        message: "Failed to notify user",
+      });
     } finally {
       setNotifying(null);
     }
@@ -179,57 +225,113 @@ export default function ReportedLinks() {
     try {
       const content = await getContent(report.contentId);
       if (!content) {
-        setAlertConfig({isOpen: true, title: 'Error', message: "Content not found"});
+        setAlertConfig({
+          isOpen: true,
+          title: "Error",
+          message: "Content not found",
+        });
         return;
       }
-      
+
       let foundLink: any = null;
 
-      if (content.type === 'movie' && content.movieLinks) {
+      if (content.type === "movie" && content.movieLinks) {
         const links = parseLinks(content.movieLinks);
-        foundLink = links.find(l => l.id === report.linkId);
-      } else if (content.type === 'series' && content.seasons) {
-        const seasons = (Array.isArray(content.seasons) ? content.seasons : JSON.parse(content.seasons || '[]')) as Season[];
-        for (const season of seasons) {
-          const zipLinks = parseLinks(typeof season.zipLinks === 'string' ? season.zipLinks : JSON.stringify(season.zipLinks || []));
-          const mkvLinks = parseLinks(typeof season.mkvLinks === 'string' ? season.mkvLinks : JSON.stringify(season.mkvLinks || []));
-          
-          foundLink = zipLinks.find(l => l.id === report.linkId);
-          if (foundLink) break;
-          
-          foundLink = mkvLinks.find(l => l.id === report.linkId);
-          if (foundLink) break;
+        foundLink = links.find(
+          (l) => l.id === report.linkId || l.url === report.linkUrl,
+        );
+      } else if (content.type === "series") {
+        if (content.fullSeasonZip) {
+          const links = parseLinks(content.fullSeasonZip);
+          foundLink = links.find(
+            (l) => l.id === report.linkId || l.url === report.linkUrl,
+          );
+        }
+        if (!foundLink && content.fullSeasonMkv) {
+          const links = parseLinks(content.fullSeasonMkv);
+          foundLink = links.find(
+            (l) => l.id === report.linkId || l.url === report.linkUrl,
+          );
+        }
+        if (!foundLink && content.seasons) {
+          const seasons = (
+            Array.isArray(content.seasons)
+              ? content.seasons
+              : JSON.parse(content.seasons || "[]")
+          ) as Season[];
+          for (const season of seasons) {
+            const zipLinks = parseLinks(
+              typeof season.zipLinks === "string"
+                ? season.zipLinks
+                : JSON.stringify(season.zipLinks || []),
+            );
+            const mkvLinks = parseLinks(
+              typeof season.mkvLinks === "string"
+                ? season.mkvLinks
+                : JSON.stringify(season.mkvLinks || []),
+            );
 
-          if (season.episodes) {
-            for (const ep of season.episodes) {
-              const epLinks = parseLinks(typeof ep.links === 'string' ? ep.links : JSON.stringify(ep.links || []));
-              foundLink = epLinks.find(l => l.id === report.linkId);
-              if (foundLink) break;
+            foundLink = zipLinks.find(
+              (l) => l.id === report.linkId || l.url === report.linkUrl,
+            );
+            if (foundLink) break;
+
+            foundLink = mkvLinks.find(
+              (l) => l.id === report.linkId || l.url === report.linkUrl,
+            );
+            if (foundLink) break;
+
+            if (season.episodes) {
+              for (const ep of season.episodes) {
+                const epLinks = parseLinks(
+                  typeof ep.links === "string"
+                    ? ep.links
+                    : JSON.stringify(ep.links || []),
+                );
+                foundLink = epLinks.find(
+                  (l) => l.id === report.linkId || l.url === report.linkUrl,
+                );
+                if (foundLink) break;
+              }
             }
+            if (foundLink) break;
           }
-          if (foundLink) break;
         }
       }
 
       if (foundLink) {
         setEditUrl(foundLink.url);
-        setEditSize(foundLink.size || '');
-        setEditUnit(foundLink.unit || 'MB');
-        setEditName(foundLink.name || '');
+        setEditSize(foundLink.size || "");
+        setEditUnit(foundLink.unit || "MB");
+        setEditName(foundLink.name || "");
         setEditingReport(report);
       } else {
-        setAlertConfig({isOpen: true, title: 'Alert', message: "Link not found in content. It might have been deleted already."});
+        setAlertConfig({
+          isOpen: true,
+          title: "Alert",
+          message:
+            "Link not found in content. It might have been deleted already.",
+        });
       }
     } catch (error) {
       console.error("Error fetching content for edit:", error);
-      setAlertConfig({isOpen: true, title: 'Error', message: "Failed to fetch content details"});
+      setAlertConfig({
+        isOpen: true,
+        title: "Error",
+        message: "Failed to fetch content details",
+      });
     }
   };
 
   const handleUrlBlur = async (url: string) => {
     if (!url) return;
-    
-    if (url.includes('hubcloud') || url.includes('moviesdrive') || url.includes('vcloud') || url.includes('hubdrive')) {
+
+    if (
+      url.includes("hubcloud") ||
+      url.includes("moviesdrive") ||
+      url.includes("vcloud") ||
+      url.includes("hubdrive")
+    ) {
       try {
         const res = await fetch("/api/hubcloud/extract", {
           method: "POST",
@@ -240,7 +342,7 @@ export default function ReportedLinks() {
           const data = await res.json();
           if (data.size && data.unit) {
             setEditSize(data.size);
-            setEditUnit(data.unit as 'MB' | 'GB');
+            setEditUnit(data.unit as "MB" | "GB");
           }
         }
       } catch (e) {
@@ -260,17 +362,17 @@ export default function ReportedLinks() {
         if (data.fileSize) {
           let sizeInBytes = data.fileSize;
           let size = 0;
-          let unit: 'MB' | 'GB' = 'MB';
-          
+          let unit: "MB" | "GB" = "MB";
+
           if (sizeInBytes >= 1000 * 1000 * 1000) {
             size = sizeInBytes / (1000 * 1000 * 1000);
-            unit = 'GB';
+            unit = "GB";
           } else {
             size = sizeInBytes / (1000 * 1000);
-            unit = 'MB';
+            unit = "MB";
           }
-          
-          setEditSize(size.toFixed(2).replace(/\.00$/, ''));
+
+          setEditSize(size.toFixed(2).replace(/\.00$/, ""));
           setEditUnit(unit);
         }
       }
@@ -285,38 +387,74 @@ export default function ReportedLinks() {
 
     try {
       const content = await getContent(editingReport.contentId);
-      
+
       if (!content) {
         throw new Error("Content not found");
       }
       let updated = false;
 
-      if (content.type === 'movie' && content.movieLinks) {
+      if (content.type === "movie" && content.movieLinks) {
         const links = parseLinks(content.movieLinks);
-        const linkIndex = links.findIndex(l => l.id === editingReport.linkId);
+        const linkIndex = links.findIndex((l) => l.id === editingReport.linkId);
         if (linkIndex !== -1) {
-          links[linkIndex] = { ...links[linkIndex], url: editUrl, size: editSize, unit: editUnit, name: editName };
-          await updateContentFields([{ id: editingReport.contentId, chunkId: content?.chunkId, fields: { movieLinks: JSON.stringify(links) } }]);
+          links[linkIndex] = {
+            ...links[linkIndex],
+            url: editUrl,
+            size: editSize,
+            unit: editUnit,
+            name: editName,
+          };
+          await updateContentFields([
+            {
+              id: editingReport.contentId,
+              chunkId: content?.chunkId,
+              fields: { movieLinks: JSON.stringify(links) },
+            },
+          ]);
           updated = true;
         }
-      } else if (content.type === 'series' && content.seasons) {
-        const seasons = (Array.isArray(content.seasons) ? content.seasons : JSON.parse(content.seasons || '[]')) as Season[];
+      } else if (content.type === "series" && content.seasons) {
+        const seasons = (
+          Array.isArray(content.seasons)
+            ? content.seasons
+            : JSON.parse(content.seasons || "[]")
+        ) as Season[];
         for (let s = 0; s < seasons.length; s++) {
           const season = seasons[s];
-          
-          const zipLinks = parseLinks(typeof season.zipLinks === 'string' ? season.zipLinks : JSON.stringify(season.zipLinks || []));
-          const idxZ = zipLinks.findIndex(l => l.id === editingReport.linkId);
+
+          const zipLinks = parseLinks(
+            typeof season.zipLinks === "string"
+              ? season.zipLinks
+              : JSON.stringify(season.zipLinks || []),
+          );
+          const idxZ = zipLinks.findIndex((l) => l.id === editingReport.linkId);
           if (idxZ !== -1) {
-            zipLinks[idxZ] = { ...zipLinks[idxZ], url: editUrl, size: editSize, unit: editUnit, name: editName };
+            zipLinks[idxZ] = {
+              ...zipLinks[idxZ],
+              url: editUrl,
+              size: editSize,
+              unit: editUnit,
+              name: editName,
+            };
             season.zipLinks = zipLinks;
             updated = true;
             break;
           }
 
-          const mkvLinks = parseLinks(typeof season.mkvLinks === 'string' ? season.mkvLinks : JSON.stringify(season.mkvLinks || []));
-          const idxM = mkvLinks.findIndex(l => l.id === editingReport.linkId);
+          const mkvLinks = parseLinks(
+            typeof season.mkvLinks === "string"
+              ? season.mkvLinks
+              : JSON.stringify(season.mkvLinks || []),
+          );
+          const idxM = mkvLinks.findIndex((l) => l.id === editingReport.linkId);
           if (idxM !== -1) {
-            mkvLinks[idxM] = { ...mkvLinks[idxM], url: editUrl, size: editSize, unit: editUnit, name: editName };
+            mkvLinks[idxM] = {
+              ...mkvLinks[idxM],
+              url: editUrl,
+              size: editSize,
+              unit: editUnit,
+              name: editName,
+            };
             season.mkvLinks = mkvLinks;
             updated = true;
             break;
@@ -325,10 +463,22 @@ export default function ReportedLinks() {
           if (season.episodes) {
             for (let e = 0; e < season.episodes.length; e++) {
               const ep = season.episodes[e];
-              const epLinks = parseLinks(typeof ep.links === 'string' ? ep.links : JSON.stringify(ep.links || []));
-              const idxE = epLinks.findIndex(l => l.id === editingReport.linkId);
+              const epLinks = parseLinks(
+                typeof ep.links === "string"
+                  ? ep.links
+                  : JSON.stringify(ep.links || []),
+              );
+              const idxE = epLinks.findIndex(
+                (l) => l.id === editingReport.linkId,
+              );
               if (idxE !== -1) {
-                epLinks[idxE] = { ...epLinks[idxE], url: editUrl, size: editSize, unit: editUnit, name: editName };
+                epLinks[idxE] = {
+                  ...epLinks[idxE],
+                  url: editUrl,
+                  size: editSize,
+                  unit: editUnit,
+                  name: editName,
+                };
                 ep.links = epLinks;
                 updated = true;
                 break;
@@ -338,25 +488,47 @@ export default function ReportedLinks() {
           }
         }
         if (updated) {
-          await updateContentFields([{ id: editingReport.contentId, chunkId: content?.chunkId, fields: { seasons: JSON.stringify(seasons) } }]);
+          await updateContentFields([
+            {
+              id: editingReport.contentId,
+              chunkId: content?.chunkId,
+              fields: { seasons: JSON.stringify(seasons) },
+            },
+          ]);
         }
       }
 
       if (updated) {
         // Mark report as resolved
-        const user = allUsers.find(u => u.uid === editingReport.userId);
+        const user = allUsers.find((u) => u.uid === editingReport.userId);
         if (user && user.reported_links) {
-          const updatedReports = user.reported_links.map(r => r.id === editingReport.id ? { ...r, status: 'resolved' } : r);
-          updateUserFields(editingReport.userId, { reported_links: updatedReports });
+          const updatedReports = user.reported_links.map((r) =>
+            r.id === editingReport.id ? { ...r, status: "resolved" } : r,
+          );
+          updateUserFields(editingReport.userId, {
+            reported_links: updatedReports,
+          });
         }
         setEditingReport(null);
-        setAlertConfig({isOpen: true, title: 'Success', message: "Link updated successfully"});
+        setAlertConfig({
+          isOpen: true,
+          title: "Success",
+          message: "Link updated successfully",
+        });
       } else {
-        setAlertConfig({isOpen: true, title: 'Error', message: "Could not find the link to update in the content document."});
+        setAlertConfig({
+          isOpen: true,
+          title: "Error",
+          message: "Could not find the link to update in the content document.",
+        });
       }
     } catch (error) {
       console.error("Error saving edited link:", error);
-      setAlertConfig({isOpen: true, title: 'Error', message: "Failed to save changes"});
+      setAlertConfig({
+        isOpen: true,
+        title: "Error",
+        message: "Failed to save changes",
+      });
     } finally {
       setSaving(false);
     }
@@ -378,8 +550,12 @@ export default function ReportedLinks() {
           Reported Links
         </h1>
         <div className="bg-zinc-50 dark:bg-zinc-900 px-4 py-2 rounded-xl border border-zinc-200 dark:border-zinc-800">
-          <span className="text-zinc-500 dark:text-zinc-400">Total Reports: </span>
-          <span className="text-zinc-900 dark:text-white font-bold">{reports.length}</span>
+          <span className="text-zinc-500 dark:text-zinc-400">
+            Total Reports:{" "}
+          </span>
+          <span className="text-zinc-900 dark:text-white font-bold">
+            {reports.length}
+          </span>
         </div>
       </div>
 
@@ -388,38 +564,65 @@ export default function ReportedLinks() {
           <table className="w-full text-left text-sm">
             <thead className="bg-white/50 dark:bg-zinc-950/50 text-zinc-500 dark:text-zinc-400">
               <tr>
-                <th className="px-6 py-4 font-medium whitespace-nowrap">User</th>
-                <th className="px-6 py-4 font-medium whitespace-nowrap">Content</th>
-                <th className="px-6 py-4 font-medium whitespace-nowrap">Link Name</th>
-                <th className="px-6 py-4 font-medium whitespace-nowrap">Status</th>
-                <th className="px-6 py-4 font-medium text-right whitespace-nowrap">Actions</th>
+                <th className="px-6 py-4 font-medium whitespace-nowrap">
+                  User
+                </th>
+                <th className="px-6 py-4 font-medium whitespace-nowrap">
+                  Content
+                </th>
+                <th className="px-6 py-4 font-medium whitespace-nowrap">
+                  Link Name
+                </th>
+                <th className="px-6 py-4 font-medium whitespace-nowrap">
+                  Status
+                </th>
+                <th className="px-6 py-4 font-medium text-right whitespace-nowrap">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800">
               {reports.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center text-zinc-500">
+                  <td
+                    colSpan={5}
+                    className="px-6 py-8 text-center text-zinc-500"
+                  >
                     No reported links found.
                   </td>
                 </tr>
               ) : (
                 reports.map((report) => (
-                  <tr key={report.id} className="hover:bg-zinc-200 dark:hover:bg-zinc-800/50 transition-colors">
+                  <tr
+                    key={report.id}
+                    className="hover:bg-zinc-200 dark:hover:bg-zinc-800/50 transition-colors"
+                  >
                     <td className="px-6 py-4">
-                      <div className="font-medium text-zinc-900 dark:text-white">{report.userName}</div>
+                      <div className="font-medium text-zinc-900 dark:text-white">
+                        {report.userName}
+                      </div>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="font-medium text-zinc-900 dark:text-white">{report.contentTitle}</div>
-                      <div className="text-xs text-zinc-500 capitalize">{report.contentType}</div>
+                      <div className="font-medium text-zinc-900 dark:text-white">
+                        {report.contentTitle}
+                      </div>
+                      <div className="text-xs text-zinc-500 capitalize">
+                        {report.contentType}
+                      </div>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="font-medium text-zinc-600 dark:text-zinc-300">{report.linkName}</div>
-                      <div className="text-xs text-zinc-500 truncate max-w-[200px]" title={report.linkUrl}>
+                      <div className="font-medium text-zinc-600 dark:text-zinc-300">
+                        {report.linkName}
+                      </div>
+                      <div
+                        className="text-xs text-zinc-500 truncate max-w-[200px]"
+                        title={report.linkUrl}
+                      >
                         {report.linkUrl}
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      {report.status === 'pending' ? (
+                      {report.status === "pending" ? (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-500/10 text-red-500 border border-red-500/20">
                           <AlertTriangle className="w-3.5 h-3.5" /> Pending
                         </span>
@@ -433,11 +636,13 @@ export default function ReportedLinks() {
                       <div className="flex items-center justify-end gap-2">
                         <button
                           onClick={() => handleNotify(report)}
-                          disabled={notifying === report.id || notified === report.id}
+                          disabled={
+                            notifying === report.id || notified === report.id
+                          }
                           className={`p-2 rounded-lg transition-colors ${
-                            notified === report.id 
-                              ? 'text-emerald-500 bg-emerald-500/10' 
-                              : 'text-zinc-500 dark:text-zinc-400 hover:text-blue-500 hover:bg-blue-500/10'
+                            notified === report.id
+                              ? "text-emerald-500 bg-emerald-500/10"
+                              : "text-zinc-500 dark:text-zinc-400 hover:text-blue-500 hover:bg-blue-500/10"
                           }`}
                           title="Notify User"
                         >
@@ -477,7 +682,9 @@ export default function ReportedLinks() {
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-6 max-w-lg w-full border border-zinc-200 dark:border-zinc-800 shadow-2xl">
             <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-bold text-zinc-900 dark:text-white">Edit Link</h3>
+              <h3 className="text-xl font-bold text-zinc-900 dark:text-white">
+                Edit Link
+              </h3>
               <button
                 onClick={() => setEditingReport(null)}
                 className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors"
@@ -488,12 +695,18 @@ export default function ReportedLinks() {
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">Content</label>
-                <div className="text-zinc-900 dark:text-white font-medium">{editingReport.contentTitle}</div>
+                <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">
+                  Content
+                </label>
+                <div className="text-zinc-900 dark:text-white font-medium">
+                  {editingReport.contentTitle}
+                </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">Link Name</label>
+                <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">
+                  Link Name
+                </label>
                 <input
                   type="text"
                   value={editName}
@@ -503,7 +716,9 @@ export default function ReportedLinks() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">URL</label>
+                <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">
+                  URL
+                </label>
                 <div className="flex gap-2">
                   <input
                     type="url"
@@ -523,7 +738,9 @@ export default function ReportedLinks() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">Size</label>
+                  <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">
+                    Size
+                  </label>
                   <input
                     type="text"
                     value={editSize}
@@ -533,10 +750,12 @@ export default function ReportedLinks() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">Unit</label>
+                  <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">
+                    Unit
+                  </label>
                   <select
                     value={editUnit}
-                    onChange={(e) => setEditUnit(e.target.value as 'MB' | 'GB')}
+                    onChange={(e) => setEditUnit(e.target.value as "MB" | "GB")}
                     className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                   >
                     <option value="MB">MB</option>
@@ -571,16 +790,16 @@ export default function ReportedLinks() {
         </div>
       )}
 
-      <LinkCheckerModal 
-        isOpen={isLinkCheckerModalOpen} 
-        onClose={() => setIsLinkCheckerModalOpen(false)} 
+      <LinkCheckerModal
+        isOpen={isLinkCheckerModalOpen}
+        onClose={() => setIsLinkCheckerModalOpen(false)}
         initialInput={editUrl}
         autoStart={!!editUrl}
         onAddLinks={(links) => {
           if (links.length > 0) {
             setEditUrl(links[0].url);
             if (links[0].size) setEditSize(links[0].size.toString());
-            if (links[0].unit) setEditUnit(links[0].unit as 'MB' | 'GB');
+            if (links[0].unit) setEditUnit(links[0].unit as "MB" | "GB");
           }
           setIsLinkCheckerModalOpen(false);
         }}
@@ -588,7 +807,7 @@ export default function ReportedLinks() {
 
       <AlertModal
         isOpen={alertConfig.isOpen}
-        onClose={() => setAlertConfig(prev => ({ ...prev, isOpen: false }))}
+        onClose={() => setAlertConfig((prev) => ({ ...prev, isOpen: false }))}
         title={alertConfig.title}
         message={alertConfig.message}
       />

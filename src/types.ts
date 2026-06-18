@@ -6,6 +6,13 @@ export interface UserProfile {
   email: string;
   displayName?: string;
   photoURL?: string;
+  age?: number | string;
+  gender?: string;
+  device?: {
+    os: string;
+    model: string;
+    type?: string;
+  };
   role: Role;
   status: Status;
   phone?: string;
@@ -13,6 +20,7 @@ export interface UserProfile {
   assignedContent?: string[]; // Content IDs
   watchLater?: string[];
   favorites?: string[];
+  clickHistory?: { id: string; label: string }[];
   createdAt: string;
   sessionsCount?: number;
   timeSpent?: number; // in seconds
