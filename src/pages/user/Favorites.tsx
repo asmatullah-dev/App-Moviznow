@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useContent } from '../../contexts/ContentContext';
@@ -15,36 +15,50 @@ export default function Favorites() {
   const { profile, toggleFavorite, toggleWatchLater } = useAuth();
   const { contentList, genres, languages, qualities } = useContent();
 
-  const favoriteContent = contentList.filter(c => 
-    profile?.favorites?.includes(c.id) && 
-    (profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'content_manager' || profile?.role === 'manager' || (
-      c.status !== 'draft' && (
-        c.status !== 'selected_content' || 
-        profile?.assignedContent?.some(id => id === c.id || id.startsWith(`${c.id}:`))
-      )
-    ))
-  ).sort((a, b) => {
+  const favoriteContent = useMemo(() => {
+    const assignedContentSet = new Set<string>();
+    profile?.assignedContent?.forEach(id => {
+      assignedContentSet.add(id);
+      if (id.includes(':')) {
+        assignedContentSet.add(id.split(':')[0]);
+      }
+    });
+
+    const canPlayBase = 
+      profile?.role === 'admin' ||
+      profile?.role === 'owner' ||
+      profile?.role === 'manager' ||
+      profile?.role === 'content_manager';
+      
+    const isProfileActive = profile?.status === 'active';
+    const isSelectedContentRole = profile?.role === "selected_content";
+
     const getCanPlay = (c: any) => {
-      const isContentAssigned = profile?.assignedContent?.some(id => id === c.id || id.startsWith(`${c.id}:`));
-      return profile?.role === 'admin' ||
-        profile?.role === 'owner' ||
-        profile?.role === 'manager' ||
-        profile?.role === 'content_manager' ||
-        isContentAssigned ||
-        (profile?.status === 'active' &&
-          !(profile?.role === "selected_content" || c.status === "selected_content"));
+      if (canPlayBase) return true;
+      if (assignedContentSet.has(c.id)) return true;
+      return isProfileActive && !isSelectedContentRole && c.status !== "selected_content";
     };
 
-    const aCanPlay = getCanPlay(a) ? 1 : 0;
-    const bCanPlay = getCanPlay(b) ? 1 : 0;
-    if (aCanPlay !== bCanPlay) return bCanPlay - aCanPlay;
+    return contentList.filter(c => 
+      profile?.favorites?.includes(c.id) && 
+      (canPlayBase || (
+        c.status !== 'draft' && (
+          c.status !== 'selected_content' || 
+          assignedContentSet.has(c.id)
+        )
+      ))
+    ).sort((a, b) => {
+      const aCanPlay = getCanPlay(a) ? 1 : 0;
+      const bCanPlay = getCanPlay(b) ? 1 : 0;
+      if (aCanPlay !== bCanPlay) return bCanPlay - aCanPlay;
 
-    const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-    const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-    if (timeB !== timeA) return timeB - timeA;
-    if (a.order !== undefined && b.order !== undefined) return b.order - a.order;
-    return 0;
-  });
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      if (timeB !== timeA) return timeB - timeA;
+      if (a.order !== undefined && b.order !== undefined) return b.order - a.order;
+      return 0;
+    });
+  }, [contentList, profile]);
 
   return (
     <div className="min-h-screen bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white flex flex-col transition-colors duration-300">

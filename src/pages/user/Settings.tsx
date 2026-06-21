@@ -74,7 +74,7 @@ export default function Settings() {
       <header className="sticky top-0 z-40 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800">
         <div className="max-w-3xl mx-auto px-4 h-16 flex items-center gap-4">
           <button 
-            onClick={() => window.history.length > 2 ? navigate(-1) : navigate('/')}
+            onClick={() => navigate('/')}
             className="p-2 -ml-2 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />

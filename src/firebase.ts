@@ -51,9 +51,10 @@ export const analyticsPromise = typeof window !== 'undefined'
         if (yes) {
           try {
             analyticsInstance = getAnalytics(app);
-            const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.0.0';
+            const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.3.0';
             setUserProperties(analyticsInstance, { 
                app_version: currentVersion,
+               version: currentVersion,
                app_name: 'MovizNow'
             });
           } catch(e) {
@@ -79,11 +80,12 @@ export const analyticsPromise = typeof window !== 'undefined'
           // @ts-ignore
           window.gtag('js', new Date());
           
-          const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.0.0';
+          const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.3.0';
           
           // @ts-ignore
           window.gtag('set', {
             app_version: currentVersion,
+            version: currentVersion,
             app_name: 'MovizNow'
           });
 

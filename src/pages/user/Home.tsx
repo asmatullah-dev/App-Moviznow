@@ -351,16 +351,33 @@ export default function Home({
     }
   };
 
-  const getCanPlay = (c: any) => {
-    const isContentAssigned = profile?.assignedContent?.some(id => id === c.id || id.startsWith(`${c.id}:`));
-    return profile?.role === 'admin' ||
-      profile?.role === 'owner' ||
-      profile?.role === 'manager' ||
-      profile?.role === 'content_manager' ||
-      isContentAssigned ||
-      (profile?.status === 'active' &&
-        !(profile?.role === "selected_content" || c.status === "selected_content"));
-  };
+  const assignedContentSet = useMemo(() => {
+    const set = new Set<string>();
+    profile?.assignedContent?.forEach(id => {
+      set.add(id);
+      if (id.includes(':')) {
+        set.add(id.split(':')[0]);
+      }
+    });
+    return set;
+  }, [profile?.assignedContent]);
+
+  const canPlayBase = 
+    profile?.role === 'admin' ||
+    profile?.role === 'owner' ||
+    profile?.role === 'manager' ||
+    profile?.role === 'content_manager';
+
+  const isProfileActive = profile?.status === 'active';
+  const isSelectedContentRole = profile?.role === "selected_content";
+
+  const getCanPlay = useCallback((c: any) => {
+    if (canPlayBase) return true;
+    const isContentAssigned = assignedContentSet.has(c.id);
+    if (isContentAssigned) return true;
+    
+    return isProfileActive && !isSelectedContentRole && c.status !== "selected_content";
+  }, [canPlayBase, assignedContentSet, isProfileActive, isSelectedContentRole]);
 
   const filteredAndSortedContent = useMemo(() => {
     let result = [...permittedContentList];
@@ -411,16 +428,8 @@ export default function Home({
 
       // For selected_content users, prioritize assigned content within their allowed pool (if any)
       if (profile?.role === "selected_content") {
-        const aAssigned = profile.assignedContent?.some(
-          (id) => id === a.id || id.startsWith(`${a.id}:`),
-        )
-          ? 1
-          : 0;
-        const bAssigned = profile.assignedContent?.some(
-          (id) => id === b.id || id.startsWith(`${b.id}:`),
-        )
-          ? 1
-          : 0;
+        const aAssigned = assignedContentSet.has(a.id) ? 1 : 0;
+        const bAssigned = assignedContentSet.has(b.id) ? 1 : 0;
         if (aAssigned !== bAssigned) return bAssigned - aAssigned;
       }
 

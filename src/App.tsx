@@ -19,16 +19,16 @@ import { SyncBanner } from './components/SyncBanner';
 import { AnalyticsTracker } from './components/AnalyticsTracker';
 
 // Pages
-const MaintenancePage = lazy(() => import('./pages/MaintenancePage'));
-const Login = lazy(() => import('./pages/Login'));
-const Home = lazy(() => import('./pages/user/Home'));
+import MaintenancePage from './pages/MaintenancePage';
+import Login from './pages/Login';
+import Home from './pages/user/Home';
 import MovieDetails from './pages/user/MovieDetails';
-const WatchLater = lazy(() => import('./pages/user/WatchLater'));
-const Favorites = lazy(() => import('./pages/user/Favorites'));
-const Trial = lazy(() => import('./pages/user/Trial'));
-const TopUp = lazy(() => import('./pages/user/TopUp'));
-const Cart = lazy(() => import('./pages/user/Cart'));
-const Settings = lazy(() => import('./pages/user/Settings'));
+import WatchLater from './pages/user/WatchLater';
+import Favorites from './pages/user/Favorites';
+import Trial from './pages/user/Trial';
+import TopUp from './pages/user/TopUp';
+import Cart from './pages/user/Cart';
+import Settings from './pages/user/Settings';
 
 import AdminLayout from './pages/admin/AdminLayout';
 import Analytics from './pages/admin/Analytics';
@@ -48,7 +48,7 @@ import MovieRequestsManagement from './pages/admin/MovieRequestsManagement';
 import OrdersManagement from './pages/admin/OrdersManagement';
 import AdminSettings from './pages/admin/AdminSettings';
 import ContentSync from './pages/admin/ContentSync';
-const InstallApp = lazy(() => import('./pages/InstallApp'));
+import InstallApp from './pages/InstallApp';
 
 const LoadingFallback = () => (
   <div className="min-h-screen bg-white dark:bg-zinc-950 transition-colors duration-300 flex flex-col items-center justify-center gap-6">
