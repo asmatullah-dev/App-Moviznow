@@ -68,6 +68,24 @@ if (workbox.navigationPreload.isSupported()) {
   workbox.navigationPreload.enable();
 }
 
+// Image caching strategy for 30 days
+workbox.routing.registerRoute(
+  ({ request }) => request.destination === 'image',
+  new workbox.strategies.CacheFirst({
+    cacheName: 'image-cache',
+    plugins: [
+      new workbox.cacheableResponse.CacheableResponsePlugin({
+        statuses: [0, 200],
+      }),
+      new workbox.expiration.ExpirationPlugin({
+        maxAgeSeconds: 30 * 24 * 60 * 60, // 30 Days
+        maxEntries: 1000,
+        purgeOnQuotaError: true,
+      }),
+    ],
+  })
+);
+
 self.addEventListener('fetch', (event) => {
   // Basic fetch handler to satisfy PWA requirements
   if (event.request.mode === 'navigate') {

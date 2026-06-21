@@ -57,15 +57,13 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         allNotifs = Object.values(items) as AppNotification[];
       }
 
-      const isAdmin = ['owner', 'admin', 'content_manager'].includes(profile.role);
-      let filtered = allNotifs;
-      if (!isAdmin) {
-        filtered = allNotifs.filter(n => 
-          (!n.targetUserId && (!n.targetUserIds || n.targetUserIds.length === 0)) || 
-          (n.targetUserId === profile.uid) || 
-          (n.targetUserIds?.includes(profile.uid))
-        );
-      }
+      let filtered = allNotifs.filter(n => {
+        const isTargeted = n.targetUserId || (n.targetUserIds && n.targetUserIds.length > 0);
+        if (isTargeted) {
+          return n.targetUserId === profile.uid || n.targetUserIds?.includes(profile.uid);
+        }
+        return true;
+      });
 
       filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       setNotifications(filtered);
@@ -90,7 +88,12 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       createdAt: new Date().toISOString()
     };
 
-    setNotifications(prev => [newNotif, ...prev]);
+    const isTargeted = newNotif.targetUserId || (newNotif.targetUserIds && newNotif.targetUserIds.length > 0);
+    const shouldAddLocally = !isTargeted || newNotif.targetUserId === profile?.uid || newNotif.targetUserIds?.includes(profile?.uid || '');
+    
+    if (shouldAddLocally) {
+      setNotifications(prev => [newNotif, ...prev]);
+    }
 
     try {
         let cid = latestChunkIdRef.current;

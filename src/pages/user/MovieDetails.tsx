@@ -225,6 +225,9 @@ export default function MovieDetails() {
 
   // Reset state and load cache on ID change
   useEffect(() => {
+    const foundInList = contentList.some((c) => c.id === id);
+    if (!foundInList) setLoading(true);
+
     if (id) {
       // Load full content cache asynchronously
       safeStorage.getItemAsync(`movie_details_${id}`).then((cachedFull) => {
@@ -344,6 +347,7 @@ export default function MovieDetails() {
                 );
                 expanded.order = content.order;
                 setFullContent(expanded);
+                setLoading(false);
                 safeStorage.setItemAsync(
                   `movie_details_${id}`,
                   JSON.stringify(expanded),
@@ -356,13 +360,16 @@ export default function MovieDetails() {
           const data = await getContent(id);
           if (data) {
             setFullContent(data);
+            setLoading(false);
             safeStorage.setItemAsync(`movie_details_${id}`, JSON.stringify(data));
           } else {
             setFetchFailed(true);
+            setLoading(false);
           }
         } catch (e) {
           console.error("Failed to fetch full content", e);
           setFetchFailed(true);
+          setLoading(false);
         }
       };
       fetchFullContent();
@@ -2062,6 +2069,7 @@ export default function MovieDetails() {
       <div className="relative min-h-[60vh] md:min-h-[70vh] w-full flex flex-col justify-end">
         <div className="absolute inset-0 overflow-hidden">
           <img
+            key={mergedContent.id + "-hero"}
             src={
               mergedContent.posterUrl ||
               settings?.defaultAppImage ||
@@ -2070,7 +2078,6 @@ export default function MovieDetails() {
             alt={mergedContent.title}
             className="w-full h-full object-cover opacity-30"
             referrerPolicy="no-referrer"
-            loading="lazy"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-white dark:from-zinc-950 via-white/60 dark:via-zinc-950/60 to-transparent" />
         </div>
@@ -2096,6 +2103,7 @@ export default function MovieDetails() {
         >
           <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center md:items-end gap-8 text-center md:text-left w-full">
             <img
+              key={mergedContent.id + "-poster"}
               src={
                 mergedContent.posterUrl ||
                 settings?.defaultAppImage ||
@@ -2105,7 +2113,6 @@ export default function MovieDetails() {
               className="w-48 md:w-64 rounded-2xl shadow-2xl cursor-pointer hover:scale-105 transition-transform border border-zinc-200 dark:border-zinc-800"
               referrerPolicy="no-referrer"
               onClick={() => setIsPosterExpanded(true)}
-              loading="lazy"
             />
 
             <div className="flex-1">
@@ -3213,6 +3220,7 @@ export default function MovieDetails() {
                 </svg>
               </button>
               <img
+                key={mergedContent.id + "-expanded"}
                 src={
                   mergedContent.posterUrl ||
                   settings?.defaultAppImage ||
@@ -3222,7 +3230,6 @@ export default function MovieDetails() {
                 className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
                 referrerPolicy="no-referrer"
                 onClick={(e) => e.stopPropagation()}
-                loading="lazy"
               />
             </motion.div>
           </motion.div>

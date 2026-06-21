@@ -1487,8 +1487,10 @@ export default function ContentManagement() {
         setSubtitles(metadata.subtitles);
       }
 
-// Type auto-switching disabled as per user request to prevent incorrect movie links going to seasons.
-      // User explicitly set type on the form.
+      if (metadata.type) {
+        setType(metadata.type);
+        activeType = metadata.type;
+      }
     }
 
     if (activeType === "movie") {
@@ -2757,15 +2759,15 @@ export default function ContentManagement() {
       });
 
       const zipLinks = sortedLinks.filter((l) =>
-        l.name.toLowerCase().includes("zip"),
+        (l?.name || "").toLowerCase().includes("zip"),
       );
       const mkvLinks = sortedLinks.filter((l) =>
-        l.name.toLowerCase().includes("mkv"),
+        (l?.name || "").toLowerCase().includes("mkv"),
       );
       const otherLinks = sortedLinks.filter(
         (l) =>
-          !l.name.toLowerCase().includes("zip") &&
-          !l.name.toLowerCase().includes("mkv"),
+          !(l?.name || "").toLowerCase().includes("zip") &&
+          !(l?.name || "").toLowerCase().includes("mkv"),
       );
 
       if (zipLinks.length > 0 || mkvLinks.length > 0 || otherLinks.length > 0) {
@@ -3060,7 +3062,7 @@ export default function ContentManagement() {
     const urlString = urls
       .filter(Boolean)
       .filter((url) => {
-        const lowerUrl = url.toLowerCase();
+        const lowerUrl = String(url).toLowerCase();
         return !lowerUrl.includes("youtube.com") && !lowerUrl.includes("youtu.be");
       })
       .filter((val, i, arr) => arr.indexOf(val) === i)

@@ -483,7 +483,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
          if (r.printQualityLabel && !batch.detectMetadata.printQuality) {
            batch.detectMetadata.printQuality = r.printQualityLabel;
          }
-         const source = (r.fileName || "" + " " + r.finalUrl || "").toLowerCase();
+         const source = (`${r.fileName || ""} ${r.finalUrl || ""}`).toLowerCase();
          if (r.subtitleLabel || /subtitles|subs|softsub|hardsub|esub|esubs|msub|msubs/i.test(source)) {
            batch.detectMetadata.subtitles = true;
          }
@@ -520,7 +520,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
     let seriesCount = 0;
 
     validResults.forEach(r => {
-      const source = `${r.fileName || ""} ${r.finalUrl || ""} ${input}`.toLowerCase();
+      const source = `${r.fileName || ""} ${r.finalUrl || ""}`.toLowerCase();
       
       if (r.audioLabel) {
         r.audioLabel.split(" / ").forEach(l => detectedLangs.add(l));
@@ -564,7 +564,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
       if (isSeriesLink) seriesCount++;
     });
 
-    if (seriesCount > 3 || validResults.some(r => r.isFullSeasonMKV || r.isFullSeasonZIP || /full season|all episodes|complete/i.test(`${r.fileName || ""} ${r.finalUrl || ""}`))) {
+    if (seriesCount >= 3 || validResults.some(r => r.isFullSeasonMKV || r.isFullSeasonZIP || (r.season === 1 && r.episode === 1) || /full season|all episodes|complete/i.test(`${r.fileName || ""} ${r.finalUrl || ""}`))) {
        detectedType = "series";
     }
 

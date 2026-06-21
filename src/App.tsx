@@ -22,7 +22,7 @@ import { AnalyticsTracker } from './components/AnalyticsTracker';
 const MaintenancePage = lazy(() => import('./pages/MaintenancePage'));
 const Login = lazy(() => import('./pages/Login'));
 const Home = lazy(() => import('./pages/user/Home'));
-const MovieDetails = lazy(() => import('./pages/user/MovieDetails'));
+import MovieDetails from './pages/user/MovieDetails';
 const WatchLater = lazy(() => import('./pages/user/WatchLater'));
 const Favorites = lazy(() => import('./pages/user/Favorites'));
 const Trial = lazy(() => import('./pages/user/Trial'));
@@ -87,6 +87,36 @@ export default function App() {
     const handlePause = (e: any) => setPauseStatus(e.detail);
     window.addEventListener('app_paused_offline', handlePause);
     return () => window.removeEventListener('app_paused_offline', handlePause);
+  }, []);
+
+  useEffect(() => {
+    // Cleanup old legacy thumbnails from the IndexedDB cache
+    try {
+      const request = indexedDB.open('moviznow_cache_db', 1);
+      request.onsuccess = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains('cache')) return;
+        
+        try {
+          const tx = db.transaction('cache', 'readwrite');
+          const store = tx.objectStore('cache');
+          const getAllKeysReq = store.getAllKeys();
+          
+          getAllKeysReq.onsuccess = () => {
+             const keys = getAllKeysReq.result;
+             keys.forEach((key: any) => {
+               if (typeof key === 'string' && key.startsWith('thumbnail_')) {
+                 store.delete(key);
+               }
+             });
+          };
+        } catch (e) {
+          console.error("Failed to clean up legacy thumbnails", e);
+        }
+      };
+    } catch (e) {
+      console.warn("Could not initiate thumbnail cleanup", e);
+    }
   }, []);
 
   useModalBehavior(isMediaModalOpen, () => setIsMediaModalOpen(false));

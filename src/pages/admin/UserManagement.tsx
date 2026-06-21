@@ -383,6 +383,8 @@ export default function UserManagement() {
       role: user.role,
       status: user.status,
       permissions: user.permissions || [],
+      age: user.age || '',
+      gender: user.gender || '',
     });
     setIsEditingOverlay(true);
   };
@@ -438,6 +440,8 @@ export default function UserManagement() {
         role: editForm.role,
         status: editForm.status,
         permissions: editForm.permissions || [],
+        age: editForm.age,
+        gender: editForm.gender,
       };
       
       // Update isUserManager flag to match role
@@ -1501,6 +1505,32 @@ export default function UserManagement() {
                       />
                     </div>
                   </div>
+
+                  <div className="flex items-center gap-2 mt-2">
+                    <div className="flex-1">
+                      <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Gender</label>
+                      <select
+                        value={editForm.gender || ''}
+                        onChange={(e) => setEditForm({ ...editForm, gender: e.target.value })}
+                        className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                      >
+                        <option value="">Unknown</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                    <div className="flex-1">
+                      <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Age / DOB</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 25 or May 12, 1990"
+                        value={editForm.age || ''}
+                        onChange={(e) => setEditForm({ ...editForm, age: e.target.value })}
+                        className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div className="p-4 md:p-6 space-y-6">
@@ -1570,10 +1600,11 @@ export default function UserManagement() {
                       <div className="text-center px-2 border-x border-zinc-100 dark:border-zinc-800/50">
                         <div className="text-zinc-500 text-[10px] uppercase font-bold mb-0.5">Gender / Age</div>
                         <div className="font-bold text-zinc-900 dark:text-white text-sm flex items-center justify-center gap-1.5 flex-wrap">
-                          <span className="capitalize">{typeof selectedUser.gender === 'string' ? (selectedUser.gender.toLowerCase() === 'male' ? 'M' : selectedUser.gender.toLowerCase() === 'female' ? 'F' : 'NA') : 'NA'}</span>
+                          <span className="capitalize">{typeof selectedUser.gender === 'string' ? (selectedUser.gender.toLowerCase() === 'male' ? 'M' : selectedUser.gender.toLowerCase() === 'female' ? 'F' : (selectedUser.gender.toLowerCase() === 'unknown' ? 'Unknown' : 'NA')) : 'NA'}</span>
                           <span className="text-zinc-400 dark:text-zinc-500">·</span>
                           <span>{(() => {
                              if (!selectedUser.age) return 'NA';
+                             if (String(selectedUser.age) === 'Unknown') return 'Unknown';
                              if (String(selectedUser.age).includes('(')) return selectedUser.age;
                              const d = new Date(selectedUser.age);
                              if (isNaN(d.getTime())) return selectedUser.age;

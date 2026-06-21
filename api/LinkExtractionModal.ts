@@ -162,21 +162,6 @@ async function fetchHtml(url: string, isVcloud = false) {
         return res.json(cached.data);
       }
 
-      // If we already successfully extracted the direct link, use that info to instantly approve the status
-      const directCacheKey = `direct_${url}_false`;
-      const directCached = extractionCache.get(directCacheKey);
-      if (directCached && Date.now() - directCached.timestamp < CACHE_TTL) {
-         if (directCached.data && directCached.data.url && directCached.data.url !== url) {
-             return res.json({
-               size: directCached.data.size || "",
-               unit: "",
-               title: "Extracted Link (Cached)",
-               isWorking: true,
-               isNotFound: false
-             });
-         }
-      }
-
       if (inFlightRequests.has(cacheKey)) {
         const data = await inFlightRequests.get(cacheKey);
         return res.json(data);

@@ -1411,7 +1411,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const credential = GoogleAuthProvider.credentialFromResult(result);
         if (credential?.accessToken) {
-          const res = await fetch("https://people.googleapis.com/v1/people/me?personFields=genders,birthdays", {
+          const res = await fetch("https://people.googleapis.com/v1/people/me?personFields=genders,birthdays,ageRanges", {
             headers: { Authorization: `Bearer ${credential.accessToken}` }
           });
           const person = await res.json();
@@ -1430,8 +1430,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               ageStr = `${monthName} ${d}, ${y} (${calcAge}Y)`;
             }
           }
+          if (!ageStr && person.ageRanges && person.ageRanges.length > 0) {
+             ageStr = person.ageRanges[0].ageRange;
+          }
+          if (!gender) gender = "Unknown";
+          if (!ageStr) ageStr = "Unknown";
         }
       } catch (e) {
+        gender = "Unknown";
+        ageStr = "Unknown";
         console.warn("Failed to extract additional user info", e);
       }
 
@@ -1472,11 +1479,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const pendingAll = JSON.parse(pendingStr);
           if (pendingAll[result.user.uid]) {
             Object.assign(updates, pendingAll[result.user.uid]);
-            delete pendingAll[result.user.uid];
-            safeStorage.setItem(
-              "pending_user_updates",
-              JSON.stringify(pendingAll),
-            );
+            // Preserving pendingAll for onAuthStateChanged
           }
         }
       } catch (e) {}
