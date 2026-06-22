@@ -3689,6 +3689,11 @@ export default function ContentManagement() {
                       const has720p = epLinks.some((l: any) =>
                         isStd(l, "720p"),
                       );
+                      const has720pHEVC = epLinks.some((l: any) => 
+                        (l.name?.includes("720p") || l.quality === "720p") && 
+                        l.name?.toUpperCase().includes("HEVC") && 
+                        l.url
+                      );
                       const has1080p = epLinks.some((l: any) =>
                         isStd(l, "1080p"),
                       );
@@ -3705,7 +3710,7 @@ export default function ContentManagement() {
                           );
                       });
 
-                      if (!has720p)
+                      if (!has720p && !has720pHEVC)
                         labels.push(
                           `Missing S${s.seasonNumber}E${ep.episodeNumber} 720p`,
                         );

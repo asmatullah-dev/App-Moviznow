@@ -213,14 +213,50 @@ export const LinkCheckerModal: React.FC<Props> = ({
       const res = await fetch(`/api/mdrive?url=${encodeURIComponent(targetUrl)}`);
       if (!res.ok) throw new Error('Failed to fetch from MDrive');
       const data = await res.json();
-      setMdriveResults(data.hits || []);
-      if (data.hits?.length === 0) {
-        setMdriveError('No Hubcloud links found on this page.');
+      const hits = data.hits || [];
+      setMdriveResults(hits);
+
+      if (hits.length === 1) {
+        // Auto-select and proceed without UI if only one result
+        const singleLink = hits[0].url;
+        processedExtractionsRef.current.add(targetUrl);
+        
+        const baseLink = targetUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+        const escapedBase = baseLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}/?`, 'g');
+        
+        const currentInput = inputRef.current;
+        const nextInput = currentInput.replace(regex, singleLink);
+        
+        console.log("MDrive auto-replacement:", { from: targetUrl, to: singleLink });
+        setInput(nextInput);
+        setMdriveUrl(null);
+        setMdriveResults([]);
+        
+        setTimeout(() => {
+          handleCheck(undefined, nextInput);
+        }, 400);
+        return;
+      }
+
+      if (hits.length > 1) {
+        // Multiple links found, show selection popup
+        setMdriveUrl(targetUrl);
+      } else if (hits.length === 0) {
+        // No links found, mark as processed and continue
+        processedExtractionsRef.current.add(targetUrl);
+        setMdriveUrl(null); // Ensure popup stays closed
+        setTimeout(() => {
+          handleCheck();
+        }, 400);
       }
     } catch (err: any) {
+      // On error, show the popup so the user can see the error
+      setMdriveUrl(targetUrl);
       setMdriveError(err.message);
     } finally {
       setMdriveLoading(false);
+      setLoading(false); // Also reset main loading just in case
     }
   };
 
@@ -280,7 +316,6 @@ export const LinkCheckerModal: React.FC<Props> = ({
       }, 400);
     } else if (mdriveUrl) {
       // Just remove the mdriveUrl to go back if nothing selected
-      processedExtractionsRef.current.add(mdriveUrl);
       setMdriveUrl(null);
     }
   };
@@ -289,7 +324,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
     setError(null);
 
     // Derive links directly from input or use provided override
-    let currentLinks = onlyUrls || (initialInputOverride ? splitLinks(initialInputOverride).map(normalizeUrl) : links).filter(Boolean);
+    const currentInputSnapshot = initialInputOverride || inputRef.current;
+    let currentLinks = onlyUrls || splitLinks(currentInputSnapshot).map(normalizeUrl).filter(Boolean);
     
     if (!currentLinks.length) {
       setError("Please paste at least one valid link first.");
@@ -318,7 +354,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
           }
         }));
 
-        let nextInput = initialInputOverride || inputRef.current;
+        let nextInput = currentInputSnapshot;
         results.forEach(({ original, extracted }) => {
           processedExtractionsRef.current.add(original);
           if (extracted && extracted !== original) {
@@ -333,7 +369,6 @@ export const LinkCheckerModal: React.FC<Props> = ({
         setInput(nextInput);
         
         // Use the updated links immediately for the next step to avoid stale state
-        const nextLinks = splitLinks(nextInput).map(normalizeUrl).filter(Boolean);
         setTimeout(() => {
           handleCheck(undefined, nextInput);
         }, 400);
@@ -348,13 +383,24 @@ export const LinkCheckerModal: React.FC<Props> = ({
     // 2. MDrive detection logic (One at a time since it needs UI)
     const mdriveLink = currentLinks.find(u => u.includes('mdrive.lol') && !processedExtractionsRef.current.has(u));
     if (mdriveLink && !onlyUrls) {
-      processedExtractionsRef.current.add(mdriveLink); // Mark as processed to prevent re-opening if check is re-triggered
-      setMdriveUrl(mdriveLink);
+      setLoading(true); // Keep button in loading state during MDrive search
       handleMdriveSearch(mdriveLink);
       return;
     }
 
-    const urls = currentLinks;
+    // 3. Final Scan Loop - FILTER OUT host links that should be extracted
+    const urls = currentLinks.filter(u => 
+      !u.includes('mdrive.lol') && 
+      !u.includes('howblogs.xyz') && 
+      !u.includes('filesdl.in')
+    );
+    
+    if (urls.length === 0 && currentLinks.length > 0) {
+      // If we filtered everything out but had links, it means we are waiting for extractions or extractions failed
+      // If none are left to process (not in processedExtractionsRef), then we might have a dead end.
+      // But usually recursion handles this.
+      return;
+    }
     
     for (const u of urls) {
       try {
@@ -980,10 +1026,20 @@ export const LinkCheckerModal: React.FC<Props> = ({
                       </div>
                       <div className="flex gap-2">
                         <button 
-                          onClick={() => setMdriveSelectedIndices(new Set(mdriveResults.keys()))}
-                          className="text-xs font-bold text-cyan-500 hover:text-cyan-400 px-3 py-1 bg-cyan-500/10 rounded-lg"
+                          onClick={() => {
+                            if (mdriveResults.length > 0 && mdriveSelectedIndices.size === mdriveResults.length) {
+                              setMdriveSelectedIndices(new Set());
+                            } else {
+                              setMdriveSelectedIndices(new Set(mdriveResults.keys()));
+                            }
+                          }}
+                          className={`text-xs font-bold px-3 py-1 rounded-lg transition-colors ${
+                            mdriveResults.length > 0 && mdriveSelectedIndices.size === mdriveResults.length
+                              ? "text-red-500 hover:text-red-400 bg-red-500/10"
+                              : "text-cyan-500 hover:text-cyan-400 bg-cyan-500/10"
+                          }`}
                         >
-                          Select All
+                          {mdriveResults.length > 0 && mdriveSelectedIndices.size === mdriveResults.length ? "Deselect All" : "Select All"}
                         </button>
                         <button 
                           onClick={() => setMdriveUrl(null)}
