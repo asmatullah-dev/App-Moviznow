@@ -334,7 +334,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
     // 1. Identify all extractable links
     const extractableLinks = currentLinks.filter(u => 
-      (u.includes('howblogs.xyz') || u.includes('filesdl.in') || u.includes('mdrive.lol')) && 
+      (u.includes('howblogs.xyz') || u.includes('filesdl.in') || u.includes('mdrive.lol') || u.includes('moviesdrives.') || u.includes('moviesdrive.')) && 
       !processedExtractionsRef.current.has(u)
     );
 
@@ -351,6 +351,11 @@ export const LinkCheckerModal: React.FC<Props> = ({
               if (!res.ok) throw new Error('MDrive fetch failed');
               const data = await res.json();
               return { type: 'mdrive', original: targetUrl, data };
+            } else if (targetUrl.includes('moviesdrives.') || targetUrl.includes('moviesdrive.')) {
+              const res = await fetch(`/api/moviesdrive?url=${encodeURIComponent(targetUrl)}`);
+              if (!res.ok) throw new Error('MoviesDrive fetch failed');
+              const data = await res.json();
+              return { type: 'moviesdrive', original: targetUrl, data };
             } else {
               const endpoint = targetUrl.includes('howblogs.xyz') ? '/api/howblogs' : '/api/filesdl';
               const res = await fetch(`${endpoint}?url=${encodeURIComponent(targetUrl)}`);
@@ -375,7 +380,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
               nextInput = nextInput.replace(regex, res.extracted);
               console.log("Auto-replacement successful:", { from: res.original, to: res.extracted });
             }
-          } else if (res.type === 'mdrive') {
+          } else if (res.type === 'mdrive' || res.type === 'moviesdrive') {
             const hits = res.data?.hits || [];
             if (hits.length === 1) {
               processedExtractionsRef.current.add(res.original);
@@ -384,23 +389,19 @@ export const LinkCheckerModal: React.FC<Props> = ({
               const escapedBase = baseLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
               const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}/?`, 'g');
               nextInput = nextInput.replace(regex, singleLink);
-              console.log("MDrive auto-replacement successful:", { from: res.original, to: singleLink });
+              console.log(`${res.type === 'mdrive' ? 'MDrive' : 'MoviesDrive'} auto-replacement successful:`, { from: res.original, to: singleLink });
             } else if (hits.length > 1) {
-              // Mark others as processed except this one if we were taking them? 
-              // No, we already processed them in this loop iteration.
-              // But we need to STOP here and show UI for this specific MDrive link.
+              // Show UI for this specific link
               setMdriveUrl(res.original);
               setMdriveResults(hits);
               setMdriveSelectedIndices(new Set());
               pausedForUI = true;
-              // We don't mark as processed yet because user needs to interact
               break; 
             } else {
               // 0 hits
               processedExtractionsRef.current.add(res.original);
             }
           } else if (res.type === 'error') {
-            // Don't mark as processed so it can be retried
             console.log("Extraction error for", res.original, "- skipping from this batch but allowing retry");
           }
         }
@@ -430,7 +431,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
     const urls = currentLinks.filter(u => 
       !u.includes('mdrive.lol') && 
       !u.includes('howblogs.xyz') && 
-      !u.includes('filesdl.in')
+      !u.includes('filesdl.in') &&
+      !u.includes('moviesdrives.') &&
+      !u.includes('moviesdrive.')
     );
     
     if (urls.length === 0 && currentLinks.length > 0) {
@@ -1059,8 +1062,12 @@ export const LinkCheckerModal: React.FC<Props> = ({
                   <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
                     <div className="flex items-center justify-between px-1">
                       <div>
-                        <h3 className="text-lg font-bold">MDrive Selection</h3>
-                        <p className="text-xs text-zinc-500">Pick the Hubcloud links you want to extract</p>
+                        <h3 className="text-lg font-bold">
+                          {mdriveUrl.includes('mdrive.lol') ? 'MDrive Selection' : 'MoviesDrive MDrive Selection'}
+                        </h3>
+                        <p className="text-xs text-zinc-500">
+                          {mdriveUrl.includes('mdrive.lol') ? 'Pick the Hubcloud links you want to extract' : 'Pick the MDrive links you want to process'}
+                        </p>
                       </div>
                       <div className="flex gap-2">
                         <button 
@@ -1125,7 +1132,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                               {mdriveSelectedIndices.has(i) && <CheckCircle2 className="w-4 h-4 text-white" />}
                             </div>
                             <div className="flex-1 min-w-0">
-                              <h4 className="text-sm font-bold truncate text-zinc-900 dark:text-white">{item.file_name}</h4>
+                              <h4 className="text-sm font-bold truncate text-zinc-900 dark:text-white">{item.file_name || item.name || 'Untitled Link'}</h4>
                               <p className="text-[10px] text-zinc-500 flex items-center gap-2 mt-1 truncate">
                                 <LinkIcon className="w-3 h-3" />
                                 {item.url}

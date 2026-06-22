@@ -668,6 +668,72 @@ async function startServer() {
     }
   });
 
+  // MoviesDrive Extraction API
+  app.get('/api/moviesdrive', async (req: express.Request, res: express.Response) => {
+    try {
+      let { url } = req.query;
+      if (!url || typeof url !== 'string' || (!url.includes('moviesdrives.') && !url.includes('moviesdrive.'))) {
+        return res.status(400).json({ error: 'Valid moviesdrives URL required' });
+      }
+
+      if (!url.startsWith('http')) {
+         url = 'https://' + url;
+      }
+
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      });
+      
+      if (!response.ok) throw new Error(`MoviesDrive returned ${response.status}`);
+      const text = await response.text();
+      
+      const hits: any[] = [];
+      const seenUrls = new Set<string>();
+      const parts = text.split('<a ');
+      
+      for(let i = 1; i < parts.length; i++) {
+        const p = parts[i];
+        const m = p.match(/href="([^"]+mdrive\.lol\/archive\/[^"]+)"/);
+        if (m) {
+          const mdriveUrl = m[1].trim();
+          if (!seenUrls.has(mdriveUrl)) {
+            seenUrls.add(mdriveUrl);
+            
+            // Extract label from the anchor text - handle potential nested tags
+            let label = "MDrive Link";
+            const closeAnchorIndex = p.indexOf('</a>');
+            if (closeAnchorIndex !== -1) {
+              const anchorContent = p.substring(0, closeAnchorIndex);
+              const tagEndIndex = anchorContent.indexOf('>');
+              if (tagEndIndex !== -1) {
+                const innerHtml = anchorContent.substring(tagEndIndex + 1);
+                // Strip any nested HTML tags to get pure text
+                label = innerHtml.replace(/<[^>]*>/g, '').trim();
+              }
+            }
+
+            if (!label) label = "MDrive Link";
+            
+            // Clean up label
+            label = label.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+
+            hits.push({
+              file_name: label,
+              url: mdriveUrl
+            });
+          }
+        }
+      }
+      
+      res.json({ hits, found: hits.length });
+    } catch (error: any) {
+      console.error('MoviesDrive extract error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Subscribe to FCM topic
   app.post(
     ["/api/notifications/subscribe", "/notifications/subscribe"],
