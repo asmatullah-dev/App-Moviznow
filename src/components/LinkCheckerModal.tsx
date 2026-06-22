@@ -332,61 +332,99 @@ export const LinkCheckerModal: React.FC<Props> = ({
       return;
     }
 
-    // 1. Identify Auto-Extracable links (HowBlogs, FilesDL)
-    const autoLinks = currentLinks.filter(u => 
-      (u.includes('howblogs.xyz') || u.includes('filesdl.in')) && 
+    // 1. Identify all extractable links
+    const extractableLinks = currentLinks.filter(u => 
+      (u.includes('howblogs.xyz') || u.includes('filesdl.in') || u.includes('mdrive.lol')) && 
       !processedExtractionsRef.current.has(u)
     );
 
-    if (autoLinks.length > 0) {
+    if (extractableLinks.length > 0) {
       setLoading(true);
+      let pausedForUI = false;
       try {
-        const results = await Promise.all(autoLinks.map(async (targetUrl) => {
+        // Take up to 5 links at once
+        const batch = extractableLinks.slice(0, 5);
+        const results = await Promise.all(batch.map(async (targetUrl) => {
           try {
-            const endpoint = targetUrl.includes('howblogs.xyz') ? '/api/howblogs' : '/api/filesdl';
-            const res = await fetch(`${endpoint}?url=${encodeURIComponent(targetUrl)}`);
-            if (!res.ok) throw new Error('Extraction failed');
-            const data = await res.json();
-            return { original: targetUrl, extracted: data.url };
+            if (targetUrl.includes('mdrive.lol')) {
+              const res = await fetch(`/api/mdrive?url=${encodeURIComponent(targetUrl)}`);
+              if (!res.ok) throw new Error('MDrive fetch failed');
+              const data = await res.json();
+              return { type: 'mdrive', original: targetUrl, data };
+            } else {
+              const endpoint = targetUrl.includes('howblogs.xyz') ? '/api/howblogs' : '/api/filesdl';
+              const res = await fetch(`${endpoint}?url=${encodeURIComponent(targetUrl)}`);
+              if (!res.ok) throw new Error('Extraction failed');
+              const data = await res.json();
+              return { type: 'auto', original: targetUrl, extracted: data.url };
+            }
           } catch (e) {
             console.error(`Failed to extract ${targetUrl}:`, e);
-            return { original: targetUrl, extracted: null };
+            return { type: 'error', original: targetUrl };
           }
         }));
 
         let nextInput = currentInputSnapshot;
-        results.forEach(({ original, extracted }) => {
-          processedExtractionsRef.current.add(original);
-          if (extracted && extracted !== original) {
-            const baseLink = original.replace(/^https?:\/\//, '').replace(/\/$/, '');
-            const escapedBase = baseLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}/?`, 'g');
-            nextInput = nextInput.replace(regex, extracted);
-            console.log("Auto-replacement successful:", { from: original, to: extracted });
+        for (const res of results) {
+          if (res.type === 'auto') {
+            processedExtractionsRef.current.add(res.original);
+            if (res.extracted && res.extracted !== res.original) {
+              const baseLink = res.original.replace(/^https?:\/\//, '').replace(/\/$/, '');
+              const escapedBase = baseLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}/?`, 'g');
+              nextInput = nextInput.replace(regex, res.extracted);
+              console.log("Auto-replacement successful:", { from: res.original, to: res.extracted });
+            }
+          } else if (res.type === 'mdrive') {
+            const hits = res.data?.hits || [];
+            if (hits.length === 1) {
+              processedExtractionsRef.current.add(res.original);
+              const singleLink = hits[0].url;
+              const baseLink = res.original.replace(/^https?:\/\//, '').replace(/\/$/, '');
+              const escapedBase = baseLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}/?`, 'g');
+              nextInput = nextInput.replace(regex, singleLink);
+              console.log("MDrive auto-replacement successful:", { from: res.original, to: singleLink });
+            } else if (hits.length > 1) {
+              // Mark others as processed except this one if we were taking them? 
+              // No, we already processed them in this loop iteration.
+              // But we need to STOP here and show UI for this specific MDrive link.
+              setMdriveUrl(res.original);
+              setMdriveResults(hits);
+              setMdriveSelectedIndices(new Set());
+              pausedForUI = true;
+              // We don't mark as processed yet because user needs to interact
+              break; 
+            } else {
+              // 0 hits
+              processedExtractionsRef.current.add(res.original);
+            }
+          } else if (res.type === 'error') {
+            // Don't mark as processed so it can be retried
+            console.log("Extraction error for", res.original, "- skipping from this batch but allowing retry");
           }
-        });
+        }
 
         setInput(nextInput);
         
-        // Use the updated links immediately for the next step to avoid stale state
-        setTimeout(() => {
-          handleCheck(undefined, nextInput);
-        }, 400);
+        if (!pausedForUI) {
+          setTimeout(() => {
+            handleCheck(undefined, nextInput);
+          }, 400);
+        }
       } catch (err: any) {
         setError(err.message);
       } finally {
-        setLoading(false);
+        if (!pausedForUI) {
+           setLoading(false);
+        }
       }
       return;
     }
 
-    // 2. MDrive detection logic (One at a time since it needs UI)
-    const mdriveLink = currentLinks.find(u => u.includes('mdrive.lol') && !processedExtractionsRef.current.has(u));
-    if (mdriveLink && !onlyUrls) {
-      setLoading(true); // Keep button in loading state during MDrive search
-      handleMdriveSearch(mdriveLink);
-      return;
-    }
+    // 2. Original MDrive detection logic is now integrated into batch above, 
+    // but just in case something slipped through or direct call:
+    // (Actually the batch handles it all now)
 
     // 3. Final Scan Loop - FILTER OUT host links that should be extracted
     const urls = currentLinks.filter(u => 
