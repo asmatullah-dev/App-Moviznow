@@ -17,7 +17,11 @@ import {
   Siren,
   Plus,
   X,
-  Server
+  Server,
+  Search,
+  Download,
+  ExternalLink,
+  Loader2 as LoaderIcon
 } from "lucide-react";
 import { QualityLinks, Language, Quality, LinkDef } from '../types';
 import { 
@@ -94,6 +98,11 @@ export const LinkCheckerModal: React.FC<Props> = ({
   disableAutoClipboard = false,
 }) => {
   const [input, setInput] = useState(initialInput);
+  const inputRef = React.useRef(input);
+  useEffect(() => {
+    inputRef.current = input;
+  }, [input]);
+
   const [autoClipboard, setAutoClipboard] = useState(false);
   const [clipboardStatus, setClipboardStatus] = useState<"active" | "unfocused" | "denied" | "idle">("idle");
   const [loading, setLoading] = useState(false);
@@ -109,6 +118,15 @@ export const LinkCheckerModal: React.FC<Props> = ({
     links: QualityLinks;
     metadata: any;
   }[]>([]);
+
+  // MDrive Scraper State
+  const [mdriveUrl, setMdriveUrl] = useState<string | null>(null);
+  const [mdriveResults, setMdriveResults] = useState<any[]>([]);
+  const [mdriveLoading, setMdriveLoading] = useState(false);
+  const [mdriveError, setMdriveError] = useState<string | null>(null);
+  const [mdriveSelectedIndices, setMdriveSelectedIndices] = useState<Set<number>>(new Set());
+  const [mdriveExtractingDirect, setMdriveExtractingDirect] = useState<Record<number, boolean>>({});
+  const processedExtractionsRef = React.useRef<Set<string>>(new Set());
 
   useModalBehavior(isOpen, onClose);
 
@@ -185,15 +203,159 @@ export const LinkCheckerModal: React.FC<Props> = ({
     onClose();
   };
 
-  const handleCheck = async (onlyUrls?: string[]) => {
-    const urls = (onlyUrls || links).filter(Boolean);
+  const handleMdriveSearch = async (targetUrl: string) => {
+    setMdriveLoading(true);
+    setMdriveError(null);
+    setMdriveResults([]);
+    setMdriveSelectedIndices(new Set());
+
+    try {
+      const res = await fetch(`/api/mdrive?url=${encodeURIComponent(targetUrl)}`);
+      if (!res.ok) throw new Error('Failed to fetch from MDrive');
+      const data = await res.json();
+      setMdriveResults(data.hits || []);
+      if (data.hits?.length === 0) {
+        setMdriveError('No Hubcloud links found on this page.');
+      }
+    } catch (err: any) {
+      setMdriveError(err.message);
+    } finally {
+      setMdriveLoading(false);
+    }
+  };
+
+  const handleExtractDirectMdrive = async (index: number) => {
+    const item = mdriveResults[index];
+    if (!item || mdriveExtractingDirect[index]) return;
+
+    setMdriveExtractingDirect(prev => ({ ...prev, [index]: true }));
+    try {
+      const res = await fetch('/api/hubcloud/direct-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: item.url })
+      });
+      const data = await res.json();
+      
+      if (data.url && data.url !== item.url) {
+        setMdriveResults(prev => {
+          const next = [...prev];
+          next[index] = { ...next[index], original_url: item.url, url: data.url, is_direct: true, size: data.size || item.size };
+          return next;
+        });
+      }
+    } catch (err) {
+      console.error('Failed to extract direct link:', err);
+    } finally {
+      setMdriveExtractingDirect(prev => ({ ...prev, [index]: false }));
+    }
+  };
+
+  const confirmMdriveSelection = () => {
+    if (mdriveUrl && mdriveSelectedIndices.size > 0) {
+      const selectedLinks = mdriveResults.filter((_, i) => mdriveSelectedIndices.has(i));
+      const newLinksText = selectedLinks.map(l => l.url).join('\n');
+      
+      // Mark as processed BEFORE replacement to prevent it from being found again
+      processedExtractionsRef.current.add(mdriveUrl);
+
+      // Replace the MDrive link with the extracted links
+      const baseLink = mdriveUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+      const escapedBase = baseLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}/?`, 'g');
+      
+      // Use inputRef to ensure we have the absolute latest input
+      const currentInput = inputRef.current;
+      const nextInput = currentInput.replace(regex, newLinksText);
+      
+      console.log("MDrive replacement:", { from: mdriveUrl, to: newLinksText, success: nextInput !== currentInput });
+      setInput(nextInput);
+      
+      setMdriveUrl(null);
+      setMdriveResults([]);
+      
+      // Trigger check for everything - this will automatically pick up the next extractions if any exist
+      setTimeout(() => {
+        handleCheck(undefined, nextInput);
+      }, 400);
+    } else if (mdriveUrl) {
+      // Just remove the mdriveUrl to go back if nothing selected
+      processedExtractionsRef.current.add(mdriveUrl);
+      setMdriveUrl(null);
+    }
+  };
+
+  const handleCheck = async (onlyUrls?: string[], initialInputOverride?: string) => {
     setError(null);
 
-    if (!urls.length) {
+    // Derive links directly from input or use provided override
+    let currentLinks = onlyUrls || (initialInputOverride ? splitLinks(initialInputOverride).map(normalizeUrl) : links).filter(Boolean);
+    
+    if (!currentLinks.length) {
       setError("Please paste at least one valid link first.");
       return;
     }
 
+    // 1. Identify Auto-Extracable links (HowBlogs, FilesDL)
+    const autoLinks = currentLinks.filter(u => 
+      (u.includes('howblogs.xyz') || u.includes('filesdl.in')) && 
+      !processedExtractionsRef.current.has(u)
+    );
+
+    if (autoLinks.length > 0) {
+      setLoading(true);
+      try {
+        const results = await Promise.all(autoLinks.map(async (targetUrl) => {
+          try {
+            const endpoint = targetUrl.includes('howblogs.xyz') ? '/api/howblogs' : '/api/filesdl';
+            const res = await fetch(`${endpoint}?url=${encodeURIComponent(targetUrl)}`);
+            if (!res.ok) throw new Error('Extraction failed');
+            const data = await res.json();
+            return { original: targetUrl, extracted: data.url };
+          } catch (e) {
+            console.error(`Failed to extract ${targetUrl}:`, e);
+            return { original: targetUrl, extracted: null };
+          }
+        }));
+
+        let nextInput = initialInputOverride || inputRef.current;
+        results.forEach(({ original, extracted }) => {
+          processedExtractionsRef.current.add(original);
+          if (extracted && extracted !== original) {
+            const baseLink = original.replace(/^https?:\/\//, '').replace(/\/$/, '');
+            const escapedBase = baseLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}/?`, 'g');
+            nextInput = nextInput.replace(regex, extracted);
+            console.log("Auto-replacement successful:", { from: original, to: extracted });
+          }
+        });
+
+        setInput(nextInput);
+        
+        // Use the updated links immediately for the next step to avoid stale state
+        const nextLinks = splitLinks(nextInput).map(normalizeUrl).filter(Boolean);
+        setTimeout(() => {
+          handleCheck(undefined, nextInput);
+        }, 400);
+      } catch (err: any) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    // 2. MDrive detection logic (One at a time since it needs UI)
+    const mdriveLink = currentLinks.find(u => u.includes('mdrive.lol') && !processedExtractionsRef.current.has(u));
+    if (mdriveLink && !onlyUrls) {
+      processedExtractionsRef.current.add(mdriveLink); // Mark as processed to prevent re-opening if check is re-triggered
+      setMdriveUrl(mdriveLink);
+      handleMdriveSearch(mdriveLink);
+      return;
+    }
+
+    const urls = currentLinks;
+    
     for (const u of urls) {
       try {
         new URL(u);
@@ -642,6 +804,10 @@ export const LinkCheckerModal: React.FC<Props> = ({
       setIsReviewingBatch(false);
       setBatchReviewItems([]);
       setAutoClipboard(false);
+      setMdriveUrl(null);
+      setMdriveResults([]);
+      setMdriveSelectedIndices(new Set());
+      processedExtractionsRef.current = new Set();
 
       if (autoStart && initialInput && autoStartedInputRef.current !== initialInput) {
         const initialLinks = splitLinks(initialInput).map(normalizeUrl).filter(Boolean);
@@ -725,6 +891,10 @@ export const LinkCheckerModal: React.FC<Props> = ({
     setExpanded({});
     setIsReviewingBatch(false);
     setBatchReviewItems([]);
+    setMdriveUrl(null);
+    setMdriveResults([]);
+    setMdriveSelectedIndices(new Set());
+    processedExtractionsRef.current = new Set();
   };
 
   const retryFailed = () => {
@@ -801,7 +971,117 @@ export const LinkCheckerModal: React.FC<Props> = ({
                   <button onClick={onClose} className="rounded-full px-3 py-1.5 text-sm text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white transition">Close</button>
                 </div>
 
-                {isReviewingBatch ? (
+                {mdriveUrl ? (
+                  <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
+                    <div className="flex items-center justify-between px-1">
+                      <div>
+                        <h3 className="text-lg font-bold">MDrive Selection</h3>
+                        <p className="text-xs text-zinc-500">Pick the Hubcloud links you want to extract</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => setMdriveSelectedIndices(new Set(mdriveResults.keys()))}
+                          className="text-xs font-bold text-cyan-500 hover:text-cyan-400 px-3 py-1 bg-cyan-500/10 rounded-lg"
+                        >
+                          Select All
+                        </button>
+                        <button 
+                          onClick={() => setMdriveUrl(null)}
+                          className="text-xs font-bold text-zinc-500 hover:text-zinc-400 px-3 py-1 bg-zinc-500/10 rounded-lg"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+
+                    {mdriveLoading ? (
+                      <div className="py-20 flex flex-col items-center justify-center gap-4">
+                        <LoaderIcon className="w-10 h-10 text-cyan-500 animate-spin" />
+                        <p className="text-zinc-500 text-sm animate-pulse">Scraping MDrive page...</p>
+                      </div>
+                    ) : mdriveError ? (
+                      <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center gap-3 text-red-500 text-sm">
+                        <AlertTriangle className="w-5 h-5 shrink-0" />
+                        {mdriveError}
+                      </div>
+                    ) : (
+                      <div className="grid gap-2 max-h-[50vh] overflow-y-auto custom-scrollbar pr-2">
+                        {mdriveResults.map((item, i) => (
+                          <div 
+                            key={i}
+                            className={`group p-4 rounded-2xl border transition-all cursor-pointer flex items-center gap-4 ${
+                              mdriveSelectedIndices.has(i) 
+                                ? 'bg-cyan-500/5 border-cyan-500/30' 
+                                : 'bg-zinc-50 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'
+                            }`}
+                            onClick={() => {
+                              setMdriveSelectedIndices(prev => {
+                                const next = new Set(prev);
+                                if (next.has(i)) next.delete(i);
+                                else next.add(i);
+                                return next;
+                              });
+                            }}
+                          >
+                            <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center shrink-0 transition-all ${
+                              mdriveSelectedIndices.has(i)
+                                ? 'bg-cyan-500 border-cyan-500'
+                                : 'border-zinc-300 dark:border-zinc-700'
+                            }`}>
+                              {mdriveSelectedIndices.has(i) && <CheckCircle2 className="w-4 h-4 text-white" />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <h4 className="text-sm font-bold truncate text-zinc-900 dark:text-white">{item.file_name}</h4>
+                              <p className="text-[10px] text-zinc-500 flex items-center gap-2 mt-1 truncate">
+                                <LinkIcon className="w-3 h-3" />
+                                {item.url}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-mono bg-zinc-200 dark:bg-zinc-800 px-2 py-1 rounded text-zinc-600 dark:text-zinc-400 uppercase">
+                                {item.size}
+                              </span>
+                              {!item.is_direct && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleExtractDirectMdrive(i);
+                                  }}
+                                  disabled={mdriveExtractingDirect[i]}
+                                  className="p-2 bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 rounded-xl text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all disabled:opacity-50"
+                                  title="Extract Direct Drive Link"
+                                >
+                                  {mdriveExtractingDirect[i] ? <LoaderIcon className="w-4 h-4 animate-spin text-cyan-500" /> : <ExternalLink className="w-4 h-4" />}
+                                </button>
+                              )}
+                              {item.is_direct && (
+                                <div className="p-2 bg-cyan-500/20 rounded-xl text-cyan-500" title="Direct Drive Link Extracted">
+                                  <CheckCircle2 className="w-4 h-4" />
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="flex justify-end gap-3 pt-4 border-t border-zinc-200 dark:border-zinc-800">
+                      <button 
+                        onClick={() => setMdriveUrl(null)}
+                        className="px-6 py-2.5 rounded-2xl text-sm font-bold text-zinc-500 hover:text-zinc-700 dark:hover:text-white transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={confirmMdriveSelection}
+                        disabled={mdriveSelectedIndices.size === 0}
+                        className="bg-cyan-500 hover:bg-cyan-600 disabled:opacity-50 text-white px-8 py-2.5 rounded-2xl font-bold flex items-center gap-2 transition-all shadow-lg shadow-cyan-500/20"
+                      >
+                        Add {mdriveSelectedIndices.size} Extracted Links
+                      </button>
+                    </div>
+                  </div>
+                ) : isReviewingBatch ? (
                   <div className="space-y-6">
                     <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 p-4 space-y-4 max-h-[60vh] overflow-y-auto custom-scrollbar">
                       {batchReviewItems.map((item) => (

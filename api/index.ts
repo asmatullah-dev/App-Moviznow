@@ -525,6 +525,149 @@ async function startServer() {
     }
   });
 
+  // MDrive Extraction API
+  app.get('/api/mdrive', async (req: express.Request, res: express.Response) => {
+    try {
+      let { url } = req.query;
+      if (!url || typeof url !== 'string' || !url.includes('mdrive.lol')) {
+        return res.status(400).json({ error: 'Valid mdrive.lol URL required' });
+      }
+
+      if (!url.startsWith('http')) {
+         url = 'https://' + url;
+      }
+
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`MDrive returned ${response.status}`);
+      }
+
+      const text = await response.text();
+      const hits: any[] = [];
+      
+      let mainTitle = "Unknown Title";
+      const titleMatch = text.match(/<title[^>]*>([^<]+)<\/title>/i);
+      if (titleMatch) {
+          mainTitle = titleMatch[1].trim().replace(" - mdrive.lol", "").replace(" - MDrive", "");
+      }
+      
+      // Split on link opening tags to evaluate the preceding text for context
+      const parts = text.split('<a ');
+      let lastFilename = "File";
+      
+      for (let i = 1; i < parts.length; i++) {
+          const hrefMatch = parts[i].match(/href="([^"]+)"/);
+          if (hrefMatch) {
+              const link = hrefMatch[1];
+              
+              // Check if it's a HubCloud link
+              if (link.includes('hubcloud.foo') || link.includes('hubcould.') || link.includes('hubcloud.')) {
+                  const prev = parts[i-1];
+                  
+                  // Mdrive stores the file name in a heading directly before the link
+                  const h5Match = prev.match(/<h[1-6][^>]*>([^<]+)<\/h[1-6]>\s*(?:<[^>]+>\s*)*$/i);
+                  let title = lastFilename;
+                  if (h5Match) {
+                      title = h5Match[1].trim();
+                      lastFilename = title; // Fallback for links that don't have a direct heading
+                  }
+                  
+                  hits.push({
+                     file_name: `${mainTitle} ${title}`.replace(/&#8211;/g, '-').replace(/&amp;/g, '&'),
+                     url: link,
+                     size: "Unknown",
+                     date: new Date().toISOString().split('T')[0]
+                  });
+              }
+          }
+      }
+
+      res.json({ hits, found: hits.length, all_fetched: true });
+    } catch (error: any) {
+      console.error('MDrive extract error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // HowBlogs Extraction API
+  app.get('/api/howblogs', async (req: express.Request, res: express.Response) => {
+    try {
+      let { url } = req.query;
+      if (!url || typeof url !== 'string' || !url.includes('howblogs.xyz')) {
+        return res.status(400).json({ error: 'Valid howblogs.xyz URL required' });
+      }
+
+      if (!url.startsWith('http')) {
+         url = 'https://' + url;
+      }
+
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HowBlogs returned ${response.status}`);
+      }
+
+      const text = await response.text();
+      // Look for HubCloud links - they usually start with hubcloud. or hubcould.
+      const hubcloudMatch = text.match(/https?:\/\/[^"'\s]*(?:hubcloud|hubcould)\.[^"'\s]*/i);
+      
+      if (hubcloudMatch) {
+          res.json({ url: hubcloudMatch[0] });
+      } else {
+          res.status(404).json({ error: 'No HubCloud link found' });
+      }
+    } catch (error: any) {
+      console.error('HowBlogs extract error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // FilesDL Extraction API
+  app.get('/api/filesdl', async (req: express.Request, res: express.Response) => {
+    try {
+      let { url } = req.query;
+      if (!url || typeof url !== 'string' || !url.includes('filesdl.in')) {
+        return res.status(400).json({ error: 'Valid filesdl.in URL required' });
+      }
+
+      if (!url.startsWith('http')) {
+         url = 'https://' + url;
+      }
+
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`FilesDL returned ${response.status}`);
+      }
+
+      const text = await response.text();
+      // Look for HubCloud links
+      const hubcloudMatch = text.match(/https?:\/\/[^"'\s]*(?:hubcloud|hubcould)\.[^"'\s]*/i);
+      
+      if (hubcloudMatch) {
+          res.json({ url: hubcloudMatch[0] });
+      } else {
+          res.status(404).json({ error: 'No HubCloud link found on FilesDL page' });
+      }
+    } catch (error: any) {
+      console.error('FilesDL extract error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Subscribe to FCM topic
   app.post(
     ["/api/notifications/subscribe", "/notifications/subscribe"],
