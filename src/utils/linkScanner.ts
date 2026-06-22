@@ -113,8 +113,27 @@ export function normalizeUrl(input: string) {
 }
 
 export function splitLinks(text: string) {
-  const matches = text.match(/https?:\/\/[^\s)\]}>"']+/g) || [];
-  return [...new Set(matches.map((s) => s.trim()))];
+  // Balanced parentheses are common in URLs (especially movie titles on these sites)
+  // We'll use a more permissive regex but still try to avoid trailing punctuation common in prose
+  const matches = text.match(/https?:\/\/[^\s"']+/g) || [];
+  return [...new Set(matches.map((s) => {
+    let clean = s.trim();
+    // Remove common trailing punctuation that's unlikely to be part of the URL itself
+    // but keep characters that are definitely part of it.
+    // If it ends with a closing paren, only remove it if there's no matching opening paren
+    clean = clean.replace(/[.,;:!]+$/, '');
+    
+    // Simple balanced paren check
+    if (clean.endsWith(')')) {
+      const openCount = (clean.match(/\(/g) || []).length;
+      const closeCount = (clean.match(/\)/g) || []).length;
+      if (closeCount > openCount) {
+        clean = clean.substring(0, clean.length - 1);
+      }
+    }
+    
+    return clean;
+  }))];
 }
 
 export function guessLinkType(url: string) {

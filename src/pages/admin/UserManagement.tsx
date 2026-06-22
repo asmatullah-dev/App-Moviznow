@@ -521,6 +521,22 @@ export default function UserManagement() {
     const currentDeleteConfirm = deleteConfirm;
     
     try {
+      if (profile?.uid) {
+        try {
+          const res = await fetch('/api/admin/users/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uid: currentDeleteConfirm, adminUid: profile.uid })
+          });
+          if (!res.ok) {
+             const errorData = await res.json().catch(() => ({}));
+             console.error("Failed to delete user from Firebase Auth:", errorData);
+          }
+        } catch (e) {
+          console.error("Failed to call delete API:", e);
+        }
+      }
+
       const batch = writeBatch(db);
       
       // 1. Delete user document
@@ -1326,11 +1342,11 @@ export default function UserManagement() {
                       <div className="flex items-center gap-2 mt-1">
                       {user.role !== 'owner' && (
                         <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider
-                          ${user.status === 'active' ? 'bg-emerald-500/10 text-emerald-500' : 
+                          ${(!user.status || user.status === 'active') ? 'bg-emerald-500/10 text-emerald-500' : 
                             user.status === 'expired' ? 'bg-red-500/10 text-red-500' : 
                             'bg-yellow-500/10 text-yellow-500'}`}
                         >
-                          {user.status}
+                          {user.status || 'active'}
                         </span>
                       )}
                       {user.notification === 'yes' && (
@@ -1483,7 +1499,7 @@ export default function UserManagement() {
                     <div className="flex-1">
                       <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Status</label>
                       <select
-                        value={editForm.status}
+                        value={editForm.status || 'active'}
                         onChange={(e) => setEditForm({ ...editForm, status: e.target.value as Status })}
                         className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
                       >
@@ -1588,7 +1604,7 @@ export default function UserManagement() {
                       )}
                       <div className="text-right">
                         <div className="text-zinc-500 text-[10px] uppercase font-bold mb-0.5">Status</div>
-                        <div className="capitalize font-bold text-zinc-900 dark:text-white text-sm">{selectedUser.status}</div>
+                        <div className="capitalize font-bold text-zinc-900 dark:text-white text-sm">{selectedUser.status || 'active'}</div>
                       </div>
                     </div>
                     

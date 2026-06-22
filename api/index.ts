@@ -548,12 +548,11 @@ async function startServer() {
       }
 
       const text = await response.text();
-      const hits: any[] = [];
-      
+      const rawHits: any[] = [];
       let mainTitle = "Unknown Title";
       const titleMatch = text.match(/<title[^>]*>([^<]+)<\/title>/i);
       if (titleMatch) {
-          mainTitle = titleMatch[1].trim().replace(" - mdrive.lol", "").replace(" - MDrive", "");
+          mainTitle = titleMatch[1].replace(/(?:\s*-\s*mdrive\.lol|\s*-\s*MDrive|HubCloud|HubDrive|vcloud|hubcould|hub-cloud)/ig, "").trim();
       }
       
       // Split on link opening tags to evaluate the preceding text for context
@@ -566,7 +565,7 @@ async function startServer() {
               const link = hrefMatch[1];
               
               // Check if it's a HubCloud link
-              if (link.includes('hubcloud.foo') || link.includes('hubcould.') || link.includes('hubcloud.')) {
+              if (link.includes('hubcloud.foo') || link.includes('hubcould.') || link.includes('hubcloud.') || link.includes('hubdrive.') || link.includes('vcloud.')) {
                   const prev = parts[i-1];
                   
                   // Mdrive stores the file name in a heading directly before the link
@@ -577,14 +576,73 @@ async function startServer() {
                       lastFilename = title; // Fallback for links that don't have a direct heading
                   }
                   
-                  hits.push({
-                     file_name: `${mainTitle} ${title}`.replace(/&#8211;/g, '-').replace(/&amp;/g, '&'),
+                  let titleClean = title.replace(/(?:HubCloud|HubDrive(?:\.space)?|vcloud|hubcould|hub-cloud)(?:\s*-)?/ig, '').trim();
+                  
+                  let tLower = titleClean.toLowerCase();
+                  let mLower = mainTitle.toLowerCase();
+                  if (tLower === 'file') titleClean = "";
+                  
+                  let combined = mainTitle;
+                  if (titleClean) {
+                      if (tLower.includes(mLower)) {
+                          combined = titleClean;
+                      } else if (mLower.includes(tLower)) {
+                          combined = mainTitle;
+                      } else {
+                          combined = `${mainTitle} ${titleClean}`;
+                      }
+                  }
+                  
+                  let finalFileName = combined.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+                  
+                  // Scrape size if available in the text
+                  let size = "Unknown";
+                  const sizeMatch = prev.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i) || title.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i);
+                  if (sizeMatch) {
+                      size = sizeMatch[1].toUpperCase();
+                      // Remove size from filename to make matching easier
+                      const escapedSize = size.replace(/\./g, '\\.');
+                      finalFileName = finalFileName.replace(new RegExp(`\\[?\\s*${escapedSize}\\s*\\]?`, 'gi'), "").replace(/[\[\]()\-_\s]+$/, "").trim();
+                  }
+
+                  rawHits.push({
+                     file_name: finalFileName,
                      url: link,
-                     size: "Unknown",
+                     size: size !== "Unknown" ? size : null,
                      date: new Date().toISOString().split('T')[0]
                   });
               }
           }
+      }
+
+      // Deduplicate: If same file found in hubcloud, skip hubdrive
+      const hits: any[] = [];
+      const seenFiles = new Map<string, string>(); // Add URL host to know which we kept
+      
+      for (const hit of rawHits) {
+         const isHubdrive = hit.url.includes('hubdrive.');
+         const existing = seenFiles.get(hit.file_name);
+         
+         if (existing) {
+             // If we already have this file...
+             if (isHubdrive && !existing.includes('hubdrive.')) {
+                 // Skip hubdrive if we already have non-hubdrive (hubcloud)
+                 continue;
+             }
+             if (!isHubdrive && existing.includes('hubdrive.')) {
+                 // Replace hubdrive with hubcloud
+                 const idx = hits.findIndex(h => h.file_name === hit.file_name && h.url === existing);
+                 if (idx !== -1) hits.splice(idx, 1);
+                 hits.push(hit);
+                 seenFiles.set(hit.file_name, hit.url);
+                 continue;
+             }
+             // Otherwise just keep the first one
+             continue;
+         }
+         
+         hits.push(hit);
+         seenFiles.set(hit.file_name, hit.url);
       }
 
       res.json({ hits, found: hits.length, all_fetched: true });
@@ -676,16 +734,21 @@ async function startServer() {
         return res.status(400).json({ error: 'Valid moviesdrives URL required' });
       }
 
-      if (!url.startsWith('http')) {
-         url = 'https://' + url;
+      // Clean URL
+      let targetUrl = url.trim().replace(/[:\s]+$/, '');
+      if (!targetUrl.startsWith('http')) {
+         targetUrl = 'https://' + targetUrl;
       }
 
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
-      });
-      
+      console.log(`[MoviesDrive] Extracting MDrive links from: ${targetUrl}`);
+
+      const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Referer': targetUrl
+      };
+
+      const response = await fetch(targetUrl, { headers });
       if (!response.ok) throw new Error(`MoviesDrive returned ${response.status}`);
       const text = await response.text();
       
@@ -695,41 +758,305 @@ async function startServer() {
       
       for(let i = 1; i < parts.length; i++) {
         const p = parts[i];
-        const m = p.match(/href="([^"]+mdrive\.lol\/archive\/[^"]+)"/);
+        const m = p.match(/href=["']([^"']*(?:mdrive|mdrvie)\.lol\/archive\/[^"']*)["']/i);
         if (m) {
-          const mdriveUrl = m[1].trim();
-          if (!seenUrls.has(mdriveUrl)) {
-            seenUrls.add(mdriveUrl);
+          const mUrl = m[1].trim();
+          if (!seenUrls.has(mUrl)) {
+            seenUrls.add(mUrl);
             
-            // Extract label from the anchor text - handle potential nested tags
-            let label = "MDrive Link";
+            // Extract label from the anchor text
+            let label = "";
             const closeAnchorIndex = p.indexOf('</a>');
             if (closeAnchorIndex !== -1) {
               const anchorContent = p.substring(0, closeAnchorIndex);
               const tagEndIndex = anchorContent.indexOf('>');
               if (tagEndIndex !== -1) {
                 const innerHtml = anchorContent.substring(tagEndIndex + 1);
-                // Strip any nested HTML tags to get pure text
                 label = innerHtml.replace(/<[^>]*>/g, '').trim();
               }
             }
-
-            if (!label) label = "MDrive Link";
             
-            // Clean up label
+            if (!label) label = "Download Link";
             label = label.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
-
+            
             hits.push({
               file_name: label,
-              url: mdriveUrl
+              url: mUrl,
+              size: null,
+              is_direct: false
             });
           }
+        }
+      }
+
+      if (hits.length === 0) {
+        // Fallback: If no mdrive links, check for native hubcloud links just in case
+        const hubcloudMatch = text.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|hubdrive)\.[^"'\s<>\[\]]*/gi);
+        if (hubcloudMatch) {
+           hubcloudMatch.forEach(hubUrl => {
+              const cleanHubUrl = hubUrl.replace(/&amp;/g, '&');
+              if (!seenUrls.has(cleanHubUrl)) {
+                 seenUrls.add(cleanHubUrl);
+                 hits.push({
+                    file_name: "Original HubCloud Link",
+                    url: cleanHubUrl,
+                    size: null,
+                    is_direct: true
+                 });
+              }
+           });
         }
       }
       
       res.json({ hits, found: hits.length });
     } catch (error: any) {
       console.error('MoviesDrive extract error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // FilmyGo Extraction API
+  app.get('/api/filmygo', async (req: express.Request, res: express.Response) => {
+    try {
+      let { url } = req.query;
+      if (!url || typeof url !== 'string' || !url.includes('filmygo.')) {
+        return res.status(400).json({ error: 'Valid FilmyGo URL required' });
+      }
+
+      // Clean URL
+      let targetUrl = url.trim().replace(/[:\s]+$/, '');
+      if (!targetUrl.startsWith('http')) {
+        targetUrl = 'https://' + targetUrl;
+      }
+
+      console.log(`[FilmyGo] Extracting FilesDL links from: ${targetUrl}`);
+
+      const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Referer': targetUrl
+      };
+
+      const response = await fetch(targetUrl, { headers });
+      if (!response.ok) throw new Error(`FilmyGo returned ${response.status}`);
+      const text = await response.text();
+      
+      const fdlData = new Map<string, { label: string }>();
+      const parts = text.split('<a ');
+      for(let i = 1; i < parts.length; i++) {
+        const p = parts[i];
+        const m = p.match(/href=["']([^"']*filesdl\.in\/[^"']*)["']/i);
+        if (m) {
+          const fdlUrl = m[1].trim();
+          
+          let label = "";
+          const closeAnchorIndex = p.indexOf('</a>');
+          if (closeAnchorIndex !== -1) {
+            const anchorContent = p.substring(0, closeAnchorIndex);
+            const tagEndIndex = anchorContent.indexOf('>');
+            if (tagEndIndex !== -1) {
+              const innerHtml = anchorContent.substring(tagEndIndex + 1);
+              label = innerHtml.replace(/<[^>]*>/g, '').trim();
+            }
+          }
+          
+          if (!label) label = "Download Link";
+          label = label.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+          
+          fdlData.set(fdlUrl, { label });
+        }
+      }
+      
+      if (fdlData.size === 0) return res.json({ hits: [], found: 0 });
+
+      const results = await Promise.all(Array.from(fdlData.keys()).map(async (fdlUrl) => {
+        try {
+          const fdlRes = await fetch(fdlUrl, { headers });
+          if (!fdlRes.ok) return [];
+          const fdlText = await fdlRes.text();
+          
+          const hubcloudMatch = fdlText.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|hubdrive)\.[^"'\s<>\[\]]*/gi);
+          if (hubcloudMatch) {
+            const sizeMatch = fdlText.match(/Size:<\/span>\s*<span>([^<]+)<\/span>/i) || fdlText.match(/(\d+(?:\.\d+)?\s*(?:GB|MB|KB))/i);
+            const size = sizeMatch ? sizeMatch[1].toUpperCase() : null;
+
+            let finalName = fdlData.get(fdlUrl)?.label || "HubCloud Link";
+            if (size) {
+                const escapedSize = size.replace(/\./g, '\\.');
+                finalName = finalName.replace(new RegExp(`\\[?${escapedSize}\\]?`, 'gi'), "").trim();
+                finalName = finalName.replace(/[\[\]()\-_\s]+$/, "").trim();
+            }
+
+            return hubcloudMatch.map(hubUrl => ({
+              file_name: finalName || "HubCloud Link",
+              url: hubUrl,
+              size: size,
+              is_direct: true
+            }));
+          }
+          return [];
+        } catch (e) {
+          return [];
+        }
+      }));
+
+      let finalHits = results.flat().filter((hit, index, self) => 
+        index === self.findIndex((t) => t.url === hit.url)
+      );
+
+      // Deduplicate Hubdrive vs Hubcloud based on finalName
+      const dedupedHits: any[] = [];
+      const seenFiles = new Map<string, string>(); // Add URL host to know which we kept
+      
+      for (const hit of finalHits) {
+         const isHubdrive = hit.url.includes('hubdrive.');
+         const existing = seenFiles.get(hit.file_name);
+         
+         if (existing) {
+             if (isHubdrive && !existing.includes('hubdrive.')) {
+                 continue;
+             }
+             if (!isHubdrive && existing.includes('hubdrive.')) {
+                 const idx = dedupedHits.findIndex(h => h.file_name === hit.file_name && h.url === existing);
+                 if (idx !== -1) dedupedHits.splice(idx, 1);
+                 dedupedHits.push(hit);
+                 seenFiles.set(hit.file_name, hit.url);
+                 continue;
+             }
+             continue;
+         }
+         
+         dedupedHits.push(hit);
+         seenFiles.set(hit.file_name, hit.url);
+      }
+      finalHits = dedupedHits;
+      
+      res.json({ hits: finalHits, found: finalHits.length });
+    } catch (error: any) {
+      console.error('FilmyGo extract error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // SkymoviesHD Extraction API
+  app.get('/api/skymovieshd', async (req: express.Request, res: express.Response) => {
+    try {
+      let { url } = req.query;
+      if (!url || typeof url !== 'string' || !url.includes('skymovieshd.')) {
+        return res.status(400).json({ error: 'Valid SkymoviesHD URL required' });
+      }
+
+      // Clean URL
+      let targetUrl = url.trim().replace(/[:\s]+$/, '');
+      if (!targetUrl.startsWith('http')) {
+        targetUrl = 'https://' + targetUrl;
+      }
+
+      console.log(`[SkymoviesHD] Extracting redirection links from: ${targetUrl}`);
+
+      const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Referer': targetUrl
+      };
+
+      const response = await fetch(targetUrl, { headers });
+      if (!response.ok) throw new Error(`SkymoviesHD returned ${response.status}`);
+      const text = await response.text();
+      
+      const hbData = new Map<string, { label: string }>();
+      const parts = text.split('<a ');
+      for(let i = 1; i < parts.length; i++) {
+        const p = parts[i];
+        const m = p.match(/href=["']([^"']*(?:howblogs\.xyz|howblog\.xyz|sky-blogs\.xyz|sky-blog\.xyz|moviesapi|skymovies)\/[^"']*)["']/i);
+        if (m) {
+          const hbUrl = m[1].trim();
+          
+          let label = "";
+          const closeAnchorIndex = p.indexOf('</a>');
+          if (closeAnchorIndex !== -1) {
+            const anchorContent = p.substring(0, closeAnchorIndex);
+            const tagEndIndex = anchorContent.indexOf('>');
+            if (tagEndIndex !== -1) {
+              const innerHtml = anchorContent.substring(tagEndIndex + 1);
+              label = innerHtml.replace(/<[^>]*>/g, '').trim();
+            }
+          }
+          
+          if (!label) label = "Download Link";
+          label = label.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+          
+          hbData.set(hbUrl, { label });
+        }
+      }
+      
+      if (hbData.size === 0) return res.json({ hits: [], found: 0 });
+
+      const results = await Promise.all(Array.from(hbData.keys()).map(async (hbUrl) => {
+        try {
+          const hbRes = await fetch(hbUrl, { headers });
+          if (!hbRes.ok) return [];
+          const hbText = await hbRes.text();
+          
+          const hubcloudMatch = hbText.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|hubdrive)\.[^"'\s<>\[\]]*/gi);
+          if (hubcloudMatch) {
+            const sizeMatch = hbText.match(/\[?(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\]?/i) || hbText.match(/Size:\s*([^<]+)/i);
+            const size = sizeMatch ? (sizeMatch[1] || sizeMatch[2]).toUpperCase() : null;
+
+            let finalName = hbData.get(hbUrl)?.label || "HubCloud Link";
+            if (size) {
+                const escapedSize = size.replace(/\./g, '\\.');
+                finalName = finalName.replace(new RegExp(`\\[?${escapedSize}\\]?`, 'gi'), "").trim();
+                finalName = finalName.replace(/[\[\]()\-_\s]+$/, "").trim();
+            }
+
+            return hubcloudMatch.map(hubUrl => ({
+              file_name: finalName || "HubCloud Link",
+              url: hubUrl,
+              size: size,
+              is_direct: true
+            }));
+          }
+          return [];
+        } catch (e) {
+          return [];
+        }
+      }));
+
+      let finalHits = results.flat().filter((hit, index, self) => 
+        index === self.findIndex((t) => t.url === hit.url)
+      );
+
+      // Deduplicate Hubdrive vs Hubcloud based on finalName
+      const dedupedHits: any[] = [];
+      const seenFiles = new Map<string, string>(); // Add URL host to know which we kept
+      
+      for (const hit of finalHits) {
+         const isHubdrive = hit.url.includes('hubdrive.');
+         const existing = seenFiles.get(hit.file_name);
+         
+         if (existing) {
+             if (isHubdrive && !existing.includes('hubdrive.')) {
+                 continue;
+             }
+             if (!isHubdrive && existing.includes('hubdrive.')) {
+                 const idx = dedupedHits.findIndex(h => h.file_name === hit.file_name && h.url === existing);
+                 if (idx !== -1) dedupedHits.splice(idx, 1);
+                 dedupedHits.push(hit);
+                 seenFiles.set(hit.file_name, hit.url);
+                 continue;
+             }
+             continue;
+         }
+         
+         dedupedHits.push(hit);
+         seenFiles.set(hit.file_name, hit.url);
+      }
+      finalHits = dedupedHits;
+      
+      res.json({ hits: finalHits, found: finalHits.length });
+    } catch (error: any) {
+      console.error('SkymoviesHD extract error:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -867,6 +1194,32 @@ async function startServer() {
       }
     },
   );
+
+  app.post("/api/admin/users/delete", async (req, res) => {
+    try {
+      const { uid, adminUid } = req.body;
+      if (!uid || !adminUid)
+        return res.status(400).json({ error: "Missing uid or adminUid" });
+
+      // Verify admin
+      const adminDoc = await db.collection("users").doc(adminUid).get();
+      if (
+        !adminDoc.exists ||
+        (adminDoc.data()?.role !== "admin" &&
+          adminDoc.data()?.role !== "owner")
+      ) {
+        return res.status(403).json({ error: "Unauthorized" });
+      }
+
+      // Delete user from Firebase Auth
+      await admin.auth().deleteUser(uid);
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Admin Delete User Error:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
 
   function formatBytes(bytes?: number) {
     if (!bytes || Number.isNaN(bytes)) return undefined;

@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   CheckCircle2,
@@ -14,6 +14,7 @@ import {
   FileDown,
   ChevronDown,
   ChevronUp,
+  Info,
   Siren,
   Plus,
   X,
@@ -128,7 +129,16 @@ export const LinkCheckerModal: React.FC<Props> = ({
   const [mdriveExtractingDirect, setMdriveExtractingDirect] = useState<Record<number, boolean>>({});
   const processedExtractionsRef = React.useRef<Set<string>>(new Set());
 
-  useModalBehavior(isOpen, onClose);
+  const handleClose = useCallback(() => {
+    if (mdriveUrl) {
+      processedExtractionsRef.current.add(mdriveUrl);
+      setMdriveUrl(null);
+    } else {
+      onClose();
+    }
+  }, [mdriveUrl, onClose]);
+
+  useModalBehavior(isOpen, handleClose);
 
   const links = useMemo(() => {
     return splitLinks(input).map(normalizeUrl).filter(Boolean);
@@ -273,15 +283,16 @@ export const LinkCheckerModal: React.FC<Props> = ({
       });
       const data = await res.json();
       
-      if (data.url && data.url !== item.url) {
+      if (data.size || data.url) {
         setMdriveResults(prev => {
           const next = [...prev];
-          next[index] = { ...next[index], original_url: item.url, url: data.url, is_direct: true, size: data.size || item.size };
+          // We DO NOT update the url to data.url per user request, just grab the size
+          next[index] = { ...next[index], size: data.size || item.size };
           return next;
         });
       }
     } catch (err) {
-      console.error('Failed to extract direct link:', err);
+      console.error('Failed to extract size:', err);
     } finally {
       setMdriveExtractingDirect(prev => ({ ...prev, [index]: false }));
     }
@@ -334,7 +345,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
     // 1. Identify all extractable links
     const extractableLinks = currentLinks.filter(u => 
-      (u.includes('howblogs.xyz') || u.includes('filesdl.in') || u.includes('mdrive.lol') || u.includes('moviesdrives.') || u.includes('moviesdrive.')) && 
+      (u.includes('howblogs.xyz') || u.includes('filesdl.in') || u.includes('mdrive.lol') || u.includes('moviesdrives.') || u.includes('moviesdrive.') || u.includes('filmygo.') || u.includes('skymovieshd.')) && 
       !processedExtractionsRef.current.has(u)
     );
 
@@ -356,6 +367,16 @@ export const LinkCheckerModal: React.FC<Props> = ({
               if (!res.ok) throw new Error('MoviesDrive fetch failed');
               const data = await res.json();
               return { type: 'moviesdrive', original: targetUrl, data };
+            } else if (targetUrl.includes('filmygo.')) {
+              const res = await fetch(`/api/filmygo?url=${encodeURIComponent(targetUrl)}`);
+              if (!res.ok) throw new Error('FilmyGo fetch failed');
+              const data = await res.json();
+              return { type: 'filmygo', original: targetUrl, data };
+            } else if (targetUrl.includes('skymovieshd.')) {
+              const res = await fetch(`/api/skymovieshd?url=${encodeURIComponent(targetUrl)}`);
+              if (!res.ok) throw new Error('SkymoviesHD fetch failed');
+              const data = await res.json();
+              return { type: 'skymovieshd', original: targetUrl, data };
             } else {
               const endpoint = targetUrl.includes('howblogs.xyz') ? '/api/howblogs' : '/api/filesdl';
               const res = await fetch(`${endpoint}?url=${encodeURIComponent(targetUrl)}`);
@@ -380,29 +401,49 @@ export const LinkCheckerModal: React.FC<Props> = ({
               nextInput = nextInput.replace(regex, res.extracted);
               console.log("Auto-replacement successful:", { from: res.original, to: res.extracted });
             }
-          } else if (res.type === 'mdrive' || res.type === 'moviesdrive') {
+          } else if (res.type === 'mdrive' || res.type === 'moviesdrive' || res.type === 'filmygo' || res.type === 'skymovieshd') {
             const hits = res.data?.hits || [];
-            if (hits.length === 1) {
-              processedExtractionsRef.current.add(res.original);
-              const singleLink = hits[0].url;
-              const baseLink = res.original.replace(/^https?:\/\//, '').replace(/\/$/, '');
-              const escapedBase = baseLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-              const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}/?`, 'g');
-              nextInput = nextInput.replace(regex, singleLink);
-              console.log(`${res.type === 'mdrive' ? 'MDrive' : 'MoviesDrive'} auto-replacement successful:`, { from: res.original, to: singleLink });
-            } else if (hits.length > 1) {
-              // Show UI for this specific link
-              setMdriveUrl(res.original);
-              setMdriveResults(hits);
-              setMdriveSelectedIndices(new Set());
-              pausedForUI = true;
-              break; 
+            if (hits.length > 0) {
+              if (res.type === 'mdrive') {
+                if (hits.length === 1) {
+                  processedExtractionsRef.current.add(res.original);
+                  // Auto-extract the single link
+                  const baseLink = res.original.replace(/^https?:\/\//, '').replace(/\/$/, '');
+                  const escapedBase = baseLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                  const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}/?`, 'g');
+                  nextInput = nextInput.replace(regex, hits[0].url);
+                  console.log("MDrive auto-extraction successful (1 link).");
+                } else {
+                  // Show the selection modal if more than 1 hubcloud link is found
+                  setMdriveUrl(res.original);
+                  setMdriveResults(hits);
+                  setMdriveSelectedIndices(new Set());
+                  pausedForUI = true;
+                  break;
+                }
+              } else if (hits.length === 1) {
+                processedExtractionsRef.current.add(res.original);
+                const singleLink = hits[0].url;
+                const baseLink = res.original.replace(/^https?:\/\//, '').replace(/\/$/, '');
+                const escapedBase = baseLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}/?`, 'g');
+                nextInput = nextInput.replace(regex, singleLink);
+                console.log(`${res.type === 'moviesdrive' ? 'MoviesDrive' : res.type === 'filmygo' ? 'FilmyGo' : 'SkymoviesHD'} auto-replacement successful:`, { from: res.original, to: singleLink });
+              } else {
+                // Show UI for this specific link (MoviesDrive, FilmyGo, SkyMoviesHD with more than 1 hit)
+                setMdriveUrl(res.original);
+                setMdriveResults(hits);
+                setMdriveSelectedIndices(new Set());
+                pausedForUI = true;
+                break; 
+              }
             } else {
               // 0 hits
               processedExtractionsRef.current.add(res.original);
             }
           } else if (res.type === 'error') {
-            console.log("Extraction error for", res.original, "- skipping from this batch but allowing retry");
+            console.log("Extraction error for", res.original, "- skipping from this session");
+            processedExtractionsRef.current.add(res.original);
           }
         }
 
@@ -416,9 +457,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
       } catch (err: any) {
         setError(err.message);
       } finally {
-        if (!pausedForUI) {
-           setLoading(false);
-        }
+        // We set loading false even if paused, because the UI popup is a separate modal state.
+        // Keeping "Checking..." on the main button while the popup is open looks like it's stuck.
+        setLoading(false);
       }
       return;
     }
@@ -433,13 +474,14 @@ export const LinkCheckerModal: React.FC<Props> = ({
       !u.includes('howblogs.xyz') && 
       !u.includes('filesdl.in') &&
       !u.includes('moviesdrives.') &&
-      !u.includes('moviesdrive.')
+      !u.includes('moviesdrive.') &&
+      !u.includes('filmygo.') &&
+      !u.includes('skymovieshd.')
     );
     
     if (urls.length === 0 && currentLinks.length > 0) {
       // If we filtered everything out but had links, it means we are waiting for extractions or extractions failed
-      // If none are left to process (not in processedExtractionsRef), then we might have a dead end.
-      // But usually recursion handles this.
+      setLoading(false);
       return;
     }
     
@@ -1055,7 +1097,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                       </p>
                     </div>
                   </div>
-                  <button onClick={onClose} className="rounded-full px-3 py-1.5 text-sm text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white transition">Close</button>
+                  <button onClick={handleClose} className="rounded-full px-3 py-1.5 text-sm text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white transition">Close</button>
                 </div>
 
                 {mdriveUrl ? (
@@ -1063,13 +1105,36 @@ export const LinkCheckerModal: React.FC<Props> = ({
                     <div className="flex items-center justify-between px-1">
                       <div>
                         <h3 className="text-lg font-bold">
-                          {mdriveUrl.includes('mdrive.lol') ? 'MDrive Selection' : 'MoviesDrive MDrive Selection'}
+                          {mdriveUrl.includes('mdrive.lol') ? 'MDrive Selection' : 
+                          mdriveUrl.includes('filmygo.') ? 'FilmyGo FilesDL Selection' : 
+                          mdriveUrl.includes('skymovieshd.') ? 'SkymoviesHD HowBlogs Selection' :
+                          'MoviesDrive MDrive Selection'}
                         </h3>
                         <p className="text-xs text-zinc-500">
-                          {mdriveUrl.includes('mdrive.lol') ? 'Pick the Hubcloud links you want to extract' : 'Pick the MDrive links you want to process'}
+                          {mdriveUrl.includes('mdrive.lol') ? 'Pick the Hubcloud links you want to extract' : 
+                          mdriveUrl.includes('filmygo.') ? 'Pick the FilesDL links you want to process' :
+                          mdriveUrl.includes('skymovieshd.') ? 'Pick the HowBlogs links you want to process' :
+                          'Pick the MDrive links you want to process'}
                         </p>
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 items-center">
+                        <button 
+                          onClick={async () => {
+                            const indicesToFetch = mdriveResults
+                              .map((item, index) => (!item.size ? index : -1))
+                              .filter(index => index !== -1);
+                            
+                            // Process in batches of 3 to avoid overwhelming
+                            for (let i = 0; i < indicesToFetch.length; i++) {
+                              handleExtractDirectMdrive(indicesToFetch[i]);
+                              if ((i + 1) % 3 === 0) await new Promise(r => setTimeout(r, 800));
+                            }
+                          }}
+                          className="text-xs font-bold text-cyan-500 hover:text-cyan-400 px-3 py-1 bg-cyan-500/10 rounded-lg flex items-center gap-1.5"
+                        >
+                          <Info className="w-3.5 h-3.5" />
+                          Fetch Sizes
+                        </button>
                         <button 
                           onClick={() => {
                             if (mdriveResults.length > 0 && mdriveSelectedIndices.size === mdriveResults.length) {
@@ -1087,7 +1152,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                           {mdriveResults.length > 0 && mdriveSelectedIndices.size === mdriveResults.length ? "Deselect All" : "Select All"}
                         </button>
                         <button 
-                          onClick={() => setMdriveUrl(null)}
+                          onClick={handleClose}
                           className="text-xs font-bold text-zinc-500 hover:text-zinc-400 px-3 py-1 bg-zinc-500/10 rounded-lg"
                         >
                           Cancel
@@ -1132,16 +1197,26 @@ export const LinkCheckerModal: React.FC<Props> = ({
                               {mdriveSelectedIndices.has(i) && <CheckCircle2 className="w-4 h-4 text-white" />}
                             </div>
                             <div className="flex-1 min-w-0">
-                              <h4 className="text-sm font-bold truncate text-zinc-900 dark:text-white">{item.file_name || item.name || 'Untitled Link'}</h4>
+                              <div className="flex items-center gap-2">
+                                <h4 className="text-sm font-bold truncate text-zinc-900 dark:text-white flex-1">
+                                  {item.file_name || 'HubCloud Link'}
+                                </h4>
+                              </div>
                               <p className="text-[10px] text-zinc-500 flex items-center gap-2 mt-1 truncate">
                                 <LinkIcon className="w-3 h-3" />
                                 {item.url}
                               </p>
                             </div>
                             <div className="flex items-center gap-2">
-                              <span className="text-[10px] font-mono bg-zinc-200 dark:bg-zinc-800 px-2 py-1 rounded text-zinc-600 dark:text-zinc-400 uppercase">
-                                {item.size}
-                              </span>
+                              {(item.size || item.file_size) ? (
+                                <span className="text-[10px] font-mono bg-cyan-500/20 px-2 py-1 rounded text-cyan-500 uppercase border border-cyan-500/20">
+                                  {item.size || item.file_size}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-mono bg-zinc-200 dark:bg-zinc-800 px-2 py-1 rounded text-zinc-400 uppercase italic">
+                                  No Size
+                                </span>
+                              )}
                               {!item.is_direct && (
                                 <button
                                   onClick={(e) => {

@@ -450,15 +450,16 @@ async function fetchHtml(url: string, isVcloud = false) {
             }
           });
         }
-        if (href && !text.includes("telegram"))
+        if (href && !text.includes("telegram")) {
           candidateLinks.push({ text, href });
+        }
       });
 
       if (candidateLinks.length === 0) {
         return { url };
       }
 
-      // Sort: pixeldrain first, then .workers.dev, then others
+      // Sort: pixeldrain first, then .workers.dev
       candidateLinks.sort((a, b) => {
         const isA_PD =
           /pixeldrain|pixel\.drain|pixeldra\.in/i.test(a.text) ||
@@ -469,32 +470,26 @@ async function fetchHtml(url: string, isVcloud = false) {
         if (isA_PD && !isB_PD) return -1;
         if (!isA_PD && isB_PD) return 1;
 
-        const isA_FSL = /fsl|servers*2/i.test(a.text) || /fsl|servers*2/i.test(a.href);const isB_FSL = /fsl|servers*2/i.test(b.text) || /fsl|servers*2/i.test(b.href);if (isA_FSL && !isB_FSL) return -1;if (!isA_FSL && isB_FSL) return 1;
         const isA_Worker = /\.workers\.dev/i.test(a.href);
         const isB_Worker = /\.workers\.dev/i.test(b.href);
         if (isA_Worker && !isB_Worker) return -1;
         if (!isA_Worker && isB_Worker) return 1;
 
+        const isA_FSL = /fsl|servers*2/i.test(a.text) || /fsl|servers*2/i.test(a.href);
+        const isB_FSL = /fsl|servers*2/i.test(b.text) || /fsl|servers*2/i.test(b.href);
+        if (isA_FSL && !isB_FSL) return -1;
+        if (!isA_FSL && isB_FSL) return 1;
+
         return 0;
       });
 
       // Find first working link
-      let workingLink = url; if (candidateLinks.length > 0) { workingLink = candidateLinks[0].href; }
+      let workingLink = url; 
+      if (candidateLinks.length > 0) { 
+        workingLink = candidateLinks[0].href; 
+      }
 
       /* Skipping expensive checks to speed up extraction */
-
-      // First Priority for Pixeldrain: Rewrite to pixeldrain.dev/u/
-      // Matches both api/file/xxx and /u/xxx
-      if (
-        /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+)/i.test(
-          workingLink,
-        )
-      ) {
-        workingLink = workingLink.replace(
-          /.*(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+).*/i,
-          "https://pixeldrain.dev/u/$1",
-        );
-      }
 
       const returnCandidates = candidateLinks.map((c) => {
         let href = c.href;

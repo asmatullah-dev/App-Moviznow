@@ -184,8 +184,12 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
 
           // 2. Fetch specific users modified by admins, found via chunkMeta
           const { getChunkMeta } = await import('../utils/chunkMeta');
-          const versions = await getChunkMeta();
+          const versions = await getChunkMeta(force);
           const serverUsersVersion = versions?.users || {};
+          
+          const knownMtimesStr = safeStorage.getItem('sync_user_mtimes') || '{}';
+          let knownMtimes: Record<string, number> = {};
+          try { knownMtimes = JSON.parse(knownMtimesStr); } catch (e) {}
           
           const uidsToFetch = new Set<string>();
           Object.entries(serverUsersVersion).forEach(([uid, mtime]) => {
@@ -195,8 +199,9 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
                    currentUsersMap.delete(uid);
                    updatedSomething = true;
                  }
-               } else if (mtime > lastFetchTime) {
+               } else if (mtime > (knownMtimes[uid] || 0) && mtime > 0) {
                  uidsToFetch.add(uid);
+                 knownMtimes[uid] = mtime;
                }
              }
           });
@@ -214,6 +219,8 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
                });
             }
           }
+          
+          safeStorage.setItem('sync_user_mtimes', JSON.stringify(knownMtimes));
 
           currentUsers = Array.from(currentUsersMap.values());
         } catch (err) {
