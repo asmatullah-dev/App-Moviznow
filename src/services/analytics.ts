@@ -120,7 +120,7 @@ export const logEvent = async (
   try {
     // Log to Google Analytics if initialized
     const gaInstance = analytics || await analyticsPromise;
-    const appVer = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.3.0';
+    const appVer = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.4.0';
     
     if (gaInstance) {
       try {

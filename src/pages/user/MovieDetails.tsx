@@ -41,6 +41,8 @@ import {
   Globe,
   ShoppingCart,
   RefreshCw,
+  ExternalLink,
+  Send,
 } from "lucide-react";
 import { logEvent } from "../../services/analytics";
 import AlertModal from "../../components/AlertModal";
@@ -128,6 +130,8 @@ export default function MovieDetails() {
   const [isWatchLaterLoading, setIsWatchLaterLoading] = useState(false);
   const [isFavoriteLoading, setIsFavoriteLoading] = useState(false);
   const [isShareLoading, setIsShareLoading] = useState(false);
+  const [resolvingTgId, setResolvingTgId] = useState<string | null>(null);
+  const [telegramConfirmModal, setTelegramConfirmModal] = useState<{ isOpen: boolean; url: string; id: string } | null>(null);
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
   const [linkPopup, setLinkPopup] = useState<{
     isOpen: boolean;
@@ -1286,6 +1290,32 @@ export default function MovieDetails() {
     }
   };
 
+  const handleTelegramResolve = async (id: string, url: string) => {
+    setResolvingTgId(id);
+    try {
+      const res = await fetch(`/api/resolve-tg?url=${encodeURIComponent(url)}`);
+      const data = await res.json();
+      if (res.ok && data.url) {
+        window.location.href = data.url;
+      } else {
+        setAlertConfig({
+          isOpen: true,
+          title: "Telegram Link Error",
+          message: data.error || "Failed to resolve Telegram link",
+        });
+      }
+    } catch (e) {
+      console.error(e);
+      setAlertConfig({
+        isOpen: true,
+        title: "Telegram Link Error",
+        message: "An error occurred fetching Telegram link",
+      });
+    } finally {
+      setResolvingTgId(null);
+    }
+  };
+
   const handlePlayClick = async (
     url: string,
     linkName?: string,
@@ -1838,8 +1868,8 @@ export default function MovieDetails() {
 
     const parseObject = (obj: any) => {
       return Object.entries(obj)
-        .map(([name, link]: [string, any]) => ({
-          id: Math.random().toString(36).substr(2, 9),
+        .map(([name, link]: [string, any], index) => ({
+          id: `parsed-link-${index}`,
           name,
           url: link?.url || "",
           size: link?.size || "",
@@ -1896,58 +1926,85 @@ export default function MovieDetails() {
           const fullName = contextName
             ? `${contextName} - ${link.name}`
             : link.name;
-          const linkKey = link.id || `link-${idx}-${link.name}`;
+          const linkKey = `${link.url}-${idx}-${contextName ? contextName.replace(/\s+/g, '-') : 'movie'}`;
           return (
             <div
               key={linkKey}
-              className={`flex flex-col sm:flex-row items-stretch sm:items-center bg-zinc-100 dark:bg-zinc-800 rounded-xl overflow-hidden border border-zinc-300 dark:border-zinc-700 flex-1 min-w-[200px] max-w-sm ${isLocked ? "opacity-60 grayscale-[0.5]" : ""}`}
+              className={`relative flex flex-col bg-zinc-100 dark:bg-zinc-800 rounded-xl overflow-hidden border border-zinc-300 dark:border-zinc-700 flex-1 min-w-[200px] max-w-sm ${isLocked ? "opacity-60 grayscale-[0.5]" : ""}`}
             >
-              <button
-                onClick={() =>
-                  handlePlayClick(
-                    link.url,
-                    fullName,
-                    link.id,
-                    isZip,
-                    link.tinyUrl,
-                    isLocked,
-                    seasonInfo,
-                  )
-                }
-                className="flex-1 flex items-center justify-center gap-2 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-6 py-3 text-sm sm:text-base font-medium transition-colors border-b sm:border-b-0 sm:border-r border-zinc-300 dark:border-zinc-700"
-                title={isLocked ? "Locked" : "Play"}
-              >
-                {isLocked ? (
-                  <Lock className="w-5 h-5 shrink-0 text-amber-500" />
-                ) : (
-                  <Play className="w-5 h-5 shrink-0" />
-                )}
-                <span className="truncate">Play {link.name}</span>
-              </button>
-              <button
-                onClick={() =>
-                  handlePlayClick(
-                    link.url,
-                    fullName,
-                    link.id,
-                    isZip,
-                    link.tinyUrl,
-                    isLocked,
-                    seasonInfo,
-                  )
-                }
-                className="flex items-center justify-center gap-2 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-6 py-3 text-sm sm:text-base font-medium transition-colors shrink-0"
-                title={isLocked ? "Locked" : "Download"}
-              >
-                {isLocked ? (
-                  <Lock className="w-5 h-5 shrink-0 text-amber-500" />
-                ) : (
-                  <Download className="w-5 h-5 shrink-0" />
-                )}
-                <span className="text-zinc-500 dark:text-zinc-400">
-                  ({link.size} {link.unit})
-                </span>
-              </button>
+              <div className="flex flex-col w-full divide-y divide-zinc-300 dark:divide-zinc-700">
+                <button
+                  onClick={() =>
+                    handlePlayClick(
+                      link.url,
+                      fullName,
+                      link.id,
+                      isZip,
+                      link.tinyUrl,
+                      isLocked,
+                      seasonInfo,
+                    )
+                  }
+                  className="w-full flex items-center justify-center gap-2 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white py-3 text-sm sm:text-base font-semibold transition-colors"
+                  title={isLocked ? "Locked" : "Play"}
+                >
+                  {isLocked ? (
+                    <Lock className="w-5 h-5 text-amber-500" />
+                  ) : (
+                    <Play className="w-5 h-5" />
+                  )}
+                  <span className="truncate max-w-[90%]">Play {link.name}</span>
+                </button>
+                <button
+                  onClick={() =>
+                    handlePlayClick(
+                      link.url,
+                      fullName,
+                      link.id,
+                      isZip,
+                      link.tinyUrl,
+                      isLocked,
+                      seasonInfo,
+                    )
+                  }
+                  className="w-full flex items-center justify-center gap-2 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white py-3 transition-colors"
+                  title={isLocked ? "Locked" : "Download"}
+                >
+                  {isLocked ? (
+                    <Lock className="w-5 h-5 text-amber-500" />
+                  ) : (
+                    <Download className="w-5 h-5" />
+                  )}
+                  <span className="text-sm font-medium text-zinc-600 dark:text-zinc-400">
+                    ({link.size} {link.unit})
+                  </span>
+                </button>
+              </div>
+              {link.url && (link.url.toLowerCase().includes('hubcloud') || link.url.toLowerCase().includes('hubcould') || link.url.toLowerCase().includes('hubdrive')) && (
+                 <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isLocked) {
+                      handlePlayClick(
+                        link.url, fullName, link.id, isZip, link.tinyUrl, isLocked, seasonInfo
+                      );
+                      return;
+                    }
+                    setTelegramConfirmModal({ isOpen: true, url: link.url, id: linkKey });
+                  }}
+                  className="absolute bottom-1 right-1 p-1.5 text-[#24A1DE] hover:opacity-80 transition-opacity"
+                  title={isLocked ? "Locked" : "Download via Telegram"}
+                  disabled={resolvingTgId === linkKey}
+                >
+                   {isLocked ? (
+                     <Lock className="w-[22px] h-[22px] text-amber-500" />
+                   ) : resolvingTgId === linkKey ? (
+                     <Loader2 className="w-[22px] h-[22px] animate-spin" />
+                   ) : (
+                     <Send className="w-[22px] h-[22px]" />
+                   )}
+                </button>
+              )}
             </div>
           );
         })}
@@ -3488,6 +3545,35 @@ export default function MovieDetails() {
           </div>
         )}
       </AlertModal>
+
+      {telegramConfirmModal && (
+        <AlertModal
+          isOpen={telegramConfirmModal.isOpen}
+          onClose={() => setTelegramConfirmModal(null)}
+          title="Download via Telegram"
+          message="Are you sure you want to download this file via Telegram?"
+        >
+          <div className="flex flex-col sm:flex-row items-center gap-3 w-full mt-4">
+            <button
+              onClick={() => setTelegramConfirmModal(null)}
+              className="w-full sm:flex-1 py-3 px-6 rounded-xl font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white hover:bg-zinc-200 dark:hover:bg-zinc-700 transition"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                const tgId = telegramConfirmModal.id;
+                const tgUrl = telegramConfirmModal.url;
+                setTelegramConfirmModal(null);
+                handleTelegramResolve(tgId, tgUrl);
+              }}
+              className="w-full sm:flex-1 py-3 px-6 rounded-xl font-bold bg-[#24A1DE] text-white hover:bg-[#1E8BC2] transition flex flex-row items-center justify-center gap-2"
+            >
+               <Send className="w-5 h-5 shrink-0" /> Open in Telegram
+            </button>
+          </div>
+        </AlertModal>
+      )}
 
       {isMediaModalOpen && mergedContent && (
         <MediaModal

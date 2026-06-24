@@ -10,7 +10,7 @@ export function AnalyticsTracker() {
   useEffect(() => {
     // Set up global gtag property on initialization after analytics promise resolves
     analyticsPromise.then(() => {
-      const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.3.0';
+      const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.4.0';
       if (typeof window !== 'undefined' && 'gtag' in window && customMeasurementId) {
         // @ts-ignore
         window.gtag('config', customMeasurementId, {
@@ -37,7 +37,7 @@ export function AnalyticsTracker() {
         // Ignore parse error
       }
 
-      const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.3.0';
+      const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.4.0';
 
       try {
         const searchParams = new URLSearchParams(location.search);

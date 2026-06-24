@@ -78,9 +78,17 @@ class SafeStorage {
   
   private initDB(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open('moviznow_cache_db', 1);
+      const request = indexedDB.open('moviznow_cache_db', 2);
       request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains('cache')) {
+          // If for some reason it's version 2 but still no cache (shouldn't happen), reject
+          reject(new Error("Object store 'cache' not found."));
+          return;
+        }
+        resolve(db);
+      };
       request.onupgradeneeded = (e: any) => {
         const db = e.target.result;
         if (!db.objectStoreNames.contains('cache')) {

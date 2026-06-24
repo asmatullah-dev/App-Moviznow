@@ -7,7 +7,9 @@ import firebaseConfig from "../firebase-applet-config.json" with { type: "json" 
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 import axios from "axios";
+import https from "https";
 import * as cheerio from "cheerio";
+import { normalizeDomain } from "./domainUtils.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -607,7 +609,7 @@ async function startServer() {
 
                   rawHits.push({
                      file_name: finalFileName,
-                     url: link,
+                     url: normalizeDomain(link),
                      size: size !== "Unknown" ? size : null,
                      date: new Date().toISOString().split('T')[0]
                   });
@@ -679,7 +681,7 @@ async function startServer() {
       const hubcloudMatch = text.match(/https?:\/\/[^"'\s]*(?:hubcloud|hubcould)\.[^"'\s]*/i);
       
       if (hubcloudMatch) {
-          res.json({ url: hubcloudMatch[0] });
+          res.json({ url: normalizeDomain(hubcloudMatch[0]) });
       } else {
           res.status(404).json({ error: 'No HubCloud link found' });
       }
@@ -716,7 +718,7 @@ async function startServer() {
       const hubcloudMatch = text.match(/https?:\/\/[^"'\s]*(?:hubcloud|hubcould)\.[^"'\s]*/i);
       
       if (hubcloudMatch) {
-          res.json({ url: hubcloudMatch[0] });
+          res.json({ url: normalizeDomain(hubcloudMatch[0]) });
       } else {
           res.status(404).json({ error: 'No HubCloud link found on FilesDL page' });
       }
@@ -781,7 +783,7 @@ async function startServer() {
             
             hits.push({
               file_name: label,
-              url: mUrl,
+              url: normalizeDomain(mUrl),
               size: null,
               is_direct: false
             });
@@ -799,7 +801,7 @@ async function startServer() {
                  seenUrls.add(cleanHubUrl);
                  hits.push({
                     file_name: "Original HubCloud Link",
-                    url: cleanHubUrl,
+                    url: normalizeDomain(cleanHubUrl),
                     size: null,
                     is_direct: true
                  });
@@ -811,6 +813,154 @@ async function startServer() {
       res.json({ hits, found: hits.length });
     } catch (error: any) {
       console.error('MoviesDrive extract error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/resolve-tg', async (req: express.Request, res: express.Response) => {
+    try {
+      const { url } = req.query;
+      if (!url || typeof url !== 'string') {
+        return res.status(400).json({ error: 'Valid URL required' });
+      }
+
+      const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+      const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' };
+
+      // Step 1: Fetch initial HubCloud/HubDrive link
+      const hcRes = await axios.get(url, { headers, httpsAgent });
+      const hcText = hcRes.data;
+      const $ = cheerio.load(hcText);
+      
+      let tgGoUrlDirect = "";
+      let tgFileUrl = "";
+      
+      $('a').each((_, el) => {
+         const href = $(el).attr('href');
+         if (!href) return;
+         if (href.includes('/tg/go')) {
+            tgGoUrlDirect = href;
+         }
+         const text = $(el).text();
+         const html = $(el).html() || '';
+         if ((text.includes('Telegram File') || text.includes('Downoad From Telegram') || html.includes('fa-telegram')) && !href.includes('t.me/hubcloudreport')) {
+            tgFileUrl = href;
+         }
+      });
+      
+      if (tgGoUrlDirect) {
+         tgGoUrlDirect = tgGoUrlDirect.replace(/&amp;/g, '&');
+      } else if (tgFileUrl) {
+         const intermediateUrlFull = tgFileUrl.startsWith('http') ? tgFileUrl : new URL(tgFileUrl, url).toString();
+         const interRes = await axios.get(intermediateUrlFull, { headers, httpsAgent });
+         const $2 = cheerio.load(interRes.data);
+         $2('a').each((_, el) => {
+             const href = $2(el).attr('href');
+             if (href && href.includes('/tg/go')) {
+                tgGoUrlDirect = href.replace(/&amp;/g, '&');
+             }
+         });
+      }
+
+      let nextUrlStr = "";
+      
+      if (tgGoUrlDirect) {
+         // Skip gamerxyt if we already have the tg/go URL
+      } else {
+         const gamerxMatch = hcText.match(/href=["'](https?:\/\/[^"']*gamerxyt\.com[^"']+)["']/i);
+         if (gamerxMatch) {
+             nextUrlStr = gamerxMatch[1].replace(/&amp;/g, '&');
+         } else {
+             return res.status(404).json({ error: 'No gamerxyt or Telegram gateway link found' });
+         }
+      }
+
+      // Step 2: Fetch gamerxyt page and extract /tg/go if needed
+      let tgGoUrl = tgGoUrlDirect;
+      if (!tgGoUrl && nextUrlStr) {
+         const gxRes = await axios.get(nextUrlStr, { headers, httpsAgent });
+         const gxText = gxRes.data;
+         const tgGoMatch = gxText.match(/href=["'](https?:\/\/[^"']+\/tg\/go[^"']*)["']/i);
+         if (tgGoMatch) {
+            tgGoUrl = tgGoMatch[1].replace(/&amp;/g, '&');
+         } else {
+            return res.status(404).json({ error: 'Could not resolve Telegram intent URL from gateway' });
+         }
+      }
+
+      // Step 3: Follow redirects of the tgGoUrl
+      let currentUrl = tgGoUrl;
+      let finalTgUrl = "";
+      
+      for(let i = 0; i < 5; i++) {
+        try {
+          const resp = await axios.get(currentUrl, { 
+            headers, 
+            httpsAgent, 
+            maxRedirects: 0,
+            validateStatus: (status) => status >= 200 && status < 400
+          });
+          
+          if (resp.status >= 300 && resp.status < 400 && resp.headers.location) {
+             currentUrl = resp.headers.location;
+             if (currentUrl.startsWith('tg://') || currentUrl.includes('telegram.me') || currentUrl.includes('t.me')) {
+                finalTgUrl = currentUrl;
+                break;
+             }
+             if (!currentUrl.startsWith('http')) {
+               currentUrl = new URL(currentUrl, nextUrlStr).toString();
+             }
+          } else {
+             // Maybe it's in the meta refresh or a direct link in HTML
+             const meta = resp.data?.match?.(/content=["']0;url=([^"']+)["']/i);
+             if (meta) {
+                 currentUrl = meta[1].replace(/&amp;/g, '&');
+                 if (currentUrl.startsWith('tg://') || currentUrl.includes('telegram.me') || currentUrl.includes('t.me')) {
+                    finalTgUrl = currentUrl;
+                    break;
+                 }
+                 continue;
+             }
+             
+             // Look for tg:// or telegram.me within html
+             const tgMatch = resp.data?.match?.(/href=["'](tg:\/\/[^"']+)["']/i) || resp.data?.match?.(/href=["'](https?:\/\/(t\.me|telegram\.me)[^"']+)["']/i);
+             if (tgMatch) {
+                 finalTgUrl = tgMatch[1];
+                 break;
+             }
+             
+             // If we didn't find anything but the URL itself is already telegram.me, we use it
+             if (currentUrl.includes('telegram.me') || currentUrl.includes('t.me')) {
+                 finalTgUrl = currentUrl;
+             }
+             break;
+          }
+        } catch (e: any) {
+           break;
+        }
+      }
+
+      if (finalTgUrl) {
+         try {
+             if (finalTgUrl.includes('telegram.me') || finalTgUrl.includes('t.me')) {
+                 const tUrl = new URL(finalTgUrl);
+                 const domain = tUrl.pathname.replace('/', '');
+                 const start = tUrl.searchParams.get('start');
+                 if (domain && start) {
+                     finalTgUrl = `tg://resolve?domain=${domain}&start=${start}`;
+                 } else if (domain) {
+                     finalTgUrl = `tg://resolve?domain=${domain}`;
+                 }
+             }
+         } catch (e) {}
+         res.json({ url: finalTgUrl });
+      } else {
+         // Fallback to the tgGoUrl if we couldn't resolve all the way, so at least it works
+         res.json({ url: tgGoUrl });
+      }
+
+    } catch (error: any) {
+      console.error('Telegram resolve error:', error.message);
       res.status(500).json({ error: error.message });
     }
   });
@@ -831,15 +981,15 @@ async function startServer() {
 
       console.log(`[FilmyGo] Extracting FilesDL links from: ${targetUrl}`);
 
+      const httpsAgent = new https.Agent({ rejectUnauthorized: false });
       const headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
         'Referer': targetUrl
       };
 
-      const response = await fetch(targetUrl, { headers });
-      if (!response.ok) throw new Error(`FilmyGo returned ${response.status}`);
-      const text = await response.text();
+      const response = await axios.get(targetUrl, { headers, httpsAgent });
+      const text = response.data;
       
       const fdlData = new Map<string, { label: string }>();
       const parts = text.split('<a ');
@@ -871,9 +1021,8 @@ async function startServer() {
 
       const results = await Promise.all(Array.from(fdlData.keys()).map(async (fdlUrl) => {
         try {
-          const fdlRes = await fetch(fdlUrl, { headers });
-          if (!fdlRes.ok) return [];
-          const fdlText = await fdlRes.text();
+          const fdlRes = await axios.get(fdlUrl, { headers, httpsAgent });
+          const fdlText = fdlRes.data;
           
           const hubcloudMatch = fdlText.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|hubdrive)\.[^"'\s<>\[\]]*/gi);
           if (hubcloudMatch) {
@@ -889,7 +1038,7 @@ async function startServer() {
 
             return hubcloudMatch.map(hubUrl => ({
               file_name: finalName || "HubCloud Link",
-              url: hubUrl,
+              url: normalizeDomain(hubUrl),
               size: size,
               is_direct: true
             }));
@@ -1012,7 +1161,7 @@ async function startServer() {
 
             return hubcloudMatch.map(hubUrl => ({
               file_name: finalName || "HubCloud Link",
-              url: hubUrl,
+              url: normalizeDomain(hubUrl),
               size: size,
               is_direct: true
             }));

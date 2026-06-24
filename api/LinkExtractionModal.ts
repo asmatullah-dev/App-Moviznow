@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import { normalizeDomain } from './domainUtils.js';
 
 export const linkExtractionRouter = Router();
 
@@ -503,7 +504,7 @@ async function fetchHtml(url: string, isVcloud = false) {
             "https://pixeldrain.dev/u/$1",
           );
         }
-        return { text: c.text.trim(), href };
+        return { text: c.text.trim(), href: normalizeDomain(href) };
       });
 
       const bodyText = $("body").text();
@@ -562,7 +563,7 @@ async function fetchHtml(url: string, isVcloud = false) {
       }
 
       return {
-        url: workingLink,
+        url: normalizeDomain(workingLink),
         candidates: returnCandidates,
         size: sizeInfo,
       };
@@ -577,11 +578,11 @@ async function fetchHtml(url: string, isVcloud = false) {
            finalUrl = e.config.url;
         }
         if (finalUrl !== url && !finalUrl.includes('hubcloud') && !finalUrl.includes('moviesdrive') && !finalUrl.includes('vcloud') && !finalUrl.includes('hubdrive')) {
-           return { url: finalUrl };
+           return { url: normalizeDomain(finalUrl) };
         }
       }
       console.error("Link extraction error:", e.message);
-      return { url };
+      return { url: normalizeDomain(url) };
     }
   }
 
@@ -636,6 +637,6 @@ async function fetchHtml(url: string, isVcloud = false) {
       }
     } catch (e: any) {
       console.error(e);
-      res.json({ url: req.body.url });
+      res.json({ url: normalizeDomain(req.body.url) });
     }
   });

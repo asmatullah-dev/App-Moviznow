@@ -96,6 +96,7 @@ import {
   fetchIMDbRating,
 } from "../../components/MediaModal";
 import { LinkCheckerModal } from "../../components/LinkCheckerModal";
+import { TelegramDownloadModal } from "../../components/TelegramDownloadModal";
 import { AdjustContentsModal } from "../../components/AdjustContentsModal";
 import ManageModal from "../../components/ManageModal";
 import { Button } from "../../components/Button";
@@ -132,6 +133,7 @@ interface ContentCardProps {
   handleEdit: (content: Content) => void;
   handleCopyData: (content: Content) => void;
   handleCheckLinks: (content: Content) => void;
+  onTelegramDownload: (content: Content) => void;
   setDeleteId: (id: string) => void;
   setNotificationModal: (modal: {
     isOpen: boolean;
@@ -159,6 +161,7 @@ const ContentCard = memo(
     handleEdit,
     handleCopyData,
     handleCheckLinks,
+    onTelegramDownload,
     setDeleteId,
     setNotificationModal,
     isActiveDropdown,
@@ -392,6 +395,18 @@ const ContentCard = memo(
                         className="w-full flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 text-sm text-emerald-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left"
                       >
                         <Clock className="w-4 h-4" /> Add to Newly Added
+                      </button>
+                    )}
+                    {(profile?.role === "admin" ||
+                      profile?.role === "owner") && (
+                      <button
+                        onClick={() => {
+                          onTelegramDownload(content);
+                          setActiveDropdownId(null);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 text-sm text-[rgb(36,161,222)] hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left"
+                      >
+                        <Download className="w-4 h-4" /> Telegram Down
                       </button>
                     )}
                     {(profile?.role === "admin" ||
@@ -776,6 +791,7 @@ export default function ContentManagement() {
   const [isBatchLinkCheckerOpen, setIsBatchLinkCheckerOpen] = useState(false);
   const [isAdjustContentsModalOpen, setIsAdjustContentsModalOpen] =
     useState(false);
+  const [telegramDownloadContent, setTelegramDownloadContent] = useState<Content | null>(null);
   const [manageModal, setManageModal] = useState<{
     isOpen: boolean;
     type: "genre" | "language" | "quality" | null;
@@ -4860,6 +4876,7 @@ export default function ContentManagement() {
                 handleEdit={handleEdit}
                 handleCopyData={handleCopyData}
                 handleCheckLinks={handleCheckLinks}
+                onTelegramDownload={setTelegramDownloadContent}
                 setDeleteId={setDeleteId}
                 setNotificationModal={setNotificationModal}
                 setActiveDropdownId={setActiveDropdownId}
@@ -5660,6 +5677,11 @@ export default function ContentManagement() {
           await updateAuxiliaryCollection(manageModal.type, items);
           setManageModal({ isOpen: false, type: null });
         }}
+      />
+      <TelegramDownloadModal
+        isOpen={!!telegramDownloadContent}
+        onClose={() => setTelegramDownloadContent(null)}
+        content={telegramDownloadContent}
       />
       {loading && contentList.length > 0 && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[9999] bg-emerald-500 text-white px-6 py-2.5 rounded-full flex items-center justify-center gap-2 text-sm font-medium shadow-lg whitespace-nowrap">

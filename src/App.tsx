@@ -92,7 +92,7 @@ export default function App() {
   useEffect(() => {
     // Cleanup old legacy thumbnails from the IndexedDB cache
     try {
-      const request = indexedDB.open('moviznow_cache_db', 1);
+      const request = indexedDB.open('moviznow_cache_db', 2);
       request.onsuccess = () => {
         const db = request.result;
         if (!db.objectStoreNames.contains('cache')) return;
