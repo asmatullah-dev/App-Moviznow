@@ -141,6 +141,8 @@ interface ContentCardProps {
     status: "idle" | "sending" | "success" | "error";
   }) => void;
   setActiveDropdownId: (id: string | null) => void;
+  dropdownPos: { id: string; topStr: string; bottomStr: string; leftStr: string; maxHeightStr: string; alignBottom: boolean; alignRight: boolean } | null;
+  setDropdownPos: (pos: { id: string; topStr: string; bottomStr: string; leftStr: string; maxHeightStr: string; alignBottom: boolean; alignRight: boolean } | null) => void;
   getMissingLabels: (content: Content, profile: any) => string[];
   handleAddToSpecialCollection: (
     contentId: string,
@@ -166,6 +168,8 @@ const ContentCard = memo(
     setNotificationModal,
     isActiveDropdown,
     setActiveDropdownId,
+    dropdownPos,
+    setDropdownPos,
     isDuplicate,
     getMissingLabels,
     isShareLoading,
@@ -180,12 +184,13 @@ const ContentCard = memo(
     return (
       <div
         className={clsx(
-          "bg-zinc-50 dark:bg-zinc-900 border rounded-xl flex flex-col group relative overflow-hidden transition-all hover:ring-2 cursor-pointer",
+          "bg-zinc-50 dark:bg-zinc-900 border rounded-xl flex flex-col group relative transition-all hover:ring-2 cursor-pointer",
           isSelected
             ? "ring-2 ring-emerald-500 border-emerald-500"
             : isDuplicate
               ? "border-red-500 hover:ring-red-500/50"
               : "border-zinc-200 dark:border-zinc-800 hover:ring-emerald-500/50",
+          isActiveDropdown && "z-50"
         )}
         onClick={(e) => {
           if (anySelected) {
@@ -339,21 +344,81 @@ const ContentCard = memo(
                   <Edit2 className="w-4 h-4 md:w-5 md:h-5" />
                 </button>
               )}
-              <div className="relative">
+              <div>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setActiveDropdownId(isActiveDropdown ? null : content.id);
+                    if (isActiveDropdown) {
+                      setActiveDropdownId(null);
+                      setDropdownPos(null);
+                    } else {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const menuWidth = 208; // 52 * 4px
+                      
+                      let left = rect.right - menuWidth;
+                      if (rect.left < window.innerWidth / 2) {
+                        left = rect.left;
+                      }
+                      // constrain horizontally with margin 8px
+                      left = Math.max(8, Math.min(left, window.innerWidth - menuWidth - 8));
+
+                      const spaceBelow = window.innerHeight - rect.bottom;
+                      // 72px accounts for mobile header (64px) + margin
+                      const spaceAbove = rect.top - 72; 
+                      
+                      const alignBottom = spaceBelow < 320 && spaceAbove > spaceBelow;
+                      
+                      const topStr = alignBottom ? 'auto' : `${rect.bottom + 8}px`;
+                      const bottomStr = alignBottom ? `${window.innerHeight - rect.top + 8}px` : 'auto';
+                      const maxHeightStr = alignBottom ? `${Math.max(100, spaceAbove)}px` : `${Math.max(100, spaceBelow - 16)}px`;
+
+                      setDropdownPos({
+                        id: content.id,
+                        topStr,
+                        bottomStr,
+                        leftStr: `${left}px`,
+                        maxHeightStr,
+                        alignBottom,
+                        alignRight: rect.left >= window.innerWidth / 2,
+                      });
+                      setActiveDropdownId(content.id);
+                    }
                   }}
                   className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white p-1.5 transition-colors"
                 >
                   <MoreVertical className="w-4 h-4 md:w-5 md:h-5" />
                 </button>
-                {isActiveDropdown && (
-                  <div
-                    className="absolute bottom-full right-0 mb-2 w-48 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-xl overflow-hidden z-20 py-1"
-                    onClick={(e) => e.stopPropagation()}
-                  >
+                <AnimatePresence>
+                  {isActiveDropdown && dropdownPos?.id === content.id && (
+                    <>
+                      {/* Transparent Backdrop to handle outside clicks */}
+                      <div
+                        className="fixed inset-0 z-[60]"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveDropdownId(null);
+                          setDropdownPos(null);
+                        }}
+                      />
+                      {/* Floating Menu */}
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.95, y: dropdownPos.alignBottom ? 10 : -10 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95, y: dropdownPos.alignBottom ? 10 : -10 }}
+                        transition={{ duration: 0.15, ease: "easeOut" }}
+                        style={{
+                          position: 'fixed',
+                          top: dropdownPos.topStr,
+                          bottom: dropdownPos.bottomStr,
+                          left: dropdownPos.leftStr,
+                          maxHeight: dropdownPos.maxHeightStr,
+                          transformOrigin: dropdownPos.alignBottom
+                            ? (dropdownPos.alignRight ? 'bottom right' : 'bottom left')
+                            : (dropdownPos.alignRight ? 'top right' : 'top left')
+                        }}
+                        className="w-52 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-xl overflow-y-auto z-[70] py-1 scrollbar-thin scrollbar-thumb-zinc-300 dark:scrollbar-thumb-zinc-700"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                     {(profile?.role === "admin" ||
                       profile?.role === "owner") && (
                       <button
@@ -445,8 +510,10 @@ const ContentCard = memo(
                         <Trash2 className="w-4 h-4" /> Delete
                       </button>
                     )}
-                  </div>
-                )}
+                    </motion.div>
+                    </>
+                  )}
+                </AnimatePresence>
               </div>
             </div>
           </div>
@@ -830,6 +897,7 @@ export default function ContentManagement() {
     [],
   );
   const [activeDropdownId, setActiveDropdownId] = useState<string | null>(null);
+  const [dropdownPos, setDropdownPos] = useState<{ id: string; topStr: string; bottomStr: string; leftStr: string; maxHeightStr: string; alignBottom: boolean; alignRight: boolean } | null>(null);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [isMerging, setIsMerging] = useState(false);
@@ -4880,6 +4948,8 @@ export default function ContentManagement() {
                 setDeleteId={setDeleteId}
                 setNotificationModal={setNotificationModal}
                 setActiveDropdownId={setActiveDropdownId}
+                dropdownPos={dropdownPos}
+                setDropdownPos={setDropdownPos}
                 getMissingLabels={getMissingLabels}
                 handleAddToSpecialCollection={handleAddToSpecialCollection}
               />

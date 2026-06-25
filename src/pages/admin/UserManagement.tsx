@@ -612,14 +612,16 @@ export default function UserManagement() {
       const expiryStr = formatDateToMonthDDYYYY(user.expiryDate);
 
       if (diffDays < 0) {
-        message = `Hello ${name},\n\nYour ${membershipType} for ${settings?.headerText || 'MovizNow'} app is Expired. Please renew to continue enjoying our services.\nVisit Now: MovizNow.com\nThank You`;
+        message = `Assalam O Alaikum! ${name},\n\nYour ${membershipType} for ${settings?.headerText || 'MovizNow'} app is Expired. Please renew to continue enjoying our services.\nVisit Now: MovizNow.com\nThank You`;
+      } else if (diffDays > 5) {
+        message = `Assalam O Alaikum! ${name},\n\nYour Membership Expiry date for MovizNow is *${expiryStr}*\nEnjoy all Unlimited new latest & old Movies & Series on MovizNow without any restrictions with Direct Play (MX Player, VLC and All Video Players) & Download (Also download able with telegram)\nVisit Now: MovizNow.com\nThank You`;
       } else if (diffDays > 3) {
-        message = `Hello ${name},\n\n${welcomeText}Your ${membershipType} for ${settings?.headerText || 'MovizNow'} app will expire on ${expiryStr}.\nVisit Now: MovizNow.com\nThank You`;
+        message = `Assalam O Alaikum! ${name},\n\n${welcomeText}Your ${membershipType} for ${settings?.headerText || 'MovizNow'} app will expire on ${expiryStr}.\nVisit Now: MovizNow.com\nThank You`;
       } else {
-        message = `Hello ${name},\n\n${welcomeText}Your ${membershipType} for ${settings?.headerText || 'MovizNow'} app is expiring very soon on ${expiryStr}. Please renew to continue enjoying our services.\nVisit Now: MovizNow.com\nThank You`;
+        message = `Assalam O Alaikum! ${name},\n\n${welcomeText}Your ${membershipType} for ${settings?.headerText || 'MovizNow'} app is expiring very soon on ${expiryStr}. Please renew to continue enjoying our services.\nVisit Now: MovizNow.com\nThank You`;
       }
     } else {
-      message = `Hello ${name},\n\n${welcomeText}This is a friendly reminder regarding your ${settings?.headerText || 'MovizNow'} ${membershipType}.\nVisit Now: MovizNow.com\nThank You`;
+      message = `Assalam O Alaikum! ${name},\n\n${welcomeText}This is a friendly reminder regarding your ${settings?.headerText || 'MovizNow'} ${membershipType}.\nVisit Now: MovizNow.com\nThank You`;
     }
 
     const encodedMessage = encodeURIComponent(message);

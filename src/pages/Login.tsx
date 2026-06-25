@@ -169,7 +169,7 @@ export default function Login() {
                         if (supportPhone.startsWith('92')) supportPhone = supportPhone.substring(2);
                         if (supportPhone.startsWith('0')) supportPhone = supportPhone.substring(1);
                         const adminPhone = `92${supportPhone}`;
-                        const message = `Hello Admin,\n\nName: ${user?.displayName || 'Unknown'}\nEmail: ${user?.email || 'N/A'}\nPhone: ${standardizedPhone}\nRole & Status: Unknown, Unknown\n\nYour message/question:\nI need help logging in.`;
+                        const message = `Assalam O Alaikum! Admin,\n\nName: ${user?.displayName || 'Unknown'}\nEmail: ${user?.email || 'N/A'}\nPhone: ${standardizedPhone}\nRole & Status: Unknown, Unknown\n\nYour message/question:\nI need help logging in.`;
                         window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
                       }}
                       className="w-full bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-700 py-2.5 rounded-lg font-medium hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors"

@@ -616,7 +616,7 @@ export default function Home({
                       supportPhone = "92" + supportPhone;
                     }
                     const adminPhone = supportPhone.replace("+", "");
-                    const msg = `Hello Admin,\n\nName: ${profile?.displayName || "Unknown"}\nEmail: ${profile?.email || "N/A"}\nPhone: ${profile?.phone || "N/A"}\nRole & Status: ${String(
+                    const msg = `Assalam O Alaikum! Admin,\n\nName: ${profile?.displayName || "Unknown"}\nEmail: ${profile?.email || "N/A"}\nPhone: ${profile?.phone || "N/A"}\nRole & Status: ${String(
                       profile?.role || "Unknown",
                     )
                       .replace(/_/g, " ")
