@@ -711,23 +711,13 @@ async function startServer() {
       const response = await fetch(url, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-          'sec-ch-ua-mobile': '?0',
-          'sec-ch-ua-platform': '"Windows"',
-          'sec-fetch-dest': 'document',
-          'sec-fetch-mode': 'navigate',
-          'sec-fetch-site': 'none',
-          'sec-fetch-user': '?1',
-          'upgrade-insecure-requests': '1'
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Referer': url
         }
       });
       
-      if (!response.ok) {
-        throw new Error(`FilesDL returned ${response.status}`);
-      }
-
+      // Try to read text anyway because Cloudflare might return 403 but the HTML might still contain the link or we can extract it
       const text = await response.text();
       // Look for HubCloud links
       const hubcloudMatch = text.match(/https?:\/\/[^"'\s]*(?:hubcloud|hubcould|vcloud\.live|hubdrive)\.[^"'\s]*/i);
@@ -735,6 +725,9 @@ async function startServer() {
       if (hubcloudMatch) {
           res.json({ url: normalizeDomain(hubcloudMatch[0]) });
       } else {
+          if (!response.ok) {
+            throw new Error(`FilesDL returned ${response.status} and no valid link was found in response`);
+          }
           res.status(404).json({ error: 'No HubCloud link found on FilesDL page' });
       }
     } catch (error: any) {
