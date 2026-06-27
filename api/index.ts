@@ -2295,7 +2295,9 @@ async function startServer() {
               const sUpdate = normalizeData(
                 sData.updatedAt || sData.createdAt || 0,
               );
-              const tData = targetMap.get(d.id) || {};
+              const tData = targetMap.get(d.id);
+              if (!tData) return true; // Missing in target
+              
               const tUpdate = normalizeData(
                 tData.updatedAt || tData.createdAt || 0,
               );
@@ -2303,7 +2305,7 @@ async function startServer() {
               if (colName === "chunk_meta") {
                 return !areDocsEqual(sData, tData);
               }
-              return !tUpdate || sUpdate > tUpdate;
+              return sUpdate !== tUpdate || !areDocsEqual(sData, tData);
             });
           } else if (mode === "missing") {
             const targetSnap = await targetDb.collection(colName).get();
@@ -2462,14 +2464,16 @@ async function startServer() {
               const tUpdate = normalizeData(
                 tData.updatedAt || tData.createdAt || 0,
               );
-              const sData = sourceMap.get(d.id) || {};
+              const sData = sourceMap.get(d.id);
+              if (!sData) return true; // Missing in source
+              
               const sUpdate = normalizeData(
                 sData.updatedAt || sData.createdAt || 0,
               );
               if (colName === "chunk_meta") {
                 return !areDocsEqual(tData, sData);
               }
-              return !sUpdate || tUpdate > sUpdate;
+              return tUpdate !== sUpdate || !areDocsEqual(tData, sData);
             });
           }
         }
