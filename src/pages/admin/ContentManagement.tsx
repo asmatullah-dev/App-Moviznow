@@ -105,6 +105,7 @@ import {
   formatReleaseDate,
   formatRuntime,
   formatDateToMonthDDYYYY,
+  getContrastColor,
 } from "../../utils/contentUtils";
 import { smartSearch } from "../../utils/searchUtils";
 import {
@@ -122,6 +123,7 @@ import { BatchFetchModal } from "../../components/BatchFetchModal";
 interface ContentCardProps {
   content: Content;
   profile: any;
+  qualities: any[];
   isSelected: boolean;
   anySelected: boolean;
   isActiveDropdown: boolean;
@@ -156,6 +158,7 @@ const ContentCard = memo(
   ({
     content,
     profile,
+    qualities,
     isSelected,
     anySelected,
     handleSelectContent,
@@ -256,7 +259,7 @@ const ContentCard = memo(
           <div className="absolute top-1 right-1 flex flex-col gap-1 items-end">
             <div
               className={clsx(
-                "px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider text-white",
+                "px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider text-white shadow-sm",
                 content.type === "movie"
                   ? "bg-blue-500/90"
                   : "bg-purple-500/90",
@@ -264,6 +267,23 @@ const ContentCard = memo(
             >
               {content.type}
             </div>
+            {(() => {
+              const qualityObj = qualities?.find((q) => q.id === content.qualityId);
+              if (qualityObj) {
+                return (
+                  <div
+                    className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider shadow-sm"
+                    style={{
+                      backgroundColor: qualityObj.color || "#10b981",
+                      color: getContrastColor(qualityObj.color || "#10b981"),
+                    }}
+                  >
+                    {qualityObj.name}
+                  </div>
+                );
+              }
+              return null;
+            })()}
             {content.status === "draft" && (
               <div className="bg-yellow-500/90 text-black backdrop-blur-md px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
                 <EyeOff className="w-3 h-3" />
@@ -4933,6 +4953,7 @@ export default function ContentManagement() {
                 key={content.id}
                 content={content}
                 profile={profile}
+                qualities={qualities}
                 isSelected={selectedContent.includes(content.id)}
                 anySelected={selectedContent.length > 0}
                 isActiveDropdown={activeDropdownId === content.id}

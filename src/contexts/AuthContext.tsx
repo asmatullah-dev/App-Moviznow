@@ -1405,13 +1405,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const provider = new GoogleAuthProvider();
       provider.addScope("https://www.googleapis.com/auth/user.gender.read");
       provider.addScope("https://www.googleapis.com/auth/user.birthday.read");
+      provider.setCustomParameters({
+        prompt: "consent",
+      });
       const result = await signInWithPopup(auth, provider);
 
-      let gender, ageStr;
+      let gender, dob;
       try {
         const credential = GoogleAuthProvider.credentialFromResult(result);
         if (credential?.accessToken) {
-          const res = await fetch("https://people.googleapis.com/v1/people/me?personFields=genders,birthdays,ageRanges", {
+          const res = await fetch("https://people.googleapis.com/v1/people/me?personFields=genders,birthdays", {
             headers: { Authorization: `Bearer ${credential.accessToken}` }
           });
           const person = await res.json();
@@ -1424,21 +1427,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               const y = birthday.date.year;
               const m = birthday.date.month || 1;
               const d = birthday.date.day || 1;
-              const dateObj = new Date(y, m - 1, d);
-              const monthName = dateObj.toLocaleString("en-US", { month: "short" });
-              const calcAge = new Date().getFullYear() - y;
-              ageStr = `${monthName} ${d}, ${y} (${calcAge}Y)`;
+              dob = `${y}-${m.toString().padStart(2, '0')}-${d.toString().padStart(2, '0')}`;
             }
           }
-          if (!ageStr && person.ageRanges && person.ageRanges.length > 0) {
-             ageStr = person.ageRanges[0].ageRange;
-          }
           if (!gender) gender = "Unknown";
-          if (!ageStr) ageStr = "Unknown";
         }
       } catch (e) {
         gender = "Unknown";
-        ageStr = "Unknown";
         console.warn("Failed to extract additional user info", e);
       }
 
@@ -1457,13 +1452,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { getDeviceDetails } = await import("../utils/deviceInfo");
       const deviceDetails = await getDeviceDetails();
 
-      if (ageStr !== undefined || gender !== undefined || deviceDetails) {
+      if (dob !== undefined || gender !== undefined || deviceDetails) {
         try {
           const pendingStr =
             safeStorage.getItem("pending_user_updates") || "{}";
           let pendingAll = JSON.parse(pendingStr);
           pendingAll[result.user.uid] = pendingAll[result.user.uid] || {};
-          if (ageStr !== undefined) pendingAll[result.user.uid].age = ageStr;
+          if (dob !== undefined) pendingAll[result.user.uid].dob = dob;
           if (gender !== undefined) pendingAll[result.user.uid].gender = gender;
           if (deviceDetails) pendingAll[result.user.uid].device = deviceDetails;
           safeStorage.setItem(

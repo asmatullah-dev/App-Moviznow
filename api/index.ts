@@ -501,7 +501,12 @@ async function startServer() {
             }
 
             const response = await fetch(fetchUrl, {
-              method: pdMatch ? "GET" : "HEAD",
+              method: "GET",
+              headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Range": "bytes=0-0",
+                "Accept": "*/*"
+              },
               signal: controller.signal,
             });
 
@@ -695,8 +700,8 @@ async function startServer() {
   app.get('/api/filesdl', async (req: express.Request, res: express.Response) => {
     try {
       let { url } = req.query;
-      if (!url || typeof url !== 'string' || !url.includes('filesdl.in')) {
-        return res.status(400).json({ error: 'Valid filesdl.in URL required' });
+      if (!url || typeof url !== 'string' || (!url.includes('filesdl.in') && !url.includes('filesdl.top'))) {
+        return res.status(400).json({ error: 'Valid filesdl URL required' });
       }
 
       if (!url.startsWith('http')) {
@@ -705,7 +710,17 @@ async function startServer() {
 
       const response = await fetch(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+          'sec-ch-ua-mobile': '?0',
+          'sec-ch-ua-platform': '"Windows"',
+          'sec-fetch-dest': 'document',
+          'sec-fetch-mode': 'navigate',
+          'sec-fetch-site': 'none',
+          'sec-fetch-user': '?1',
+          'upgrade-insecure-requests': '1'
         }
       });
       
@@ -715,7 +730,7 @@ async function startServer() {
 
       const text = await response.text();
       // Look for HubCloud links
-      const hubcloudMatch = text.match(/https?:\/\/[^"'\s]*(?:hubcloud|hubcould)\.[^"'\s]*/i);
+      const hubcloudMatch = text.match(/https?:\/\/[^"'\s]*(?:hubcloud|hubcould|vcloud\.live|hubdrive)\.[^"'\s]*/i);
       
       if (hubcloudMatch) {
           res.json({ url: normalizeDomain(hubcloudMatch[0]) });
