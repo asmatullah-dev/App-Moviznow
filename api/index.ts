@@ -501,7 +501,12 @@ async function startServer() {
             }
 
             const response = await fetch(fetchUrl, {
-              method: pdMatch ? "GET" : "HEAD",
+              method: "GET",
+              headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Range": "bytes=0-0",
+                "Accept": "*/*"
+              },
               signal: controller.signal,
             });
 
@@ -695,8 +700,8 @@ async function startServer() {
   app.get('/api/filesdl', async (req: express.Request, res: express.Response) => {
     try {
       let { url } = req.query;
-      if (!url || typeof url !== 'string' || !url.includes('filesdl.in')) {
-        return res.status(400).json({ error: 'Valid filesdl.in URL required' });
+      if (!url || typeof url !== 'string' || (!url.includes('filesdl.in') && !url.includes('filesdl.top'))) {
+        return res.status(400).json({ error: 'Valid filesdl URL required' });
       }
 
       if (!url.startsWith('http')) {
@@ -705,21 +710,24 @@ async function startServer() {
 
       const response = await fetch(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Referer': url
         }
       });
       
-      if (!response.ok) {
-        throw new Error(`FilesDL returned ${response.status}`);
-      }
-
+      // Try to read text anyway because Cloudflare might return 403 but the HTML might still contain the link or we can extract it
       const text = await response.text();
       // Look for HubCloud links
-      const hubcloudMatch = text.match(/https?:\/\/[^"'\s]*(?:hubcloud|hubcould)\.[^"'\s]*/i);
+      const hubcloudMatch = text.match(/https?:\/\/[^"'\s]*(?:hubcloud|hubcould|vcloud\.live|hubdrive)\.[^"'\s]*/i);
       
       if (hubcloudMatch) {
           res.json({ url: normalizeDomain(hubcloudMatch[0]) });
       } else {
+          if (!response.ok) {
+            throw new Error(`FilesDL returned ${response.status} and no valid link was found in response`);
+          }
           res.status(404).json({ error: 'No HubCloud link found on FilesDL page' });
       }
     } catch (error: any) {
@@ -827,9 +835,29 @@ async function startServer() {
       const httpsAgent = new https.Agent({ rejectUnauthorized: false });
       const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' };
 
+      const fetchWithMicrolink = async (targetUrl: string, prerender = false) => {
+         try {
+            const mlRes = await axios.get(`https://api.microlink.io?url=${encodeURIComponent(targetUrl)}&meta=false${prerender ? '&prerender=true' : ''}&data.html.selector=html`, { headers, httpsAgent });
+            if (mlRes.data && mlRes.data.data) {
+               return {
+                   html: mlRes.data.data.html || "",
+                   url: mlRes.data.data.url || targetUrl
+               };
+            }
+         } catch (e: any) {
+            console.error("Microlink failed for", targetUrl, e.message);
+         }
+         // Fallback to normal axios if Microlink fails
+         const res = await axios.get(targetUrl, { headers, httpsAgent });
+         return {
+             html: res.data || "",
+             url: res.request?.res?.responseUrl || targetUrl
+         };
+      };
+
       // Step 1: Fetch initial HubCloud/HubDrive link
-      const hcRes = await axios.get(url, { headers, httpsAgent });
-      const hcText = hcRes.data;
+      const hcResult = await fetchWithMicrolink(url);
+      const hcText = hcResult.html;
       const $ = cheerio.load(hcText);
       
       let tgGoUrlDirect = "";
@@ -852,8 +880,9 @@ async function startServer() {
          tgGoUrlDirect = tgGoUrlDirect.replace(/&amp;/g, '&');
       } else if (tgFileUrl) {
          const intermediateUrlFull = tgFileUrl.startsWith('http') ? tgFileUrl : new URL(tgFileUrl, url).toString();
-         const interRes = await axios.get(intermediateUrlFull, { headers, httpsAgent });
-         const $2 = cheerio.load(interRes.data);
+         const interResult = await fetchWithMicrolink(intermediateUrlFull);
+         const interText = interResult.html;
+         const $2 = cheerio.load(interText);
          $2('a').each((_, el) => {
              const href = $2(el).attr('href');
              if (href && href.includes('/tg/go')) {
@@ -877,67 +906,65 @@ async function startServer() {
 
       // Step 2: Fetch gamerxyt page and extract /tg/go if needed
       let tgGoUrl = tgGoUrlDirect;
+      let finalTgUrl = "";
       if (!tgGoUrl && nextUrlStr) {
-         const gxRes = await axios.get(nextUrlStr, { headers, httpsAgent });
-         const gxText = gxRes.data;
+         const gxResult = await fetchWithMicrolink(nextUrlStr);
+         const gxText = gxResult.html;
          const tgGoMatch = gxText.match(/href=["'](https?:\/\/[^"']+\/tg\/go[^"']*)["']/i);
          if (tgGoMatch) {
             tgGoUrl = tgGoMatch[1].replace(/&amp;/g, '&');
          } else {
-            return res.status(404).json({ error: 'Could not resolve Telegram intent URL from gateway' });
+            // It might contain a direct telegram link already
+            const directTgMatch = gxText.match(/href=["'](tg:\/\/[^"']+)["']/i) || gxText.match(/href=["'](https?:\/\/(t\.me|telegram\.me)[^"']+)["']/i);
+            if (directTgMatch) {
+               finalTgUrl = directTgMatch[1];
+            } else {
+               return res.status(404).json({ error: 'Could not resolve Telegram intent URL from gateway' });
+            }
          }
       }
 
       // Step 3: Follow redirects of the tgGoUrl
       let currentUrl = tgGoUrl;
-      let finalTgUrl = "";
       
-      for(let i = 0; i < 5; i++) {
-        try {
-          const resp = await axios.get(currentUrl, { 
-            headers, 
-            httpsAgent, 
-            maxRedirects: 0,
-            validateStatus: (status) => status >= 200 && status < 400
-          });
-          
-          if (resp.status >= 300 && resp.status < 400 && resp.headers.location) {
-             currentUrl = resp.headers.location;
-             if (currentUrl.startsWith('tg://') || currentUrl.includes('telegram.me') || currentUrl.includes('t.me')) {
-                finalTgUrl = currentUrl;
-                break;
-             }
-             if (!currentUrl.startsWith('http')) {
-               currentUrl = new URL(currentUrl, nextUrlStr).toString();
-             }
-          } else {
-             // Maybe it's in the meta refresh or a direct link in HTML
-             const meta = resp.data?.match?.(/content=["']0;url=([^"']+)["']/i);
-             if (meta) {
-                 currentUrl = meta[1].replace(/&amp;/g, '&');
-                 if (currentUrl.startsWith('tg://') || currentUrl.includes('telegram.me') || currentUrl.includes('t.me')) {
-                    finalTgUrl = currentUrl;
-                    break;
-                 }
-                 continue;
-             }
-             
-             // Look for tg:// or telegram.me within html
-             const tgMatch = resp.data?.match?.(/href=["'](tg:\/\/[^"']+)["']/i) || resp.data?.match?.(/href=["'](https?:\/\/(t\.me|telegram\.me)[^"']+)["']/i);
-             if (tgMatch) {
-                 finalTgUrl = tgMatch[1];
-                 break;
-             }
-             
-             // If we didn't find anything but the URL itself is already telegram.me, we use it
-             if (currentUrl.includes('telegram.me') || currentUrl.includes('t.me')) {
-                 finalTgUrl = currentUrl;
-             }
-             break;
-          }
-        } catch (e: any) {
-           break;
-        }
+      if (!finalTgUrl && currentUrl) {
+         for(let i = 0; i < 5; i++) {
+            if (!currentUrl) break;
+            try {
+               const redirectResult = await fetchWithMicrolink(currentUrl, false);
+               const redirectHtml = redirectResult.html;
+               const resolvedUrl = redirectResult.url;
+               
+               if (resolvedUrl.startsWith('tg://') || resolvedUrl.includes('telegram.me') || resolvedUrl.includes('t.me')) {
+                  finalTgUrl = resolvedUrl;
+                  break;
+               } else {
+                  const meta = redirectHtml.match(/content=["']0;url=([^"']+)["']/i);
+                  if (meta) {
+                     currentUrl = meta[1].replace(/&amp;/g, '&');
+                     if (currentUrl.startsWith('tg://') || currentUrl.includes('telegram.me') || currentUrl.includes('t.me')) {
+                        finalTgUrl = currentUrl;
+                        break;
+                     }
+                     continue;
+                  }
+                  
+                  const tgMatch = redirectHtml.match(/href=["'](tg:\/\/[^"']+)["']/i) || redirectHtml.match(/href=["'](https?:\/\/(t\.me|telegram\.me)[^"']+)["']/i);
+                  if (tgMatch) {
+                     finalTgUrl = tgMatch[1];
+                     break;
+                  }
+                  
+                  if (!finalTgUrl && (currentUrl.includes('telegram.me') || currentUrl.includes('t.me'))) {
+                      finalTgUrl = currentUrl;
+                  }
+                  break;
+               }
+            } catch (e: any) {
+               console.error("Step 3 failed", e.message);
+               break;
+            }
+         }
       }
 
       if (finalTgUrl) {
@@ -2287,7 +2314,9 @@ async function startServer() {
               const sUpdate = normalizeData(
                 sData.updatedAt || sData.createdAt || 0,
               );
-              const tData = targetMap.get(d.id) || {};
+              const tData = targetMap.get(d.id);
+              if (!tData) return true; // Missing in target
+              
               const tUpdate = normalizeData(
                 tData.updatedAt || tData.createdAt || 0,
               );
@@ -2295,7 +2324,7 @@ async function startServer() {
               if (colName === "chunk_meta") {
                 return !areDocsEqual(sData, tData);
               }
-              return !tUpdate || sUpdate > tUpdate;
+              return sUpdate !== tUpdate || !areDocsEqual(sData, tData);
             });
           } else if (mode === "missing") {
             const targetSnap = await targetDb.collection(colName).get();
@@ -2454,14 +2483,16 @@ async function startServer() {
               const tUpdate = normalizeData(
                 tData.updatedAt || tData.createdAt || 0,
               );
-              const sData = sourceMap.get(d.id) || {};
+              const sData = sourceMap.get(d.id);
+              if (!sData) return true; // Missing in source
+              
               const sUpdate = normalizeData(
                 sData.updatedAt || sData.createdAt || 0,
               );
               if (colName === "chunk_meta") {
                 return !areDocsEqual(tData, sData);
               }
-              return !sUpdate || tUpdate > sUpdate;
+              return tUpdate !== sUpdate || !areDocsEqual(tData, sData);
             });
           }
         }

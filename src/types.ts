@@ -6,7 +6,7 @@ export interface UserProfile {
   email: string;
   displayName?: string;
   photoURL?: string;
-  age?: number | string;
+  dob?: string;
   gender?: string;
   device?: {
     os: string;
