@@ -833,18 +833,25 @@ async function startServer() {
       }
 
       const httpsAgent = new https.Agent({ rejectUnauthorized: false });
-      const headers = { 
-        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Mobile Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9'
+      const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Referer': url
       };
 
       // Step 1: Fetch initial HubCloud/HubDrive link
-      const hcRes = await fetch(url, { headers, agent: httpsAgent } as any);
-      if (hcRes.status === 403) {
-          console.warn('Received 403 on initial fetch. Trying to proceed anyway...');
+      let hcRes;
+      try {
+        hcRes = await axios.get(url, { headers, httpsAgent, validateStatus: (status) => status < 500 });
+        if (hcRes.status === 403) {
+            console.warn(`[Telegram Resolve] 403 Forbidden for URL: ${url}. Attempting to proceed, but Cloudflare might be blocking Vercel.`);
+        }
+      } catch (e: any) {
+         console.error('[Telegram Resolve] Error fetching initial link:', e.message);
+         throw e;
       }
-      const hcText = await hcRes.text();
+      const hcText = hcRes.data;
       const $ = cheerio.load(hcText);
       
       let tgGoUrlDirect = "";
@@ -867,9 +874,8 @@ async function startServer() {
          tgGoUrlDirect = tgGoUrlDirect.replace(/&amp;/g, '&');
       } else if (tgFileUrl) {
          const intermediateUrlFull = tgFileUrl.startsWith('http') ? tgFileUrl : new URL(tgFileUrl, url).toString();
-         const interRes = await fetch(intermediateUrlFull, { headers, agent: httpsAgent } as any);
-         const interText = await interRes.text();
-         const $2 = cheerio.load(interText);
+         const interRes = await axios.get(intermediateUrlFull, { headers, httpsAgent, validateStatus: (status) => status < 500 });
+         const $2 = cheerio.load(interRes.data);
          $2('a').each((_, el) => {
              const href = $2(el).attr('href');
              if (href && href.includes('/tg/go')) {
@@ -894,8 +900,12 @@ async function startServer() {
       // Step 2: Fetch gamerxyt page and extract /tg/go if needed
       let tgGoUrl = tgGoUrlDirect;
       if (!tgGoUrl && nextUrlStr) {
-         const gxRes = await fetch(nextUrlStr, { headers, agent: httpsAgent } as any);
-         const gxText = await gxRes.text();
+         const gxRes = await axios.get(nextUrlStr, { 
+             headers: { ...headers, 'Referer': url }, 
+             httpsAgent,
+             validateStatus: (status) => status < 500
+         });
+         const gxText = gxRes.data;
          const tgGoMatch = gxText.match(/href=["'](https?:\/\/[^"']+\/tg\/go[^"']*)["']/i);
          if (tgGoMatch) {
             tgGoUrl = tgGoMatch[1].replace(/&amp;/g, '&');
@@ -910,25 +920,25 @@ async function startServer() {
       
       for(let i = 0; i < 5; i++) {
         try {
-          const resp = await fetch(currentUrl, { 
+          const resp = await axios.get(currentUrl, { 
             headers, 
-            redirect: 'manual',
-            agent: httpsAgent
-          } as any);
+            httpsAgent, 
+            maxRedirects: 0,
+            validateStatus: () => true
+          });
           
-          if (resp.status >= 300 && resp.status < 400 && resp.headers.get('location')) {
-             currentUrl = resp.headers.get('location')!;
+          if (resp.status >= 300 && resp.status < 400 && resp.headers.location) {
+             currentUrl = resp.headers.location;
              if (currentUrl.startsWith('tg://') || currentUrl.includes('telegram.me') || currentUrl.includes('t.me')) {
                 finalTgUrl = currentUrl;
                 break;
              }
              if (!currentUrl.startsWith('http')) {
-               currentUrl = new URL(currentUrl, nextUrlStr || url).toString();
+               currentUrl = new URL(currentUrl, nextUrlStr).toString();
              }
           } else {
              // Maybe it's in the meta refresh or a direct link in HTML
-             const textData = await resp.text();
-             const meta = textData.match(/content=["']0;url=([^"']+)["']/i);
+             const meta = resp.data?.match?.(/content=["']0;url=([^"']+)["']/i);
              if (meta) {
                  currentUrl = meta[1].replace(/&amp;/g, '&');
                  if (currentUrl.startsWith('tg://') || currentUrl.includes('telegram.me') || currentUrl.includes('t.me')) {
@@ -939,7 +949,7 @@ async function startServer() {
              }
              
              // Look for tg:// or telegram.me within html
-             const tgMatch = textData.match(/href=["'](tg:\/\/[^"']+)["']/i) || textData.match(/href=["'](https?:\/\/(t\.me|telegram\.me)[^"']+)["']/i);
+             const tgMatch = resp.data?.match?.(/href=["'](tg:\/\/[^"']+)["']/i) || resp.data?.match?.(/href=["'](https?:\/\/(t\.me|telegram\.me)[^"']+)["']/i);
              if (tgMatch) {
                  finalTgUrl = tgMatch[1];
                  break;
