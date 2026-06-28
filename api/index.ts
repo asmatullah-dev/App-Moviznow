@@ -501,12 +501,7 @@ async function startServer() {
             }
 
             const response = await fetch(fetchUrl, {
-              method: "GET",
-              headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Range": "bytes=0-0",
-                "Accept": "*/*"
-              },
+              method: pdMatch ? "GET" : "HEAD",
               signal: controller.signal,
             });
 
@@ -700,8 +695,8 @@ async function startServer() {
   app.get('/api/filesdl', async (req: express.Request, res: express.Response) => {
     try {
       let { url } = req.query;
-      if (!url || typeof url !== 'string' || (!url.includes('filesdl.in') && !url.includes('filesdl.top'))) {
-        return res.status(400).json({ error: 'Valid filesdl URL required' });
+      if (!url || typeof url !== 'string' || !url.includes('filesdl.in')) {
+        return res.status(400).json({ error: 'Valid filesdl.in URL required' });
       }
 
       if (!url.startsWith('http')) {
@@ -710,24 +705,21 @@ async function startServer() {
 
       const response = await fetch(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Referer': url
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
       });
       
-      // Try to read text anyway because Cloudflare might return 403 but the HTML might still contain the link or we can extract it
+      if (!response.ok) {
+        throw new Error(`FilesDL returned ${response.status}`);
+      }
+
       const text = await response.text();
       // Look for HubCloud links
-      const hubcloudMatch = text.match(/https?:\/\/[^"'\s]*(?:hubcloud|hubcould|vcloud\.live|hubdrive)\.[^"'\s]*/i);
+      const hubcloudMatch = text.match(/https?:\/\/[^"'\s]*(?:hubcloud|hubcould)\.[^"'\s]*/i);
       
       if (hubcloudMatch) {
           res.json({ url: normalizeDomain(hubcloudMatch[0]) });
       } else {
-          if (!response.ok) {
-            throw new Error(`FilesDL returned ${response.status} and no valid link was found in response`);
-          }
           res.status(404).json({ error: 'No HubCloud link found on FilesDL page' });
       }
     } catch (error: any) {
@@ -833,24 +825,10 @@ async function startServer() {
       }
 
       const httpsAgent = new https.Agent({ rejectUnauthorized: false });
-      const headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Referer': url
-      };
+      const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' };
 
       // Step 1: Fetch initial HubCloud/HubDrive link
-      let hcRes;
-      try {
-        hcRes = await axios.get(url, { headers, httpsAgent, validateStatus: (status) => status < 500 });
-        if (hcRes.status === 403) {
-            console.warn(`[Telegram Resolve] 403 Forbidden for URL: ${url}. Attempting to proceed, but Cloudflare might be blocking Vercel.`);
-        }
-      } catch (e: any) {
-         console.error('[Telegram Resolve] Error fetching initial link:', e.message);
-         throw e;
-      }
+      const hcRes = await axios.get(url, { headers, httpsAgent });
       const hcText = hcRes.data;
       const $ = cheerio.load(hcText);
       
@@ -874,7 +852,7 @@ async function startServer() {
          tgGoUrlDirect = tgGoUrlDirect.replace(/&amp;/g, '&');
       } else if (tgFileUrl) {
          const intermediateUrlFull = tgFileUrl.startsWith('http') ? tgFileUrl : new URL(tgFileUrl, url).toString();
-         const interRes = await axios.get(intermediateUrlFull, { headers, httpsAgent, validateStatus: (status) => status < 500 });
+         const interRes = await axios.get(intermediateUrlFull, { headers, httpsAgent });
          const $2 = cheerio.load(interRes.data);
          $2('a').each((_, el) => {
              const href = $2(el).attr('href');
@@ -900,11 +878,7 @@ async function startServer() {
       // Step 2: Fetch gamerxyt page and extract /tg/go if needed
       let tgGoUrl = tgGoUrlDirect;
       if (!tgGoUrl && nextUrlStr) {
-         const gxRes = await axios.get(nextUrlStr, { 
-             headers: { ...headers, 'Referer': url }, 
-             httpsAgent,
-             validateStatus: (status) => status < 500
-         });
+         const gxRes = await axios.get(nextUrlStr, { headers, httpsAgent });
          const gxText = gxRes.data;
          const tgGoMatch = gxText.match(/href=["'](https?:\/\/[^"']+\/tg\/go[^"']*)["']/i);
          if (tgGoMatch) {
@@ -924,7 +898,7 @@ async function startServer() {
             headers, 
             httpsAgent, 
             maxRedirects: 0,
-            validateStatus: () => true
+            validateStatus: (status) => status >= 200 && status < 400
           });
           
           if (resp.status >= 300 && resp.status < 400 && resp.headers.location) {
@@ -2313,9 +2287,7 @@ async function startServer() {
               const sUpdate = normalizeData(
                 sData.updatedAt || sData.createdAt || 0,
               );
-              const tData = targetMap.get(d.id);
-              if (!tData) return true; // Missing in target
-              
+              const tData = targetMap.get(d.id) || {};
               const tUpdate = normalizeData(
                 tData.updatedAt || tData.createdAt || 0,
               );
@@ -2323,7 +2295,7 @@ async function startServer() {
               if (colName === "chunk_meta") {
                 return !areDocsEqual(sData, tData);
               }
-              return sUpdate !== tUpdate || !areDocsEqual(sData, tData);
+              return !tUpdate || sUpdate > tUpdate;
             });
           } else if (mode === "missing") {
             const targetSnap = await targetDb.collection(colName).get();
@@ -2482,16 +2454,14 @@ async function startServer() {
               const tUpdate = normalizeData(
                 tData.updatedAt || tData.createdAt || 0,
               );
-              const sData = sourceMap.get(d.id);
-              if (!sData) return true; // Missing in source
-              
+              const sData = sourceMap.get(d.id) || {};
               const sUpdate = normalizeData(
                 sData.updatedAt || sData.createdAt || 0,
               );
               if (colName === "chunk_meta") {
                 return !areDocsEqual(tData, sData);
               }
-              return tUpdate !== sUpdate || !areDocsEqual(tData, sData);
+              return !sUpdate || tUpdate > sUpdate;
             });
           }
         }

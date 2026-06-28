@@ -345,7 +345,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
     // 1. Identify all extractable links
     const extractableLinks = currentLinks.filter(u => 
-      (u.includes('howblogs.xyz') || u.includes('filesdl.in') || u.includes('filesdl.top') || u.includes('mdrive.lol') || u.includes('moviesdrives.') || u.includes('moviesdrive.') || u.includes('filmygo.') || u.includes('skymovieshd.')) && 
+      (u.includes('howblogs.xyz') || u.includes('filesdl.in') || u.includes('mdrive.lol') || u.includes('moviesdrives.') || u.includes('moviesdrive.') || u.includes('filmygo.') || u.includes('skymovieshd.')) && 
       !processedExtractionsRef.current.has(u)
     );
 
@@ -473,7 +473,6 @@ export const LinkCheckerModal: React.FC<Props> = ({
       !u.includes('mdrive.lol') && 
       !u.includes('howblogs.xyz') && 
       !u.includes('filesdl.in') &&
-      !u.includes('filesdl.top') &&
       !u.includes('moviesdrives.') &&
       !u.includes('moviesdrive.') &&
       !u.includes('filmygo.') &&

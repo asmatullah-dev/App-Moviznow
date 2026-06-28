@@ -139,7 +139,7 @@ export default function Settings() {
                              supportPhone = '92' + supportPhone;
                            }
                            const adminPhone = supportPhone.replace('+', '');
-                           return `https://wa.me/${adminPhone}?text=${encodeURIComponent(`Assalam O Alaikum! Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nI need to change my email address.\n\nYour new email: `)}`;
+                           return `https://wa.me/${adminPhone}?text=${encodeURIComponent(`Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nI need to change my email address.\n\nYour new email: `)}`;
                          })()} target="_blank" rel="noreferrer" className="text-emerald-500 hover:underline">Contact admin</a> if needed.</span>
                       )}
                   </p>

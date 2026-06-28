@@ -1403,7 +1403,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setError(null);
       justLoggedInRef.current = true;
       const provider = new GoogleAuthProvider();
+      provider.addScope("https://www.googleapis.com/auth/user.gender.read");
+      provider.addScope("https://www.googleapis.com/auth/user.birthday.read");
       const result = await signInWithPopup(auth, provider);
+
+      let gender, ageStr;
+      try {
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        if (credential?.accessToken) {
+          const res = await fetch("https://people.googleapis.com/v1/people/me?personFields=genders,birthdays,ageRanges", {
+            headers: { Authorization: `Bearer ${credential.accessToken}` }
+          });
+          const person = await res.json();
+          if (person.genders && person.genders.length > 0) {
+            gender = person.genders[0].value;
+          }
+          if (person.birthdays && person.birthdays.length > 0) {
+            const birthday = person.birthdays.find((b: any) => b.date && b.date.year) || person.birthdays[0];
+            if (birthday && birthday.date && birthday.date.year) {
+              const y = birthday.date.year;
+              const m = birthday.date.month || 1;
+              const d = birthday.date.day || 1;
+              const dateObj = new Date(y, m - 1, d);
+              const monthName = dateObj.toLocaleString("en-US", { month: "short" });
+              const calcAge = new Date().getFullYear() - y;
+              ageStr = `${monthName} ${d}, ${y} (${calcAge}Y)`;
+            }
+          }
+          if (!ageStr && person.ageRanges && person.ageRanges.length > 0) {
+             ageStr = person.ageRanges[0].ageRange;
+          }
+          if (!gender) gender = "Unknown";
+          if (!ageStr) ageStr = "Unknown";
+        }
+      } catch (e) {
+        gender = "Unknown";
+        ageStr = "Unknown";
+        console.warn("Failed to extract additional user info", e);
+      }
 
       // Force refresh app data
       safeStorage.removeItem("profile_cache");
@@ -1420,13 +1457,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { getDeviceDetails } = await import("../utils/deviceInfo");
       const deviceDetails = await getDeviceDetails();
 
-      if (deviceDetails) {
+      if (ageStr !== undefined || gender !== undefined || deviceDetails) {
         try {
           const pendingStr =
             safeStorage.getItem("pending_user_updates") || "{}";
           let pendingAll = JSON.parse(pendingStr);
           pendingAll[result.user.uid] = pendingAll[result.user.uid] || {};
-          pendingAll[result.user.uid].device = deviceDetails;
+          if (ageStr !== undefined) pendingAll[result.user.uid].age = ageStr;
+          if (gender !== undefined) pendingAll[result.user.uid].gender = gender;
+          if (deviceDetails) pendingAll[result.user.uid].device = deviceDetails;
           safeStorage.setItem(
             "pending_user_updates",
             JSON.stringify(pendingAll),

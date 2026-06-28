@@ -113,7 +113,7 @@ export default function TopUp() {
       const orders = profile.orders || [];
       const lastOrder = orders.length > 0 ? [...orders].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] : null;
 
-      const message = `Assalam O Alaikum! Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${whatsappNumber || profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nPlease approve my membership top-up. Order ID: ${currentOrderId}\nMonths: ${lastOrder?.months || months}\nAmount: Rs ${lastOrder?.amount || months * (settings?.membershipFee || 200)}`;
+      const message = `Hello Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${whatsappNumber || profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nPlease approve my membership top-up. Order ID: ${currentOrderId}\nMonths: ${lastOrder?.months || months}\nAmount: Rs ${lastOrder?.amount || months * (settings?.membershipFee || 200)}`;
       
       const adminPhone = standardizePhone(settings?.supportNumber || '3363284466').replace('+', '');
       const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;

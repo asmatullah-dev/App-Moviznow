@@ -383,7 +383,7 @@ export default function UserManagement() {
       role: user.role,
       status: user.status,
       permissions: user.permissions || [],
-      dob: user.dob || '',
+      age: user.age || '',
       gender: user.gender || '',
     });
     setIsEditingOverlay(true);
@@ -440,7 +440,7 @@ export default function UserManagement() {
         role: editForm.role,
         status: editForm.status,
         permissions: editForm.permissions || [],
-        dob: editForm.dob,
+        age: editForm.age,
         gender: editForm.gender,
       };
       
@@ -612,16 +612,14 @@ export default function UserManagement() {
       const expiryStr = formatDateToMonthDDYYYY(user.expiryDate);
 
       if (diffDays < 0) {
-        message = `Assalam O Alaikum! ${name},\n\nYour ${membershipType} for ${settings?.headerText || 'MovizNow'} app is Expired. Please renew to continue enjoying our services.\nVisit Now: MovizNow.com\nThank You`;
-      } else if (diffDays > 5) {
-        message = `Assalam O Alaikum! ${name},\n\nYour Membership Expiry date for MovizNow is *${expiryStr}*\nEnjoy all Unlimited new latest & old Movies & Series on MovizNow without any restrictions with Direct Play (MX Player, VLC and All Video Players) & Download (Also download able with telegram)\nVisit Now: MovizNow.com\nThank You`;
+        message = `Hello ${name},\n\nYour ${membershipType} for ${settings?.headerText || 'MovizNow'} app is Expired. Please renew to continue enjoying our services.\nVisit Now: MovizNow.com\nThank You`;
       } else if (diffDays > 3) {
-        message = `Assalam O Alaikum! ${name},\n\n${welcomeText}Your ${membershipType} for ${settings?.headerText || 'MovizNow'} app will expire on ${expiryStr}.\nVisit Now: MovizNow.com\nThank You`;
+        message = `Hello ${name},\n\n${welcomeText}Your ${membershipType} for ${settings?.headerText || 'MovizNow'} app will expire on ${expiryStr}.\nVisit Now: MovizNow.com\nThank You`;
       } else {
-        message = `Assalam O Alaikum! ${name},\n\n${welcomeText}Your ${membershipType} for ${settings?.headerText || 'MovizNow'} app is expiring very soon on ${expiryStr}. Please renew to continue enjoying our services.\nVisit Now: MovizNow.com\nThank You`;
+        message = `Hello ${name},\n\n${welcomeText}Your ${membershipType} for ${settings?.headerText || 'MovizNow'} app is expiring very soon on ${expiryStr}. Please renew to continue enjoying our services.\nVisit Now: MovizNow.com\nThank You`;
       }
     } else {
-      message = `Assalam O Alaikum! ${name},\n\n${welcomeText}This is a friendly reminder regarding your ${settings?.headerText || 'MovizNow'} ${membershipType}.\nVisit Now: MovizNow.com\nThank You`;
+      message = `Hello ${name},\n\n${welcomeText}This is a friendly reminder regarding your ${settings?.headerText || 'MovizNow'} ${membershipType}.\nVisit Now: MovizNow.com\nThank You`;
     }
 
     const encodedMessage = encodeURIComponent(message);
@@ -1539,11 +1537,12 @@ export default function UserManagement() {
                       </select>
                     </div>
                     <div className="flex-1">
-                      <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Date of Birth</label>
+                      <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Age / DOB</label>
                       <input
-                        type="date"
-                        value={editForm.dob || ''}
-                        onChange={(e) => setEditForm({ ...editForm, dob: e.target.value })}
+                        type="text"
+                        placeholder="e.g. 25 or May 12, 1990"
+                        value={editForm.age || ''}
+                        onChange={(e) => setEditForm({ ...editForm, age: e.target.value })}
                         className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
                       />
                     </div>
@@ -1620,18 +1619,14 @@ export default function UserManagement() {
                           <span className="capitalize">{typeof selectedUser.gender === 'string' ? (selectedUser.gender.toLowerCase() === 'male' ? 'M' : selectedUser.gender.toLowerCase() === 'female' ? 'F' : (selectedUser.gender.toLowerCase() === 'unknown' ? 'Unknown' : 'NA')) : 'NA'}</span>
                           <span className="text-zinc-400 dark:text-zinc-500">·</span>
                           <span>{(() => {
-                             if (!selectedUser.dob) return 'NA';
-                             if (String(selectedUser.dob) === 'Unknown') return 'Unknown';
-                             const d = new Date(selectedUser.dob);
-                             if (isNaN(d.getTime())) return String(selectedUser.dob);
-                             const today = new Date();
-                             let yrs = today.getFullYear() - d.getFullYear();
-                             const m = today.getMonth() - d.getMonth();
-                             if (m < 0 || (m === 0 && today.getDate() < d.getDate())) {
-                               yrs--;
-                             }
-                             const monthStr = d.toLocaleString('en-US', { month: 'short' });
-                             return `${monthStr} ${d.getDate()}, ${d.getFullYear()} (${yrs}Y)`;
+                             if (!selectedUser.age) return 'NA';
+                             if (String(selectedUser.age) === 'Unknown') return 'Unknown';
+                             if (String(selectedUser.age).includes('(')) return selectedUser.age;
+                             const d = new Date(selectedUser.age);
+                             if (isNaN(d.getTime())) return selectedUser.age;
+                             const yrs = new Date().getFullYear() - d.getFullYear();
+                             const m = d.toLocaleString('en-US', { month: 'short' });
+                             return `${m} ${d.getDate()}, ${d.getFullYear()} (${yrs}Y)`;
                           })()}</span>
                         </div>
                       </div>

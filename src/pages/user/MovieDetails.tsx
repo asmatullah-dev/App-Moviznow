@@ -2390,7 +2390,7 @@ export default function MovieDetails() {
                           profile?.role === "selected_content"
                             ? `I want to get access to ${contentTitle}. Please tell me how to pay and add it to my account.`
                             : `I cannot access ${contentTitle}.`;
-                        const msg = `Assalam O Alaikum! Admin,\n\nName: ${profile?.displayName || "Unknown"}\nEmail: ${profile?.email || "N/A"}\nPhone: ${profile?.phone || "N/A"}\nRole & Status: ${String(
+                        const msg = `Hello Admin,\n\nName: ${profile?.displayName || "Unknown"}\nEmail: ${profile?.email || "N/A"}\nPhone: ${profile?.phone || "N/A"}\nRole & Status: ${String(
                           profile?.role || "Unknown",
                         )
                           .replace(/_/g, " ")
