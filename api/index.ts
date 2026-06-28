@@ -840,8 +840,11 @@ async function startServer() {
       };
 
       // Step 1: Fetch initial HubCloud/HubDrive link
-      const hcRes = await axios.get(url, { headers, httpsAgent });
-      const hcText = hcRes.data;
+      const hcRes = await fetch(url, { headers, agent: httpsAgent } as any);
+      if (hcRes.status === 403) {
+          console.warn('Received 403 on initial fetch. Trying to proceed anyway...');
+      }
+      const hcText = await hcRes.text();
       const $ = cheerio.load(hcText);
       
       let tgGoUrlDirect = "";
@@ -864,8 +867,9 @@ async function startServer() {
          tgGoUrlDirect = tgGoUrlDirect.replace(/&amp;/g, '&');
       } else if (tgFileUrl) {
          const intermediateUrlFull = tgFileUrl.startsWith('http') ? tgFileUrl : new URL(tgFileUrl, url).toString();
-         const interRes = await axios.get(intermediateUrlFull, { headers, httpsAgent });
-         const $2 = cheerio.load(interRes.data);
+         const interRes = await fetch(intermediateUrlFull, { headers, agent: httpsAgent } as any);
+         const interText = await interRes.text();
+         const $2 = cheerio.load(interText);
          $2('a').each((_, el) => {
              const href = $2(el).attr('href');
              if (href && href.includes('/tg/go')) {
@@ -890,8 +894,8 @@ async function startServer() {
       // Step 2: Fetch gamerxyt page and extract /tg/go if needed
       let tgGoUrl = tgGoUrlDirect;
       if (!tgGoUrl && nextUrlStr) {
-         const gxRes = await axios.get(nextUrlStr, { headers, httpsAgent });
-         const gxText = gxRes.data;
+         const gxRes = await fetch(nextUrlStr, { headers, agent: httpsAgent } as any);
+         const gxText = await gxRes.text();
          const tgGoMatch = gxText.match(/href=["'](https?:\/\/[^"']+\/tg\/go[^"']*)["']/i);
          if (tgGoMatch) {
             tgGoUrl = tgGoMatch[1].replace(/&amp;/g, '&');
@@ -906,25 +910,25 @@ async function startServer() {
       
       for(let i = 0; i < 5; i++) {
         try {
-          const resp = await axios.get(currentUrl, { 
+          const resp = await fetch(currentUrl, { 
             headers, 
-            httpsAgent, 
-            maxRedirects: 0,
-            validateStatus: (status) => status >= 200 && status < 400
-          });
+            redirect: 'manual',
+            agent: httpsAgent
+          } as any);
           
-          if (resp.status >= 300 && resp.status < 400 && resp.headers.location) {
-             currentUrl = resp.headers.location;
+          if (resp.status >= 300 && resp.status < 400 && resp.headers.get('location')) {
+             currentUrl = resp.headers.get('location')!;
              if (currentUrl.startsWith('tg://') || currentUrl.includes('telegram.me') || currentUrl.includes('t.me')) {
                 finalTgUrl = currentUrl;
                 break;
              }
              if (!currentUrl.startsWith('http')) {
-               currentUrl = new URL(currentUrl, nextUrlStr).toString();
+               currentUrl = new URL(currentUrl, nextUrlStr || url).toString();
              }
           } else {
              // Maybe it's in the meta refresh or a direct link in HTML
-             const meta = resp.data?.match?.(/content=["']0;url=([^"']+)["']/i);
+             const textData = await resp.text();
+             const meta = textData.match(/content=["']0;url=([^"']+)["']/i);
              if (meta) {
                  currentUrl = meta[1].replace(/&amp;/g, '&');
                  if (currentUrl.startsWith('tg://') || currentUrl.includes('telegram.me') || currentUrl.includes('t.me')) {
@@ -935,7 +939,7 @@ async function startServer() {
              }
              
              // Look for tg:// or telegram.me within html
-             const tgMatch = resp.data?.match?.(/href=["'](tg:\/\/[^"']+)["']/i) || resp.data?.match?.(/href=["'](https?:\/\/(t\.me|telegram\.me)[^"']+)["']/i);
+             const tgMatch = textData.match(/href=["'](tg:\/\/[^"']+)["']/i) || textData.match(/href=["'](https?:\/\/(t\.me|telegram\.me)[^"']+)["']/i);
              if (tgMatch) {
                  finalTgUrl = tgMatch[1];
                  break;
