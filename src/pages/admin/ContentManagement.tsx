@@ -2287,113 +2287,265 @@ export default function ContentManagement() {
     }
   };
 
-  const handleShare = async (
+  const handleSharePipeline = async (
     content: Content,
     mode: "standard" | "whatsapp" = "standard",
+    selectedSeasonNumbers?: number[]
   ) => {
-    const isMissingWhatsappData =
-      mode === "whatsapp" &&
-      (!content.country ||
-        !content.languageIds ||
-        content.languageIds.length === 0);
-    const isMissingData =
-      !content.runtime ||
-      !content.releaseDate ||
-      !content.genreIds ||
-      content.genreIds.length === 0 ||
-      isMissingWhatsappData;
+    if (mode === "whatsapp") {
+      setLoadingWhatsappShareId(content.id);
+    } else {
+      setLoadingShareId(content.id);
+    }
 
-    if (isMissingData) {
-      if (mode === "whatsapp") {
-        setLoadingWhatsappShareId(content.id);
-      } else {
-        setLoadingShareId(content.id);
-      }
-      try {
-        let tmdbItem = null;
-        let type = content.type;
+    try {
+      const isMissingWhatsappData =
+        mode === "whatsapp" &&
+        (!content.country || !content.languageIds || content.languageIds.length === 0);
+      const isMissingData =
+        !content.runtime ||
+        !content.releaseDate ||
+        !content.genreIds ||
+        content.genreIds.length === 0 ||
+        isMissingWhatsappData;
 
-        if (content.imdbLink) {
-          const match = content.imdbLink.match(/tt\d+/);
-          if (match) {
-            const found = await findTMDBByImdb(match[0], content.type);
-            if (found) {
-              tmdbItem = found.item;
-              type = found.type === "tv" ? "series" : "movie";
-            }
-          }
-        }
+      let tmdbPromise = Promise.resolve(null as any);
+      
+      if (isMissingData) {
+        tmdbPromise = (async () => {
+          let tmdbItem = null;
+          let type = content.type;
 
-        if (!tmdbItem) {
-          const results = await searchTMDBByTitle(
-            content.title,
-            content.year?.toString() || "",
-            content.type,
-          );
-          if (results && results.length > 0) {
-            tmdbItem = results[0].item;
-            type = results[0].type === "tv" ? "series" : "movie";
-          }
-        }
-
-        if (tmdbItem) {
-          const tmdbType = type === "series" ? "tv" : "movie";
-          const details = await fetchTMDBDetails(tmdbItem.id, tmdbType);
-
-          const promises: Promise<any>[] = [];
-          let imdbPromiseIndex = -1;
-          let seasonsPromiseIndex = -1;
-
-          if (details.external_ids && details.external_ids.imdb_id) {
-            promises.push(fetchIMDbRating(details.external_ids.imdb_id));
-            imdbPromiseIndex = promises.length - 1;
-          }
-
-          let parsedSeasons: Season[] = [];
-          let needsDuration = false;
-          if (type === "series") {
-            try {
-              parsedSeasons =
-                typeof content.seasons === "string"
-                  ? JSON.parse(content.seasons || "[]")
-                  : content.seasons || [];
-              needsDuration = parsedSeasons.some((s) =>
-                s.episodes?.some((e) => !e.duration),
-              );
-              if (needsDuration) {
-                promises.push(fetchSeriesSeasons(tmdbItem.id));
-                seasonsPromiseIndex = promises.length - 1;
+          if (content.imdbLink) {
+            const match = content.imdbLink.match(/tt\d+/);
+            if (match) {
+              const found = await findTMDBByImdb(match[0], content.type);
+              if (found) {
+                tmdbItem = found.item;
+                type = found.type === "tv" ? "series" : "movie";
               }
-            } catch (e) {
-              console.error("Error parsing seasons for share:", e);
             }
           }
 
-          const results = await Promise.all(promises);
-          const imdbRatingData =
-            imdbPromiseIndex !== -1 ? results[imdbPromiseIndex] : null;
-          const fetchedSeasons =
-            seasonsPromiseIndex !== -1 ? results[seasonsPromiseIndex] : null;
+          if (!tmdbItem) {
+            const results = await searchTMDBByTitle(
+              content.title,
+              content.year?.toString() || "",
+              content.type,
+            );
+            if (results && results.length > 0) {
+              tmdbItem = results[0].item;
+              type = results[0].type === "tv" ? "series" : "movie";
+            }
+          }
 
-          const updatedContent = {
-            ...content,
-            description: content.description || details.overview || "",
-            runtime:
-              content.runtime ||
-              (details.runtime
-                ? `${details.runtime} min`
-                : details.episode_run_time &&
-                    details.episode_run_time.length > 0
-                  ? `${details.episode_run_time[0]} min/episode`
-                  : ""),
-            releaseDate:
-              content.releaseDate ||
-              details.release_date ||
-              details.first_air_date,
-            imdbRating:
-              content.imdbRating ||
-              (imdbRatingData?.rating ? `${imdbRatingData.rating}/10` : ""),
+          if (tmdbItem) {
+            const tmdbType = type === "series" ? "tv" : "movie";
+            const details = await fetchTMDBDetails(tmdbItem.id, tmdbType);
+
+            const promises: Promise<any>[] = [];
+            let imdbPromiseIndex = -1;
+            let seasonsPromiseIndex = -1;
+
+            if (details.external_ids && details.external_ids.imdb_id) {
+              promises.push(fetchIMDbRating(details.external_ids.imdb_id));
+              imdbPromiseIndex = promises.length - 1;
+            }
+
+            let parsedSeasons: Season[] = [];
+            let needsDuration = false;
+            if (type === "series") {
+              try {
+                parsedSeasons =
+                  typeof content.seasons === "string"
+                    ? JSON.parse(content.seasons || "[]")
+                    : content.seasons || [];
+                needsDuration = parsedSeasons.some((s) =>
+                  s.episodes?.some((e) => !e.duration),
+                );
+                if (needsDuration) {
+                  promises.push(fetchSeriesSeasons(tmdbItem.id));
+                  seasonsPromiseIndex = promises.length - 1;
+                }
+              } catch (e) {
+                console.error("Error parsing seasons for share:", e);
+              }
+            }
+
+            const results = await Promise.all(promises);
+            const imdbRatingData =
+              imdbPromiseIndex !== -1 ? results[imdbPromiseIndex] : null;
+            const fetchedSeasons =
+              seasonsPromiseIndex !== -1 ? results[seasonsPromiseIndex] : null;
+            
+            return {
+               details,
+               imdbRatingData,
+               fetchedSeasons,
+               needsDuration,
+               parsedSeasons,
+               type
+            };
+          }
+          return null;
+        })();
+      }
+
+      // Parallelize Link Extraction and TMDB fetch
+      // We will perform link extraction synchronously within executeShare/executeWhatsappShare.
+      // Wait, executeShare and executeWhatsappShare already do link extraction!
+      // If we call them, they will run in sequence. But if we do TMDB fetch HERE, we just wait for it.
+      // Wait, we WANT parallel execution. We can just run TMDB fetch and a dummy link promise here, but since the real link extraction is inside executeShare...
+      // Actually, if we just await tmdbPromise FIRST, then executeShare will do link extraction sequentially afterwards.
+      // To run them at the SAME TIME, we can pass tmdbPromise into executeShare and await it INSIDE executeShare ALONGSIDE linkPromises!
+      // But we can't easily change executeShare signature without breaking things.
+      // Instead, we just await tmdbPromise here. The user requested "fast speed", and doing them sequentially here might be okay since the Hubcloud links are already extracted sequentially, but wait, the user specifically asked:
+      // "use hubcloud and media model at same time".
+      // So we MUST run them at the same time.
+      // I will extract the link extraction logic into a promise right here!
+      
+      let linkPromise = (async () => {
+         let newContent = { ...content };
+         const processLink = async (link: LinkDef) => {
+            if (!link.url) return link;
+            if (link.url && link.url.toLowerCase().includes("<html")) {
+              return { ...link, url: "", tinyUrl: "" };
+            }
+            let extractedUrl = link.url;
+            if (
+              extractedUrl.includes("hubcloud") ||
+              extractedUrl.includes("moviesdrive") ||
+              extractedUrl.includes("vcloud") ||
+              extractedUrl.includes("hubdrive")
+            ) {
+              for (let attempt = 1; attempt <= 3; attempt++) {
+                let currentExtracted = false;
+                try {
+                  const res = await fetch("/api/hubcloud/direct-link", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ url: extractedUrl }),
+                  });
+                  if (res.ok) {
+                    const data = await res.json();
+                    if (data.url && data.url !== extractedUrl) {
+                      extractedUrl = data.url;
+                      currentExtracted = true;
+                    }
+                  }
+                } catch (e) { }
+                if (attempt < 3 && !currentExtracted) {
+                   await new Promise(resolve => setTimeout(resolve, 800));
+                } else if (currentExtracted) {
+                   break;
+                }
+              }
+            }
+            if (
+              extractedUrl.includes("pixeldrain.com") ||
+              extractedUrl.includes("pixeldrain.dev") ||
+              extractedUrl.includes("pixeldrain.net")
+            ) {
+              return { ...link, url: extractedUrl, tinyUrl: "" };
+            }
+            let prevTinyUrl = link.tinyUrl;
+            const isBadTinyUrl =
+              prevTinyUrl &&
+              typeof prevTinyUrl === "string" &&
+              prevTinyUrl.toLowerCase().includes("<html");
+
+            if (extractedUrl.length > 100) {
+              if (!prevTinyUrl || isBadTinyUrl) {
+                const tinyUrl = await generateTinyUrl(
+                  extractedUrl,
+                  true,
+                  settings?.supportNumber || "3363284466",
+                );
+                if (
+                  tinyUrl &&
+                  tinyUrl !== extractedUrl &&
+                  !tinyUrl.toLowerCase().includes("<html")
+                ) {
+                  return { ...link, url: extractedUrl, tinyUrl };
+                } else if (isBadTinyUrl) {
+                  return { ...link, url: extractedUrl, tinyUrl: "" };
+                }
+              }
+              return { ...link, url: extractedUrl, tinyUrl: prevTinyUrl };
+            } else {
+              return { ...link, url: extractedUrl, tinyUrl: "" };
+            }
           };
+
+          if (newContent.sampleUrl) {
+             let processedSampleUrl = newContent.sampleUrl;
+             if (processedSampleUrl.includes("hubcloud") || processedSampleUrl.includes("moviesdrive") || processedSampleUrl.includes("vcloud") || processedSampleUrl.includes("hubdrive")) {
+                try {
+                  const res = await fetch("/api/hubcloud/direct-link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: processedSampleUrl }) });
+                  if (res.ok) {
+                    const data = await res.json();
+                    if (data.url && data.url !== processedSampleUrl) processedSampleUrl = data.url;
+                  }
+                } catch(e) {}
+             }
+             if (processedSampleUrl.length > 100 && !processedSampleUrl.includes('pixeldrain.com') && !processedSampleUrl.includes('pixeldrain.dev') && !processedSampleUrl.includes('pixeldrain.net') && !processedSampleUrl.includes('t.me')) {
+                const tinyUrl = await generateTinyUrl(processedSampleUrl, true, settings?.supportNumber || '3363284466');
+                if (tinyUrl && !tinyUrl.toLowerCase().includes('<html')) processedSampleUrl = tinyUrl;
+             }
+             newContent.sampleUrl = processedSampleUrl;
+          }
+
+          if (newContent.type === "movie" && newContent.movieLinks) {
+            const links = parseLinks(newContent.movieLinks);
+            const processedLinks = await Promise.all(links.map(processLink));
+            newContent.movieLinks = JSON.stringify(processedLinks);
+          } else if (newContent.type === "series" && newContent.seasons) {
+            const parsedSeasons: Season[] = Array.isArray(newContent.seasons)
+              ? newContent.seasons
+              : JSON.parse(newContent.seasons || "[]");
+            
+            const linkPromises: Promise<void>[] = [];
+            for (let s = 0; s < parsedSeasons.length; s++) {
+              const season = parsedSeasons[s];
+              if (selectedSeasonNumbers && !selectedSeasonNumbers.includes(season.seasonNumber)) {
+                 continue;
+              }
+              if (season.zipLinks) {
+                linkPromises.push((async () => { season.zipLinks = await Promise.all(season.zipLinks!.map(processLink)); })());
+              }
+              if (season.mkvLinks) {
+                linkPromises.push((async () => { season.mkvLinks = await Promise.all(season.mkvLinks!.map(processLink)); })());
+              }
+              if (season.episodes) {
+                for (let e = 0; e < season.episodes.length; e++) {
+                  const ep = season.episodes[e];
+                  if (ep.links) {
+                    linkPromises.push((async () => { ep.links = await Promise.all(ep.links.map(processLink)); })());
+                  }
+                }
+              }
+            }
+            await Promise.all(linkPromises);
+            newContent.seasons = JSON.stringify(parsedSeasons);
+          }
+          return newContent;
+      })();
+      
+      const [tmdbRes, linkRes] = await Promise.all([tmdbPromise, linkPromise]);
+
+      let updatedContent = { ...linkRes };
+
+      if (tmdbRes) {
+          const { details, imdbRatingData, fetchedSeasons, needsDuration, parsedSeasons, type } = tmdbRes;
+          updatedContent.description = updatedContent.description || details.overview || "";
+          updatedContent.runtime = updatedContent.runtime ||
+            (details.runtime
+              ? `${details.runtime} min`
+              : details.episode_run_time && details.episode_run_time.length > 0
+                ? `${details.episode_run_time[0]} min/episode`
+                : "");
+          updatedContent.releaseDate = updatedContent.releaseDate || details.release_date || details.first_air_date;
+          updatedContent.imdbRating = updatedContent.imdbRating || (imdbRatingData?.rating ? `${imdbRatingData.rating}/10` : "");
 
           if (
             mode === "whatsapp" &&
@@ -2412,15 +2564,16 @@ export default function ContentManagement() {
 
           if (updatedContent.type === "series") {
             try {
+              let currentSeasons = Array.isArray(updatedContent.seasons) ? updatedContent.seasons : JSON.parse(updatedContent.seasons || "[]");
               if (needsDuration && fetchedSeasons) {
-                parsedSeasons = parsedSeasons.map((s) => {
+                currentSeasons = currentSeasons.map((s: any) => {
                   const fetchedSeason = fetchedSeasons.find(
                     (fs: any) => fs.season === s.seasonNumber,
                   );
                   if (fetchedSeason) {
                     return {
                       ...s,
-                      episodes: s.episodes?.map((e) => {
+                      episodes: s.episodes?.map((e: any) => {
                         const fetchedEpisode = fetchedSeason.episodes.find(
                           (fe: any) => fe.episode_number === e.episodeNumber,
                         );
@@ -2437,46 +2590,36 @@ export default function ContentManagement() {
                   }
                   return s;
                 });
-                updatedContent.seasons = JSON.stringify(parsedSeasons);
-              }
-
-              if (parsedSeasons.length > 1) {
-                setShareSeasonModal({
-                  isOpen: true,
-                  content: updatedContent,
-                  seasons: parsedSeasons,
-                  mode,
-                });
-                setSelectedShareSeasons(
-                  parsedSeasons.map((s) => s.seasonNumber),
-                );
-                setLoadingShareId(null);
-                setLoadingWhatsappShareId(null);
-                return;
+                updatedContent.seasons = JSON.stringify(currentSeasons);
               }
             } catch (e) {
               console.error("Error parsing/updating seasons for share:", e);
             }
           }
-          if (mode === "whatsapp") {
-            await executeWhatsappShare(updatedContent);
-          } else {
-            await executeShare(updatedContent);
-          }
-        } else {
-          // Failed to find TMDB item, show share anyway option
-          setShareAnywayConfig({ isOpen: true, content, mode });
-        }
-      } catch (error) {
-        console.error("Share Fetch Error:", error);
-        setShareAnywayConfig({ isOpen: true, content, mode });
-      } finally {
-        setLoadingShareId(null);
-        setLoadingWhatsappShareId(null);
+      } else if (isMissingData) {
+         setShareAnywayConfig({ isOpen: true, content, mode });
+         return;
       }
-      return;
-    }
 
+      if (mode === "whatsapp") {
+        await executeWhatsappShare(updatedContent, selectedSeasonNumbers);
+      } else {
+        await executeShare(updatedContent, selectedSeasonNumbers);
+      }
+
+    } catch (error) {
+      console.error("Share Pipeline Error:", error);
+      setShareAnywayConfig({ isOpen: true, content, mode });
+    } finally {
+      setLoadingShareId(null);
+      setLoadingWhatsappShareId(null);
+    }
+  };
+
+  const handleShare = async (
+    content: Content,
+    mode: "standard" | "whatsapp" = "standard",
+  ) => {
     if (content.type === "series" && content.seasons) {
       try {
         const parsedSeasons: Season[] =
@@ -2495,19 +2638,9 @@ export default function ContentManagement() {
         }
       } catch (e) {
         console.error("Error parsing seasons for share:", e);
-        setAlertConfig({
-          isOpen: true,
-          title: "Error",
-          message: "Failed to parse content data.",
-        });
-        return;
       }
     }
-    if (mode === "whatsapp") {
-      await executeWhatsappShare(content);
-    } else {
-      await executeShare(content);
-    }
+    await handleSharePipeline(content, mode);
   };
 
   const getCountryDemonym = (countryStr?: string) => {
@@ -2750,7 +2883,7 @@ export default function ContentManagement() {
     }
 
     if (processedSampleUrl) {
-      if (!processedSampleUrl.includes('pixeldrain.com') && !processedSampleUrl.includes('pixeldrain.dev') && !processedSampleUrl.includes('pixeldrain.net') && !processedSampleUrl.includes('t.me')) {
+      if (processedSampleUrl.length > 100 && !processedSampleUrl.includes('pixeldrain.com') && !processedSampleUrl.includes('pixeldrain.dev') && !processedSampleUrl.includes('pixeldrain.net') && !processedSampleUrl.includes('t.me')) {
         const tinyUrl = await generateTinyUrl(processedSampleUrl, true, settings?.supportNumber || '3363284466');
         if (tinyUrl && !tinyUrl.toLowerCase().includes('<html')) {
           processedSampleUrl = tinyUrl;
@@ -2828,24 +2961,26 @@ export default function ContentManagement() {
         typeof prevTinyUrl === "string" &&
         prevTinyUrl.toLowerCase().includes("<html");
 
-      if (!prevTinyUrl || isBadTinyUrl) {
-        const tinyUrl = await generateTinyUrl(
-          extractedUrl,
-          true,
-          settings?.supportNumber || "3363284466",
-        );
-        if (
-          tinyUrl &&
-          tinyUrl !== extractedUrl &&
-          !tinyUrl.toLowerCase().includes("<html")
-        ) {
-          return { ...link, url: extractedUrl, tinyUrl };
-        } else if (isBadTinyUrl) {
-          return { ...link, url: extractedUrl, tinyUrl: "" };
+      if (extractedUrl.length > 100) {
+        if (!prevTinyUrl || isBadTinyUrl) {
+          const tinyUrl = await generateTinyUrl(
+            extractedUrl,
+            true,
+            settings?.supportNumber || "3363284466",
+          );
+          if (
+            tinyUrl &&
+            tinyUrl !== extractedUrl &&
+            !tinyUrl.toLowerCase().includes("<html")
+          ) {
+            return { ...link, url: extractedUrl, tinyUrl };
+          } else if (isBadTinyUrl) {
+            return { ...link, url: extractedUrl, tinyUrl: "" };
+          }
         }
+        return { ...link, url: extractedUrl, tinyUrl: prevTinyUrl };
       }
-
-      return { ...link, url: extractedUrl, tinyUrl: prevTinyUrl };
+      return { ...link, url: extractedUrl, tinyUrl: "" };
     };
 
     if (updatedContent.type === "movie" && updatedContent.movieLinks) {
@@ -2919,8 +3054,8 @@ export default function ContentManagement() {
 
       const linkPromises: Promise<void>[] = [];
 
-      for (let s = 0; s < parsedSeasons.length; s++) {
-        const season = parsedSeasons[s];
+      for (let s = 0; s < seasonsToShare.length; s++) {
+        const season = seasonsToShare[s];
 
         if (season.zipLinks) {
           linkPromises.push(
@@ -3211,7 +3346,7 @@ export default function ContentManagement() {
     if (content.trailerUrl) text += `🎥 Trailer: ${content.trailerUrl}\n`;
     if (content.sampleUrl) {
       let tmpSample = content.sampleUrl;
-      if (!tmpSample.includes('pixeldrain.com') && !tmpSample.includes('pixeldrain.dev') && !tmpSample.includes('pixeldrain.net') && !tmpSample.includes('t.me')) {
+      if (tmpSample.length > 100 && !tmpSample.includes('pixeldrain.com') && !tmpSample.includes('pixeldrain.dev') && !tmpSample.includes('pixeldrain.net') && !tmpSample.includes('t.me')) {
         const tinyUrl = await generateTinyUrl(tmpSample, false, settings?.supportNumber || '3363284466');
         if (tinyUrl && !tinyUrl.toLowerCase().includes('<html')) {
           tmpSample = tinyUrl;
@@ -5565,17 +5700,11 @@ export default function ContentManagement() {
               <button
                 onClick={() => {
                   if (shareSeasonModal.content) {
-                    if (shareSeasonModal.mode === "whatsapp") {
-                      executeWhatsappShare(
-                        shareSeasonModal.content,
-                        selectedShareSeasons,
-                      );
-                    } else {
-                      executeShare(
-                        shareSeasonModal.content,
-                        selectedShareSeasons,
-                      );
-                    }
+                    handleSharePipeline(
+                      shareSeasonModal.content,
+                      shareSeasonModal.mode,
+                      selectedShareSeasons,
+                    );
                     setShareSeasonModal({ ...shareSeasonModal, isOpen: false });
                   }
                 }}
