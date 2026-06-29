@@ -503,10 +503,9 @@ async function startServer() {
             const response = await fetch(fetchUrl, {
               method: "GET",
               headers: {
-                "User-Agent":
-                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                Range: "bytes=0-0",
-                Accept: "*/*",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Range": "bytes=0-0",
+                "Accept": "*/*"
               },
               signal: controller.signal,
             });
@@ -534,891 +533,709 @@ async function startServer() {
   });
 
   // MDrive Extraction API
-  app.get(
-    "/api/mdrive",
-    async (req: express.Request, res: express.Response) => {
-      try {
-        let { url } = req.query;
-        if (!url || typeof url !== "string" || !url.includes("mdrive.lol")) {
-          return res
-            .status(400)
-            .json({ error: "Valid mdrive.lol URL required" });
+  app.get('/api/mdrive', async (req: express.Request, res: express.Response) => {
+    try {
+      let { url } = req.query;
+      if (!url || typeof url !== 'string' || !url.includes('mdrive.lol')) {
+        return res.status(400).json({ error: 'Valid mdrive.lol URL required' });
+      }
+
+      if (!url.startsWith('http')) {
+         url = 'https://' + url;
+      }
+
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`MDrive returned ${response.status}`);
+      }
 
-        if (!url.startsWith("http")) {
-          url = "https://" + url;
-        }
-
-        const response = await fetch(url, {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          },
-        });
-
-        if (!response.ok) {
-          throw new Error(`MDrive returned ${response.status}`);
-        }
-
-        const text = await response.text();
-        const rawHits: any[] = [];
-        let mainTitle = "Unknown Title";
-        const titleMatch = text.match(/<title[^>]*>([^<]+)<\/title>/i);
-        if (titleMatch) {
-          mainTitle = titleMatch[1]
-            .replace(
-              /(?:\s*-\s*mdrive\.lol|\s*-\s*MDrive|HubCloud|HubDrive|vcloud|hubcould|hub-cloud)/gi,
-              "",
-            )
-            .trim();
-        }
-
-        // Split on link opening tags to evaluate the preceding text for context
-        const parts = text.split("<a ");
-        let lastFilename = "File";
-
-        for (let i = 1; i < parts.length; i++) {
+      const text = await response.text();
+      const rawHits: any[] = [];
+      let mainTitle = "Unknown Title";
+      const titleMatch = text.match(/<title[^>]*>([^<]+)<\/title>/i);
+      if (titleMatch) {
+          mainTitle = titleMatch[1].replace(/(?:\s*-\s*mdrive\.lol|\s*-\s*MDrive|HubCloud|HubDrive|vcloud|hubcould|hub-cloud)/ig, "").trim();
+      }
+      
+      // Split on link opening tags to evaluate the preceding text for context
+      const parts = text.split('<a ');
+      let lastFilename = "File";
+      
+      for (let i = 1; i < parts.length; i++) {
           const hrefMatch = parts[i].match(/href="([^"]+)"/);
           if (hrefMatch) {
-            const link = hrefMatch[1];
+              const link = hrefMatch[1];
+              
+              // Check if it's a HubCloud link
+              if (link.includes('hubcloud.foo') || link.includes('hubcould.') || link.includes('hubcloud.') || link.includes('hubdrive.') || link.includes('vcloud.')) {
+                  const prev = parts[i-1];
+                  
+                  // Mdrive stores the file name in a heading directly before the link
+                  const h5Match = prev.match(/<h[1-6][^>]*>([^<]+)<\/h[1-6]>\s*(?:<[^>]+>\s*)*$/i);
+                  let title = lastFilename;
+                  if (h5Match) {
+                      title = h5Match[1].trim();
+                      lastFilename = title; // Fallback for links that don't have a direct heading
+                  }
+                  
+                  let titleClean = title.replace(/(?:HubCloud|HubDrive(?:\.space)?|vcloud|hubcould|hub-cloud)(?:\s*-)?/ig, '').trim();
+                  
+                  let tLower = titleClean.toLowerCase();
+                  let mLower = mainTitle.toLowerCase();
+                  if (tLower === 'file') titleClean = "";
+                  
+                  let combined = mainTitle;
+                  if (titleClean) {
+                      if (tLower.includes(mLower)) {
+                          combined = titleClean;
+                      } else if (mLower.includes(tLower)) {
+                          combined = mainTitle;
+                      } else {
+                          combined = `${mainTitle} ${titleClean}`;
+                      }
+                  }
+                  
+                  let finalFileName = combined.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+                  
+                  // Scrape size if available in the text
+                  let size = "Unknown";
+                  const sizeMatch = prev.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i) || title.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i);
+                  if (sizeMatch) {
+                      size = sizeMatch[1].toUpperCase();
+                      // Remove size from filename to make matching easier
+                      const escapedSize = size.replace(/\./g, '\\.');
+                      finalFileName = finalFileName.replace(new RegExp(`\\[?\\s*${escapedSize}\\s*\\]?`, 'gi'), "").replace(/[\[\]()\-_\s]+$/, "").trim();
+                  }
 
-            // Check if it's a HubCloud link
-            if (
-              link.includes("hubcloud.foo") ||
-              link.includes("hubcould.") ||
-              link.includes("hubcloud.") ||
-              link.includes("hubdrive.") ||
-              link.includes("vcloud.")
-            ) {
-              const prev = parts[i - 1];
-
-              // Mdrive stores the file name in a heading directly before the link
-              const h5Match = prev.match(
-                /<h[1-6][^>]*>([^<]+)<\/h[1-6]>\s*(?:<[^>]+>\s*)*$/i,
-              );
-              let title = lastFilename;
-              if (h5Match) {
-                title = h5Match[1].trim();
-                lastFilename = title; // Fallback for links that don't have a direct heading
+                  rawHits.push({
+                     file_name: finalFileName,
+                     url: normalizeDomain(link),
+                     size: size !== "Unknown" ? size : null,
+                     date: new Date().toISOString().split('T')[0]
+                  });
               }
-
-              let titleClean = title
-                .replace(
-                  /(?:HubCloud|HubDrive(?:\.space)?|vcloud|hubcould|hub-cloud)(?:\s*-)?/gi,
-                  "",
-                )
-                .trim();
-
-              let tLower = titleClean.toLowerCase();
-              let mLower = mainTitle.toLowerCase();
-              if (tLower === "file") titleClean = "";
-
-              let combined = mainTitle;
-              if (titleClean) {
-                if (tLower.includes(mLower)) {
-                  combined = titleClean;
-                } else if (mLower.includes(tLower)) {
-                  combined = mainTitle;
-                } else {
-                  combined = `${mainTitle} ${titleClean}`;
-                }
-              }
-
-              let finalFileName = combined
-                .replace(/&#8211;/g, "-")
-                .replace(/&amp;/g, "&")
-                .replace(/\s+/g, " ")
-                .trim();
-
-              // Scrape size if available in the text
-              let size = "Unknown";
-              const sizeMatch =
-                prev.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i) ||
-                title.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i);
-              if (sizeMatch) {
-                size = sizeMatch[1].toUpperCase();
-                // Remove size from filename to make matching easier
-                const escapedSize = size.replace(/\./g, "\\.");
-                finalFileName = finalFileName
-                  .replace(
-                    new RegExp(`\\[?\\s*${escapedSize}\\s*\\]?`, "gi"),
-                    "",
-                  )
-                  .replace(/[\[\]()\-_\s]+$/, "")
-                  .trim();
-              }
-
-              rawHits.push({
-                file_name: finalFileName,
-                url: normalizeDomain(link),
-                size: size !== "Unknown" ? size : null,
-                date: new Date().toISOString().split("T")[0],
-              });
-            }
           }
-        }
-
-        // Deduplicate: If same file found in hubcloud, skip hubdrive
-        const hits: any[] = [];
-        const seenFiles = new Map<string, string>(); // Add URL host to know which we kept
-
-        for (const hit of rawHits) {
-          const isHubdrive = hit.url.includes("hubdrive.");
-          const existing = seenFiles.get(hit.file_name);
-
-          if (existing) {
-            // If we already have this file...
-            if (isHubdrive && !existing.includes("hubdrive.")) {
-              // Skip hubdrive if we already have non-hubdrive (hubcloud)
-              continue;
-            }
-            if (!isHubdrive && existing.includes("hubdrive.")) {
-              // Replace hubdrive with hubcloud
-              const idx = hits.findIndex(
-                (h) => h.file_name === hit.file_name && h.url === existing,
-              );
-              if (idx !== -1) hits.splice(idx, 1);
-              hits.push(hit);
-              seenFiles.set(hit.file_name, hit.url);
-              continue;
-            }
-            // Otherwise just keep the first one
-            continue;
-          }
-
-          hits.push(hit);
-          seenFiles.set(hit.file_name, hit.url);
-        }
-
-        res.json({ hits, found: hits.length, all_fetched: true });
-      } catch (error: any) {
-        console.error("MDrive extract error:", error);
-        res.status(500).json({ error: error.message });
       }
-    },
-  );
+
+      // Deduplicate: If same file found in hubcloud, skip hubdrive
+      const hits: any[] = [];
+      const seenFiles = new Map<string, string>(); // Add URL host to know which we kept
+      
+      for (const hit of rawHits) {
+         const isHubdrive = hit.url.includes('hubdrive.');
+         const existing = seenFiles.get(hit.file_name);
+         
+         if (existing) {
+             // If we already have this file...
+             if (isHubdrive && !existing.includes('hubdrive.')) {
+                 // Skip hubdrive if we already have non-hubdrive (hubcloud)
+                 continue;
+             }
+             if (!isHubdrive && existing.includes('hubdrive.')) {
+                 // Replace hubdrive with hubcloud
+                 const idx = hits.findIndex(h => h.file_name === hit.file_name && h.url === existing);
+                 if (idx !== -1) hits.splice(idx, 1);
+                 hits.push(hit);
+                 seenFiles.set(hit.file_name, hit.url);
+                 continue;
+             }
+             // Otherwise just keep the first one
+             continue;
+         }
+         
+         hits.push(hit);
+         seenFiles.set(hit.file_name, hit.url);
+      }
+
+      res.json({ hits, found: hits.length, all_fetched: true });
+    } catch (error: any) {
+      console.error('MDrive extract error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
 
   // HowBlogs Extraction API
-  app.get(
-    "/api/howblogs",
-    async (req: express.Request, res: express.Response) => {
-      try {
-        let { url } = req.query;
-        if (!url || typeof url !== "string" || !url.includes("howblogs.xyz")) {
-          return res
-            .status(400)
-            .json({ error: "Valid howblogs.xyz URL required" });
-        }
-
-        if (!url.startsWith("http")) {
-          url = "https://" + url;
-        }
-
-        const response = await fetch(url, {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          },
-        });
-
-        if (!response.ok) {
-          throw new Error(`HowBlogs returned ${response.status}`);
-        }
-
-        const text = await response.text();
-        // Look for HubCloud links - they usually start with hubcloud. or hubcould.
-        const hubcloudMatch = text.match(
-          /https?:\/\/[^"'\s]*(?:hubcloud|hubcould)\.[^"'\s]*/i,
-        );
-
-        if (hubcloudMatch) {
-          res.json({ url: normalizeDomain(hubcloudMatch[0]) });
-        } else {
-          res.status(404).json({ error: "No HubCloud link found" });
-        }
-      } catch (error: any) {
-        console.error("HowBlogs extract error:", error);
-        res.status(500).json({ error: error.message });
+  app.get('/api/howblogs', async (req: express.Request, res: express.Response) => {
+    try {
+      let { url } = req.query;
+      if (!url || typeof url !== 'string' || !url.includes('howblogs.xyz')) {
+        return res.status(400).json({ error: 'Valid howblogs.xyz URL required' });
       }
-    },
-  );
+
+      if (!url.startsWith('http')) {
+         url = 'https://' + url;
+      }
+
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HowBlogs returned ${response.status}`);
+      }
+
+      const text = await response.text();
+      // Look for HubCloud links - they usually start with hubcloud. or hubcould.
+      const hubcloudMatch = text.match(/https?:\/\/[^"'\s]*(?:hubcloud|hubcould)\.[^"'\s]*/i);
+      
+      if (hubcloudMatch) {
+          res.json({ url: normalizeDomain(hubcloudMatch[0]) });
+      } else {
+          res.status(404).json({ error: 'No HubCloud link found' });
+      }
+    } catch (error: any) {
+      console.error('HowBlogs extract error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
 
   // FilesDL Extraction API
-  app.get(
-    "/api/filesdl",
-    async (req: express.Request, res: express.Response) => {
-      try {
-        let { url } = req.query;
-        if (
-          !url ||
-          typeof url !== "string" ||
-          (!url.includes("filesdl.in") && !url.includes("filesdl.top"))
-        ) {
-          return res.status(400).json({ error: "Valid filesdl URL required" });
-        }
-
-        if (!url.startsWith("http")) {
-          url = "https://" + url;
-        }
-
-        const response = await fetch(url, {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            Accept:
-              "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
-            Referer: url,
-          },
-        });
-
-        // Try to read text anyway because Cloudflare might return 403 but the HTML might still contain the link or we can extract it
-        const text = await response.text();
-        // Look for HubCloud links
-        const hubcloudMatch = text.match(
-          /https?:\/\/[^"'\s]*(?:hubcloud|hubcould|vcloud\.live|hubdrive)\.[^"'\s]*/i,
-        );
-
-        if (hubcloudMatch) {
-          res.json({ url: normalizeDomain(hubcloudMatch[0]) });
-        } else {
-          if (!response.ok) {
-            throw new Error(
-              `FilesDL returned ${response.status} and no valid link was found in response`,
-            );
-          }
-          res
-            .status(404)
-            .json({ error: "No HubCloud link found on FilesDL page" });
-        }
-      } catch (error: any) {
-        console.error("FilesDL extract error:", error);
-        res.status(500).json({ error: error.message });
+  app.get('/api/filesdl', async (req: express.Request, res: express.Response) => {
+    try {
+      let { url } = req.query;
+      if (!url || typeof url !== 'string' || (!url.includes('filesdl.in') && !url.includes('filesdl.top'))) {
+        return res.status(400).json({ error: 'Valid filesdl URL required' });
       }
-    },
-  );
+
+      if (!url.startsWith('http')) {
+         url = 'https://' + url;
+      }
+
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Referer': url
+        }
+      });
+      
+      // Try to read text anyway because Cloudflare might return 403 but the HTML might still contain the link or we can extract it
+      const text = await response.text();
+      // Look for HubCloud links
+      const hubcloudMatch = text.match(/https?:\/\/[^"'\s]*(?:hubcloud|hubcould|vcloud\.live|hubdrive)\.[^"'\s]*/i);
+      
+      if (hubcloudMatch) {
+          res.json({ url: normalizeDomain(hubcloudMatch[0]) });
+      } else {
+          if (!response.ok) {
+            throw new Error(`FilesDL returned ${response.status} and no valid link was found in response`);
+          }
+          res.status(404).json({ error: 'No HubCloud link found on FilesDL page' });
+      }
+    } catch (error: any) {
+      console.error('FilesDL extract error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
 
   // MoviesDrive Extraction API
-  app.get(
-    "/api/moviesdrive",
-    async (req: express.Request, res: express.Response) => {
-      try {
-        let { url } = req.query;
-        if (
-          !url ||
-          typeof url !== "string" ||
-          (!url.includes("moviesdrives.") && !url.includes("moviesdrive."))
-        ) {
-          return res
-            .status(400)
-            .json({ error: "Valid moviesdrives URL required" });
-        }
-
-        // Clean URL
-        let targetUrl = url.trim().replace(/[:\s]+$/, "");
-        if (!targetUrl.startsWith("http")) {
-          targetUrl = "https://" + targetUrl;
-        }
-
-        console.log(`[MoviesDrive] Extracting MDrive links from: ${targetUrl}`);
-
-        const headers = {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          Accept:
-            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-          Referer: targetUrl,
-        };
-
-        const response = await fetch(targetUrl, { headers });
-        if (!response.ok)
-          throw new Error(`MoviesDrive returned ${response.status}`);
-        const text = await response.text();
-
-        const hits: any[] = [];
-        const seenUrls = new Set<string>();
-        const parts = text.split("<a ");
-
-        for (let i = 1; i < parts.length; i++) {
-          const p = parts[i];
-          const m = p.match(
-            /href=["']([^"']*(?:mdrive|mdrvie)\.lol\/archive\/[^"']*)["']/i,
-          );
-          if (m) {
-            const mUrl = m[1].trim();
-            if (!seenUrls.has(mUrl)) {
-              seenUrls.add(mUrl);
-
-              // Extract label from the anchor text
-              let label = "";
-              const closeAnchorIndex = p.indexOf("</a>");
-              if (closeAnchorIndex !== -1) {
-                const anchorContent = p.substring(0, closeAnchorIndex);
-                const tagEndIndex = anchorContent.indexOf(">");
-                if (tagEndIndex !== -1) {
-                  const innerHtml = anchorContent.substring(tagEndIndex + 1);
-                  label = innerHtml.replace(/<[^>]*>/g, "").trim();
-                }
-              }
-
-              if (!label) label = "Download Link";
-              label = label
-                .replace(/&#8211;/g, "-")
-                .replace(/&amp;/g, "&")
-                .replace(/\s+/g, " ");
-
-              hits.push({
-                file_name: label,
-                url: normalizeDomain(mUrl),
-                size: null,
-                is_direct: false,
-              });
-            }
-          }
-        }
-
-        if (hits.length === 0) {
-          // Fallback: If no mdrive links, check for native hubcloud links just in case
-          const hubcloudMatch = text.match(
-            /https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|hubdrive)\.[^"'\s<>\[\]]*/gi,
-          );
-          if (hubcloudMatch) {
-            hubcloudMatch.forEach((hubUrl) => {
-              const cleanHubUrl = hubUrl.replace(/&amp;/g, "&");
-              if (!seenUrls.has(cleanHubUrl)) {
-                seenUrls.add(cleanHubUrl);
-                hits.push({
-                  file_name: "Original HubCloud Link",
-                  url: normalizeDomain(cleanHubUrl),
-                  size: null,
-                  is_direct: true,
-                });
-              }
-            });
-          }
-        }
-
-        res.json({ hits, found: hits.length });
-      } catch (error: any) {
-        console.error("MoviesDrive extract error:", error);
-        res.status(500).json({ error: error.message });
+  app.get('/api/moviesdrive', async (req: express.Request, res: express.Response) => {
+    try {
+      let { url } = req.query;
+      if (!url || typeof url !== 'string' || (!url.includes('moviesdrives.') && !url.includes('moviesdrive.'))) {
+        return res.status(400).json({ error: 'Valid moviesdrives URL required' });
       }
-    },
-  );
 
-  app.get(
-    "/api/resolve-tg",
-    async (req: express.Request, res: express.Response) => {
-      try {
-        const { url } = req.query;
-        if (!url || typeof url !== "string") {
-          return res.status(400).json({ error: "Valid URL required" });
-        }
+      // Clean URL
+      let targetUrl = url.trim().replace(/[:\s]+$/, '');
+      if (!targetUrl.startsWith('http')) {
+         targetUrl = 'https://' + targetUrl;
+      }
 
-        const httpsAgent = new https.Agent({ rejectUnauthorized: false });
-        const headers = {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        };
+      console.log(`[MoviesDrive] Extracting MDrive links from: ${targetUrl}`);
 
-        const fetchWithMicrolink = async (
-          targetUrl: string,
-          prerender = false,
-        ) => {
-          try {
-            const res = await axios.get(targetUrl, {
-              headers,
-              httpsAgent,
-              timeout: 3000,
+      const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Referer': targetUrl
+      };
+
+      const response = await fetch(targetUrl, { headers });
+      if (!response.ok) throw new Error(`MoviesDrive returned ${response.status}`);
+      const text = await response.text();
+      
+      const hits: any[] = [];
+      const seenUrls = new Set<string>();
+      const parts = text.split('<a ');
+      
+      for(let i = 1; i < parts.length; i++) {
+        const p = parts[i];
+        const m = p.match(/href=["']([^"']*(?:mdrive|mdrvie)\.lol\/archive\/[^"']*)["']/i);
+        if (m) {
+          const mUrl = m[1].trim();
+          if (!seenUrls.has(mUrl)) {
+            seenUrls.add(mUrl);
+            
+            // Extract label from the anchor text
+            let label = "";
+            const closeAnchorIndex = p.indexOf('</a>');
+            if (closeAnchorIndex !== -1) {
+              const anchorContent = p.substring(0, closeAnchorIndex);
+              const tagEndIndex = anchorContent.indexOf('>');
+              if (tagEndIndex !== -1) {
+                const innerHtml = anchorContent.substring(tagEndIndex + 1);
+                label = innerHtml.replace(/<[^>]*>/g, '').trim();
+              }
+            }
+            
+            if (!label) label = "Download Link";
+            label = label.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+            
+            hits.push({
+              file_name: label,
+              url: normalizeDomain(mUrl),
+              size: null,
+              is_direct: false
             });
-            return {
-              html: res.data || "",
-              url:
-                res.request?.res?.responseUrl ||
-                res.request?._currentUrl ||
-                targetUrl,
-            };
-          } catch (e: any) {
-            console.log("Axios failed for", targetUrl);
           }
+        }
+      }
 
-          return { html: "", url: targetUrl };
-        };
+      if (hits.length === 0) {
+        // Fallback: If no mdrive links, check for native hubcloud links just in case
+        const hubcloudMatch = text.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|hubdrive)\.[^"'\s<>\[\]]*/gi);
+        if (hubcloudMatch) {
+           hubcloudMatch.forEach(hubUrl => {
+              const cleanHubUrl = hubUrl.replace(/&amp;/g, '&');
+              if (!seenUrls.has(cleanHubUrl)) {
+                 seenUrls.add(cleanHubUrl);
+                 hits.push({
+                    file_name: "Original HubCloud Link",
+                    url: normalizeDomain(cleanHubUrl),
+                    size: null,
+                    is_direct: true
+                 });
+              }
+           });
+        }
+      }
+      
+      res.json({ hits, found: hits.length });
+    } catch (error: any) {
+      console.error('MoviesDrive extract error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
 
-        // Step 1: Fetch initial HubCloud/HubDrive link
-        const hcResult = await fetchWithMicrolink(url);
-        const hcText = hcResult.html;
-        const $ = cheerio.load(hcText);
+  app.get('/api/resolve-tg', async (req: express.Request, res: express.Response) => {
+    try {
+      const { url } = req.query;
+      if (!url || typeof url !== 'string') {
+        return res.status(400).json({ error: 'Valid URL required' });
+      }
 
-        let tgGoUrlDirect = "";
-        let tgFileUrl = "";
+      const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+      const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' };
 
-        $("a").each((_, el) => {
-          const href = $(el).attr("href");
-          if (!href) return;
-          if (href.includes("/tg/go")) {
+      const fetchWithMicrolink = async (targetUrl: string, prerender = false) => {
+         try {
+            const mlRes = await axios.get(`https://api.microlink.io?url=${encodeURIComponent(targetUrl)}&meta=false${prerender ? '&prerender=true' : ''}&data.html.selector=html`, { headers, httpsAgent });
+            if (mlRes.data && mlRes.data.data) {
+               return {
+                   html: mlRes.data.data.html || "",
+                   url: mlRes.data.data.url || targetUrl
+               };
+            }
+         } catch (e: any) {
+            console.error("Microlink failed for", targetUrl, e.message);
+         }
+         // Fallback to normal axios if Microlink fails
+         const res = await axios.get(targetUrl, { headers, httpsAgent });
+         return {
+             html: res.data || "",
+             url: res.request?.res?.responseUrl || targetUrl
+         };
+      };
+
+      // Step 1: Fetch initial HubCloud/HubDrive link
+      const hcResult = await fetchWithMicrolink(url);
+      const hcText = hcResult.html;
+      const $ = cheerio.load(hcText);
+      
+      let tgGoUrlDirect = "";
+      let tgFileUrl = "";
+      
+      $('a').each((_, el) => {
+         const href = $(el).attr('href');
+         if (!href) return;
+         if (href.includes('/tg/go')) {
             tgGoUrlDirect = href;
-          }
-          const text = $(el).text();
-          const html = $(el).html() || "";
-          if (
-            (text.includes("Telegram File") ||
-              text.includes("Downoad From Telegram") ||
-              html.includes("fa-telegram")) &&
-            !href.includes("t.me/hubcloudreport")
-          ) {
+         }
+         const text = $(el).text();
+         const html = $(el).html() || '';
+         if ((text.includes('Telegram File') || text.includes('Downoad From Telegram') || html.includes('fa-telegram')) && !href.includes('t.me/hubcloudreport')) {
             tgFileUrl = href;
-          }
-        });
+         }
+      });
+      
+      if (tgGoUrlDirect) {
+         tgGoUrlDirect = tgGoUrlDirect.replace(/&amp;/g, '&');
+      } else if (tgFileUrl) {
+         const intermediateUrlFull = tgFileUrl.startsWith('http') ? tgFileUrl : new URL(tgFileUrl, url).toString();
+         const interResult = await fetchWithMicrolink(intermediateUrlFull);
+         const interText = interResult.html;
+         const $2 = cheerio.load(interText);
+         $2('a').each((_, el) => {
+             const href = $2(el).attr('href');
+             if (href && href.includes('/tg/go')) {
+                tgGoUrlDirect = href.replace(/&amp;/g, '&');
+             }
+         });
+      }
 
-        if (tgGoUrlDirect) {
-          tgGoUrlDirect = tgGoUrlDirect.replace(/&amp;/g, "&");
-        } else if (tgFileUrl) {
-          const intermediateUrlFull = tgFileUrl.startsWith("http")
-            ? tgFileUrl
-            : new URL(tgFileUrl, url).toString();
-          const interResult = await fetchWithMicrolink(intermediateUrlFull);
-          const interText = interResult.html;
-          const $2 = cheerio.load(interText);
-          $2("a").each((_, el) => {
-            const href = $2(el).attr("href");
-            if (href && href.includes("/tg/go")) {
-              tgGoUrlDirect = href.replace(/&amp;/g, "&");
-            }
-          });
-        }
+      let nextUrlStr = "";
+      
+      if (tgGoUrlDirect) {
+         // Skip gamerxyt if we already have the tg/go URL
+      } else {
+         const gamerxMatch = hcText.match(/href=["'](https?:\/\/[^"']*gamerxyt\.com[^"']+)["']/i);
+         if (gamerxMatch) {
+             nextUrlStr = gamerxMatch[1].replace(/&amp;/g, '&');
+         } else {
+             return res.status(404).json({ error: 'No gamerxyt or Telegram gateway link found' });
+         }
+      }
 
-        let nextUrlStr = "";
-
-        if (tgGoUrlDirect) {
-          // Skip gamerxyt if we already have the tg/go URL
-        } else {
-          const gamerxMatch = hcText.match(
-            /href=["'](https?:\/\/[^"']*gamerxyt\.com[^"']+)["']/i,
-          );
-          if (gamerxMatch) {
-            nextUrlStr = gamerxMatch[1].replace(/&amp;/g, "&");
-          } else {
-            return res
-              .status(404)
-              .json({ error: "No gamerxyt or Telegram gateway link found" });
-          }
-        }
-
-        // Step 2: Fetch gamerxyt page and extract /tg/go if needed
-        let tgGoUrl = tgGoUrlDirect;
-        let finalTgUrl = "";
-        if (!tgGoUrl && nextUrlStr) {
-          const gxResult = await fetchWithMicrolink(nextUrlStr);
-          const gxText = gxResult.html;
-          const tgGoMatch = gxText.match(
-            /href=["'](https?:\/\/[^"']+\/tg\/go[^"']*)["']/i,
-          );
-          if (tgGoMatch) {
-            tgGoUrl = tgGoMatch[1].replace(/&amp;/g, "&");
-          } else {
+      // Step 2: Fetch gamerxyt page and extract /tg/go if needed
+      let tgGoUrl = tgGoUrlDirect;
+      let finalTgUrl = "";
+      if (!tgGoUrl && nextUrlStr) {
+         const gxResult = await fetchWithMicrolink(nextUrlStr);
+         const gxText = gxResult.html;
+         const tgGoMatch = gxText.match(/href=["'](https?:\/\/[^"']+\/tg\/go[^"']*)["']/i);
+         if (tgGoMatch) {
+            tgGoUrl = tgGoMatch[1].replace(/&amp;/g, '&');
+         } else {
             // It might contain a direct telegram link already
-            const directTgMatch =
-              gxText.match(/href=["'](tg:\/\/[^"']+)["']/i) ||
-              gxText.match(
-                /href=["'](https?:\/\/(t\.me|telegram\.me)[^"']+)["']/i,
-              );
+            const directTgMatch = gxText.match(/href=["'](tg:\/\/[^"']+)["']/i) || gxText.match(/href=["'](https?:\/\/(t\.me|telegram\.me)[^"']+)["']/i);
             if (directTgMatch) {
-              finalTgUrl = directTgMatch[1];
+               finalTgUrl = directTgMatch[1];
             } else {
-              return res.status(404).json({
-                error: "Could not resolve Telegram intent URL from gateway",
-              });
+               return res.status(404).json({ error: 'Could not resolve Telegram intent URL from gateway' });
             }
-          }
-        }
+         }
+      }
 
-        // Step 3: Follow redirects of the tgGoUrl
-        let currentUrl = tgGoUrl;
-
-        if (!finalTgUrl && currentUrl) {
-          for (let i = 0; i < 5; i++) {
+      // Step 3: Follow redirects of the tgGoUrl
+      let currentUrl = tgGoUrl;
+      
+      if (!finalTgUrl && currentUrl) {
+         for(let i = 0; i < 5; i++) {
             if (!currentUrl) break;
             try {
-              const redirectResult = await fetchWithMicrolink(
-                currentUrl,
-                false,
-              );
-              const redirectHtml = redirectResult.html;
-              const resolvedUrl = redirectResult.url;
-
-              if (
-                resolvedUrl.startsWith("tg://") ||
-                resolvedUrl.includes("telegram.me") ||
-                resolvedUrl.includes("t.me")
-              ) {
-                finalTgUrl = resolvedUrl;
-                break;
-              } else {
-                const meta = redirectHtml.match(
-                  /content=["']0;url=([^"']+)["']/i,
-                );
-                if (meta) {
-                  currentUrl = meta[1].replace(/&amp;/g, "&");
-                  if (
-                    currentUrl.startsWith("tg://") ||
-                    currentUrl.includes("telegram.me") ||
-                    currentUrl.includes("t.me")
-                  ) {
-                    finalTgUrl = currentUrl;
-                    break;
-                  }
-                  continue;
-                }
-
-                const tgMatch =
-                  redirectHtml.match(/href=["'](tg:\/\/[^"']+)["']/i) ||
-                  redirectHtml.match(
-                    /href=["'](https?:\/\/(t\.me|telegram\.me)[^"']+)["']/i,
-                  );
-                if (tgMatch) {
-                  finalTgUrl = tgMatch[1];
+               const redirectResult = await fetchWithMicrolink(currentUrl, false);
+               const redirectHtml = redirectResult.html;
+               const resolvedUrl = redirectResult.url;
+               
+               if (resolvedUrl.startsWith('tg://') || resolvedUrl.includes('telegram.me') || resolvedUrl.includes('t.me')) {
+                  finalTgUrl = resolvedUrl;
                   break;
-                }
-
-                if (
-                  !finalTgUrl &&
-                  (currentUrl.includes("telegram.me") ||
-                    currentUrl.includes("t.me"))
-                ) {
-                  finalTgUrl = currentUrl;
-                }
-                break;
-              }
+               } else {
+                  const meta = redirectHtml.match(/content=["']0;url=([^"']+)["']/i);
+                  if (meta) {
+                     currentUrl = meta[1].replace(/&amp;/g, '&');
+                     if (currentUrl.startsWith('tg://') || currentUrl.includes('telegram.me') || currentUrl.includes('t.me')) {
+                        finalTgUrl = currentUrl;
+                        break;
+                     }
+                     continue;
+                  }
+                  
+                  const tgMatch = redirectHtml.match(/href=["'](tg:\/\/[^"']+)["']/i) || redirectHtml.match(/href=["'](https?:\/\/(t\.me|telegram\.me)[^"']+)["']/i);
+                  if (tgMatch) {
+                     finalTgUrl = tgMatch[1];
+                     break;
+                  }
+                  
+                  if (!finalTgUrl && (currentUrl.includes('telegram.me') || currentUrl.includes('t.me'))) {
+                      finalTgUrl = currentUrl;
+                  }
+                  break;
+               }
             } catch (e: any) {
-              console.error("Step 3 failed", e.message);
-              break;
+               console.error("Step 3 failed", e.message);
+               break;
             }
-          }
-        }
-
-        if (finalTgUrl) {
-          try {
-            if (
-              finalTgUrl.includes("telegram.me") ||
-              finalTgUrl.includes("t.me")
-            ) {
-              const tUrl = new URL(finalTgUrl);
-              const domain = tUrl.pathname.replace("/", "");
-              const start = tUrl.searchParams.get("start");
-              if (domain && start) {
-                finalTgUrl = `tg://resolve?domain=${domain}&start=${start}`;
-              } else if (domain) {
-                finalTgUrl = `tg://resolve?domain=${domain}`;
-              }
-            }
-          } catch (e) {}
-          res.json({ url: finalTgUrl });
-        } else {
-          // Fallback to the tgGoUrl if we couldn't resolve all the way, so at least it works
-          res.json({ url: tgGoUrl });
-        }
-      } catch (error: any) {
-        console.error("Telegram resolve error:", error.message);
-        res.status(500).json({ error: error.message });
+         }
       }
-    },
-  );
+
+      if (finalTgUrl) {
+         try {
+             if (finalTgUrl.includes('telegram.me') || finalTgUrl.includes('t.me')) {
+                 const tUrl = new URL(finalTgUrl);
+                 const domain = tUrl.pathname.replace('/', '');
+                 const start = tUrl.searchParams.get('start');
+                 if (domain && start) {
+                     finalTgUrl = `tg://resolve?domain=${domain}&start=${start}`;
+                 } else if (domain) {
+                     finalTgUrl = `tg://resolve?domain=${domain}`;
+                 }
+             }
+         } catch (e) {}
+         res.json({ url: finalTgUrl });
+      } else {
+         // Fallback to the tgGoUrl if we couldn't resolve all the way, so at least it works
+         res.json({ url: tgGoUrl });
+      }
+
+    } catch (error: any) {
+      console.error('Telegram resolve error:', error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
 
   // FilmyGo Extraction API
-  app.get(
-    "/api/filmygo",
-    async (req: express.Request, res: express.Response) => {
-      try {
-        let { url } = req.query;
-        if (!url || typeof url !== "string" || !url.includes("filmygo.")) {
-          return res.status(400).json({ error: "Valid FilmyGo URL required" });
-        }
-
-        // Clean URL
-        let targetUrl = url.trim().replace(/[:\s]+$/, "");
-        if (!targetUrl.startsWith("http")) {
-          targetUrl = "https://" + targetUrl;
-        }
-
-        console.log(`[FilmyGo] Extracting FilesDL links from: ${targetUrl}`);
-
-        const httpsAgent = new https.Agent({ rejectUnauthorized: false });
-        const headers = {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          Accept:
-            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-          Referer: targetUrl,
-        };
-
-        const response = await axios.get(targetUrl, { headers, httpsAgent });
-        const text = response.data;
-
-        const fdlData = new Map<string, { label: string }>();
-        const parts = text.split("<a ");
-        for (let i = 1; i < parts.length; i++) {
-          const p = parts[i];
-          const m = p.match(/href=["']([^"']*filesdl\.in\/[^"']*)["']/i);
-          if (m) {
-            const fdlUrl = m[1].trim();
-
-            let label = "";
-            const closeAnchorIndex = p.indexOf("</a>");
-            if (closeAnchorIndex !== -1) {
-              const anchorContent = p.substring(0, closeAnchorIndex);
-              const tagEndIndex = anchorContent.indexOf(">");
-              if (tagEndIndex !== -1) {
-                const innerHtml = anchorContent.substring(tagEndIndex + 1);
-                label = innerHtml.replace(/<[^>]*>/g, "").trim();
-              }
-            }
-
-            if (!label) label = "Download Link";
-            label = label
-              .replace(/&#8211;/g, "-")
-              .replace(/&amp;/g, "&")
-              .replace(/\s+/g, " ");
-
-            fdlData.set(fdlUrl, { label });
-          }
-        }
-
-        if (fdlData.size === 0) return res.json({ hits: [], found: 0 });
-
-        const results = await Promise.all(
-          Array.from(fdlData.keys()).map(async (fdlUrl) => {
-            try {
-              const fdlRes = await axios.get(fdlUrl, { headers, httpsAgent });
-              const fdlText = fdlRes.data;
-
-              const hubcloudMatch = fdlText.match(
-                /https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|hubdrive)\.[^"'\s<>\[\]]*/gi,
-              );
-              if (hubcloudMatch) {
-                const sizeMatch =
-                  fdlText.match(/Size:<\/span>\s*<span>([^<]+)<\/span>/i) ||
-                  fdlText.match(/(\d+(?:\.\d+)?\s*(?:GB|MB|KB))/i);
-                const size = sizeMatch ? sizeMatch[1].toUpperCase() : null;
-
-                let finalName = fdlData.get(fdlUrl)?.label || "HubCloud Link";
-                if (size) {
-                  const escapedSize = size.replace(/\./g, "\\.");
-                  finalName = finalName
-                    .replace(new RegExp(`\\[?${escapedSize}\\]?`, "gi"), "")
-                    .trim();
-                  finalName = finalName.replace(/[\[\]()\-_\s]+$/, "").trim();
-                }
-
-                return hubcloudMatch.map((hubUrl) => ({
-                  file_name: finalName || "HubCloud Link",
-                  url: normalizeDomain(hubUrl),
-                  size: size,
-                  is_direct: true,
-                }));
-              }
-              return [];
-            } catch (e) {
-              return [];
-            }
-          }),
-        );
-
-        let finalHits = results
-          .flat()
-          .filter(
-            (hit, index, self) =>
-              index === self.findIndex((t) => t.url === hit.url),
-          );
-
-        // Deduplicate Hubdrive vs Hubcloud based on finalName
-        const dedupedHits: any[] = [];
-        const seenFiles = new Map<string, string>(); // Add URL host to know which we kept
-
-        for (const hit of finalHits) {
-          const isHubdrive = hit.url.includes("hubdrive.");
-          const existing = seenFiles.get(hit.file_name);
-
-          if (existing) {
-            if (isHubdrive && !existing.includes("hubdrive.")) {
-              continue;
-            }
-            if (!isHubdrive && existing.includes("hubdrive.")) {
-              const idx = dedupedHits.findIndex(
-                (h) => h.file_name === hit.file_name && h.url === existing,
-              );
-              if (idx !== -1) dedupedHits.splice(idx, 1);
-              dedupedHits.push(hit);
-              seenFiles.set(hit.file_name, hit.url);
-              continue;
-            }
-            continue;
-          }
-
-          dedupedHits.push(hit);
-          seenFiles.set(hit.file_name, hit.url);
-        }
-        finalHits = dedupedHits;
-
-        res.json({ hits: finalHits, found: finalHits.length });
-      } catch (error: any) {
-        console.error("FilmyGo extract error:", error);
-        res.status(500).json({ error: error.message });
+  app.get('/api/filmygo', async (req: express.Request, res: express.Response) => {
+    try {
+      let { url } = req.query;
+      if (!url || typeof url !== 'string' || !url.includes('filmygo.')) {
+        return res.status(400).json({ error: 'Valid FilmyGo URL required' });
       }
-    },
-  );
+
+      // Clean URL
+      let targetUrl = url.trim().replace(/[:\s]+$/, '');
+      if (!targetUrl.startsWith('http')) {
+        targetUrl = 'https://' + targetUrl;
+      }
+
+      console.log(`[FilmyGo] Extracting FilesDL links from: ${targetUrl}`);
+
+      const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+      const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Referer': targetUrl
+      };
+
+      const response = await axios.get(targetUrl, { headers, httpsAgent });
+      const text = response.data;
+      
+      const fdlData = new Map<string, { label: string }>();
+      const parts = text.split('<a ');
+      for(let i = 1; i < parts.length; i++) {
+        const p = parts[i];
+        const m = p.match(/href=["']([^"']*filesdl\.in\/[^"']*)["']/i);
+        if (m) {
+          const fdlUrl = m[1].trim();
+          
+          let label = "";
+          const closeAnchorIndex = p.indexOf('</a>');
+          if (closeAnchorIndex !== -1) {
+            const anchorContent = p.substring(0, closeAnchorIndex);
+            const tagEndIndex = anchorContent.indexOf('>');
+            if (tagEndIndex !== -1) {
+              const innerHtml = anchorContent.substring(tagEndIndex + 1);
+              label = innerHtml.replace(/<[^>]*>/g, '').trim();
+            }
+          }
+          
+          if (!label) label = "Download Link";
+          label = label.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+          
+          fdlData.set(fdlUrl, { label });
+        }
+      }
+      
+      if (fdlData.size === 0) return res.json({ hits: [], found: 0 });
+
+      const results = await Promise.all(Array.from(fdlData.keys()).map(async (fdlUrl) => {
+        try {
+          const fdlRes = await axios.get(fdlUrl, { headers, httpsAgent });
+          const fdlText = fdlRes.data;
+          
+          const hubcloudMatch = fdlText.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|hubdrive)\.[^"'\s<>\[\]]*/gi);
+          if (hubcloudMatch) {
+            const sizeMatch = fdlText.match(/Size:<\/span>\s*<span>([^<]+)<\/span>/i) || fdlText.match(/(\d+(?:\.\d+)?\s*(?:GB|MB|KB))/i);
+            const size = sizeMatch ? sizeMatch[1].toUpperCase() : null;
+
+            let finalName = fdlData.get(fdlUrl)?.label || "HubCloud Link";
+            if (size) {
+                const escapedSize = size.replace(/\./g, '\\.');
+                finalName = finalName.replace(new RegExp(`\\[?${escapedSize}\\]?`, 'gi'), "").trim();
+                finalName = finalName.replace(/[\[\]()\-_\s]+$/, "").trim();
+            }
+
+            return hubcloudMatch.map(hubUrl => ({
+              file_name: finalName || "HubCloud Link",
+              url: normalizeDomain(hubUrl),
+              size: size,
+              is_direct: true
+            }));
+          }
+          return [];
+        } catch (e) {
+          return [];
+        }
+      }));
+
+      let finalHits = results.flat().filter((hit, index, self) => 
+        index === self.findIndex((t) => t.url === hit.url)
+      );
+
+      // Deduplicate Hubdrive vs Hubcloud based on finalName
+      const dedupedHits: any[] = [];
+      const seenFiles = new Map<string, string>(); // Add URL host to know which we kept
+      
+      for (const hit of finalHits) {
+         const isHubdrive = hit.url.includes('hubdrive.');
+         const existing = seenFiles.get(hit.file_name);
+         
+         if (existing) {
+             if (isHubdrive && !existing.includes('hubdrive.')) {
+                 continue;
+             }
+             if (!isHubdrive && existing.includes('hubdrive.')) {
+                 const idx = dedupedHits.findIndex(h => h.file_name === hit.file_name && h.url === existing);
+                 if (idx !== -1) dedupedHits.splice(idx, 1);
+                 dedupedHits.push(hit);
+                 seenFiles.set(hit.file_name, hit.url);
+                 continue;
+             }
+             continue;
+         }
+         
+         dedupedHits.push(hit);
+         seenFiles.set(hit.file_name, hit.url);
+      }
+      finalHits = dedupedHits;
+      
+      res.json({ hits: finalHits, found: finalHits.length });
+    } catch (error: any) {
+      console.error('FilmyGo extract error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
 
   // SkymoviesHD Extraction API
-  app.get(
-    "/api/skymovieshd",
-    async (req: express.Request, res: express.Response) => {
-      try {
-        let { url } = req.query;
-        if (!url || typeof url !== "string" || !url.includes("skymovieshd.")) {
-          return res
-            .status(400)
-            .json({ error: "Valid SkymoviesHD URL required" });
-        }
-
-        // Clean URL
-        let targetUrl = url.trim().replace(/[:\s]+$/, "");
-        if (!targetUrl.startsWith("http")) {
-          targetUrl = "https://" + targetUrl;
-        }
-
-        console.log(
-          `[SkymoviesHD] Extracting redirection links from: ${targetUrl}`,
-        );
-
-        const headers = {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          Accept:
-            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-          Referer: targetUrl,
-        };
-
-        const response = await fetch(targetUrl, { headers });
-        if (!response.ok)
-          throw new Error(`SkymoviesHD returned ${response.status}`);
-        const text = await response.text();
-
-        const hbData = new Map<string, { label: string }>();
-        const parts = text.split("<a ");
-        for (let i = 1; i < parts.length; i++) {
-          const p = parts[i];
-          const m = p.match(
-            /href=["']([^"']*(?:howblogs\.xyz|howblog\.xyz|sky-blogs\.xyz|sky-blog\.xyz|moviesapi|skymovies)\/[^"']*)["']/i,
-          );
-          if (m) {
-            const hbUrl = m[1].trim();
-
-            let label = "";
-            const closeAnchorIndex = p.indexOf("</a>");
-            if (closeAnchorIndex !== -1) {
-              const anchorContent = p.substring(0, closeAnchorIndex);
-              const tagEndIndex = anchorContent.indexOf(">");
-              if (tagEndIndex !== -1) {
-                const innerHtml = anchorContent.substring(tagEndIndex + 1);
-                label = innerHtml.replace(/<[^>]*>/g, "").trim();
-              }
-            }
-
-            if (!label) label = "Download Link";
-            label = label
-              .replace(/&#8211;/g, "-")
-              .replace(/&amp;/g, "&")
-              .replace(/\s+/g, " ");
-
-            hbData.set(hbUrl, { label });
-          }
-        }
-
-        if (hbData.size === 0) return res.json({ hits: [], found: 0 });
-
-        const results = await Promise.all(
-          Array.from(hbData.keys()).map(async (hbUrl) => {
-            try {
-              const hbRes = await fetch(hbUrl, { headers });
-              if (!hbRes.ok) return [];
-              const hbText = await hbRes.text();
-
-              const hubcloudMatch = hbText.match(
-                /https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|hubdrive)\.[^"'\s<>\[\]]*/gi,
-              );
-              if (hubcloudMatch) {
-                const sizeMatch =
-                  hbText.match(/\[?(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\]?/i) ||
-                  hbText.match(/Size:\s*([^<]+)/i);
-                const size = sizeMatch
-                  ? (sizeMatch[1] || sizeMatch[2]).toUpperCase()
-                  : null;
-
-                let finalName = hbData.get(hbUrl)?.label || "HubCloud Link";
-                if (size) {
-                  const escapedSize = size.replace(/\./g, "\\.");
-                  finalName = finalName
-                    .replace(new RegExp(`\\[?${escapedSize}\\]?`, "gi"), "")
-                    .trim();
-                  finalName = finalName.replace(/[\[\]()\-_\s]+$/, "").trim();
-                }
-
-                return hubcloudMatch.map((hubUrl) => ({
-                  file_name: finalName || "HubCloud Link",
-                  url: normalizeDomain(hubUrl),
-                  size: size,
-                  is_direct: true,
-                }));
-              }
-              return [];
-            } catch (e) {
-              return [];
-            }
-          }),
-        );
-
-        let finalHits = results
-          .flat()
-          .filter(
-            (hit, index, self) =>
-              index === self.findIndex((t) => t.url === hit.url),
-          );
-
-        // Deduplicate Hubdrive vs Hubcloud based on finalName
-        const dedupedHits: any[] = [];
-        const seenFiles = new Map<string, string>(); // Add URL host to know which we kept
-
-        for (const hit of finalHits) {
-          const isHubdrive = hit.url.includes("hubdrive.");
-          const existing = seenFiles.get(hit.file_name);
-
-          if (existing) {
-            if (isHubdrive && !existing.includes("hubdrive.")) {
-              continue;
-            }
-            if (!isHubdrive && existing.includes("hubdrive.")) {
-              const idx = dedupedHits.findIndex(
-                (h) => h.file_name === hit.file_name && h.url === existing,
-              );
-              if (idx !== -1) dedupedHits.splice(idx, 1);
-              dedupedHits.push(hit);
-              seenFiles.set(hit.file_name, hit.url);
-              continue;
-            }
-            continue;
-          }
-
-          dedupedHits.push(hit);
-          seenFiles.set(hit.file_name, hit.url);
-        }
-        finalHits = dedupedHits;
-
-        res.json({ hits: finalHits, found: finalHits.length });
-      } catch (error: any) {
-        console.error("SkymoviesHD extract error:", error);
-        res.status(500).json({ error: error.message });
+  app.get('/api/skymovieshd', async (req: express.Request, res: express.Response) => {
+    try {
+      let { url } = req.query;
+      if (!url || typeof url !== 'string' || !url.includes('skymovieshd.')) {
+        return res.status(400).json({ error: 'Valid SkymoviesHD URL required' });
       }
-    },
-  );
+
+      // Clean URL
+      let targetUrl = url.trim().replace(/[:\s]+$/, '');
+      if (!targetUrl.startsWith('http')) {
+        targetUrl = 'https://' + targetUrl;
+      }
+
+      console.log(`[SkymoviesHD] Extracting redirection links from: ${targetUrl}`);
+
+      const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Referer': targetUrl
+      };
+
+      const response = await fetch(targetUrl, { headers });
+      if (!response.ok) throw new Error(`SkymoviesHD returned ${response.status}`);
+      const text = await response.text();
+      
+      const hbData = new Map<string, { label: string }>();
+      const parts = text.split('<a ');
+      for(let i = 1; i < parts.length; i++) {
+        const p = parts[i];
+        const m = p.match(/href=["']([^"']*(?:howblogs\.xyz|howblog\.xyz|sky-blogs\.xyz|sky-blog\.xyz|moviesapi|skymovies)\/[^"']*)["']/i);
+        if (m) {
+          const hbUrl = m[1].trim();
+          
+          let label = "";
+          const closeAnchorIndex = p.indexOf('</a>');
+          if (closeAnchorIndex !== -1) {
+            const anchorContent = p.substring(0, closeAnchorIndex);
+            const tagEndIndex = anchorContent.indexOf('>');
+            if (tagEndIndex !== -1) {
+              const innerHtml = anchorContent.substring(tagEndIndex + 1);
+              label = innerHtml.replace(/<[^>]*>/g, '').trim();
+            }
+          }
+          
+          if (!label) label = "Download Link";
+          label = label.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+          
+          hbData.set(hbUrl, { label });
+        }
+      }
+      
+      if (hbData.size === 0) return res.json({ hits: [], found: 0 });
+
+      const results = await Promise.all(Array.from(hbData.keys()).map(async (hbUrl) => {
+        try {
+          const hbRes = await fetch(hbUrl, { headers });
+          if (!hbRes.ok) return [];
+          const hbText = await hbRes.text();
+          
+          const hubcloudMatch = hbText.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|hubdrive)\.[^"'\s<>\[\]]*/gi);
+          if (hubcloudMatch) {
+            const sizeMatch = hbText.match(/\[?(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\]?/i) || hbText.match(/Size:\s*([^<]+)/i);
+            const size = sizeMatch ? (sizeMatch[1] || sizeMatch[2]).toUpperCase() : null;
+
+            let finalName = hbData.get(hbUrl)?.label || "HubCloud Link";
+            if (size) {
+                const escapedSize = size.replace(/\./g, '\\.');
+                finalName = finalName.replace(new RegExp(`\\[?${escapedSize}\\]?`, 'gi'), "").trim();
+                finalName = finalName.replace(/[\[\]()\-_\s]+$/, "").trim();
+            }
+
+            return hubcloudMatch.map(hubUrl => ({
+              file_name: finalName || "HubCloud Link",
+              url: normalizeDomain(hubUrl),
+              size: size,
+              is_direct: true
+            }));
+          }
+          return [];
+        } catch (e) {
+          return [];
+        }
+      }));
+
+      let finalHits = results.flat().filter((hit, index, self) => 
+        index === self.findIndex((t) => t.url === hit.url)
+      );
+
+      // Deduplicate Hubdrive vs Hubcloud based on finalName
+      const dedupedHits: any[] = [];
+      const seenFiles = new Map<string, string>(); // Add URL host to know which we kept
+      
+      for (const hit of finalHits) {
+         const isHubdrive = hit.url.includes('hubdrive.');
+         const existing = seenFiles.get(hit.file_name);
+         
+         if (existing) {
+             if (isHubdrive && !existing.includes('hubdrive.')) {
+                 continue;
+             }
+             if (!isHubdrive && existing.includes('hubdrive.')) {
+                 const idx = dedupedHits.findIndex(h => h.file_name === hit.file_name && h.url === existing);
+                 if (idx !== -1) dedupedHits.splice(idx, 1);
+                 dedupedHits.push(hit);
+                 seenFiles.set(hit.file_name, hit.url);
+                 continue;
+             }
+             continue;
+         }
+         
+         dedupedHits.push(hit);
+         seenFiles.set(hit.file_name, hit.url);
+      }
+      finalHits = dedupedHits;
+      
+      res.json({ hits: finalHits, found: finalHits.length });
+    } catch (error: any) {
+      console.error('SkymoviesHD extract error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
 
   // Subscribe to FCM topic
   app.post(
@@ -1434,11 +1251,11 @@ async function startServer() {
             throw new Error("Firebase Admin not initialized");
           }
           await admin.messaging().subscribeToTopic(token, "all_users");
-
+          
           if (userId) {
             await admin.messaging().subscribeToTopic(token, `user_${userId}`);
           }
-
+          
           res.json({ success: true });
         } catch (fcmError: any) {
           const isAuthError =
@@ -1466,8 +1283,7 @@ async function startServer() {
     ["/api/notifications/send", "/notifications/send"],
     async (req, res) => {
       try {
-        const { title, body, imageUrl, url, buttonUrl, targetUserIds } =
-          req.body;
+        const { title, body, imageUrl, url, buttonUrl, targetUserIds } = req.body;
         const targetUrl = buttonUrl || url || "/";
 
         try {
@@ -1481,10 +1297,10 @@ async function startServer() {
               },
               topic: `user_${uid}`,
             }));
-
+            
             let successCount = 0;
             let failureCount = 0;
-
+            
             for (let i = 0; i < messages.length; i += 500) {
               const batch = messages.slice(i, i + 500);
               const response = await admin.messaging().sendEach(batch);
@@ -1565,7 +1381,8 @@ async function startServer() {
       const adminDoc = await db.collection("users").doc(adminUid).get();
       if (
         !adminDoc.exists ||
-        (adminDoc.data()?.role !== "admin" && adminDoc.data()?.role !== "owner")
+        (adminDoc.data()?.role !== "admin" &&
+          adminDoc.data()?.role !== "owner")
       ) {
         return res.status(403).json({ error: "Unauthorized" });
       }
@@ -1593,7 +1410,7 @@ async function startServer() {
   }
 
   // Advanced Link Checker API
-  const checkLinkCache = new Map<string, { data: any; timestamp: number }>();
+  const checkLinkCache = new Map<string, { data: any, timestamp: number }>();
   const CHECK_LINK_CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
 
   app.post(["/api/check-link", "/check-link"], async (req, res) => {
@@ -1608,7 +1425,7 @@ async function startServer() {
       const cacheKey = url;
       const cached = checkLinkCache.get(cacheKey);
       if (cached && Date.now() - cached.timestamp < CHECK_LINK_CACHE_TTL) {
-        return res.json(cached.data);
+         return res.json(cached.data);
       }
 
       const originalJson = res.json.bind(res);
@@ -1618,6 +1435,7 @@ async function startServer() {
         }
         return originalJson(data);
       };
+
 
       let parsed: URL;
       try {
@@ -1650,7 +1468,7 @@ async function startServer() {
       ) {
         try {
           const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 2000);
+          const timeout = setTimeout(() => controller.abort(), 8000);
           const redirectCheck = await fetch(currentUrl, {
             method: "HEAD",
             headers,
@@ -1666,7 +1484,7 @@ async function startServer() {
         } catch (e) {
           try {
             const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 2000);
+            const timeout = setTimeout(() => controller.abort(), 8000);
             const redirectCheckGet = await fetch(currentUrl, {
               method: "GET",
               headers: { ...headers, Range: "bytes=0-0" },
@@ -1957,7 +1775,7 @@ async function startServer() {
       // GENERAL CHECK
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 4000);
+        const timeout = setTimeout(() => controller.abort(), 12000);
 
         let res_fetch: Response;
         try {
@@ -1969,7 +1787,7 @@ async function startServer() {
           });
           if (!res_fetch.ok || res_fetch.status === 405) {
             const getController = new AbortController();
-            const getTimeout = setTimeout(() => getController.abort(), 4000);
+            const getTimeout = setTimeout(() => getController.abort(), 12000);
             res_fetch = await fetch(currentUrl, {
               method: "GET",
               headers: { ...headers, Range: "bytes=0-0" },
@@ -2306,7 +2124,7 @@ async function startServer() {
             "collections",
             "settings",
             "notification_chunks",
-            "collection_chunks",
+            "collection_chunks"
           ]
         : [
             "genres",
@@ -2315,7 +2133,7 @@ async function startServer() {
             "content_chunks",
             "chunk_meta",
             "collections",
-            "collection_chunks",
+            "collection_chunks"
           ];
       const results: any = {};
 
@@ -2443,7 +2261,7 @@ async function startServer() {
             "collections",
             "settings",
             "notification_chunks",
-            "collection_chunks",
+            "collection_chunks"
           ]
         : [
             "genres",
@@ -2452,7 +2270,7 @@ async function startServer() {
             "content_chunks",
             "chunk_meta",
             "collections",
-            "collection_chunks",
+            "collection_chunks"
           ];
       const logs: string[] = [];
 
@@ -2498,7 +2316,7 @@ async function startServer() {
               );
               const tData = targetMap.get(d.id);
               if (!tData) return true; // Missing in target
-
+              
               const tUpdate = normalizeData(
                 tData.updatedAt || tData.createdAt || 0,
               );
@@ -2608,7 +2426,7 @@ async function startServer() {
             "collections",
             "settings",
             "notification_chunks",
-            "collection_chunks",
+            "collection_chunks"
           ]
         : [
             "genres",
@@ -2617,7 +2435,7 @@ async function startServer() {
             "content_chunks",
             "chunk_meta",
             "collections",
-            "collection_chunks",
+            "collection_chunks"
           ];
       const logs: string[] = [];
 
@@ -2667,7 +2485,7 @@ async function startServer() {
               );
               const sData = sourceMap.get(d.id);
               if (!sData) return true; // Missing in source
-
+              
               const sUpdate = normalizeData(
                 sData.updatedAt || sData.createdAt || 0,
               );
