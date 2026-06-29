@@ -101,23 +101,31 @@ async function fetchWithApi(url: string, timeout = 10000, isVcloud = false) {
 }
 
 async function fetchHtmlFallback(url: string, isVcloud = false) {
-  let response;
-  try {
-    response = await fetchDirect(url, 3000);
-    if (!isCloudflareResponse(response)) return response;
-  } catch (err) {}
+  const directPromise = fetchDirect(url, 2500).catch(() => null);
+  const apiPromise = fetchWithApi(url, 4000, isVcloud).catch(() => null);
 
   try {
-    response = await fetchWithApi(url, 5000, isVcloud);
-    if (!isCloudflareResponse(response)) return response;
+    // Wait for the first one to resolve with a successful (non-Cloudflare) response
+    const firstRes = await Promise.race([
+      directPromise.then((res) => {
+        if (res && !isCloudflareResponse(res)) return res;
+        return new Promise(() => {}); // never resolve if cloudflare, let the other one win
+      }),
+      apiPromise.then((res) => {
+        if (res && !isCloudflareResponse(res)) return res;
+        return new Promise(() => {});
+      }),
+    ]);
+
+    if (firstRes) return firstRes;
   } catch (err) {}
 
-  try {
-    response = await fetchWithApi(url, 12000, isVcloud);
-  } catch (err) {
-    response = { data: "", status: 500, headers: {} };
-  }
-  return response;
+  // If both failed or returned cloudflare, let's wait for them to settle and pick the best one
+  const [direct, api] = await Promise.all([directPromise, apiPromise]);
+  if (direct && !isCloudflareResponse(direct)) return direct;
+  if (api && !isCloudflareResponse(api)) return api;
+
+  return { data: "", status: 500, headers: {} };
 }
 
 async function fetchHtml(url: string, isVcloud = false) {

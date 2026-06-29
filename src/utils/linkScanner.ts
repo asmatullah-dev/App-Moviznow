@@ -116,24 +116,28 @@ export function splitLinks(text: string) {
   // Balanced parentheses are common in URLs (especially movie titles on these sites)
   // We'll use a more permissive regex but still try to avoid trailing punctuation common in prose
   const matches = text.match(/https?:\/\/[^\s"']+/g) || [];
-  return [...new Set(matches.map((s) => {
-    let clean = s.trim();
-    // Remove common trailing punctuation that's unlikely to be part of the URL itself
-    // but keep characters that are definitely part of it.
-    // If it ends with a closing paren, only remove it if there's no matching opening paren
-    clean = clean.replace(/[.,;:!]+$/, '');
-    
-    // Simple balanced paren check
-    if (clean.endsWith(')')) {
-      const openCount = (clean.match(/\(/g) || []).length;
-      const closeCount = (clean.match(/\)/g) || []).length;
-      if (closeCount > openCount) {
-        clean = clean.substring(0, clean.length - 1);
-      }
-    }
-    
-    return clean;
-  }))];
+  return [
+    ...new Set(
+      matches.map((s) => {
+        let clean = s.trim();
+        // Remove common trailing punctuation that's unlikely to be part of the URL itself
+        // but keep characters that are definitely part of it.
+        // If it ends with a closing paren, only remove it if there's no matching opening paren
+        clean = clean.replace(/[.,;:!]+$/, "");
+
+        // Simple balanced paren check
+        if (clean.endsWith(")")) {
+          const openCount = (clean.match(/\(/g) || []).length;
+          const closeCount = (clean.match(/\)/g) || []).length;
+          if (closeCount > openCount) {
+            clean = clean.substring(0, clean.length - 1);
+          }
+        }
+
+        return clean;
+      }),
+    ),
+  ];
 }
 
 export function guessLinkType(url: string) {
@@ -162,17 +166,35 @@ export function extractFilenameFromUrl(url: string): string | undefined {
   try {
     const parsed = new URL(url);
     // 1. Check common query parameters for a filename (with extension)
-    const params = ["file", "filename", "name", "title", "file_name", "download"];
+    const params = [
+      "file",
+      "filename",
+      "name",
+      "title",
+      "file_name",
+      "download",
+    ];
     for (const p of params) {
       const val = parsed.searchParams.get(p);
-      if (val && /\.(mkv|mp4|zip|rar|7z|avi|mov|wmv|flv|ts|3gp|srt|ass)$/i.test(val)) {
+      if (
+        val &&
+        /\.(mkv|mp4|zip|rar|7z|avi|mov|wmv|flv|ts|3gp|srt|ass)$/i.test(val)
+      ) {
         return decodeURIComponent(val);
       }
     }
     // 2. Check the path name (last non-empty segment)
     const segments = parsed.pathname.split("/").filter(Boolean);
-    const lastSegment = segments.length > 0 ? decodeURIComponent(segments[segments.length - 1]) : "";
-    if (lastSegment && /\.(mkv|mp4|zip|rar|7z|avi|mov|wmv|flv|ts|3gp|srt|ass)$/i.test(lastSegment)) {
+    const lastSegment =
+      segments.length > 0
+        ? decodeURIComponent(segments[segments.length - 1])
+        : "";
+    if (
+      lastSegment &&
+      /\.(mkv|mp4|zip|rar|7z|avi|mov|wmv|flv|ts|3gp|srt|ass)$/i.test(
+        lastSegment,
+      )
+    ) {
       return lastSegment;
     }
   } catch (e) {
@@ -669,41 +691,49 @@ export async function performFullLinkScan(
 
   // HubCloud interception
   let hubcloudTitle = "";
-  if (url.includes("hubcloud") || url.includes("moviesdrive") || url.includes("vcloud") || url.includes("hubdrive")) {
+  if (
+    url.includes("hubcloud") ||
+    url.includes("moviesdrive") ||
+    url.includes("vcloud") ||
+    url.includes("hubdrive")
+  ) {
     base = {
       url,
       ok: true,
       statusLabel: "WORKING",
       message: "Assuming working (initial)",
     };
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= 1; attempt++) {
       try {
         const extractController = new AbortController();
-        const extractTimeout = setTimeout(() => extractController.abort(), 25000);
-        
+        const extractTimeout = setTimeout(
+          () => extractController.abort(),
+          8000,
+        );
+
         const directController = new AbortController();
-        const directTimeout = setTimeout(() => directController.abort(), 25000);
+        const directTimeout = setTimeout(() => directController.abort(), 8000);
 
         const [res, dLinkRes] = await Promise.allSettled([
           fetch("/api/hubcloud/extract", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ url }),
-            signal: extractController.signal
+            signal: extractController.signal,
           }),
           fetch("/api/hubcloud/direct-link", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ url, checkOnly: false }),
-            signal: directController.signal
-          })
+            signal: directController.signal,
+          }),
         ]);
-        
+
         clearTimeout(extractTimeout);
         clearTimeout(directTimeout);
 
         let candidatesInfo: undefined | any[] = undefined;
-        
+
         if (dLinkRes.status === "fulfilled" && dLinkRes.value.ok) {
           try {
             const dLinkData = await dLinkRes.value.json();
@@ -725,7 +755,7 @@ export async function performFullLinkScan(
               statusLabel: hubcloudTitle ? "WORKING" : "WORKING",
               fileName: hubcloudTitle || undefined,
               fileSizeText: `${data.size} ${data.unit}`,
-              candidates: candidatesInfo
+              candidates: candidatesInfo,
             };
             if (!hubcloudTitle) base.statusLabel = "MISSING_FILENAME";
             finalUrlToUse = url;
@@ -746,7 +776,7 @@ export async function performFullLinkScan(
               ok: true,
               statusLabel: "WORKING",
               fileName: hubcloudTitle || undefined,
-              candidates: candidatesInfo
+              candidates: candidatesInfo,
             };
             finalUrlToUse = url;
             if (!hubcloudTitle) base.statusLabel = "MISSING_FILENAME";
@@ -757,7 +787,7 @@ export async function performFullLinkScan(
               ok: true,
               statusLabel: "WORKING",
               message: "Assuming working (size extraction failed)",
-              candidates: candidatesInfo
+              candidates: candidatesInfo,
             };
             finalUrlToUse = url;
             if (candidatesInfo) break;
@@ -768,7 +798,7 @@ export async function performFullLinkScan(
             ok: true,
             statusLabel: "WORKING",
             message: "Assuming working (timeout/blocked)",
-            candidates: candidatesInfo
+            candidates: candidatesInfo,
           };
           finalUrlToUse = url;
           if (candidatesInfo) break;
@@ -782,9 +812,9 @@ export async function performFullLinkScan(
         };
         finalUrlToUse = url;
       }
-      
+
       if (attempt < 3) {
-        await new Promise(resolve => setTimeout(resolve, 800));
+        await new Promise((resolve) => setTimeout(resolve, 800));
       }
     }
   } else if (url.includes("?token=") || url.includes("&token=")) {

@@ -623,12 +623,21 @@ export const LinkCheckerModal: React.FC<Props> = ({
           const u = queue.shift()!;
 
           try {
-            const result = await performFullLinkScan(
-              u,
-              extractedMetaRef.current,
-              languages,
-              qualities,
-            );
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+            let result;
+            try {
+              result = await performFullLinkScan(
+                u,
+                extractedMetaRef.current,
+                languages,
+                qualities,
+                controller.signal,
+              );
+            } finally {
+              clearTimeout(timeoutId);
+            }
 
             allResults.push(result);
             completedCount++;

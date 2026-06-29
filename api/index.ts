@@ -925,52 +925,23 @@ async function startServer() {
           prerender = false,
         ) => {
           try {
-            const fastRes = await axios.get(targetUrl, {
+            const res = await axios.get(targetUrl, {
               headers,
               httpsAgent,
-              timeout: 4000,
+              timeout: 3000,
             });
-            if (fastRes.data && typeof fastRes.data === "string") {
-              return {
-                html: fastRes.data,
-                url:
-                  fastRes.request?.res?.responseUrl ||
-                  fastRes.request?._currentUrl ||
-                  targetUrl,
-              };
-            }
+            return {
+              html: res.data || "",
+              url:
+                res.request?.res?.responseUrl ||
+                res.request?._currentUrl ||
+                targetUrl,
+            };
           } catch (e: any) {
-            console.log(
-              "Fast axios failed for",
-              targetUrl,
-              "trying microlink...",
-            );
+            console.log("Axios failed for", targetUrl);
           }
 
-          try {
-            const mlRes = await axios.get(
-              `https://api.microlink.io?url=${encodeURIComponent(targetUrl)}&meta=false${prerender ? "&prerender=true" : ""}&data.html.selector=html`,
-              { headers, httpsAgent },
-            );
-            if (mlRes.data && mlRes.data.data) {
-              return {
-                html: mlRes.data.data.html || "",
-                url: mlRes.data.data.url || targetUrl,
-              };
-            }
-          } catch (e: any) {
-            console.error("Microlink failed for", targetUrl, e.message);
-          }
-          // Fallback to normal axios if Microlink fails, this time with longer timeout
-          const res = await axios.get(targetUrl, {
-            headers,
-            httpsAgent,
-            timeout: 10000,
-          });
-          return {
-            html: res.data || "",
-            url: res.request?.res?.responseUrl || targetUrl,
-          };
+          return { html: "", url: targetUrl };
         };
 
         // Step 1: Fetch initial HubCloud/HubDrive link
@@ -1054,11 +1025,9 @@ async function startServer() {
             if (directTgMatch) {
               finalTgUrl = directTgMatch[1];
             } else {
-              return res
-                .status(404)
-                .json({
-                  error: "Could not resolve Telegram intent URL from gateway",
-                });
+              return res.status(404).json({
+                error: "Could not resolve Telegram intent URL from gateway",
+              });
             }
           }
         }
@@ -1681,7 +1650,7 @@ async function startServer() {
       ) {
         try {
           const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 8000);
+          const timeout = setTimeout(() => controller.abort(), 2000);
           const redirectCheck = await fetch(currentUrl, {
             method: "HEAD",
             headers,
@@ -1697,7 +1666,7 @@ async function startServer() {
         } catch (e) {
           try {
             const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 8000);
+            const timeout = setTimeout(() => controller.abort(), 2000);
             const redirectCheckGet = await fetch(currentUrl, {
               method: "GET",
               headers: { ...headers, Range: "bytes=0-0" },
@@ -1988,7 +1957,7 @@ async function startServer() {
       // GENERAL CHECK
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 12000);
+        const timeout = setTimeout(() => controller.abort(), 4000);
 
         let res_fetch: Response;
         try {
@@ -2000,7 +1969,7 @@ async function startServer() {
           });
           if (!res_fetch.ok || res_fetch.status === 405) {
             const getController = new AbortController();
-            const getTimeout = setTimeout(() => getController.abort(), 12000);
+            const getTimeout = setTimeout(() => getController.abort(), 4000);
             res_fetch = await fetch(currentUrl, {
               method: "GET",
               headers: { ...headers, Range: "bytes=0-0" },
