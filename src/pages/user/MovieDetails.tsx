@@ -8,7 +8,6 @@ import {
 } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 
-
 import { Content, QualityLinks, Season, Trailer } from "../../types";
 import { useAuth } from "../../contexts/AuthContext";
 import { useContent } from "../../contexts/ContentContext";
@@ -96,7 +95,8 @@ export default function MovieDetails() {
   } = useContent();
   const { cart, addToCart } = useCart();
   const { settings } = useSettings();
-  const [hasAttemptedGlobalRefresh, setHasAttemptedGlobalRefresh] = useState(false);
+  const [hasAttemptedGlobalRefresh, setHasAttemptedGlobalRefresh] =
+    useState(false);
 
   const content = useMemo(() => {
     console.log("DEBUG: id=", id, "contentList length=", contentList.length);
@@ -131,7 +131,11 @@ export default function MovieDetails() {
   const [isFavoriteLoading, setIsFavoriteLoading] = useState(false);
   const [isShareLoading, setIsShareLoading] = useState(false);
   const [resolvingTgId, setResolvingTgId] = useState<string | null>(null);
-  const [telegramConfirmModal, setTelegramConfirmModal] = useState<{ isOpen: boolean; url: string; id: string } | null>(null);
+  const [telegramConfirmModal, setTelegramConfirmModal] = useState<{
+    isOpen: boolean;
+    url: string;
+    id: string;
+  } | null>(null);
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
   const [linkPopup, setLinkPopup] = useState<{
     isOpen: boolean;
@@ -144,6 +148,7 @@ export default function MovieDetails() {
     candidates?: { text: string; href: string }[];
     size?: string;
     isCloudflare?: boolean;
+    formattedTitle?: string;
   } | null>(null);
   const [isPosterExpanded, setIsPosterExpanded] = useState(false);
   const [isTrailerPopupOpen, setIsTrailerPopupOpen] = useState(false);
@@ -365,7 +370,10 @@ export default function MovieDetails() {
           if (data) {
             setFullContent(data);
             setLoading(false);
-            safeStorage.setItemAsync(`movie_details_${id}`, JSON.stringify(data));
+            safeStorage.setItemAsync(
+              `movie_details_${id}`,
+              JSON.stringify(data),
+            );
           } else {
             setFetchFailed(true);
             setLoading(false);
@@ -385,7 +393,7 @@ export default function MovieDetails() {
     // Prioritize cachedMetadata (TMDB updates/local edits), then fresh fullContent from DB, then partial content from list
     const metadata: any = cachedMetadata.id === id ? cachedMetadata.data : {};
     const validFullContent: any = fullContent?.id === id ? fullContent : {};
-    
+
     const merged: any = {
       ...(content || {}),
       ...validFullContent,
@@ -395,22 +403,36 @@ export default function MovieDetails() {
     // Rescue links from validFullContent if metadata incorrectly overwrote them
     if (metadata.seasons && validFullContent.seasons) {
       try {
-        const metaSeasons = typeof metadata.seasons === 'string' ? JSON.parse(metadata.seasons) : metadata.seasons;
-        const fullSeasons = typeof validFullContent.seasons === 'string' ? JSON.parse(validFullContent.seasons) : validFullContent.seasons;
-        
+        const metaSeasons =
+          typeof metadata.seasons === "string"
+            ? JSON.parse(metadata.seasons)
+            : metadata.seasons;
+        const fullSeasons =
+          typeof validFullContent.seasons === "string"
+            ? JSON.parse(validFullContent.seasons)
+            : validFullContent.seasons;
+
         const rescuedSeasons = fullSeasons.map((fs: any) => {
-          const ms = metaSeasons.find((m: any) => m.seasonNumber === fs.seasonNumber);
+          const ms = metaSeasons.find(
+            (m: any) => m.seasonNumber === fs.seasonNumber,
+          );
           if (!ms) return fs;
-          const rescued = { ...fs, year: ms.year || fs.year, title: ms.title || fs.title };
+          const rescued = {
+            ...fs,
+            year: ms.year || fs.year,
+            title: ms.title || fs.title,
+          };
           if (fs.episodes && ms.episodes) {
             rescued.episodes = fs.episodes.map((fe: any) => {
-              const me = ms.episodes.find((m: any) => m.episodeNumber === fe.episodeNumber);
+              const me = ms.episodes.find(
+                (m: any) => m.episodeNumber === fe.episodeNumber,
+              );
               if (!me) return fe;
-              return { 
-                ...fe, 
-                title: me.title || fe.title, 
-                description: me.description || fe.description, 
-                duration: me.duration || fe.duration 
+              return {
+                ...fe,
+                title: me.title || fe.title,
+                description: me.description || fe.description,
+                duration: me.duration || fe.duration,
               };
             });
           }
@@ -526,7 +548,10 @@ export default function MovieDetails() {
     };
 
     const getLanguageString = () => {
-      if (mergedContent.languageIds && Array.isArray(mergedContent.languageIds)) {
+      if (
+        mergedContent.languageIds &&
+        Array.isArray(mergedContent.languageIds)
+      ) {
         const names = languages
           .filter((l) => mergedContent.languageIds?.includes(l.id))
           .map((l) => l.name);
@@ -534,7 +559,7 @@ export default function MovieDetails() {
       }
       if (
         (mergedContent as any).language &&
-        typeof (mergedContent as any).language === 'string'
+        typeof (mergedContent as any).language === "string"
       ) {
         return (mergedContent as any).language;
       }
@@ -543,12 +568,14 @@ export default function MovieDetails() {
 
     const getQualityString = () => {
       if (mergedContent.qualityId) {
-        const matchingQuality = qualities.find((q) => q.id === mergedContent.qualityId);
+        const matchingQuality = qualities.find(
+          (q) => q.id === mergedContent.qualityId,
+        );
         if (matchingQuality) return matchingQuality.name;
       }
       if (
         (mergedContent as any).quality &&
-        typeof (mergedContent as any).quality === 'string'
+        typeof (mergedContent as any).quality === "string"
       ) {
         return (mergedContent as any).quality;
       }
@@ -677,7 +704,7 @@ export default function MovieDetails() {
             imdbRating: mergedContent.imdbRating,
             ageRating: (mergedContent as any).ageRating,
             duration: (mergedContent as any).duration,
-            status: mergedContent.status
+            status: mergedContent.status,
           };
 
           // Add to front
@@ -688,19 +715,22 @@ export default function MovieDetails() {
 
           // Cleanup old movie_details is now mostly handled automatically by IndexedDB size, but we can do a best effort using localstorage fallback keys if any
           try {
-             const recentIds = recent.map(r => `movie_details_${r.id}`);
-             const keysToRemove = [];
-             for (let i = 0; i < localStorage.length; i++) {
-                const key = localStorage.key(i);
-                if (key?.startsWith('movie_details_') && !recentIds.includes(key)) {
-                   keysToRemove.push(key);
-                }
-             }
-             keysToRemove.forEach(k => {
-               localStorage.removeItem(k);
-               safeStorage.removeItemAsync(k);
-             });
-          } catch(e) {}
+            const recentIds = recent.map((r) => `movie_details_${r.id}`);
+            const keysToRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+              const key = localStorage.key(i);
+              if (
+                key?.startsWith("movie_details_") &&
+                !recentIds.includes(key)
+              ) {
+                keysToRemove.push(key);
+              }
+            }
+            keysToRemove.forEach((k) => {
+              localStorage.removeItem(k);
+              safeStorage.removeItemAsync(k);
+            });
+          } catch (e) {}
         } catch (e) {
           console.error("Failed to update recently viewed", e);
         }
@@ -1177,14 +1207,31 @@ export default function MovieDetails() {
   }, []);
 
   useEffect(() => {
-    if (!contentLoading && !mergedContent && fetchFailed && !hasAttemptedGlobalRefresh) {
+    if (
+      !contentLoading &&
+      !mergedContent &&
+      fetchFailed &&
+      !hasAttemptedGlobalRefresh
+    ) {
       setHasAttemptedGlobalRefresh(true);
       if (!isOffline) {
-        checkForUpdates(true).catch(e => console.error("Error refreshing content:", e));
-        refreshProfile(true).catch(e => console.error("Error refreshing user:", e));
+        checkForUpdates(true).catch((e) =>
+          console.error("Error refreshing content:", e),
+        );
+        refreshProfile(true).catch((e) =>
+          console.error("Error refreshing user:", e),
+        );
       }
     }
-  }, [contentLoading, mergedContent, fetchFailed, hasAttemptedGlobalRefresh, isOffline, checkForUpdates, refreshProfile]);
+  }, [
+    contentLoading,
+    mergedContent,
+    fetchFailed,
+    hasAttemptedGlobalRefresh,
+    isOffline,
+    checkForUpdates,
+    refreshProfile,
+  ]);
 
   if (loading || profileLoading) {
     return (
@@ -1205,15 +1252,21 @@ export default function MovieDetails() {
   if (!mergedContent || !isAuthorized) {
     return (
       <div className="min-h-screen bg-white dark:bg-zinc-950 flex flex-col items-center justify-center text-zinc-900 dark:text-white p-4">
-        {(!contentLoading && fetchFailed && !hasAttemptedGlobalRefresh) ? (
+        {!contentLoading && fetchFailed && !hasAttemptedGlobalRefresh ? (
           <div className="flex flex-col items-center gap-4">
             <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">Searching global library...</p>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              Searching global library...
+            </p>
           </div>
         ) : (
           <div className="text-center space-y-4">
-             <h2 className="text-xl font-bold">Content not found or unavailable</h2>
-             <p className="text-sm text-zinc-500 dark:text-zinc-400">This content may have been removed or you don't have access to it.</p>
+            <h2 className="text-xl font-bold">
+              Content not found or unavailable
+            </h2>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              This content may have been removed or you don't have access to it.
+            </p>
           </div>
         )}
       </div>
@@ -1324,6 +1377,7 @@ export default function MovieDetails() {
     tinyUrl?: string,
     isLocked?: boolean,
     seasonInfo?: { id: string; number: number; title?: string },
+    formattedTitle?: string,
   ) => {
     // Check eligibility before opening links
     const checkEligibility = () => {
@@ -1411,10 +1465,17 @@ export default function MovieDetails() {
     let finalSize: string | undefined;
 
     const isVcloudHost = url.includes("vcloud");
-    const isVcloudName = linkName ? linkName.toLowerCase().includes("vcloud") : false;
+    const isVcloudName = linkName
+      ? linkName.toLowerCase().includes("vcloud")
+      : false;
     const isVcloud = isVcloudHost || isVcloudName;
 
-    if (url.includes("hubcloud") || url.includes("moviesdrive") || url.includes("hubdrive") || isVcloud) {
+    if (
+      url.includes("hubcloud") ||
+      url.includes("moviesdrive") ||
+      url.includes("hubdrive") ||
+      isVcloud
+    ) {
       const clickId = url;
       setExtractingLinkId(clickId);
       // Immediately open the popup with a temporary "extracting" state, so user gets feedback
@@ -1426,31 +1487,35 @@ export default function MovieDetails() {
         id: linkId || "unknown",
         isZip,
         tinyUrl,
+        formattedTitle,
       });
 
       let shouldExtract = true;
       const now = Date.now();
-      
+
       let cachedLocal: any = null;
       try {
-        const cacheStr = localStorage.getItem('hubcloud_extraction_cache');
+        const cacheStr = localStorage.getItem("hubcloud_extraction_cache");
         if (cacheStr) {
           const cacheObj = JSON.parse(cacheStr);
-          
+
           // Prune old entries (> 10 mins) to prevent localStorage bloat
           const prunedObj: Record<string, any> = {};
           let changed = false;
           for (const key in cacheObj) {
-             if (now - cacheObj[key].timestamp < 600000) {
-                prunedObj[key] = cacheObj[key];
-             } else {
-                changed = true;
-             }
+            if (now - cacheObj[key].timestamp < 600000) {
+              prunedObj[key] = cacheObj[key];
+            } else {
+              changed = true;
+            }
           }
           if (changed) {
-             localStorage.setItem('hubcloud_extraction_cache', JSON.stringify(prunedObj));
+            localStorage.setItem(
+              "hubcloud_extraction_cache",
+              JSON.stringify(prunedObj),
+            );
           }
-          
+
           if (prunedObj[url]) {
             cachedLocal = prunedObj[url];
           }
@@ -1485,7 +1550,7 @@ export default function MovieDetails() {
               finalTinyUrl = undefined; // Drop the old tinyurl since url changed!
               finalCandidates = data.candidates;
               finalSize = data.size;
-              
+
               // Save to cache (memory and localStorage)
               const cacheEntry = {
                 url: finalUrl,
@@ -1495,10 +1560,15 @@ export default function MovieDetails() {
               };
               hubcloudCacheRef.current[url] = cacheEntry;
               try {
-                const cacheStr = localStorage.getItem('hubcloud_extraction_cache');
+                const cacheStr = localStorage.getItem(
+                  "hubcloud_extraction_cache",
+                );
                 const cacheObj = cacheStr ? JSON.parse(cacheStr) : {};
                 cacheObj[url] = cacheEntry;
-                localStorage.setItem('hubcloud_extraction_cache', JSON.stringify(cacheObj));
+                localStorage.setItem(
+                  "hubcloud_extraction_cache",
+                  JSON.stringify(cacheObj),
+                );
               } catch (e) {}
             } else if (data.isCloudflare) {
               finalUrl = url;
@@ -1529,6 +1599,7 @@ export default function MovieDetails() {
             candidates: finalCandidates,
             size: finalSize,
             isCloudflare: isCloudflareBlocked,
+            formattedTitle,
           };
         }
         return prev;
@@ -1546,6 +1617,7 @@ export default function MovieDetails() {
       tinyUrl: finalTinyUrl,
       candidates: finalCandidates,
       size: finalSize,
+      formattedTitle,
     });
   };
 
@@ -1707,7 +1779,9 @@ export default function MovieDetails() {
       const scheme = urlObj.protocol.replace(":", "");
       const hostAndPath =
         urlObj.host + urlObj.pathname + urlObj.search + urlObj.hash;
-      const title = encodeURIComponent(mergedContent.title);
+      const title = encodeURIComponent(
+        linkPopup.formattedTitle || mergedContent.title,
+      );
 
       let intentUrl = "";
       if (player === "vlc") {
@@ -1738,7 +1812,9 @@ export default function MovieDetails() {
 
     setIsReporting(true);
     try {
-      const activeReports = (profile.reported_links || []).filter((r:any) => r.status === 'pending').length;
+      const activeReports = (profile.reported_links || []).filter(
+        (r: any) => r.status === "pending",
+      ).length;
       if (activeReports >= 5) {
         setAlertConfig({
           isOpen: true,
@@ -1751,11 +1827,17 @@ export default function MovieDetails() {
 
       const alreadyReported = profile.reported_links?.some((r: any) => {
         if (r.status !== "pending") return false;
-        
-        const hasValidIdCheck = r.linkId && linkPopup.id && linkPopup.id !== "unknown" && linkPopup.id !== "sample" && r.linkId === linkPopup.id;
+
+        const hasValidIdCheck =
+          r.linkId &&
+          linkPopup.id &&
+          linkPopup.id !== "unknown" &&
+          linkPopup.id !== "sample" &&
+          r.linkId === linkPopup.id;
         const currentUrl = linkPopup.originalUrl || linkPopup.url;
-        const hasValidUrlCheck = r.linkUrl && currentUrl && r.linkUrl === currentUrl;
-        
+        const hasValidUrlCheck =
+          r.linkUrl && currentUrl && r.linkUrl === currentUrl;
+
         return hasValidIdCheck || hasValidUrlCheck;
       });
 
@@ -1769,7 +1851,6 @@ export default function MovieDetails() {
         return;
       }
 
-      
       const reportId = Math.floor(
         10000000 + Math.random() * 90000000,
       ).toString();
@@ -1791,7 +1872,7 @@ export default function MovieDetails() {
       await updateUserProfileData(
         { reported_links: [...(profile.reported_links || []), reportData] },
         undefined,
-        true
+        true,
       );
       setAlertConfig({
         isOpen: true,
@@ -1905,6 +1986,8 @@ export default function MovieDetails() {
     contextName?: string,
     isLocked?: boolean,
     seasonInfo?: { id: string; number: number; title?: string },
+    episodeInfo?: { number: number; title: string },
+    isMkv?: boolean,
   ) => {
     if (!Array.isArray(links)) return null;
 
@@ -1926,7 +2009,25 @@ export default function MovieDetails() {
           const fullName = contextName
             ? `${contextName} - ${link.name}`
             : link.name;
-          const linkKey = `${link.url}-${idx}-${contextName ? contextName.replace(/\s+/g, '-') : 'movie'}`;
+          const linkKey = `${link.url}-${idx}-${contextName ? contextName.replace(/\s+/g, "-") : "movie"}`;
+
+          const getFormattedTitle = (link: any) => {
+            if (episodeInfo && seasonInfo) {
+              return `${mergedContent?.title || ""} S${seasonInfo.number}E${episodeInfo.number}: ${episodeInfo.title} - ${link.name}`;
+            } else if (isMkv && seasonInfo) {
+              return `${mergedContent?.title || ""} Season ${seasonInfo.number} - ${link.name}`;
+            } else if (isZip && seasonInfo) {
+              return `${mergedContent?.title || ""} Season ${seasonInfo.number} - ${link.name}`;
+            } else if (mergedContent?.type === "movie") {
+              return `${mergedContent.title || ""} ${mergedContent.year || ""} - ${link.name}`.replace(
+                "  ",
+                " ",
+              );
+            }
+            return `${mergedContent?.title || ""} - ${link.name}`;
+          };
+          const formattedTitle = getFormattedTitle(link);
+
           return (
             <div
               key={linkKey}
@@ -1943,6 +2044,7 @@ export default function MovieDetails() {
                       link.tinyUrl,
                       isLocked,
                       seasonInfo,
+                      formattedTitle,
                     )
                   }
                   className="w-full flex items-center justify-center gap-2 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white py-3 text-sm sm:text-base font-semibold transition-colors"
@@ -1965,6 +2067,7 @@ export default function MovieDetails() {
                       link.tinyUrl,
                       isLocked,
                       seasonInfo,
+                      formattedTitle,
                     )
                   }
                   className="w-full flex items-center justify-center gap-2 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white py-3 transition-colors"
@@ -1980,31 +2083,45 @@ export default function MovieDetails() {
                   </span>
                 </button>
               </div>
-              {link.url && (link.url.toLowerCase().includes('hubcloud') || link.url.toLowerCase().includes('hubcould') || link.url.toLowerCase().includes('hubdrive')) && (
-                 <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (isLocked) {
-                      handlePlayClick(
-                        link.url, fullName, link.id, isZip, link.tinyUrl, isLocked, seasonInfo
-                      );
-                      return;
-                    }
-                    setTelegramConfirmModal({ isOpen: true, url: link.url, id: linkKey });
-                  }}
-                  className="absolute bottom-1 right-1 p-1.5 text-[#24A1DE] hover:opacity-80 transition-opacity"
-                  title={isLocked ? "Locked" : "Download via Telegram"}
-                  disabled={resolvingTgId === linkKey}
-                >
-                   {isLocked ? (
-                     <Lock className="w-[22px] h-[22px] text-amber-500" />
-                   ) : resolvingTgId === linkKey ? (
-                     <Loader2 className="w-[22px] h-[22px] animate-spin" />
-                   ) : (
-                     <Send className="w-[22px] h-[22px]" />
-                   )}
-                </button>
-              )}
+              {link.url &&
+                (link.url.toLowerCase().includes("hubcloud") ||
+                  link.url.toLowerCase().includes("hubcould") ||
+                  link.url.toLowerCase().includes("hubdrive")) && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (isLocked) {
+                        handlePlayClick(
+                          link.url,
+                          fullName,
+                          link.id,
+                          isZip,
+                          link.tinyUrl,
+                          isLocked,
+                          seasonInfo,
+                          formattedTitle,
+                        );
+                        return;
+                      }
+                      setTelegramConfirmModal({
+                        isOpen: true,
+                        url: link.url,
+                        id: linkKey,
+                      });
+                    }}
+                    className="absolute bottom-1 right-1 p-1.5 text-[#24A1DE] hover:opacity-80 transition-opacity"
+                    title={isLocked ? "Locked" : "Download via Telegram"}
+                    disabled={resolvingTgId === linkKey}
+                  >
+                    {isLocked ? (
+                      <Lock className="w-[22px] h-[22px] text-amber-500" />
+                    ) : resolvingTgId === linkKey ? (
+                      <Loader2 className="w-[22px] h-[22px] animate-spin" />
+                    ) : (
+                      <Send className="w-[22px] h-[22px]" />
+                    )}
+                  </button>
+                )}
             </div>
           );
         })}
@@ -2018,12 +2135,15 @@ export default function MovieDetails() {
     setIsShareLoading(true);
 
     let shareUrl = window.location.href;
-    
+
     // Ensure the share URL uses /series for series and /movie for movies
-    if (mergedContent.type === 'series' && shareUrl.includes('/movie/')) {
-      shareUrl = shareUrl.replace('/movie/', '/series/');
-    } else if (mergedContent.type === 'movie' && shareUrl.includes('/series/')) {
-      shareUrl = shareUrl.replace('/series/', '/movie/');
+    if (mergedContent.type === "series" && shareUrl.includes("/movie/")) {
+      shareUrl = shareUrl.replace("/movie/", "/series/");
+    } else if (
+      mergedContent.type === "movie" &&
+      shareUrl.includes("/series/")
+    ) {
+      shareUrl = shareUrl.replace("/series/", "/movie/");
     }
 
     // We no longer use tinyurl for shareUrl
@@ -2080,7 +2200,11 @@ export default function MovieDetails() {
       text: textForShare,
     };
 
-    if (files.length > 0 && navigator.canShare && navigator.canShare({ files })) {
+    if (
+      files.length > 0 &&
+      navigator.canShare &&
+      navigator.canShare({ files })
+    ) {
       shareData.files = files;
     }
 
@@ -2097,10 +2221,11 @@ export default function MovieDetails() {
         });
       }
     } catch (err: any) {
-      const isCanceled = err.name === 'AbortError' || 
-                         (err.message && err.message.toLowerCase().includes('cancel')) ||
-                         (typeof err === 'string' && err.toLowerCase().includes('cancel'));
-      
+      const isCanceled =
+        err.name === "AbortError" ||
+        (err.message && err.message.toLowerCase().includes("cancel")) ||
+        (typeof err === "string" && err.toLowerCase().includes("cancel"));
+
       if (!isCanceled) {
         console.error("Error sharing:", err);
       }
@@ -2236,6 +2361,11 @@ export default function MovieDetails() {
                         mergedContent.sampleUrl!,
                         "Sample",
                         "sample",
+                        undefined,
+                        undefined,
+                        undefined,
+                        undefined,
+                        `${mergedContent.title || ""} - Sample`,
                       )
                     }
                     className="bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-6 py-3 text-sm sm:text-base rounded-xl font-bold flex items-center gap-2 transition-all active:scale-95 border border-zinc-300 dark:border-zinc-700 shadow-sm"
@@ -2902,13 +3032,16 @@ export default function MovieDetails() {
                                             number: season.seasonNumber,
                                             title: season.title,
                                           },
+                                          undefined,
+                                          true,
                                         )}
                                       </div>
                                     )}
 
                                     {season.episodes &&
                                       season.episodes.filter(
-                                        (ep) => getLinksArray(ep.links).length > 0,
+                                        (ep) =>
+                                          getLinksArray(ep.links).length > 0,
                                       ).length > 0 && (
                                         <div>
                                           <h4 className="font-semibold text-zinc-500 dark:text-zinc-400 mb-4 text-sm uppercase tracking-wider">
@@ -2918,7 +3051,8 @@ export default function MovieDetails() {
                                             {season.episodes
                                               .filter(
                                                 (ep) =>
-                                                  getLinksArray(ep.links).length > 0,
+                                                  getLinksArray(ep.links)
+                                                    .length > 0,
                                               )
                                               .map((ep, eIdx) => (
                                                 <div
@@ -2972,22 +3106,31 @@ export default function MovieDetails() {
                                                       )}
                                                   </div>
 
-                                                  {getLinksArray(ep.links).length > 0 && (
-                                                      <div className="flex justify-center">
-                                                        {renderLinks(
-                                                          getLinksArray(ep.links),
-                                                          false,
-                                                          `S${season.seasonNumber} E${ep.episodeNumber}`,
-                                                          !isAccessible,
-                                                          {
-                                                            id: season.id,
-                                                            number:
-                                                              season.seasonNumber,
-                                                            title: season.title,
-                                                          },
-                                                        )}
-                                                      </div>
-                                                    )}
+                                                  {getLinksArray(ep.links)
+                                                    .length > 0 && (
+                                                    <div className="flex justify-center">
+                                                      {renderLinks(
+                                                        getLinksArray(ep.links),
+                                                        false,
+                                                        `S${season.seasonNumber} E${ep.episodeNumber}`,
+                                                        !isAccessible,
+                                                        {
+                                                          id: season.id,
+                                                          number:
+                                                            season.seasonNumber,
+                                                          title: season.title,
+                                                        },
+                                                        {
+                                                          number:
+                                                            ep.episodeNumber,
+                                                          title:
+                                                            ep.name ||
+                                                            ep.title ||
+                                                            `Episode ${ep.episodeNumber}`,
+                                                        },
+                                                      )}
+                                                    </div>
+                                                  )}
                                                 </div>
                                               ))}
                                           </div>
@@ -3389,7 +3532,9 @@ export default function MovieDetails() {
                     ></iframe>
                     <div className="absolute top-4 right-12 z-50">
                       <a
-                        href={activeTrailerUrl || mergedContent.trailerUrl || ""}
+                        href={
+                          activeTrailerUrl || mergedContent.trailerUrl || ""
+                        }
                         target="_blank"
                         rel="noreferrer"
                         className="bg-black/60 backdrop-blur-md text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-black/80 transition-colors border border-white/10 shadow-lg flex items-center gap-1.5"
@@ -3569,7 +3714,7 @@ export default function MovieDetails() {
               }}
               className="w-full sm:flex-1 py-3 px-6 rounded-xl font-bold bg-[#24A1DE] text-white hover:bg-[#1E8BC2] transition flex flex-row items-center justify-center gap-2"
             >
-               <Send className="w-5 h-5 shrink-0" /> Open in Telegram
+              <Send className="w-5 h-5 shrink-0" /> Open in Telegram
             </button>
           </div>
         </AlertModal>
