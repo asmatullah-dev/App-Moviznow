@@ -13,6 +13,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useContent } from "../../contexts/ContentContext";
 import { useCart } from "../../contexts/CartContext";
 import { useHaptics } from "../../hooks/useHaptics";
+import { globalScrollState } from "../../hooks/useScrollRestoration";
 import { safeStorage } from "../../utils/safeStorage";
 import {
   Film,
@@ -194,6 +195,13 @@ export default function MovieDetails() {
 
   const hasLoggedView = useRef(false);
   const navigate = useNavigate();
+  const handleFilterNavigation = (key: string, value: string) => {
+    const keys = ['home_search', 'home_sort', 'home_genre', 'home_language', 'home_type', 'home_quality', 'home_year', 'home_page'];
+    keys.forEach(k => sessionStorage.removeItem(k));
+    sessionStorage.setItem(key, value);
+    globalScrollState.set("home_window_scroll", 0);
+    navigate("/");
+  };
   const location = useLocation();
   const navigationType = useNavigationType();
 
@@ -2678,33 +2686,58 @@ export default function MovieDetails() {
                             </span>
                           </div>
                         )}
-                      {displayData.quality && (
+                      {mergedContent.qualityId && (
                         <div className="flex items-baseline gap-2">
                           <span className="text-zinc-500 text-xs font-medium">
                             Quality
                           </span>
-                          <span className="text-sm font-medium text-cyan-700/80 dark:text-cyan-400/80">
+                          <span 
+                            className="text-sm font-medium text-cyan-700/80 dark:text-cyan-400/80 underline underline-offset-2 decoration-cyan-500/50 hover:text-cyan-600 dark:hover:text-cyan-300 transition-colors cursor-pointer"
+                            onClick={() => handleFilterNavigation("home_quality", mergedContent.qualityId || "")}
+                          >
                             {displayData.quality}
                           </span>
                         </div>
                       )}
-                      {displayData.genres && (
+                      {mergedContent.genreIds && mergedContent.genreIds.length > 0 && (
                         <div className="flex items-baseline gap-2">
                           <span className="text-zinc-500 text-xs font-medium">
                             Genre
                           </span>
-                          <span className="text-sm font-medium text-cyan-700/80 dark:text-cyan-400/80">
-                            {displayData.genres}
+                          <span className="text-sm font-medium text-cyan-700/80 dark:text-cyan-400/80 flex gap-1 flex-wrap">
+                            {mergedContent.genreIds.map((id, index) => {
+                               const g = genres.find(genre => genre.id === id);
+                               if (!g) return null;
+                               return (
+                                 <span key={id}>
+                                   <span className="underline underline-offset-2 decoration-cyan-500/50 hover:text-emerald-500 transition-colors cursor-pointer" onClick={() => {
+                                      handleFilterNavigation("home_genre", id);
+                                   }}>{g.name}</span>
+                                   {index < mergedContent.genreIds!.length - 1 ? ", " : ""}
+                                 </span>
+                               );
+                            })}
                           </span>
                         </div>
                       )}
-                      {displayData.language && (
+                      {mergedContent.languageIds && mergedContent.languageIds.length > 0 && (
                         <div className="flex items-baseline gap-2">
                           <span className="text-zinc-500 text-xs font-medium">
                             Language
                           </span>
-                          <span className="text-sm font-medium text-cyan-700/80 dark:text-cyan-400/80">
-                            {displayData.language}
+                          <span className="text-sm font-medium text-cyan-700/80 dark:text-cyan-400/80 flex gap-1 flex-wrap">
+                            {mergedContent.languageIds.map((id, index) => {
+                               const l = languages.find(lang => lang.id === id);
+                               if (!l) return null;
+                               return (
+                                 <span key={id}>
+                                   <span className="underline underline-offset-2 decoration-cyan-500/50 hover:text-emerald-500 transition-colors cursor-pointer" onClick={() => {
+                                      handleFilterNavigation("home_language", id);
+                                   }}>{l.name}</span>
+                                   {index < mergedContent.languageIds!.length - 1 ? ", " : ""}
+                                 </span>
+                               );
+                            })}
                           </span>
                         </div>
                       )}
@@ -2799,14 +2832,40 @@ export default function MovieDetails() {
                           {mergedContent.country}
                         </span>
                       )}
-                      {contentGenres && (
-                        <span className="flex items-center gap-2 bg-cyan-500/10 px-3 py-1.5 rounded-lg">
-                          Genre: {contentGenres}
+                      {mergedContent.genreIds && mergedContent.genreIds.length > 0 && (
+                        <span className="flex items-center gap-2 bg-cyan-500/10 px-3 py-1.5 rounded-lg select-none">
+                          Genre: <span className="flex gap-1 flex-wrap">
+                            {mergedContent.genreIds.map((id, index) => {
+                               const g = genres.find(genre => genre.id === id);
+                               if (!g) return null;
+                               return (
+                                 <span key={id}>
+                                   <button className="underline underline-offset-2 decoration-cyan-500/50 hover:text-emerald-500 transition-colors" onClick={() => {
+                                      handleFilterNavigation("home_genre", id);
+                                   }}>{g.name}</button>
+                                   {index < mergedContent.genreIds!.length - 1 ? ", " : ""}
+                                 </span>
+                               );
+                            })}
+                          </span>
                         </span>
                       )}
-                      {contentLangs && (
-                        <span className="flex items-center gap-2 bg-cyan-500/10 px-3 py-1.5 rounded-lg">
-                          Language: {contentLangs}
+                      {mergedContent.languageIds && mergedContent.languageIds.length > 0 && (
+                        <span className="flex items-center gap-2 bg-cyan-500/10 px-3 py-1.5 rounded-lg select-none">
+                          Language: <span className="flex gap-1 flex-wrap">
+                            {mergedContent.languageIds.map((id, index) => {
+                               const l = languages.find(lang => lang.id === id);
+                               if (!l) return null;
+                               return (
+                                 <span key={id}>
+                                   <button className="underline underline-offset-2 decoration-cyan-500/50 hover:text-emerald-500 transition-colors" onClick={() => {
+                                      handleFilterNavigation("home_language", id);
+                                   }}>{l.name}</button>
+                                   {index < mergedContent.languageIds!.length - 1 ? ", " : ""}
+                                 </span>
+                               );
+                            })}
+                          </span>
                         </span>
                       )}
                       {mergedContent.qualityId &&
@@ -2816,8 +2875,11 @@ export default function MovieDetails() {
                           );
                           if (!qualityObj) return null;
                           return (
-                            <span
-                              className="flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold shadow-lg"
+                            <button
+                              onClick={() => {
+                                handleFilterNavigation("home_quality", mergedContent.qualityId || "");
+                              }}
+                              className="flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold shadow-lg transition-transform hover:scale-105 underline underline-offset-2 decoration-white/50 select-none"
                               style={{
                                 backgroundColor: qualityObj.color || "#10b981",
                                 color: getContrastColor(
@@ -2826,7 +2888,7 @@ export default function MovieDetails() {
                               }}
                             >
                               Quality: {qualityObj.name}
-                            </span>
+                            </button>
                           );
                         })()}
                     </div>
@@ -3124,7 +3186,7 @@ export default function MovieDetails() {
                                                           number:
                                                             ep.episodeNumber,
                                                           title:
-                                                            ep.name ||
+                                                            (ep as any).name ||
                                                             ep.title ||
                                                             `Episode ${ep.episodeNumber}`,
                                                         },

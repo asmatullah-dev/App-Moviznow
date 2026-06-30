@@ -10,26 +10,24 @@ export function useScrollRestoration<T extends HTMLElement>(key: string, isWindo
     if (!ready) return;
 
     // Restore scroll position
-    const savedPosition = globalScrollState.get(key) || 0;
+    const savedPosition = globalScrollState.get(key) ?? 0;
     
-    if (savedPosition > 0) {
-      const restore = () => {
-        if (isWindow) {
-          window.scrollTo({ top: savedPosition, behavior: 'instant' } as any);
-        } else if (ref.current) {
-          if (ref.current.scrollWidth >= savedPosition) {
-            ref.current.scrollLeft = savedPosition;
-          }
+    const restore = () => {
+      if (isWindow) {
+        window.scrollTo({ top: savedPosition, behavior: 'instant' } as any);
+      } else if (ref.current) {
+        if (ref.current.scrollWidth >= savedPosition) {
+          ref.current.scrollLeft = savedPosition;
         }
-      };
+      }
+    };
 
-      // Try once immediately (if ready is already true)
-      restore();
-      
-      // And again after a short delay to account for layout shifts
-      const timer = setTimeout(restore, 100);
-      return () => clearTimeout(timer);
-    }
+    // Try once immediately (if ready is already true)
+    restore();
+    
+    // And again after a short delay to account for layout shifts
+    const timer = setTimeout(restore, 100);
+    return () => clearTimeout(timer);
   }, [key, isWindow, ready]);
 
   useEffect(() => {

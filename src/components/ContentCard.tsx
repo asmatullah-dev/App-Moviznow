@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 import { Heart, Clock, ShoppingCart, Play, X, Lock, Star } from 'lucide-react';
 import { Content, Quality, Language, Genre } from '../types';
@@ -38,6 +38,7 @@ const ContentCard = React.memo(({
   const { profile: sysProfile } = useAuth();
   const { settings } = useSettings();
   const { vibrate } = useHaptics();
+  const navigate = useNavigate();
   const [isTrailerSelectionOpen, setIsTrailerSelectionOpen] = React.useState(false);
   const [selectedTrailerUrl, setSelectedTrailerUrl] = React.useState<string | null>(null);
   const [isClicked, setIsClicked] = React.useState(false);
@@ -184,9 +185,9 @@ const ContentCard = React.memo(({
              onClick={() => {
                setIsClicked(true);
              }}
-             className="absolute inset-0 z-20" aria-label={`View details for ${content.title}`} />
+             className="absolute inset-0 z-10" aria-label={`View details for ${content.title}`} />
           
-          <div className="relative aspect-[2/3] w-full bg-zinc-100 dark:bg-zinc-800 block z-10">
+          <div className="relative aspect-[2/3] w-full bg-zinc-100 dark:bg-zinc-800 block">
             <img
             src={content.posterUrl || settings?.defaultAppImage || 'https://picsum.photos/seed/movie/400/600'}
             alt={content.title}
@@ -214,7 +215,7 @@ const ContentCard = React.memo(({
               {qualityObj && (
                 <div 
                   className={clsx(
-                    "px-1 py-0.5 rounded-sm font-bold uppercase tracking-wider shadow-sm",
+                    "px-1 py-0.5 rounded-sm font-bold uppercase tracking-wider shadow-sm select-none",
                     isSmall ? 'text-[6px]' : 'text-[8px]'
                   )}
                   style={{ 
@@ -360,7 +361,7 @@ const ContentCard = React.memo(({
               )}
             </div>
             {!isSmall && (
-              <div className="flex flex-col gap-0.5 mt-auto">
+              <div className="flex flex-col gap-0.5 mt-auto select-none">
                 {contentGenres && (
                   <p className="text-zinc-500 text-[10px] line-clamp-1 italic">
                     {contentGenres}
