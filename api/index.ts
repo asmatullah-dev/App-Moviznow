@@ -576,10 +576,10 @@ async function startServer() {
                   const prev = parts[i-1];
                   
                   // Mdrive stores the file name in a heading directly before the link
-                  const h5Match = prev.match(/<h[1-6][^>]*>([^<]+)<\/h[1-6]>\s*(?:<[^>]+>\s*)*$/i);
+                  const h5Match = prev.match(/<h[1-6][^>]*>(.*?)<\/h[1-6]>\s*(?:<[^>]+>\s*)*$/i);
                   let title = lastFilename;
                   if (h5Match) {
-                      title = h5Match[1].trim();
+                      title = h5Match[1].replace(/<[^>]+>/g, '').trim();
                       lastFilename = title; // Fallback for links that don't have a direct heading
                   }
                   
@@ -602,9 +602,12 @@ async function startServer() {
                   
                   let finalFileName = combined.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
                   
+                  // Clean up sizes with /E (e.g., [440MB/E]) from the main title part
+                  finalFileName = finalFileName.replace(/\[?\s*\d+(?:\.\d+)?\s*(?:GB|MB|KB)\/E\s*\]?/gi, '').trim();
+                  
                   // Scrape size if available in the text
                   let size = "Unknown";
-                  const sizeMatch = prev.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i) || title.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i);
+                  const sizeMatch = title.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i) || prev.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i);
                   if (sizeMatch) {
                       size = sizeMatch[1].toUpperCase();
                       // Remove size from filename to make matching easier
