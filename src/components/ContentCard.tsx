@@ -135,11 +135,13 @@ const ContentCard = React.memo(({
     e.preventDefault();
     e.stopPropagation();
     if (content.type === 'movie') {
+      const basePrice = settings?.movieFee || 50;
+      const finalPrice = content.status === 'selected_content' ? basePrice * 2 : basePrice;
       addToCart({
         contentId: content.id,
         title: content.title,
         type: 'movie',
-        price: settings?.movieFee || 50
+        price: finalPrice
       });
     } else {
       let firstSeason = matchingSeason ? matchingSeason.seasonNumber : 1;
@@ -147,13 +149,15 @@ const ContentCard = React.memo(({
         firstSeason = seasons[0].seasonNumber;
       }
       
+      const basePrice = settings?.seasonFee || 100;
+      const finalPrice = content.status === 'selected_content' ? basePrice * 2 : basePrice;
       addToCart({
         contentId: content.id,
         title: `${content.title} - Season ${firstSeason}`,
         type: 'season',
         seasonNumber: firstSeason,
         seasonId: matchingSeason ? matchingSeason.id : (seasons[0]?.id || `s${firstSeason}`),
-        price: settings?.seasonFee || 100
+        price: finalPrice
       });
     }
   };

@@ -153,7 +153,7 @@ export default function UserManagement() {
     setEditingId(null);
   });
 
-  const { users: allUsers, loading: usersLoading, updateUserFields, finalizeUserChanges, hasPendingChanges, refreshUsers } = useUsers();
+  const { users: allUsers, loading: usersLoading, updateMultipleUserFields, updateUserFields, finalizeUserChanges, hasPendingChanges, refreshUsers } = useUsers();
   
   // Fetch fresh data on mount and force sync on unmount
   const { checkForUpdates } = useContent();
@@ -215,6 +215,7 @@ export default function UserManagement() {
     const runAutoUpdates = async () => {
       hasRunAutoUpdates.current = true;
       const now = new Date();
+      const batchUpdates: Record<string, any> = {};
 
       users.forEach((user: UserProfile) => {
         let needsUpdate = false;
@@ -248,9 +249,14 @@ export default function UserManagement() {
         }
 
         if (needsUpdate) {
-          updateUserFields(user.uid, updates);
+          batchUpdates[user.uid] = updates;
         }
       });
+      
+      if (Object.keys(batchUpdates).length > 0) {
+        updateMultipleUserFields(batchUpdates);
+        finalizeUserChanges(true).catch(console.error);
+      }
     };
 
     const timer = setTimeout(runAutoUpdates, 3000); // Wait 3s after load/change

@@ -12,6 +12,7 @@ interface UsersContextType {
   error: string | null;
   refreshUsers: (force?: boolean) => Promise<{ users: UserProfile[], updatedSomething: boolean }>;
   updateUserFields: (userId: string, fields: Partial<UserProfile>) => void;
+  updateMultipleUserFields: (updates: Record<string, Partial<UserProfile>>) => void;
   finalizeUserChanges: (force?: boolean) => Promise<void>;
   hasPendingChanges: boolean;
 }
@@ -31,10 +32,11 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [hasPendingChanges, setHasPendingChanges] = useState(false);
 
-  // Buffer changes locally
-  const updateUserFields = useCallback((userId: string, fields: Partial<UserProfile>) => {
+  const updateMultipleUserFields = useCallback((updates: Record<string, Partial<UserProfile>>) => {
+    if (Object.keys(updates).length === 0) return;
+
     setUsers(prev => {
-      const next = prev.map(u => u.uid === userId ? { ...u, ...fields } : u);
+      const next = prev.map(u => updates[u.uid] ? { ...u, ...updates[u.uid] } : u);
       safeStorage.setItem('cached_all_users', JSON.stringify(next));
       return next;
     });
@@ -43,10 +45,18 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     let pending: Record<string, Partial<UserProfile>> = {};
     try { pending = JSON.parse(pendingStr); } catch(e) {}
     
-    pending[userId] = { ...pending[userId], ...fields };
+    for (const [userId, fields] of Object.entries(updates)) {
+      pending[userId] = { ...pending[userId], ...fields };
+    }
+    
     safeStorage.setItem('pending_user_updates', JSON.stringify(pending));
     setHasPendingChanges(true);
   }, []);
+
+  // Buffer changes locally
+  const updateUserFields = useCallback((userId: string, fields: Partial<UserProfile>) => {
+    updateMultipleUserFields({ [userId]: fields });
+  }, [updateMultipleUserFields]);
 
   const finalizeUserChanges = useCallback(async (force: boolean = false) => {
     const pendingStr = safeStorage.getItem('pending_user_updates');
@@ -286,7 +296,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
   }, [finalizeUserChanges]);
 
   return (
-    <UsersContext.Provider value={{ users, loading, error, refreshUsers: fetchUsers, updateUserFields, finalizeUserChanges, hasPendingChanges }}>
+    <UsersContext.Provider value={{ users, loading, error, refreshUsers: fetchUsers, updateUserFields, updateMultipleUserFields, finalizeUserChanges, hasPendingChanges }}>
       {children}
     </UsersContext.Provider>
   );

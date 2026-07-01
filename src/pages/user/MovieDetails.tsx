@@ -1398,25 +1398,35 @@ export default function MovieDetails() {
         // Set locked content info for the alert modal
         if (mergedContent) {
           if (seasonInfo) {
+            const basePrice = settings?.seasonFee || 100;
+            const finalPrice = mergedContent.status === "selected_content" ? basePrice * 2 : basePrice;
             setLockedContentInfo({
               id: mergedContent.id,
               type: "season",
               seasonId: seasonInfo.id,
               seasonNumber: seasonInfo.number,
               title: `${mergedContent.title} - Season ${seasonInfo.number}${seasonInfo.title ? ` (${seasonInfo.title})` : ""}`,
-              price: settings?.seasonFee || 100,
+              price: finalPrice,
             });
           } else if (mergedContent.type === "movie") {
+            const basePrice = settings?.movieFee || 50;
+            const finalPrice = mergedContent.status === "selected_content" ? basePrice * 2 : basePrice;
             setLockedContentInfo({
               id: mergedContent.id,
               type: "movie",
               title: mergedContent.title,
-              price: settings?.movieFee || 50,
+              price: finalPrice,
             });
           }
         }
 
-        if (isPending) {
+        if (mergedContent?.status === "selected_content") {
+          setAlertConfig({
+            isOpen: true,
+            title: "Content Locked",
+            message: "you don't has access to this content. Contact Admin",
+          });
+        } else if (isPending) {
           setAlertConfig({
             isOpen: true,
             title: "Account Pending",
@@ -2499,13 +2509,15 @@ export default function MovieDetails() {
               <div className="flex-1">
                 <h3 className="font-bold text-lg mb-1">Access Restricted</h3>
                 <p className="text-red-400 mb-4">
-                  {isPending
-                    ? "Your account activation is pending. Please Get Membership or Add any content to cart to activate your account."
-                    : isExpired
-                      ? profile?.role === "trial"
-                        ? "Your free Trial has expired. Please get Membership to continue watching."
-                        : "Your membership has expired."
-                      : "You do not have permission to access links for this content."}
+                  {mergedContent.status === "selected_content"
+                    ? "you don't has access to this content. Contact Admin"
+                    : isPending
+                      ? "Your account activation is pending. Please Get Membership or Add any content to cart to activate your account."
+                      : isExpired
+                        ? profile?.role === "trial"
+                          ? "Your free Trial has expired. Please get Membership to continue watching."
+                          : "Your membership has expired."
+                        : "You do not have permission to access links for this content."}
                 </p>
                 <div className="flex flex-wrap gap-3">
                   {settings?.isAdminContactEnabled !== false && (
@@ -2524,10 +2536,12 @@ export default function MovieDetails() {
                             ? " (Full Series)"
                             : "";
                         const contentTitle = mergedContent?.title + seasonText;
+                        const isSCO = mergedContent?.status === "selected_content";
+                        const scoPrefix = isSCO ? "(SCO) " : "";
                         const helpText =
                           profile?.role === "selected_content"
-                            ? `I want to get access to ${contentTitle}. Please tell me how to pay and add it to my account.`
-                            : `I cannot access ${contentTitle}.`;
+                            ? `I want to get access to ${scoPrefix}${contentTitle}. Please tell me how to pay and add it to my account.`
+                            : `I cannot access ${scoPrefix}${contentTitle}.`;
                         const msg = `Assalam O Alaikum! Admin,\n\nName: ${profile?.displayName || "Unknown"}\nEmail: ${profile?.email || "N/A"}\nPhone: ${profile?.phone || "N/A"}\nRole & Status: ${String(
                           profile?.role || "Unknown",
                         )
@@ -2553,7 +2567,7 @@ export default function MovieDetails() {
                   )}
                   {(((profile?.role === "selected_content" ||
                     profile?.role === "user") &&
-                    !isExpired) ||
+                    (!isExpired || mergedContent.status === "selected_content")) ||
                     isPending) &&
                     mergedContent?.type === "movie" &&
                     (cart.some(
@@ -2569,43 +2583,46 @@ export default function MovieDetails() {
                     ) : (
                       <button
                         onClick={() => {
+                          const basePrice = settings?.movieFee || 50;
+                          const finalPrice = mergedContent.status === "selected_content" ? basePrice * 2 : basePrice;
                           addToCart({
                             contentId: mergedContent.id,
                             title: mergedContent.title,
                             type: "movie",
-                            price: settings?.movieFee || 50,
+                            price: finalPrice,
                           });
                         }}
                         className="inline-flex items-center gap-2 bg-emerald-500/20 text-emerald-500 px-6 py-3 text-sm sm:text-base rounded-xl font-medium hover:bg-emerald-500/30 transition-colors"
                       >
                         <ShoppingCart className="w-5 h-5" />
-                        Add to Cart (Rs {settings?.movieFee || 50})
+                        Add to Cart (Rs {mergedContent.status === "selected_content" ? (settings?.movieFee || 50) * 2 : (settings?.movieFee || 50)})
                       </button>
                     ))}
                   {(profile?.role === "selected_content" ||
                     profile?.role === "user" ||
                     isPending) &&
-                    !isExpired &&
+                    (!isExpired || mergedContent.status === "selected_content") &&
                     mergedContent?.type === "series" && (
                       <p className="text-sm text-zinc-500 dark:text-zinc-400 w-full mt-2 italic">
                         Scroll down to add specific seasons to your cart.
                       </p>
                     )}
-                  {(isExpired ||
-                    isPending ||
-                    profile?.role === "trial" ||
-                    profile?.role === "user") && (
-                    <Link
-                      to="/top-up"
-                      className="inline-flex items-center gap-2 bg-emerald-500 text-white px-6 py-3 text-sm sm:text-base rounded-xl font-bold hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20"
-                    >
-                      {isExpired
-                        ? profile?.role === "trial"
-                          ? "Buy Membership"
-                          : "Renew Now"
-                        : "Get Membership"}
-                    </Link>
-                  )}
+                  {mergedContent?.status !== "selected_content" &&
+                    (isExpired ||
+                      isPending ||
+                      profile?.role === "trial" ||
+                      profile?.role === "user") && (
+                      <Link
+                        to="/top-up"
+                        className="inline-flex items-center gap-2 bg-emerald-500 text-white px-6 py-3 text-sm sm:text-base rounded-xl font-bold hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20"
+                      >
+                        {isExpired
+                          ? profile?.role === "trial"
+                            ? "Buy Membership"
+                            : "Renew Now"
+                          : "Get Membership"}
+                      </Link>
+                    )}
                 </div>
               </div>
             </div>
@@ -3001,7 +3018,7 @@ export default function MovieDetails() {
                                     </span>
                                     {(((profile?.role === "selected_content" ||
                                       profile?.role === "user") &&
-                                      profile?.status !== "expired") ||
+                                      (profile?.status !== "expired" || mergedContent.status === "selected_content")) ||
                                       profile?.status === "pending") &&
                                       (cart.some(
                                         (item) =>
@@ -3018,30 +3035,68 @@ export default function MovieDetails() {
                                       ) : (
                                         <button
                                           onClick={() => {
+                                            const basePrice = settings?.seasonFee || 100;
+                                            const finalPrice = mergedContent.status === "selected_content" ? basePrice * 2 : basePrice;
                                             addToCart({
                                               contentId: mergedContent.id,
                                               title: `${mergedContent.title} - Season ${season.seasonNumber}${season.title ? ` (${season.title})` : ""}`,
                                               type: "season",
                                               seasonId: season.id,
                                               seasonNumber: season.seasonNumber,
-                                              price: settings?.seasonFee || 100,
+                                              price: finalPrice,
                                             });
                                           }}
                                           className="bg-emerald-500/20 text-emerald-500 px-3 py-1 rounded-full text-sm font-bold flex items-center gap-2 hover:bg-emerald-500/30 transition-colors"
                                         >
                                           <ShoppingCart className="w-4 h-4" />
                                           Add to Cart (Rs{" "}
-                                          {settings?.seasonFee || 100})
+                                          {mergedContent.status === "selected_content" ? (settings?.seasonFee || 100) * 2 : (settings?.seasonFee || 100)})
                                         </button>
                                       ))}
-                                    {(profile?.role === "trial" ||
-                                      profile?.role === "user") && (
-                                      <Link
-                                        to="/top-up"
-                                        className="bg-emerald-500/20 text-emerald-500 px-3 py-1 rounded-full text-sm font-bold flex items-center gap-2 hover:bg-emerald-500/30 transition-colors"
+                                    {mergedContent?.status !== "selected_content" &&
+                                      (profile?.role === "trial" ||
+                                        profile?.role === "user") && (
+                                        <Link
+                                          to="/top-up"
+                                          className="bg-emerald-500/20 text-emerald-500 px-3 py-1 rounded-full text-sm font-bold flex items-center gap-2 hover:bg-emerald-500/30 transition-colors"
+                                        >
+                                          Top Up Membership
+                                        </Link>
+                                      )}
+                                    {settings?.isAdminContactEnabled !== false && (
+                                      <button
+                                        onClick={() => {
+                                          let supportPhone =
+                                            settings?.supportNumber || "3363284466";
+                                          if (supportPhone.startsWith("0")) {
+                                            supportPhone = "92" + supportPhone.substring(1);
+                                          } else if (!supportPhone.startsWith("92")) {
+                                            supportPhone = "92" + supportPhone;
+                                          }
+                                          const adminPhone = supportPhone.replace("+", "");
+                                          const contentTitle = `${mergedContent?.title} - Season ${season.seasonNumber}${season.title ? ` (${season.title})` : ""}`;
+                                          const isSCO = mergedContent?.status === "selected_content";
+                                          const scoPrefix = isSCO ? "(SCO) " : "";
+                                          const helpText =
+                                            profile?.role === "selected_content"
+                                              ? `I want to get access to ${scoPrefix}${contentTitle}. Please tell me how to pay and add it to my account.`
+                                              : `I cannot access ${scoPrefix}${contentTitle}.`;
+                                          const msg = `Assalam O Alaikum! Admin,\n\nName: ${profile?.displayName || "Unknown"}\nEmail: ${profile?.email || "N/A"}\nPhone: ${profile?.phone || "N/A"}\nRole & Status: ${String(
+                                            profile?.role || "Unknown",
+                                          )
+                                            .replace(/_/g, " ")
+                                            .replace(/\b\w/g, (c) =>
+                                              c.toUpperCase(),
+                                            )}, ${String(profile?.status || "Unknown").replace(/\b\w/g, (c) => c.toUpperCase())}\n\nYour message/question:\n${helpText}`;
+                                          window.open(
+                                            `https://wa.me/${adminPhone}?text=${encodeURIComponent(msg)}`,
+                                            "_blank",
+                                          );
+                                        }}
+                                        className="bg-red-500/20 text-red-500 px-3 py-1 rounded-full text-sm font-bold flex items-center gap-2 hover:bg-red-500/30 transition-colors"
                                       >
-                                        Top Up Membership
-                                      </Link>
+                                        <MessageCircle className="w-4 h-4" /> Admin
+                                      </button>
                                     )}
                                   </>
                                 )}
@@ -3651,7 +3706,7 @@ export default function MovieDetails() {
           alertConfig.title === "Content Locked") && (
           <div className="flex flex-col gap-3">
             {lockedContentInfo &&
-              !isExpired &&
+              (!isExpired || mergedContent?.status === "selected_content") &&
               (cart.some(
                 (item) =>
                   item.contentId === lockedContentInfo.id &&
@@ -3684,23 +3739,26 @@ export default function MovieDetails() {
                   {lockedContentInfo.price})
                 </button>
               ))}
-            {(profile?.role === "trial" ||
-              profile?.role === "user" ||
-              isExpired) && (
-              <Link
-                to="/top-up"
-                className="flex items-center justify-center gap-2 bg-emerald-500 text-white px-6 py-3 text-sm sm:text-base rounded-xl font-bold hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20"
-              >
-                {isExpired
-                  ? profile?.role === "trial"
-                    ? "Buy Membership"
-                    : "Renew Now"
-                  : "Get Membership"}
-              </Link>
-            )}
+
+            {mergedContent?.status !== "selected_content" &&
+              (profile?.role === "trial" ||
+                profile?.role === "user" ||
+                isExpired) && (
+                <Link
+                  to="/top-up"
+                  className="flex items-center justify-center gap-2 bg-emerald-500 text-white px-6 py-3 text-sm sm:text-base rounded-xl font-bold hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20"
+                >
+                  {isExpired
+                    ? profile?.role === "trial"
+                      ? "Buy Membership"
+                      : "Renew Now"
+                    : "Get Membership"}
+                </Link>
+              )}
+
             {(profile?.role === "selected_content" ||
               profile?.role === "user") &&
-              !isExpired && (
+              (!isExpired || mergedContent?.status === "selected_content") && (
                 <Link
                   to="/cart"
                   className="flex items-center justify-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white px-6 py-3 text-sm sm:text-base rounded-xl font-bold hover:bg-zinc-300 dark:hover:bg-zinc-700 transition-all"
@@ -3727,10 +3785,12 @@ export default function MovieDetails() {
                     (lockedContentInfo?.title ||
                       mergedContent?.title ||
                       "this content") + seasonText;
+                  const isSCO = mergedContent?.status === "selected_content";
+                  const scoPrefix = isSCO ? "(SCO) " : "";
                   const helpText =
                     profile?.role === "selected_content"
-                      ? `I want to get access to ${displayTitle}. Please tell me how to pay and add it to my account.`
-                      : `I need assistance with ${displayTitle}.`;
+                      ? `I want to get access to ${scoPrefix}${displayTitle}. Please tell me how to pay and add it to my account.`
+                      : `I need assistance with ${scoPrefix}${displayTitle}.`;
                   const message = encodeURIComponent(
                     `Hello Admin,\n\nName: ${profile?.displayName || "Unknown"}\nEmail: ${profile?.email || "N/A"}\nPhone: ${profile?.phone || "N/A"}\nRole & Status: ${String(
                       profile?.role || "Unknown",

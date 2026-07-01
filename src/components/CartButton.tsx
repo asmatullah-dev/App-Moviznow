@@ -11,7 +11,7 @@ export const CartButton = React.memo(() => {
   if (!profile) return null;
   const role = profile.role;
   const status = profile.status;
-  const showCart = (role === 'selected_content' && status !== 'expired') || status === 'pending';
+  const showCart = (role === 'selected_content' && status !== 'expired') || status === 'pending' || cart.length > 0;
   
   if (!showCart) return null;
 

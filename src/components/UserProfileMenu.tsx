@@ -359,8 +359,7 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                     // Start sync with loading UX (button could disable, but simplest is keeping it as is)
                     await Promise.all([
                       checkForUpdates(true),
-                      refreshSettings(),
-                      refreshProfile(true, 'manual')
+                      refreshSettings()
                     ]);
                   } finally {
                     setIsOpen(false);

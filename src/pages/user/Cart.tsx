@@ -26,10 +26,10 @@ export default function Cart() {
   const [alertConfig, setAlertConfig] = useState<{isOpen: boolean; title: string; message: string;}>({ isOpen: false, title: '', message: '' });
 
   React.useEffect(() => {
-    if (profile?.status === 'expired') {
+    if ((profile?.role === 'user' || profile?.role === 'trial') && profile?.status === 'expired' && cart.length === 0) {
       navigate('/');
     }
-  }, [profile, navigate]);
+  }, [profile, navigate, cart.length]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(settings?.accountNumber || '03416286423');
