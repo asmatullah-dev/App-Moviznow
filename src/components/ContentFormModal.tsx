@@ -256,14 +256,14 @@ const QualityInputs: React.FC<QualityInputsProps> = ({ links, onChange, droppabl
 export const ContentFormModal = ({ state, actions }: { state: any, actions: any }) => {
   const {
       isModalOpen, editingId, contentList, profile, type, status, initialStatus, addToTrending, addToNewlyAdded,
-      title, showTitleSuggestions, disableSuggestions, description, posterUrl, trailerUrl, trailerTitle, trailerYoutubeTitle,
+      title, order, showTitleSuggestions, disableSuggestions, description, posterUrl, trailerUrl, trailerTitle, trailerYoutubeTitle,
       trailerSeasonNumber, trailers, sampleUrl, imdbLink, imdbRating, year, releaseDate, runtime, selectedGenres, genres,
       selectedLanguages, languages, selectedQuality, qualities, subtitles, cast, country, isDescriptionExpanded, isCastExpanded,
       isCountryExpanded, movieLinks, seasons, expandedEpisodes, isSaving, titleSuggestions
   } = state;
 
   const {
-      setIsModalOpen, setIsAutoFillModalOpen, setType, setStatus, setTitle, setShowTitleSuggestions, setDisableSuggestions,
+      setIsModalOpen, setIsAutoFillModalOpen, setType, setStatus, setTitle, setOrder, setShowTitleSuggestions, setDisableSuggestions,
       setDescription, setPosterUrl, handleImageUpload, setTrailerUrl, setTrailerTitle, setTrailerYoutubeTitle, setTrailerSeasonNumber,
       setTrailers, setSampleUrl, setImdbLink, setImdbRating, setYear, setReleaseDate, setRuntime, setSelectedGenres, setManageModal,
       setSelectedLanguages, setSelectedQuality, setSubtitles, setCast, setCountry, setIsDescriptionExpanded, setIsCastExpanded,
@@ -377,53 +377,66 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                   </div>
                   
                   {/* 2. Title */}
-                  <div className="relative">
-                    <div className="flex justify-between items-center mb-1">
-                      <label className="block text-xs font-medium text-zinc-500">Title</label>
-                      {titleSuggestions.length > 0 && (
-                        <button 
-                          type="button"
-                          onClick={() => setDisableSuggestions(!disableSuggestions)}
-                          className="text-[10px] bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 px-2 py-0.5 rounded-md text-zinc-400 dark:text-zinc-500 hover:text-emerald-500 flex items-center gap-1 transition-colors border border-zinc-200 dark:border-zinc-800"
-                          title={disableSuggestions ? "Show similar titles" : "Hide similar titles"}
-                        >
-                          {disableSuggestions ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
-                          {disableSuggestions ? 'Show Similar' : 'Hide Similar'}
-                        </button>
+                  <div className="grid grid-cols-[1fr_80px] gap-2">
+                    <div className="relative">
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="block text-xs font-medium text-zinc-500">Title</label>
+                        {titleSuggestions.length > 0 && (
+                          <button 
+                            type="button"
+                            onClick={() => setDisableSuggestions(!disableSuggestions)}
+                            className="text-[10px] bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 px-2 py-0.5 rounded-md text-zinc-400 dark:text-zinc-500 hover:text-emerald-500 flex items-center gap-1 transition-colors border border-zinc-200 dark:border-zinc-800"
+                            title={disableSuggestions ? "Show similar titles" : "Hide similar titles"}
+                          >
+                            {disableSuggestions ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
+                            {disableSuggestions ? 'Show Similar' : 'Hide Similar'}
+                          </button>
+                        )}
+                      </div>
+                      <input 
+                        type="text" 
+                        value={title} 
+                        onChange={(e) => {
+                          setTitle(e.target.value);
+                          setShowTitleSuggestions(true);
+                        }} 
+                        onFocus={() => {
+                          setShowTitleSuggestions(true);
+                          setDisableSuggestions(false);
+                        }}
+                        onBlur={() => setTimeout(() => setShowTitleSuggestions(false), 200)}
+                        className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" 
+                      />
+                      {showTitleSuggestions && !disableSuggestions && titleSuggestions.length > 0 && (
+                        <div className="absolute z-50 w-full mt-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg shadow-xl max-h-48 overflow-y-auto">
+                          <div className="p-2 text-xs text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-800">Similar content found:</div>
+                          {titleSuggestions.map(suggestion => (
+                            <div 
+                              key={suggestion.id} 
+                              className="px-3 py-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 cursor-pointer text-sm flex justify-between items-center"
+                              onClick={() => {
+                                setTitle(suggestion.title);
+                                setShowTitleSuggestions(false);
+                              }}
+                            >
+                              <span className="text-zinc-900 dark:text-zinc-200">{suggestion.title}</span>
+                              <span className="text-xs text-zinc-500 capitalize">{suggestion.type} • {suggestion.year}</span>
+                            </div>
+                          ))}
+                        </div>
                       )}
                     </div>
-                    <input 
-                      type="text" 
-                      value={title} 
-                      onChange={(e) => {
-                        setTitle(e.target.value);
-                        setShowTitleSuggestions(true);
-                      }} 
-                      onFocus={() => {
-                        setShowTitleSuggestions(true);
-                        setDisableSuggestions(false);
-                      }}
-                      onBlur={() => setTimeout(() => setShowTitleSuggestions(false), 200)}
-                      className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" 
-                    />
-                    {showTitleSuggestions && !disableSuggestions && titleSuggestions.length > 0 && (
-                      <div className="absolute z-50 w-full mt-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg shadow-xl max-h-48 overflow-y-auto">
-                        <div className="p-2 text-xs text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-800">Similar content found:</div>
-                        {titleSuggestions.map(suggestion => (
-                          <div 
-                            key={suggestion.id} 
-                            className="px-3 py-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 cursor-pointer text-sm flex justify-between items-center"
-                            onClick={() => {
-                              setTitle(suggestion.title);
-                              setShowTitleSuggestions(false);
-                            }}
-                          >
-                            <span className="text-zinc-900 dark:text-zinc-200">{suggestion.title}</span>
-                            <span className="text-xs text-zinc-500 capitalize">{suggestion.type} • {suggestion.year}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-500 mb-1" title="Leave empty for auto highest order (top)">Order</label>
+                      <input 
+                        type="number" 
+                        value={order} 
+                        onChange={(e) => setOrder(e.target.value === "" ? "" : Number(e.target.value))} 
+                        placeholder="Auto"
+                        className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-emerald-500" 
+                      />
+                    </div>
                   </div>
                   
                   {/* 3. Release Year+ Fetch +Master Fetch */}

@@ -98,6 +98,7 @@ import {
 import { LinkCheckerModal } from "../../components/LinkCheckerModal";
 import { TelegramDownloadModal } from "../../components/TelegramDownloadModal";
 import { AdjustContentsModal } from "../../components/AdjustContentsModal";
+import Modal from "../../components/Modal";
 import ManageModal from "../../components/ManageModal";
 import { Button } from "../../components/Button";
 import {
@@ -653,6 +654,7 @@ export default function ContentManagement() {
   const [addToTrending, setAddToTrending] = useState(false);
   const [addToNewlyAdded, setAddToNewlyAdded] = useState(false);
   const [title, setTitle] = useState("");
+  const [order, setOrder] = useState<number | "">("");
   const [showTitleSuggestions, setShowTitleSuggestions] = useState(false);
   const [disableSuggestions, setDisableSuggestions] = useState(false);
   const [description, setDescription] = useState("");
@@ -796,7 +798,7 @@ export default function ContentManagement() {
     () => sessionStorage.getItem("content_mgmt_added_by") || "all",
   );
   const [filterSort, setFilterSort] = useState<"default" | "newest" | "oldest">(
-    () => (sessionStorage.getItem("content_mgmt_sort") as any) || "newest",
+    () => (sessionStorage.getItem("content_mgmt_sort_v2") as any) || "default",
   );
   const [selectedContent, setSelectedContent] = useState<string[]>([]);
   const [visibleCount, setVisibleCount] = useState(() => {
@@ -842,7 +844,7 @@ export default function ContentManagement() {
       sessionStorage.setItem("content_mgmt_year", filterYear);
       sessionStorage.setItem("content_mgmt_status", filterStatus);
       sessionStorage.setItem("content_mgmt_added_by", filterAddedBy);
-      sessionStorage.setItem("content_mgmt_sort", filterSort);
+      sessionStorage.setItem("content_mgmt_sort_v2", filterSort);
       sessionStorage.setItem("adminShowDuplicates", showDuplicates.toString());
       sessionStorage.setItem("adminShowMissingOnly", showMissing.toString());
       sessionStorage.setItem(
@@ -908,6 +910,12 @@ export default function ContentManagement() {
     content: Content | null;
     status: "idle" | "sending" | "success" | "error";
   }>({ isOpen: false, content: null, status: "idle" });
+  const [shareResultModal, setShareResultModal] = useState<{
+    isOpen: boolean;
+    text: string;
+    title: string;
+  }>({ isOpen: false, text: "", title: "" });
+
   const [shareAnywayConfig, setShareAnywayConfig] = useState<{
     isOpen: boolean;
     content: Content | null;
@@ -947,6 +955,9 @@ export default function ContentManagement() {
   );
   useModalBehavior(notificationModal.isOpen, () =>
     setNotificationModal({ isOpen: false, content: null, status: "idle" }),
+  );
+  useModalBehavior(shareResultModal.isOpen, () =>
+    setShareResultModal({ ...shareResultModal, isOpen: false }),
   );
   useModalBehavior(shareAnywayConfig.isOpen, () =>
     setShareAnywayConfig({
@@ -1035,7 +1046,7 @@ export default function ContentManagement() {
     setFilterYear("all");
     setFilterStatus("all");
     setFilterAddedBy("all");
-    setFilterSort("newest");
+    setFilterSort("default");
     setSearchTerm("");
     setShowMissing("none");
     setShowDuplicates(false);
@@ -1112,6 +1123,7 @@ export default function ContentManagement() {
     setAddToTrending(false);
     setAddToNewlyAdded(false);
     setTitle("");
+    setOrder("");
     setDescription("");
     setPosterUrl("");
     setTrailerUrl("");
@@ -1213,6 +1225,7 @@ export default function ContentManagement() {
     setStatus(contentToUse.status || "published");
     setInitialStatus(contentToUse.status || "published");
     setTitle(contentToUse.title || "");
+    setOrder(contentToUse.order !== undefined ? contentToUse.order : "");
     setDescription(contentToUse.description || "");
     setPosterUrl(contentToUse.posterUrl || "");
     setTrailerUrl(contentToUse.trailerUrl || "");
@@ -1364,7 +1377,9 @@ export default function ContentManagement() {
         updatedAt: new Date().toISOString(),
       };
 
-      if (
+      if (order !== "") {
+        data.order = Number(order);
+      } else if (
         currentEditingId &&
         initialStatus === "draft" &&
         finalStatus === "published"
@@ -2799,10 +2814,10 @@ export default function ContentManagement() {
               "Sharing failed directly, but content was copied to clipboard.",
           });
         } catch (e) {
-          setAlertConfig({
+          setShareResultModal({
             isOpen: true,
-            title: "Error",
-            message: "Failed to share to WhatsApp.",
+            title: "Share to WhatsApp",
+            text: text
           });
         }
       }
@@ -3212,10 +3227,10 @@ export default function ContentManagement() {
               message: "Share content copied to clipboard!",
             });
           } catch (clipErr) {
-            setAlertConfig({
+            setShareResultModal({
               isOpen: true,
-              title: "Error",
-              message: "Failed to share or copy to clipboard.",
+              title: "Share Content",
+              text: text
             });
           }
         }
@@ -3230,10 +3245,10 @@ export default function ContentManagement() {
           message: "Share content copied to clipboard!",
         });
       } catch (clipErr) {
-        setAlertConfig({
+        setShareResultModal({
           isOpen: true,
-          title: "Error",
-          message: "Failed to copy to clipboard.",
+          title: "Share Content",
+          text: text
         });
       }
     }
@@ -4583,7 +4598,7 @@ export default function ContentManagement() {
     filterYear !== "all" ||
     filterStatus !== "all" ||
     filterAddedBy !== "all" ||
-    filterSort !== "newest" ||
+    filterSort !== "default" ||
     showMissing !== "none" ||
     showDuplicates;
 
@@ -5137,6 +5152,7 @@ export default function ContentManagement() {
           addToTrending,
           addToNewlyAdded,
           title,
+          order,
           showTitleSuggestions,
           disableSuggestions,
           description,
@@ -5176,6 +5192,7 @@ export default function ContentManagement() {
           setType,
           setStatus,
           setTitle,
+          setOrder,
           setShowTitleSuggestions,
           setDisableSuggestions,
           setDescription,
@@ -5873,6 +5890,54 @@ export default function ContentManagement() {
         }
       />
 
+      <Modal
+        isOpen={shareResultModal.isOpen}
+        onClose={() => setShareResultModal({ ...shareResultModal, isOpen: false })}
+        title={shareResultModal.title}
+        maxWidth="max-w-2xl"
+      >
+        <div className="flex flex-col gap-4">
+          <p className="text-zinc-600 dark:text-zinc-400 text-sm">
+            Please copy the content below manually.
+          </p>
+          <textarea
+            readOnly
+            className="w-full h-64 p-3 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-sm font-mono whitespace-pre-wrap outline-none"
+            value={shareResultModal.text}
+          />
+          <div className="flex justify-end gap-3 mt-2">
+            <button
+              onClick={() => setShareResultModal({ ...shareResultModal, isOpen: false })}
+              className="px-4 py-2 rounded-xl text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium transition-colors"
+            >
+              Close
+            </button>
+            <button
+              onClick={() => {
+                const textArea = document.createElement("textarea");
+                textArea.value = shareResultModal.text;
+                textArea.style.top = "0";
+                textArea.style.left = "0";
+                textArea.style.position = "fixed";
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                try {
+                  document.execCommand('copy');
+                  setAlertConfig({ isOpen: true, title: "Success", message: "Copied to clipboard!" });
+                } catch (err) {
+                  setAlertConfig({ isOpen: true, title: "Error", message: "Failed to copy." });
+                } finally {
+                  document.body.removeChild(textArea);
+                }
+              }}
+              className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-2 rounded-xl font-bold transition-colors flex items-center gap-2"
+            >
+              <Copy className="w-4 h-4" /> Copy
+            </button>
+          </div>
+        </div>
+      </Modal>
       <AdjustContentsModal
         isOpen={isAdjustContentsModalOpen}
         onClose={() => setIsAdjustContentsModalOpen(false)}

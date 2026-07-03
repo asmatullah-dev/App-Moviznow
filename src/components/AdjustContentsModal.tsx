@@ -7,6 +7,7 @@ import { Content } from '../types';
 import { db } from '../firebase';
 import { writeBatch, doc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
+import { getContrastColor } from '../utils/contentUtils';
 import { useModalBehavior } from '../hooks/useModalBehavior';
 
 import { useContent } from '../contexts/ContentContext';
@@ -22,13 +23,19 @@ const ContentItem = memo(({
   index, 
   isSelected, 
   isDragDisabled, 
-  onClick 
+  onClick,
+  onOrderChange,
+  orderNumber,
+  quality
 }: { 
   item: Content; 
   index: number; 
   isSelected: boolean; 
   isDragDisabled: boolean;
   onClick: (id: string, e: React.MouseEvent) => void;
+  onOrderChange: (id: string, newOrder: number) => void;
+  orderNumber: number;
+  quality?: any;
 }) => {
   return (
     <Draggable 
@@ -42,7 +49,7 @@ const ContentItem = memo(({
           {...provided.draggableProps}
           onClick={(e) => onClick(item.id, e)}
           className={clsx(
-            "flex items-center gap-4 p-3 rounded-xl border transition-colors duration-200 cursor-pointer",
+            "flex items-center gap-2 p-2 rounded-xl border transition-colors duration-200 cursor-pointer",
             snapshot.isDragging 
               ? 'bg-zinc-100 dark:bg-zinc-800 border-emerald-500 shadow-xl shadow-emerald-500/10 z-50' 
               : isSelected
@@ -50,47 +57,76 @@ const ContentItem = memo(({
                 : 'bg-zinc-50/50 dark:bg-zinc-900/50 border-zinc-100 dark:border-zinc-800 hover:bg-zinc-100/80 dark:hover:bg-zinc-800/80'
           )}
         >
-          <div
-            {...provided.dragHandleProps}
-            className={clsx(
-              "p-2 rounded-lg transition-colors",
-              isDragDisabled 
-                ? 'opacity-30 cursor-not-allowed' 
-                : 'hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white cursor-grab active:cursor-grabbing'
-            )}
-          >
-            <GripVertical className="w-5 h-5" />
-          </div>
-          
-          <div className="w-12 h-16 flex-shrink-0 rounded-lg overflow-hidden bg-zinc-200 dark:bg-zinc-800 transition-colors duration-300">
-            {item.posterUrl ? (
-              <img src={item.posterUrl} alt={item.title} className="w-full h-full object-cover" loading="lazy" />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-zinc-500 dark:text-zinc-400 text-[10px]">
-                No Img
+          <div className="flex items-center gap-1">
+            <div
+              {...provided.dragHandleProps}
+              className={clsx(
+                "p-0.5 rounded-lg transition-colors",
+                isDragDisabled 
+                  ? 'opacity-30 cursor-not-allowed' 
+                  : 'hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white cursor-grab active:cursor-grabbing'
+              )}
+            >
+              <GripVertical className="w-5 h-5 -ml-1" />
+            </div>
+            
+            <div className="w-12 h-16 flex-shrink-0 rounded-lg overflow-hidden bg-zinc-200 dark:bg-zinc-800 transition-colors duration-300 relative">
+              <div className="absolute top-0 left-0 bg-black/60 text-white text-[10px] font-bold px-1 rounded-br-md z-10 backdrop-blur-sm">
+                #{orderNumber}
               </div>
-            )}
+              {item.posterUrl ? (
+                <img src={item.posterUrl} alt={item.title} className="w-full h-full object-cover" loading="lazy" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-zinc-500 dark:text-zinc-400 text-[10px]">
+                  No Img
+                </div>
+              )}
+            </div>
           </div>
           
           <div className="flex-1 min-w-0">
             <h3 className="text-sm font-medium text-zinc-900 dark:text-white line-clamp-2 leading-tight transition-colors duration-300">{item.title}</h3>
           </div>
           
-          <div className="flex flex-col items-end gap-1 flex-shrink-0">
-            {item.status === 'draft' && (
-              <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider bg-orange-500 text-white shadow-sm">
-                Draft
-              </span>
-            )}
-            <span className={clsx(
-              "px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider text-white",
-              item.type === 'movie' ? 'bg-blue-500/90' : 'bg-purple-500/90'
-            )}>
-              {item.type}
-            </span>
-            <span className="px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 text-[8px] font-bold transition-colors duration-300">
-              {item.year}
-            </span>
+          <div className="flex flex-col items-end gap-1 flex-shrink-0" onClick={e => e.stopPropagation()}>
+            <input
+              type="number"
+              value={item.order === undefined ? '' : item.order}
+              onChange={(e) => onOrderChange(item.id, Number(e.target.value))}
+              className="w-16 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md px-1.5 py-0.5 text-xs text-center focus:outline-none focus:border-emerald-500 mb-0.5 text-zinc-700 dark:text-zinc-300 font-mono"
+              title="Order"
+            />
+            <div className="flex flex-col items-end gap-1">
+              <div className="flex flex-wrap items-center justify-end gap-1">
+                {item.status === 'draft' && (
+                  <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider bg-orange-500 text-white shadow-sm">
+                    Draft
+                  </span>
+                )}
+                <span className={clsx(
+                  "px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider text-white",
+                  item.type === 'movie' ? 'bg-blue-500/90' : 'bg-purple-500/90'
+                )}>
+                  {item.type}
+                </span>
+                <span className="px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 text-[8px] font-bold transition-colors duration-300">
+                  {item.year}
+                </span>
+              </div>
+              {quality && (
+                <div className="flex justify-end">
+                  <span 
+                    className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider shadow-sm border border-black/10 dark:border-white/10"
+                    style={{
+                      backgroundColor: quality.color || '#f59e0b',
+                      color: getContrastColor(quality.color || '#f59e0b')
+                    }}
+                  >
+                    {quality.name}
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -101,30 +137,43 @@ const ContentItem = memo(({
 ContentItem.displayName = 'ContentItem';
 
 export const AdjustContentsModal: React.FC<Props> = ({ isOpen, onClose, contentList }) => {
-  const { updateOrder } = useContent();
+  const { updateOrder, qualities } = useContent();
   const [items, setItems] = useState<Content[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [multiSelectMode, setMultiSelectMode] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [saving, setSaving] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(50);
+
+  const [isRendering, setIsRendering] = useState(false);
 
   useModalBehavior(isOpen, onClose);
 
   // Initialize only when modal opens to prevent background resets
   useEffect(() => {
     if (isOpen) {
-      const sorted = [...contentList].sort((a, b) => {
-        if (a.order !== undefined && b.order !== undefined) return b.order - a.order;
-        if (a.order === undefined && b.order !== undefined) return 1;
-        if (a.order !== undefined && b.order === undefined) return -1;
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      });
-      setItems(sorted);
-      setSearchTerm('');
-      setSelectedIds([]);
-      setMultiSelectMode(false);
+      setIsRendering(true);
+      // Let the modal open animation finish before processing list
+      const timerId = setTimeout(() => {
+        const sorted = [...contentList].sort((a, b) => {
+          if (a.order !== undefined && b.order !== undefined) return b.order - a.order;
+          if (a.order === undefined && b.order !== undefined) return 1;
+          if (a.order !== undefined && b.order === undefined) return -1;
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        });
+        setItems(sorted);
+        setSearchTerm('');
+        setSelectedIds([]);
+        setMultiSelectMode(false);
+        setVisibleCount(50);
+        setIsRendering(false);
+      }, 150);
+      
+      return () => clearTimeout(timerId);
+    } else {
+      setItems([]); // Clear to save memory when closed
     }
-  }, [isOpen]); // Only trigger on open, NOT on contentList changes while open
+  }, [isOpen, contentList]);
 
   const filteredItems = searchTerm 
     ? items.filter(item => 
@@ -132,6 +181,12 @@ export const AdjustContentsModal: React.FC<Props> = ({ isOpen, onClose, contentL
         item.year.toString().includes(searchTerm)
       )
     : items;
+
+  const visibleItems = filteredItems.slice(0, visibleCount);
+
+  const handleOrderChange = useCallback((id: string, newOrder: number) => {
+    setItems(prev => prev.map(item => item.id === id ? { ...item, order: newOrder } : item));
+  }, []);
 
   const toggleSelection = useCallback((id: string, event: React.MouseEvent) => {
     if (searchTerm) return;
@@ -182,12 +237,42 @@ export const AdjustContentsModal: React.FC<Props> = ({ isOpen, onClose, contentL
         const itemsRemovedBeforeDest = prev.slice(0, destination.index).filter(item => movedIds.includes(item.id)).length;
         const finalInsertIndex = Math.max(0, destination.index - itemsRemovedBeforeDest);
         
-        otherItems.splice(finalInsertIndex, 0, ...itemsToMove);
+        // Calculate new orders for multi-select
+        let baseOrder = 0;
+        if (finalInsertIndex === 0) {
+            baseOrder = (otherItems[0]?.order || 0) + (itemsToMove.length * 10);
+        } else if (finalInsertIndex === otherItems.length) {
+            baseOrder = (otherItems[otherItems.length - 1]?.order || 0) - 10;
+        } else {
+            const prevOrder = otherItems[finalInsertIndex - 1].order || 0;
+            const nextOrder = otherItems[finalInsertIndex].order || 0;
+            baseOrder = Math.floor((prevOrder + nextOrder) / 2) + Math.floor(itemsToMove.length / 2);
+        }
+        
+        const updatedItemsToMove = itemsToMove.map((item, idx) => ({
+            ...item,
+            order: baseOrder - idx
+        }));
+
+        otherItems.splice(finalInsertIndex, 0, ...updatedItemsToMove);
         return otherItems;
       } else {
         // Single item move
         const [reorderedItem] = newItems.splice(source.index, 1);
-        newItems.splice(destination.index, 0, reorderedItem);
+        
+        let newOrder = 0;
+        if (destination.index === 0) {
+            newOrder = (newItems[0]?.order || 0) + 10;
+        } else if (destination.index === newItems.length) {
+            newOrder = (newItems[newItems.length - 1]?.order || 0) - 10;
+        } else {
+            const prevOrder = newItems[destination.index - 1].order || 0;
+            const nextOrder = newItems[destination.index].order || 0;
+            newOrder = Math.floor((prevOrder + nextOrder) / 2);
+        }
+        
+        const updatedItem = { ...reorderedItem, order: newOrder };
+        newItems.splice(destination.index, 0, updatedItem);
         setSelectedIds([draggableId]);
         return newItems;
       }
@@ -200,18 +285,19 @@ export const AdjustContentsModal: React.FC<Props> = ({ isOpen, onClose, contentL
     try {
       // Find only items that have actually changed their position
       // Using an optimized check to avoid updating everything if only a few moved
-      const itemsToUpdate = items
-        .map((item, index) => ({ id: item.id, currentOrder: item.order, newOrder: items.length - 1 - index }))
-        .filter(change => change.currentOrder !== change.newOrder);
+      const itemsToUpdate = items.filter(item => {
+        const originalItem = contentList.find(c => c.id === item.id);
+        return originalItem && originalItem.order !== item.order;
+      });
       
       if (itemsToUpdate.length === 0) {
         onClose();
         return;
       }
 
-      const updates = itemsToUpdate.map(({ id, newOrder }) => ({
-        id,
-        order: newOrder
+      const updates = itemsToUpdate.map(item => ({
+        id: item.id,
+        order: item.order as number
       }));
       
       // We only update the order in memory, and let Context debounce-save it to search index
@@ -239,7 +325,7 @@ export const AdjustContentsModal: React.FC<Props> = ({ isOpen, onClose, contentL
             initial={{ scale: 0.98, opacity: 0, y: 10 }}
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.98, opacity: 0, y: 10 }}
-            className="w-full h-full flex flex-col bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white transition-colors duration-300"
+            className="w-full h-full max-h-[100dvh] flex flex-col bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white transition-colors duration-300"
           >
             {/* Header */}
             <div className="flex items-center justify-between p-3 md:p-4 border-b border-zinc-100 dark:border-zinc-800 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md sticky top-0 z-[60] transition-colors duration-300">
@@ -317,56 +403,95 @@ export const AdjustContentsModal: React.FC<Props> = ({ isOpen, onClose, contentL
             </div>
 
             {/* Content List */}
-            <div className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-zinc-50/30 dark:bg-zinc-950/30 scroll-smooth">
-              {searchTerm ? (
-                <div className="mb-4 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-emerald-500 rounded-lg text-white">
-                      <Search className="w-4 h-4" />
-                    </div>
-                    <p className="text-emerald-700 dark:text-emerald-400 text-sm font-medium">
-                      Showing results for "{searchTerm}". Dragging is disabled while searching.
-                    </p>
-                  </div>
-                  <button 
-                    onClick={() => setSearchTerm('')}
-                    className="text-xs font-bold text-emerald-600 dark:text-emerald-500 hover:underline"
-                  >
-                    CLEAR SEARCH
-                  </button>
+            <div className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-zinc-50/30 dark:bg-zinc-950/30 touch-auto">
+              {isRendering ? (
+                <div className="flex flex-col items-center justify-center h-64 gap-4">
+                  <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
+                  <p className="text-sm text-zinc-500">Loading content...</p>
                 </div>
               ) : (
-                <div className="mb-4 flex items-center justify-between text-[10px] uppercase tracking-widest text-zinc-400 font-bold px-2">
-                  <span>List order</span>
-                  {selectedIds.length > 0 && (
-                    <span className="text-emerald-500">{selectedIds.length} items selected to move</span>
-                  )}
-                </div>
-              )}
-              
-              <DragDropContext onDragEnd={onDragEnd}>
-                <Droppable droppableId="content-list" isDropDisabled={!!searchTerm}>
-                  {(provided) => (
-                    <div
-                      {...provided.droppableProps}
-                      ref={provided.innerRef}
-                      className="space-y-2 max-w-5xl mx-auto pb-20"
-                    >
-                      {filteredItems.map((item, index) => (
-                        <ContentItem 
-                          key={item.id}
-                          item={item}
-                          index={index}
-                          isSelected={selectedIds.includes(item.id)}
-                          isDragDisabled={!!searchTerm}
-                          onClick={toggleSelection}
-                        />
-                      ))}
-                      {provided.placeholder}
+                <>
+                  {searchTerm ? (
+                    <div className="mb-4 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-emerald-500 rounded-lg text-white">
+                          <Search className="w-4 h-4" />
+                        </div>
+                        <p className="text-emerald-700 dark:text-emerald-400 text-sm font-medium">
+                          Showing results for "{searchTerm}". Dragging is disabled while searching.
+                        </p>
+                      </div>
+                      <button 
+                        onClick={() => setSearchTerm('')}
+                        className="text-xs font-bold text-emerald-600 dark:text-emerald-500 hover:underline"
+                      >
+                        CLEAR SEARCH
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="mb-4 flex items-center justify-between text-[10px] uppercase tracking-widest text-zinc-400 font-bold px-2">
+                      <div className="flex items-center gap-4">
+                        <span>List order</span>
+                        <button
+                          onClick={() => {
+                            setItems(prev => prev.map((item, index) => ({
+                              ...item,
+                              order: prev.length - index
+                            })));
+                          }}
+                          className="px-2 py-1 bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 rounded hover:bg-blue-500/20 transition-colors"
+                        >
+                          Reset Orders to Index
+                        </button>
+                      </div>
+                      {selectedIds.length > 0 && (
+                        <span className="text-emerald-500">{selectedIds.length} items selected to move</span>
+                      )}
                     </div>
                   )}
-                </Droppable>
-              </DragDropContext>
+                  
+                  <DragDropContext onDragEnd={onDragEnd}>
+                    <Droppable droppableId="content-list" isDropDisabled={!!searchTerm}>
+                      {(provided) => (
+                        <div
+                          {...provided.droppableProps}
+                          ref={provided.innerRef}
+                          className="space-y-2 max-w-5xl mx-auto pb-20"
+                        >
+                          {visibleItems.map((item, index) => (
+                            <ContentItem 
+                              key={item.id}
+                              item={item}
+                              index={index}
+                              isSelected={selectedIds.includes(item.id)}
+                              isDragDisabled={!!searchTerm}
+                              onClick={toggleSelection}
+                              onOrderChange={handleOrderChange}
+                              orderNumber={items.length - items.findIndex(i => i.id === item.id)}
+                              quality={qualities?.find((q: any) => q.id === item.qualityId)}
+                            />
+                          ))}
+                          {provided.placeholder}
+                        </div>
+                      )}
+                    </Droppable>
+                  </DragDropContext>
+                  
+                  {visibleCount < filteredItems.length && (
+                    <div className="flex justify-center mt-6 pb-20">
+                      <button
+                        onClick={() => setVisibleCount(prev => prev + 50)}
+                        className="px-6 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-full text-sm font-medium transition-colors border border-zinc-200 dark:border-zinc-700 shadow-sm flex items-center gap-2"
+                      >
+                        Show More
+                        <span className="text-xs text-zinc-500">
+                          ({filteredItems.length - visibleCount} remaining)
+                        </span>
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </motion.div>
         </motion.div>

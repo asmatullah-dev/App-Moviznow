@@ -953,25 +953,18 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
   };
 
   const updateOrder = async (updates: {id: string, order: number}[]) => {
-     const newList = [...contentList];
-     const updateMap = new Map(updates.map(u => [u.id, u.order]));
-     let changed = false;
-     newList.forEach(item => {
-        if (updateMap.has(item.id) && item.order !== updateMap.get(item.id)) {
-          item.order = updateMap.get(item.id);
-          changed = true;
-        }
-     });
-     if (changed) {
-        newList.sort((a, b) => (b.order || 0) - (a.order || 0));
-        setContentList(newList);
-        if (['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) {
-            const affectedItems = newList.filter(item => updateMap.has(item.id));
-            for (const item of affectedItems) {
-                await saveContentInternal(item, true); 
-            }
-        }
-     }
+    const validUpdates = updates.filter(u => {
+        const item = contentList.find(c => c.id === u.id);
+        return item && item.order !== u.order;
+    });
+
+    if (validUpdates.length > 0) {
+        const formattedUpdates = validUpdates.map(u => ({
+            id: u.id,
+            fields: { order: u.order }
+        }));
+        await updateContentFields(formattedUpdates);
+    }
   };
 
   const saveContent = (content: Content) => saveContentInternal(content);

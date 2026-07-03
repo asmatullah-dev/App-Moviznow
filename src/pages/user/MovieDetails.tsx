@@ -69,6 +69,7 @@ import {
 import ContentCard from "../../components/ContentCard";
 
 import { useModalBehavior } from "../../hooks/useModalBehavior";
+import Modal from "../../components/Modal";
 import { useSettings } from "../../contexts/SettingsContext";
 
 export default function MovieDetails() {
@@ -154,6 +155,11 @@ export default function MovieDetails() {
   const [isPosterExpanded, setIsPosterExpanded] = useState(false);
   const [isTrailerPopupOpen, setIsTrailerPopupOpen] = useState(false);
   const [isTrailerSelectionOpen, setIsTrailerSelectionOpen] = useState(false);
+  const [shareResultModal, setShareResultModal] = useState<{
+    isOpen: boolean;
+    text: string;
+    title: string;
+  }>({ isOpen: false, text: "", title: "" });
   const [activeTrailerUrl, setActiveTrailerUrl] = useState<string | null>(null);
   const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
   const [lockedContentInfo, setLockedContentInfo] = useState<{
@@ -187,6 +193,9 @@ export default function MovieDetails() {
   });
   useModalBehavior(isTrailerSelectionOpen, () =>
     setIsTrailerSelectionOpen(false),
+  );
+  useModalBehavior(shareResultModal.isOpen, () =>
+    setShareResultModal({ ...shareResultModal, isOpen: false }),
   );
   useModalBehavior(linkPopup?.isOpen || false, () => setLinkPopup(null));
   useModalBehavior(!!deleteId, () => setDeleteId(null));
@@ -2231,12 +2240,20 @@ export default function MovieDetails() {
         await navigator.share(shareData);
       } else {
         // Fallback to clipboard
-        await navigator.clipboard.writeText(textForClipboard);
-        setAlertConfig({
-          isOpen: true,
-          title: "Success",
-          message: "Link and details copied to clipboard!",
-        });
+        try {
+          await navigator.clipboard.writeText(textForClipboard);
+          setAlertConfig({
+            isOpen: true,
+            title: "Success",
+            message: "Link and details copied to clipboard!",
+          });
+        } catch (clipErr) {
+          setShareResultModal({
+            isOpen: true,
+            title: "Share Content",
+            text: textForClipboard
+          });
+        }
       }
     } catch (err: any) {
       const isCanceled =
@@ -2245,7 +2262,20 @@ export default function MovieDetails() {
         (typeof err === "string" && err.toLowerCase().includes("cancel"));
 
       if (!isCanceled) {
-        console.error("Error sharing:", err);
+        try {
+          await navigator.clipboard.writeText(textForClipboard);
+          setAlertConfig({
+            isOpen: true,
+            title: "Success",
+            message: "Sharing failed directly, but content was copied to clipboard.",
+          });
+        } catch (e) {
+          setShareResultModal({
+            isOpen: true,
+            title: "Share Content",
+            text: textForClipboard
+          });
+        }
       }
     } finally {
       setIsShareLoading(false);
@@ -3984,6 +4014,57 @@ export default function MovieDetails() {
           initialYear={mergedContent.year?.toString() || ""}
         />
       )}
+
+      {/* Share Result Modal */}
+      <Modal
+        isOpen={shareResultModal.isOpen}
+        onClose={() => setShareResultModal({ ...shareResultModal, isOpen: false })}
+        title={shareResultModal.title}
+        maxWidth="max-w-2xl"
+      >
+        <div className="flex flex-col gap-4">
+          <p className="text-zinc-600 dark:text-zinc-400 text-sm">
+            Please copy the content below manually.
+          </p>
+          <textarea
+            readOnly
+            className="w-full h-64 p-3 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-sm font-mono whitespace-pre-wrap outline-none"
+            value={shareResultModal.text}
+          />
+          <div className="flex justify-end gap-3 mt-2">
+            <button
+              onClick={() => setShareResultModal({ ...shareResultModal, isOpen: false })}
+              className="px-4 py-2 rounded-xl text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium transition-colors"
+            >
+              Close
+            </button>
+            <button
+              onClick={() => {
+                const textArea = document.createElement("textarea");
+                textArea.value = shareResultModal.text;
+                textArea.style.top = "0";
+                textArea.style.left = "0";
+                textArea.style.position = "fixed";
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                try {
+                  document.execCommand('copy');
+                  setAlertConfig({ isOpen: true, title: "Success", message: "Copied to clipboard!" });
+                } catch (err) {
+                  setAlertConfig({ isOpen: true, title: "Error", message: "Failed to copy." });
+                } finally {
+                  document.body.removeChild(textArea);
+                }
+              }}
+              className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-2 rounded-xl font-bold transition-colors flex items-center gap-2"
+            >
+              <Copy className="w-4 h-4" /> Copy
+            </button>
+          </div>
+        </div>
+      </Modal>
+
     </div>
   );
 }
