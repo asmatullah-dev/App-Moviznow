@@ -78,6 +78,8 @@ export function minifyContent(content: any): any {
                ms.eps = s.episodes.map((e: any) => {
                    const me: any = { en: e.episodeNumber };
                    if (e.title) me.ti = e.title;
+                   if (e.description) me.de = e.description;
+                   if (e.duration) me.du = e.duration;
                    if (e.links && e.links.length > 0) {
                        me.lks = e.links.map((l: any) => {
                            const ml: any = {};
@@ -171,6 +173,8 @@ export function expandContent(minified: any, chunkId?: string): Content {
                 s.episodes = ms.eps.map((me: any) => {
                     const e: any = { id: `e${me.en}`, episodeNumber: me.en };
                     if (me.ti) e.title = me.ti;
+                    if (me.de) e.description = me.de;
+                    if (me.du) e.duration = me.du;
                     if (me.lks) {
                         e.links = me.lks.map((ml: any) => {
                             const l: any = { url: ml.ur || ml.url };

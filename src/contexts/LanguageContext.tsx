@@ -251,7 +251,7 @@ export const LanguageProvider = ({ children }: { children: ReactNode }) => {
 
   const setLanguage = (lang: Language) => {
     setLanguageState(lang);
-    safeStorage.setItem('app_language', lang);
+    safeStorage.setItemAsync('app_language', lang);
   };
 
   const t = (key: string): string => {
@@ -348,29 +348,15 @@ export const LanguageProvider = ({ children }: { children: ReactNode }) => {
   const translateMany = async (texts: string[]): Promise<string[]> => {
     if (language === 'en' || !texts || texts.length === 0) return texts;
     
-    // Filter and unique texts
-    const validTexts = Array.from(new Set(texts.filter(t => t && t.trim() !== "")));
-    if (validTexts.length === 0) return texts;
-
-    // Trigger all translations to be added to pending
-    const promises = validTexts.map(text => translate(text));
+    const promises = texts.map(text => translate(text));
     
-    // Force an immediate batch execution for these specific texts
-    // We wait a tiny bit to let the microtask queue process the translate calls
-    await new Promise(resolve => setTimeout(resolve, 0));
-    
+    // If we have new pending translations, trigger them immediately
     if (pendingTranslations.current.size > 0) {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
       executeBatchTranslation();
     }
     
-    const results = await Promise.all(promises);
-    
-    // Map back to original order
-    const resultsMap = new Map<string, string>();
-    validTexts.forEach((text, i) => resultsMap.set(text, results[i]));
-    
-    return texts.map(text => resultsMap.get(text) || text);
+    return Promise.all(promises);
   };
 
   return (

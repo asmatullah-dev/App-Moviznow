@@ -1365,7 +1365,15 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     }
     if (!chunkId) return item;
     try {
-      const chunkStr = safeStorage.getItem('content_chunk_' + chunkId);
+      let chunkStr = safeStorage.getItem('content_chunk_' + chunkId);
+      if (!chunkStr) {
+         const chunkDoc = await getDoc(doc(db, 'content_chunks', chunkId));
+         if (chunkDoc.exists()) {
+             const items = chunkDoc.data().items || {};
+             chunkStr = JSON.stringify(items);
+             safeStorage.setItem('content_chunk_' + chunkId, chunkStr);
+         }
+      }
       if (chunkStr) {
          const items = JSON.parse(chunkStr);
          if (items[id]) {
@@ -1374,7 +1382,9 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
             return expanded;
          }
       }
-    } catch(e) {}
+    } catch(e) {
+      console.error("Failed to fetch chunk on demand:", e);
+    }
     return item;
   };
 

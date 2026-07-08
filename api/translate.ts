@@ -35,7 +35,7 @@ translateRouter.post("/translate", async (req, res) => {
     }
     
     const response = await ai.models.generateContent({
-      model: "gemini-3.1-flash-lite",
+      model: "gemini-2.5-flash",
       contents: prompt
     });
 
