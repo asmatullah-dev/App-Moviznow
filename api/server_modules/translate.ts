@@ -35,7 +35,7 @@ translateRouter.post("/translate", async (req, res) => {
     }
     
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-1.5-flash",
       contents: prompt
     });
 
@@ -58,3 +58,5 @@ translateRouter.post("/translate", async (req, res) => {
     res.status(500).json({ error: "Translation failed" });
   }
 });
+
+export default translateRouter;
