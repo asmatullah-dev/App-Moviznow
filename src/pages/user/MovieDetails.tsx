@@ -455,11 +455,14 @@ export default function MovieDetails() {
                 (m: any) => m.episodeNumber === fe.episodeNumber,
               );
               if (!me) return fe;
+              const isFeDescPlaceholder = !fe.description || /^episode/i.test(fe.description);
+              const isFeDurPlaceholder = !fe.duration || fe.duration === "N/A";
+
               return {
                 ...fe,
                 title: me.title || fe.title,
-                description: me.description || fe.description,
-                duration: me.duration || fe.duration,
+                description: (isFeDescPlaceholder && me.description) ? me.description : (me.description || fe.description),
+                duration: (isFeDurPlaceholder && me.duration) ? me.duration : (me.duration || fe.duration),
               };
             });
           }
@@ -516,9 +519,7 @@ export default function MovieDetails() {
             if (ep.title && !/^episode\s+\d+$/i.test(ep.title.trim())) {
               stringsToTranslate.add(ep.title);
             }
-            if (ep.description && ep.description.trim() !== "" && ep.description !== ep.title) {
-              stringsToTranslate.add(ep.description);
-            }
+            // Removed episode description from prefetch to translate on open only
           });
         }
       });
@@ -1195,14 +1196,21 @@ export default function MovieDetails() {
                         tmdbEp.name
                           ? tmdbEp.name
                           : existingEp.title;
+
+                      // Only keep existing description if it's not a placeholder
+                      const isDescPlaceholder = !existingEp.description || /^episode/i.test(existingEp.description);
                       const newDesc =
-                        existingEp.description &&
-                        !/^episode/i.test(existingEp.description)
-                          ? existingEp.description
-                          : tmdbEp.overview || tmdbEp.description || "";
+                        isDescPlaceholder
+                          ? tmdbEp.overview || tmdbEp.description || ""
+                          : existingEp.description;
+
+                      // Only keep existing duration if it's valid and not a placeholder
+                      const isDurPlaceholder = !existingEp.duration || existingEp.duration === "N/A";
+                      const fallbackDur = tmdbEp.runtime ? `${tmdbEp.runtime}m` : (details.episode_run_time && details.episode_run_time[0] ? `${details.episode_run_time[0]}m` : "");
                       const newDur =
-                        existingEp.duration ||
-                        (tmdbEp.runtime ? `${tmdbEp.runtime}m` : "");
+                        isDurPlaceholder
+                          ? fallbackDur
+                          : existingEp.duration;
 
                       if (
                         newTitle !== existingEp.title ||

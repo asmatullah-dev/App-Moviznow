@@ -246,6 +246,7 @@ export const LanguageProvider = ({ children }: { children: ReactNode }) => {
   const [isTranslating, setIsTranslating] = useState(false);
   
   const pendingTranslations = useRef<Map<string, { resolve: (val: string) => void, reject: (err: any) => void }>>(new Map());
+  const inFlightTranslations = useRef<Map<string, Promise<string>>>(new Map());
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
 
   const setLanguage = (lang: Language) => {
@@ -324,73 +325,38 @@ export const LanguageProvider = ({ children }: { children: ReactNode }) => {
       // Ignore cache errors
     }
 
-    return new Promise((resolve, reject) => {
+    // Check if already in-flight
+    if (inFlightTranslations.current.has(text)) {
+      return inFlightTranslations.current.get(text)!;
+    }
+
+    const promise = new Promise<string>((resolve, reject) => {
       pendingTranslations.current.set(text, { resolve, reject });
       
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
-      debounceTimer.current = setTimeout(executeBatchTranslation, 1500); // Increased debounce to catch all content on page load
+      debounceTimer.current = setTimeout(executeBatchTranslation, 1500); 
     });
+
+    inFlightTranslations.current.set(text, promise);
+    promise.finally(() => {
+      inFlightTranslations.current.delete(text);
+    });
+
+    return promise;
   };
 
   const translateMany = async (texts: string[]): Promise<string[]> => {
     if (language === 'en' || !texts || texts.length === 0) return texts;
     
-    const uniqueTexts = Array.from(new Set(texts.filter(t => t && !/^episode\s+\d+$/i.test(t.trim()))));
-    if (uniqueTexts.length === 0) return texts;
-
-    const CACHE_EXPIRATION = 30 * 60 * 1000;
-    const resultsMap = new Map<string, string>();
-    const toTranslate: string[] = [];
-
-    // Check cache for all
-    for (const text of uniqueTexts) {
-      const cacheKey = `v2_trans_${language}_${btoa(encodeURIComponent(text.substring(0, 150)))}`;
-      try {
-        const cached = await safeStorage.getItemAsync(cacheKey);
-        if (cached) {
-          const { translated, timestamp } = JSON.parse(cached);
-          if (Date.now() - timestamp < CACHE_EXPIRATION) {
-            resultsMap.set(text, translated);
-            continue;
-          }
-        }
-      } catch (e) {}
-      toTranslate.push(text);
+    const promises = texts.map(text => translate(text));
+    
+    // If we have new pending translations, trigger them immediately
+    if (pendingTranslations.current.size > 0) {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+      executeBatchTranslation();
     }
-
-    if (toTranslate.length > 0) {
-      setIsTranslating(true);
-      const targetLangName = language === 'ur-roman' ? 'Roman Urdu (written with English alphabet)' : 'Urdu';
-      
-      try {
-        const res = await fetch('/api/translate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: toTranslate, targetLanguage: targetLangName })
-        });
-        const data = await res.json();
-        
-        if (data.translation && Array.isArray(data.translation)) {
-          data.translation.forEach((translated: string, index: number) => {
-            const original = toTranslate[index];
-            resultsMap.set(original, translated);
-            
-            const cacheKey = `v2_trans_${language}_${btoa(encodeURIComponent(original.substring(0, 150)))}`;
-            const cacheData = JSON.stringify({
-              translated,
-              timestamp: Date.now()
-            });
-            safeStorage.setItemAsync(cacheKey, cacheData);
-          });
-        }
-      } catch (e) {
-        console.error("Batch translation failed", e);
-      } finally {
-        setIsTranslating(false);
-      }
-    }
-
-    return texts.map(text => resultsMap.get(text) || text);
+    
+    return Promise.all(promises);
   };
 
   return (
