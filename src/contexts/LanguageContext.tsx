@@ -244,6 +244,8 @@ export const LanguageProvider = ({ children }: { children: ReactNode }) => {
     return (saved as Language) || 'en';
   });
   const [isTranslating, setIsTranslating] = useState(false);
+  const failureCount = useRef(0);
+  const MAX_FAILURES = 3;
   
   const pendingTranslations = useRef<Map<string, { resolve: (val: string) => void, reject: (err: any) => void }>>(new Map());
   const inFlightTranslations = useRef<Map<string, Promise<string>>>(new Map());
@@ -261,6 +263,14 @@ export const LanguageProvider = ({ children }: { children: ReactNode }) => {
 
   const executeBatchTranslation = async () => {
     if (pendingTranslations.current.size === 0) return;
+    
+    if (failureCount.current >= MAX_FAILURES) {
+      console.warn("Translation disabled due to multiple failures");
+      const itemsToTranslate = Array.from(pendingTranslations.current.entries());
+      pendingTranslations.current.clear();
+      itemsToTranslate.forEach(([text, { resolve }]) => resolve(text));
+      return;
+    }
 
     const itemsToTranslate = Array.from(pendingTranslations.current.entries());
     pendingTranslations.current.clear();
@@ -293,11 +303,14 @@ export const LanguageProvider = ({ children }: { children: ReactNode }) => {
           safeStorage.setItemAsync(cacheKey, cacheData);
           resolve(translated);
         });
+        failureCount.current = 0; // Reset on success
       } else {
+        failureCount.current++;
         itemsToTranslate.forEach(([text, { resolve }]) => resolve(text));
       }
     } catch (e) {
       console.error("Batch translation failed", e);
+      failureCount.current++;
       itemsToTranslate.forEach(([text, { resolve }]) => resolve(text));
     } finally {
       setIsTranslating(false);

@@ -15,7 +15,14 @@ translateRouter.post("/translate", async (req, res) => {
       return res.status(500).json({ error: "Gemini API key not configured" });
     }
 
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({ 
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
     
     // Support JSON array for batch translation to preserve structure
     const isArray = Array.isArray(text);
@@ -35,7 +42,7 @@ translateRouter.post("/translate", async (req, res) => {
     }
     
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
       contents: prompt
     });
 
