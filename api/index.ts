@@ -85,7 +85,7 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(express.json({ limit: "50mb" }));
-  app.use("/api", translateRouter);
+  app.use(["/api", "/"], translateRouter);
 
   // Background Scan Endpoint
   app.post(
