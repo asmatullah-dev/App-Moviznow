@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth, standardizePhone } from '../../contexts/AuthContext';
+import { useLanguage } from '../../contexts/LanguageContext';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Save, Lock, User, Mail, Phone, Loader2, AlertCircle, Bell, BellOff, CheckCircle2 } from 'lucide-react';
@@ -8,6 +9,7 @@ import { requestNotificationPermission } from '../../firebase';
 
 export default function Settings() {
   const { profile, user, updateUserProfileData } = useAuth();
+  const { t } = useLanguage();
   const { settings } = useSettings();
   const navigate = useNavigate();
   
@@ -42,12 +44,12 @@ export default function Settings() {
     }
 
     if (newPassword && newPassword !== confirmPassword) {
-      setError('New passwords do not match');
+      setError(t('New passwords do not match'));
       return;
     }
 
     if (newPassword && profile?.hasPassword && !currentPassword) {
-      setError('Current password is required to set a new password');
+      setError(t('Current password is required to set a new password'));
       return;
     }
 
@@ -58,12 +60,12 @@ export default function Settings() {
         email: email,
         phone: phone,
       }, newPassword || undefined);
-      setSuccess('Profile updated successfully');
+      setSuccess(t('Profile updated successfully'));
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
     } catch (err: any) {
-      setError(err.message || 'Failed to update profile');
+      setError(err.message || t('Failed to update profile'));
     } finally {
       setLoading(false);
     }
@@ -79,14 +81,14 @@ export default function Settings() {
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <h1 className="text-lg font-bold">Settings</h1>
+          <h1 className="text-lg font-bold">{t('Settings')}</h1>
         </div>
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-8">
         <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-sm">
           <div className="p-6">
-            <h2 className="text-xl font-bold mb-6">Profile Information</h2>
+            <h2 className="text-xl font-bold mb-6">{t('Profile Information')}</h2>
             
             {error && (
               <div className="mb-6 p-4 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl text-red-600 dark:text-red-400 text-sm">
@@ -103,7 +105,7 @@ export default function Settings() {
             <form onSubmit={handleSave} className="space-y-6">
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">Full Name</label>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">{t('Full Name')}</label>
                   <div className="relative">
                     <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400" />
                     <input
@@ -117,7 +119,7 @@ export default function Settings() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">Email Address</label>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">{t('Email Address')}</label>
                   <div className="relative">
                     <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400" />
                     <input
@@ -129,7 +131,7 @@ export default function Settings() {
                     />
                   </div>
                   <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                    Email address cannot be changed. 
+                    {t('Email address cannot be changed.')} 
                       {settings?.isAdminContactEnabled !== false && (
                          <span> <a href={(() => {
                            let supportPhone = settings?.supportNumber || '3363284466';
@@ -139,14 +141,14 @@ export default function Settings() {
                              supportPhone = '92' + supportPhone;
                            }
                            const adminPhone = supportPhone.replace('+', '');
-                           return `https://wa.me/${adminPhone}?text=${encodeURIComponent(`Assalam O Alaikum! Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nI need to change my email address.\n\nYour new email: `)}`;
-                         })()} target="_blank" rel="noreferrer" className="text-emerald-500 hover:underline">Contact admin</a> if needed.</span>
+                           return `https://wa.me/${adminPhone}?text=${encodeURIComponent(`Assalam O Alaikum! Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\n${t("Your message/question:")}\n${t("I need to change my email address.")}\n\n${t("Your new email:")} `)}`;
+                         })()} target="_blank" rel="noreferrer" className="text-emerald-500 hover:underline">{t('Contact admin')}</a> {t('if needed.')}</span>
                       )}
                   </p>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">WhatsApp Number</label>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">{t('WhatsApp Number')}</label>
                   <div className="relative">
                     <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400" />
                     <input
@@ -163,11 +165,11 @@ export default function Settings() {
                   {showPhoneWarning && !phone.trim() && (
                     <div className="mt-2 flex items-center gap-2 text-amber-500">
                       <AlertCircle className="w-4 h-4" />
-                      <p className="text-xs font-medium">WhatsApp number is required for support. Click Save again to skip.</p>
+                      <p className="text-xs font-medium">{t('WhatsApp number is required for support. Click Save again to skip.')}</p>
                     </div>
                   )}
                   <p className="mt-1 text-[10px] text-zinc-500 dark:text-zinc-400">
-                    Required for membership.
+                    {t('Required for membership.')}
                   </p>
                 </div>
               </div>
@@ -177,11 +179,11 @@ export default function Settings() {
                   <div className="h-px bg-zinc-200 dark:bg-zinc-800 my-8"></div>
 
                   <div className="space-y-4">
-                    <h3 className="text-lg font-bold mb-4">{profile?.hasPassword ? 'Change Password' : 'Create Password'}</h3>
+                    <h3 className="text-lg font-bold mb-4">{profile?.hasPassword ? t('Change Password') : t('Create Password')}</h3>
                     
                     {profile?.hasPassword && (
                       <div>
-                        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">Current Password</label>
+                        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">{t('Current Password')}</label>
                         <div className="relative">
                           <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400" />
                           <input
@@ -196,7 +198,7 @@ export default function Settings() {
                     )}
 
                     <div>
-                      <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">New Password</label>
+                      <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">{t('New Password')}</label>
                       <div className="relative">
                         <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400" />
                         <input
@@ -210,7 +212,7 @@ export default function Settings() {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">Confirm New Password</label>
+                      <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">{t('Confirm New Password')}</label>
                       <div className="relative">
                         <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400" />
                         <input
@@ -233,7 +235,7 @@ export default function Settings() {
                   className="w-full flex items-center justify-center gap-2 bg-emerald-500 text-white py-3 rounded-xl font-bold hover:bg-emerald-600 transition-colors disabled:opacity-50"
                 >
                   {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
-                  Save Changes
+                  {t('Save Changes')}
                 </button>
               </div>
             </form>

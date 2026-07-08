@@ -10,6 +10,8 @@ import { useCart } from '../contexts/CartContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useHaptics } from '../hooks/useHaptics';
+import { useLanguage } from '../contexts/LanguageContext';
+import { Translate } from './Translate';
 
 interface ContentCardProps {
   content: Content;
@@ -38,6 +40,7 @@ const ContentCard = React.memo(({
   const { profile: sysProfile } = useAuth();
   const { settings } = useSettings();
   const { vibrate } = useHaptics();
+  const { t } = useLanguage();
   const navigate = useNavigate();
   const [isTrailerSelectionOpen, setIsTrailerSelectionOpen] = React.useState(false);
   const [selectedTrailerUrl, setSelectedTrailerUrl] = React.useState<string | null>(null);
@@ -98,7 +101,7 @@ const ContentCard = React.memo(({
   };
 
   const isAssigned = profile?.role === 'selected_content' && profile.assignedContent?.some((id: string) => id === content.id || id.startsWith(`${content.id}:`));
-  const isLocked = profile?.status === 'pending' || !getCanPlay(content);
+  const isLocked = !getCanPlay(content);
   const isPending = profile?.status === 'pending';
   
   const qualityObj = qualities.find(q => q.id === content.qualityId);
@@ -399,7 +402,7 @@ const ContentCard = React.memo(({
             >
               <X className="w-6 h-6" />
             </button>
-            <h3 className="text-xl font-bold mb-4">Select Trailer</h3>
+            <h3 className="text-xl font-bold mb-4">{t('Select Trailer')}</h3>
             <div className="flex flex-col gap-3">
               {allTrailers.map((trailer) => (
                 <button

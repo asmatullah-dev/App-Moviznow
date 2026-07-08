@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth, standardizePhone } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
+import { useLanguage } from '../contexts/LanguageContext';
 import { Film, Mail, Phone, ArrowLeft, Eye, EyeOff, Lock, User as UserIcon, Loader2 } from 'lucide-react';
 
 import { ConfirmationResult } from 'firebase/auth';
@@ -27,6 +28,7 @@ export default function Login() {
     error 
   } = useAuth();
   const { settings } = useSettings();
+  const { t } = useLanguage();
   const navigate = useNavigate();
   const location = useLocation();
   const [step, setStep] = useState<LoginStep>('social');
@@ -169,7 +171,7 @@ export default function Login() {
                         if (supportPhone.startsWith('92')) supportPhone = supportPhone.substring(2);
                         if (supportPhone.startsWith('0')) supportPhone = supportPhone.substring(1);
                         const adminPhone = `92${supportPhone}`;
-                        const message = `Assalam O Alaikum! Admin,\n\nName: ${user?.displayName || 'Unknown'}\nEmail: ${user?.email || 'N/A'}\nPhone: ${standardizedPhone}\nRole & Status: Unknown, Unknown\n\nYour message/question:\nI need help logging in.`;
+                        const message = `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${user?.displayName || t("Unknown")}\n${t("Email")}: ${user?.email || 'N/A'}\n${t("Phone")}: ${standardizedPhone}\n${t("Role & Status")}: ${t("Unknown")}, ${t("Unknown")}\n\n${t("Your message/question:")}\n${t("I need help logging in.")}`;
                         window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
                       }}
                       className="w-full bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-700 py-2.5 rounded-lg font-medium hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors"
@@ -238,7 +240,7 @@ export default function Login() {
       if (supportPhone.startsWith('92')) supportPhone = supportPhone.substring(2);
       if (supportPhone.startsWith('0')) supportPhone = supportPhone.substring(1);
       const adminPhone = `92${supportPhone}`;
-      const message = `Hello Admin,\n\nName: ${registeredUser?.displayName || 'Unknown'}\nEmail: ${registeredUser?.email || 'N/A'}\nPhone: ${registeredUser?.phone || identifier}\nRole & Status: ${String(registeredUser?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(registeredUser?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nI forgot my password and need help resetting it.`;
+      const message = `Assalam O Alaikum! Admin,\n\nName: ${registeredUser?.displayName || 'Unknown'}\nEmail: ${registeredUser?.email || 'N/A'}\nPhone: ${registeredUser?.phone || identifier}\nRole & Status: ${String(registeredUser?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(registeredUser?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\n${t("Your message/question:")}\n${t("I forgot my password and need help resetting it.")}`;
       window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
     }
   };

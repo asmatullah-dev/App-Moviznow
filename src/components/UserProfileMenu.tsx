@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
+import { useLanguage } from '../contexts/LanguageContext';
 import { usePWA } from '../contexts/PWAContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { useUsers } from '../contexts/UsersContext';
@@ -19,6 +20,7 @@ import { useHaptics } from '../hooks/useHaptics';
 export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogoutModal?: () => void }) => {
   const { profile, logout, refreshProfile, isSyncing } = useAuth();
   const { theme, setTheme } = useTheme();
+  const { language, setLanguage, t } = useLanguage();
   const { isInstallable, installApp } = usePWA();
   const { checkForUpdates } = useContent();
   const { refreshSettings } = useSettings();
@@ -168,7 +170,7 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                       <p className="text-[10px] text-zinc-500 truncate">{profile.phone}</p>
                     )}
                     {!profile?.phone && profile?.email?.endsWith('@moviznow.com') && (
-                      <p className="text-[10px] text-zinc-500 truncate">No Contact Info</p>
+                      <p className="text-[10px] text-zinc-500 truncate">{t('No Contact Info')}</p>
                     )}
                   </div>
                 </div>
@@ -188,7 +190,7 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
               {role !== 'owner' && profile?.expiryDate && (
                 <div className="text-xs text-zinc-500 mt-2 flex items-center justify-between">
                   <div>
-                    Expiry: <span className="font-medium text-zinc-900 dark:text-white">{profile.expiryDate === 'Lifetime' ? 'Lifetime' : format(new Date(profile.expiryDate), 'MMM dd, yyyy')}</span>
+                    {t('Expiry')}: <span className="font-medium text-zinc-900 dark:text-white">{profile.expiryDate === 'Lifetime' ? t('Lifetime') : format(new Date(profile.expiryDate), 'MMM dd, yyyy')}</span>
                   </div>
                   <button 
                     onClick={() => {
@@ -206,7 +208,7 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
               {(profile?.reported_links || []).length > 0 && (
                 <div className="mt-3 pt-3 border-t border-zinc-200/50 dark:border-zinc-700/50">
                   <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                    <span>Reported Links</span>
+                    <span>{t('Reported Links')}</span>
                     <span className="text-zinc-400">{profile.reported_links?.length}</span>
                   </div>
                   <div className="max-h-24 overflow-y-auto custom-scrollbar flex flex-col gap-1 pr-1">
@@ -230,7 +232,7 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
               {profile?.role !== 'manager' && profile?.role !== 'content_manager' && (
                 <div className="mt-3 pt-3 border-t border-zinc-200/50 dark:border-zinc-700/50">
                   <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                    <span>Movie Requests</span>
+                    <span>{t('Movie Requests')}</span>
                     <div className="flex gap-2 items-center">
                        <span className="text-zinc-400">{(profile?.movieRequests || []).length} / 3</span>
                        <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsOpen(false); setIsRequestModalOpen(true); }} className="p-0.5 rounded-full bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20"><Plus className="w-3 h-3" /></button>
@@ -267,7 +269,7 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
             <div className="p-2 space-y-1">
               {/* Theme Toggle */}
               <div className="px-3 py-2 flex items-center justify-between">
-                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Theme</span>
+                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">{t('Theme')}</span>
                 <div className="flex bg-zinc-100 dark:bg-zinc-800 rounded-lg p-1">
                   <button
                     onClick={() => setTheme('light')}
@@ -302,8 +304,42 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                 </div>
               </div>
 
+              {/* Language Toggle */}
+              <div className="px-3 py-2 flex flex-col gap-2">
+                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">{t('Language')}</span>
+                <div className="flex bg-zinc-100 dark:bg-zinc-800 rounded-lg p-1">
+                  <button
+                    onClick={() => setLanguage('en')}
+                    className={clsx(
+                      "flex-1 px-2 py-1.5 text-xs font-medium rounded-md transition-colors",
+                      language === 'en' ? "bg-white dark:bg-zinc-700 shadow-sm text-emerald-500" : "text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
+                    )}
+                  >
+                    EN
+                  </button>
+                  <button
+                    onClick={() => setLanguage('ur-roman')}
+                    className={clsx(
+                      "flex-1 px-2 py-1.5 text-xs font-medium rounded-md transition-colors",
+                      language === 'ur-roman' ? "bg-white dark:bg-zinc-700 shadow-sm text-emerald-500" : "text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
+                    )}
+                  >
+                    Roman
+                  </button>
+                  <button
+                    onClick={() => setLanguage('ur')}
+                    className={clsx(
+                      "flex-1 px-2 py-1.5 text-xs font-medium rounded-md transition-colors",
+                      language === 'ur' ? "bg-white dark:bg-zinc-700 shadow-sm text-emerald-500" : "text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
+                    )}
+                  >
+                    اردو
+                  </button>
+                </div>
+              </div>
+
               <div className="px-3 py-2 flex items-center justify-between">
-                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Haptics</span>
+                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">{t('Haptics')}</span>
                 <button
                   onClick={toggleHaptics}
                   className={clsx(
@@ -324,10 +360,10 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
               <div className="h-px bg-zinc-200 dark:bg-zinc-800 my-1"></div>
 
               <Link to="/watch-later" onClick={() => setIsOpen(false)} className="flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
-                <Clock className="w-4 h-4 text-zinc-400" /> Watch Later
+                <Clock className="w-4 h-4 text-zinc-400" /> {t('Watch Later')}
               </Link>
               <Link to="/favorites" onClick={() => setIsOpen(false)} className="flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
-                <Heart className="w-4 h-4 text-zinc-400" /> Favorites
+                <Heart className="w-4 h-4 text-zinc-400" /> {t('Favorites')}
               </Link>
 
               {isInstallable && (
@@ -338,14 +374,14 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                   }} 
                   className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-colors"
                 >
-                  <Download className="w-4 h-4" /> Install App
+                  <Download className="w-4 h-4" /> {t('Install App')}
                 </button>
               )}
 
               <div className="h-px bg-zinc-200 dark:bg-zinc-800 my-1"></div>
 
               <Link to="/settings" onClick={() => setIsOpen(false)} className="flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
-                <Settings className="w-4 h-4 text-zinc-400" /> Settings
+                <Settings className="w-4 h-4 text-zinc-400" /> {t('Settings')}
               </Link>
               
               <button 
@@ -369,14 +405,14 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                 title="Refresh Content & Account Sync"
               >
                 <RefreshCw className={clsx("w-4 h-4 text-zinc-400", isSyncing && "animate-spin text-emerald-500")} /> 
-                {isSyncing ? "Refreshing..." : "Refresh App Data"}
+                {isSyncing ? t("Refreshing...") : t("Refresh App Data")}
               </button>
 
               <button 
                 onClick={handleLogout} 
                 className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
               >
-                <LogOut className="w-4 h-4" /> Sign Out
+                <LogOut className="w-4 h-4" /> {t('Sign Out')}
               </button>
             </div>
           </motion.div>

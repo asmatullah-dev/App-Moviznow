@@ -39,6 +39,12 @@ export default function ConfirmModal({
 
   const isLoading = externalLoading || isConfirming;
 
+  const hasUrdu = (text: string) => /[\u0600-\u06FF]/.test(text);
+  const titleClass = hasUrdu(title) ? 'urdu-font ' : '';
+  const messageClass = hasUrdu(message) ? 'urdu-font ' : '';
+  const confirmClass = hasUrdu(confirmText) ? 'urdu-font ' : '';
+  const cancelClass = hasUrdu(cancelText) ? 'urdu-font ' : '';
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -63,25 +69,25 @@ export default function ConfirmModal({
                   <div className="bg-red-500/10 p-2 rounded-full">
                     <AlertTriangle className="w-6 h-6 text-red-500" />
                   </div>
-                  <h2 className="text-xl font-bold text-zinc-900 dark:text-white transition-colors duration-300">{title}</h2>
+                  <h2 className={`text-xl font-bold text-zinc-900 dark:text-white transition-colors duration-300 ${titleClass}`}>{title}</h2>
                 </div>
                 <button onClick={onCancel} disabled={isLoading} className="text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all active:scale-95 disabled:opacity-50">
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <p className="text-zinc-600 dark:text-zinc-300 mb-6 transition-colors duration-300">{message}</p>
+              <p className={`text-zinc-600 dark:text-zinc-300 mb-6 transition-colors duration-300 ${messageClass}`}>{message}</p>
               <div className="flex justify-between gap-2">
                 <button
                   onClick={onCancel}
                   disabled={isLoading}
-                  className="px-5 py-2.5 text-sm rounded-xl font-medium text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all active:scale-95 border border-transparent hover:border-zinc-200 dark:hover:border-zinc-700 disabled:opacity-50"
+                  className={`px-5 py-2.5 text-sm rounded-xl font-medium text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all active:scale-95 border border-transparent hover:border-zinc-200 dark:hover:border-zinc-700 disabled:opacity-50 ${cancelClass}`}
                 >
                   {cancelText}
                 </button>
                 <button
                   onClick={handleConfirm}
                   disabled={isLoading}
-                  className="px-5 py-2.5 text-sm rounded-xl font-medium bg-red-500 hover:bg-red-600 text-white transition-all active:scale-95 border border-white/20 shadow-lg disabled:opacity-50 flex items-center gap-2"
+                  className={`px-5 py-2.5 text-sm rounded-xl font-medium bg-red-500 hover:bg-red-600 text-white transition-all active:scale-95 border border-white/20 shadow-lg disabled:opacity-50 flex items-center gap-2 ${confirmClass}`}
                 >
                   {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}
                   {confirmText}

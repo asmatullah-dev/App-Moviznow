@@ -2,11 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { useSettings } from '../contexts/SettingsContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useLanguage } from '../contexts/LanguageContext';
 import { useNavigate } from 'react-router-dom';
 
 export default function MaintenancePage() {
   const { settings, refreshSettings } = useSettings();
   const { profile, refreshProfile } = useAuth();
+  const { t } = useLanguage();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const navigate = useNavigate();
 
@@ -46,7 +48,7 @@ export default function MaintenancePage() {
     supportPhone = '92' + supportPhone;
   }
   const adminPhone = supportPhone.replace('+', '');
-  const message = `Assalam O Alaikum! Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nI am seeing the Not Available screen.`;
+  const message = `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${profile?.displayName || t("Unknown")}\n${t("Email")}: ${profile?.email || "N/A"}\n${t("Phone")}: ${profile?.phone || "N/A"}\n${t("Role & Status")}: ${String(profile?.role || t("Unknown")).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || t("Unknown")).replace(/\b\w/g, c => c.toUpperCase())}\n\n${t("Your message/question:")}\n${t("I am seeing the Not Available screen.")}`;
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex flex-col items-center justify-center p-4">

@@ -109,10 +109,10 @@ async function fetchHtmlFallback(url: string, isVcloud = false) {
   return response;
 }
 
-async function fetchHtml(url: string, isVcloud = false) {
+async function fetchHtml(url: string, isVcloud = false, force = false) {
   const cacheKey = url;
   const cached = htmlCache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < HTML_CACHE_TTL) {
+  if (!force && cached && Date.now() - cached.timestamp < HTML_CACHE_TTL) {
     return cached;
   }
   if (inFlightHtmlRequests.has(cacheKey)) {
@@ -144,7 +144,7 @@ async function fetchHtml(url: string, isVcloud = false) {
 
   linkExtractionRouter.post("/api/hubcloud/extract", async (req, res) => {
     try {
-      const { url, forceExtract, isVcloud } = req.body;
+      const { url, forceExtract, isVcloud, force } = req.body;
       const isVcloudBool = Boolean(isVcloud);
       if (
         !url ||
@@ -159,7 +159,7 @@ async function fetchHtml(url: string, isVcloud = false) {
 
       const cacheKey = `extract_${url}`;
       const cached = extractionCache.get(cacheKey);
-      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      if (!force && cached && Date.now() - cached.timestamp < CACHE_TTL) {
         return res.json(cached.data);
       }
 
@@ -169,7 +169,7 @@ async function fetchHtml(url: string, isVcloud = false) {
       }
 
       const performFetch = async () => {
-        const response = await fetchHtml(url, isVcloudBool);
+        const response = await fetchHtml(url, isVcloudBool, force);
         const $ = cheerio.load(response.data);
 
         let sizeStr =
@@ -214,7 +214,9 @@ async function fetchHtml(url: string, isVcloud = false) {
           }
         }
 
-        let title = $("title").text() || $(".card-header").text() || "";
+        let title = $("title").text() || $(".card-header").text() || $(".card-title").text() || $("h1").first().text() || "";
+        title = title.replace(/hubcloud/gi, "").replace(/moviesdrive/gi, "").replace(/hubdrive/gi, "").replace(/vcloud/gi, "").trim();
+        
         const isCloudflare =
           title.toLowerCase().includes("just a moment") ||
           title.toLowerCase().includes("cloudflare") ||
@@ -229,18 +231,18 @@ async function fetchHtml(url: string, isVcloud = false) {
         }
 
         const isNotFound =
-          response.status === 404 || title.toLowerCase().includes("not found");
+          response.status === 404 || title.toLowerCase().includes("not found") || title.toLowerCase().includes("file not found");
         const isWorking =
-          response.status < 400 ||
+          (response.status < 400 ||
           response.status === 403 ||
           response.status === 503 ||
-          title === "Unknown (Cloudflare Block)";
+          title === "Unknown (Cloudflare Block)") && !isNotFound;
 
         const responseData = {
           size,
           unit,
           title: title.trim(),
-          isWorking: isWorking && !isNotFound,
+          isWorking,
           isNotFound,
         };
         
@@ -249,7 +251,8 @@ async function fetchHtml(url: string, isVcloud = false) {
           !responseData.isNotFound && 
           responseData.title && 
           !responseData.title.toLowerCase().includes("cloudflare block") && 
-          !responseData.title.toLowerCase().includes("timeout");
+          !responseData.title.toLowerCase().includes("timeout") &&
+          !responseData.title.toLowerCase().includes("just a moment");
 
         if (isSuccessful) {
           extractionCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
@@ -284,7 +287,7 @@ async function fetchHtml(url: string, isVcloud = false) {
     }
   });
 
-  async function performExtraction(url: string, checkOnly: boolean, depth = 0, isVcloud = false): Promise<any> {
+  async function performExtraction(url: string, checkOnly: boolean, depth = 0, isVcloud = false, force = false): Promise<any> {
     try {
       if (depth > 2) return { url, candidates: [], size: "" };
       const headers = {
@@ -353,8 +356,11 @@ async function fetchHtml(url: string, isVcloud = false) {
         return { url };
       }
 
-      let response = await fetchHtml(url, isVcloud);
-      let $ = cheerio.load(response.data);
+      let $2 = null;
+      let $ = null;
+
+      let response = await fetchHtml(url, isVcloud, force);
+      $ = cheerio.load(response.data);
 
       const titleText = $("title").text().toLowerCase();
       const isCf =
@@ -371,7 +377,8 @@ async function fetchHtml(url: string, isVcloud = false) {
       let nextUrl =
         $("#download").attr("href") ||
         $('a:contains("Generate Direct Download Link")').attr("href") ||
-        $("a.btn-zip").attr("href");
+        $("a.btn-zip").attr("href") ||
+        "";
 
       // Extract url from script for vcloud if href is missing
       if (!nextUrl) {
@@ -382,16 +389,16 @@ async function fetchHtml(url: string, isVcloud = false) {
          }
       }
 
-      let $2 = null;
-
       if (!nextUrl) {
         if ($("a.btn").length > 0) {
           $2 = $;
         } else {
           return { url };
         }
-      } else {
-        let res2 = await fetchHtml(nextUrl, isVcloud);
+      }
+
+      if (!$2 && nextUrl) {
+        let res2 = await fetchHtml(nextUrl, isVcloud, force);
         $2 = cheerio.load(res2.data);
 
         const titleText2 = $2("title").text().toLowerCase();
@@ -507,7 +514,8 @@ async function fetchHtml(url: string, isVcloud = false) {
         return { text: c.text.trim(), href: normalizeDomain(href) };
       });
 
-      const bodyText = $("body").text();
+      const active$ = $ || $2;
+      const bodyText = active$ ? active$("body").text() : "";
       let sizeInfo = "";
       const sizeMatch = bodyText.match(/File Size\s*([\d.]+\s*[A-Za-z]+)/i);
       if (sizeMatch && sizeMatch[1]) {
@@ -550,7 +558,7 @@ async function fetchHtml(url: string, isVcloud = false) {
 
       if (nextHubcloudLink && nextHubcloudLink !== url) {
          try {
-           const recursiveRes = await performExtraction(nextHubcloudLink, false, depth + 1);
+           const recursiveRes = await performExtraction(nextHubcloudLink, false, depth + 1, isVcloud, force);
            if (recursiveRes.candidates && recursiveRes.candidates.length > 0) {
              if (!recursiveRes.size && sizeInfo) recursiveRes.size = sizeInfo;
              if (recursiveRes.url) {
@@ -588,13 +596,13 @@ async function fetchHtml(url: string, isVcloud = false) {
 
   linkExtractionRouter.post("/api/hubcloud/direct-link", async (req, res) => {
     try {
-      const { url, checkOnly, isVcloud } = req.body;
+      const { url, checkOnly, isVcloud, force } = req.body;
       const isCheckOnly = Boolean(checkOnly);
       const isVcloudBool = Boolean(isVcloud);
       const cacheKey = `direct_${url}_${isCheckOnly}`;
       
       const cached = extractionCache.get(cacheKey);
-      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      if (!force && cached && Date.now() - cached.timestamp < CACHE_TTL) {
         return res.json(cached.data);
       }
 
@@ -604,7 +612,7 @@ async function fetchHtml(url: string, isVcloud = false) {
         return res.json(data);
       }
 
-      const extractPromise = performExtraction(url, isCheckOnly, 0, isVcloudBool);
+      const extractPromise = performExtraction(url, isCheckOnly, 0, isVcloudBool, force);
       inFlightRequests.set(cacheKey, extractPromise);
 
       try {

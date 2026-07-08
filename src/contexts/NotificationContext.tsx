@@ -60,7 +60,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       let filtered = allNotifs.filter(n => {
         const isTargeted = n.targetUserId || (n.targetUserIds && n.targetUserIds.length > 0);
         if (isTargeted) {
-          return n.targetUserId === profile.uid || n.targetUserIds?.includes(profile.uid);
+          return n.targetUserId === profile?.uid || n.targetUserIds?.includes(profile?.uid || '');
         }
         return true;
       });
@@ -72,7 +72,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     } finally {
       setLoading(false);
     }
-  }, [profile]);
+  }, [profile?.uid]);
 
   useEffect(() => {
     fetchNotifications();

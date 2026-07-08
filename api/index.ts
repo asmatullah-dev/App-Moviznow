@@ -78,11 +78,14 @@ async function getSyncApps(
   return { sourceApp, targetApp, targetDbId };
 }
 
+import { translateRouter } from "./translate.js";
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.use(express.json({ limit: "50mb" }));
+  app.use("/api", translateRouter);
 
   // Background Scan Endpoint
   app.post(
@@ -536,8 +539,8 @@ async function startServer() {
   app.get('/api/mdrive', async (req: express.Request, res: express.Response) => {
     try {
       let { url } = req.query;
-      if (!url || typeof url !== 'string' || !url.includes('mdrive.lol')) {
-        return res.status(400).json({ error: 'Valid mdrive.lol URL required' });
+      if (!url || typeof url !== 'string' || (!url.includes('mdrive.lol') && !url.includes('mdrvie.lol'))) {
+        return res.status(400).json({ error: 'Valid mdrive.lol or mdrvie.lol URL required' });
       }
 
       if (!url.startsWith('http')) {
@@ -1427,7 +1430,7 @@ async function startServer() {
 
       const cacheKey = url;
       const cached = checkLinkCache.get(cacheKey);
-      if (cached && Date.now() - cached.timestamp < CHECK_LINK_CACHE_TTL) {
+      if (!req.body.force && cached && Date.now() - cached.timestamp < CHECK_LINK_CACHE_TTL) {
          return res.json(cached.data);
       }
 

@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useModalBehavior } from '../hooks/useModalBehavior';
 import { useHaptics } from '../hooks/useHaptics';
 
+import { useLanguage } from '../contexts/LanguageContext';
+
 interface AlertModalProps {
   isOpen: boolean;
   title: string;
@@ -18,9 +20,11 @@ export default function AlertModal({
   title,
   message,
   onClose,
-  buttonText = 'OK',
+  buttonText,
   children
 }: AlertModalProps) {
+  const { t } = useLanguage();
+  const effectiveButtonText = buttonText || t('OK');
   useModalBehavior(isOpen, onClose);
   const { vibrate } = useHaptics();
 
@@ -29,6 +33,11 @@ export default function AlertModal({
       vibrate([50, 50, 50]); // A small distinct pattern for alerts
     }
   }, [isOpen, vibrate]);
+
+  const hasUrdu = (text: string) => /[\u0600-\u06FF]/.test(text);
+  const titleClass = hasUrdu(title) ? 'urdu-font ' : '';
+  const messageClass = hasUrdu(message) ? 'urdu-font ' : '';
+  const buttonClass = hasUrdu(effectiveButtonText) ? 'urdu-font ' : '';
 
   return (
     <AnimatePresence>
@@ -54,21 +63,21 @@ export default function AlertModal({
                   <div className="bg-yellow-500/10 p-2 rounded-full">
                     <AlertCircle className="w-6 h-6 text-yellow-500" />
                   </div>
-                  <h2 className="text-xl font-bold text-zinc-900 dark:text-white">{title}</h2>
+                  <h2 className={`text-xl font-bold text-zinc-900 dark:text-white ${titleClass}`}>{title}</h2>
                 </div>
                 <button onClick={onClose} className="text-zinc-500 hover:text-zinc-900 dark:text-white transition-all active:scale-95">
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <p className="text-zinc-600 dark:text-zinc-300 mb-6 text-lg font-medium leading-relaxed">{message}</p>
+              <p className={`text-zinc-600 dark:text-zinc-300 mb-6 text-lg font-medium leading-relaxed ${messageClass}`}>{message}</p>
               <div className="flex flex-col gap-3">
                 {children ? children : (
                   <div className="flex justify-end">
                     <button
                       onClick={onClose}
-                      className="px-5 py-2.5 text-sm rounded-xl font-medium bg-emerald-500 hover:bg-emerald-600 text-white transition-all active:scale-95 border border-white/20 shadow-lg"
+                      className={`px-5 py-2.5 text-sm rounded-xl font-medium bg-emerald-500 hover:bg-emerald-600 text-white transition-all active:scale-95 border border-white/20 shadow-lg ${buttonClass}`}
                     >
-                      {buttonText}
+                      {effectiveButtonText}
                     </button>
                   </div>
                 )}

@@ -57,6 +57,7 @@ import {
   Save,
   Upload,
   Download,
+  FileDown,
   Search,
   Eye,
   EyeOff,
@@ -2429,7 +2430,7 @@ export default function ContentManagement() {
             let extractedUrl = link.url;
             if (
               extractedUrl.includes("hubcloud") ||
-              extractedUrl.includes("moviesdrive") ||
+              
               extractedUrl.includes("vcloud") ||
               extractedUrl.includes("hubdrive")
             ) {
@@ -2494,7 +2495,7 @@ export default function ContentManagement() {
 
           if (newContent.sampleUrl) {
              let processedSampleUrl = newContent.sampleUrl;
-             if (processedSampleUrl.includes("hubcloud") || processedSampleUrl.includes("moviesdrive") || processedSampleUrl.includes("vcloud") || processedSampleUrl.includes("hubdrive")) {
+             if (processedSampleUrl.includes("hubcloud") ||  processedSampleUrl.includes("vcloud") || processedSampleUrl.includes("hubdrive")) {
                 try {
                   const res = await fetch("/api/hubcloud/direct-link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: processedSampleUrl }) });
                   if (res.ok) {
@@ -2866,7 +2867,7 @@ export default function ContentManagement() {
 
     let processedSampleUrl = content.sampleUrl;
 
-    if (processedSampleUrl && (processedSampleUrl.includes("hubcloud") || processedSampleUrl.includes("moviesdrive") || processedSampleUrl.includes("vcloud") || processedSampleUrl.includes("hubdrive"))) {
+    if (processedSampleUrl && (processedSampleUrl.includes("hubcloud") ||  processedSampleUrl.includes("vcloud") || processedSampleUrl.includes("hubdrive"))) {
       let sampleExtractionSuccess = false;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
@@ -2931,7 +2932,7 @@ export default function ContentManagement() {
       // Extract HubCloud links
       if (
         extractedUrl.includes("hubcloud") ||
-        extractedUrl.includes("moviesdrive") ||
+        
         extractedUrl.includes("vcloud") ||
         extractedUrl.includes("hubdrive")
       ) {
@@ -4906,6 +4907,24 @@ export default function ContentManagement() {
             )}
             {(profile?.role === "admin" || profile?.role === "owner") && (
               <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    const data = JSON.stringify(contentList, null, 2);
+                    const blob = new Blob([data], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `content_export_${new Date().toISOString().split('T')[0]}.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    triggerAlert("Success", "Content exported to JSON file", "success");
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-lg text-sm font-medium transition-colors"
+                  title="Export All Content to JSON"
+                >
+                  <FileDown className="w-4 h-4" />
+                  Export All JSON
+                </button>
                 {hasPendingChanges && (
                   <span className="flex h-2 w-2 rounded-full bg-red-500 animate-ping" />
                 )}

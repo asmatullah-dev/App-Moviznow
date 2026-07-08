@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { RefreshCw, CheckCircle2 } from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
 
 export function SyncBanner() {
+  const { t } = useLanguage();
   const [syncStatus, setSyncStatus] = useState<'syncing' | 'up-to-date' | 'success' | null>(null);
 
   useEffect(() => {
@@ -29,9 +31,9 @@ export function SyncBanner() {
   };
 
   const text = {
-    syncing: 'Updating data...',
-    'up-to-date': 'Data is up to date',
-    success: 'Data updated successfully'
+    syncing: t('Updating data...'),
+    'up-to-date': t('Data is up to date'),
+    success: t('Data updated successfully')
   };
 
   return (

@@ -8,6 +8,7 @@ import { PWAProvider } from './contexts/PWAContext';
 import { CartProvider } from './contexts/CartContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { UsersProvider } from './contexts/UsersContext';
+import { LanguageProvider, useLanguage } from './contexts/LanguageContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Loader2 } from 'lucide-react';
 import { SystemNotificationWrapper } from './components/SystemNotificationWrapper';
@@ -71,9 +72,48 @@ function MediaModalController({ isOpen, onClose }: { isOpen: boolean; onClose: (
   return <MediaModal isOpen={isOpen} onClose={onClose} onApply={handleApply} />;
 }
 
+function AppLanguageEffect() {
+  const { language } = useLanguage();
+  useEffect(() => {
+    document.documentElement.lang = language;
+    if (language === 'ur') {
+      document.body.classList.add('urdu-font');
+    } else {
+      document.body.classList.remove('urdu-font');
+    }
+  }, [language]);
+  return null;
+}
+
+function SyncErrorOverlay() {
+  const { t } = useLanguage();
+  const [pauseStatus, setPauseStatus] = useState<{ paused: boolean, lastSynced?: string }>({ paused: false });
+
+  useEffect(() => {
+    const handlePause = (e: any) => setPauseStatus(e.detail);
+    window.addEventListener('app_paused_offline', handlePause);
+    return () => window.removeEventListener('app_paused_offline', handlePause);
+  }, []);
+
+  if (!pauseStatus.paused) return null;
+
+  return (
+    <div className="fixed inset-0 z-[9999] bg-zinc-950/80 backdrop-blur-md flex flex-col items-center justify-center p-4">
+      <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl p-8 max-w-sm w-full text-center space-y-4">
+        <h2 className="text-xl font-bold text-zinc-900 dark:text-white">{t('Data is not up to date')}</h2>
+        <p className="text-zinc-600 dark:text-zinc-400 text-sm">
+          {t('You have been offline for over 30 hours. Data was last synced on')} {pauseStatus.lastSynced}. 
+        </p>
+        <p className="text-zinc-600 dark:text-zinc-400 text-sm">
+          {t('Please connect to the internet to update your app data and continue.')}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
-  const [pauseStatus, setPauseStatus] = useState<{ paused: boolean, lastSynced?: string }>({ paused: false });
 
   useGlobalButtonHaptics();
 
@@ -81,12 +121,6 @@ export default function App() {
     if (window.history.scrollRestoration) {
       window.history.scrollRestoration = 'manual';
     }
-  }, []);
-
-  useEffect(() => {
-    const handlePause = (e: any) => setPauseStatus(e.detail);
-    window.addEventListener('app_paused_offline', handlePause);
-    return () => window.removeEventListener('app_paused_offline', handlePause);
   }, []);
 
   useEffect(() => {
@@ -123,6 +157,8 @@ export default function App() {
 
   return (
     <ThemeProvider>
+      <LanguageProvider>
+        <AppLanguageEffect />
       <AuthProvider>
         <UsersProvider>
           <SettingsProvider>
@@ -130,19 +166,7 @@ export default function App() {
               <NotificationProvider>
                 <CartProvider>
                   <PWAProvider>
-                    {pauseStatus.paused && (
-                      <div className="fixed inset-0 z-[9999] bg-zinc-950/80 backdrop-blur-md flex flex-col items-center justify-center p-4">
-                        <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl p-8 max-w-sm w-full text-center space-y-4">
-                          <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Data is not up to date</h2>
-                          <p className="text-zinc-600 dark:text-zinc-400 text-sm">
-                            You have been offline for over 30 hours. Data was last synced on {pauseStatus.lastSynced}. 
-                          </p>
-                          <p className="text-zinc-600 dark:text-zinc-400 text-sm">
-                            Please connect to the internet to update your app data and continue.
-                          </p>
-                        </div>
-                      </div>
-                    )}
+                    <SyncErrorOverlay />
                     <OfflineBanner />
                     <SyncBanner />
                     <SystemNotificationWrapper />
@@ -199,6 +223,7 @@ export default function App() {
           </SettingsProvider>
         </UsersProvider>
       </AuthProvider>
+      </LanguageProvider>
     </ThemeProvider>
   );
 }

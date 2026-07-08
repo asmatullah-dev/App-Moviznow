@@ -54,6 +54,16 @@ export function normalizeUrl(input: string) {
     const url = new URL(trimmed);
     const host = url.hostname.toLowerCase().replace(/^www\./, "");
 
+    // HubCloud/HubDrive normalization
+    if (host.includes('hubcould') || host.includes('hubcloud') || host.includes('vcloud') ) {
+      url.hostname = 'hubcloud.cx';
+      return url.toString().replace(/\/$/, "");
+    }
+    if (host.includes('hubdrive')) {
+      url.hostname = 'hubdrive.space';
+      return url.toString().replace(/\/$/, "");
+    }
+
     const isPixeldrain =
       host.includes("pixeldrain.com") ||
       host.includes("pixeldrain.dev") ||
@@ -418,11 +428,12 @@ export function detectMetadataForLink(
 export async function serverCheckLink(
   url: string,
   signal?: AbortSignal,
+  force: boolean = false,
 ): Promise<LinkCheckResult> {
   const response = await fetch("/api/check-link", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url }),
+    body: JSON.stringify({ url, force }),
     signal,
   });
 
@@ -663,15 +674,18 @@ export async function performFullLinkScan(
   signal?: AbortSignal,
   expectedSize?: string,
   expectedUnit?: "MB" | "GB",
+  force: boolean = false,
 ): Promise<LinkCheckResult> {
+  const normalizedUrl = normalizeUrl(url);
   let base: LinkCheckResult;
-  let finalUrlToUse = url;
+  let finalUrlToUse = normalizedUrl;
 
   // HubCloud interception
   let hubcloudTitle = "";
-  if (url.includes("hubcloud") || url.includes("moviesdrive") || url.includes("vcloud") || url.includes("hubdrive")) {
+  const lowUrl = normalizedUrl.toLowerCase();
+  if (lowUrl.includes("hubcloud") ||  lowUrl.includes("vcloud") || lowUrl.includes("hubdrive")) {
     base = {
-      url,
+      url: normalizedUrl,
       ok: true,
       statusLabel: "WORKING",
       message: "Assuming working (initial)",
@@ -688,13 +702,13 @@ export async function performFullLinkScan(
           fetch("/api/hubcloud/extract", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url }),
+            body: JSON.stringify({ url: normalizedUrl, force }),
             signal: extractController.signal
           }),
           fetch("/api/hubcloud/direct-link", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url, checkOnly: false }),
+            body: JSON.stringify({ url: normalizedUrl, checkOnly: false, force }),
             signal: directController.signal
           })
         ]);
@@ -797,25 +811,25 @@ export async function performFullLinkScan(
 
         try {
           // Try without token first
-          base = await serverCheckLink(urlWithoutToken, signal);
+          base = await serverCheckLink(urlWithoutToken, signal, force);
           if (base.ok) {
             finalUrlToUse = urlWithoutToken;
           } else {
             // If it fails, try with token
-            base = await serverCheckLink(url, signal);
+            base = await serverCheckLink(url, signal, force);
           }
         } catch (e) {
           // If it throws, try with token
-          base = await serverCheckLink(url, signal);
+          base = await serverCheckLink(url, signal, force);
         }
       } else {
-        base = await serverCheckLink(url, signal);
+        base = await serverCheckLink(url, signal, force);
       }
     } catch (e) {
-      base = await serverCheckLink(url, signal);
+      base = await serverCheckLink(url, signal, force);
     }
   } else {
-    base = await serverCheckLink(url, signal);
+    base = await serverCheckLink(url, signal, force);
   }
 
   // Pixeldrain fallback logic: If original domain fails, try pixeldrain.dev
@@ -826,7 +840,7 @@ export async function performFullLinkScan(
         const originalHost = urlObj.hostname;
         urlObj.hostname = "pixeldrain.dev";
         const devUrl = urlObj.toString().replace(/\/$/, "");
-        const devBase = await serverCheckLink(devUrl, signal);
+        const devBase = await serverCheckLink(devUrl, signal, force);
         if (devBase.ok) {
           base = devBase;
           finalUrlToUse = devUrl;
@@ -840,7 +854,7 @@ export async function performFullLinkScan(
         .replace(/pixeldra\.in/i, "pixeldrain.dev");
       if (devUrl !== url) {
         try {
-          const devBase = await serverCheckLink(devUrl, signal);
+          const devBase = await serverCheckLink(devUrl, signal, force);
           if (devBase.ok) {
             base = devBase;
             finalUrlToUse = devUrl;
@@ -856,7 +870,7 @@ export async function performFullLinkScan(
     base.finalUrl !== url
   ) {
     try {
-      const retryBase = await serverCheckLink(base.finalUrl, signal);
+      const retryBase = await serverCheckLink(base.finalUrl, signal, force);
       base = retryBase;
       finalUrlToUse = base.finalUrl || base.url;
     } catch (e) {
@@ -868,7 +882,7 @@ export async function performFullLinkScan(
   if (!base.ok || base.statusLabel === "UNKNOWN") {
     try {
       await new Promise((resolve) => setTimeout(resolve, 800));
-      const doubleCheckBase = await serverCheckLink(finalUrlToUse, signal);
+      const doubleCheckBase = await serverCheckLink(finalUrlToUse, signal, force);
       if (doubleCheckBase.ok) {
         base = doubleCheckBase;
       }

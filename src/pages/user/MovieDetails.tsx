@@ -9,7 +9,9 @@ import {
 import { Helmet } from "react-helmet-async";
 
 import { Content, QualityLinks, Season, Trailer } from "../../types";
+import { Translate } from "../../components/Translate";
 import { useAuth } from "../../contexts/AuthContext";
+import { useLanguage } from "../../contexts/LanguageContext";
 import { useContent } from "../../contexts/ContentContext";
 import { useCart } from "../../contexts/CartContext";
 import { useHaptics } from "../../hooks/useHaptics";
@@ -83,6 +85,7 @@ export default function MovieDetails() {
     updateUserProfileData,
     refreshProfile,
   } = useAuth();
+  const { t, language, translateMany } = useLanguage();
   const {
     contentList,
     genres,
@@ -350,6 +353,7 @@ export default function MovieDetails() {
   useEffect(() => {
     if (
       (isMinimal || isStale) &&
+      !contentLoading &&
       id &&
       !fetchFailed &&
       !isOffline &&
@@ -394,6 +398,9 @@ export default function MovieDetails() {
           } else {
             setFetchFailed(true);
             setLoading(false);
+            setFullContent(null);
+            safeStorage.removeItemAsync(`movie_details_${id}`);
+            safeStorage.removeItemAsync(`content_cache_${id}`);
           }
         } catch (e) {
           console.error("Failed to fetch full content", e);
@@ -403,9 +410,12 @@ export default function MovieDetails() {
       };
       fetchFullContent();
     }
-  }, [isMinimal, isStale, id, fetchFailed, isOffline, content]);
+  }, [isMinimal, isStale, id, fetchFailed, isOffline, content, contentLoading]);
 
   const mergedContent = useMemo(() => {
+    // If it's completely missing from contentList and we've finished loading contentList, it doesn't exist anymore
+    if (!content && !contentLoading && !isOffline) return null;
+
     if (!content && !fullContent) return null;
     // Prioritize cachedMetadata (TMDB updates/local edits), then fresh fullContent from DB, then partial content from list
     const metadata: any = cachedMetadata.id === id ? cachedMetadata.data : {};
@@ -462,7 +472,7 @@ export default function MovieDetails() {
     }
 
     return merged as Content;
-  }, [content, cachedMetadata, fullContent, id]);
+  }, [content, cachedMetadata, fullContent, id, contentLoading, isOffline]);
 
   const seasons = useMemo(() => {
     if (
@@ -481,6 +491,44 @@ export default function MovieDetails() {
       return [] as Season[];
     }
   }, [mergedContent]);
+
+  const hasPrefetched = useRef<Set<string>>(new Set());
+
+  // Prefetch translations for all content in one go
+  useEffect(() => {
+    if (language === 'en' || !mergedContent || isOffline) return;
+    
+    // For series, wait until seasons are loaded to translate everything in one batch
+    if (mergedContent.type === 'series' && seasons.length === 0) return;
+
+    const prefetchKey = `all_pref_${id}_${language}_${seasons.length}`;
+    if (hasPrefetched.current.has(prefetchKey)) return;
+    
+    const stringsToTranslate = new Set<string>();
+    
+    if (mergedContent.description) stringsToTranslate.add(mergedContent.description);
+    
+    if (mergedContent.type === 'series') {
+      seasons.forEach(season => {
+        if (season.title) stringsToTranslate.add(season.title);
+        if (season.episodes) {
+          season.episodes.forEach(ep => {
+            if (ep.title && !/^episode\s+\d+$/i.test(ep.title.trim())) {
+              stringsToTranslate.add(ep.title);
+            }
+            if (ep.description && ep.description.trim() !== "" && ep.description !== ep.title) {
+              stringsToTranslate.add(ep.description);
+            }
+          });
+        }
+      });
+    }
+    
+    if (stringsToTranslate.size > 0) {
+      hasPrefetched.current.add(prefetchKey);
+      translateMany(Array.from(stringsToTranslate));
+    }
+  }, [mergedContent, language, seasons, id, translateMany, isOffline]);
 
   const allTrailers = useMemo(() => {
     const list: Trailer[] = [];
@@ -1232,10 +1280,10 @@ export default function MovieDetails() {
     ) {
       setHasAttemptedGlobalRefresh(true);
       if (!isOffline) {
-        checkForUpdates(true).catch((e) =>
+        checkForUpdates(false).catch((e) =>
           console.error("Error refreshing content:", e),
         );
-        refreshProfile(true).catch((e) =>
+        refreshProfile(false).catch((e) =>
           console.error("Error refreshing user:", e),
         );
       }
@@ -1273,16 +1321,16 @@ export default function MovieDetails() {
           <div className="flex flex-col items-center gap-4">
             <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
             <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              Searching global library...
+              {t('Search global library...')}
             </p>
           </div>
         ) : (
           <div className="text-center space-y-4">
             <h2 className="text-xl font-bold">
-              Content not found or unavailable
+              {t('Content not found or unavailable')}
             </h2>
             <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              This content may have been removed or you don't have access to it.
+              {t('This content may have been removed or you don\'t have access to it.')}
             </p>
           </div>
         )}
@@ -1363,23 +1411,37 @@ export default function MovieDetails() {
   const handleTelegramResolve = async (id: string, url: string) => {
     setResolvingTgId(id);
     try {
-      const res = await fetch(`/api/resolve-tg?url=${encodeURIComponent(url)}`);
+      // Normalize hubcloud domains before resolving
+      let targetUrl = url;
+      try {
+        const u = new URL(url);
+        const host = u.hostname.toLowerCase();
+        if (host.includes('hubcould') || host.includes('hubcloud') || host.includes('vcloud') ) {
+          u.hostname = 'hubcloud.cx';
+          targetUrl = u.toString();
+        } else if (host.includes('hubdrive')) {
+          u.hostname = 'hubdrive.space';
+          targetUrl = u.toString();
+        }
+      } catch (e) {}
+
+      const res = await fetch(`/api/resolve-tg?url=${encodeURIComponent(targetUrl)}`);
       const data = await res.json();
       if (res.ok && data.url) {
         window.location.href = data.url;
       } else {
         setAlertConfig({
           isOpen: true,
-          title: "Telegram Link Error",
-          message: data.error || "Failed to resolve Telegram link",
+          title: t("Telegram Link Error"),
+          message: data.error || t("Failed to resolve Telegram link"),
         });
       }
     } catch (e) {
       console.error(e);
       setAlertConfig({
         isOpen: true,
-        title: "Telegram Link Error",
-        message: "An error occurred fetching Telegram link",
+        title: t("Telegram Link Error"),
+        message: t("An error occurred fetching Telegram link"),
       });
     } finally {
       setResolvingTgId(null);
@@ -1432,38 +1494,36 @@ export default function MovieDetails() {
         if (mergedContent?.status === "selected_content") {
           setAlertConfig({
             isOpen: true,
-            title: "Content Locked",
-            message: "you don't has access to this content. Contact Admin",
+            title: t("Content Locked"),
+            message: t("You don't have access to this content. Contact Admin."),
           });
         } else if (isPending) {
           setAlertConfig({
             isOpen: true,
-            title: "Account Pending",
-            message:
-              "Your account activation is pending. Please Get Membership or Add any content to cart to activate your account.",
+            title: t("Account Pending"),
+            message: t("Your account activation is pending. Please Get Membership or Add any content to cart to activate your account."),
           });
         } else if (isExpired) {
           if (profile?.role === "trial") {
             setAlertConfig({
               isOpen: true,
-              title: "Trial Expired",
-              message:
-                "Your free Trial has expired. Please get Membership to continue watching.",
+              title: t("Trial Expired"),
+              message: t("Your free Trial has expired. Please get Membership to continue watching."),
             });
           } else {
             setAlertConfig({
               isOpen: true,
-              title: "Membership Expired",
+              title: t("Membership Expired"),
               message:
-                "Your membership has expired. Please renew to continue watching.",
+                t("Your membership has expired. Please renew to continue watching."),
             });
           }
         } else {
           setAlertConfig({
             isOpen: true,
-            title: "Content Locked",
+            title: t("Content Locked"),
             message:
-              "This content is locked. Please contact admin to get access to this movie/series.",
+              t("This content is locked. Please contact admin to get access to this movie/series."),
           });
         }
         return false;
@@ -1472,6 +1532,20 @@ export default function MovieDetails() {
     };
 
     if (!checkEligibility()) return;
+
+    // Normalize hubcloud domains
+    let targetUrl = url;
+    try {
+      const u = new URL(url);
+      const host = u.hostname.toLowerCase();
+      if (host.includes('hubcould') || host.includes('hubcloud') || host.includes('vcloud') ) {
+        u.hostname = 'hubcloud.cx';
+        targetUrl = u.toString();
+      } else if (host.includes('hubdrive')) {
+        u.hostname = 'hubdrive.space';
+        targetUrl = u.toString();
+      }
+    } catch (e) {}
 
     if (linkId !== "sample") {
       // tracking removed
@@ -1486,30 +1560,30 @@ export default function MovieDetails() {
       return;
     }
 
-    let finalUrl = url;
-    let finalTinyUrl = tinyUrl;
+    let finalUrl = targetUrl;
+    let finalTinyUrl = finalUrl === url ? tinyUrl : undefined;
     let finalCandidates: { text: string; href: string }[] | undefined;
     let finalSize: string | undefined;
 
-    const isVcloudHost = url.includes("vcloud");
+    const isVcloudHost = targetUrl.includes("vcloud");
     const isVcloudName = linkName
       ? linkName.toLowerCase().includes("vcloud")
       : false;
     const isVcloud = isVcloudHost || isVcloudName;
 
     if (
-      url.includes("hubcloud") ||
-      url.includes("moviesdrive") ||
-      url.includes("hubdrive") ||
+      targetUrl.includes("hubcloud") ||
+      targetUrl.includes("moviesdrive") ||
+      targetUrl.includes("hubdrive") ||
       isVcloud
     ) {
-      const clickId = url;
+      const clickId = targetUrl;
       setExtractingLinkId(clickId);
       // Immediately open the popup with a temporary "extracting" state, so user gets feedback
       setLinkPopup({
         isOpen: true,
-        url,
-        originalUrl: url,
+        url: targetUrl,
+        originalUrl: targetUrl,
         name: linkName || "Unknown Link",
         id: linkId || "unknown",
         isZip,
@@ -1549,7 +1623,7 @@ export default function MovieDetails() {
         }
       } catch (e) {}
 
-      const cached = hubcloudCacheRef.current[url] || cachedLocal;
+      const cached = hubcloudCacheRef.current[targetUrl] || cachedLocal;
 
       // If we have a cached link within 10 minutes (600,000 ms), use it directly
       if (cached && now - cached.timestamp < 600000) {
@@ -1558,7 +1632,7 @@ export default function MovieDetails() {
         finalTinyUrl = undefined;
         finalCandidates = cached.candidates;
         finalSize = cached.size;
-        hubcloudCacheRef.current[url] = cached; // Update memory cache
+        hubcloudCacheRef.current[targetUrl] = cached; // Update memory cache
       }
 
       let isCloudflareBlocked = false;
@@ -1568,11 +1642,11 @@ export default function MovieDetails() {
           const res = await fetch("/api/hubcloud/direct-link", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url, isVcloud, forceExtract: isVcloudName }),
+            body: JSON.stringify({ url: targetUrl, isVcloud, forceExtract: isVcloudName }),
           });
           if (res.ok) {
             const data = await res.json();
-            if (data.url && data.url !== url) {
+            if (data.url && data.url !== targetUrl) {
               finalUrl = data.url;
               finalTinyUrl = undefined; // Drop the old tinyurl since url changed!
               finalCandidates = data.candidates;
@@ -1585,20 +1659,20 @@ export default function MovieDetails() {
                 size: finalSize,
                 timestamp: Date.now(),
               };
-              hubcloudCacheRef.current[url] = cacheEntry;
+              hubcloudCacheRef.current[targetUrl] = cacheEntry;
               try {
                 const cacheStr = localStorage.getItem(
                   "hubcloud_extraction_cache",
                 );
                 const cacheObj = cacheStr ? JSON.parse(cacheStr) : {};
-                cacheObj[url] = cacheEntry;
+                cacheObj[targetUrl] = cacheEntry;
                 localStorage.setItem(
                   "hubcloud_extraction_cache",
                   JSON.stringify(cacheObj),
                 );
               } catch (e) {}
             } else if (data.isCloudflare) {
-              finalUrl = url;
+              finalUrl = targetUrl;
               finalTinyUrl = tinyUrl;
               finalSize = "Cloudflare Blocked";
               isCloudflareBlocked = true;
@@ -1614,11 +1688,11 @@ export default function MovieDetails() {
       setLinkPopup((prev) => {
         // Only update the popup final URL if they haven't clicked a DIFFERENT link
         // We know it's the same popup content if the original 'url' or 'id' matches what we opened
-        if (prev && prev.url === url) {
+        if (prev && prev.url === targetUrl) {
           return {
             ...prev,
             url: finalUrl,
-            originalUrl: url,
+            originalUrl: targetUrl,
             name: linkName || "Unknown Link",
             id: linkId || "unknown",
             isZip,
@@ -1637,7 +1711,7 @@ export default function MovieDetails() {
     setLinkPopup({
       isOpen: true,
       url: finalUrl,
-      originalUrl: url,
+      originalUrl: targetUrl,
       name: linkName || "Unknown Link",
       id: linkId || "unknown",
       isZip,
@@ -1956,6 +2030,24 @@ export default function MovieDetails() {
       } catch (e) {}
     }
 
+    if (url.includes('hubcould') || url.includes('hubcloud') || url.includes('vcloud') ) {
+      try {
+        const u = new URL(url);
+        u.hostname = 'hubcloud.cx';
+        url = u.toString();
+      } catch (e) {
+        url = url.replace(/(hubcloud|hubcould|vcloud)\.[a-z]+/i, 'hubcloud.cx');
+      }
+    } else if (url.includes('hubdrive')) {
+      try {
+        const u = new URL(url);
+        u.hostname = 'hubdrive.space';
+        url = u.toString();
+      } catch (e) {
+        url = url.replace(/hubdrive\.[a-z]+/i, 'hubdrive.space');
+      }
+    }
+
     window.open(url, "_blank", "noopener,noreferrer");
 
     closeLinkPopup();
@@ -2082,7 +2174,7 @@ export default function MovieDetails() {
                   ) : (
                     <Play className="w-5 h-5" />
                   )}
-                  <span className="truncate max-w-[90%]">Play {link.name}</span>
+                  <span className="truncate max-w-[90%]">{isLocked ? "Locked" : "Play"} {link.name}</span>
                 </button>
                 <button
                   onClick={() =>
@@ -2098,7 +2190,7 @@ export default function MovieDetails() {
                     )
                   }
                   className="w-full flex items-center justify-center gap-2 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white py-3 transition-colors"
-                  title={isLocked ? "Locked" : "Download"}
+                  title={isLocked ? "Locked" : link.name}
                 >
                   {isLocked ? (
                     <Lock className="w-5 h-5 text-amber-500" />
@@ -2106,7 +2198,7 @@ export default function MovieDetails() {
                     <Download className="w-5 h-5" />
                   )}
                   <span className="text-sm font-medium text-zinc-600 dark:text-zinc-400">
-                    ({link.size} {link.unit})
+                    {isLocked ? "Locked" : `${link.size} ${link.unit}`}
                   </span>
                 </button>
               </div>
@@ -2130,14 +2222,29 @@ export default function MovieDetails() {
                         );
                         return;
                       }
+                      const targetUrl = (() => {
+                        try {
+                          const u = new URL(link.url);
+                          const host = u.hostname.toLowerCase();
+                          if (host.includes('hubcould') || host.includes('hubcloud') || host.includes('vcloud')) {
+                            u.hostname = 'hubcloud.cx';
+                            return u.toString();
+                          } else if (host.includes('hubdrive')) {
+                            u.hostname = 'hubdrive.space';
+                            return u.toString();
+                          }
+                        } catch (e) {}
+                        return link.url;
+                      })();
+
                       setTelegramConfirmModal({
                         isOpen: true,
-                        url: link.url,
+                        url: targetUrl,
                         id: linkKey,
                       });
                     }}
                     className="absolute bottom-1 right-1 p-1.5 text-[#24A1DE] hover:opacity-80 transition-opacity"
-                    title={isLocked ? "Locked" : "Download via Telegram"}
+                    title={isLocked ? t("Locked") : t("Download via Telegram")}
                     disabled={resolvingTgId === linkKey}
                   >
                     {isLocked ? (
@@ -2516,10 +2623,9 @@ export default function MovieDetails() {
             <div className="flex items-start gap-4">
               <Lock className="w-6 h-6 shrink-0 mt-0.5" />
               <div>
-                <h3 className="font-bold text-lg mb-1">Sign in required</h3>
+                <h3 className="font-bold text-lg mb-1">{t('Sign in required')}</h3>
                 <p className="text-emerald-400 mb-0">
-                  Please sign in or log in to access links and watch this
-                  content.
+                  {t('Please sign in or log in to access links and watch this content.')}
                 </p>
               </div>
             </div>
@@ -2529,7 +2635,7 @@ export default function MovieDetails() {
               }
               className="bg-emerald-500 text-white px-6 py-3 text-sm sm:text-base rounded-xl font-bold hover:bg-emerald-600 transition-colors whitespace-nowrap"
             >
-              Log In
+              {t('Log In')}
             </button>
           </div>
         ) : (
@@ -2537,17 +2643,17 @@ export default function MovieDetails() {
             <div className="bg-red-500/10 border border-red-500/20 text-red-500 p-6 rounded-2xl mb-8 flex items-start gap-4">
               <AlertCircle className="w-6 h-6 shrink-0 mt-0.5" />
               <div className="flex-1">
-                <h3 className="font-bold text-lg mb-1">Access Restricted</h3>
+                <h3 className="font-bold text-lg mb-1">{t('Access Restricted')}</h3>
                 <p className="text-red-400 mb-4">
                   {mergedContent.status === "selected_content"
-                    ? "you don't has access to this content. Contact Admin"
+                    ? t("You don't have access to this content. Contact Admin.")
                     : isPending
-                      ? "Your account activation is pending. Please Get Membership or Add any content to cart to activate your account."
+                      ? t("Your account activation is pending. Please Get Membership or Add any content to cart to activate your account.")
                       : isExpired
                         ? profile?.role === "trial"
-                          ? "Your free Trial has expired. Please get Membership to continue watching."
-                          : "Your membership has expired."
-                        : "You do not have permission to access links for this content."}
+                          ? t("Your free Trial has expired. Please get Membership to continue watching.")
+                          : t("Your membership has expired.")
+                        : t("You do not have permission to access links for this content.")}
                 </p>
                 <div className="flex flex-wrap gap-3">
                   {settings?.isAdminContactEnabled !== false && (
@@ -2572,13 +2678,13 @@ export default function MovieDetails() {
                           profile?.role === "selected_content"
                             ? `I want to get access to ${scoPrefix}${contentTitle}. Please tell me how to pay and add it to my account.`
                             : `I cannot access ${scoPrefix}${contentTitle}.`;
-                        const msg = `Assalam O Alaikum! Admin,\n\nName: ${profile?.displayName || "Unknown"}\nEmail: ${profile?.email || "N/A"}\nPhone: ${profile?.phone || "N/A"}\nRole & Status: ${String(
+                        const msg = `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${profile?.displayName || t("Unknown")}\n${t("Email")}: ${profile?.email || "N/A"}\n${t("Phone")}: ${profile?.phone || "N/A"}\n${t("Role & Status")}: ${String(
                           profile?.role || "Unknown",
                         )
                           .replace(/_/g, " ")
                           .replace(/\b\w/g, (c) =>
                             c.toUpperCase(),
-                          )}, ${String(profile?.status || "Unknown").replace(/\b\w/g, (c) => c.toUpperCase())}\n\nYour message/question:\n${helpText}`;
+                          )}, ${String(profile?.status || "Unknown").replace(/\b\w/g, (c) => c.toUpperCase())}\n\n${t("Your message/question:")}\n${helpText}`;
                         window.open(
                           `https://wa.me/${adminPhone}?text=${encodeURIComponent(msg)}`,
                           "_blank",
@@ -2586,7 +2692,7 @@ export default function MovieDetails() {
                       }}
                       className="inline-flex items-center gap-2 bg-red-500/20 px-6 py-3 text-sm sm:text-base rounded-xl font-medium hover:bg-red-500/30 transition-colors text-red-500"
                     >
-                      <MessageCircle className="w-5 h-5" /> Contact Admin (
+                      <MessageCircle className="w-5 h-5" /> {t('Contact Admin')} (
                       {(settings?.supportNumber || "03363284466").startsWith(
                         "0",
                       )
@@ -2608,7 +2714,7 @@ export default function MovieDetails() {
                         className="inline-flex items-center gap-2 bg-emerald-500 text-white px-6 py-3 text-sm sm:text-base rounded-xl font-medium hover:bg-emerald-600 transition-colors"
                       >
                         <ShoppingCart className="w-5 h-5 fill-current" />
-                        View Cart
+                        {t('View Cart')}
                       </Link>
                     ) : (
                       <button
@@ -2625,7 +2731,7 @@ export default function MovieDetails() {
                         className="inline-flex items-center gap-2 bg-emerald-500/20 text-emerald-500 px-6 py-3 text-sm sm:text-base rounded-xl font-medium hover:bg-emerald-500/30 transition-colors"
                       >
                         <ShoppingCart className="w-5 h-5" />
-                        Add to Cart (Rs {mergedContent.status === "selected_content" ? (settings?.movieFee || 50) * 2 : (settings?.movieFee || 50)})
+                        {t('Add to Cart')} (Rs {mergedContent.status === "selected_content" ? (settings?.movieFee || 50) * 2 : (settings?.movieFee || 50)})
                       </button>
                     ))}
                   {(profile?.role === "selected_content" ||
@@ -2648,9 +2754,9 @@ export default function MovieDetails() {
                       >
                         {isExpired
                           ? profile?.role === "trial"
-                            ? "Buy Membership"
-                            : "Renew Now"
-                          : "Get Membership"}
+                            ? t("Buy Membership")
+                            : t("Renew Now")
+                          : t("Get Membership")}
                       </Link>
                     )}
                 </div>
@@ -2822,11 +2928,20 @@ export default function MovieDetails() {
                     {(displayData.description || mergedContent.description) && (
                       <div className="pt-2">
                         <h4 className="text-sm font-bold text-cyan-700 dark:text-cyan-400 mb-1 uppercase tracking-wider opacity-70">
-                          Synopsis
+                          {t('Synopsis')}
                         </h4>
-                        <p className="text-zinc-500 dark:text-zinc-400 text-xs leading-relaxed">
-                          {displayData.description || mergedContent.description}
-                        </p>
+                        <div className={`text-zinc-500 dark:text-zinc-400 leading-relaxed ${language === 'ur' || language === 'ur-roman' ? 'text-base sm:text-lg font-medium' : 'text-xs'}`}>
+                          <Translate
+                            loadingFallback={
+                              <div className="flex items-center gap-3 text-zinc-500 dark:text-zinc-400 italic py-2 animate-pulse">
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                <span>{t('Translating Description...')}</span>
+                              </div>
+                            }
+                          >
+                            {displayData.description || mergedContent.description}
+                          </Translate>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -2959,11 +3074,20 @@ export default function MovieDetails() {
                     )}
 
                     <h3 className="text-sm font-bold mb-1 text-cyan-700 dark:text-cyan-400 uppercase tracking-wider opacity-70">
-                      Synopsis
+                      {t('Synopsis')}
                     </h3>
-                    <p className="text-zinc-500 dark:text-zinc-400 text-xs leading-relaxed">
-                      {mergedContent.description}
-                    </p>
+                    <div className={`text-zinc-500 dark:text-zinc-400 leading-relaxed ${language === 'ur' || language === 'ur-roman' ? 'text-base sm:text-lg font-medium' : 'text-xs'}`}>
+                      <Translate
+                        loadingFallback={
+                          <div className="flex items-center gap-3 text-zinc-500 dark:text-zinc-400 italic py-2 animate-pulse">
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span>{t('Translating Description...')}</span>
+                          </div>
+                        }
+                      >
+                        {mergedContent.description}
+                      </Translate>
+                    </div>
                   </section>
                 </div>
               )}
@@ -3079,7 +3203,7 @@ export default function MovieDetails() {
                                           className="bg-emerald-500/20 text-emerald-500 px-3 py-1 rounded-full text-sm font-bold flex items-center gap-2 hover:bg-emerald-500/30 transition-colors"
                                         >
                                           <ShoppingCart className="w-4 h-4" />
-                                          Add to Cart (Rs{" "}
+                                          {t('Add to Cart')} (Rs{" "}
                                           {mergedContent.status === "selected_content" ? (settings?.seasonFee || 100) * 2 : (settings?.seasonFee || 100)})
                                         </button>
                                       ))}
@@ -3090,7 +3214,7 @@ export default function MovieDetails() {
                                           to="/top-up"
                                           className="bg-emerald-500/20 text-emerald-500 px-3 py-1 rounded-full text-sm font-bold flex items-center gap-2 hover:bg-emerald-500/30 transition-colors"
                                         >
-                                          Top Up Membership
+                                          {t('Top Up Membership')}
                                         </Link>
                                       )}
                                     {settings?.isAdminContactEnabled !== false && (
@@ -3111,13 +3235,13 @@ export default function MovieDetails() {
                                             profile?.role === "selected_content"
                                               ? `I want to get access to ${scoPrefix}${contentTitle}. Please tell me how to pay and add it to my account.`
                                               : `I cannot access ${scoPrefix}${contentTitle}.`;
-                                          const msg = `Assalam O Alaikum! Admin,\n\nName: ${profile?.displayName || "Unknown"}\nEmail: ${profile?.email || "N/A"}\nPhone: ${profile?.phone || "N/A"}\nRole & Status: ${String(
+                                          const msg = `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${profile?.displayName || t("Unknown")}\n${t("Email")}: ${profile?.email || "N/A"}\n${t("Phone")}: ${profile?.phone || "N/A"}\n${t("Role & Status")}: ${String(
                                             profile?.role || "Unknown",
                                           )
                                             .replace(/_/g, " ")
                                             .replace(/\b\w/g, (c) =>
                                               c.toUpperCase(),
-                                            )}, ${String(profile?.status || "Unknown").replace(/\b\w/g, (c) => c.toUpperCase())}\n\nYour message/question:\n${helpText}`;
+                                            )}, ${String(profile?.status || "Unknown").replace(/\b\w/g, (c) => c.toUpperCase())}\n\n${t("Your message/question:")}\n${helpText}`;
                                           window.open(
                                             `https://wa.me/${adminPhone}?text=${encodeURIComponent(msg)}`,
                                             "_blank",
@@ -3125,7 +3249,7 @@ export default function MovieDetails() {
                                         }}
                                         className="bg-red-500/20 text-red-500 px-3 py-1 rounded-full text-sm font-bold flex items-center gap-2 hover:bg-red-500/30 transition-colors"
                                       >
-                                        <MessageCircle className="w-4 h-4" /> Admin
+                                        <MessageCircle className="w-4 h-4" /> {t("Admin")}
                                       </button>
                                     )}
                                   </>
@@ -3201,86 +3325,86 @@ export default function MovieDetails() {
                                                   getLinksArray(ep.links)
                                                     .length > 0,
                                               )
-                                              .map((ep, eIdx) => (
-                                                <div
-                                                  key={ep.id || `ep-${eIdx}`}
-                                                  className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 flex flex-col gap-4"
-                                                >
-                                                  <div className="flex flex-col gap-2">
-                                                    <div className="flex items-center flex-wrap gap-2">
-                                                      <span className="text-emerald-500 font-bold">
-                                                        E{ep.episodeNumber}
-                                                      </span>
-                                                      <span className="font-medium">
-                                                        {ep.title}
-                                                      </span>
-                                                      {ep.description && (
+                                              .map((ep, eIdx) => {
+                                                const isGenericTitle = /^episode\s+\d+$/i.test(ep.title?.trim() || "");
+                                                return (
+                                                  <div
+                                                    key={ep.id || `ep-${eIdx}`}
+                                                    className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 flex flex-col gap-4"
+                                                  >
+                                                    <div className="flex flex-col gap-2">
+                                                      <div className="flex items-center flex-wrap gap-2">
+                                                        <span className="text-emerald-500 font-bold">
+                                                          E{ep.episodeNumber}
+                                                        </span>
+                                                        <span className="font-medium">
+                                                          {isGenericTitle ? ep.title : <Translate>{ep.title}</Translate>}
+                                                        </span>
                                                         <button
                                                           onClick={() =>
                                                             setExpandedEpisodes(
                                                               (prev) => ({
                                                                 ...prev,
-                                                                [ep.id]:
-                                                                  !prev[ep.id],
+                                                                [`${season.id}-${ep.id}`]:
+                                                                  !prev[`${season.id}-${ep.id}`],
                                                               }),
                                                             )
                                                           }
                                                           className="text-xs text-zinc-500 dark:text-zinc-400 hover:text-emerald-500 transition-colors"
                                                         >
                                                           {expandedEpisodes[
-                                                            ep.id
+                                                            `${season.id}-${ep.id}`
                                                           ] ? (
                                                             <ChevronUp className="w-4 h-4" />
                                                           ) : (
                                                             <ChevronDown className="w-4 h-4" />
                                                           )}
                                                         </button>
-                                                      )}
-                                                      {ep.duration && (
-                                                        <span className="text-xs text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded whitespace-nowrap">
-                                                          {ep.duration}
-                                                        </span>
-                                                      )}
-                                                    </div>
+                                                        {ep.duration && (
+                                                          <span className="text-xs text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded whitespace-nowrap">
+                                                            {ep.duration}
+                                                          </span>
+                                                        )}
+                                                      </div>
 
-                                                    {ep.description &&
-                                                      expandedEpisodes[
-                                                        ep.id
-                                                      ] && (
+                                                      {expandedEpisodes[
+                                                        `${season.id}-${ep.id}`
+                                                      ] && ep.description && ep.description.trim() !== "" && ep.description !== ep.title && (
                                                         <div className="text-sm text-zinc-500 dark:text-zinc-400 bg-zinc-50/50 dark:bg-zinc-900/50 p-3 rounded-lg">
-                                                          {ep.description}
+                                                          <Translate>{ep.description}</Translate>
                                                         </div>
                                                       )}
-                                                  </div>
-
-                                                  {getLinksArray(ep.links)
-                                                    .length > 0 && (
-                                                    <div className="flex justify-center">
-                                                      {renderLinks(
-                                                        getLinksArray(ep.links),
-                                                        false,
-                                                        `S${season.seasonNumber} E${ep.episodeNumber}`,
-                                                        !isAccessible,
-                                                        {
-                                                          id: season.id,
-                                                          number:
-                                                            season.seasonNumber,
-                                                          title: season.title,
-                                                        },
-                                                        {
-                                                          number:
-                                                            ep.episodeNumber,
-                                                          title:
-                                                            (ep as any).name ||
-                                                            ep.title ||
-                                                            `Episode ${ep.episodeNumber}`,
-                                                        },
-                                                      )}
                                                     </div>
-                                                  )}
-                                                </div>
-                                              ))}
-                                          </div>
+
+                                                    {getLinksArray(ep.links)
+                                                      .length > 0 && (
+                                                      <div className="flex justify-center">
+                                                        {renderLinks(
+                                                          getLinksArray(ep.links),
+                                                          false,
+                                                          `S${season.seasonNumber} E${ep.episodeNumber}`,
+                                                          !isAccessible,
+                                                          {
+                                                            id: season.id,
+                                                            number:
+                                                              season.seasonNumber,
+                                                            title: season.title,
+                                                          },
+                                                          {
+                                                            number:
+                                                              ep.episodeNumber,
+                                                            title:
+                                                              (ep as any).name ||
+                                                              ep.title ||
+                                                              `Episode ${ep.episodeNumber}`,
+                                                          },
+                                                        )}
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                );
+                                              })}
+                                            </div>
                                         </div>
                                       )}
                                   </>
@@ -3293,7 +3417,7 @@ export default function MovieDetails() {
                     } catch (e) {
                       console.error("Error parsing series seasons:", e);
                       return (
-                        <p className="text-red-500">Error loading seasons</p>
+                        <p className="text-red-500">{t('Error loading seasons')}</p>
                       );
                     }
                   })()}
@@ -3307,7 +3431,7 @@ export default function MovieDetails() {
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="text-xl font-bold text-zinc-900 dark:text-white flex items-center gap-2">
                     <Heart className="w-5 h-5 text-cyan-500" />
-                    Recommended For You
+                    {t('Recommended For You')}
                   </h2>
                 </div>
                 <div className="relative group">
@@ -3384,10 +3508,10 @@ export default function MovieDetails() {
                   <line x1="6" y1="6" x2="18" y2="18"></line>
                 </svg>
               </button>
-              <h3 className="text-xl font-bold mb-2">Play Content</h3>
+              <h3 className="text-xl font-bold mb-2">{t('Play Content')}</h3>
               <div className="flex justify-between items-center mb-6">
                 <p className="text-zinc-500 dark:text-zinc-400">
-                  How would you like to open "{linkPopup.name}"?
+                  {t('How would you like to open')} <span dir="ltr" className="inline-block mx-1 font-bold">"{linkPopup.name}"</span>{language === 'ur' ? '؟' : '?'}
                 </p>
                 {linkPopup.size && (
                   <span className="px-2.5 py-1 bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-lg text-xs font-bold whitespace-nowrap">
@@ -3409,7 +3533,7 @@ export default function MovieDetails() {
                 {linkPopup.candidates && linkPopup.candidates.length > 0 && (
                   <div className="mb-1">
                     <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
-                      Select Server:
+                      {t('Select Server')}:
                     </label>
                     <select
                       value={linkPopup.url}
@@ -3730,10 +3854,10 @@ export default function MovieDetails() {
         title={alertConfig.title}
         message={alertConfig.message}
       >
-        {(alertConfig.title === "Account Pending" ||
-          alertConfig.title === "Trial Expired" ||
-          alertConfig.title === "Membership Expired" ||
-          alertConfig.title === "Content Locked") && (
+        {(alertConfig.title === t("Account Pending") ||
+          alertConfig.title === t("Trial Expired") ||
+          alertConfig.title === t("Membership Expired") ||
+          alertConfig.title === t("Content Locked")) && (
           <div className="flex flex-col gap-3">
             {lockedContentInfo &&
               (!isExpired || mergedContent?.status === "selected_content") &&
@@ -3747,7 +3871,7 @@ export default function MovieDetails() {
                   to="/cart"
                   className="flex items-center justify-center gap-2 bg-emerald-500 text-white px-6 py-3 text-sm sm:text-base rounded-xl font-bold hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20"
                 >
-                  <ShoppingCart className="w-5 h-5 fill-current" /> View Cart
+                  <ShoppingCart className="w-5 h-5 fill-current" /> {t('View Cart')}
                 </Link>
               ) : (
                 <button
@@ -3765,7 +3889,7 @@ export default function MovieDetails() {
                   }}
                   className="flex items-center justify-center gap-2 bg-emerald-500 text-white px-6 py-3 text-sm sm:text-base rounded-xl font-bold hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20"
                 >
-                  <ShoppingCart className="w-5 h-5" /> Add to Cart (Rs{" "}
+                  <ShoppingCart className="w-5 h-5" /> {t('Add to Cart')} (Rs{" "}
                   {lockedContentInfo.price})
                 </button>
               ))}
@@ -3780,9 +3904,9 @@ export default function MovieDetails() {
                 >
                   {isExpired
                     ? profile?.role === "trial"
-                      ? "Buy Membership"
-                      : "Renew Now"
-                    : "Get Membership"}
+                      ? t("Buy Membership")
+                      : t("Renew Now")
+                    : t("Get Membership")}
                 </Link>
               )}
 
@@ -3822,13 +3946,13 @@ export default function MovieDetails() {
                       ? `I want to get access to ${scoPrefix}${displayTitle}. Please tell me how to pay and add it to my account.`
                       : `I need assistance with ${scoPrefix}${displayTitle}.`;
                   const message = encodeURIComponent(
-                    `Hello Admin,\n\nName: ${profile?.displayName || "Unknown"}\nEmail: ${profile?.email || "N/A"}\nPhone: ${profile?.phone || "N/A"}\nRole & Status: ${String(
+                    `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${profile?.displayName || t("Unknown")}\n${t("Email")}: ${profile?.email || "N/A"}\n${t("Phone")}: ${profile?.phone || "N/A"}\n${t("Role & Status")}: ${String(
                       profile?.role || "Unknown",
                     )
                       .replace(/_/g, " ")
                       .replace(/\b\w/g, (c) =>
                         c.toUpperCase(),
-                      )}, ${String(profile?.status || "Unknown").replace(/\b\w/g, (c) => c.toUpperCase())}\n\nYour message/question:\n${helpText}`,
+                      )}, ${String(profile?.status || "Unknown").replace(/\b\w/g, (c) => c.toUpperCase())}\n\n${t("Your message/question:")}\n${helpText}`,
                   );
                   return `https://wa.me/${adminPhone}?text=${message}`;
                 })()}
@@ -3836,7 +3960,7 @@ export default function MovieDetails() {
                 rel="noreferrer"
                 className="flex items-center justify-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white px-6 py-3 text-sm sm:text-base rounded-xl font-bold hover:bg-zinc-300 dark:hover:bg-zinc-700 transition-all"
               >
-                <MessageCircle className="w-5 h-5" /> Admin
+                <MessageCircle className="w-5 h-5" /> {t("Admin")}
               </a>
             )}
           </div>
@@ -3847,15 +3971,15 @@ export default function MovieDetails() {
         <AlertModal
           isOpen={telegramConfirmModal.isOpen}
           onClose={() => setTelegramConfirmModal(null)}
-          title="Download via Telegram"
-          message="Are you sure you want to download this file via Telegram?"
+          title={t("Download via Telegram")}
+          message={t("Are you sure you want to download this file via Telegram?")}
         >
           <div className="flex flex-col sm:flex-row items-center gap-3 w-full mt-4">
             <button
               onClick={() => setTelegramConfirmModal(null)}
               className="w-full sm:flex-1 py-3 px-6 rounded-xl font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white hover:bg-zinc-200 dark:hover:bg-zinc-700 transition"
             >
-              Cancel
+              {t('Cancel')}
             </button>
             <button
               onClick={() => {
@@ -3866,7 +3990,7 @@ export default function MovieDetails() {
               }}
               className="w-full sm:flex-1 py-3 px-6 rounded-xl font-bold bg-[#24A1DE] text-white hover:bg-[#1E8BC2] transition flex flex-row items-center justify-center gap-2"
             >
-              <Send className="w-5 h-5 shrink-0" /> Open in Telegram
+              <Send className="w-5 h-5 shrink-0" /> {t('Open in Telegram')}
             </button>
           </div>
         </AlertModal>

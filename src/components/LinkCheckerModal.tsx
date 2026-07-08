@@ -331,21 +331,33 @@ export const LinkCheckerModal: React.FC<Props> = ({
     }
   };
 
-  const handleCheck = async (onlyUrls?: string[], initialInputOverride?: string) => {
+  const handleCheck = async (onlyUrls?: string[], initialInputOverride?: string, depth = 0, force = false) => {
     setError(null);
+    if (depth > 5) {
+      console.warn("Max check depth reached, stopping recursion.");
+      setLoading(false);
+      return;
+    }
 
     // Derive links directly from input or use provided override
     const currentInputSnapshot = initialInputOverride || inputRef.current;
-    let currentLinks = onlyUrls || splitLinks(currentInputSnapshot).map(normalizeUrl).filter(Boolean);
+    
+    // Convert all HubCloud links to .cx BEFORE processing
+    let normalizedInput = currentInputSnapshot;
+    normalizedInput = normalizedInput.replace(/(hubcloud|hubcould|vcloud)\.[a-z]+/gi, 'hubcloud.cx');
+    normalizedInput = normalizedInput.replace(/hubdrive\.[a-z]+/gi, 'hubdrive.space');
+    
+    let currentLinks = onlyUrls || splitLinks(normalizedInput).map(normalizeUrl).filter(Boolean);
     
     if (!currentLinks.length) {
       setError("Please paste at least one valid link first.");
+      setLoading(false);
       return;
     }
 
     // 1. Identify all extractable links
     const extractableLinks = currentLinks.filter(u => 
-      (u.includes('howblogs.xyz') || u.includes('filesdl.in') || u.includes('filesdl.top') || u.includes('mdrive.lol') || u.includes('moviesdrives.') || u.includes('moviesdrive.') || u.includes('filmygo.') || u.includes('skymovieshd.')) && 
+      (u.includes('howblogs.xyz') || u.includes('filesdl.in') || u.includes('filesdl.top') || u.includes('mdrive.lol') || u.includes('mdrvie.lol') || u.includes('moviesdrives.') || u.includes('moviesdrive.') || u.includes('filmygo.') || u.includes('skymovieshd.')) && 
       !processedExtractionsRef.current.has(u)
     );
 
@@ -357,29 +369,30 @@ export const LinkCheckerModal: React.FC<Props> = ({
         const batch = extractableLinks.slice(0, 5);
         const results = await Promise.all(batch.map(async (targetUrl) => {
           try {
-            if (targetUrl.includes('mdrive.lol')) {
-              const res = await fetch(`/api/mdrive?url=${encodeURIComponent(targetUrl)}`);
+            const normUrl = normalizeUrl(targetUrl);
+            if (normUrl.includes('mdrive.lol') || normUrl.includes('mdrvie.lol')) {
+              const res = await fetch(`/api/mdrive?url=${encodeURIComponent(normUrl)}`);
               if (!res.ok) throw new Error('MDrive fetch failed');
               const data = await res.json();
               return { type: 'mdrive', original: targetUrl, data };
-            } else if (targetUrl.includes('moviesdrives.') || targetUrl.includes('moviesdrive.')) {
-              const res = await fetch(`/api/moviesdrive?url=${encodeURIComponent(targetUrl)}`);
+            } else if (normUrl.includes('moviesdrives.') || normUrl.includes('moviesdrive.')) {
+              const res = await fetch(`/api/moviesdrive?url=${encodeURIComponent(normUrl)}`);
               if (!res.ok) throw new Error('MoviesDrive fetch failed');
               const data = await res.json();
               return { type: 'moviesdrive', original: targetUrl, data };
-            } else if (targetUrl.includes('filmygo.')) {
-              const res = await fetch(`/api/filmygo?url=${encodeURIComponent(targetUrl)}`);
+            } else if (normUrl.includes('filmygo.')) {
+              const res = await fetch(`/api/filmygo?url=${encodeURIComponent(normUrl)}`);
               if (!res.ok) throw new Error('FilmyGo fetch failed');
               const data = await res.json();
               return { type: 'filmygo', original: targetUrl, data };
-            } else if (targetUrl.includes('skymovieshd.')) {
-              const res = await fetch(`/api/skymovieshd?url=${encodeURIComponent(targetUrl)}`);
+            } else if (normUrl.includes('skymovieshd.')) {
+              const res = await fetch(`/api/skymovieshd?url=${encodeURIComponent(normUrl)}`);
               if (!res.ok) throw new Error('SkymoviesHD fetch failed');
               const data = await res.json();
               return { type: 'skymovieshd', original: targetUrl, data };
             } else {
-              const endpoint = targetUrl.includes('howblogs.xyz') ? '/api/howblogs' : '/api/filesdl';
-              const res = await fetch(`${endpoint}?url=${encodeURIComponent(targetUrl)}`);
+              const endpoint = normUrl.includes('howblogs.xyz') ? '/api/howblogs' : '/api/filesdl';
+              const res = await fetch(`${endpoint}?url=${encodeURIComponent(normUrl)}`);
               if (!res.ok) throw new Error('Extraction failed');
               const data = await res.json();
               return { type: 'auto', original: targetUrl, extracted: data.url };
@@ -451,7 +464,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
         
         if (!pausedForUI) {
           setTimeout(() => {
-            handleCheck(undefined, nextInput);
+            handleCheck(undefined, nextInput, depth + 1, force);
           }, 400);
         }
       } catch (err: any) {
@@ -470,7 +483,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
     // 3. Final Scan Loop - FILTER OUT host links that should be extracted
     const urls = currentLinks.filter(u => 
-      !u.includes('mdrive.lol') && 
+      !u.includes('mdrive.lol') && !u.includes('mdrvie.lol') && 
       !u.includes('howblogs.xyz') && 
       !u.includes('filesdl.in') &&
       !u.includes('filesdl.top') &&
@@ -508,44 +521,41 @@ export const LinkCheckerModal: React.FC<Props> = ({
       let completedCount = 0;
 
       const processNext = async (): Promise<void> => {
-        if (queue.length === 0) return;
-        
-        activeCount++;
-        const u = queue.shift()!;
-        
-        try {
-          const result = await performFullLinkScan(u, extractedMetaRef.current, languages, qualities);
+        while (queue.length > 0) {
+          const u = queue.shift();
+          if (!u) break;
 
-          allResults.push(result);
-          completedCount++;
+          try {
+            const result = await performFullLinkScan(u, extractedMetaRef.current, languages, qualities, undefined, undefined, undefined, force);
+            allResults.push(result);
+            completedCount++;
 
-          if (result.statusLabel === "WORKING" || result.statusLabel === "SMALL_FILE" || result.statusLabel === "MISSING_FILENAME" || result.statusLabel === "MISSING_METADATA" || result.statusLabel === "SIZE_MISMATCH") {
-            setSelectedUrls((prev) => new Set(prev).add(result.url));
-          }
-        } catch (e: any) {
-          console.error(`Error checking link ${u}:`, e);
-          const errorResult: LinkCheckResult = {
-            url: u,
-            ok: false,
-            statusLabel: "UNKNOWN",
-            message: e?.message || "Check failed due to a network or fetch error."
-          };
-          allResults.push(errorResult);
-          completedCount++;
-        } finally {
-          // Update results incrementally for better UX
-          setResults((prev) => {
-            let merged: LinkCheckResult[];
-            if (onlyUrls?.length) {
-              const keep = prev.filter((r) => !onlyUrls.includes(r.url));
-              merged = [...keep, ...allResults];
-            } else {
-              merged = [...allResults];
+            if (result.statusLabel === "WORKING" || result.statusLabel === "SMALL_FILE" || result.statusLabel === "MISSING_FILENAME" || result.statusLabel === "MISSING_METADATA" || result.statusLabel === "SIZE_MISMATCH") {
+              setSelectedUrls((prev) => new Set(prev).add(result.url));
             }
-            return merged;
-          });
-          activeCount--;
-          await processNext();
+          } catch (e: any) {
+            console.error(`Error checking link ${u}:`, e);
+            const errorResult: LinkCheckResult = {
+              url: u,
+              ok: false,
+              statusLabel: "UNKNOWN",
+              message: e?.message || "Check failed due to a network or fetch error."
+            };
+            allResults.push(errorResult);
+            completedCount++;
+          } finally {
+            // Update results incrementally for better UX
+            setResults((prev) => {
+              let merged: LinkCheckResult[];
+              if (onlyUrls?.length) {
+                const keep = prev.filter((r) => !onlyUrls.includes(r.url));
+                merged = [...keep, ...allResults];
+              } else {
+                merged = [...allResults];
+              }
+              return merged;
+            });
+          }
         }
       };
 
@@ -1106,13 +1116,13 @@ export const LinkCheckerModal: React.FC<Props> = ({
                     <div className="flex items-center justify-between px-1">
                       <div>
                         <h3 className="text-lg font-bold">
-                          {mdriveUrl.includes('mdrive.lol') ? 'MDrive Selection' : 
+                          {(mdriveUrl.includes('mdrive.lol') || mdriveUrl.includes('mdrvie.lol')) ? 'MDrive Selection' : 
                           mdriveUrl.includes('filmygo.') ? 'FilmyGo FilesDL Selection' : 
                           mdriveUrl.includes('skymovieshd.') ? 'SkymoviesHD HowBlogs Selection' :
                           'MoviesDrive MDrive Selection'}
                         </h3>
                         <p className="text-xs text-zinc-500">
-                          {mdriveUrl.includes('mdrive.lol') ? 'Pick the Hubcloud links you want to extract' : 
+                          {(mdriveUrl.includes('mdrive.lol') || mdriveUrl.includes('mdrvie.lol')) ? 'Pick the Hubcloud links you want to extract' : 
                           mdriveUrl.includes('filmygo.') ? 'Pick the FilesDL links you want to process' :
                           mdriveUrl.includes('skymovieshd.') ? 'Pick the HowBlogs links you want to process' :
                           'Pick the MDrive links you want to process'}
@@ -1513,7 +1523,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                             <div className="flex gap-2 self-start">
                               {(!result.ok || result.statusLabel === "UNKNOWN" || result.statusLabel === "MISSING_FILENAME" || result.statusLabel === "BROKEN" || result.statusLabel === "UNAVAILABLE") && (
                                 <button
-                                  onClick={() => handleCheck([result.url])}
+                                  onClick={() => handleCheck([result.url], undefined, 0, true)}
                                   disabled={loading}
                                   className="inline-flex items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50 gap-1.5 transition-colors"
                                   title="Retry checking this link"

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, ExternalLink, Loader2, Download } from "lucide-react";
 import { Content } from "../types";
 import { useModalBehavior } from "../hooks/useModalBehavior";
+import { useLanguage } from "../contexts/LanguageContext";
 
 interface TelegramDownloadModalProps {
   isOpen: boolean;
@@ -16,6 +17,7 @@ export function TelegramDownloadModal({
   content,
 }: TelegramDownloadModalProps) {
   useModalBehavior(isOpen, onClose);
+  const { t } = useLanguage();
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [errorId, setErrorId] = useState<string | null>(null);
 
@@ -31,12 +33,12 @@ export function TelegramDownloadModal({
         window.location.href = data.url;
       } else {
         setErrorId(id);
-        alert(data.error || "Failed to resolve Telegram link");
+        alert(data.error || t("Failed to resolve Telegram link"));
       }
     } catch (e) {
       console.error(e);
       setErrorId(id);
-      alert("An error occurred predicting Telegram link");
+      alert(t("An error occurred predicting Telegram link"));
     } finally {
       setResolvingId(null);
     }
@@ -77,7 +79,7 @@ export function TelegramDownloadModal({
                  className="w-full flex justify-center items-center gap-2 px-3 py-2 bg-[rgb(36,161,222)] hover:bg-[rgb(32,144,199)] disabled:opacity-50 text-white rounded-lg text-sm font-medium transition"
                >
                  {resolvingId === id ? <Loader2 className="w-4 h-4 animate-spin" /> : <ExternalLink className="w-4 h-4" />}
-                 {resolvingId === id ? "Resolving..." : "Download via Telegram"}
+                 {resolvingId === id ? t("Resolving...") : t("Download via Telegram")}
                </button>
              </div>
            );
@@ -122,7 +124,7 @@ export function TelegramDownloadModal({
                    </div>
                    <div>
                      <h2 className="text-lg font-bold text-zinc-900 dark:text-white">
-                        Telegram Download
+                        {t("Telegram Download")}
                      </h2>
                      <p className="text-xs text-zinc-500">
                         {content.title}

@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { useLanguage } from '../../contexts/LanguageContext';
 import { useContent } from '../../contexts/ContentContext';
 import { Film, Clock, ArrowLeft } from 'lucide-react';
 import { formatContentTitle } from '../../utils/contentUtils';
@@ -13,6 +14,7 @@ import ContentCard from '../../components/ContentCard';
 
 export default function WatchLater() {
   const { profile, toggleFavorite, toggleWatchLater } = useAuth();
+  const { t } = useLanguage();
   const { contentList, genres, languages, qualities } = useContent();
 
   const watchLaterContent = useMemo(() => {
@@ -70,7 +72,7 @@ export default function WatchLater() {
             </Link>
             <h1 className="text-xl font-bold flex items-center gap-2">
               <Clock className="w-5 h-5 text-emerald-500" />
-              Watch Later
+              {t('Watch Later')}
             </h1>
           </div>
           <div className="flex items-center gap-4">
@@ -101,7 +103,7 @@ export default function WatchLater() {
         {watchLaterContent.length === 0 && (
           <div className="text-center py-20 text-zinc-500">
             <Film className="w-16 h-16 mx-auto mb-4 opacity-20" />
-            <p className="text-xl">Your Watch Later list is empty</p>
+            <p className="text-xl">{t('Your Watch Later list is empty')}</p>
           </div>
         )}
       </main>

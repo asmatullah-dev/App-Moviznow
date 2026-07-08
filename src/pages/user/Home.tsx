@@ -4,6 +4,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { Content, Role, Collection as AppCollection } from "../../types";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "../../contexts/AuthContext";
+import { useLanguage } from "../../contexts/LanguageContext";
 import { useContent } from "../../contexts/ContentContext";
 import { useCart } from "../../contexts/CartContext";
 import { usePWA } from "../../contexts/PWAContext";
@@ -74,6 +75,7 @@ export default function Home({
     loading,
     isOffline,
   } = useContent();
+  const { t } = useLanguage();
   const { cart } = useCart();
   const { settings } = useSettings();
   const { isInstallable, installApp } = usePWA();
@@ -581,11 +583,10 @@ export default function Home({
           <div className="bg-yellow-500/10 border border-yellow-500 text-yellow-600 dark:text-yellow-500 p-4 sm:p-6 rounded-2xl mb-8 flex flex-row items-center justify-between gap-4 sm:gap-8">
             <div className="flex-1 min-w-0">
               <h3 className="font-bold text-lg sm:text-2xl mb-1 sm:mb-2 text-yellow-600 dark:text-yellow-500">
-                Account Pending
+                {t('Account Pending')}
               </h3>
               <p className="text-yellow-700 dark:text-yellow-500/80 text-sm sm:text-lg font-medium">
-                Your account activation is pending. Please Get Membership or Add
-                any content to cart to activate your account.
+                {t('Your account activation is pending. Please Get Membership or Add any content to cart to activate your account.')}
               </p>
             </div>
             <div className="flex flex-col gap-2 sm:gap-3 min-w-[140px] sm:min-w-[220px] shrink-0">
@@ -594,7 +595,7 @@ export default function Home({
                   to="/top-up"
                   className="flex items-center justify-center gap-1.5 sm:gap-2 bg-yellow-500 text-white dark:text-black px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-yellow-400 transition-all active:scale-95 shadow-lg shadow-yellow-500/20 border border-white/20"
                 >
-                  Get Membership
+                  {t('Get Membership')}
                 </Link>
               )}
               {(profile?.role === "selected_content" ||
@@ -603,7 +604,7 @@ export default function Home({
                   to="/cart"
                   className="flex items-center justify-center gap-1.5 sm:gap-2 bg-yellow-500 text-white dark:text-black px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-yellow-400 transition-all active:scale-95 shadow-lg shadow-yellow-500/20 border border-white/20"
                 >
-                  <ShoppingCart className="w-3 h-3 sm:w-5 sm:h-5" /> Cart
+                  <ShoppingCart className="w-3 h-3 sm:w-5 sm:h-5" /> {t('Cart')}
                 </Link>
               )}
               {settings?.isAdminContactEnabled !== false && (
@@ -616,13 +617,13 @@ export default function Home({
                       supportPhone = "92" + supportPhone;
                     }
                     const adminPhone = supportPhone.replace("+", "");
-                    const msg = `Assalam O Alaikum! Admin,\n\nName: ${profile?.displayName || "Unknown"}\nEmail: ${profile?.email || "N/A"}\nPhone: ${profile?.phone || "N/A"}\nRole & Status: ${String(
+                    const msg = `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${profile?.displayName || t("Unknown")}\n${t("Email")}: ${profile?.email || "N/A"}\n${t("Phone")}: ${profile?.phone || "N/A"}\n${t("Role & Status")}: ${String(
                       profile?.role || "Unknown",
                     )
                       .replace(/_/g, " ")
                       .replace(/\b\w/g, (c) =>
                         c.toUpperCase(),
-                      )}, ${String(profile?.status || "Unknown").replace(/\b\w/g, (c) => c.toUpperCase())}\n\nYour message/question:\nMy account is pending and I need assistance.`;
+                      )}, ${String(profile?.status || "Unknown").replace(/\b\w/g, (c) => c.toUpperCase())}\n\n${t("Your message/question:")}\n${t("My account is pending and I need assistance.")}`;
                     window.open(
                       `https://wa.me/${adminPhone}?text=${encodeURIComponent(msg)}`,
                       "_blank",
@@ -630,7 +631,7 @@ export default function Home({
                   }}
                   className="flex items-center justify-center gap-1.5 sm:gap-2 bg-yellow-500/10 border border-yellow-500 text-yellow-600 dark:text-yellow-500 px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-yellow-500/20 transition-all active:scale-95"
                 >
-                  <MessageCircle className="w-3 h-3 sm:w-5 sm:h-5" /> Admin
+                  <MessageCircle className="w-3 h-3 sm:w-5 sm:h-5" /> {t("Contact Admin")}
                 </button>
               )}
             </div>
@@ -641,13 +642,13 @@ export default function Home({
             <div className="flex-1 min-w-0">
               <h3 className="font-bold text-lg sm:text-2xl mb-1 sm:mb-2">
                 {profile.role === "trial"
-                  ? "Trial Expired"
-                  : "Membership Expired"}
+                  ? t("Trial Expired")
+                  : t("Membership Expired")}
               </h3>
               <p className="text-red-500/80 text-sm sm:text-lg font-medium">
                 {profile.role === "trial"
-                  ? "Your free Trial has expired. Please get Membership to continue watching."
-                  : "Your membership has expired. Please renew to continue watching."}
+                  ? t("Your free Trial has expired. Please get Membership to continue watching.")
+                  : t("Your membership has expired. Please renew to continue watching.")}
               </p>
             </div>
             <div className="flex flex-col gap-2 sm:gap-3 min-w-[140px] sm:min-w-[220px] shrink-0">
@@ -655,7 +656,7 @@ export default function Home({
                 to="/top-up"
                 className="flex items-center justify-center gap-1.5 sm:gap-2 bg-red-500 text-white px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-red-600 transition-all active:scale-95 shadow-lg shadow-red-500/20 border border-white/20"
               >
-                Renew Now
+                {t("Renew Now")}
               </Link>
               {settings?.isAdminContactEnabled !== false && (
                 <button
@@ -668,14 +669,14 @@ export default function Home({
                     }
                     const adminPhone = supportPhone.replace("+", "");
                     const expiryType =
-                      profile?.role === "trial" ? "Trial" : "Membership";
-                    const msg = `Hello Admin,\n\nName: ${profile?.displayName || "Unknown"}\nEmail: ${profile?.email || "N/A"}\nPhone: ${profile?.phone || "N/A"}\nRole & Status: ${String(
-                      profile?.role || "Unknown",
+                      profile?.role === "trial" ? t("Trial") : t("Membership");
+                    const msg = `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${profile?.displayName || t("Unknown")}\n${t("Email")}: ${profile?.email || "N/A"}\n${t("Phone")}: ${profile?.phone || "N/A"}\n${t("Role & Status")}: ${String(
+                      profile?.role || t("Unknown"),
                     )
                       .replace(/_/g, " ")
                       .replace(/\b\w/g, (c) =>
                         c.toUpperCase(),
-                      )}, ${String(profile?.status || "Unknown").replace(/\b\w/g, (c) => c.toUpperCase())}\n\nYour message/question:\nMy ${expiryType} has expired and I need assistance.`;
+                      )}, ${String(profile?.status || t("Unknown")).replace(/\b\w/g, (c) => c.toUpperCase())}\n\n${t("Your message/question:")}\n${t("My")} ${expiryType} ${t("has expired and I need assistance.")}`;
                     window.open(
                       `https://wa.me/${adminPhone}?text=${encodeURIComponent(msg)}`,
                       "_blank",
@@ -683,7 +684,7 @@ export default function Home({
                   }}
                   className="flex items-center justify-center gap-1.5 sm:gap-2 bg-red-500/10 border border-red-500/30 px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-red-500/20 transition-all active:scale-95"
                 >
-                  <MessageCircle className="w-3 h-3 sm:w-5 sm:h-5" /> Admin
+                  <MessageCircle className="w-3 h-3 sm:w-5 sm:h-5" /> {t("Contact Admin")}
                 </button>
               )}
             </div>
@@ -706,7 +707,7 @@ export default function Home({
                   <input
                     ref={searchInputRef}
                     type="text"
-                    placeholder="Search movies & series..."
+                    placeholder={t("Search movies & series...")}
                     value={search}
                     onChange={(e) => {
                       setSearch(e.target.value);
@@ -745,10 +746,10 @@ export default function Home({
                     onChange={(e) => setSort(e.target.value as any)}
                     className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
                   >
-                    <option value="default">Default Order</option>
-                    <option value="newest">Recently Added</option>
-                    <option value="year">Release Year</option>
-                    <option value="az">A-Z</option>
+                    <option value="default">{t('Default Order')}</option>
+                    <option value="newest">{t('Recently Added')}</option>
+                    <option value="year">{t('Release Year')}</option>
+                    <option value="az">{t('A-Z')}</option>
                   </select>
 
                   <select
@@ -756,9 +757,9 @@ export default function Home({
                     onChange={(e) => setSelectedType(e.target.value)}
                     className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
                   >
-                    <option value="">Types</option>
-                    <option value="movie">Movies</option>
-                    <option value="series">Series</option>
+                    <option value="">{t('Types')}</option>
+                    <option value="movie">{t('Movies')}</option>
+                    <option value="series">{t('Series')}</option>
                   </select>
 
                   <select
@@ -766,7 +767,7 @@ export default function Home({
                     onChange={(e) => setSelectedGenre(e.target.value)}
                     className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
                   >
-                    <option value="">Genres</option>
+                    <option value="">{t('Genres')}</option>
                     {[...genres]
                       .sort((a, b) => a.name.localeCompare(b.name))
                       .map((g) => (
@@ -781,7 +782,7 @@ export default function Home({
                     onChange={(e) => setSelectedLanguage(e.target.value)}
                     className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
                   >
-                    <option value="">Languages</option>
+                    <option value="">{t('Langs')}</option>
                     {[...languages]
                       .sort((a, b) => a.name.localeCompare(b.name))
                       .map((l) => (
@@ -796,7 +797,7 @@ export default function Home({
                     onChange={(e) => setSelectedQuality(e.target.value)}
                     className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
                   >
-                    <option value="">Qualities</option>
+                    <option value="">{t('Quals')}</option>
                     {[...qualities]
                       .sort((a, b) => a.name.localeCompare(b.name))
                       .map((q) => (
@@ -811,7 +812,7 @@ export default function Home({
                     onChange={(e) => setSelectedYear(e.target.value)}
                     className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
                   >
-                    <option value="">Years</option>
+                    <option value="">{t('Years')}</option>
                     {uniqueYears.map((y) => (
                       <option key={y} value={y}>
                         {y}
@@ -830,7 +831,7 @@ export default function Home({
               <h2 className="text-lg sm:text-xl font-bold tracking-tight text-zinc-900 dark:text-white flex items-center gap-2">
                 <span className="w-1.5 h-6 bg-indigo-500 rounded-full"></span>
                 <Clock className="w-5 h-5 text-indigo-500" />
-                Recently Viewed
+                {t('Recently Viewed')}
               </h2>
             </div>
             <div className="relative group">
@@ -870,7 +871,7 @@ export default function Home({
                 <h2 className="text-lg sm:text-xl font-bold tracking-tight text-zinc-900 dark:text-white flex items-center gap-2">
                   <span className="w-1.5 h-6 bg-pink-500 rounded-full"></span>
                   <TrendingUp className="w-5 h-5 text-pink-500" />
-                  Trending
+                  {t('Trending')}
                 </h2>
                 {trendingCollection.description && (
                   <p className="text-[10px] sm:text-xs text-zinc-500 dark:text-zinc-400 mt-1 ml-3.5 italic">
@@ -924,7 +925,7 @@ export default function Home({
                 <h2 className="text-lg sm:text-xl font-bold tracking-tight text-zinc-900 dark:text-white flex items-center gap-2">
                   <span className="w-1.5 h-6 bg-cyan-500 rounded-full"></span>
                   <Zap className="w-5 h-5 text-cyan-500" />
-                  Newly Added
+                  {t('Newly Added')}
                 </h2>
                 {newlyAddedCollection.description && (
                   <p className="text-[10px] sm:text-xs text-zinc-500 dark:text-zinc-400 mt-1 ml-3.5 italic">
@@ -976,7 +977,7 @@ export default function Home({
             <div className="flex items-center justify-between mb-4 border-b border-zinc-200 dark:border-zinc-800 pb-2">
               <h2 className="text-lg sm:text-xl font-bold tracking-tight text-zinc-900 dark:text-white flex items-center gap-2">
                 <span className="w-1.5 h-6 bg-emerald-500 rounded-full"></span>
-                Collections
+                {t('Collections')}
               </h2>
             </div>
             <div className="relative group">
@@ -1069,7 +1070,7 @@ export default function Home({
         ) : filteredAndSortedContent.length === 0 ? (
           <div className="text-center py-20 text-zinc-500">
             <Film className="w-16 h-16 mx-auto mb-4 opacity-20" />
-            <p className="text-xl">No content found</p>
+            <p className="text-xl">{t('No content found')}</p>
           </div>
         ) : (
           <>
@@ -1103,7 +1104,7 @@ export default function Home({
                     className="h-9 sm:h-10 px-3 sm:px-4 rounded-xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-sm font-medium hover:bg-zinc-200 dark:hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
                   >
                     <ChevronLeft className="w-4 h-4" />
-                    <span className="hidden sm:inline">Previous</span>
+                    <span className="hidden sm:inline">{t('Previous')}</span>
                   </button>
 
                   <div className="flex items-center gap-1">
@@ -1182,7 +1183,7 @@ export default function Home({
                     disabled={currentPage === totalPages}
                     className="h-9 sm:h-10 px-3 sm:px-4 rounded-xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-sm font-medium hover:bg-zinc-200 dark:hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
                   >
-                    <span className="hidden sm:inline">Next</span>
+                    <span className="hidden sm:inline">{t('Next')}</span>
                     <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
@@ -1195,19 +1196,19 @@ export default function Home({
       {/* Footer */}
       {settings?.isAdminContactEnabled !== false && (
         <footer className="border-t border-zinc-200 dark:border-zinc-800 pt-8 pb-2 text-center text-zinc-500">
-          <p>Need help or want to renew membership?</p>
+          <p>{t('Need help or want to renew membership?')}</p>
           <button
             onClick={() => {
               const adminPhone = standardizePhone(
                 settings?.supportNumber || "3363284466"
               ).replace("+", "");
-              const msg = `Hello Admin,\n\nName: ${profile?.displayName || "Unknown"}\nEmail: ${profile?.email || "N/A"}\nPhone: ${profile?.phone || "N/A"}\nRole & Status: ${String(
+              const msg = `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${profile?.displayName || t("Unknown")}\n${t("Email")}: ${profile?.email || "N/A"}\n${t("Phone")}: ${profile?.phone || "N/A"}\n${t("Role & Status")}: ${String(
                 profile?.role || "Unknown",
               )
                 .replace(/_/g, " ")
                 .replace(/\b\w/g, (c) =>
                   c.toUpperCase(),
-                )}, ${String(profile?.status || "Unknown").replace(/\b\w/g, (c) => c.toUpperCase())}\n\nYour message/question:\nI need help or want to renew my membership.`;
+                )}, ${String(profile?.status || "Unknown").replace(/\b\w/g, (c) => c.toUpperCase())}\n\n${t("Your message/question:")}\n${t("I need help or want to renew my membership.")}`;
               window.open(
                 `https://wa.me/${adminPhone}?text=${encodeURIComponent(msg)}`,
                 "_blank",
@@ -1262,9 +1263,9 @@ export default function Home({
                   onChange={(e) => setCollectionSort(e.target.value as any)}
                   className="bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500 outline-none"
                 >
-                  <option value="default">Default Order</option>
-                  <option value="newest">Newest First</option>
-                  <option value="az">A-Z</option>
+                  <option value="default">{t('Default Order')}</option>
+                  <option value="newest">{t('Newest First')}</option>
+                  <option value="az">{t('A-Z')}</option>
                 </select>
               </div>
               <button
@@ -1282,7 +1283,7 @@ export default function Home({
               {selectedCollection.contentIds.length === 0 ? (
                 <div className="text-center py-20 text-zinc-500">
                   <Film className="w-16 h-16 mx-auto mb-4 opacity-20" />
-                  <p className="text-xl">No content in this collection</p>
+                  <p className="text-xl">{t('No content in this collection')}</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6">

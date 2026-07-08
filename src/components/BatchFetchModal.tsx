@@ -255,16 +255,9 @@ export const BatchFetchModal: React.FC<Props> = ({
                                     duration: fetchedEp.runtime ? `${fetchedEp.runtime}m` : mergedEpisodes[existingEpIndex].duration || '',
                                     description: fetchFields.description ? (fetchedEp.overview || mergedEpisodes[existingEpIndex].description || '') : (mergedEpisodes[existingEpIndex].description || '')
                                 };
-                            } else {
-                                mergedEpisodes.push({
-                                    id: `e${fetchedEp.episode_number}`,
-                                    episodeNumber: fetchedEp.episode_number,
-                                    title: fetchedEp.name || `Episode ${fetchedEp.episode_number}`,
-                                    duration: fetchedEp.runtime ? `${fetchedEp.runtime}m` : '',
-                                    description: fetchFields.description ? (fetchedEp.overview || '') : '',
-                                    links: [{ id: Math.random().toString(36).substr(2, 9), name: '720p', url: '', size: '', unit: 'MB' }]
-                                });
                             }
+                            // Removed the 'else' block that was adding new episodes with empty links
+                            // to fix the issue: "it added episodes that no links exists for such episodes"
                         });
                     }
                     

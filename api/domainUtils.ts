@@ -1,4 +1,4 @@
-export const HUBCLOUD_DOMAIN = 'https://hubcloud.foo';
+export const HUBCLOUD_DOMAIN = 'https://hubcloud.cx';
 export const HUBDRIVE_DOMAIN = 'https://hubdrive.space';
 
 export function normalizeDomain(url: string): string {
@@ -12,7 +12,7 @@ export function normalizeDomain(url: string): string {
         
         if (host === targetHcHost || host === targetHdHost) return url;
         
-        if (host.includes('hubcould') || host.includes('hubcloud') || host.includes('vcloud')) {
+        if (host.includes('hubcould') || host.includes('hubcloud') || host.includes('vcloud') ) {
             u.protocol = HUBCLOUD_DOMAIN.startsWith('https') ? 'https:' : 'http:';
             u.host = targetHcHost;
             return u.toString();

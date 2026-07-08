@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useCart } from '../../contexts/CartContext';
 import { useAuth, standardizePhone } from '../../contexts/AuthContext';
+import { useLanguage } from '../../contexts/LanguageContext';
 import { useSettings } from '../../contexts/SettingsContext';
 import { ArrowLeft, Trash2, Copy, Check, Send, Loader2, Wallet, Smartphone, CreditCard, Banknote } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -16,6 +17,7 @@ import PaymentMethods from '../../components/PaymentMethods';
 export default function Cart() {
   const { cart, removeFromCart, totalPrice, clearCart } = useCart();
   const { profile, updateUserProfileData } = useAuth();
+  const { language, t } = useLanguage();
   const { settings } = useSettings();
   const navigate = useNavigate();
   const [copied, setCopied] = useState(false);
@@ -40,7 +42,7 @@ export default function Cart() {
   const handleConfirm = async (): Promise<string | null> => { 
     if (!profile || cart.length === 0) return null; 
     if (!whatsappNumber || whatsappNumber.length < 10) { 
-      setAlertConfig({isOpen: true, title: 'Invalid Phone Number', message: 'Please enter a valid WhatsApp number'}); 
+      setAlertConfig({isOpen: true, title: t('Invalid Phone Number'), message: t('Please enter a valid WhatsApp number')}); 
       return null; 
     } 
     setLoading(true); 
@@ -59,7 +61,7 @@ export default function Cart() {
       return newOrderId; 
     } catch (error) { 
       console.error('Error creating order:', error); 
-      setAlertConfig({isOpen: true, title: 'Error', message: 'Failed to create order. Please try again.'}); 
+      setAlertConfig({isOpen: true, title: t('Error'), message: t('Failed to create order. Please try again.')}); 
       return null; 
     } finally { 
       setLoading(false); 
@@ -75,7 +77,7 @@ export default function Cart() {
           currentOrderId = await handleConfirm();
           if (!currentOrderId) { setLoading(false); return; }
       }
-      const message = `Assalam O Alaikum! Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${whatsappNumber || profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nPlease approve my order. Order ID: ${currentOrderId}\nItems: ${cart?.length || 0}\nTotal Amount: Rs ${totalPrice}`;
+      const message = `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${profile?.displayName || t("Unknown")}\n${t("Email")}: ${profile?.email || 'N/A'}\n${t("Phone")}: ${whatsappNumber || profile?.phone || 'N/A'}\n${t("Role & Status")}: ${String(profile?.role || t("Unknown")).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || t("Unknown")).replace(/\b\w/g, c => c.toUpperCase())}\n\n${t("Your message/question:")}\n${t("Please approve my order. Order ID:")} ${currentOrderId}\n${t("Items")}: ${cart?.length || 0}\n${t("Total Amount: Rs")} ${totalPrice}`;
       const adminPhone = standardizePhone(settings?.supportNumber || '3363284466').replace('+', '');
       const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
       window.open(whatsappUrl, '_blank');
@@ -92,10 +94,10 @@ export default function Cart() {
       <div className="max-w-2xl mx-auto">
         <button onClick={() => navigate('/')} className="flex items-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white mb-6 transition-all active:scale-95">
           <ArrowLeft className="w-5 h-5 mr-2" />
-          Back to Home
+          {t('Back to Home')}
         </button>
 
-        <h1 className="text-2xl font-bold mb-6">Your Cart</h1>
+        <h1 className="text-2xl font-bold mb-6">{t('Your Cart')}</h1>
 
         <div className="bg-zinc-50 dark:bg-zinc-900 rounded-xl p-6 mb-6">
           {cart.length > 0 ? (
@@ -105,7 +107,7 @@ export default function Cart() {
                   <div className="flex-1 min-w-0">
                     <h3 className="font-semibold">{item.title}</h3>
                     <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                      {item.type === 'season' ? `Season ${item.seasonNumber}` : 'Movie'}
+                      {item.type === 'season' ? `Season ${item.seasonNumber}` : t('Movie')}
                     </p>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
@@ -121,11 +123,11 @@ export default function Cart() {
               ))}
             </div>
           ) : (
-            <p className="text-center text-zinc-500 dark:text-zinc-400">Your cart is empty. Add Movies and Series (Seasons) from home page and start watching.</p>
+            <p className="text-center text-zinc-500 dark:text-zinc-400">{t('Your cart is empty. Add Movies and Series (Seasons) from home page and start watching.')}</p>
           )}
           
           <div className="flex justify-between items-center border-t border-zinc-200 dark:border-zinc-800 pt-4 mt-4">
-            <span className="text-lg font-semibold">Total Amount</span>
+            <span className="text-lg font-semibold">{t('Total Amount')}</span>
             <span className="text-2xl font-bold text-red-500">Rs {totalPrice}</span>
           </div>
         </div>
@@ -134,7 +136,7 @@ export default function Cart() {
           <div className="bg-zinc-50 dark:bg-zinc-900 rounded-xl p-6 mb-6 shadow-2xl border border-zinc-200 dark:border-zinc-800/50">
             <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
               <Smartphone className="w-5 h-5 text-emerald-500" />
-              WhatsApp Number
+              {t('WhatsApp Number')}
             </h2>
             <input
               type="tel"
@@ -150,10 +152,10 @@ export default function Cart() {
           <div className="bg-zinc-50 dark:bg-zinc-900 rounded-xl p-6 mb-6 shadow-2xl border border-zinc-200 dark:border-zinc-800/50">
             <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
               <Wallet className="w-5 h-5 text-emerald-500" />
-              Payment Details
+              {t('Payment Details')}
             </h2>
             <p className="text-zinc-500 dark:text-zinc-400 mb-6 text-sm">
-              Please send the payment to the following account via any of these methods:
+              {t('Please send the payment to the following account via any of these methods:')}
             </p>
             
             <PaymentMethods copied={copied} onCopy={handleCopy} />
@@ -162,7 +164,7 @@ export default function Cart() {
 
         <div className="text-center mb-6">
           <p className="text-zinc-500 dark:text-zinc-400 text-sm">
-            {settings?.isPaymentEnabled !== false ? 'After Payment Send Screenshot for Approval' : 'Submit your request for approval'}
+            {settings?.isPaymentEnabled !== false ? t('After Payment Send Screenshot for Approval') : t('Submit your request for approval')}
           </p>
         </div>
 
@@ -171,7 +173,7 @@ export default function Cart() {
           disabled={loading || confirmed || cart.length === 0}
           className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50 border border-white/20 shadow-lg mb-4"
         >
-          {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : confirmed ? 'Confirmed' : 'Confirm Order'}
+          {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : confirmed ? t('Confirmed') : t('Confirm Order')}
         </button>
 
         {settings?.isAdminContactEnabled !== false && (
@@ -181,7 +183,7 @@ export default function Cart() {
             className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50 border border-white/20 shadow-lg"
           >
             {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-            {loading ? 'Processing...' : (settings?.isPaymentEnabled !== false ? 'Send Payment Screenshot' : 'Contact Admin For Order')}
+            {loading ? t('Processing...') : (settings?.isPaymentEnabled !== false ? t('Send Payment Screenshot') : t('Contact Admin For Order'))}
           </button>
         )}
 

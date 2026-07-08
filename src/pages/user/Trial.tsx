@@ -2,15 +2,17 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSettings } from '../../contexts/SettingsContext';
+import { useLanguage } from '../../contexts/LanguageContext';
 import { Loader2, CheckCircle, AlertCircle, Home, MessageCircle, Phone } from 'lucide-react';
 import { Helmet } from 'react-helmet-async';
 
 export default function Trial() {
+  const { t } = useLanguage();
   const { user, profile, loading, authLoading, updateUserProfileData, refreshProfile } = useAuth();
   const { settings } = useSettings();
   const navigate = useNavigate();
   const [status, setStatus] = useState<'loading' | 'missing_phone' | 'success' | 'error' | 'disabled'>('loading');
-  const [message, setMessage] = useState('Activating your trial...');
+  const [message, setMessage] = useState(t('Activating your trial...'));
   const [countdown, setCountdown] = useState(15);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [phoneError, setPhoneError] = useState('');
@@ -31,7 +33,7 @@ export default function Trial() {
 
     if (settings.isTrialEnabled === false) {
       setStatus('disabled');
-      setMessage('Sorry we are not giving Trial on direct link. Please contact admin.');
+      setMessage(t('Sorry we are not giving Trial on direct link. Please contact admin.'));
       
       const timer = setInterval(() => {
         setCountdown((prev) => {
@@ -48,28 +50,28 @@ export default function Trial() {
 
     if (profile.role === 'trial') {
       setStatus('error');
-      setMessage('You already have an active trial.');
+      setMessage(t('You already have an active trial.'));
       setTimeout(() => navigate('/'), 3000);
       return;
     }
 
     if (profile.status === 'active') {
        setStatus('error');
-       setMessage('Your account is already active. Trial is only for new pending members.');
+       setMessage(t('Your account is already active. Trial is only for new pending members.'));
        setTimeout(() => navigate('/'), 3000);
        return;
     }
 
     if (profile.status !== 'pending' || profile.role !== 'user') {
       setStatus('error');
-      setMessage('Trial is only available for new pending accounts.');
+      setMessage(t('Trial is only available for new pending accounts.'));
       setTimeout(() => navigate('/'), 3000);
       return;
     }
 
     if (!profile.phone) {
       setStatus('missing_phone');
-      setMessage('Please add your WhatsApp number to activate your trial.');
+      setMessage(t('Please add your WhatsApp number to activate your trial.'));
       return;
     }
 
@@ -102,13 +104,13 @@ export default function Trial() {
       await refreshProfile(true);
 
       setStatus('success');
-      setMessage('Trial activated successfully! Enjoy 48 hours of access.');
+      setMessage(t('Trial activated successfully! Enjoy 48 hours of access.'));
       setTimeout(() => navigate('/'), 3000);
     } catch (error) {
       console.error('Error activating trial:', error);
       hasActivatedRef.current = false;
       setStatus('error');
-      setMessage('Failed to activate trial. Please try again.');
+      setMessage(t('Failed to activate trial. Please try again.'));
       setTimeout(() => navigate('/'), 3000);
     }
   };
@@ -116,7 +118,7 @@ export default function Trial() {
   const handlePhoneSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!phoneNumber.trim()) {
-      setPhoneError('Please enter a valid WhatsApp number');
+      setPhoneError(t('Please enter a valid WhatsApp number'));
       return;
     }
     
@@ -129,7 +131,7 @@ export default function Trial() {
     }
     
     if (standardized.length < 10) {
-      setPhoneError('Please enter a valid WhatsApp number with correct length');
+      setPhoneError(t('Please enter a valid WhatsApp number with correct length'));
       return;
     }
 
@@ -138,11 +140,11 @@ export default function Trial() {
       await updateUserProfileData({ phone: standardized }, undefined, true);
       await refreshProfile();
       setStatus('loading');
-      setMessage('Activating your trial...');
+      setMessage(t('Activating your trial...'));
       await activateTrial();
     } catch (error: any) {
       console.error('Error saving WhatsApp number:', error);
-      setPhoneError(error.message || 'Failed to save WhatsApp number. Please try again.');
+      setPhoneError(error.message || t('Failed to save WhatsApp number. Please try again.'));
       setIsSubmittingPhone(false);
     }
   };
@@ -158,21 +160,21 @@ export default function Trial() {
     // Remove '+' if present
     supportPhone = supportPhone.replace('+', '');
     
-    const urlMessage = encodeURIComponent(`Assalam O Alaikum! Admin,\n\nName: ${user?.displayName || 'Unknown'}\nEmail: ${user?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nI tried to activate a trial but saw that it is disabled on the direct link. Please help me get a trial or membership.`);
+    const urlMessage = encodeURIComponent(`${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${user?.displayName || t('Unknown')}\n${t("Email")}: ${user?.email || 'N/A'}\n${t("Phone")}: ${profile?.phone || 'N/A'}\n${t("Role & Status")}: ${String(profile?.role || t('Unknown')).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || t('Unknown')).replace(/\b\w/g, c => c.toUpperCase())}\n\n${t("Your message/question:")}\n${t("I tried to activate a trial but saw that it is disabled on the direct link. Please help me get a trial or membership.")}`);
     window.open(`https://wa.me/${supportPhone}?text=${urlMessage}`, '_blank');
   };
 
   return (
     <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
       <Helmet>
-        <title>Activate Trial - {settings?.headerText || 'Moviznow'}</title>
+        <title>{t('Activate Trial')} - {settings?.headerText || 'Moviznow'}</title>
       </Helmet>
 
       <div className="bg-gray-800 rounded-xl p-8 max-w-md w-full text-center shadow-2xl border border-gray-700 relative overflow-hidden">
         {status === 'loading' && (
           <div className="flex flex-col items-center">
             <Loader2 className="w-16 h-16 text-emerald-500 animate-spin mb-4" />
-            <h2 className="text-2xl font-bold text-white mb-2">Activating Trial</h2>
+            <h2 className="text-2xl font-bold text-white mb-2">{t('Activating Trial')}</h2>
             <p className="text-gray-400">{message}</p>
           </div>
         )}
@@ -180,7 +182,7 @@ export default function Trial() {
         {status === 'missing_phone' && (
           <div className="flex flex-col items-center">
             <Phone className="w-16 h-16 text-emerald-500 mb-4" />
-            <h2 className="text-2xl font-bold text-white mb-2">WhatsApp Number Required</h2>
+            <h2 className="text-2xl font-bold text-white mb-2">{t('WhatsApp Number Required')}</h2>
             <p className="text-gray-400 mb-6">{message}</p>
             
             <form onSubmit={handlePhoneSubmit} className="w-full">
@@ -194,7 +196,7 @@ export default function Trial() {
                   disabled={isSubmittingPhone}
                 />
                 {phoneError && <p className="text-red-500 text-sm mt-2 text-left">{phoneError}</p>}
-                <p className="text-xs text-gray-500 mt-2 text-left">We need your WhatsApp number to verify your trial and provide support.</p>
+                <p className="text-xs text-gray-500 mt-2 text-left">{t('We need your WhatsApp number to verify your trial and provide support.')}</p>
               </div>
               
               <button
@@ -205,7 +207,7 @@ export default function Trial() {
                 {isSubmittingPhone ? (
                   <Loader2 className="w-5 h-5 animate-spin" />
                 ) : (
-                  'Save & Activate Trial'
+                  t('Save & Activate Trial')
                 )}
               </button>
             </form>
@@ -215,25 +217,25 @@ export default function Trial() {
         {status === 'success' && (
           <div className="flex flex-col items-center">
             <CheckCircle className="w-16 h-16 text-emerald-500 mb-4" />
-            <h2 className="text-2xl font-bold text-white mb-2">Success!</h2>
+            <h2 className="text-2xl font-bold text-white mb-2">{t('Success!')}</h2>
             <p className="text-gray-400 mb-6">{message}</p>
-            <p className="text-sm text-gray-500">Redirecting to home...</p>
+            <p className="text-sm text-gray-500">{t('Redirecting to home...')}</p>
           </div>
         )}
 
         {status === 'error' && (
           <div className="flex flex-col items-center">
             <AlertCircle className="w-16 h-16 text-red-500 mb-4" />
-            <h2 className="text-2xl font-bold text-white mb-2">Cannot Activate Trial</h2>
+            <h2 className="text-2xl font-bold text-white mb-2">{t('Cannot Activate Trial')}</h2>
             <p className="text-gray-400 mb-6">{message}</p>
-            <p className="text-sm text-gray-500">Redirecting to home...</p>
+            <p className="text-sm text-gray-500">{t('Redirecting to home...')}</p>
           </div>
         )}
 
         {status === 'disabled' && (
           <div className="flex flex-col items-center">
             <AlertCircle className="w-16 h-16 text-yellow-500 mb-4" />
-            <h2 className="text-2xl font-bold text-white mb-2">Trial Disabled</h2>
+            <h2 className="text-2xl font-bold text-white mb-2">{t('Trial Disabled')}</h2>
             <p className="text-gray-300 mb-6 text-sm sm:text-base leading-relaxed bg-gray-900/50 p-4 rounded-lg border border-gray-700/50">{message}</p>
             
             <div className="flex flex-col gap-3 w-full mb-6">
@@ -243,7 +245,7 @@ export default function Trial() {
                   className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-transform active:scale-95 shadow-lg shadow-emerald-900/20"
                 >
                   <MessageCircle className="w-5 h-5" />
-                  Contact Admin (WhatsApp)
+                  {t('Contact Admin (WhatsApp)')}
                 </button>
               )}
               
@@ -252,12 +254,12 @@ export default function Trial() {
                 className="w-full py-3 px-4 bg-gray-700 hover:bg-gray-600 text-white font-medium rounded-xl flex items-center justify-center gap-2 transition-colors active:scale-95 border border-gray-600"
               >
                 <Home className="w-5 h-5" />
-                Go to Home
+                {t('Go to Home')}
               </button>
             </div>
             
             <p className="text-sm text-gray-500 flex items-center justify-center gap-2 bg-gray-900/50 py-2 px-4 rounded-full w-fit mx-auto">
-              Redirecting to home in <span className="font-mono text-emerald-400 font-bold">{countdown}</span>...
+              {t('Redirecting to home in')} <span className="font-mono text-emerald-400 font-bold">{countdown}</span>...
             </p>
           </div>
         )}
