@@ -1,4 +1,4 @@
-import { linkExtractionRouter } from "./server_modules/LinkExtractionModal.js";
+import { linkExtractionRouter } from "./LinkExtractionModal.js";
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -9,7 +9,7 @@ import { getFirestore } from "firebase-admin/firestore";
 import axios from "axios";
 import https from "https";
 import * as cheerio from "cheerio";
-import { normalizeDomain } from "./server_modules/domainUtils.js";
+import { normalizeDomain } from "./domainUtils.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -78,7 +78,7 @@ async function getSyncApps(
   return { sourceApp, targetApp, targetDbId };
 }
 
-import { translateRouter } from "./server_modules/translate.js";
+import { translateRouter } from "./translate.js";
 
 async function startServer() {
   const app = express();
