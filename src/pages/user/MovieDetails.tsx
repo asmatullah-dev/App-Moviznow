@@ -441,7 +441,7 @@ export default function MovieDetails() {
 
         const rescuedSeasons = fullSeasons.map((fs: any) => {
           const ms = metaSeasons.find(
-            (m: any) => m.seasonNumber === fs.seasonNumber,
+            (m: any) => parseInt(m.seasonNumber?.toString() || '0') === parseInt(fs.seasonNumber?.toString() || '0'),
           );
           if (!ms) return fs;
           const rescued = {
@@ -452,7 +452,7 @@ export default function MovieDetails() {
           if (fs.episodes && ms.episodes) {
             rescued.episodes = fs.episodes.map((fe: any) => {
               const me = ms.episodes.find(
-                (m: any) => m.episodeNumber === fe.episodeNumber,
+                (m: any) => parseInt(m.episodeNumber?.toString() || '0') === parseInt(fe.episodeNumber?.toString() || '0'),
               );
               if (!me) return fe;
               const isFeDescPlaceholder = !fe.description || /^episode/i.test(fe.description);
@@ -892,7 +892,7 @@ export default function MovieDetails() {
     if (!force && hasAttemptedStaticFetch.current[id]) return;
 
     // If we are currently fetching the full document from Firebase, wait for it
-    if (isMinimal && (!fullContent || fullContent.id !== id) && !fetchFailed)
+    if ((isMinimal || isStale) && (!fullContent || fullContent.id !== id) && !fetchFailed)
       return;
 
     let seasons: any[] = [];
@@ -919,8 +919,6 @@ export default function MovieDetails() {
           s.episodes &&
           s.episodes.some(
             (ep: any) =>
-              ep.links &&
-              ep.links.length > 0 &&
               (!ep.description ||
                 !ep.duration ||
                 !ep.title ||

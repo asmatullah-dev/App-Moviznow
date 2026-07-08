@@ -251,7 +251,7 @@ export const LanguageProvider = ({ children }: { children: ReactNode }) => {
 
   const setLanguage = (lang: Language) => {
     setLanguageState(lang);
-    safeStorage.setItemAsync('app_language', lang);
+    safeStorage.setItem('app_language', lang);
   };
 
   const t = (key: string): string => {
