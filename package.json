@@ -17,6 +17,7 @@
     "reorder-chunks": "tsx scripts/reorder_chunks.ts"
   },
   "dependencies": {
+    "@google/genai": "^2.10.0",
     "@hello-pangea/dnd": "^18.0.1",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
@@ -29,7 +30,6 @@
     "firebase": "^12.10.0",
     "firebase-admin": "^13.8.0",
     "framer-motion": "^12.40.0",
-    "google-translate-api-x": "^10.7.3",
     "idb": "^8.0.3",
     "lucide-react": "^0.546.0",
     "motion": "^12.40.0",
@@ -41,8 +41,7 @@
     "react-router-dom": "^7.13.1",
     "react-virtuoso": "^4.18.3",
     "tailwind-merge": "^3.5.0",
-    "ua-parser-js": "^2.0.10",
-    "urdumagic": "^0.3.0"
+    "ua-parser-js": "^2.0.10"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",

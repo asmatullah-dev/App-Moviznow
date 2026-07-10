@@ -673,7 +673,7 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                         {isCastExpanded ? <ChevronUp className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" /> : <ChevronDown className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />}
                       </div>
                       {isCastExpanded && (
-                        <div className="mt-1 relative">
+                        <div className="mt-1">
                           <textarea rows={3} value={cast} onChange={(e) => setCast(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" placeholder="Enter cast (comma separated)..." />
                         </div>
                       )}
@@ -687,7 +687,7 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                         {isCountryExpanded ? <ChevronUp className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" /> : <ChevronDown className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />}
                       </div>
                       {isCountryExpanded && (
-                        <div className="mt-1 relative">
+                        <div className="mt-1">
                           <textarea rows={3} value={country} onChange={(e) => setCountry(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" placeholder="Enter country (comma separated)..." />
                         </div>
                       )}

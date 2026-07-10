@@ -1,9 +1,4 @@
-import translate from "google-translate-api-x";
-import { UrduMagic } from "urdumagic";
-
-
 import { linkExtractionRouter } from "./LinkExtractionModal.js";
-import { translateRouter } from "./translate.js";
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -83,12 +78,14 @@ async function getSyncApps(
   return { sourceApp, targetApp, targetDbId };
 }
 
+import { translateRouter } from "./translate.js";
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.use(express.json({ limit: "50mb" }));
+  app.use("/api", translateRouter);
 
   // Background Scan Endpoint
   app.post(
@@ -2065,56 +2062,6 @@ async function startServer() {
   };
 
   app.use(linkExtractionRouter);
-
-  
-  
-  const magic = UrduMagic.init({ defaultLang: "en", modes: ["en", "ur", "roman"], showSwitcher: false, strategy: 'offline' });
-
-  app.post("/api/translate", async (req, res) => {
-    try {
-      const { text, targetLanguage } = req.body;
-      if (!text || !targetLanguage) {
-        return res.status(400).json({ error: "Missing text or targetLanguage" });
-      }
-      const isArray = Array.isArray(text);
-      const targetLang = targetLanguage.toLowerCase();
-      const isRoman = targetLang.includes("roman");
-      const targetGoogleLang = isRoman ? "ur" : (targetLang.includes("urdu") ? "ur" : "en"); // fallback to english or default
-      if (isArray) {
-        try {
-          const results = await translate(text, { to: targetGoogleLang });
-          const translatedArray = (results as any[]).map((result: any) => {
-            let t = (result as any).text;
-            if (isRoman) {
-              t = magic.toRoman(t);
-            }
-            return t;
-          });
-          return res.json({ translation: translatedArray });
-        } catch (e) {
-          console.error("Batch translation failed:", e);
-          return res.status(500).json({ error: "Batch translation failed" });
-        }
-      } else {
-        try {
-          const result = await translate(text, { to: targetGoogleLang });
-          let t = (result as any).text;
-          if (isRoman) {
-            t = magic.toRoman(t);
-          }
-          return res.json({ translation: t });
-        } catch (e) {
-          console.error("Single translation failed:", e);
-          return res.status(500).json({ error: "Single translation failed" });
-        }
-      }
-    } catch (error) {
-      console.error("Translation error:", error);
-      res.status(500).json({ error: "Translation failed" });
-    }
-  });
-
-  
 
   // Sync Endpoints
   app.post("/api/sync/status", async (req, res) => {
