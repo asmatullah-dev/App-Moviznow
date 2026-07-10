@@ -322,7 +322,7 @@ export const LanguageProvider = ({ children }: { children: ReactNode }) => {
     
     // Skip translating generic episode titles
     if (/^episode\s+\d+$/i.test(text.trim())) return text;
-    
+
     const CACHE_EXPIRATION = 30 * 60 * 1000;
     const cacheKey = `v2_trans_${language}_${btoa(encodeURIComponent(text.substring(0, 150)))}`;
     

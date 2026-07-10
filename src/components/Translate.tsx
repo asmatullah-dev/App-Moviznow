@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useLanguage } from '../contexts/LanguageContext';
 
 /**
- * Component for AI-powered translation (primarily for long-form content like synopses)
+ * Component for offline translation (primarily for long-form content like synopses)
  */
 export const Translate: React.FC<{ 
   children: string | React.ReactNode;
