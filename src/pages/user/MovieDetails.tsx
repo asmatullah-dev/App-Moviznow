@@ -3170,7 +3170,13 @@ export default function MovieDetails() {
                             <div className="bg-white/50 dark:bg-zinc-950/50 p-6 border-b border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                               <h3 className="text-xl font-bold">
                                 Season {season.seasonNumber}{" "}
-                                {season.title ? `- ${season.title}` : ""}
+                                {season.title ? (
+                                  <>
+                                    - <Translate loadingFallback={<div className="h-5 bg-zinc-200 dark:bg-zinc-800 rounded w-32 animate-pulse inline-block align-middle ml-1"></div>}>{season.title}</Translate>
+                                  </>
+                                ) : (
+                                  ""
+                                )}
                                 {season.year && (
                                   <span className="text-sm text-zinc-500 ml-2">
                                     ({season.year})
@@ -3354,7 +3360,7 @@ export default function MovieDetails() {
                                                           E{ep.episodeNumber}
                                                         </span>
                                                         <span className="font-medium">
-                                                          {isGenericTitle ? ep.title : <Translate>{ep.title}</Translate>}
+                                                          {isGenericTitle ? ep.title : <Translate loadingFallback={<div className="h-4 bg-zinc-200 dark:bg-zinc-800 rounded w-32 animate-pulse inline-block align-middle"></div>}>{ep.title}</Translate>}
                                                         </span>
                                                         <button
                                                           onClick={() =>
