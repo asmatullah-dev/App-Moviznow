@@ -2938,12 +2938,16 @@ export default function MovieDetails() {
                         <h4 className="text-sm font-bold text-cyan-700 dark:text-cyan-400 mb-1 uppercase tracking-wider opacity-70">
                           {t('Synopsis')}
                         </h4>
-                        <div className={`text-zinc-500 dark:text-zinc-400 leading-relaxed ${language === 'ur' || language === 'ur-roman' ? 'text-base sm:text-lg font-medium' : 'text-xs'}`}>
+                        <div 
+                          dir={language === 'ur' ? 'rtl' : 'ltr'}
+                          className={`text-zinc-500 dark:text-zinc-400 leading-relaxed ${language === 'ur' || language === 'ur-roman' ? 'text-base sm:text-lg font-medium' : 'text-xs'}`}
+                        >
                           <Translate
                             loadingFallback={
-                              <div className="flex items-center gap-3 text-zinc-500 dark:text-zinc-400 italic py-2 animate-pulse">
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                                <span>{t('Translating Description...')}</span>
+                              <div className="flex flex-col gap-2 animate-pulse py-1">
+                                <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded w-full"></div>
+                                <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded w-5/6"></div>
+                                <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded w-4/6"></div>
                               </div>
                             }
                           >
@@ -3084,12 +3088,16 @@ export default function MovieDetails() {
                     <h3 className="text-sm font-bold mb-1 text-cyan-700 dark:text-cyan-400 uppercase tracking-wider opacity-70">
                       {t('Synopsis')}
                     </h3>
-                    <div className={`text-zinc-500 dark:text-zinc-400 leading-relaxed ${language === 'ur' || language === 'ur-roman' ? 'text-base sm:text-lg font-medium' : 'text-xs'}`}>
+                    <div 
+                      dir={language === 'ur' ? 'rtl' : 'ltr'}
+                      className={`text-zinc-500 dark:text-zinc-400 leading-relaxed ${language === 'ur' || language === 'ur-roman' ? 'text-base sm:text-lg font-medium' : 'text-xs'}`}
+                    >
                       <Translate
                         loadingFallback={
-                          <div className="flex items-center gap-3 text-zinc-500 dark:text-zinc-400 italic py-2 animate-pulse">
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            <span>{t('Translating Description...')}</span>
+                          <div className="flex flex-col gap-2 animate-pulse py-1">
+                            <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded w-full"></div>
+                            <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded w-5/6"></div>
+                            <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded w-4/6"></div>
                           </div>
                         }
                       >
@@ -3378,8 +3386,21 @@ export default function MovieDetails() {
                                                       {expandedEpisodes[
                                                         `${season.id}-${ep.id}`
                                                       ] && ep.description && ep.description.trim() !== "" && ep.description !== ep.title && (
-                                                        <div className="text-sm text-zinc-500 dark:text-zinc-400 bg-zinc-50/50 dark:bg-zinc-900/50 p-3 rounded-lg">
-                                                          <Translate>{ep.description}</Translate>
+                                                        <div 
+                                                          dir={language === 'ur' ? 'rtl' : 'ltr'}
+                                                          className={`text-zinc-500 dark:text-zinc-400 bg-zinc-50/50 dark:bg-zinc-900/50 p-3 rounded-lg ${language === 'ur' || language === 'ur-roman' ? 'text-base font-medium' : 'text-sm'}`}
+                                                        >
+                                                          <Translate
+                                                            loadingFallback={
+                                                              <div className="flex flex-col gap-2 animate-pulse py-1">
+                                                                <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded w-full"></div>
+                                                                <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded w-5/6"></div>
+                                                                <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded w-4/6"></div>
+                                                              </div>
+                                                            }
+                                                          >
+                                                            {ep.description}
+                                                          </Translate>
                                                         </div>
                                                       )}
                                                     </div>

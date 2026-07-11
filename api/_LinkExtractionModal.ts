@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { normalizeDomain } from './domainUtils.js';
+import { normalizeDomain } from './_domainUtils.js';
 
 export const linkExtractionRouter = Router();
 

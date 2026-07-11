@@ -1,4 +1,4 @@
-import { linkExtractionRouter } from "./LinkExtractionModal.js";
+import { linkExtractionRouter } from "./_LinkExtractionModal.js";
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -9,27 +9,33 @@ import { getFirestore } from "firebase-admin/firestore";
 import axios from "axios";
 import https from "https";
 import * as cheerio from "cheerio";
-import { normalizeDomain } from "./domainUtils.js";
+import { normalizeDomain } from "./_domainUtils.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Initialize Firebase Admin
-if (!admin.apps.length) {
-  let credential;
-  if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-    credential = admin.credential.cert(
-      JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON),
-    );
-  } else {
-    credential = admin.credential.applicationDefault();
+let db: admin.firestore.Firestore | undefined;
+try {
+  if (!admin.apps.length) {
+    let credential;
+    if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+      credential = admin.credential.cert(
+        JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON),
+      );
+    } else {
+      // Avoid crashing if applicationDefault is not available (e.g. Vercel)
+      credential = admin.credential.applicationDefault();
+    }
+    admin.initializeApp({
+      credential,
+      projectId: firebaseConfig.projectId,
+    });
   }
-  admin.initializeApp({
-    credential,
-    projectId: firebaseConfig.projectId,
-  });
+  db = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
+} catch (error) {
+  console.warn("Failed to initialize Firebase Admin. Firebase services will be unavailable.", error);
 }
-const db = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
 
 import crypto from "crypto";
 
@@ -78,7 +84,7 @@ async function getSyncApps(
   return { sourceApp, targetApp, targetDbId };
 }
 
-import { translateRouter } from "./translate.js";
+import { translateRouter } from "./_translate.js";
 
 async function startServer() {
   const app = express();
