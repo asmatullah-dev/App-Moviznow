@@ -187,13 +187,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
+    
+    const handleLanguageChange = (e: Event) => {
+      const customEvent = e as CustomEvent<string>;
+      const newLang = customEvent.detail;
+      if (profile && profile.uid) {
+        setProfile(prev => prev ? { ...prev, preferredLanguage: newLang } : null);
+        
+        try {
+          const pendingStr = safeStorage.getItem("pending_user_updates") || "{}";
+          const pendingAll = JSON.parse(pendingStr);
+          pendingAll[profile.uid] = pendingAll[profile.uid] || {};
+          pendingAll[profile.uid].preferredLanguage = newLang;
+          safeStorage.setItem("pending_user_updates", JSON.stringify(pendingAll));
+        } catch (err) {
+          console.error("Failed to save language preference to pending updates", err);
+        }
+      }
+    };
+
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
+    window.addEventListener("app_language_changed", handleLanguageChange);
     return () => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("app_language_changed", handleLanguageChange);
     };
-  }, []);
+  }, [profile?.uid]);
 
   const refreshProfile = useCallback(
     async (
@@ -578,12 +599,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               (window as any)._isNewSessionId = false; // reset after initial assignment
             } else {
               if (data.sessionId && data.sessionId !== localSessionId) {
-                console.log("Logged in from another device. Logging out.");
-                signOut(auth);
-                setError(
-                  "You have been logged out because your account was accessed from another device.",
-                );
-                return false;
+                console.log("Logged in from another device. Session mismatch detected.");
+                // signOut(auth); // Disabled to prevent auto logout bug
+                // setError(
+                //  "You have been logged out because your account was accessed from another device.",
+                // );
+                // return false;
               } else if (!data.sessionId) {
                 updates.sessionId = localSessionId;
                 data.sessionId = localSessionId;
@@ -2056,7 +2077,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await signOut(auth);
   };
 
-  const toggleFavorite = async (contentId: string) => {
+  const toggleFavorite = useCallback(async (contentId: string) => {
     if (!profile || !user) return;
 
     const newFavorites = profile.favorites?.includes(contentId)
@@ -2075,9 +2096,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       JSON.stringify(newFavorites),
     );
     safeStorage.setItem("needs_user_sync", "true");
-  };
+  }, [profile, user]);
 
-  const toggleWatchLater = async (contentId: string) => {
+  const toggleWatchLater = useCallback(async (contentId: string) => {
     if (!profile || !user) return;
 
     const newWatchLater = profile.watchLater?.includes(contentId)
@@ -2096,7 +2117,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       JSON.stringify(newWatchLater),
     );
     safeStorage.setItem("needs_user_sync", "true");
-  };
+  }, [profile, user]);
 
   return (
     <AuthContext.Provider

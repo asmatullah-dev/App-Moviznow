@@ -1,6 +1,6 @@
 {
   "name": "MovizNow Premium",
-  "description": "A high-performance streaming platform with multi-account merging, secure membership management, and real-time content synchronization.",
+  "description": "A premium streaming platform featuring HD content, WhatsApp delivery, secure membership management, and real-time synchronization.",
   "requestFramePermissions": [
     "notifications",
     "web-share"

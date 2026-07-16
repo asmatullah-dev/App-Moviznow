@@ -126,6 +126,7 @@ interface ContentCardProps {
   content: Content;
   profile: any;
   qualities: any[];
+  languages?: any[];
   isSelected: boolean;
   anySelected: boolean;
   isActiveDropdown: boolean;
@@ -161,6 +162,7 @@ const ContentCard = memo(
     content,
     profile,
     qualities,
+    languages,
     isSelected,
     anySelected,
     handleSelectContent,
@@ -307,9 +309,16 @@ const ContentCard = memo(
           >
             {content.title}
           </h3>
-          <p className="text-zinc-500 dark:text-zinc-400 text-xs mb-2">
-            {content.year}
-          </p>
+          <div className="flex flex-col gap-0.5 mb-2">
+            <p className="text-zinc-500 dark:text-zinc-400 text-xs">
+              {content.year}
+            </p>
+            {languages && content.languageIds && content.languageIds.length > 0 && (
+              <p className="text-zinc-500 dark:text-zinc-400 text-[10px] font-medium line-clamp-1">
+                {languages.filter(l => content.languageIds.includes(l.id)).map(l => l.name).join(', ')}
+              </p>
+            )}
+          </div>
           {["owner", "admin"].includes(profile?.role) &&
             content.addedByRole &&
             !["owner", "admin"].includes(content.addedByRole) &&
@@ -4923,7 +4932,7 @@ export default function ContentManagement() {
                   title="Export All Content to JSON"
                 >
                   <FileDown className="w-4 h-4" />
-                  Export All JSON
+                  Export
                 </button>
                 {hasPendingChanges && (
                   <span className="flex h-2 w-2 rounded-full bg-red-500 animate-ping" />
@@ -5123,6 +5132,7 @@ export default function ContentManagement() {
                 content={content}
                 profile={profile}
                 qualities={qualities}
+                languages={languages}
                 isSelected={selectedContent.includes(content.id)}
                 anySelected={selectedContent.length > 0}
                 isActiveDropdown={activeDropdownId === content.id}

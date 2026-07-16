@@ -775,8 +775,9 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     // Period check to avoid redundant auto-checks
     const lastCheckPeriod = safeStorage.getItem('last_meta_check_period');
     
-    // Always refresh if content list is empty locally or first login
-    const noLocalData = contentList.length === 0;
+    // Always refresh if first login / never successfully synced
+    const hasCompletedSync = safeStorage.getItem('has_completed_initial_sync');
+    const noLocalData = !hasCompletedSync;
 
     if (!force && lastCheckPeriod === checkPeriod && !noLocalData) {
         // Already checked for this period (the 7AM cycle)
@@ -816,6 +817,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     // Record that we checked in this period
     safeStorage.setItem('last_meta_check_period', checkPeriod);
     safeStorage.setItem('last_successful_meta_check', Date.now().toString());
+    safeStorage.setItem('has_completed_initial_sync', 'true');
 
     if (force || noLocalData || lastCheckPeriod !== checkPeriod) {
         window.dispatchEvent(new CustomEvent('sync_status', { detail: updatedSomething ? 'success' : 'up-to-date' }));

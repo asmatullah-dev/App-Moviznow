@@ -1,6 +1,8 @@
 import { doc, getDoc, getDocs, collection, writeBatch, setDoc, updateDoc, deleteField, QueryDocumentSnapshot, DocumentData, WriteBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Content } from '../types';
+import { getChunkMeta, clearChunkMetaCache } from './chunkMeta';
+import { safeStorage } from './safeStorage';
 
 export const CONTENT_CHUNK_MOVIE_SIZE = 800;
 export const CONTENT_CHUNK_SERIES_SIZE = 300;
@@ -638,3 +640,90 @@ export async function rebuildAllChunks(contents: Content[]): Promise<number> {
 
   return Object.keys(chunkDocs).length;
 }
+
+export async function fetchReviewsFromChunks(forceRefresh = false): Promise<any[]> {
+  const meta = await getChunkMeta(forceRefresh);
+  const cachedVersion = safeStorage.getItem('cached_review_version');
+  const serverVersion = meta.reviews?.version?.toString();
+  
+  if (!forceRefresh && cachedVersion === serverVersion && serverVersion) {
+    const cachedData = safeStorage.getItem('cached_reviews_data');
+    if (cachedData) {
+      try {
+        return JSON.parse(cachedData);
+      } catch (e) {}
+    }
+  }
+
+  const snapshot = await getDocs(collection(db, 'review_chunks'));
+  let allReviews: any[] = [];
+  snapshot.docs.forEach(d => {
+    const items = d.data().items || {};
+    allReviews = [...allReviews, ...Object.values(items)];
+  });
+
+  // Sort by date descending
+  allReviews.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  safeStorage.setItem('cached_reviews_data', JSON.stringify(allReviews));
+  if (serverVersion) {
+    safeStorage.setItem('cached_review_version', serverVersion);
+  }
+  
+  return allReviews;
+}
+
+export async function saveReviewToChunk(review: any): Promise<void> {
+  const batch = writeBatch(db);
+  const now = Date.now();
+  
+  // Clean review object of undefined values to prevent Firestore errors
+  const cleanedReview: any = {};
+  Object.entries(review).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) {
+      cleanedReview[key] = value;
+    }
+  });
+
+  // For simplicity and following "chunk combination of all reviews", 
+  // we'll use a single chunk named 'main' for now.
+  const chunkRef = doc(db, 'review_chunks', 'main');
+  
+  // Use nested object with merge: true to update specific item in the map
+  batch.set(chunkRef, { 
+    items: { 
+      [cleanedReview.id]: cleanedReview 
+    } 
+  }, { merge: true });
+  
+  // Update version
+  const metaRef = doc(db, 'chunk_meta', 'versions');
+  batch.set(metaRef, { reviews: { version: now } }, { merge: true });
+  
+  await batch.commit();
+  clearChunkMetaCache();
+}
+
+export async function deleteReviewFromChunk(reviewId: string): Promise<void> {
+  const batch = writeBatch(db);
+  const now = Date.now();
+  
+  const chunkRef = doc(db, 'review_chunks', 'main');
+  
+  // For deletion in a map with merge: true, we must use dot notation with update() 
+  // or a special deleteField() in set(). 
+  // Using update() is safer if we know the doc exists, but here we'll use set with nested deleteField.
+  batch.set(chunkRef, {
+    items: {
+      [reviewId]: deleteField()
+    }
+  }, { merge: true });
+  
+  // Update version
+  const metaRef = doc(db, 'chunk_meta', 'versions');
+  batch.set(metaRef, { reviews: { version: now } }, { merge: true });
+  
+  await batch.commit();
+  clearChunkMetaCache();
+}
+

@@ -1,3 +1,4 @@
+import { standardizePhone } from "../../contexts/AuthContext";
 import { useState, useEffect, useRef, useMemo } from "react";
 import {
   useParams,
@@ -19,6 +20,8 @@ import { globalScrollState } from "../../hooks/useScrollRestoration";
 import { safeStorage } from "../../utils/safeStorage";
 import {
   Film,
+  Phone,
+  MessageSquare,
   ArrowLeft,
   Play,
   Clock,
@@ -73,6 +76,9 @@ import ContentCard from "../../components/ContentCard";
 import { useModalBehavior } from "../../hooks/useModalBehavior";
 import Modal from "../../components/Modal";
 import { useSettings } from "../../contexts/SettingsContext";
+
+import { ContactSupportButtons } from "../../components/ContactSupportButtons";
+import { PageTransition } from "../../components/PageTransition";
 
 export default function MovieDetails() {
   const { id } = useParams<{ id: string }>();
@@ -568,7 +574,7 @@ export default function MovieDetails() {
 
   const title = mergedContent
     ? `${formatContentTitle(mergedContent)} (${mergedContent.year}) - ${settings?.headerText || "MovizNow"}`
-    : settings?.headerText || "MovizNow";
+    : `${settings?.headerText || "MovizNow"} - ${t("Movie Details")}`;
   const description =
     mergedContent?.description ||
     `Watch the latest movies and series on ${settings?.headerText || "MovizNow"}.`;
@@ -2625,6 +2631,7 @@ export default function MovieDetails() {
       </div>
 
       {/* Main Content Area */}
+      <PageTransition className="w-full">
       <div className="max-w-7xl mx-auto px-8 pt-0 pb-12">
         {!profile ? (
           <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 p-6 rounded-2xl mb-8 flex items-center justify-between gap-4">
@@ -3460,6 +3467,8 @@ export default function MovieDetails() {
               )}
             </section>
 
+            <ContactSupportButtons content={mergedContent} />
+
             {/* Recommended Movies Section */}
             {recommendedMovies.length > 0 && (
               <div className="mt-12">
@@ -3497,6 +3506,7 @@ export default function MovieDetails() {
           </div>
         </div>
       </div>
+      </PageTransition>
 
       <ConfirmModal
         isOpen={!!deleteId}
@@ -3869,6 +3879,7 @@ export default function MovieDetails() {
             </motion.div>
           )}
       </AnimatePresence>
+      
       <ConfirmModal
         isOpen={showLoginPrompt}
         title="Sign in required"

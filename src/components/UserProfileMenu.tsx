@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -8,7 +8,7 @@ import { useSettings } from '../contexts/SettingsContext';
 import { useUsers } from '../contexts/UsersContext';
 import { 
   User, Settings, LogOut, Heart, Clock, MessageCircle, 
-  Sun, Moon, Monitor, LayoutDashboard, Film, Users, Plus, Download, RefreshCw, Eye, X
+  Sun, Moon, Monitor, LayoutDashboard, Film, Users, Plus, Download, RefreshCw, Eye, X, Menu, Home as HomeIcon, PlayCircle, Tv, Gift, Star, Info, Phone
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { format } from 'date-fns';
@@ -27,6 +27,8 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
   const { refreshUsers } = useUsers();
   const { enabled: isHapticsEnabled, toggleHaptics, vibrate } = useHaptics();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
   const [isOpen, setIsOpen] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -139,19 +141,34 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
   return (
     <div className="relative" ref={menuRef}>
       <button 
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-8 h-8 rounded-full bg-emerald-500/10 text-emerald-500 flex items-center justify-center border border-emerald-500/20 hover:bg-emerald-500/20 transition-colors"
+        onClick={() => {
+          vibrate(30);
+          setIsOpen(!isOpen);
+        }}
+        className="w-8 h-8 rounded-full bg-emerald-500/10 text-emerald-500 flex items-center justify-center border border-emerald-500/20 hover:bg-emerald-500/20 transition-colors relative overflow-hidden"
+        title={isOpen ? t("Close Menu") : t("Open Menu")}
       >
-        <User className="w-4 h-4" />
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={isOpen ? 'close' : 'menu'}
+            initial={{ opacity: 0, rotate: -90, scale: 0.5 }}
+            animate={{ opacity: 1, rotate: 0, scale: 1 }}
+            exit={{ opacity: 0, rotate: 90, scale: 0.5 }}
+            transition={{ duration: 0.2 }}
+            className="flex items-center justify-center"
+          >
+            {isOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </motion.div>
+        </AnimatePresence>
       </button>
 
       <AnimatePresence>
         {isOpen && (
           <motion.div 
-            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+            initial={{ opacity: 0, y: -10, scale: 0.9, transformOrigin: 'top right' }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 10, scale: 0.95 }}
-            transition={{ duration: 0.15 }}
+            exit={{ opacity: 0, y: -10, scale: 0.9 }}
+            transition={{ type: "spring", damping: 20, stiffness: 300 }}
             className="absolute right-0 mt-2 w-72 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-2xl overflow-y-auto custom-scrollbar max-h-[85vh] z-50"
           >
             {/* User Details Header */}
@@ -267,6 +284,49 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
             </div>
 
             <div className="p-2 space-y-1">
+                {/* Navigation Tabs */}
+                <Link to="/" onClick={() => setIsOpen(false)} className={clsx("relative flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors", location.pathname === "/" && !searchParams.get("type") ? "text-emerald-500 bg-emerald-500/10" : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800")}>
+                  {location.pathname === "/" && !searchParams.get("type") && <div className="absolute left-0 w-1 h-5 bg-emerald-500 rounded-r-full" />}
+                  <HomeIcon className="w-4 h-4" /> {t("Home")}
+                  {location.pathname === "/" && !searchParams.get("type") && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+                </Link>
+                <Link to="/?type=movie" onClick={() => setIsOpen(false)} className={clsx("relative flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors", location.pathname === "/" && searchParams.get("type") === "movie" ? "text-emerald-500 bg-emerald-500/10" : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800")}>
+                  {location.pathname === "/" && searchParams.get("type") === "movie" && <div className="absolute left-0 w-1 h-5 bg-emerald-500 rounded-r-full" />}
+                  <Film className="w-4 h-4" /> {t("Movies")}
+                  {location.pathname === "/" && searchParams.get("type") === "movie" && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+                </Link>
+                <Link to="/?type=series" onClick={() => setIsOpen(false)} className={clsx("relative flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors", location.pathname === "/" && searchParams.get("type") === "series" ? "text-emerald-500 bg-emerald-500/10" : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800")}>
+                  {location.pathname === "/" && searchParams.get("type") === "series" && <div className="absolute left-0 w-1 h-5 bg-emerald-500 rounded-r-full" />}
+                  <Tv className="w-4 h-4" /> {t("Web Series")}
+                  {location.pathname === "/" && searchParams.get("type") === "series" && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+                </Link>
+                <Link to="/freemovies" onClick={() => setIsOpen(false)} className={clsx("relative flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors", location.pathname === "/freemovies" ? "text-emerald-500 bg-emerald-500/10" : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800")}>
+                  {location.pathname === "/freemovies" && <div className="absolute left-0 w-1 h-5 bg-emerald-500 rounded-r-full" />}
+                  <PlayCircle className="w-4 h-4" /> {t("Free Movies")}
+                  {location.pathname === "/freemovies" && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+                </Link>
+                <Link to="/membership" onClick={() => setIsOpen(false)} className={clsx("relative flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors", location.pathname === "/membership" ? "text-emerald-500 bg-emerald-500/10" : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800")}>
+                  {location.pathname === "/membership" && <div className="absolute left-0 w-1 h-5 bg-emerald-500 rounded-r-full" />}
+                  <Gift className="w-4 h-4" /> {t("Membership")}
+                  {location.pathname === "/membership" && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+                </Link>
+                <Link to="/reviews" onClick={() => setIsOpen(false)} className={clsx("relative flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors", location.pathname === "/reviews" ? "text-emerald-500 bg-emerald-500/10" : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800")}>
+                  {location.pathname === "/reviews" && <div className="absolute left-0 w-1 h-5 bg-emerald-500 rounded-r-full" />}
+                  <Star className="w-4 h-4" /> {t("Reviews")}
+                  {location.pathname === "/reviews" && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+                </Link>
+                <Link to="/about" onClick={() => setIsOpen(false)} className={clsx("relative flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors", location.pathname === "/about" ? "text-emerald-500 bg-emerald-500/10" : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800")}>
+                  {location.pathname === "/about" && <div className="absolute left-0 w-1 h-5 bg-emerald-500 rounded-r-full" />}
+                  <Info className="w-4 h-4" /> {t("About")}
+                  {location.pathname === "/about" && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+                </Link>
+                <Link to="/contact" onClick={() => setIsOpen(false)} className={clsx("relative flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors", location.pathname === "/contact" ? "text-emerald-500 bg-emerald-500/10" : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800")}>
+                  {location.pathname === "/contact" && <div className="absolute left-0 w-1 h-5 bg-emerald-500 rounded-r-full" />}
+                  <Phone className="w-4 h-4" /> {t("Contact")}
+                  {location.pathname === "/contact" && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+                </Link>
+                <div className="h-px bg-zinc-200 dark:bg-zinc-800 my-2"></div>
+
               {/* Theme Toggle */}
               <div className="px-3 py-2 flex items-center justify-between">
                 <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">{t('Theme')}</span>

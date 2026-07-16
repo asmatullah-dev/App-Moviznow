@@ -4,6 +4,160 @@ import { safeStorage } from '../utils/safeStorage';
 export type Language = 'en' | 'ur-roman' | 'ur';
 
 const translations: Record<string, Record<Language, string>> = {
+  'City': { en: 'City', 'ur-roman': 'Shehar', ur: 'شہر' },
+  'Enter your city': { en: 'Enter your city', 'ur-roman': 'Apna shehar darj karein', ur: 'اپنا شہر درج کریں' },
+  'City cannot be changed once set.': { en: 'City cannot be changed once set.', 'ur-roman': 'Shehar set karne ke baad badla nahi ja sakta.', ur: 'شہر ایک بار سیٹ ہونے کے بعد تبدیل نہیں کیا جا سکتا۔' },
+  'You can only set your city once.': { en: 'You can only set your city once.', 'ur-roman': 'Aap apna shehar sirf aik baar set kar sakte hain.', ur: 'آپ اپنا شہر صرف ایک بار سیٹ کر سکتے ہیں۔' },
+
+  'Join the group — save up to 44%': { en: 'Join the group — save up to 44%', 'ur-roman': 'Group join karein — 44% tak bachayein', ur: 'گروپ میں شامل ہوں — 44% تک بچائیں' },
+  'Save 17%': { en: 'Save 17%', 'ur-roman': '17% bachayein', ur: '17% بچائیں' },
+
+
+  'Search and Filters': { en: 'Search and Filters', 'ur-roman': 'Search aur Filters', ur: 'تلاش اور فلٹرز' },
+  'Clear Filters': { en: 'Clear Filters', 'ur-roman': 'Filters hatayein', ur: 'فلٹرز ہٹائیں' },
+  'Install App': { en: 'Install App', 'ur-roman': 'App Install Karein', ur: 'ایپ انسٹال کریں' },
+
+  'About %APP_NAME%': { en: 'About %APP_NAME%', 'ur-roman': '%APP_NAME% Ke Baray Mein', ur: '%APP_NAME% کے بارے میں' },
+
+  'Web Series Season': { en: 'Web Series Season', 'ur-roman': 'Web Series Season', ur: 'ویب سیریز سیزن' },
+  'PKR 100': { en: 'PKR 100', 'ur-roman': 'PKR 100', ur: '100 روپے' },
+  'PKR 300': { en: 'PKR 300', 'ur-roman': 'PKR 300', ur: '300 روپے' },
+  'PKR 750': { en: 'PKR 750', 'ur-roman': 'PKR 750', ur: '750 روپے' },
+  'PKR 900': { en: 'PKR 900', 'ur-roman': 'PKR 900', ur: '900 روپے' },
+  'PKR 1,400': { en: 'PKR 1,400', 'ur-roman': 'PKR 1,400', ur: '1,400 روپے' },
+  'PKR 1,800': { en: 'PKR 1,800', 'ur-roman': 'PKR 1,800', ur: '1,800 روپے' },
+  'PKR 2,600': { en: 'PKR 2,600', 'ur-roman': 'PKR 2,600', ur: '2,600 روپے' },
+  'PKR 3,600': { en: 'PKR 3,600', 'ur-roman': 'PKR 3,600', ur: '3,600 روپے' },
+  'PKR 4,000': { en: 'PKR 4,000', 'ur-roman': 'PKR 4,000', ur: '4,000 روپے' },
+  'PKR 7,200': { en: 'PKR 7,200', 'ur-roman': 'PKR 7,200', ur: '7,200 روپے' },
+  '≈ PKR 300/month': { en: '≈ PKR 300/month', 'ur-roman': '≈ PKR 300/mahina', ur: '≈ 300 روپے/مہینہ' },
+  'per season': { en: 'per season', 'ur-roman': 'har season ke liye', ur: 'فی سیزن' },
+  'Any web series season': { en: 'Any web series season', 'ur-roman': 'Koi bhi web series season', ur: 'کوئی بھی ویب سیریز سیزن' },
+
+  '1 Month': { en: '1 Month', 'ur-roman': '1 Mahina', ur: '1 مہینہ' },
+  '3 Months': { en: '3 Months', 'ur-roman': '3 Mahinay', ur: '3 مہینے' },
+  '6 Months': { en: '6 Months', 'ur-roman': '6 Mahinay', ur: '6 مہینے' },
+  '1 Year': { en: '1 Year', 'ur-roman': '1 Saal', ur: '1 سال' },
+  '2 Years': { en: '2 Years', 'ur-roman': '2 Saal', ur: '2 سال' },
+  '≈ PKR 250/month': { en: '≈ PKR 250/month', 'ur-roman': '≈ PKR 250/mahina', ur: '≈ 250 روپے/مہینہ' },
+  '≈ PKR 233/month': { en: '≈ PKR 233/month', 'ur-roman': '≈ PKR 233/mahina', ur: '≈ 233 روپے/مہینہ' },
+  '≈ PKR 217/month': { en: '≈ PKR 217/month', 'ur-roman': '≈ PKR 217/mahina', ur: '≈ 217 روپے/مہینہ' },
+  '≈ PKR 167/month': { en: '≈ PKR 167/month', 'ur-roman': '≈ PKR 167/mahina', ur: '≈ 167 روپے/مہینہ' },
+  'Save PKR 150': { en: 'Save PKR 150', 'ur-roman': 'PKR 150 bachayein', ur: '150 روپے بچائیں' },
+  'Save PKR 400': { en: 'Save PKR 400', 'ur-roman': 'PKR 400 bachayein', ur: '400 روپے بچائیں' },
+  'Save PKR 1,000': { en: 'Save PKR 1,000', 'ur-roman': 'PKR 1,000 bachayein', ur: '1,000 روپے بچائیں' },
+  'Save PKR 3,200': { en: 'Save PKR 3,200', 'ur-roman': 'PKR 3,200 bachayein', ur: '3,200 روپے بچائیں' },
+  'Daily 6–7 HD movies': { en: 'Daily 6–7 HD movies', 'ur-roman': 'Rozana 6–7 HD movies', ur: 'روزانہ 6-7 ایچ ڈی موویز' },
+  'Daily 6–7 Movies': { en: 'Daily 6–7 Movies', 'ur-roman': 'Rozana 6–7 Movies', ur: 'روزانہ 6-7 موویز' },
+  'Latest web series': { en: 'Latest web series', 'ur-roman': 'Latest web series', ur: 'تازہ ترین ویب سیریز' },
+  'Latest Web Series': { en: 'Latest Web Series', 'ur-roman': 'Latest Web Series', ur: 'تازہ ترین ویب سیریز' },
+  'HD Quality': { en: 'HD Quality', 'ur-roman': 'HD Quality', ur: 'ایچ ڈی کوالٹی' },
+  'Priority Updates': { en: 'Priority Updates', 'ur-roman': 'Priority Updates', ur: 'ترجیحی اپ ڈیٹس' },
+  'Priority WhatsApp support': { en: 'Priority WhatsApp support', 'ur-roman': 'Priority WhatsApp support', ur: 'ترجیحی واٹس ایپ سپورٹ' },
+  'Most Popular • Save 22%': { en: 'Most Popular • Save 22%', 'ur-roman': 'Sab se maqbool • 22% bachayein', ur: 'سب سے مقبول • 22% بچائیں' },
+  'Best Value • Save 28%': { en: 'Best Value • Save 28%', 'ur-roman': 'Behtareen Value • 28% bachayein', ur: 'بہترین ویلیو • 28% بچائیں' },
+  'Mega Saver • Save 44%': { en: 'Mega Saver • Save 44%', 'ur-roman': 'Mega Saver • 44% bachayein', ur: 'میگا سیور • 44% بچائیں' },
+  'Join Now': { en: 'Join Now', 'ur-roman': 'Abhi Join Karein', ur: 'ابھی جوائن کریں' },
+  'Trending Movies': { en: 'Trending Movies', 'ur-roman': 'Trending Movies', ur: 'ٹرینڈنگ موویز' },
+
+  'Free movie download sites in Pakistan are illegal, full of viruses, popups aur VPN ki zaroorat hoti hai.': { en: 'Free movie download sites in Pakistan are illegal, full of viruses, popups aur VPN ki zaroorat hoti hai.', 'ur-roman': 'Pakistan mein free movie download sites ghair kanooni hain, virus se bhari hain, popups aate hain aur VPN ki zaroorat hoti hai.', ur: 'پاکستان میں مفت مووی ڈاؤن لوڈ سائٹس غیر قانونی ہیں، وائرس سے بھری ہیں، پاپ اپس آتے ہیں اور وی پی این کی ضرورت ہوتی ہے۔' },
+  'Safe legal alternative hai — full HD Bollywood, Hollywood, Punjabi aur Pakistani movies sirf PKR 50 me, seedha WhatsApp par delivery. Ek biscuit ki price me poori HD movie.': { en: 'Safe legal alternative hai — full HD Bollywood, Hollywood, Punjabi aur Pakistani movies sirf PKR 50 me, seedha WhatsApp par delivery. Ek biscuit ki price me poori HD movie.', 'ur-roman': 'Ye ek mehfooz kanooni mutabadil hai — full HD Bollywood, Hollywood, Punjabi aur Pakistani movies sirf PKR 50 mein, seedha WhatsApp par delivery. Ek biscuit ki qeemat mein poori HD movie.', ur: 'یہ ایک محفوظ قانونی متبادل ہے — فل ایچ ڈی بالی ووڈ، ہالی ووڈ، پنجابی اور پاکستانی موویز صرف 50 روپے میں، سیدھا واٹس ایپ پر ڈیلیوری۔ ایک بسکٹ کی قیمت میں پوری ایچ ڈی مووی۔' },
+
+
+  'Delete Review': { en: 'Delete Review', 'ur-roman': 'Review Delete Karein', ur: 'جائزہ حذف کریں' },
+  'No reviews yet. Be the first to review!': { en: 'No reviews yet. Be the first to review!', 'ur-roman': 'Abhi tak koi review nahi. Pehla review ap dein!', ur: 'ابھی تک کوئی جائزہ نہیں۔ پہلا جائزہ آپ دیں!' },
+
+
+  'Share your experience...': { en: 'Share your experience...', 'ur-roman': 'Apna tajurba share karein...', ur: 'اپنا تجربہ شیئر کریں...' },
+
+
+  'User Reviews': { en: 'User Reviews', 'ur-roman': 'Users ke Reviews', ur: 'صارفین کے جائزے' },
+  'See what others are saying about %APP_NAME%': { en: 'See what others are saying about %APP_NAME%', 'ur-roman': 'Dekhein doosray log %APP_NAME% ke baray mein kya kehte hain', ur: 'دیکھیں کہ دوسرے لوگ %APP_NAME% کے بارے میں کیا کہتے ہیں' },
+  'Submit': { en: 'Submit', 'ur-roman': 'Jama Karein', ur: 'جمع کریں' },
+
+
+  'Get in touch with the %APP_NAME% team.': { en: 'Get in touch with the %APP_NAME% team.', 'ur-roman': '%APP_NAME% team se rabta karein.', ur: '%APP_NAME% ٹیم سے رابطہ کریں۔' },
+  'Have a question or need to request a specific movie? Reach out directly on WhatsApp for fast support.': { en: 'Have a question or need to request a specific movie? Reach out directly on WhatsApp for fast support.', 'ur-roman': 'Koi sawal hai ya kisi makhsoos movie ki request karni hai? Taiz support ke liye direct WhatsApp par rabta karein.', ur: 'کوئی سوال ہے یا کسی مخصوص مووی کی درخواست کرنی ہے؟ تیز سپورٹ کے لیے براہ راست واٹس ایپ پر رابطہ کریں۔' },
+  'Chat on WhatsApp': { en: 'Chat on WhatsApp', 'ur-roman': 'WhatsApp par chat karein', ur: 'واٹس ایپ پر چیٹ کریں' },
+  'WhatsApp Channel': { en: 'WhatsApp Channel', 'ur-roman': 'WhatsApp Channel', ur: 'واٹس ایپ چینل' },
+  'Join our official WhatsApp channel for the latest movie drops, series updates, and exclusive offers.': { en: 'Join our official WhatsApp channel for the latest movie drops, series updates, and exclusive offers.', 'ur-roman': 'Latest movies, series updates, aur exclusive offers ke liye hamara official WhatsApp channel join karein.', ur: 'تازہ ترین موویز، سیریز کی اپ ڈیٹس، اور خصوصی پیشکشوں کے لیے ہمارے آفیشل واٹس ایپ چینل میں شامل ہوں۔' },
+  'Join Channel': { en: 'Join Channel', 'ur-roman': 'Channel Join Karein', ur: 'چینل جوائن کریں' },
+
+
+  'Free Movies in Pakistan?': { en: 'Free Movies in Pakistan?', 'ur-roman': 'Pakistan me Free Movies?', ur: 'پاکستان میں مفت موویز؟' },
+  'Get them almost-free — PKR 50 in HD.': { en: 'Get them almost-free — PKR 50 in HD.', 'ur-roman': 'Taqreeban muft haasil karein — sirf PKR 50 mein HD.', ur: 'انہیں تقریباً مفت حاصل کریں — ایچ ڈی میں صرف پچاس روپے میں۔' },
+  'Get PKR 50 Movie on WhatsApp': { en: 'Get PKR 50 Movie on WhatsApp', 'ur-roman': 'WhatsApp par PKR 50 ki Movie lein', ur: 'واٹس ایپ پر 50 روپے میں مووی حاصل کریں' },
+  'Browse Full Catalog': { en: 'Browse Full Catalog', 'ur-roman': 'Mukammal Catalog dekhein', ur: 'مکمل کیٹلاگ دیکھیں' },
+  'Free download sites vs.': { en: 'Free download sites vs.', 'ur-roman': 'Free download sites muqabla', ur: 'مفت ڈاؤن لوڈ سائٹس بمقابلہ' },
+  'Free piracy sites': { en: 'Free piracy sites', 'ur-roman': 'Free piracy sites', ur: 'مفت پائریسی سائٹس' },
+  'Illegal & unsafe': { en: 'Illegal & unsafe', 'ur-roman': 'Ghair kanooni aur ghair mehfooz', ur: 'غیر قانونی اور غیر محفوظ' },
+  'Malware, viruses, phishing popups': { en: 'Malware, viruses, phishing popups', 'ur-roman': 'Malware, viruses, phishing popups', ur: 'میلویئر، وائرس، فشنگ پاپ اپ' },
+  'VPN required, slow downloads': { en: 'VPN required, slow downloads', 'ur-roman': 'VPN zaroori, slow downloads', ur: 'وی پی این درکار، سست ڈاؤن لوڈ' },
+  'Fake "download" buttons, ads everywhere': { en: 'Fake "download" buttons, ads everywhere', 'ur-roman': 'Jaali "download" buttons, har jagah ads', ur: 'جعلی "ڈاؤن لوڈ" بٹن، ہر جگہ اشتہارات' },
+  'Poor quality, wrong files, no support': { en: 'Poor quality, wrong files, no support', 'ur-roman': 'Kharab quality, ghalat files, koi support nahi', ur: 'ناقص کوالٹی، غلط فائلیں، کوئی سپورٹ نہیں' },
+  'Safe, legal, ad-free': { en: 'Safe, legal, ad-free', 'ur-roman': 'Mehfooz, kanooni, ads ke baghair', ur: 'محفوظ، قانونی، اشتہارات کے بغیر' },
+  'Verified HD source, no viruses': { en: 'Verified HD source, no viruses', 'ur-roman': 'Tasdeeq shuda HD source, koi virus nahi', ur: 'تصدیق شدہ ایچ ڈی سورس، کوئی وائرس نہیں' },
+  'No VPN — delivered on WhatsApp': { en: 'No VPN — delivered on WhatsApp', 'ur-roman': 'Baghair VPN — WhatsApp par dastyab', ur: 'بغیر وی پی این — واٹس ایپ پر دستیاب' },
+  'Only PKR 50 per movie (biscuit price)': { en: 'Only PKR 50 per movie (biscuit price)', 'ur-roman': 'Sirf PKR 50 per movie (biscuit ki qeemat)', ur: 'صرف 50 روپے فی مووی (بسکٹ کی قیمت)' },
+  'Real support on WhatsApp': { en: 'Real support on WhatsApp', 'ur-roman': 'WhatsApp par real support', ur: 'واٹس ایپ پر حقیقی سپورٹ' },
+  'Trending Now': { en: 'Trending Now', 'ur-roman': 'Aaj kal maqbool', ur: 'آج کل مقبول' },
+
+  'Simple, honest pricing': { en: 'Simple, honest pricing', 'ur-roman': 'Saada, imaandarana qeemat', ur: 'سادہ، ایماندارانہ قیمت' },
+  'Pay per title, or join the group and get 6–7 fresh HD movies delivered every single day.': { en: 'Pay per title, or join the group and get 6–7 fresh HD movies delivered every single day.', 'ur-roman': 'Har title ka pay karein, ya group join karein aur rozana 6-7 nayi HD movies haasil karein.', ur: 'ہر ٹائٹل کے لیے ادائیگی کریں، یا گروپ میں شامل ہوں اور روزانہ 6 سے 7 نئی ایچ ڈی موویز حاصل کریں۔' },
+  'Single Movie': { en: 'Single Movie', 'ur-roman': 'Ek Movie', ur: 'ایک مووی' },
+  'one-time': { en: 'one-time', 'ur-roman': 'ek dafa', ur: 'ایک بار' },
+  'Any movie in the catalog': { en: 'Any movie in the catalog', 'ur-roman': 'Catalog mein se koi bhi movie', ur: 'کیٹلاگ میں سے کوئی بھی مووی' },
+  'Full HD quality': { en: 'Full HD quality', 'ur-roman': 'Full HD quality', ur: 'فل ایچ ڈی کوالٹی' },
+  'Delivered on WhatsApp': { en: 'Delivered on WhatsApp', 'ur-roman': 'WhatsApp par bheji jayegi', ur: 'واٹس ایپ پر بھیجی جائے گی' },
+  'Same-day delivery': { en: 'Same-day delivery', 'ur-roman': 'Usi din delivery', ur: 'اسی دن ڈیلیوری' },
+  'Get on WhatsApp': { en: 'Get on WhatsApp', 'ur-roman': 'WhatsApp par lein', ur: 'واٹس ایپ پر حاصل کریں' },
+  'Monthly Group': { en: 'Monthly Group', 'ur-roman': 'Mahana Group', ur: 'ماہانہ گروپ' },
+  '/month': { en: '/month', 'ur-roman': '/mah', ur: '/مہینہ' },
+  '6-7 fresh HD movies daily': { en: '6-7 fresh HD movies daily', 'ur-roman': 'Rozana 6-7 fresh HD movies', ur: 'روزانہ 6 سے 7 تازہ ایچ ڈی موویز' },
+  'Access to premium WhatsApp group': { en: 'Access to premium WhatsApp group', 'ur-roman': 'Premium WhatsApp group tak rasai', ur: 'پریمیم واٹس ایپ گروپ تک رسائی' },
+  'Priority requests': { en: 'Priority requests', 'ur-roman': 'Tareeji requests', ur: 'ترجیحی درخواستیں' },
+  'No hidden fees': { en: 'No hidden fees', 'ur-roman': 'Koi chupi hui fees nahi', ur: 'کوئی پوشیدہ فیس نہیں' },
+  'Join WhatsApp Group': { en: 'Join WhatsApp Group', 'ur-roman': 'WhatsApp Group join karein', ur: 'واٹس ایپ گروپ جوائن کریں' },
+
+  'Your premium destination for HD movies and web series in Pakistan.': { en: 'Your premium destination for HD movies and web series in Pakistan.', 'ur-roman': 'Pakistan mein HD movies aur web series ki behtareen jagah.', ur: 'پاکستان میں ایچ ڈی موویز اور ویب سیریز کے لیے آپ کی پریمیم منزل۔' },
+  'Vast Collection': { en: 'Vast Collection', 'ur-roman': 'Bohat bada collection', ur: 'وسيع کلیکشن' },
+  'Access thousands of movies and web series from Bollywood, Hollywood, and local cinema in pristine HD quality.': { en: 'Access thousands of movies and web series from Bollywood, Hollywood, and local cinema in pristine HD quality.', 'ur-roman': 'Bollywood, Hollywood, aur local cinema ki hazaron movies aur web series behtareen HD quality mein.', ur: 'بالی ووڈ، ہالی ووڈ اور مقامی سنیما سے ہزاروں فلموں اور ویب سیریز تک بہترین ایچ ڈی کوالٹی میں رسائی حاصل کریں۔' },
+  'Safe & Secure': { en: 'Safe & Secure', 'ur-roman': 'Mehfooz', ur: 'محفوظ' },
+  'No more sketchy download sites, viruses, or VPNs. We provide direct, safe access to the content you love.': { en: 'No more sketchy download sites, viruses, or VPNs. We provide direct, safe access to the content you love.', 'ur-roman': 'Ab aur koi khatarnak download sites, viruses ya VPN nahi. Hum aapke pasandeeda content tak direct aur mehfooz rasai dete hain.', ur: 'اب کوئی خطرناک ڈاؤن لوڈ سائٹس، وائرس یا وی پی این نہیں۔ ہم آپ کے پسندیدہ مواد تک براہ راست اور محفوظ رسائی فراہم کرتے ہیں۔' },
+  'Fast Delivery': { en: 'Fast Delivery', 'ur-roman': 'Tez Delivery', ur: 'تیز ڈیلیوری' },
+  'Get your favorite content delivered directly to your WhatsApp instantly. No waiting, no buffering.': { en: 'Get your favorite content delivered directly to your WhatsApp instantly. No waiting, no buffering.', 'ur-roman': 'Apna pasandeeda content foran WhatsApp par haasil karein. Koi intezar nahi, koi buffering nahi.', ur: 'اپنا پسندیدہ مواد فوری طور پر واٹس ایپ پر حاصل کریں۔ کوئی انتظار نہیں، کوئی بفرنگ نہیں۔' },
+  'Our Mission': { en: 'Our Mission', 'ur-roman': 'Hamara Maqsad', ur: 'ہمارا مشن' },
+  'At %APP_NAME%, we believe entertainment should be accessible, affordable, and safe. For too long, finding a good movie online meant navigating through a maze of popup ads, malware, and broken links.': { en: 'At %APP_NAME%, we believe entertainment should be accessible, affordable, and safe. For too long, finding a good movie online meant navigating through a maze of popup ads, malware, and broken links.', 'ur-roman': 'Hum maante hain ke entertainment asaan, sasta aur mehfooz hona chahiye. Bohat arsay tak achi movie dhoondne ka matlab popup ads, malware aur broken links se guzarna tha.', ur: 'ہمارا ماننا ہے کہ تفریح قابل رسائی، سستی اور محفوظ ہونی چاہیے۔ طویل عرصے تک ایک اچھی فلم آن لائن تلاش کرنے کا مطلب پاپ اپ اشتہارات، میلویئر اور ٹوٹے ہوئے لنکس کے جال سے گزرنا تھا۔' },
+  'We\'re changing that by offering a clean, straightforward service. Whether you want to buy a single movie for just PKR 50 or join our membership for daily content, we ensure you get exactly what you pay for — high-quality entertainment without the hassle.': { en: 'We\'re changing that by offering a clean, straightforward service. Whether you want to buy a single movie for just PKR 50 or join our membership for daily content, we ensure you get exactly what you pay for — high-quality entertainment without the hassle.', 'ur-roman': 'Hum is sab ko badal rahe hain ek saaf suthri service ke zariye. Chahe aap 50 rupay mein ek movie khareedein ya daily content ke liye membership lein, hum yaqeen dehani karate hain ke aapko bina kisi masle ke high-quality entertainment milay.', ur: 'ہم ایک صاف ستھری سروس کی پیشکش کر کے اسے تبدیل کر رہے ہیں۔ چاہے آپ صرف 50 روپے میں ایک مووی خریدنا چاہیں یا روزانہ مواد کے لیے ہماری ممبرشپ میں شامل ہوں، ہم یقینی بناتے ہیں کہ آپ کو بغیر کسی پریشانی کے اعلیٰ معیار کی تفریح ملے۔' },
+
+  'Get in Touch': { en: 'Get in Touch', 'ur-roman': 'Rabta Karein', ur: 'رابطہ کریں' },
+  'Have a question or need help? We\'re here for you.': { en: 'Have a question or need help? We\'re here for you.', 'ur-roman': 'Koi sawal hai ya madad chahiye? Hum aapke liye hazir hain.', ur: 'کوئی سوال ہے یا مدد چاہیے؟ ہم آپ کے لیے حاضر ہیں۔' },
+  'WhatsApp Support': { en: 'WhatsApp Support', 'ur-roman': 'WhatsApp Support', ur: 'واٹس ایپ سپورٹ' },
+  'Available 24/7 for fast responses': { en: 'Available 24/7 for fast responses', 'ur-roman': 'Fori jawabaat ke liye 24/7 dastyab', ur: 'فوری جوابات کے لیے 24/7 دستیاب' },
+  'Message on WhatsApp': { en: 'Message on WhatsApp', 'ur-roman': 'WhatsApp par message karein', ur: 'واٹس ایپ پر پیغام بھیجیں' },
+  'Email Us': { en: 'Email Us', 'ur-roman': 'Email Karein', ur: 'ای میل کریں' },
+  'For business inquiries and support': { en: 'For business inquiries and support', 'ur-roman': 'Business inquiries aur support ke liye', ur: 'کاروباری پوچھ گچھ اور تعاون کے لیے' },
+  'Send Email': { en: 'Send Email', 'ur-roman': 'Email Bhejein', ur: 'ای میل بھیجیں' },
+  'Call Us': { en: 'Call Us', 'ur-roman': 'Call Karein', ur: 'کال کریں' },
+  'Available during business hours': { en: 'Available during business hours', 'ur-roman': 'Kaam ke auqaat mein dastyab', ur: 'کاروباری اوقات کے دوران دستیاب' },
+  'Call Now': { en: 'Call Now', 'ur-roman': 'Abhi Call Karein', ur: 'ابھی کال کریں' },
+  'Office Hours': { en: 'Office Hours', 'ur-roman': 'Office ke Auqaat', ur: 'دفتری اوقات' },
+  'Monday - Saturday': { en: 'Monday - Saturday', 'ur-roman': 'Peer - Hafta', ur: 'پیر - ہفتہ' },
+  '9:00 AM - 10:00 PM (PKT)': { en: '9:00 AM - 10:00 PM (PKT)', 'ur-roman': 'Subah 9:00 se Raat 10:00 (PKT)', ur: 'صبح 9:00 سے رات 10:00 (PKT)' },
+  'Sunday': { en: 'Sunday', 'ur-roman': 'Itwar', ur: 'اتوار' },
+  'Closed': { en: 'Closed', 'ur-roman': 'Band', ur: 'بند ہے' },
+
+  'What our users say': { en: 'What our users say', 'ur-roman': 'Hamare users kya kehte hain', ur: 'ہمارے صارفین کیا کہتے ہیں' },
+  'Join thousands of satisfied users.': { en: 'Join thousands of satisfied users.', 'ur-roman': 'Hazaron mutma\'een users mein shamil hon.', ur: 'ہزاروں مطمئن صارفین میں شامل ہوں۔' },
+  'Write a Review': { en: 'Write a Review', 'ur-roman': 'Review Likhein', ur: 'جائزہ لکھیں' },
+  'Your Rating': { en: 'Your Rating', 'ur-roman': 'Aapki Rating', ur: 'آپ کی درجہ بندی' },
+  'Your Review': { en: 'Your Review', 'ur-roman': 'Aapka Review', ur: 'آپ کا جائزہ' },
+  'Submit Review': { en: 'Submit Review', 'ur-roman': 'Review Bhejein', ur: 'جائزہ جمع کریں' },
+  'Update Review': { en: 'Update Review', 'ur-roman': 'Review Update Karein', ur: 'جائزہ اپ ڈیٹ کریں' },
+  'Average Rating': { en: 'Average Rating', 'ur-roman': 'Average Rating', ur: 'اوسط درجہ بندی' },
+  'Based on %COUNT% reviews': { en: 'Based on %COUNT% reviews', 'ur-roman': '%COUNT% reviews ki bunyad par', ur: '%COUNT% جائزوں کی بنیاد پر' },
+  'No reviews yet. Be the first to share your experience!': { en: 'No reviews yet. Be the first to share your experience!', 'ur-roman': 'Abhi tak koi review nahi. Apna tajurba share karne wale pehle shakhs banein!', ur: 'ابھی تک کوئی جائزہ نہیں۔ اپنا تجربہ شیئر کرنے والے پہلے شخص بنیں!' },
+
   'Home': { en: 'Home', 'ur-roman': 'Ghar', ur: 'ہوم' },
   'Movie Details': { en: 'Movie Details', 'ur-roman': 'Movie ki tafseel', ur: 'مووی کی تفصیلات' },
   'Cart': { en: 'Cart', 'ur-roman': 'Tohfa', ur: 'کارٹ' },
@@ -33,6 +187,13 @@ const translations: Record<string, Record<Language, string>> = {
   'Year': { en: 'Year', 'ur-roman': 'Saal', ur: 'سال' },
   'Type': { en: 'Type', 'ur-roman': 'Qisam', ur: 'قسم' },
   'Movies': { en: 'Movies', 'ur-roman': 'Movies', ur: 'موویز' },
+  'Web Series': { en: 'Web Series', 'ur-roman': 'Web Series', ur: 'ویب سیریز' },
+  'Free Movies': { en: 'Free Movies', 'ur-roman': 'Muft Movies', ur: 'مفت موویز' },
+  'Reviews': { en: 'Reviews', 'ur-roman': 'Reviews', ur: 'جائزے' },
+  'About': { en: 'About', 'ur-roman': 'Hamare baaray mein', ur: 'ہمارے بارے میں' },
+  'About Us': { en: 'About Us', 'ur-roman': 'Hamare baaray mein', ur: 'ہمارے بارے میں' },
+  'Contact Us': { en: 'Contact Us', 'ur-roman': 'Ham se rabta karein', ur: 'ہم سے رابطہ کریں' },
+  'Contact': { en: 'Contact', 'ur-roman': 'Rabta', ur: 'رابطہ کریں' },
   'Series': { en: 'Series', 'ur-roman': 'Series', ur: 'سیریز' },
   'Types': { en: 'Types', 'ur-roman': 'Iqsam', ur: 'اقسام' },
   'Genres': { en: 'Genres', 'ur-roman': 'Asnaf', ur: 'اصناف' },
@@ -109,6 +270,11 @@ const translations: Record<string, Record<Language, string>> = {
   'Get Membership': { en: 'Get Membership', 'ur-roman': 'Membership lein', ur: 'ممبرشپ حاصل کریں' },
   'Scroll down to add specific seasons to your cart.': { en: 'Scroll down to add specific seasons to your cart.', 'ur-roman': 'Seasons cart mein add karne ke liye neechay scroll karein.', ur: 'مخصوص سیزن اپنے کارٹ میں شامل کرنے کے لیے نیچے اسکرول کریں۔' },
   'Need help or want to renew membership?': { en: 'Need help or want to renew membership?', 'ur-roman': 'Kya aap ko madad chahiye ya membership renew karni hai?', ur: 'مدد کی ضرورت ہے یا ممبرشپ کی تجدید کرنا چاہتے ہیں؟' },
+  'Need help or want to report an issue with this content?': { en: 'Need help or want to report an issue with this content?', 'ur-roman': 'Kya aapko madad chahiye ya is content ke mutaliq report karna hai?', ur: 'کیا آپ کو مدد کی ضرورت ہے یا اس مواد سے متعلق کوئی مسئلہ رپورٹ کرنا چاہتے ہیں؟' },
+  'Need help? Reach out to our support or join our community.': { en: 'Need help? Reach out to our support or join our community.', 'ur-roman': 'Madad chahiye? Humare support se rabta karein ya community join karein.', ur: 'مدد چاہیے؟ ہمارے سپورٹ سے رابطہ کریں یا ہماری کمیونٹی میں شامل ہوں۔' },
+  'Join WhatsApp Channel': { en: 'Join WhatsApp Channel', 'ur-roman': 'WhatsApp Channel join karein', ur: 'واٹس ایپ چینل جوائن کریں' },
+  'Content Issue:': { en: 'Content Issue:', 'ur-roman': 'Content ka Masla:', ur: 'مواد کا مسئلہ:' },
+  'I need help with this content.': { en: 'I need help with this content.', 'ur-roman': 'Mujhe is content ke hawale se madad chahiye.', ur: 'مجھے اس مواد کے حوالے سے مدد کی ضرورت ہے۔' },
   'if needed.': { en: 'if needed.', 'ur-roman': 'agar zaroorat ho.', ur: 'اگر ضرورت ہو۔' },
   'Content Locked': { en: 'Content Locked', 'ur-roman': 'Content Locked hai', ur: 'مواد مقفل ہے' },
   'You don\'t have access to this content. Contact Admin.': { en: 'You don\'t have access to this content. Contact Admin.', 'ur-roman': 'Aap ke paas is content ka access nahi hai. Admin se rabta karein.', ur: 'آپ کو اس مواد تک رسائی حاصل نہیں ہے۔ ایڈمن سے رابطہ کریں۔' },
@@ -243,7 +409,7 @@ export const LanguageProvider = ({ children }: { children: ReactNode }) => {
     const saved = safeStorage.getItem('app_language');
     return (saved as Language) || 'en';
   });
-  const [isTranslating, setIsTranslating] = useState(false);
+  const isTranslatingRef = useRef(false);
   const failureCount = useRef(0);
   const MAX_FAILURES = 3;
   
@@ -253,7 +419,8 @@ export const LanguageProvider = ({ children }: { children: ReactNode }) => {
 
   const setLanguage = (lang: Language) => {
     setLanguageState(lang);
-    safeStorage.setItemAsync('app_language', lang);
+    safeStorage.setItem('app_language', lang);
+    window.dispatchEvent(new CustomEvent('app_language_changed', { detail: lang }));
   };
 
   const t = (key: string): string => {
@@ -275,7 +442,7 @@ export const LanguageProvider = ({ children }: { children: ReactNode }) => {
     const itemsToTranslate = Array.from(pendingTranslations.current.entries());
     pendingTranslations.current.clear();
     
-    setIsTranslating(true);
+    isTranslatingRef.current = true;
     
     const targetLangName = language === 'ur-roman' ? 'Roman Urdu (written with English alphabet)' : 'Urdu';
     
@@ -313,7 +480,7 @@ export const LanguageProvider = ({ children }: { children: ReactNode }) => {
       failureCount.current++;
       itemsToTranslate.forEach(([text, { resolve }]) => resolve(text));
     } finally {
-      setIsTranslating(false);
+      isTranslatingRef.current = false;
     }
   };
 
@@ -373,7 +540,7 @@ export const LanguageProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <LanguageContext.Provider value={{ language, setLanguage, translate, translateMany, t, isTranslating }}>
+    <LanguageContext.Provider value={{ language, setLanguage, translate, translateMany, t, isTranslating: isTranslatingRef.current }}>
       {children}
     </LanguageContext.Provider>
   );

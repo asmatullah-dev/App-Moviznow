@@ -52,7 +52,9 @@ export const smartSearch = <T extends Record<string, any>>(
 
     // Combine all searchable fields into one string for matching, with extra phone formats
     const searchableTextParts = fields.map(f => {
-      const val = String(item[f] || '').toLowerCase();
+      const path = String(f);
+      const nestedVal = path.split('.').reduce((o, k) => (o || {})[k], item);
+      const val = String(nestedVal || '').toLowerCase();
       if (String(f).toLowerCase().includes('phone')) {
         const digits = val.replace(/\D/g, '');
         const normalized = normalizePhone(val);
@@ -136,7 +138,9 @@ export const smartSearch = <T extends Record<string, any>>(
       const qNormalized = normalizePhone(q);
 
       for (const f of fields) {
-        const val = String(item[f] || '').toLowerCase();
+        const path = String(f);
+        const nestedVal = path.split('.').reduce((o, k) => (o || {})[k], item);
+        const val = String(nestedVal || '').toLowerCase();
         const valDigits = val.replace(/\D/g, '');
         
         // Exact string match

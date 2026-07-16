@@ -7,6 +7,7 @@ import { Film, Users, Tags, Languages, Clock, LogOut, Menu, X, MonitorPlay, BarC
 import { clsx } from 'clsx';
 import ConfirmModal from '../../components/ConfirmModal';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
+import { motion, AnimatePresence } from 'framer-motion';
 
 export default function AdminLayout() {
   const { logout, profile } = useAuth();
@@ -122,9 +123,20 @@ export default function AdminLayout() {
         {(profile?.role === 'admin' || profile?.role === 'owner') ? (
           <button 
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white"
+            className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white relative"
           >
-            {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={isMobileMenuOpen ? 'close' : 'menu'}
+                initial={{ opacity: 0, rotate: -90, scale: 0.5 }}
+                animate={{ opacity: 1, rotate: 0, scale: 1 }}
+                exit={{ opacity: 0, rotate: 90, scale: 0.5 }}
+                transition={{ duration: 0.2 }}
+                className="flex items-center justify-center"
+              >
+                {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+              </motion.div>
+            </AnimatePresence>
           </button>
         ) : (
           <button 

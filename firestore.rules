@@ -278,6 +278,11 @@ service cloud.firestore {
       allow write: if isAdminOrEditor();
     }
 
+    match /review_chunks/{chunkId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
     match /chunk_meta/{docId} {
       allow read: if true;
       allow write: if isAdminOrEditor() || (
@@ -286,9 +291,9 @@ service cloud.firestore {
         (
           // Allow creation of the versions document if it doesn't exist
           !exists(/databases/$(database)/documents/chunk_meta/versions) ||
-          // Allow updating ONLY the current user's version entry in the 'users' map
+          // Allow updating ONLY the current user's version entry in the 'users' map OR the reviews version
           (
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['users'])
+            request.resource.data.diff(resource.data).affectedKeys().hasAny(['users', 'reviews'])
           )
         )
       );

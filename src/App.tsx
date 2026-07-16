@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { Suspense, lazy, useState, useEffect } from 'react';
-import { AuthProvider } from './contexts/AuthContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { ContentProvider } from './contexts/ContentContext';
 import { NotificationProvider } from './contexts/NotificationContext';
@@ -23,6 +23,11 @@ import { AnalyticsTracker } from './components/AnalyticsTracker';
 import MaintenancePage from './pages/MaintenancePage';
 import Login from './pages/Login';
 import Home from './pages/user/Home';
+import FreeMovies from './pages/user/FreeMovies';
+import Membership from './pages/user/Membership';
+import Reviews from './pages/user/Reviews';
+import About from './pages/user/About';
+import Contact from './pages/user/Contact';
 import MovieDetails from './pages/user/MovieDetails';
 import WatchLater from './pages/user/WatchLater';
 import Favorites from './pages/user/Favorites';
@@ -85,6 +90,20 @@ function AppLanguageEffect() {
   return null;
 }
 
+function AuthLanguageSync() {
+  const { language, setLanguage } = useLanguage();
+  const { profile, updateUserProfileData } = useAuth();
+  
+  // Update local language if profile has one and we just loaded it
+  useEffect(() => {
+    if (profile?.preferredLanguage && profile.preferredLanguage !== language) {
+      setLanguage(profile.preferredLanguage as any);
+    }
+  }, [profile?.preferredLanguage]);
+
+  return null;
+}
+
 function SyncErrorOverlay() {
   const { t } = useLanguage();
   const [pauseStatus, setPauseStatus] = useState<{ paused: boolean, lastSynced?: string }>({ paused: false });
@@ -111,6 +130,8 @@ function SyncErrorOverlay() {
     </div>
   );
 }
+
+import { ScrollToTopOrRestore } from "./components/ScrollToTopOrRestore";
 
 export default function App() {
   const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
@@ -160,6 +181,7 @@ export default function App() {
       <LanguageProvider>
         <AppLanguageEffect />
       <AuthProvider>
+        <AuthLanguageSync />
         <UsersProvider>
           <SettingsProvider>
             <ContentProvider>
@@ -171,6 +193,7 @@ export default function App() {
                     <SyncBanner />
                     <SystemNotificationWrapper />
                     <BrowserRouter>
+                    <ScrollToTopOrRestore />
                     <AnalyticsTracker />
                     <MediaModalController isOpen={isMediaModalOpen} onClose={() => setIsMediaModalOpen(false)} />
                     <Suspense fallback={<LoadingFallback />}>
@@ -191,6 +214,11 @@ export default function App() {
                         <Route path="/top-up" element={<ProtectedRoute><TopUp /></ProtectedRoute>} />
                         <Route path="/cart" element={<ProtectedRoute><Cart /></ProtectedRoute>} />
                         <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+                        <Route path="/freemovies" element={<ProtectedRoute><FreeMovies /></ProtectedRoute>} />
+                        <Route path="/membership" element={<ProtectedRoute><Membership /></ProtectedRoute>} />
+                        <Route path="/reviews" element={<ProtectedRoute><Reviews /></ProtectedRoute>} />
+                        <Route path="/about" element={<ProtectedRoute><About /></ProtectedRoute>} />
+                        <Route path="/contact" element={<ProtectedRoute><Contact /></ProtectedRoute>} />
                         
                         {/* Admin Routes */}
                         <Route path="/admin" element={<ProtectedRoute requireAdmin><AdminLayout /></ProtectedRoute>}>

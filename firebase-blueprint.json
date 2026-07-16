@@ -201,6 +201,20 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "title", "contentIds"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "A user review.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "rating": { "type": "number" },
+        "text": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "userName", "rating", "text", "date"]
     }
   },
   "firestore": {
@@ -295,6 +309,15 @@
         }
       },
       "description": "Stores collections in chunks to optimize reads."
+    },
+    "/review_chunks/{chunkId}": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "items": { "type": "object", "additionalProperties": { "$ref": "#/entities/Review" } }
+        }
+      },
+      "description": "Stores user reviews in chunks."
     }
   }
 }

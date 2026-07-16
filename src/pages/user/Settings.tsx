@@ -3,7 +3,7 @@ import { useAuth, standardizePhone } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Lock, User, Mail, Phone, Loader2, AlertCircle, Bell, BellOff, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Save, Lock, User, Mail, Phone, Loader2, AlertCircle, Bell, BellOff, CheckCircle2, MapPin } from 'lucide-react';
 import { clsx } from 'clsx';
 import { requestNotificationPermission } from '../../firebase';
 
@@ -19,6 +19,7 @@ export default function Settings() {
   const [name, setName] = useState(profile?.displayName || '');
   const [email, setEmail] = useState(profile?.email?.endsWith('@moviznow.com') ? '' : (profile?.email || ''));
   const [phone, setPhone] = useState(profile?.phone || '');
+  const [city, setCity] = useState(profile?.city || '');
   const [showPhoneWarning, setShowPhoneWarning] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -59,6 +60,7 @@ export default function Settings() {
         displayName: name,
         email: email,
         phone: phone,
+        city: city,
       }, newPassword || undefined);
       setSuccess(t('Profile updated successfully'));
       setCurrentPassword('');
@@ -116,6 +118,37 @@ export default function Settings() {
                       placeholder="Your name"
                     />
                   </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">{t('City')}</label>
+                  <div className="relative">
+                    <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400" />
+                    <input
+                      type="text"
+                      value={city}
+                      onChange={(e) => {
+                        setCity(e.target.value);
+                        setError('');
+                      }}
+                      disabled={!!profile?.city}
+                      className={clsx(
+                        "w-full border rounded-xl pl-10 pr-4 py-2.5 focus:outline-none transition-colors",
+                        profile?.city 
+                          ? "bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-800 text-zinc-500 cursor-not-allowed opacity-70"
+                          : "bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 focus:border-emerald-500"
+                      )}
+                      placeholder={t('Enter your city')}
+                    />
+                  </div>
+                  {profile?.city ? (
+                    <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      {t('City cannot be changed once set.')}
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-[10px] text-zinc-500 dark:text-zinc-400">
+                      {t('You can only set your city once.')}
+                    </p>
+                  )}
                 </div>
 
                 <div>

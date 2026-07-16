@@ -428,7 +428,15 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                     </div>
                     
                     <div>
-                      <label className="block text-xs font-medium text-zinc-500 mb-1" title="Leave empty for auto highest order (top)">Order</label>
+                      <label className="block text-xs font-medium text-zinc-500 mb-1">Release Year</label>
+                      <input type="number" value={year || ''} onChange={(e) => setYear(parseInt(e.target.value) || new Date().getFullYear())} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-emerald-500" />
+                    </div>
+                  </div>
+                  
+                  {/* 3. Order+ Fetch +Master Fetch */}
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-500 mb-1" title="Leave empty for auto highest order (top)">Order</label>
+                    <div className="flex gap-2">
                       <input 
                         type="number" 
                         value={order} 
@@ -436,14 +444,6 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                         placeholder="Auto"
                         className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-emerald-500" 
                       />
-                    </div>
-                  </div>
-                  
-                  {/* 3. Release Year+ Fetch +Master Fetch */}
-                  <div>
-                    <label className="block text-xs font-medium text-zinc-500 mb-1">Release Year</label>
-                    <div className="flex gap-2">
-                      <input type="number" value={year || ''} onChange={(e) => setYear(parseInt(e.target.value) || new Date().getFullYear())} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-emerald-500" />
                       <button type="button" onClick={() => setIsLinkCheckerOpen(true)} className="bg-emerald-500 hover:bg-emerald-600 text-white px-2 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-2 whitespace-nowrap" title="Add Links via Link Checker">
                         <RefreshCw className="w-3.5 h-3.5" />
                         Add Links

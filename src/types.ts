@@ -16,6 +16,7 @@ export interface UserProfile {
   role: Role;
   status: Status;
   phone?: string;
+  city?: string;
   expiryDate?: string; // ISO string
   assignedContent?: string[]; // Content IDs
   watchLater?: string[];
@@ -24,6 +25,7 @@ export interface UserProfile {
   createdAt: string;
   sessionsCount?: number;
   timeSpent?: number; // in seconds
+  preferredLanguage?: string; // e.g. 'en', 'ur', 'ur-roman'
   lastNotificationCheck?: string; // ISO string
   permissions?: string[]; // Specific management access
   managedBy?: string; // UID of the User Manager who added this user
@@ -255,6 +257,7 @@ export interface AppSettings {
   isMaintenanceModeEnabled?: boolean;
   maintenanceMessage?: string;
   maintenanceEndTime?: string; // ISO string
+  whatsappChannelLink?: string;
   serviceAccounts?: {
     sourceKey?: string;
     targets?: {

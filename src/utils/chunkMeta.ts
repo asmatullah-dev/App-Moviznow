@@ -58,7 +58,7 @@ export const getChunkMeta = async (forceRefresh = false) => {
         const shiftedTimeInternal = new Date(nowInternal + (5 - 7) * 60 * 60 * 1000);
         const periodInternal = `${shiftedTimeInternal.getUTCFullYear()}-${shiftedTimeInternal.getUTCMonth() + 1}-${shiftedTimeInternal.getUTCDate()}`;
         safeStorage.setItem('last_chunk_meta_period', periodInternal);
-
+        
         chunkMetaPromise = null; // Clear the inflight promise
         return data;
       })
@@ -69,4 +69,11 @@ export const getChunkMeta = async (forceRefresh = false) => {
       });
   }
   return chunkMetaPromise;
+};
+
+export const clearChunkMetaCache = () => {
+  chunkMetaPromise = null;
+  memoryCache = null;
+  safeStorage.removeItem('cached_chunk_meta_doc');
+  safeStorage.removeItem('last_chunk_meta_period');
 };

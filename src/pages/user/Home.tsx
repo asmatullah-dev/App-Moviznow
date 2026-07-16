@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 
 import { Content, Role, Collection as AppCollection } from "../../types";
 import { motion, AnimatePresence } from "framer-motion";
@@ -11,6 +11,7 @@ import { usePWA } from "../../contexts/PWAContext";
 import { standardizePhone } from "../../contexts/AuthContext";
 import {
   Film,
+  Phone,
   Search,
   Filter,
   MessageCircle,
@@ -31,6 +32,7 @@ import {
   Zap,
   AlertCircle,
 } from "lucide-react";
+import { Helmet } from "react-helmet";
 import { clsx } from "clsx";
 import { format } from "date-fns";
 import ConfirmModal from "../../components/ConfirmModal";
@@ -51,6 +53,9 @@ import { CartButton } from "../../components/CartButton";
 import { ThemeToggle } from "../../components/ThemeToggle";
 import { useSettings } from "../../contexts/SettingsContext";
 import { useHaptics } from "../../hooks/useHaptics";
+
+import { Header } from "../../components/Header";
+import { PageTransition } from "../../components/PageTransition";
 
 export default function Home({
   onOpenMediaModal,
@@ -80,6 +85,16 @@ export default function Home({
   const { settings } = useSettings();
   const { isInstallable, installApp } = usePWA();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  useEffect(() => {
+    const typeParam = searchParams.get("type");
+    if (typeParam === "movie" || typeParam === "series") {
+      setSelectedType(typeParam);
+    } else if (typeParam === "all" || typeParam === "" || typeParam === null) {
+      setSelectedType("");
+    }
+  }, [searchParams]);
+
 
   const [search, setSearch] = useState(
     () => sessionStorage.getItem("home_search") || "",
@@ -514,70 +529,22 @@ export default function Home({
 
   return (
     <div className="min-h-screen bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white flex flex-col transition-colors duration-300">
-      {/* Header */}
-      <header className="sticky top-0 z-40 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 transition-colors duration-300">
-        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2">
-            <div className="flex items-center gap-2">
-              <img
-                src="/Blacklogo.svg"
-                alt="Logo"
-                className="w-auto h-8 block dark:hidden"
-              />
-              <img
-                src="/Whitelogo.svg"
-                alt="Logo"
-                className="w-auto h-8 hidden dark:block"
-              />
-            </div>
-            <span className="text-xl font-bold tracking-tight text-emerald-500 whitespace-nowrap">
-              {settings?.headerText || "MovizNow"}
-            </span>
-          </Link>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className={clsx(
-                "w-8 h-8 rounded-full flex items-center justify-center transition-colors border",
-                hasAnyFilter
-                  ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20 hover:bg-emerald-500/20"
-                  : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 border-transparent",
-              )}
-              title="Search and Filters"
-            >
-              <Search className="w-4 h-4" />
-            </button>
-            {hasAnyFilter && (
-              <button
-                onClick={clearFilters}
-                className="w-8 h-8 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center border border-red-500/20 hover:bg-red-500/20 transition-colors"
-                title="Clear Filters"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            )}
-            {isInstallable && (
-              <button
-                onClick={installApp}
-                className="w-8 h-8 rounded-full bg-emerald-500/10 text-emerald-500 flex items-center justify-center border border-emerald-500/20 hover:bg-emerald-500/20 transition-colors"
-                title="Install App"
-              >
-                <Download className="w-4 h-4" />
-              </button>
-            )}
-            <AdminButtons profile={profile} />
-            <NotificationMenu />
-            <CartButton />
-            <UserProfileMenu
-              onOpenLogoutModal={() => setIsLogoutModalOpen(true)}
-            />
-          </div>
-        </div>
-      </header>
+      <Helmet>
+        <title>{settings?.headerText || "MovizNow"} - {t("Home")}</title>
+      </Helmet>
+      <Header 
+        showSearchAndFilters={true}
+        showFilters={showFilters}
+        setShowFilters={setShowFilters}
+        hasAnyFilter={hasAnyFilter}
+        clearFilters={clearFilters}
+        setIsLogoutModalOpen={setIsLogoutModalOpen}
+        showBackButton={false}
+      />
 
       {/* Main Content */}
-      <main className="flex-1 max-w-7xl mx-auto w-full px-4 pt-4 pb-8">
+      <PageTransition className="flex-1 w-full">
+      <main className="max-w-7xl mx-auto w-full px-4 pt-4 pb-8">
         {/* Status Banner */}
         {profile?.status === "pending" && (
           <div className="bg-yellow-500/10 border border-yellow-500 text-yellow-600 dark:text-yellow-500 p-4 sm:p-6 rounded-2xl mb-8 flex flex-row items-center justify-between gap-4 sm:gap-8">
@@ -1192,6 +1159,7 @@ export default function Home({
           </>
         )}
       </main>
+      </PageTransition>
 
       {/* Footer */}
       {settings?.isAdminContactEnabled !== false && (
@@ -1219,6 +1187,19 @@ export default function Home({
             <MessageCircle className="w-4 h-4" /> WhatsApp:{" "}
             {standardizePhone(settings?.supportNumber || "3363284466")}
           </button>
+          
+          {settings?.whatsappChannelLink && (
+            <div className="mt-4">
+              <a
+                href={settings.whatsappChannelLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 bg-[#25D366] text-white px-4 py-2 rounded-full font-medium hover:bg-[#20b858] transition-colors shadow-sm"
+              >
+                <MessageCircle className="w-4 h-4" /> Join our WhatsApp Channel
+              </a>
+            </div>
+          )}
         </footer>
       )}
 

@@ -43,6 +43,7 @@ export default function UserManagement() {
   const [sortField, setSortField] = useState<SortField>(() => (sessionStorage.getItem('user_mgmt_sort_field') as any) || 'createdAt');
   const [sortOrder, setSortOrder] = useState<SortOrder>(() => (sessionStorage.getItem('user_mgmt_sort_order') as any) || 'desc');
   const [filterRole, setFilterRole] = useState<Role | 'all'>(() => (sessionStorage.getItem('user_mgmt_role') as any) || 'all');
+  const [filterLanguage, setFilterLanguage] = useState<string>(() => sessionStorage.getItem('user_mgmt_lang') || 'all');
   const [filterStatus, setFilterStatus] = useState<Status | 'all'>(() => (sessionStorage.getItem('user_mgmt_status') as any) || 'all');
 
   useEffect(() => {
@@ -51,7 +52,8 @@ export default function UserManagement() {
     sessionStorage.setItem('user_mgmt_sort_order', sortOrder);
     sessionStorage.setItem('user_mgmt_role', filterRole);
     sessionStorage.setItem('user_mgmt_status', filterStatus);
-  }, [searchTerm, sortField, sortOrder, filterRole, filterStatus]);
+    sessionStorage.setItem('user_mgmt_lang', filterLanguage);
+  }, [searchTerm, sortField, sortOrder, filterRole, filterStatus, filterLanguage]);
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
 
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
@@ -71,7 +73,7 @@ export default function UserManagement() {
   // Add User State
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
   const [isWhitelistModalOpen, setIsWhitelistModalOpen] = useState(false);
-  const [newUserForm, setNewUserForm] = useState({ email: '', phone: '', displayName: '', role: 'user' as Role, status: 'pending' as 'pending' | 'active', expiryDate: '' });
+  const [newUserForm, setNewUserForm] = useState({ email: '', phone: '', displayName: '', city: '', role: 'user' as Role, status: 'pending' as 'pending' | 'active', expiryDate: '' });
   const [foundUser, setFoundUser] = useState<UserProfile | null>(null);
   const [searchStatus, setSearchStatus] = useState<'idle' | 'searching' | 'found' | 'not_found'>('idle');
   const [managers, setManagers] = useState<Record<string, string>>({});
@@ -377,14 +379,15 @@ export default function UserManagement() {
   };
 
   const handleEdit = (user: UserProfile) => {
-    if (user.role === 'owner') return;
-    if (user.uid === profile?.uid) return; // Owner cannot edit themselves
+    if (user.role === 'owner' && user.uid !== profile?.uid) return; // Cannot edit owner unless it's yourself
     setSelectedUser(user);
     setEditingId(user.uid);
+    setIsEditingOverlay(true);
     setEditForm({
       displayName: user.displayName || '',
       email: user.email || '',
       phone: user.phone || '',
+      city: user.city || '',
       expiryDate: user.expiryDate ? user.expiryDate.split('T')[0] : '',
       role: user.role,
       status: user.status,
@@ -448,6 +451,7 @@ export default function UserManagement() {
         permissions: editForm.permissions || [],
         dob: editForm.dob,
         gender: editForm.gender,
+        city: editForm.city,
       };
       
       // Update isUserManager flag to match role
@@ -944,10 +948,17 @@ export default function UserManagement() {
     result = result.filter(u => u.role !== 'owner');
     
     if (searchTerm) {
-      result = smartSearch(result, searchTerm, ['displayName', 'email', 'phone', 'uid']);
+      result = smartSearch(result, searchTerm, ['displayName', 'email', 'phone', 'uid', 'city', 'preferredLanguage', 'device.os', 'device.model', 'device.type'] as any);
     }
     if (filterRole !== 'all') {
       result = result.filter(u => u.role === filterRole);
+    }
+    if (filterLanguage !== 'all') {
+      if (filterLanguage === 'none') {
+        result = result.filter(u => !u.preferredLanguage);
+      } else {
+        result = result.filter(u => u.preferredLanguage === filterLanguage);
+      }
     }
     if (filterStatus !== 'all') {
       result = result.filter(u => u.status === filterStatus);
@@ -1009,7 +1020,7 @@ export default function UserManagement() {
     }
 
     return result;
-  }, [users, searchTerm, filterRole, filterStatus, sortField, sortOrder]);
+  }, [users, searchTerm, filterRole, filterStatus, filterLanguage, sortField, sortOrder]);
 
   const handleAddUser = async () => {
     if (!foundUser && !newUserForm.phone && !newUserForm.email) {
@@ -1025,7 +1036,8 @@ export default function UserManagement() {
           managedBy: profile?.uid,
           role: newUserForm.role,
           status: newUserForm.status,
-          displayName: newUserForm.displayName || foundUser.displayName
+          displayName: newUserForm.displayName || foundUser.displayName,
+          city: newUserForm.city || foundUser.city
         };
         
         if (newUserForm.expiryDate) {
@@ -1068,6 +1080,7 @@ export default function UserManagement() {
             email: emailToMatch,
             phone: standardizedPhone,
             displayName: newUserForm.displayName || '',
+            city: newUserForm.city || '',
             role: newUserForm.role,
             status: newUserForm.status,
             hasPassword: false,
@@ -1094,7 +1107,7 @@ export default function UserManagement() {
       }
       
       setIsAddUserModalOpen(false);
-      setNewUserForm({ email: '', phone: '', displayName: '', role: 'user', status: 'pending', expiryDate: '' });
+      setNewUserForm({ email: '', phone: '', displayName: '', city: '', role: 'user', status: 'pending', expiryDate: '' });
       setFoundUser(null);
       setSearchStatus('idle');
       if (foundUser) {
@@ -1239,13 +1252,25 @@ export default function UserManagement() {
                 <option value="pending">Pending</option>
                 <option value="expired">Expired</option>
               </select>
+              <select
+                value={filterLanguage}
+                onChange={(e) => setFilterLanguage(e.target.value)}
+                className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 focus:outline-none focus:border-emerald-500 min-w-[120px] text-xs"
+              >
+                <option value="all">All Languages</option>
+                <option value="en">English</option>
+                <option value="ur">Urdu</option>
+                <option value="ur-roman">Roman Urdu</option>
+                <option value="none">No Language</option>
+              </select>
               
-              {(searchTerm || filterRole !== 'all' || filterStatus !== 'all' || sortField !== 'createdAt' || sortOrder !== 'desc') && (
+              {(searchTerm || filterRole !== 'all' || filterStatus !== 'all' || filterLanguage !== 'all' || sortField !== 'createdAt' || sortOrder !== 'desc') && (
                 <button
                   onClick={() => {
                     setSearchTerm('');
                     setFilterRole('all');
                     setFilterStatus('all');
+                    setFilterLanguage('all');
                     setSortField('createdAt');
                     setSortOrder('desc');
                   }}
@@ -1319,13 +1344,14 @@ export default function UserManagement() {
                       )}
                       <div className="min-w-0 flex-1">
                         <div className="font-medium text-zinc-900 dark:text-white flex items-center gap-2 truncate">
-                          {user.displayName || 'No Name'}
+                          {user.displayName || 'No Name'} {user.city && <span className="text-zinc-500 font-normal">({user.city})</span>}
                         </div>
                         <div className="text-zinc-500 dark:text-zinc-400 text-xs mt-0.5 truncate" title={user.email}>{user.email}</div>
                         <div className="text-zinc-500 text-xs mt-0.5 flex items-center gap-1 truncate">
                           <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
                           {user.phone || 'No phone'}
                         </div>
+
                       </div>
                     </div>
                   </td>
@@ -1455,14 +1481,26 @@ export default function UserManagement() {
             <div className="overflow-y-auto flex-1">
               {isEditingOverlay ? (
                 <div className="p-4 md:p-6 space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">Name</label>
-                    <input
-                      type="text"
-                      value={editForm.displayName || ''}
-                      onChange={(e) => setEditForm({ ...editForm, displayName: e.target.value })}
-                      className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2 focus:outline-none focus:border-emerald-500"
-                    />
+                  <div className="flex gap-4">
+                    <div className="flex-1">
+                      <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">Name</label>
+                      <input
+                        type="text"
+                        value={editForm.displayName || ''}
+                        onChange={(e) => setEditForm({ ...editForm, displayName: e.target.value })}
+                        className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2 focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">City</label>
+                      <input
+                        type="text"
+                        value={editForm.city || ''}
+                        onChange={(e) => setEditForm({ ...editForm, city: e.target.value })}
+                        className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2 focus:outline-none focus:border-emerald-500"
+                        placeholder="Enter city"
+                      />
+                    </div>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">Email</label>
@@ -1483,13 +1521,15 @@ export default function UserManagement() {
                       className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
+
                   <div className="flex items-center gap-2">
                     <div className="flex-1">
                       <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Role</label>
                       <select
                         value={editForm.role}
                         onChange={(e) => setEditForm({ ...editForm, role: e.target.value as Role })}
-                        className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                        disabled={selectedUser.uid === profile?.uid}
+                        className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500 disabled:opacity-50"
                       >
                         <option value="user">User</option>
                         <option value="trial">Trial</option>
@@ -1509,7 +1549,8 @@ export default function UserManagement() {
                       <select
                         value={editForm.status || 'active'}
                         onChange={(e) => setEditForm({ ...editForm, status: e.target.value as Status })}
-                        className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                        disabled={selectedUser.uid === profile?.uid}
+                        className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500 disabled:opacity-50"
                       >
                         <option value="active">Active</option>
                         <option value="pending">Pending</option>
@@ -1525,7 +1566,8 @@ export default function UserManagement() {
                         type="date"
                         value={editForm.expiryDate || ''}
                         onChange={(e) => setEditForm({ ...editForm, expiryDate: e.target.value })}
-                        className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                        disabled={selectedUser.uid === profile?.uid}
+                        className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500 disabled:opacity-50"
                       />
                     </div>
                   </div>
@@ -1566,7 +1608,10 @@ export default function UserManagement() {
                       </div>
                     )}
                     <div>
-                      <h3 className="text-lg font-bold text-zinc-900 dark:text-white">{selectedUser.displayName || 'No Name'}</h3>
+                      <h3 className="text-lg font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+                        {selectedUser.displayName || 'No Name'} 
+                      </h3>
+                      {selectedUser.city && <p className="text-zinc-600 dark:text-zinc-300 font-medium text-sm">{selectedUser.city}</p>}
                       <p className="text-zinc-500 dark:text-zinc-400 text-sm">{selectedUser.email?.endsWith('@moviznow.com') ? 'No Email' : selectedUser.email}</p>
                       <p className="text-zinc-500 dark:text-zinc-400 text-sm">{selectedUser.phone || 'No WhatsApp Number'}</p>
                       <p className="text-zinc-500 dark:text-zinc-400 mt-1 font-mono text-[10px] break-all border border-zinc-200 dark:border-zinc-800 rounded px-1.5 py-0.5 inline-block">ID: {selectedUser.uid}</p>
@@ -1578,6 +1623,12 @@ export default function UserManagement() {
                             `${selectedUser.device.os} - ${selectedUser.device.model} (${selectedUser.device.type || 'desktop'})`
                           ) : 'N/A'}
                         </div>
+                        {selectedUser.preferredLanguage && (
+                          <div className="text-xs text-zinc-600 dark:text-zinc-400">
+                            <span className="font-semibold text-zinc-900 dark:text-zinc-200">Language:</span>{' '}
+                            {selectedUser.preferredLanguage === 'en' ? 'English' : selectedUser.preferredLanguage === 'ur' ? 'Urdu' : selectedUser.preferredLanguage === 'ur-roman' ? 'Roman Urdu' : selectedUser.preferredLanguage}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -2023,7 +2074,7 @@ export default function UserManagement() {
                   >
                     Send Reminder
                   </Button>
-                  {selectedUser.role !== 'owner' && (
+                  {(selectedUser.role !== 'owner' || selectedUser.uid === profile?.uid) && (
                     <Button
                       onClick={() => {
                         handleEdit(selectedUser);
@@ -2258,14 +2309,25 @@ export default function UserManagement() {
                           placeholder="user@example.com"
                         />
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">Display Name</label>
-                        <input
-                          type="text"
-                          value={newUserForm.displayName}
-                          onChange={(e) => setNewUserForm({ ...newUserForm, displayName: e.target.value })}
-                          className="w-full p-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent"
-                        />
+                      <div className="flex gap-4">
+                        <div className="flex-1">
+                          <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">Display Name</label>
+                          <input
+                            type="text"
+                            value={newUserForm.displayName}
+                            onChange={(e) => setNewUserForm({ ...newUserForm, displayName: e.target.value })}
+                            className="w-full p-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent"
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">City</label>
+                          <input
+                            type="text"
+                            value={newUserForm.city}
+                            onChange={(e) => setNewUserForm({ ...newUserForm, city: e.target.value })}
+                            className="w-full p-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent"
+                          />
+                        </div>
                       </div>
                     </>
                   )}
