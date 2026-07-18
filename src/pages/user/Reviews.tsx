@@ -83,6 +83,11 @@ export default function Reviews() {
     if (!profile) return alert('Please login to review');
     if (!text.trim()) return;
     
+    const userReviewsCount = reviews.filter(r => r.userId === profile.uid).length;
+    if (userReviewsCount >= 2) {
+      return alert('You can only post up to 2 reviews.');
+    }
+    
     setSubmitting(true);
     // Update user city if provided
     if (city.trim() && !profile.city) {
@@ -108,6 +113,7 @@ export default function Reviews() {
       const updatedReviews = [newReview, ...reviews];
       setReviews(updatedReviews);
       safeStorage.setItem(CACHE_KEY, JSON.stringify(updatedReviews));
+      safeStorage.setItem('has_rated', 'true');
       setText('');
       setRating(5);
       setCity('');
@@ -170,7 +176,7 @@ export default function Reviews() {
           </p>
         </div>
 
-        {profile && (
+        {profile && reviews.filter(r => r.userId === profile.uid).length < 2 && (
           <form onSubmit={handleSubmit} className="bg-zinc-50 dark:bg-zinc-900 p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 mb-12">
             <h3 className="font-bold text-lg mb-4">{t("Write a Review")}</h3>
             <div className="flex gap-2 mb-4">

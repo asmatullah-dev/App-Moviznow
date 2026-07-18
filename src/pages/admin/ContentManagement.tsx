@@ -1707,7 +1707,7 @@ export default function ContentManagement() {
           // Full season
           const isZip =
             link.isFullSeasonZIP ||
-            (link.url && link.url.toLowerCase().includes(".zip"));
+            (!link.isFullSeasonMKV && link.url && link.url.toLowerCase().includes(".zip"));
 
           const updatedSeason = { ...updatedSeasons[seasonIdx] };
           const targetLinks = isZip
@@ -1956,16 +1956,17 @@ export default function ContentManagement() {
                   getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
               );
             } else {
-              if (l.isFullSeasonMKV) {
-                if (!s.mkvLinks) s.mkvLinks = [];
-                s.mkvLinks.push(l);
-                s.mkvLinks.sort(
+              const isZip = l.isFullSeasonZIP || (!l.isFullSeasonMKV && l.url && l.url.toLowerCase().includes(".zip"));
+              if (isZip) {
+                s.zipLinks.push(l);
+                s.zipLinks.sort(
                   (a, b) =>
                     getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
                 );
               } else {
-                s.zipLinks.push(l);
-                s.zipLinks.sort(
+                if (!s.mkvLinks) s.mkvLinks = [];
+                s.mkvLinks.push(l);
+                s.mkvLinks.sort(
                   (a, b) =>
                     getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
                 );

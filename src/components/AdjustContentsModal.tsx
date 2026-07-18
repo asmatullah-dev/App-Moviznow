@@ -185,7 +185,23 @@ export const AdjustContentsModal: React.FC<Props> = ({ isOpen, onClose, contentL
   const visibleItems = filteredItems.slice(0, visibleCount);
 
   const handleOrderChange = useCallback((id: string, newOrder: number) => {
-    setItems(prev => prev.map(item => item.id === id ? { ...item, order: newOrder } : item));
+    setItems(prev => {
+        const newItems = prev.map(item => item.id === id ? { ...item, order: newOrder } : item);
+        const sorted = newItems.sort((a, b) => {
+            if (a.order !== undefined && b.order !== undefined) return b.order - a.order;
+            if (a.order === undefined && b.order !== undefined) return 1;
+            if (a.order !== undefined && b.order === undefined) return -1;
+            return 0;
+        });
+
+        for (let i = sorted.length - 2; i >= 0; i--) {
+            if ((sorted[i].order || 0) <= (sorted[i + 1].order || 0)) {
+                sorted[i] = { ...sorted[i], order: (sorted[i + 1].order || 0) + 1 };
+            }
+        }
+        
+        return sorted;
+    });
   }, []);
 
   const toggleSelection = useCallback((id: string, event: React.MouseEvent) => {
@@ -237,42 +253,50 @@ export const AdjustContentsModal: React.FC<Props> = ({ isOpen, onClose, contentL
         const itemsRemovedBeforeDest = prev.slice(0, destination.index).filter(item => movedIds.includes(item.id)).length;
         const finalInsertIndex = Math.max(0, destination.index - itemsRemovedBeforeDest);
         
-        // Calculate new orders for multi-select
         let baseOrder = 0;
-        if (finalInsertIndex === 0) {
-            baseOrder = (otherItems[0]?.order || 0) + (itemsToMove.length * 10);
-        } else if (finalInsertIndex === otherItems.length) {
-            baseOrder = (otherItems[otherItems.length - 1]?.order || 0) - 10;
+        if (finalInsertIndex === otherItems.length) {
+            baseOrder = (otherItems[otherItems.length - 1]?.order || itemsToMove.length) - itemsToMove.length;
         } else {
-            const prevOrder = otherItems[finalInsertIndex - 1].order || 0;
-            const nextOrder = otherItems[finalInsertIndex].order || 0;
-            baseOrder = Math.floor((prevOrder + nextOrder) / 2) + Math.floor(itemsToMove.length / 2);
+            baseOrder = (otherItems[finalInsertIndex].order || 0) + 1;
         }
-        
+
         const updatedItemsToMove = itemsToMove.map((item, idx) => ({
             ...item,
-            order: baseOrder - idx
+            order: baseOrder + itemsToMove.length - 1 - idx
         }));
 
         otherItems.splice(finalInsertIndex, 0, ...updatedItemsToMove);
+
+        for (let i = finalInsertIndex - 1; i >= 0; i--) {
+            if ((otherItems[i].order || 0) <= (otherItems[i + 1].order || 0)) {
+                otherItems[i] = { ...otherItems[i], order: (otherItems[i + 1].order || 0) + 1 };
+            } else {
+                break;
+            }
+        }
         return otherItems;
       } else {
         // Single item move
         const [reorderedItem] = newItems.splice(source.index, 1);
         
         let newOrder = 0;
-        if (destination.index === 0) {
-            newOrder = (newItems[0]?.order || 0) + 10;
-        } else if (destination.index === newItems.length) {
-            newOrder = (newItems[newItems.length - 1]?.order || 0) - 10;
+        if (destination.index === newItems.length) {
+            newOrder = (newItems[newItems.length - 1]?.order || 1) - 1;
         } else {
-            const prevOrder = newItems[destination.index - 1].order || 0;
-            const nextOrder = newItems[destination.index].order || 0;
-            newOrder = Math.floor((prevOrder + nextOrder) / 2);
+            newOrder = (newItems[destination.index].order || 0) + 1;
         }
         
         const updatedItem = { ...reorderedItem, order: newOrder };
         newItems.splice(destination.index, 0, updatedItem);
+        
+        for (let i = destination.index - 1; i >= 0; i--) {
+            if ((newItems[i].order || 0) <= (newItems[i + 1].order || 0)) {
+                newItems[i] = { ...newItems[i], order: (newItems[i + 1].order || 0) + 1 };
+            } else {
+                break;
+            }
+        }
+        
         setSelectedIds([draggableId]);
         return newItems;
       }
@@ -291,6 +315,7 @@ export const AdjustContentsModal: React.FC<Props> = ({ isOpen, onClose, contentL
       });
       
       if (itemsToUpdate.length === 0) {
+        setSaving(false);
         onClose();
         return;
       }
@@ -302,8 +327,9 @@ export const AdjustContentsModal: React.FC<Props> = ({ isOpen, onClose, contentL
       
       // We only update the order in memory, and let Context debounce-save it to search index
       // We do NOT save the order back to chunks to save massive bandwidth.
-      updateOrder(updates);
+      await updateOrder(updates);
       
+      setSaving(false);
       onClose();
     } catch (error) {
       console.error("Error saving content order:", error);

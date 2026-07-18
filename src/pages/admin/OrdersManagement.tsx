@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
-import { collection, query, orderBy, doc, updateDoc, getDoc, arrayUnion, deleteDoc, writeBatch, getDocs } from 'firebase/firestore';
+import { collection, query, orderBy, doc, updateDoc, getDoc, arrayUnion, deleteDoc, writeBatch } from 'firebase/firestore';
 import { Order, UserProfile } from '../../types';
 import { Check, X, Clock, Search, Filter, Eye, Loader2, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';

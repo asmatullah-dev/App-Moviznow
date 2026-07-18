@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../firebase';
-import { collection, onSnapshot, query, where, doc, updateDoc, getDocs, writeBatch } from 'firebase/firestore';
+import { writeBatch, doc } from 'firebase/firestore';
 import { UserProfile, Role } from '../../types';
 import { Users, ChevronRight, Search, X, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
-import { collection, doc, updateDoc, getDoc, onSnapshot, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit, deleteField } from 'firebase/firestore';
+import { collection, doc, updateDoc, getDoc, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit, deleteField } from 'firebase/firestore';
 import { UserProfile, Role, Status, AnalyticsEvent, Content } from '../../types';
 import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, Bell, RefreshCw, Link2 as LinkIcon } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
@@ -22,6 +22,7 @@ import { PhoneWhitelistManager } from '../../components/PhoneWhitelistManager';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { useUsers } from '../../contexts/UsersContext';
+import { fetchReviewsFromChunks } from '../../utils/chunkUtils';
 
 type SortField = 'createdAt' | 'displayName' | 'phone' | 'expiryDate' | 'lastActive';
 type SortOrder = 'asc' | 'desc';
@@ -29,7 +30,7 @@ type SortOrder = 'asc' | 'desc';
 export default function UserManagement() {
   const { profile, findUsersByEmailOrPhone } = useAuth();
   const { settings } = useSettings();
-  const { contentList } = useContent();
+  const { contentList, updateContentFields } = useContent();
   const location = useLocation();
   const navigate = useNavigate();
   const searchParams = new URLSearchParams(location.search);
@@ -78,6 +79,28 @@ export default function UserManagement() {
   const [searchStatus, setSearchStatus] = useState<'idle' | 'searching' | 'found' | 'not_found'>('idle');
   const [managers, setManagers] = useState<Record<string, string>>({});
   const [processing, setProcessing] = useState<Record<string, boolean>>({});
+  const [userReviews, setUserReviews] = useState<Record<string, {rating: number, text: string}[]>>({});
+
+  useEffect(() => {
+    const loadReviews = async () => {
+      try {
+        const data = await fetchReviewsFromChunks(true);
+        const reviewMap: Record<string, {rating: number, text: string}[]> = {};
+        data.forEach(r => {
+          if (r.userId) {
+            if (!reviewMap[r.userId]) {
+              reviewMap[r.userId] = [];
+            }
+            reviewMap[r.userId].push({ rating: r.rating, text: r.text });
+          }
+        });
+        setUserReviews(reviewMap);
+      } catch (e) {
+        console.error("Failed to fetch reviews", e);
+      }
+    };
+    loadReviews();
+  }, []);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
@@ -880,23 +903,17 @@ export default function UserManagement() {
         });
       }
 
-      // Re-assign any content they added (for Content Management Tab) - WORKING WITH CHUNKS
-      const chunksSnapshot = await getDocs(collection(db, 'content_chunks'));
-      for (const chunkDoc of chunksSnapshot.docs) {
-        const items = chunkDoc.data().items as Record<string, Content>;
-        let chunkChanged = false;
-        const updatedItems = { ...items };
-
-        Object.keys(updatedItems).forEach(contentId => {
-          if (updatedItems[contentId].addedBy === user2.uid) {
-            updatedItems[contentId].addedBy = user1.uid;
-            chunkChanged = true;
-          }
-        });
-
-        if (chunkChanged) {
-          batch.update(chunkDoc.ref, { items: updatedItems });
-        }
+      // Re-assign any content they added (for Content Management Tab)
+      const contentUpdates = contentList
+        .filter(c => c.addedBy === user2.uid)
+        .map(c => ({
+          id: c.id,
+          chunkId: c.chunkId,
+          fields: { addedBy: user1.uid }
+        }));
+        
+      if (contentUpdates.length > 0) {
+        await updateContentFields(contentUpdates);
       }
 
       await batch.commit();
@@ -1698,6 +1715,25 @@ export default function UserManagement() {
                       </div>
                     </div>
 
+                    {userReviews[selectedUser.uid] && userReviews[selectedUser.uid].length > 0 && (
+                      <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 flex flex-col gap-3">
+                        {userReviews[selectedUser.uid].map((rev, idx) => (
+                          <div key={idx} className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2">
+                              <div className="text-zinc-500 text-[10px] uppercase font-bold">App Rating:</div>
+                              <div className="flex text-yellow-400">
+                                {Array.from({ length: 5 }).map((_, i) => (
+                                  <svg key={i} className={`w-4 h-4 ${i < rev.rating ? "fill-yellow-400" : "text-zinc-300 dark:text-zinc-700"}`} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+                                ))}
+                              </div>
+                            </div>
+                            {rev.text && (
+                              <p className="text-xs text-zinc-600 dark:text-zinc-300 italic">"{rev.text}"</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {selectedUser.permissions && selectedUser.permissions.length > 0 && (
                       <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
                         <div className="text-zinc-500 text-[10px] uppercase font-bold mb-1">Management Access</div>

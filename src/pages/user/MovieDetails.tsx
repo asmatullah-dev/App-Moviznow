@@ -164,6 +164,7 @@ export default function MovieDetails() {
   const [isPosterExpanded, setIsPosterExpanded] = useState(false);
   const [isTrailerPopupOpen, setIsTrailerPopupOpen] = useState(false);
   const [isTrailerSelectionOpen, setIsTrailerSelectionOpen] = useState(false);
+  const [showRatePrompt, setShowRatePrompt] = useState(false);
   const [shareResultModal, setShareResultModal] = useState<{
     isOpen: boolean;
     text: string;
@@ -1748,6 +1749,33 @@ export default function MovieDetails() {
     }
   };
 
+  const trackStreamAndCheckRate = () => {
+    if (!profile) return;
+    const hasRated = safeStorage.getItem('has_rated') === 'true';
+    if (hasRated) return;
+
+    let streamedContentIds = [];
+    try {
+      const stored = safeStorage.getItem('streamed_contents');
+      if (stored) {
+        streamedContentIds = JSON.parse(stored);
+      }
+    } catch (e) {}
+
+    if (mergedContent && !streamedContentIds.includes(mergedContent.id)) {
+      streamedContentIds.push(mergedContent.id);
+      safeStorage.setItem('streamed_contents', JSON.stringify(streamedContentIds));
+    }
+
+    if (streamedContentIds.length === 3) {
+      const promptShownFor = safeStorage.getItem('rate_prompt_shown_for');
+      if (promptShownFor !== '3') {
+        setTimeout(() => setShowRatePrompt(true), 1000);
+        safeStorage.setItem('rate_prompt_shown_for', '3');
+      }
+    }
+  };
+
   const handlePlayExternal = async (
     player: "vlc" | "mx" | "generic" | "download" | "browser",
   ) => {
@@ -1762,6 +1790,8 @@ export default function MovieDetails() {
         playerType: player,
       });
     }
+
+    trackStreamAndCheckRate();
 
     let urlToPlay = linkPopup.url;
 
@@ -2019,6 +2049,8 @@ export default function MovieDetails() {
         linkName: linkPopup.name,
       });
     }
+
+    trackStreamAndCheckRate();
 
     let url = linkPopup.url;
 
@@ -4235,6 +4267,21 @@ export default function MovieDetails() {
         </div>
       </Modal>
 
+      <ConfirmModal
+        isOpen={showRatePrompt}
+        title="Enjoying the App?"
+        message="It looks like you've been enjoying our app! Would you like to leave a review and let others know what you think?"
+        confirmText="Rate Now"
+        cancelText="Maybe Later"
+        onConfirm={() => {
+          setShowRatePrompt(false);
+          safeStorage.setItem('has_rated', 'true');
+          navigate('/reviews');
+        }}
+        onCancel={() => {
+          setShowRatePrompt(false);
+        }}
+      />
     </div>
   );
 }
