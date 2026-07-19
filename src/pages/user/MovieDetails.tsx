@@ -91,6 +91,7 @@ export default function MovieDetails() {
     toggleWatchLater: authToggleWatchLater,
     updateUserProfileData,
     refreshProfile,
+    isSyncing,
   } = useAuth();
   const { t, language, translateMany } = useLanguage();
   const {
@@ -106,9 +107,10 @@ export default function MovieDetails() {
     checkForUpdates,
   } = useContent();
   const { cart, addToCart } = useCart();
-  const { settings } = useSettings();
+  const { settings, refreshSettings } = useSettings();
   const [hasAttemptedGlobalRefresh, setHasAttemptedGlobalRefresh] =
     useState(false);
+  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
 
   const content = useMemo(() => {
     console.log("DEBUG: id=", id, "contentList length=", contentList.length);
@@ -1314,10 +1316,17 @@ export default function MovieDetails() {
     refreshProfile,
   ]);
 
-  if (loading || profileLoading) {
+  if (loading || profileLoading || isManualRefreshing) {
     return (
       <div className="min-h-screen bg-white dark:bg-zinc-950 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-emerald-500"></div>
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-emerald-500"></div>
+          {isManualRefreshing && (
+            <p className="text-sm font-medium text-zinc-500 animate-pulse">
+              {t("Refreshing content...")}
+            </p>
+          )}
+        </div>
       </div>
     );
   }
@@ -1341,13 +1350,49 @@ export default function MovieDetails() {
             </p>
           </div>
         ) : (
-          <div className="text-center space-y-4">
-            <h2 className="text-xl font-bold">
-              {t('Content not found or unavailable')}
-            </h2>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              {t('This content may have been removed or you don\'t have access to it.')}
-            </p>
+          <div className="text-center space-y-6 max-w-md">
+            <div className="space-y-4">
+              <h2 className="text-xl font-bold">
+                {t('Content not found or unavailable')}
+              </h2>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                {t('This content may have been removed or you don\'t have access to it.')}
+              </p>
+            </div>
+            
+            <div className="pt-4 flex flex-col gap-3">
+              <button
+                onClick={async () => {
+                  vibrate(50);
+                  setIsManualRefreshing(true);
+                  try {
+                    await Promise.all([
+                      checkForUpdates(true),
+                      refreshProfile(true, 'manual'),
+                      refreshSettings(true)
+                    ]);
+                    // Give a small delay for state to propagate
+                    await new Promise(resolve => setTimeout(resolve, 800));
+                  } catch (e) {
+                    console.error("Manual refresh failed", e);
+                  } finally {
+                    setIsManualRefreshing(false);
+                  }
+                }}
+                disabled={isSyncing || isManualRefreshing}
+                className="flex items-center justify-center gap-2 w-full px-6 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-600 disabled:bg-zinc-200 dark:disabled:bg-zinc-800 disabled:text-zinc-400 text-white font-semibold transition-all active:scale-95 shadow-lg shadow-emerald-500/20"
+              >
+                <RefreshCw className={clsx("w-5 h-5", (isSyncing || isManualRefreshing) && "animate-spin")} />
+                {(isSyncing || isManualRefreshing) ? t("Refreshing...") : t("Refresh App Data")}
+              </button>
+              
+              <Link
+                to="/"
+                className="text-sm font-medium text-zinc-500 hover:text-emerald-500 transition-colors"
+              >
+                {t('Go back to Home')}
+              </Link>
+            </div>
           </div>
         )}
       </div>
