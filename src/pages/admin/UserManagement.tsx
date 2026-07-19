@@ -1241,6 +1241,22 @@ export default function UserManagement() {
               </div>
             )}
             <div className="flex gap-2 flex-1 overflow-x-auto pb-1 md:pb-0 items-center">
+              {(searchTerm || filterRole !== 'all' || filterStatus !== 'all' || filterLanguage !== 'all' || sortField !== 'createdAt' || sortOrder !== 'desc') && (
+                <button
+                  onClick={() => {
+                    setSearchTerm('');
+                    setFilterRole('all');
+                    setFilterStatus('all');
+                    setFilterLanguage('all');
+                    setSortField('createdAt');
+                    setSortOrder('desc');
+                  }}
+                  className="p-1.5 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors shrink-0"
+                  title="Reset Filters & Sorting"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
               <select
                 value={filterRole}
                 onChange={(e) => setFilterRole(e.target.value as any)}
@@ -1280,23 +1296,6 @@ export default function UserManagement() {
                 <option value="ur-roman">Roman Urdu</option>
                 <option value="none">No Language</option>
               </select>
-              
-              {(searchTerm || filterRole !== 'all' || filterStatus !== 'all' || filterLanguage !== 'all' || sortField !== 'createdAt' || sortOrder !== 'desc') && (
-                <button
-                  onClick={() => {
-                    setSearchTerm('');
-                    setFilterRole('all');
-                    setFilterStatus('all');
-                    setFilterLanguage('all');
-                    setSortField('createdAt');
-                    setSortOrder('desc');
-                  }}
-                  className="p-1.5 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors shrink-0"
-                  title="Reset Filters & Sorting"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
             </div>
           </div>
         </div>

@@ -643,10 +643,10 @@ export async function rebuildAllChunks(contents: Content[]): Promise<number> {
 
 export async function fetchReviewsFromChunks(forceRefresh = false): Promise<any[]> {
   const meta = await getChunkMeta(forceRefresh);
-  const cachedVersion = safeStorage.getItem('cached_review_version');
-  const serverVersion = meta.reviews?.version?.toString();
+  const cachedVersion = safeStorage.getItem('cached_review_version') || '0';
+  const serverVersion = meta.reviews?.version?.toString() || '0';
   
-  if (!forceRefresh && cachedVersion === serverVersion && serverVersion) {
+  if (!forceRefresh && cachedVersion === serverVersion) {
     const cachedData = safeStorage.getItem('cached_reviews_data');
     if (cachedData) {
       try {
@@ -666,9 +666,7 @@ export async function fetchReviewsFromChunks(forceRefresh = false): Promise<any[
   allReviews.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   safeStorage.setItem('cached_reviews_data', JSON.stringify(allReviews));
-  if (serverVersion) {
-    safeStorage.setItem('cached_review_version', serverVersion);
-  }
+  safeStorage.setItem('cached_review_version', serverVersion);
   
   return allReviews;
 }

@@ -813,7 +813,7 @@ async function startServer() {
 
       if (hits.length === 0) {
         // Fallback: If no mdrive links, check for native hubcloud links just in case
-        const hubcloudMatch = text.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|hubdrive)\.[^"'\s<>\[\]]*/gi);
+        const hubcloudMatch = text.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|hubdrive|skymovies|moviesdrive|mdrive|filmygo)\.[^"'\s<>\[\]]*/gi);
         if (hubcloudMatch) {
            hubcloudMatch.forEach(hubUrl => {
               const cleanHubUrl = hubUrl.replace(/&amp;/g, '&');
@@ -1063,7 +1063,7 @@ async function startServer() {
           const fdlRes = await axios.get(fdlUrl, { headers, httpsAgent });
           const fdlText = fdlRes.data;
           
-          const hubcloudMatch = fdlText.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|hubdrive)\.[^"'\s<>\[\]]*/gi);
+          const hubcloudMatch = fdlText.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|hubdrive|skymovies|moviesdrive|mdrive|filmygo)\.[^"'\s<>\[\]]*/gi);
           if (hubcloudMatch) {
             const sizeMatch = fdlText.match(/Size:<\/span>\s*<span>([^<]+)<\/span>/i) || fdlText.match(/(\d+(?:\.\d+)?\s*(?:GB|MB|KB))/i);
             const size = sizeMatch ? sizeMatch[1].toUpperCase() : null;
@@ -1186,7 +1186,7 @@ async function startServer() {
           if (!hbRes.ok) return [];
           const hbText = await hbRes.text();
           
-          const hubcloudMatch = hbText.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|hubdrive)\.[^"'\s<>\[\]]*/gi);
+          const hubcloudMatch = hbText.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|hubdrive|skymovies|moviesdrive|mdrive|filmygo)\.[^"'\s<>\[\]]*/gi);
           if (hubcloudMatch) {
             const sizeMatch = hbText.match(/\[?(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\]?/i) || hbText.match(/Size:\s*([^<]+)/i);
             const size = sizeMatch ? (sizeMatch[1] || sizeMatch[2]).toUpperCase() : null;

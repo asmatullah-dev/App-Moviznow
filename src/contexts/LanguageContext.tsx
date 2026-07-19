@@ -190,6 +190,8 @@ const translations: Record<string, Record<Language, string>> = {
   'Web Series': { en: 'Web Series', 'ur-roman': 'Web Series', ur: 'ویب سیریز' },
   'Free Movies': { en: 'Free Movies', 'ur-roman': 'Muft Movies', ur: 'مفت موویز' },
   'Reviews': { en: 'Reviews', 'ur-roman': 'Reviews', ur: 'جائزے' },
+  'Rate our app': { en: 'Rate our app', 'ur-roman': 'Hamari app ko rate karein', ur: 'ہماری ایپ کو ریٹ کریں' },
+  'Check Reviews': { en: 'Check Reviews', 'ur-roman': 'Reviews Check Karein', ur: 'جائزے چیک کریں' },
   'About': { en: 'About', 'ur-roman': 'Hamare baaray mein', ur: 'ہمارے بارے میں' },
   'About Us': { en: 'About Us', 'ur-roman': 'Hamare baaray mein', ur: 'ہمارے بارے میں' },
   'Contact Us': { en: 'Contact Us', 'ur-roman': 'Ham se rabta karein', ur: 'ہم سے رابطہ کریں' },

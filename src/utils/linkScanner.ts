@@ -54,16 +54,9 @@ export function normalizeUrl(input: string) {
     const url = new URL(trimmed);
     const host = url.hostname.toLowerCase().replace(/^www\./, "");
 
-    // HubCloud/HubDrive normalization
-    if (host.includes('hubcould') || host.includes('hubcloud') || host.includes('vcloud') ) {
-      url.hostname = 'hubcloud.cx';
-      return url.toString().replace(/\/$/, "");
-    }
-    if (host.includes('hubdrive')) {
-      url.hostname = 'hubdrive.space';
-      return url.toString().replace(/\/$/, "");
-    }
-
+    // We no longer normalize domains to hubcloud.cx or hubdrive.space
+    // to allow users to use any working mirror/domain they provide.
+    
     const isPixeldrain =
       host.includes("pixeldrain.com") ||
       host.includes("pixeldrain.dev") ||
@@ -683,7 +676,16 @@ export async function performFullLinkScan(
   // HubCloud interception
   let hubcloudTitle = "";
   const lowUrl = normalizedUrl.toLowerCase();
-  if (lowUrl.includes("hubcloud") ||  lowUrl.includes("vcloud") || lowUrl.includes("hubdrive")) {
+  const isHubcloudVariant = lowUrl.includes("hubcloud") || 
+    lowUrl.includes("vcloud") || 
+    lowUrl.includes("hubdrive") ||
+    lowUrl.includes("moviesdrive") ||
+    lowUrl.includes("skymovies") ||
+    lowUrl.includes("sky movies") ||
+    lowUrl.includes("mdrive") ||
+    lowUrl.includes("filmygo");
+
+  if (isHubcloudVariant) {
     base = {
       url: normalizedUrl,
       ok: true,

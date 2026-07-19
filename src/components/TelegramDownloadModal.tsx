@@ -46,7 +46,7 @@ export function TelegramDownloadModal({
 
   const isHubcloudLink = (url: string) => {
     const l = url.toLowerCase();
-    return l.includes('hubcloud') || l.includes('hubcould') || l.includes('hubdrive');
+    return l.includes('hubcloud') || l.includes('hubcould') || l.includes('hubdrive') || l.includes('moviesdrive') || l.includes('skymovies') || l.includes('mdrive') || l.includes('filmygo');
   };
 
   const renderQualityLinks = (linksRaw: any, prefix: string) => {

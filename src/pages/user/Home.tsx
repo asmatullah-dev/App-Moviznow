@@ -1,3 +1,5 @@
+import { fetchReviewsFromChunks } from "../../utils/chunkUtils";
+import { safeStorage } from "../../utils/safeStorage";
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
 
@@ -31,7 +33,7 @@ import {
   TrendingUp,
   Zap,
   AlertCircle,
-} from "lucide-react";
+Star } from "lucide-react";
 import { Helmet } from "react-helmet";
 import { clsx } from "clsx";
 import { format } from "date-fns";
@@ -109,6 +111,33 @@ export default function Home({
   }, [search]);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const [reviewsData, setReviewsData] = useState({ average: "0.0", total: 0 });
+
+  useEffect(() => {
+    const loadReviews = async () => {
+      try {
+        const cachedData = safeStorage.getItem('cached_reviews_data');
+        let data: any[] | null = null;
+        if (cachedData) {
+          try {
+            const parsed = JSON.parse(cachedData);
+            if (Array.isArray(parsed)) {
+               data = parsed;
+            }
+          } catch(e) {}
+        }
+        if (data === null) {
+            data = await fetchReviewsFromChunks(false);
+        }
+        if (data && data.length > 0) {
+           const avg = (data.reduce((acc, curr) => acc + curr.rating, 0) / data.length).toFixed(1);
+           setReviewsData({ average: avg, total: data.length });
+        }
+      } catch(e) {}
+    };
+    loadReviews();
+  }, []);
 
   // ... (rest of the component)
 
@@ -574,6 +603,12 @@ export default function Home({
                   <ShoppingCart className="w-3 h-3 sm:w-5 sm:h-5" /> {t('Cart')}
                 </Link>
               )}
+              <Link
+                to="/reviews"
+                className="flex items-center justify-center gap-1.5 sm:gap-2 bg-zinc-800 text-white dark:bg-zinc-200 dark:text-black px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-zinc-700 dark:hover:bg-zinc-300 transition-all active:scale-95 shadow-lg"
+              >
+                <MessageCircle className="w-3 h-3 sm:w-5 sm:h-5" /> {profile?.status === 'pending' || profile?.status === 'expired' ? t('Check Reviews') : t('Rate our app')}
+              </Link>
               {settings?.isAdminContactEnabled !== false && (
                 <button
                   onClick={() => {
@@ -654,6 +689,12 @@ export default function Home({
                   <MessageCircle className="w-3 h-3 sm:w-5 sm:h-5" /> {t("Contact Admin")}
                 </button>
               )}
+              <Link
+                to="/reviews"
+                className="flex items-center justify-center gap-1.5 sm:gap-2 bg-zinc-800 text-white dark:bg-zinc-200 dark:text-black px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-zinc-700 dark:hover:bg-zinc-300 transition-all active:scale-95 shadow-lg"
+              >
+                <MessageCircle className="w-3 h-3 sm:w-5 sm:h-5" /> {profile?.status === 'pending' || profile?.status === 'expired' ? t('Check Reviews') : t('Rate our app')}
+              </Link>
             </div>
           </div>
         )}
@@ -1162,46 +1203,67 @@ export default function Home({
       </PageTransition>
 
       {/* Footer */}
-      {settings?.isAdminContactEnabled !== false && (
-        <footer className="border-t border-zinc-200 dark:border-zinc-800 pt-8 pb-2 text-center text-zinc-500">
-          <p>{t('Need help or want to renew membership?')}</p>
-          <button
-            onClick={() => {
-              const adminPhone = standardizePhone(
-                settings?.supportNumber || "3363284466"
-              ).replace("+", "");
-              const msg = `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${profile?.displayName || t("Unknown")}\n${t("Email")}: ${profile?.email || "N/A"}\n${t("Phone")}: ${profile?.phone || "N/A"}\n${t("Role & Status")}: ${String(
-                profile?.role || "Unknown",
-              )
-                .replace(/_/g, " ")
-                .replace(/\b\w/g, (c) =>
-                  c.toUpperCase(),
-                )}, ${String(profile?.status || "Unknown").replace(/\b\w/g, (c) => c.toUpperCase())}\n\n${t("Your message/question:")}\n${t("I need help or want to renew my membership.")}`;
-              window.open(
-                `https://wa.me/${adminPhone}?text=${encodeURIComponent(msg)}`,
-                "_blank",
-              );
-            }}
-            className="inline-flex items-center gap-2 text-emerald-500 hover:text-emerald-400 mt-2 font-medium cursor-pointer bg-transparent border-none"
-          >
-            <MessageCircle className="w-4 h-4" /> WhatsApp:{" "}
-            {standardizePhone(settings?.supportNumber || "3363284466")}
-          </button>
-          
-          {settings?.whatsappChannelLink && (
-            <div className="mt-4">
-              <a
-                href={settings.whatsappChannelLink}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 bg-[#25D366] text-white px-4 py-2 rounded-full font-medium hover:bg-[#20b858] transition-colors shadow-sm"
-              >
-                <MessageCircle className="w-4 h-4" /> Join our WhatsApp Channel
-              </a>
+      <footer className="border-t border-zinc-200 dark:border-zinc-800 pt-6 pb-8 flex flex-col items-center gap-4">
+        {settings?.isAdminContactEnabled !== false && (
+          <div className="text-center text-zinc-500 flex flex-col items-center">
+            <p>{t('Need help or want to renew membership?')}</p>
+            <button
+              onClick={() => {
+                const adminPhone = standardizePhone(
+                  settings?.supportNumber || "3363284466"
+                ).replace("+", "");
+                const msg = `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${profile?.displayName || t("Unknown")}\n${t("Email")}: ${profile?.email || "N/A"}\n${t("Phone")}: ${profile?.phone || "N/A"}\n${t("Role & Status")}: ${String(
+                  profile?.role || "Unknown",
+                )
+                  .replace(/_/g, " ")
+                  .replace(/\b\w/g, (c) =>
+                    c.toUpperCase(),
+                  )}, ${String(profile?.status || "Unknown").replace(/\b\w/g, (c) => c.toUpperCase())}\n\n${t("Your message/question:")}\n${t("I need help or want to renew my membership.")}`;
+                window.open(
+                  `https://wa.me/${adminPhone}?text=${encodeURIComponent(msg)}`,
+                  "_blank",
+                );
+              }}
+              className="inline-flex items-center gap-2 text-emerald-500 hover:text-emerald-400 mt-2 font-medium cursor-pointer bg-transparent border-none"
+            >
+              <MessageCircle className="w-4 h-4" /> WhatsApp:{" "}
+              {standardizePhone(settings?.supportNumber || "3363284466")}
+            </button>
+            
+            {settings?.whatsappChannelLink && (
+              <div className="mt-2">
+                <a
+                  href={settings.whatsappChannelLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 bg-[#25D366] text-white px-4 py-2 rounded-full font-medium hover:bg-[#20b858] transition-colors shadow-sm"
+                >
+                  <MessageCircle className="w-4 h-4" /> Join our WhatsApp Channel
+                </a>
+              </div>
+            )}
+          </div>
+        )}
+
+        <Link to="/reviews" className="flex flex-col items-center gap-2 hover:scale-105 transition-transform active:scale-95 group">
+          <div className="text-3xl font-bold flex items-center gap-2">
+            {reviewsData.average}
+            <div className="flex">
+              {[1, 2, 3, 4, 5].map(star => (
+                <Star key={`home-avg-star-${star}`} className={`w-5 h-5 ${star <= Math.round(Number(reviewsData.average)) ? 'fill-yellow-400 text-yellow-400' : 'text-zinc-300 dark:text-zinc-700'}`} />
+              ))}
             </div>
-          )}
-        </footer>
-      )}
+          </div>
+          <div className="text-sm font-medium text-zinc-500 group-hover:text-emerald-500 transition-colors">
+            {t("Based on %COUNT% reviews").replace("%COUNT%", reviewsData.total.toString())}
+          </div>
+        </Link>
+
+        <div className="text-center text-xs text-zinc-500 dark:text-zinc-600 font-mono">
+          {/* @ts-ignore */}
+          v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.0.0'}
+        </div>
+      </footer>
 
       <ConfirmModal
         isOpen={isLogoutModalOpen}
@@ -1309,10 +1371,6 @@ export default function Home({
           </motion.div>
         )}
       </AnimatePresence>
-      <div className="text-center pb-8 pt-2 text-xs text-zinc-500 dark:text-zinc-600 font-mono">
-        {/* @ts-ignore */}
-        v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.0.0'}
-      </div>
     </div>
   );
 }

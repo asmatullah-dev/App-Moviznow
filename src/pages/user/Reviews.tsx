@@ -44,6 +44,11 @@ export default function Reviews() {
   
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [reviewIdToDelete, setReviewIdToDelete] = useState<string | null>(null);
+
+  const totalReviews = reviews.length;
+  const averageRating = totalReviews > 0 
+    ? (reviews.reduce((acc, curr) => acc + curr.rating, 0) / totalReviews).toFixed(1) 
+    : "0.0";
   
   useEffect(() => {
     const loadReviews = async () => {
@@ -174,6 +179,18 @@ export default function Reviews() {
           <p className="text-zinc-600 dark:text-zinc-400">
             {t("See what others are saying about %APP_NAME%").replace("%APP_NAME%", appName)}
           </p>
+
+          <div className="flex items-center justify-center gap-2 mt-4">
+            <div className="text-4xl font-bold">{averageRating}</div>
+            <div className="flex flex-col items-start gap-1">
+              <div className="flex">
+                {[1, 2, 3, 4, 5].map(star => (
+                  <Star key={`avg-star-${star}`} className={`w-5 h-5 ${star <= Math.round(Number(averageRating)) ? 'fill-yellow-400 text-yellow-400' : 'text-zinc-300 dark:text-zinc-700'}`} />
+                ))}
+              </div>
+              <span className="text-xs text-zinc-500">{t("Based on %COUNT% reviews").replace("%COUNT%", totalReviews.toString())}</span>
+            </div>
+          </div>
         </div>
 
         {profile && reviews.filter(r => r.userId === profile.uid).length < 2 && (

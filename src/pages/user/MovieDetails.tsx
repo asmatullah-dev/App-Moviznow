@@ -1426,19 +1426,7 @@ export default function MovieDetails() {
   const handleTelegramResolve = async (id: string, url: string) => {
     setResolvingTgId(id);
     try {
-      // Normalize hubcloud domains before resolving
       let targetUrl = url;
-      try {
-        const u = new URL(url);
-        const host = u.hostname.toLowerCase();
-        if (host.includes('hubcould') || host.includes('hubcloud') || host.includes('vcloud') ) {
-          u.hostname = 'hubcloud.cx';
-          targetUrl = u.toString();
-        } else if (host.includes('hubdrive')) {
-          u.hostname = 'hubdrive.space';
-          targetUrl = u.toString();
-        }
-      } catch (e) {}
 
       const res = await fetch(`/api/resolve-tg?url=${encodeURIComponent(targetUrl)}`);
       const data = await res.json();
@@ -1548,19 +1536,7 @@ export default function MovieDetails() {
 
     if (!checkEligibility()) return;
 
-    // Normalize hubcloud domains
     let targetUrl = url;
-    try {
-      const u = new URL(url);
-      const host = u.hostname.toLowerCase();
-      if (host.includes('hubcould') || host.includes('hubcloud') || host.includes('vcloud') ) {
-        u.hostname = 'hubcloud.cx';
-        targetUrl = u.toString();
-      } else if (host.includes('hubdrive')) {
-        u.hostname = 'hubdrive.space';
-        targetUrl = u.toString();
-      }
-    } catch (e) {}
 
     if (linkId !== "sample") {
       // tracking removed
@@ -1590,6 +1566,9 @@ export default function MovieDetails() {
       targetUrl.includes("hubcloud") ||
       targetUrl.includes("moviesdrive") ||
       targetUrl.includes("hubdrive") ||
+      targetUrl.includes("skymovies") ||
+      targetUrl.includes("mdrive") ||
+      targetUrl.includes("filmygo") ||
       isVcloud
     ) {
       const clickId = targetUrl;
@@ -2076,24 +2055,7 @@ export default function MovieDetails() {
       } catch (e) {}
     }
 
-    if (url.includes('hubcould') || url.includes('hubcloud') || url.includes('vcloud') ) {
-      try {
-        const u = new URL(url);
-        u.hostname = 'hubcloud.cx';
-        url = u.toString();
-      } catch (e) {
-        url = url.replace(/(hubcloud|hubcould|vcloud)\.[a-z]+/i, 'hubcloud.cx');
-      }
-    } else if (url.includes('hubdrive')) {
-      try {
-        const u = new URL(url);
-        u.hostname = 'hubdrive.space';
-        url = u.toString();
-      } catch (e) {
-        url = url.replace(/hubdrive\.[a-z]+/i, 'hubdrive.space');
-      }
-    }
-
+    // We no longer normalize HubCloud domains to .cx to support dynamic domains
     window.open(url, "_blank", "noopener,noreferrer");
 
     closeLinkPopup();
@@ -2584,6 +2546,13 @@ export default function MovieDetails() {
                     IMDb
                   </a>
                 )}
+                
+                <Link
+                  to="/reviews"
+                  className="bg-zinc-800 text-white dark:bg-zinc-200 dark:text-black px-6 py-3 text-sm sm:text-base rounded-xl font-bold flex items-center gap-2 transition-all hover:bg-zinc-700 dark:hover:bg-zinc-300 active:scale-95 shadow-lg"
+                >
+                  <MessageCircle className="w-5 h-5" /> {profile?.status === 'pending' || profile?.status === 'expired' ? t('Check Reviews') : t('Rate our app')}
+                </Link>
 
                 <div className="flex items-center gap-2">
                   <button

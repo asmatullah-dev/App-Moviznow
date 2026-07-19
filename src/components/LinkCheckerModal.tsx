@@ -342,10 +342,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
     // Derive links directly from input or use provided override
     const currentInputSnapshot = initialInputOverride || inputRef.current;
     
-    // Convert all HubCloud links to .cx BEFORE processing
+    // We no longer normalize domains to hubcloud.cx to allow dynamic domains
     let normalizedInput = currentInputSnapshot;
-    normalizedInput = normalizedInput.replace(/(hubcloud|hubcould|vcloud)\.[a-z]+/gi, 'hubcloud.cx');
-    normalizedInput = normalizedInput.replace(/hubdrive\.[a-z]+/gi, 'hubdrive.space');
     
     let currentLinks = onlyUrls || splitLinks(normalizedInput).map(normalizeUrl).filter(Boolean);
     

@@ -150,7 +150,11 @@ async function fetchHtml(url: string, isVcloud = false, force = false) {
         !url ||
         (!forceExtract && 
          !url.includes("hubcloud") &&
+          !url.includes("hubcould") &&
           !url.includes("moviesdrive") &&
+          !url.includes("skymovies") &&
+          !url.includes("mdrive") &&
+          !url.includes("filmygo") &&
           !url.includes("vcloud") &&
           !url.includes("hubdrive"))
       ) {
@@ -215,7 +219,7 @@ async function fetchHtml(url: string, isVcloud = false, force = false) {
         }
 
         let title = $("title").text() || $(".card-header").text() || $(".card-title").text() || $("h1").first().text() || "";
-        title = title.replace(/hubcloud/gi, "").replace(/moviesdrive/gi, "").replace(/hubdrive/gi, "").replace(/vcloud/gi, "").trim();
+        title = title.replace(/hubcloud/gi, "").replace(/moviesdrive/gi, "").replace(/hubdrive/gi, "").replace(/vcloud/gi, "").replace(/skymovies/gi, "").replace(/mdrive/gi, "").replace(/filmygo/gi, "").trim();
         
         const isCloudflare =
           title.toLowerCase().includes("just a moment") ||
@@ -350,6 +354,9 @@ async function fetchHtml(url: string, isVcloud = false, force = false) {
         (!isVcloud && 
           !url.includes("hubcloud") &&
           !url.includes("moviesdrive") &&
+          !url.includes("skymovies") &&
+          !url.includes("mdrive") &&
+          !url.includes("filmygo") &&
           !url.includes("vcloud") &&
           !url.includes("hubdrive"))
       ) {
@@ -550,7 +557,7 @@ async function fetchHtml(url: string, isVcloud = false, force = false) {
 
       let nextHubcloudLink = "";
       for (const c of returnCandidates) {
-        if (c.href.includes("hubcloud") || c.href.includes("moviesdrive") || c.href.includes("vcloud") || c.href.includes("hubdrive")) {
+        if (c.href.includes("hubcloud") || c.href.includes("moviesdrive") || c.href.includes("vcloud") || c.href.includes("hubdrive") || c.href.includes("skymovies") || c.href.includes("mdrive") || c.href.includes("filmygo")) {
            nextHubcloudLink = c.href;
            break;
         }
@@ -585,7 +592,7 @@ async function fetchHtml(url: string, isVcloud = false, force = false) {
         } else if (e.config && e.config.url) {
            finalUrl = e.config.url;
         }
-        if (finalUrl !== url && !finalUrl.includes('hubcloud') && !finalUrl.includes('moviesdrive') && !finalUrl.includes('vcloud') && !finalUrl.includes('hubdrive')) {
+        if (finalUrl !== url && !finalUrl.includes('hubcloud') && !finalUrl.includes('moviesdrive') && !finalUrl.includes('vcloud') && !finalUrl.includes('hubdrive') && !finalUrl.includes('skymovies') && !finalUrl.includes('mdrive') && !finalUrl.includes('filmygo')) {
            return { url: normalizeDomain(finalUrl) };
         }
       }
