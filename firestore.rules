@@ -293,7 +293,7 @@ service cloud.firestore {
           !exists(/databases/$(database)/documents/chunk_meta/versions) ||
           // Allow updating ONLY the current user's version entry in the 'users' map OR the reviews version
           (
-            request.resource.data.diff(resource.data).affectedKeys().hasAny(['users', 'reviews'])
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['users', 'reviews'])
           )
         )
       );

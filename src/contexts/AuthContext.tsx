@@ -224,8 +224,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       let updatedSomething = false;
       const currentUser = auth.currentUser;
       if (!currentUser) {
-        safeStorage.removeItem("profile_cache");
-        setProfile(null);
+        // Do not clear profile cache here to prevent auto logout bug when Firebase auth state drops temporarily
         setLoading(false);
         return false;
       }
@@ -1220,8 +1219,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         refreshProfile();
       } else {
-        safeStorage.removeItem("profile_cache");
-        setProfile(null);
+        // Do not clear profile cache here to prevent auto logout bug when Firebase auth state drops temporarily
         setLoading(false);
 
         if (sessionStartTimeRef.current) {
@@ -2074,6 +2072,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (e) {
       console.error("Flush before logout error", e);
     }
+    
+    // Explicitly clear cache on intentional logout to ensure user is logged out
+    safeStorage.removeItem("profile_cache");
+    safeStorage.removeItem("cached_chunk_users_versions");
+    safeStorage.removeItem("cached_all_users");
+    if (auth.currentUser) {
+      localStorage.removeItem(`last_daily_sync_${auth.currentUser.uid}`);
+    }
+    setProfile(null);
+    setUser(null);
+
     await signOut(auth);
   };
 

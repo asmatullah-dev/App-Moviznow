@@ -84,7 +84,7 @@ export default function UserManagement() {
   useEffect(() => {
     const loadReviews = async () => {
       try {
-        const data = await fetchReviewsFromChunks(true);
+        const data = await fetchReviewsFromChunks(false);
         const reviewMap: Record<string, {rating: number, text: string}[]> = {};
         data.forEach(r => {
           if (r.userId) {

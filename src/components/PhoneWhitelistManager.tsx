@@ -26,10 +26,8 @@ export function PhoneWhitelistManager() {
       }
     };
     fetchPhones();
-    const interval = setInterval(fetchPhones, 5 * 60 * 1000);
     return () => {
       isMounted = false;
-      clearInterval(interval);
     }
   }, []);
 

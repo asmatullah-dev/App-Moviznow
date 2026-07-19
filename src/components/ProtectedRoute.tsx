@@ -49,8 +49,8 @@ export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRout
 
   // If we have a cached user but auth is still loading, allow rendering the app
   // If auth finishes and there is no user, it will redirect to login then.
-  if (!user && !authLoading) {
-    console.log('ProtectedRoute: No user, redirecting to login');
+  if (!user && !profile && !authLoading) {
+    console.log('ProtectedRoute: No user or profile, redirecting to login');
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 

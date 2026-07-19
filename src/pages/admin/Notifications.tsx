@@ -112,11 +112,8 @@ export default function Notifications() {
     };
 
     fetchTemplates();
-    const intervalId = setInterval(fetchTemplates, 5 * 60 * 1000);
-
     return () => {
       isMounted = false;
-      clearInterval(intervalId);
     };
   }, []);
 

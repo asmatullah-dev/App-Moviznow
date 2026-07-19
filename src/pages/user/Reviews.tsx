@@ -69,7 +69,7 @@ export default function Reviews() {
       // 2. Fetch fresh data from Firestore
       setSyncing(true);
       try {
-        const data = await fetchReviewsFromChunks(true);
+        const data = await fetchReviewsFromChunks(false);
         if (data) {
           setReviews(data);
         }

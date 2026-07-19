@@ -76,8 +76,6 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   useEffect(() => {
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 10 * 60 * 1000);
-    return () => clearInterval(interval);
   }, [fetchNotifications]);
 
   const sendNotification = async (notifData: Omit<AppNotification, 'id' | 'createdAt'>) => {

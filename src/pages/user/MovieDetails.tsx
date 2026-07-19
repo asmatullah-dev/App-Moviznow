@@ -1,4 +1,5 @@
 import { standardizePhone } from "../../contexts/AuthContext";
+import { fetchReviewsFromChunks } from "../../utils/chunkUtils";
 import { useState, useEffect, useRef, useMemo } from "react";
 import {
   useParams,
@@ -1728,12 +1729,12 @@ export default function MovieDetails() {
     }
   };
 
-  const trackStreamAndCheckRate = () => {
+  const trackStreamAndCheckRate = async () => {
     if (!profile) return;
     const hasRated = safeStorage.getItem('has_rated') === 'true';
     if (hasRated) return;
 
-    let streamedContentIds = [];
+    let streamedContentIds: string[] = [];
     try {
       const stored = safeStorage.getItem('streamed_contents');
       if (stored) {
@@ -1749,6 +1750,14 @@ export default function MovieDetails() {
     if (streamedContentIds.length === 3) {
       const promptShownFor = safeStorage.getItem('rate_prompt_shown_for');
       if (promptShownFor !== '3') {
+        try {
+          // Verify if they actually haven't rated in the DB
+          const data = await fetchReviewsFromChunks(false);
+          if (data && data.some(r => r.userId === profile.uid)) {
+            safeStorage.setItem('has_rated', 'true');
+            return;
+          }
+        } catch (e) {}
         setTimeout(() => setShowRatePrompt(true), 1000);
         safeStorage.setItem('rate_prompt_shown_for', '3');
       }
@@ -2547,12 +2556,14 @@ export default function MovieDetails() {
                   </a>
                 )}
                 
-                <Link
-                  to="/reviews"
-                  className="bg-zinc-800 text-white dark:bg-zinc-200 dark:text-black px-6 py-3 text-sm sm:text-base rounded-xl font-bold flex items-center gap-2 transition-all hover:bg-zinc-700 dark:hover:bg-zinc-300 active:scale-95 shadow-lg"
-                >
-                  <MessageCircle className="w-5 h-5" /> {profile?.status === 'pending' || profile?.status === 'expired' ? t('Check Reviews') : t('Rate our app')}
-                </Link>
+                {!(safeStorage.getItem('has_rated') === 'true' && profile?.status !== 'pending' && profile?.status !== 'expired') && (
+                  <Link
+                    to="/reviews"
+                    className="bg-zinc-800 text-white dark:bg-zinc-200 dark:text-black px-6 py-3 text-sm sm:text-base rounded-xl font-bold flex items-center gap-2 transition-all hover:bg-zinc-700 dark:hover:bg-zinc-300 active:scale-95 shadow-lg"
+                  >
+                    <MessageCircle className="w-5 h-5" /> {profile?.status === 'pending' || profile?.status === 'expired' ? t('Check Reviews') : t('Rate our app')}
+                  </Link>
+                )}
 
                 <div className="flex items-center gap-2">
                   <button
