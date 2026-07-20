@@ -607,7 +607,7 @@ export default function Home({
                 to="/reviews"
                 className="flex items-center justify-center gap-1.5 sm:gap-2 bg-zinc-800 text-white dark:bg-zinc-200 dark:text-black px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-zinc-700 dark:hover:bg-zinc-300 transition-all active:scale-95 shadow-lg"
               >
-                <MessageCircle className="w-3 h-3 sm:w-5 sm:h-5" /> {profile?.status && (['pending', 'expired'] as string[]).includes(profile.status) ? t('Check Reviews') : t('Rate our app')}
+                <MessageCircle className="w-3 h-3 sm:w-5 sm:h-5" /> {profile?.status === 'pending' || profile?.status === 'expired' ? t('Check Reviews') : t('Rate our app')}
               </Link>
               {settings?.isAdminContactEnabled !== false && (
                 <button
@@ -693,7 +693,7 @@ export default function Home({
                 to="/reviews"
                 className="flex items-center justify-center gap-1.5 sm:gap-2 bg-zinc-800 text-white dark:bg-zinc-200 dark:text-black px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-zinc-700 dark:hover:bg-zinc-300 transition-all active:scale-95 shadow-lg"
               >
-                <MessageCircle className="w-3 h-3 sm:w-5 sm:h-5" /> {profile?.status && (['pending', 'expired'] as string[]).includes(profile.status) ? t('Check Reviews') : t('Rate our app')}
+                <MessageCircle className="w-3 h-3 sm:w-5 sm:h-5" /> {profile?.status === 'pending' || profile?.status === 'expired' ? t('Check Reviews') : t('Rate our app')}
               </Link>
             </div>
           </div>
@@ -1261,7 +1261,7 @@ export default function Home({
 
         <div className="text-center text-xs text-zinc-500 dark:text-zinc-600 font-mono">
           {/* @ts-ignore */}
-          v{typeof __APP_VERSION__ !== 'undefined' ? `${__APP_VERSION__} (Referral Addition)` : '2.7.5 (Referral Addition)'}
+          v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.0.0'}
         </div>
       </footer>
 

@@ -147,9 +147,9 @@ service cloud.firestore {
                        (isUserManager() && resource.data.get('managedBy', null) == request.auth.uid && request.resource.data.get('managedBy', null) == request.auth.uid && isValidUser(request.resource.data));
 
 
-      // 2. Admin/Manager/Identity/Referral Access
-      allow get: if isOwner(userId) || isAdminOrEditor() || isUserManager() || (resource != null && (isIdentityMatch(resource.data) || resource.data.referredBy == request.auth.uid));
-      allow list: if (('limit' in request.query) && request.query.limit <= 500) || isAdminOrEditor() || isUserManager() || (request.auth != null && request.query.limit <= 500);
+      // 2. Admin/Manager/Identity Access
+      allow get: if isOwner(userId) || isAdminOrEditor() || isUserManager() || (resource != null && isIdentityMatch(resource.data));
+      allow list: if (('limit' in request.query) && request.query.limit <= 10) || isAdminOrEditor() || isUserManager();
       allow create: if isAdmin() || (isValidUser(request.resource.data) && (
                        (isUserManager() && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended') ||
                        (isAdminOrEditor() && request.resource.data.get('role', 'user') in ['user', 'trial', 'selected_content'])

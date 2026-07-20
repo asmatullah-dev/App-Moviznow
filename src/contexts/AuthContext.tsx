@@ -132,10 +132,6 @@ export const standardizePhone = (phone: string) => {
   return digits;
 };
 
-const generateReferralCode = () => {
-  return Math.random().toString(36).substring(2, 8).toUpperCase();
-};
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(auth.currentUser);
   const [profile, setProfile] = useState<UserProfile | null>(() => {
@@ -394,64 +390,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
-          if (modified || !mergedProfile.referralCode) {
-            if (!mergedProfile.referralCode) mergedProfile.referralCode = generateReferralCode();
+          if (modified) {
             safeStorage.setItem("needs_user_sync", "true");
-          }
-        }
-
-        // 5. Referral Inviter Reward Check
-        if (mergedProfile?.referredBy && navigator.onLine) {
-          try {
-            const updates: any = {};
-            let extensionDays = 0;
-
-            // Tier 1: Signup Reward (5 days)
-            // Given immediately when the referred user joins (they are active for 5 days by default)
-            if (!mergedProfile.signupRewardClaimed) {
-              extensionDays += 5;
-              updates.signupRewardClaimed = true;
-            }
-
-            // Tier 2: Activation Reward (5 days)
-            // Given if the user is active AND has at least one order
-            const hasBoughtMembership = (mergedProfile.orders && mergedProfile.orders.length > 0);
-            if (hasBoughtMembership && !mergedProfile.activationRewardClaimed) {
-              extensionDays += 5;
-              updates.activationRewardClaimed = true;
-            }
-
-            if (extensionDays > 0) {
-              const inviterRef = doc(db, "users", mergedProfile.referredBy);
-              const inviterSnap = await getDoc(inviterRef);
-              if (inviterSnap.exists()) {
-                const inviterData = inviterSnap.data();
-                let newExpiry = new Date();
-                if (
-                  inviterData.expiryDate &&
-                  inviterData.expiryDate !== "Lifetime"
-                ) {
-                  const currentExpiry = new Date(inviterData.expiryDate);
-                  newExpiry = currentExpiry > new Date() ? currentExpiry : new Date();
-                }
-                newExpiry.setDate(newExpiry.getDate() + extensionDays);
-
-                const { writeBatch } = await import("firebase/firestore");
-                const batch = writeBatch(db);
-                batch.update(inviterRef, {
-                  expiryDate: newExpiry.toISOString(),
-                  status: "active",
-                });
-                batch.update(userRef, updates);
-                await batch.commit();
-                
-                // Update local profile state
-                Object.assign(mergedProfile, updates);
-                safeStorage.setItem("profile_cache", JSON.stringify(mergedProfile));
-              }
-            }
-          } catch (e) {
-            console.error("Failed to process referral rewards", e);
           }
         }
 
@@ -995,33 +935,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             console.error("Failed to check for existing accounts:", e);
           }
 
-          // Check for referral
-          const storedRefCode = localStorage.getItem("referral_code");
-          let referredByUid = null;
-          
-          const userCreatedAt = mergedOldData.createdAt ? new Date(mergedOldData.createdAt) : new Date();
-          const daysSinceJoined = (new Date().getTime() - userCreatedAt.getTime()) / (1000 * 60 * 60 * 24);
-          const isEligibleNewUser = daysSinceJoined <= 3;
-
-          if (storedRefCode && !mergedOldData.referredBy && isEligibleNewUser) {
-            try {
-              const usersRef = collection(db, "users");
-              const q = query(
-                usersRef,
-                where("referralCode", "==", storedRefCode),
-                limit(1),
-              );
-              const snap = await getDocs(q);
-              if (!snap.empty && snap.docs[0].id !== currentUser.uid) {
-                referredByUid = snap.docs[0].id;
-              }
-            } catch (e) {
-              console.error("Failed to find inviter", e);
-            }
-          }
-
-          const isNewlyReferred = referredByUid && !mergedOldData.referredBy;
-
           const newProfile: UserProfile = {
             // Start with all aggregated data from old accounts
             ...mergedOldData,
@@ -1032,8 +945,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             displayName:
               currentUser.displayName || mergedOldData.displayName || "",
             photoURL: currentUser.photoURL || mergedOldData.photoURL || "",
-            referralCode: mergedOldData.referralCode || generateReferralCode(),
-            referredBy: referredByUid || mergedOldData.referredBy || null,
             // Increment session data for the current session, unless it's an owner
             sessionsCount: isOwner
               ? mergedOldData.sessionsCount || 0
@@ -1045,28 +956,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               ? "owner"
               : isAdmin
                 ? "admin"
-                : isNewlyReferred
-                  ? "user"
-                  : mergedOldData.role || defaultRoleToSet,
+                : mergedOldData.role || defaultRoleToSet,
             status:
               isOwner || isAdmin
                 ? "active"
-                : isNewlyReferred
-                  ? "active"
-                  : mergedOldData.status || defaultStatusToSet,
-            expiryDate: isOwner
-              ? "Lifetime"
-              : isNewlyReferred
-                ? (() => {
-                    let baseDate = new Date();
-                    if (mergedOldData.expiryDate && mergedOldData.expiryDate !== "Lifetime") {
-                      const currentExp = new Date(mergedOldData.expiryDate);
-                      if (currentExp > baseDate) baseDate = currentExp;
-                    }
-                    baseDate.setDate(baseDate.getDate() + 5);
-                    return baseDate.toISOString();
-                  })()
-                : mergedOldData.expiryDate || null,
+                : mergedOldData.status || defaultStatusToSet,
+            expiryDate: isOwner ? "Lifetime" : mergedOldData.expiryDate || null,
             // Ensure we have a creation date
             createdAt: mergedOldData.createdAt || new Date().toISOString(),
             lastActive: new Date().toISOString(),
@@ -1075,10 +970,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             watchLater: mergedOldData.watchLater || [],
             assignedContent: mergedOldData.assignedContent || [],
           };
-
-          if (referredByUid) {
-            localStorage.removeItem("referral_code");
-          }
 
           try {
             const pendingUpdatesStr = safeStorage.getItem(

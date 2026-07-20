@@ -13,7 +13,6 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { Loader2 } from 'lucide-react';
 import { SystemNotificationWrapper } from './components/SystemNotificationWrapper';
 import { MediaModal } from './components/MediaModal';
-import AlertModal from './components/AlertModal';
 import { useModalBehavior } from './hooks/useModalBehavior';
 import { useGlobalButtonHaptics } from './hooks/useHaptics';
 import { OfflineBanner } from './components/OfflineBanner';
@@ -54,10 +53,8 @@ import Notifications from './pages/admin/Notifications';
 import MovieRequestsManagement from './pages/admin/MovieRequestsManagement';
 import OrdersManagement from './pages/admin/OrdersManagement';
 import AdminSettings from './pages/admin/AdminSettings';
-import ReferralsManagement from './pages/admin/ReferralsManagement';
 import ContentSync from './pages/admin/ContentSync';
 import InstallApp from './pages/InstallApp';
-import Rewards from './pages/user/Rewards';
 
 const LoadingFallback = () => (
   <div className="min-h-screen bg-white dark:bg-zinc-950 transition-colors duration-300 flex flex-col items-center justify-center gap-6">
@@ -103,105 +100,6 @@ function AuthLanguageSync() {
       setLanguage(profile.preferredLanguage as any);
     }
   }, [profile?.preferredLanguage]);
-
-  return null;
-}
-
-function ReferralTracker() {
-  const { profile } = useAuth();
-  const { t } = useLanguage();
-  const [alertConfig, setAlertConfig] = useState<{ isOpen: boolean; title: string; message: string } | null>(null);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const ref = params.get('ref');
-    
-    if (ref) {
-      if (profile) {
-        // Check if user is more than 3 days old
-        const userCreatedAt = profile.createdAt ? new Date(profile.createdAt) : new Date();
-        const now = new Date();
-        const diffTime = Math.abs(now.getTime() - userCreatedAt.getTime());
-        const diffDays = diffTime / (1000 * 60 * 60 * 24);
-
-        if (diffDays > 3) {
-          setAlertConfig({
-            isOpen: true,
-            title: t('Referral Limit'),
-            message: t('This referral offer is only available for new users or new joining only.')
-          });
-          
-          // Clear the ref from URL to prevent showing it again
-          const url = new URL(window.location.href);
-          url.searchParams.delete('ref');
-          window.history.replaceState({}, '', url.pathname);
-          return;
-        }
-      }
-      
-      localStorage.setItem('referral_code', ref);
-    }
-  }, [profile, t]);
-
-  return (
-    <AlertModal
-      isOpen={!!alertConfig?.isOpen}
-      title={alertConfig?.title || ''}
-      message={alertConfig?.message || ''}
-      onClose={() => setAlertConfig(null)}
-    />
-  );
-}
-
-import { usePWA } from './contexts/PWAContext';
-
-function RewardsManager() {
-  const { user, profile, updateUserProfileData } = useAuth();
-  const { isInstalled } = usePWA();
-  
-  useEffect(() => {
-    if (!profile || !user) return;
-
-    const checkRewards = async () => {
-      const updates: any = {};
-      let extensionDays = 0;
-
-      // PWA Reward (3 days)
-      if (isInstalled && !profile.pwaRewardClaimed) {
-        updates.pwaRewardClaimed = true;
-        extensionDays += 3;
-      }
-
-      // Notification Reward (3 days)
-      const hasNotificationPermission = 'Notification' in window && Notification.permission === 'granted';
-      if (hasNotificationPermission && !profile.notificationRewardClaimed) {
-        updates.notificationRewardClaimed = true;
-        extensionDays += 3;
-      }
-
-      if (extensionDays > 0) {
-        let newExpiry = new Date();
-        if (profile.expiryDate && profile.expiryDate !== 'Lifetime') {
-          const currentExpiry = new Date(profile.expiryDate);
-          newExpiry = currentExpiry > new Date() ? currentExpiry : new Date();
-        }
-        newExpiry.setDate(newExpiry.getDate() + extensionDays);
-        updates.expiryDate = newExpiry.toISOString();
-        // If they were expired, reactivation might be needed
-        if (profile.status === 'expired' || profile.status === 'pending') {
-          updates.status = 'active';
-        }
-
-        try {
-          await updateUserProfileData(updates);
-        } catch (e) {
-          console.error("Failed to claim engagement rewards", e);
-        }
-      }
-    };
-
-    checkRewards();
-  }, [isInstalled, profile?.uid, profile?.pwaRewardClaimed, profile?.notificationRewardClaimed]);
 
   return null;
 }
@@ -290,8 +188,6 @@ export default function App() {
               <NotificationProvider>
                 <CartProvider>
                   <PWAProvider>
-                    <ReferralTracker />
-                    <RewardsManager />
                     <SyncErrorOverlay />
                     <OfflineBanner />
                     <SyncBanner />
@@ -320,7 +216,6 @@ export default function App() {
                         <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
                         <Route path="/freemovies" element={<ProtectedRoute><FreeMovies /></ProtectedRoute>} />
                         <Route path="/membership" element={<ProtectedRoute><Membership /></ProtectedRoute>} />
-                        <Route path="/rewards" element={<ProtectedRoute><Rewards /></ProtectedRoute>} />
                         <Route path="/reviews" element={<ProtectedRoute><Reviews /></ProtectedRoute>} />
                         <Route path="/about" element={<ProtectedRoute><About /></ProtectedRoute>} />
                         <Route path="/contact" element={<ProtectedRoute><Contact /></ProtectedRoute>} />
@@ -342,7 +237,6 @@ export default function App() {
                           <Route path="error-links" element={<ErrorLinks />} />
                           <Route path="reported-links" element={<ReportedLinks />} />
                           <Route path="notifications" element={<Notifications />} />
-                          <Route path="referrals" element={<ReferralsManagement />} />
                           <Route path="requests" element={<MovieRequestsManagement />} />
                           <Route path="sync" element={<ContentSync />} />
                           <Route path="settings" element={<AdminSettings />} />
