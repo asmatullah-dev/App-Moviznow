@@ -133,6 +133,18 @@ function ReferralTracker() {
   const [alertConfig, setAlertConfig] = useState<{ isOpen: boolean; title: string; message: string } | null>(null);
 
   useEffect(() => {
+    const successMsg = localStorage.getItem("referral_credit_message");
+    if (successMsg) {
+      setAlertConfig({
+        isOpen: true,
+        title: t('Referral Reward Credited'),
+        message: successMsg
+      });
+      localStorage.removeItem("referral_credit_message");
+    }
+  }, [profile, t]);
+
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const ref = params.get('ref');
     

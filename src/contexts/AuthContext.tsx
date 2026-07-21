@@ -132,7 +132,16 @@ export const standardizePhone = (phone: string) => {
   return digits;
 };
 
-const generateReferralCode = () => {
+const generateReferralCode = (uid?: string) => {
+  if (uid) {
+    let hash = 0;
+    for (let i = 0; i < uid.length; i++) {
+      const char = uid.charCodeAt(i);
+      hash = (hash << 5) - hash + char;
+      hash = hash & hash;
+    }
+    return Math.abs(hash).toString(36).toUpperCase().padStart(6, 'X').substring(0, 6);
+  }
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 };
 
@@ -413,7 +422,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (modified || !mergedProfile.referralCode) {
             let newlyGenerated = false;
             if (!mergedProfile.referralCode) {
-              mergedProfile.referralCode = generateReferralCode();
+              mergedProfile.referralCode = generateReferralCode(currentUser.uid);
               newlyGenerated = true;
             }
 
@@ -440,7 +449,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         // Check and apply referral if available for existing profile
-        if (mergedProfile && !mergedProfile.referredBy && navigator.onLine) {
+        if (mergedProfile && !mergedProfile.referredBy && !mergedProfile.hasReceivedReferralReward && navigator.onLine) {
           const storedRefCode = localStorage.getItem("referral_code");
           if (storedRefCode) {
             const userCreatedAt = mergedProfile.createdAt ? new Date(mergedProfile.createdAt) : new Date();
@@ -487,6 +496,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 if (foundInviterUid && foundInviterUid !== currentUser.uid) {
                   mergedProfile.referredBy = foundInviterUid;
                   mergedProfile.signupRewardClaimed = true;
+                  mergedProfile.hasReceivedReferralReward = true;
                   
                   // Give the newly referred user 5 days and make them active
                   let baseDate = new Date();
@@ -499,12 +509,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   mergedProfile.status = "active";
                   
                   localStorage.removeItem("referral_code");
+                  localStorage.setItem("referral_credit_message", "Your account is credited with 5 Days membership with referral code " + storedRefCode);
                   
                   // Write these updates to Firestore immediately
                   const batch = writeBatch(db);
                   batch.set(userRef, {
                     referredBy: foundInviterUid,
                     signupRewardClaimed: true,
+                    hasReceivedReferralReward: true,
                     expiryDate: mergedProfile.expiryDate,
                     status: "active"
                   }, { merge: true });
@@ -1172,7 +1184,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const daysSinceJoined = (new Date().getTime() - userCreatedAt.getTime()) / (1000 * 60 * 60 * 24);
           const isEligibleNewUser = daysSinceJoined <= 3;
 
-          if (storedRefCode && !mergedOldData.referredBy && isEligibleNewUser) {
+          if (storedRefCode && !mergedOldData.referredBy && !mergedOldData.hasReceivedReferralReward && isEligibleNewUser) {
             try {
               const { doc, collection, query, where, getDocs, limit, writeBatch, getDoc } = await import("firebase/firestore");
               let foundInviterUid = null;
@@ -1217,7 +1229,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
-          const isNewlyReferred = referredByUid && !mergedOldData.referredBy;
+          const isNewlyReferred = referredByUid && !mergedOldData.referredBy && !mergedOldData.hasReceivedReferralReward;
+
+          if (isNewlyReferred && storedRefCode) {
+            localStorage.setItem("referral_credit_message", "Your account is credited with 5 Days membership with referral code " + storedRefCode);
+          }
 
           const newProfile: UserProfile = {
             // Start with all aggregated data from old accounts
@@ -1229,9 +1245,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             displayName:
               currentUser.displayName || mergedOldData.displayName || "",
             photoURL: currentUser.photoURL || mergedOldData.photoURL || "",
-            referralCode: mergedOldData.referralCode || generateReferralCode(),
+            referralCode: mergedOldData.referralCode || generateReferralCode(currentUser.uid),
             referredBy: referredByUid || mergedOldData.referredBy || null,
             signupRewardClaimed: isNewlyReferred || mergedOldData.signupRewardClaimed || false,
+            hasReceivedReferralReward: isNewlyReferred || mergedOldData.hasReceivedReferralReward || false,
             activationRewardClaimed: mergedOldData.activationRewardClaimed || false,
             notificationRewardClaimed: mergedOldData.notificationRewardClaimed || false,
             pwaRewardClaimed: mergedOldData.pwaRewardClaimed || false,

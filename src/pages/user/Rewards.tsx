@@ -29,6 +29,16 @@ import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
 import { Header } from '../../components/Header';
 
+const getReferralCodeForUid = (uid: string) => {
+  let hash = 0;
+  for (let i = 0; i < uid.length; i++) {
+    const char = uid.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash = hash & hash;
+  }
+  return Math.abs(hash).toString(36).toUpperCase().padStart(6, 'X').substring(0, 6);
+};
+
 export default function Rewards() {
   const { profile, updateUserProfileData } = useAuth();
   const { t } = useLanguage();
@@ -68,7 +78,7 @@ export default function Rewards() {
   useEffect(() => {
     // Generate referral code on mount if missing
     if (profile && !profile.referralCode) {
-      const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const newCode = getReferralCodeForUid(profile.uid);
       updateUserProfileData({ referralCode: newCode }).catch(console.error);
     }
   }, [profile?.referralCode, profile?.uid]);
@@ -290,8 +300,8 @@ export default function Rewards() {
     
     // Every user has only one unique referral code connected to their account
     if (!profile.referralCode) {
-      const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-      console.log('Generating new referral code:', newCode);
+      const newCode = getReferralCodeForUid(profile.uid);
+      console.log('Generating deterministic referral code:', newCode);
       try {
         await updateUserProfileData({ referralCode: newCode });
         console.log('updateUserProfileData called for referralCode');
@@ -517,14 +527,6 @@ export default function Rewards() {
         {/* Empty State / Invitation Illustration */}
         {!isLoadingStats && referredCount === 0 && (
           <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-8 flex flex-col items-center text-center gap-4">
-            <div className="w-48 h-48 relative">
-              <img 
-                src="/src/assets/images/referral_empty_state_illustration_1784514629455.jpg" 
-                alt="Invite friends"
-                className="w-full h-full object-contain rounded-2xl mix-blend-multiply dark:mix-blend-screen"
-                referrerPolicy="no-referrer"
-              />
-            </div>
             <div className="space-y-2">
               <h3 className="text-lg font-bold">{t('Invite your first friend')}</h3>
               <p className="text-sm text-zinc-500 max-w-[260px] mx-auto">

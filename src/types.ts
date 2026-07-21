@@ -39,6 +39,7 @@ export interface UserProfile {
   referralCode?: string;
   referredBy?: string;
   signupRewardClaimed?: boolean;
+  hasReceivedReferralReward?: boolean;
   activationRewardClaimed?: boolean;
   notificationRewardClaimed?: boolean;
   pwaRewardClaimed?: boolean;
