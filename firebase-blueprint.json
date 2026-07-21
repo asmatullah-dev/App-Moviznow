@@ -223,12 +223,16 @@
     },
     "ReferralStore": {
       "title": "ReferralStore",
-      "description": "Stores user referral code, joins and statistics.",
+      "description": "Stores all referral codes, joins and statistics.",
       "type": "object",
       "properties": {
-        "code": {
-          "type": "string",
-          "description": "The user's referral code."
+        "codes": {
+          "type": "object",
+          "description": "Mapping of user UID to their referral code."
+        },
+        "codeToUid": {
+          "type": "object",
+          "description": "Mapping of referral code to user UID."
         },
         "joins": {
           "type": "object",
@@ -236,15 +240,15 @@
         },
         "stats": {
           "type": "object",
-          "description": "Total stats for this user."
+          "description": "Mapping of inviter UID to their total stats."
         }
       }
     }
   },
   "firestore": {
-    "/referral/{userId}": {
+    "/referral/all": {
       "schema": { "$ref": "#/entities/ReferralStore" },
-      "description": "Stores unified referral records for a specific user."
+      "description": "Stores all unified referral records in a single root document."
     },
     "/settings/app_settings": {
       "schema": { "$ref": "#/entities/AppSettings" },

@@ -47,29 +47,45 @@ export default function ReferralsManagement() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const { collection, getDocs } = await import('firebase/firestore');
-        const snap = await getDocs(collection(db, 'referral'));
+        const { doc, getDoc } = await import('firebase/firestore');
+        const docSnap = await getDoc(doc(db, 'referral', 'all'));
         
         let total_clicks = 0;
         let clicks_whatsapp = 0;
         let clicks_telegram = 0;
         const refList: any[] = [];
         
-        snap.docs.forEach(docSnap => {
-          const data = docSnap.data();
-          const uid = docSnap.id;
-          
-          if (data.stats) {
-            total_clicks += data.stats.total_clicks || 0;
-            clicks_whatsapp += data.stats.clicks_whatsapp || 0;
-            clicks_telegram += data.stats.clicks_telegram || 0;
-          }
-          
-          refList.push({
-            uid,
-            ...data
+        if (docSnap.exists()) {
+          const data = docSnap.data() || {};
+          const codesMap = data.codes || {};
+          const statsMap = data.stats || {};
+          const joinsMap = data.joins || {};
+
+          // Calculate total analytics over all users
+          Object.values(statsMap).forEach((st: any) => {
+            total_clicks += st.total_clicks || 0;
+            clicks_whatsapp += st.clicks_whatsapp || 0;
+            clicks_telegram += st.clicks_telegram || 0;
           });
-        });
+
+          // Reconstruct the referrals list for inviters
+          Object.entries(codesMap).forEach(([uid, code]) => {
+            // Find joins belonging to this inviter
+            const inviterJoins: Record<string, any> = {};
+            Object.entries(joinsMap).forEach(([joinedUid, joinDetail]: [string, any]) => {
+              if (joinDetail.inviterUid === uid) {
+                inviterJoins[joinedUid] = joinDetail;
+              }
+            });
+
+            refList.push({
+              uid,
+              code,
+              joins: inviterJoins,
+              stats: statsMap[uid] || {}
+            });
+          });
+        }
 
         const newAnalytics = { total_clicks, clicks_whatsapp, clicks_telegram };
         setAnalytics(newAnalytics);
@@ -121,13 +137,14 @@ export default function ReferralsManagement() {
     return referrals
       .filter(ref => ref.joins && Object.keys(ref.joins).length > 0)
       .map(ref => {
-        const user = users.find(u => u.uid === ref.uid) || {};
+        const user = (users.find(u => u.uid === ref.uid) || {}) as any;
         const referredUsers = Object.values(ref.joins || {}).map((j: any) => ({
           uid: j.uid,
           email: j.email,
           displayName: j.displayName,
           createdAt: j.createdAt,
           status: j.status,
+          role: j.role || 'user',
           signupRewardClaimed: j.signupClaimed,
           activationRewardClaimed: j.activationClaimed
         }));
@@ -136,6 +153,7 @@ export default function ReferralsManagement() {
           uid: ref.uid,
           email: user.email || '',
           displayName: user.displayName || '',
+          photoURL: user.photoURL || null,
           referralCode: ref.code || user.referralCode || '',
           referredUsers
         };

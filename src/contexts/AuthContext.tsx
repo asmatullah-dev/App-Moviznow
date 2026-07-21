@@ -439,6 +439,126 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
+        // Check and apply referral if available for existing profile
+        if (mergedProfile && !mergedProfile.referredBy && navigator.onLine) {
+          const storedRefCode = localStorage.getItem("referral_code");
+          if (storedRefCode) {
+            const userCreatedAt = mergedProfile.createdAt ? new Date(mergedProfile.createdAt) : new Date();
+            const daysSinceJoined = (new Date().getTime() - userCreatedAt.getTime()) / (1000 * 60 * 60 * 24);
+            const isEligibleNewUser = daysSinceJoined <= 3;
+
+            if (isEligibleNewUser) {
+              try {
+                const { doc, collection, query, where, getDocs, limit, writeBatch, getDoc } = await import("firebase/firestore");
+                let foundInviterUid = null;
+
+                // 1. Get the single referral document
+                const refDoc = await getDoc(doc(db, "referral", "all"));
+                if (refDoc.exists()) {
+                  const data = refDoc.data() || {};
+                  const codeToUidMap = data.codeToUid || {};
+                  foundInviterUid = codeToUidMap[storedRefCode];
+                }
+
+                // 2. Fallback to users collection for legacy users
+                if (!foundInviterUid) {
+                  const usersRef = collection(db, "users");
+                  const q = query(usersRef, where("referralCode", "==", storedRefCode), limit(1));
+                  const snap = await getDocs(q);
+                  if (!snap.empty) {
+                    foundInviterUid = snap.docs[0].id;
+                    
+                    // Auto-migrate to the new document
+                    try {
+                      const batch = writeBatch(db);
+                      batch.set(doc(db, "referral", "all"), {
+                        codes: {
+                          [foundInviterUid]: storedRefCode
+                        },
+                        codeToUid: {
+                          [storedRefCode]: foundInviterUid
+                        }
+                      }, { merge: true });
+                      await batch.commit();
+                    } catch (e) {}
+                  }
+                }
+
+                if (foundInviterUid && foundInviterUid !== currentUser.uid) {
+                  mergedProfile.referredBy = foundInviterUid;
+                  mergedProfile.signupRewardClaimed = true;
+                  
+                  // Give the newly referred user 5 days and make them active
+                  let baseDate = new Date();
+                  if (mergedProfile.expiryDate && mergedProfile.expiryDate !== "Lifetime") {
+                    const currentExp = new Date(mergedProfile.expiryDate);
+                    if (currentExp > baseDate) baseDate = currentExp;
+                  }
+                  baseDate.setDate(baseDate.getDate() + 5);
+                  mergedProfile.expiryDate = baseDate.toISOString();
+                  mergedProfile.status = "active";
+                  
+                  localStorage.removeItem("referral_code");
+                  
+                  // Write these updates to Firestore immediately
+                  const batch = writeBatch(db);
+                  batch.set(userRef, {
+                    referredBy: foundInviterUid,
+                    signupRewardClaimed: true,
+                    expiryDate: mergedProfile.expiryDate,
+                    status: "active"
+                  }, { merge: true });
+
+                  // Also add them to the inviter's joins
+                  const displayName = currentUser.displayName || mergedProfile.displayName || currentUser.email || mergedProfile.email || "User";
+                  const email = currentUser.email || mergedProfile.email || "";
+                  const status = (mergedProfile.orders && mergedProfile.orders.length > 0) ? "paid" : "login";
+                  
+                  const { increment } = await import("firebase/firestore");
+                  batch.set(doc(db, "referral", "all"), {
+                    joins: {
+                      [currentUser.uid]: {
+                        uid: currentUser.uid,
+                        code: storedRefCode,
+                        inviterUid: foundInviterUid,
+                        displayName,
+                        email,
+                        status,
+                        createdAt: new Date().toISOString(),
+                        signupClaimed: false,
+                        activationClaimed: false
+                      }
+                    },
+                    stats: {
+                      [foundInviterUid]: {
+                        totalJoined: increment(1)
+                      }
+                    }
+                  }, { merge: true });
+
+                  // Ensure the newly referred user also has their own referral registration in codes map
+                  if (mergedProfile.referralCode) {
+                    batch.set(doc(db, "referral", "all"), {
+                      codes: {
+                        [mergedProfile.uid]: mergedProfile.referralCode
+                      },
+                      codeToUid: {
+                        [mergedProfile.referralCode]: mergedProfile.uid
+                      }
+                    }, { merge: true });
+                  }
+
+                  await batch.commit();
+                  updatedSomething = true;
+                  console.log("Successfully applied referral reward to existing user profile.");
+                }
+              } catch (e) {
+                console.error("Failed to apply referral to existing user:", e);
+              }
+            }
+          }
+        }
+
         // 5. Referral Inviter Reward Check
         if (mergedProfile?.referredBy && navigator.onLine) {
           try {
@@ -615,7 +735,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (Object.keys(updatesToPush).length > 0) {
               batch.set(userRef, updatesToPush, { merge: true });
               if (updatesToPush.referralCode) {
-                batch.set(doc(db, "referral", currentUser.uid), { code: updatesToPush.referralCode }, { merge: true });
+                batch.set(doc(db, "referral", "all"), {
+                  codes: {
+                    [currentUser.uid]: updatesToPush.referralCode
+                  },
+                  codeToUid: {
+                    [updatesToPush.referralCode]: currentUser.uid
+                  }
+                }, { merge: true });
               }
             }
             // Add user version to chunk_meta to prevent infinite writes
@@ -1047,16 +1174,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
           if (storedRefCode && !mergedOldData.referredBy && isEligibleNewUser) {
             try {
-              const { doc, collection, query, where, getDocs, limit, writeBatch } = await import("firebase/firestore");
+              const { doc, collection, query, where, getDocs, limit, writeBatch, getDoc } = await import("firebase/firestore");
               let foundInviterUid = null;
 
-              // 1. Query the new referral collection
-              const referralRef = collection(db, "referral");
-              const qReferral = query(referralRef, where("code", "==", storedRefCode), limit(1));
-              const snapReferral = await getDocs(qReferral);
-              
-              if (!snapReferral.empty) {
-                foundInviterUid = snapReferral.docs[0].id;
+              // 1. Get the single referral document
+              const refDoc = await getDoc(doc(db, "referral", "all"));
+              if (refDoc.exists()) {
+                const data = refDoc.data() || {};
+                const codeToUidMap = data.codeToUid || {};
+                foundInviterUid = codeToUidMap[storedRefCode];
               }
 
               // 2. Fallback to users collection for legacy users
@@ -1070,7 +1196,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   // Auto-migrate to the new document
                   try {
                     const batch = writeBatch(db);
-                    batch.set(doc(db, "referral", foundInviterUid), { code: storedRefCode }, { merge: true });
+                    batch.set(doc(db, "referral", "all"), {
+                      codes: {
+                        [foundInviterUid]: storedRefCode
+                      },
+                      codeToUid: {
+                        [storedRefCode]: foundInviterUid
+                      }
+                    }, { merge: true });
                     await batch.commit();
                   } catch (e) {}
                 }
@@ -1178,8 +1311,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               const status = (newProfile.orders && newProfile.orders.length > 0) ? "paid" : "login";
               
               const { increment } = await import("firebase/firestore");
-              // Update the inviter's referral document
-              batch.set(doc(db, "referral", referredByUid), {
+              // Update the inviter's referral document inside "all"
+              batch.set(doc(db, "referral", "all"), {
                 joins: {
                   [currentUser.uid]: {
                     uid: currentUser.uid,
@@ -1194,15 +1327,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   }
                 },
                 stats: {
-                  totalJoined: increment(1)
+                  [referredByUid]: {
+                    totalJoined: increment(1)
+                  }
                 }
               }, { merge: true });
             }
 
-            // Also register their own referralCode in the codes map
+            // Also register their own referralCode in the codes map inside "all"
             if (newProfile.referralCode) {
-              batch.set(doc(db, "referral", newProfile.uid), {
-                code: newProfile.referralCode
+              batch.set(doc(db, "referral", "all"), {
+                codes: {
+                  [newProfile.uid]: newProfile.referralCode
+                },
+                codeToUid: {
+                  [newProfile.referralCode]: newProfile.uid
+                }
               }, { merge: true });
             }
 
@@ -1228,8 +1368,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               const { writeBatch } = await import("firebase/firestore");
               const fbBatch = writeBatch(db);
               fbBatch.set(userRef, newProfile);
-              fbBatch.set(doc(db, "referral", newProfile.uid), {
-                code: newProfile.referralCode
+              fbBatch.set(doc(db, "referral", "all"), {
+                codes: {
+                  [newProfile.uid]: newProfile.referralCode
+                },
+                codeToUid: {
+                  [newProfile.referralCode]: newProfile.uid
+                }
               }, { merge: true });
               await fbBatch.commit();
             } catch (e) {}
@@ -2194,7 +2339,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         let batch = writeBatch(db);
         batch.set(userRefPath, data, { merge: true });
         if (data.referralCode) {
-          batch.set(doc(db, "referral", user.uid), { code: data.referralCode }, { merge: true });
+          batch.set(doc(db, "referral", "all"), {
+            codes: {
+              [user.uid]: data.referralCode
+            },
+            codeToUid: {
+              [data.referralCode]: user.uid
+            }
+          }, { merge: true });
         }
 
         // Propagate status update if they are referred and transitioned to paid
@@ -2203,14 +2355,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const belongsToInviter = profile?.referredBy || data.referredBy;
         if (belongsToInviter && isPaidNow && !wasPaid) {
           const { increment } = await import("firebase/firestore");
-          batch.set(doc(db, "referral", belongsToInviter), {
+          batch.set(doc(db, "referral", "all"), {
             joins: {
               [user.uid]: {
                 status: "paid"
               }
             },
             stats: {
-              totalPaid: increment(1)
+              [belongsToInviter]: {
+                totalPaid: increment(1)
+              }
             }
           }, { merge: true });
         }

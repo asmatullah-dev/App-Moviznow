@@ -76,12 +76,13 @@ export default function Rewards() {
     if (!profile?.uid) return;
 
     try {
-      // 1. Get referral document for the current user
-      const refDoc = await getDoc(doc(db, 'referral', profile.uid));
+      // 1. Get referral document for the current user (using unified doc)
+      const refDoc = await getDoc(doc(db, 'referral', 'all'));
       let myJoins: any[] = [];
       if (refDoc.exists()) {
         const joins = refDoc.data()?.joins || {};
-        myJoins = Object.values(joins);
+        // Filter joins by current user's uid as inviterUid
+        myJoins = Object.values(joins).filter((j: any) => j.inviterUid === profile.uid);
       }
 
       // If the referral document is empty, fallback to users collection query for migration
@@ -93,7 +94,7 @@ export default function Rewards() {
         );
         const snap = await getDocs(q);
         
-        // Let's migrate these existing referrals to /users/referral
+        // Let's migrate these existing referrals to /referral/all
         if (!snap.empty) {
           const batch = writeBatch(db);
           const migratedJoins: any = {};
@@ -118,12 +119,19 @@ export default function Rewards() {
             migratedJoins[uid] = joinRecord;
           });
           
-          batch.set(doc(db, 'referral', profile.uid), {
-            code: profile.referralCode,
+          batch.set(doc(db, 'referral', 'all'), {
+            codes: {
+              [profile.uid]: profile.referralCode || 'UNKNOWN'
+            },
+            codeToUid: {
+              [profile.referralCode || 'UNKNOWN']: profile.uid
+            },
             joins: migratedJoins,
             stats: {
-              totalJoined: snap.size,
-              totalPaid: snap.docs.filter(d => (d.data().orders && d.data().orders.length > 0) || d.data().activationRewardClaimed).length
+              [profile.uid]: {
+                totalJoined: snap.size,
+                totalPaid: snap.docs.filter(d => (d.data().orders && d.data().orders.length > 0) || d.data().activationRewardClaimed).length
+              }
             }
           }, { merge: true });
 
@@ -203,7 +211,7 @@ export default function Rewards() {
       
       // Update claim status in the user's referral document
       const claimField = type === 'signup' ? 'signupClaimed' : 'activationClaimed';
-      batch.set(doc(db, 'referral', profile.uid), {
+      batch.set(doc(db, 'referral', 'all'), {
         joins: {
           [joinedUid]: {
             [claimField]: true
@@ -324,12 +332,19 @@ export default function Rewards() {
       const code = await ensureReferralCode();
       if (!code) return; // Need a code to write the document properly
 
-      await setDoc(doc(db, 'referral', profile.uid), {
-        code,
+      await setDoc(doc(db, 'referral', 'all'), {
+        codes: {
+          [profile.uid]: code
+        },
+        codeToUid: {
+          [code]: profile.uid
+        },
         stats: {
-          [key]: increment(1),
-          total_clicks: increment(1),
-          lastUpdated: new Date().toISOString()
+          [profile.uid]: {
+            [key]: increment(1),
+            total_clicks: increment(1),
+            lastUpdated: new Date().toISOString()
+          }
         }
       }, { merge: true });
     } catch (e) {
