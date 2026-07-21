@@ -1891,7 +1891,10 @@ async function startServer() {
   // Helper to fetch movie details and generate OG tags
   const getOgTags = async (req: express.Request) => {
     const urlPath = req.originalUrl;
-    const host = req.get("x-forwarded-host") || req.get("host") || "";
+    let host = req.get("host") || req.get("x-forwarded-host") || "";
+    if (host.includes(",")) {
+      host = host.split(",")[0].trim();
+    }
     
     // Force HTTPS for all production environments to satisfy strict social card requirements (WhatsApp, Facebook, Twitter, Discord)
     const isLocalhost = host.includes("localhost") || host.includes("127.0.0.1") || host.includes("0.0.0.0") || host.includes("::1");
@@ -2014,11 +2017,17 @@ async function startServer() {
       }
     }
 
+    const imageType = image.toLowerCase().includes(".png") ? "image/png" : "image/jpeg";
+
     return `
       <meta property="og:title" content="${title.replace(/"/g, "&quot;")}" />
       <meta property="og:description" content="${description.replace(/"/g, "&quot;").slice(0, 200)}..." />
       <meta property="og:image" content="${image}" />
-      <meta property="og:type" content="video.movie" />
+      <meta property="og:image:secure_url" content="${image}" />
+      <meta property="og:image:type" content="${imageType}" />
+      <meta property="og:image:width" content="1200" />
+      <meta property="og:image:height" content="630" />
+      <meta property="og:type" content="website" />
       <meta property="og:url" content="${baseUrl}${urlPath}" />
       <meta property="og:site_name" content="MovizNow" />
       <meta name="twitter:card" content="summary_large_image" />
@@ -2599,6 +2608,12 @@ async function startServer() {
     app.use(express.static(distPath, { index: false })); // Disable default index.html serving
 
     // Explicitly serve PWA files with correct MIME types
+    app.get("/moviznow_share_banner.jpg", (req, res) => {
+      res.sendFile(path.join(distPath, "moviznow_share_banner.jpg"), {
+        headers: { "Content-Type": "image/jpeg" },
+      });
+    });
+
     app.get("/manifest.webmanifest", (req, res) => {
       res.sendFile(path.join(distPath, "manifest.webmanifest"), {
         headers: { "Content-Type": "application/manifest+json" },
