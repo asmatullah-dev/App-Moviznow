@@ -37,12 +37,19 @@ export default function ReferralsManagement() {
   const { t } = useLanguage();
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedUsers, setExpandedUsers] = useState<string[]>([]);
-  const [referrals, setReferrals] = useState<any[]>([]);
+  const [referrals, setReferrals] = useState<any[]>(() => {
+    const cached = safeStorage.getItem('admin_referral_list');
+    return cached ? JSON.parse(cached) : [];
+  });
   const [analytics, setAnalytics] = useState<any>(() => {
     const cached = safeStorage.getItem('admin_referral_analytics');
     return cached ? JSON.parse(cached) : null;
   });
-  const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(true);
+  const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(() => {
+    const cachedAnalytics = safeStorage.getItem('admin_referral_analytics');
+    const cachedList = safeStorage.getItem('admin_referral_list');
+    return !(cachedAnalytics && cachedList);
+  });
 
   useEffect(() => {
     const fetchData = async () => {
@@ -91,6 +98,7 @@ export default function ReferralsManagement() {
         setAnalytics(newAnalytics);
         setReferrals(refList);
         safeStorage.setItem('admin_referral_analytics', JSON.stringify(newAnalytics));
+        safeStorage.setItem('admin_referral_list', JSON.stringify(refList));
       } catch (e) {
         console.error("Failed to fetch referral data", e);
       } finally {

@@ -462,7 +462,7 @@ const LanguageContext = createContext<LanguageContextType | undefined>(undefined
 export const LanguageProvider = ({ children }: { children: ReactNode }) => {
   const [language, setLanguageState] = useState<Language>(() => {
     const saved = safeStorage.getItem('app_language');
-    return (saved as Language) || 'ur';
+    return (saved as Language) || 'en';
   });
   const isTranslatingRef = useRef(false);
   const failureCount = useRef(0);

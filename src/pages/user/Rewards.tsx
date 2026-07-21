@@ -46,7 +46,10 @@ export default function Rewards() {
     const cached = safeStorage.getItem('referral_users_list');
     return cached ? JSON.parse(cached) : [];
   });
-  const [isLoadingStats, setIsLoadingStats] = useState(true);
+  const [isLoadingStats, setIsLoadingStats] = useState(() => {
+    const cached = safeStorage.getItem('referral_users_list');
+    return !cached;
+  });
 
   const referralLink = `${window.location.origin}/?ref=${profile?.referralCode || ''}`;
 

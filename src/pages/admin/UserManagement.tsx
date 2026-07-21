@@ -1424,6 +1424,19 @@ export default function UserManagement() {
                       <span className="text-zinc-600 dark:text-zinc-300 font-medium">
                         {user.role === 'owner' ? 'Lifetime' : user.expiryDate ? safeFormat(user.expiryDate, 'MMM dd, yyyy') : '-'}
                       </span>
+                      {user.referredBy && (() => {
+                        const inviter = allUsers.find(u => u.uid === user.referredBy);
+                        return (
+                          <div className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium flex flex-wrap items-center gap-0.5">
+                            <span className="text-zinc-400 dark:text-zinc-500">Ref by:</span>
+                            <span>
+                              {inviter 
+                                ? (inviter.displayName || inviter.phone || inviter.email || 'User') 
+                                : 'Yes'}
+                            </span>
+                          </div>
+                        );
+                      })()}
                       {(profile?.role === 'admin' || profile?.role === 'owner') && user.managedBy && (
                         <span className="text-zinc-500 dark:text-zinc-400 text-xs">
                           {managers[user.managedBy] || ''}
@@ -1711,6 +1724,19 @@ export default function UserManagement() {
                       <div className="text-right">
                         <div className="text-zinc-500 text-[10px] uppercase font-bold mb-0.5">Expiry Date</div>
                         <div className="font-bold text-zinc-900 dark:text-white text-sm">{selectedUser.role === 'owner' ? 'Lifetime' : selectedUser.expiryDate ? safeFormat(selectedUser.expiryDate, 'MMM dd, yyyy') : 'N/A'}</div>
+                        {selectedUser.referredBy && (() => {
+                          const inviter = allUsers.find(u => u.uid === selectedUser.referredBy);
+                          return (
+                            <div className="mt-1.5 text-right">
+                              <span className="text-[10px] text-zinc-400 dark:text-zinc-500 block uppercase font-bold">Ref by:</span>
+                              <span className="text-xs font-medium text-indigo-600 dark:text-indigo-400 block">
+                                {inviter 
+                                  ? (inviter.displayName || inviter.phone || inviter.email || 'User') 
+                                  : 'Yes'}
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
 
