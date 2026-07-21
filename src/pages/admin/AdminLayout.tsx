@@ -3,7 +3,7 @@ import { Outlet, Link, useLocation, useNavigate, Navigate } from 'react-router-d
 import { useAuth } from '../../contexts/AuthContext';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useUsers } from '../../contexts/UsersContext';
-import { Film, Users, Tags, Languages, Clock, LogOut, Menu, X, MonitorPlay, BarChart3, DollarSign, AlertTriangle, Bell, MessageCircle, Settings, LayoutDashboard, RefreshCw, Layers } from 'lucide-react';
+import { Film, Users, Tags, Languages, Clock, LogOut, Menu, X, MonitorPlay, BarChart3, DollarSign, AlertTriangle, Bell, MessageCircle, Settings, LayoutDashboard, RefreshCw, Layers, Gift } from 'lucide-react';
 import { clsx } from 'clsx';
 import ConfirmModal from '../../components/ConfirmModal';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
@@ -52,6 +52,7 @@ export default function AdminLayout() {
     { id: 'UserManagers', path: '/admin/user-managers', label: 'User Managers', icon: Users },
     { id: 'SelectedContent', path: '/admin/selected-content', label: 'Selected Content Only', icon: Film },
     { id: 'Income', path: '/admin/income', label: 'Income / Earn', icon: DollarSign },
+    { id: 'Referrals', path: '/admin/referrals', label: 'Referrals', icon: Gift },
     { id: 'ErrorLinks', path: '/admin/error-links', label: 'Error Links', icon: AlertTriangle },
     { id: 'ReportedLinks', path: '/admin/reported-links', label: `Reported Links${reportedLinksCount > 0 ? ` (${reportedLinksCount})` : ''}`, icon: AlertTriangle },
     { id: 'Notifications', path: '/admin/notifications', label: 'Notifications', icon: Bell },
@@ -65,9 +66,9 @@ export default function AdminLayout() {
   if (profile?.role === 'content_manager') {
     navItems = allNavItems.filter(item => ['/admin/content'].includes(item.path));
   } else if (profile?.role === 'user_manager') {
-    navItems = allNavItems.filter(item => ['/admin/users'].includes(item.path));
+    navItems = allNavItems.filter(item => ['/admin/users', '/admin/referrals'].includes(item.path));
   } else if (profile?.role === 'manager') {
-    navItems = allNavItems.filter(item => ['/admin/content', '/admin/users'].includes(item.path));
+    navItems = allNavItems.filter(item => ['/admin/content', '/admin/users', '/admin/referrals'].includes(item.path));
   }
 
   // Filter based on hiddenAdminTabs (only for non-owners)
@@ -226,7 +227,7 @@ export default function AdminLayout() {
             <LogOut className="w-5 h-5" />
           </button>
         </div>
-        <p className="text-[10px] text-zinc-500 font-mono tracking-tighter opacity-50 text-center pb-2">v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.4.0'}</p>
+        <p className="text-[10px] text-zinc-500 font-mono tracking-tighter opacity-50 text-center pb-2">v{typeof __APP_VERSION__ !== 'undefined' ? `${__APP_VERSION__} (Referral Addition)` : '2.7.5 (Referral Addition)'}</p>
       </aside>
 
       {/* Overlay for mobile */}

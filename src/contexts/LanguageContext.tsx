@@ -60,6 +60,59 @@ const translations: Record<string, Record<Language, string>> = {
   'Join Now': { en: 'Join Now', 'ur-roman': 'Abhi Join Karein', ur: 'ابھی جوائن کریں' },
   'Trending Movies': { en: 'Trending Movies', 'ur-roman': 'Trending Movies', ur: 'ٹرینڈنگ موویز' },
 
+  'Rewards & Referrals': { en: 'Rewards & Referrals', 'ur-roman': 'Inamat aur Referrals', ur: 'انعامات اور ریفرلز' },
+  'Rewards': { en: 'Rewards', 'ur-roman': 'Inamat', ur: 'انعامات' },
+  'Next Goal': { en: 'Next Goal', 'ur-roman': 'Agla Maqsad', ur: 'اگلا مقصد' },
+  'Referrals': { en: 'Referrals', 'ur-roman': 'Referrals', ur: 'ریفرلز' },
+  'Signups': { en: 'Signups', 'ur-roman': 'Signups', ur: 'سائن اپس' },
+  'Activated': { en: 'Activated', 'ur-roman': 'Activated', ur: 'فعال' },
+  'Bonus Days': { en: 'Bonus Days', 'ur-roman': 'Bonus Din', ur: 'بونس دن' },
+  'Refer & Earn': { en: 'Refer & Earn', 'ur-roman': 'Refer Karein aur Kamayein', ur: 'ریفر کریں اور کمائیں' },
+  'Invite friends and both of you get 5 days of premium instantly!': { en: 'Invite friends and both of you get 5 days of premium instantly!', 'ur-roman': 'Doston ko invite karein aur dono ko foran 5 din ki premium membership milegi!', ur: 'دوستوں کو مدعو کریں اور آپ دونوں کو فوری طور پر 5 دن کی پریمیم ممبرشپ ملے گی!' },
+  'Your Code': { en: 'Your Code', 'ur-roman': 'Aap ka Code', ur: 'آپ کا کوڈ' },
+  'Link': { en: 'Link', 'ur-roman': 'Link', ur: 'لنک' },
+  'Native Share': { en: 'Native Share', 'ur-roman': 'Native Share', ur: 'شیئر کریں' },
+  'Invite your first friend': { en: 'Invite your first friend', 'ur-roman': 'Apne pehle dost ko invite karein', ur: 'اپنے پہلے دوست کو مدعو کریں' },
+  'Sharing is caring! Invite your friends to join MovizNow and unlock exclusive rewards together.': { en: 'Sharing is caring! Invite your friends to join MovizNow and unlock exclusive rewards together.', 'ur-roman': 'Sharing is caring! Apne doston ko MovizNow par bulayein aur mil kar inamat jeetein.', ur: 'شیئرنگ ہی کیئرنگ ہے! اپنے دوستوں کو MovizNow میں شامل ہونے کے لیے مدعو کریں اور مل کر خصوصی انعامات حاصل کریں۔' },
+  'Start Sharing Now': { en: 'Start Sharing Now', 'ur-roman': 'Abhi share karna shuru karein', ur: 'ابھی شیئر کرنا شروع کریں' },
+  'Enable Notifications': { en: 'Enable Notifications', 'ur-roman': 'Notifications on karein', ur: 'اطلاعات کو فعال کریں' },
+  'Get 3 days of extra membership by enabling push notifications for updates.': { en: 'Get 3 days of extra membership by enabling push notifications for updates.', 'ur-roman': 'Updates ke liye push notifications on karein aur 3 din ki extra membership haasil karein.', ur: 'اپ ڈیٹس کے لیے پش نوٹیفیکیشنز کو فعال کر کے 3 دن کی اضافی ممبرشپ حاصل کریں۔' },
+  'Notification Permissions': { en: 'Notification Permissions', 'ur-roman': 'Notification ki ijazat', ur: 'اطلاعات کی اجازت' },
+  'Already Enabled': { en: 'Already Enabled', 'ur-roman': 'Pehle se on hai', ur: 'پہلے ہی فعال ہے' },
+  'Claimed': { en: 'Claimed', 'ur-roman': 'Haasil kar liya', ur: 'حاصل کر لیا' },
+  'Recent Referral Activity': { en: 'Recent Referral Activity', 'ur-roman': 'Haal hi ki referral activity', ur: 'حالیہ ریفرل سرگرمی' },
+  'Recently': { en: 'Recently', 'ur-roman': 'Haal hi mein', ur: 'حال ہی میں' },
+  'Days': { en: 'Days', 'ur-roman': 'Din', ur: 'دن' },
+  'How it works': { en: 'How it works', 'ur-roman': 'Ye kaise kaam karta hai', ur: 'یہ کیسے کام کرتا ہے' },
+  'Share your unique link or code with friends.': { en: 'Share your unique link or code with friends.', 'ur-roman': 'Apna makhsoos link ya code doston ke saath share karein.', ur: 'اپنا منفرد لنک یا کوڈ دوستوں کے ساتھ شیئر کریں۔' },
+  'Both you and your friend get 5 days of premium instantly when they sign up!': { en: 'Both you and your friend get 5 days of premium instantly when they sign up!', 'ur-roman': 'Dost ke sign up karne par aap dono ko foran 5 din ki premium membership milegi!', ur: 'دوست کے سائن اپ کرنے پر آپ دونوں کو فوری طور پر 5 دن کی پریمیم ممبرشپ ملے گی!' },
+  'Get another 5 days for yourself when your friend activates their membership.': { en: 'Get another 5 days for yourself when your friend activates their membership.', 'ur-roman': 'Jab aapka dost apni membership activate karega to aapko mazeed 5 din milenge.', ur: 'جب آپ کا دوست اپنی ممبرشپ فعال کرے گا تو آپ کو مزید 5 دن ملیں گے۔' },
+  'Membership is extended automatically from your current expiry.': { en: 'Membership is extended automatically from your current expiry.', 'ur-roman': 'Membership aapki maujuda expiry se khud-ba-khud barh jayegi.', ur: 'ممبرشپ آپ کی موجودہ میعاد ختم ہونے سے خود بخود بڑھ جائے گی۔' },
+  'Diamond Referrer': { en: 'Diamond Referrer', 'ur-roman': 'Diamond Referrer', ur: 'ڈائمنڈ ریفرر' },
+  'Platinum Referrer': { en: 'Platinum Referrer', 'ur-roman': 'Platinum Referrer', ur: 'پلاٹینم ریفرر' },
+  'Gold Referrer': { en: 'Gold Referrer', 'ur-roman': 'Gold Referrer', ur: 'گولڈ ریفرر' },
+  'Silver Referrer': { en: 'Silver Referrer', 'ur-roman': 'Silver Referrer', ur: 'سلور ریفرر' },
+  'Bronze Referrer': { en: 'Bronze Referrer', 'ur-roman': 'Bronze Referrer', ur: 'برونز ریفرر' },
+  'Newcomer': { en: 'Newcomer', 'ur-roman': 'Naya shamil shuda', ur: 'نووارد' },
+  'Get 5 days of premium membership for free on MovizNow!': { en: 'Get 5 days of premium membership for free on MovizNow!', 'ur-roman': 'MovizNow par 5 din ki premium membership muft haasil karein!', ur: 'MovizNow پر 5 دن کی پریمیم ممبرشپ مفت حاصل کریں!' },
+  'Join MovizNow': { en: 'Join MovizNow', 'ur-roman': 'MovizNow join karein', ur: 'MovizNow میں شامل ہوں' },
+  'Signed Up': { en: 'Signed Up', 'ur-roman': 'Sign up ho gaya', ur: 'سائن اپ کر لیا' },
+  'Paid Members': { en: 'Paid Members', 'ur-roman': 'Paid Members', ur: 'پیڈ ممبرز' },
+  'Total Days': { en: 'Total Days', 'ur-roman': 'Kul Din', ur: 'کل دن' },
+  'One-Time Rewards': { en: 'One-Time Rewards', 'ur-roman': 'Ek dafa milne wale inamat', ur: 'ایک بار ملنے والے انعامات' },
+  'Stay updated with latest content': { en: 'Stay updated with latest content', 'ur-roman': 'Latest content se bakhabar rahein', ur: 'تازہ ترین مواد سے باخبر رہیں' },
+  'Better experience on home screen': { en: 'Better experience on home screen', 'ur-roman': 'Home screen par behtar tajurba', ur: 'ہوم اسکرین پر بہتر تجربہ' },
+  'Enable': { en: 'Enable', 'ur-roman': 'On karein', ur: 'فعال کریں' },
+  'Installed': { en: 'Installed', 'ur-roman': 'Install ho gayi', ur: 'انسٹال ہو گئی' },
+  'Install': { en: 'Install', 'ur-roman': 'Install', ur: 'انسٹال' },
+  'Referral Limit': { en: 'Referral Limit', 'ur-roman': 'Referral ki had', ur: 'ریفرل کی حد' },
+  'This referral offer is only available for new users or new joining only.': { en: 'This referral offer is only available for new users or new joining only.', 'ur-roman': 'Ye referral offer sirf naye users ke liye hai.', ur: 'یہ ریفرل پیشکش صرف نئے صارفین یا نئی شمولیت کے لیے دستیاب ہے۔' },
+  'Expiry': { en: 'Expiry', 'ur-roman': 'Expiry', ur: 'میعاد ختم' },
+  'Lifetime': { en: 'Lifetime', 'ur-roman': 'Lifetime', ur: 'تاحیات' },
+  'Reported Links': { en: 'Reported Links', 'ur-roman': 'Reported Links', ur: 'رپورٹ شدہ لنکس' },
+  'Movie Requests': { en: 'Movie Requests', 'ur-roman': 'Movie ki requests', ur: 'مووی کی درخواستیں' },
+  'No Contact Info': { en: 'No Contact Info', 'ur-roman': 'Rabtay ki maloomat nahi', ur: 'کوئی رابطہ معلومات نہیں' },
+
   'Free movie download sites in Pakistan are illegal, full of viruses, popups aur VPN ki zaroorat hoti hai.': { en: 'Free movie download sites in Pakistan are illegal, full of viruses, popups aur VPN ki zaroorat hoti hai.', 'ur-roman': 'Pakistan mein free movie download sites ghair kanooni hain, virus se bhari hain, popups aate hain aur VPN ki zaroorat hoti hai.', ur: 'پاکستان میں مفت مووی ڈاؤن لوڈ سائٹس غیر قانونی ہیں، وائرس سے بھری ہیں، پاپ اپس آتے ہیں اور وی پی این کی ضرورت ہوتی ہے۔' },
   'Safe legal alternative hai — full HD Bollywood, Hollywood, Punjabi aur Pakistani movies sirf PKR 50 me, seedha WhatsApp par delivery. Ek biscuit ki price me poori HD movie.': { en: 'Safe legal alternative hai — full HD Bollywood, Hollywood, Punjabi aur Pakistani movies sirf PKR 50 me, seedha WhatsApp par delivery. Ek biscuit ki price me poori HD movie.', 'ur-roman': 'Ye ek mehfooz kanooni mutabadil hai — full HD Bollywood, Hollywood, Punjabi aur Pakistani movies sirf PKR 50 mein, seedha WhatsApp par delivery. Ek biscuit ki qeemat mein poori HD movie.', ur: 'یہ ایک محفوظ قانونی متبادل ہے — فل ایچ ڈی بالی ووڈ، ہالی ووڈ، پنجابی اور پاکستانی موویز صرف 50 روپے میں، سیدھا واٹس ایپ پر ڈیلیوری۔ ایک بسکٹ کی قیمت میں پوری ایچ ڈی مووی۔' },
 
@@ -409,7 +462,7 @@ const LanguageContext = createContext<LanguageContextType | undefined>(undefined
 export const LanguageProvider = ({ children }: { children: ReactNode }) => {
   const [language, setLanguageState] = useState<Language>(() => {
     const saved = safeStorage.getItem('app_language');
-    return (saved as Language) || 'en';
+    return (saved as Language) || 'ur';
   });
   const isTranslatingRef = useRef(false);
   const failureCount = useRef(0);

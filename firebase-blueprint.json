@@ -9,6 +9,11 @@
         "email": { "type": "string", "format": "email" },
         "displayName": { "type": "string" },
         "photoURL": { "type": "string" },
+        "referralCode": { "type": "string", "description": "The user's unique referral code." },
+        "referredBy": { "type": "string", "description": "The UID of the user who referred this user." },
+        "referralRewardClaimed": { "type": "boolean", "description": "Whether the inviter has been rewarded for this user's activation." },
+        "notificationRewardClaimed": { "type": "boolean", "description": "Whether the user claimed the notification reward." },
+        "pwaRewardClaimed": { "type": "boolean", "description": "Whether the user claimed the PWA install reward." },
         "role": { "type": "string", "enum": ["admin", "owner", "manager", "user_manager", "content_manager", "user", "trial", "selected_content", "temporary", "editor"] },
         "permissions": { "type": "array", "items": { "type": "string" }, "description": "Specific administrative permissions." },
         "status": { "type": "string", "enum": ["pending", "active", "suspended", "expired"] },
@@ -215,9 +220,32 @@
         "date": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "userId", "userName", "rating", "text", "date"]
+    },
+    "ReferralStore": {
+      "title": "ReferralStore",
+      "description": "Stores user referral code, joins and statistics.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "The user's referral code."
+        },
+        "joins": {
+          "type": "object",
+          "description": "Mapping of joined user UID to join details."
+        },
+        "stats": {
+          "type": "object",
+          "description": "Total stats for this user."
+        }
+      }
     }
   },
   "firestore": {
+    "/referral/{userId}": {
+      "schema": { "$ref": "#/entities/ReferralStore" },
+      "description": "Stores unified referral records for a specific user."
+    },
     "/settings/app_settings": {
       "schema": { "$ref": "#/entities/AppSettings" },
       "description": "Stores global app settings."

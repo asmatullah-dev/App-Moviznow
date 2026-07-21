@@ -1130,7 +1130,7 @@ async function startServer() {
   app.get('/api/skymovieshd', async (req: express.Request, res: express.Response) => {
     try {
       let { url } = req.query;
-      if (!url || typeof url !== 'string' || !url.includes('skymovieshd.')) {
+      if (!url || typeof url !== 'string' || !url.includes('skymovies')) {
         return res.status(400).json({ error: 'Valid SkymoviesHD URL required' });
       }
 

@@ -36,6 +36,19 @@ export interface UserProfile {
   hasPassword?: boolean;
   sessionId?: string;
   orders?: Order[];
+  referralCode?: string;
+  referredBy?: string;
+  signupRewardClaimed?: boolean;
+  activationRewardClaimed?: boolean;
+  notificationRewardClaimed?: boolean;
+  pwaRewardClaimed?: boolean;
+  claimedReferralSignups?: string[];
+  claimedReferralActivations?: string[];
+  referralStats?: {
+    total_clicks: number;
+    lastUpdated: string;
+    [key: string]: any;
+  };
   reported_links?: any[];
   movieRequests?: any[];
   trialActivated?: boolean;

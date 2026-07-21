@@ -355,7 +355,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
     // 1. Identify all extractable links
     const extractableLinks = currentLinks.filter(u => 
-      (u.includes('howblogs.xyz') || u.includes('filesdl.in') || u.includes('filesdl.top') || u.includes('mdrive.lol') || u.includes('mdrvie.lol') || u.includes('moviesdrives.') || u.includes('moviesdrive.') || u.includes('filmygo.') || u.includes('skymovieshd.')) && 
+      (u.includes('howblogs.xyz') || u.includes('filesdl.in') || u.includes('filesdl.top') || u.includes('mdrive.lol') || u.includes('mdrvie.lol') || u.includes('moviesdrives.') || u.includes('moviesdrive.') || u.includes('filmygo.') || u.includes('skymovies')) && 
       !processedExtractionsRef.current.has(u)
     );
 
@@ -383,7 +383,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
               if (!res.ok) throw new Error('FilmyGo fetch failed');
               const data = await res.json();
               return { type: 'filmygo', original: targetUrl, data };
-            } else if (normUrl.includes('skymovieshd.')) {
+            } else if (normUrl.includes('skymovies')) {
               const res = await fetch(`/api/skymovieshd?url=${encodeURIComponent(normUrl)}`);
               if (!res.ok) throw new Error('SkymoviesHD fetch failed');
               const data = await res.json();
@@ -488,7 +488,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
       !u.includes('moviesdrives.') &&
       !u.includes('moviesdrive.') &&
       !u.includes('filmygo.') &&
-      !u.includes('skymovieshd.')
+      !u.includes('skymovies')
     );
     
     if (urls.length === 0 && currentLinks.length > 0) {
@@ -1116,13 +1116,13 @@ export const LinkCheckerModal: React.FC<Props> = ({
                         <h3 className="text-lg font-bold">
                           {(mdriveUrl.includes('mdrive.lol') || mdriveUrl.includes('mdrvie.lol')) ? 'MDrive Selection' : 
                           mdriveUrl.includes('filmygo.') ? 'FilmyGo FilesDL Selection' : 
-                          mdriveUrl.includes('skymovieshd.') ? 'SkymoviesHD HowBlogs Selection' :
+                          mdriveUrl.includes('skymovies') ? 'SkymoviesHD HowBlogs Selection' :
                           'MoviesDrive MDrive Selection'}
                         </h3>
                         <p className="text-xs text-zinc-500">
                           {(mdriveUrl.includes('mdrive.lol') || mdriveUrl.includes('mdrvie.lol')) ? 'Pick the Hubcloud links you want to extract' : 
                           mdriveUrl.includes('filmygo.') ? 'Pick the FilesDL links you want to process' :
-                          mdriveUrl.includes('skymovieshd.') ? 'Pick the HowBlogs links you want to process' :
+                          mdriveUrl.includes('skymovies') ? 'Pick the HowBlogs links you want to process' :
                           'Pick the MDrive links you want to process'}
                         </p>
                       </div>

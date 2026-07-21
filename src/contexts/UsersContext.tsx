@@ -113,7 +113,6 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         batches.push(writeBatch(db));
       }
       batches[batches.length - 1].set(doc(db, 'chunk_meta', 'versions'), { users: usersMeta }, { merge: true });
-
       for (const b of batches) await b.commit();
       
       safeStorage.removeItem('pending_user_updates');

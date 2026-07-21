@@ -8,7 +8,7 @@ import { useSettings } from '../contexts/SettingsContext';
 import { useUsers } from '../contexts/UsersContext';
 import { 
   User, Settings, LogOut, Heart, Clock, MessageCircle, 
-  Sun, Moon, Monitor, LayoutDashboard, Film, Users, Plus, Download, RefreshCw, Eye, X, Menu, Home as HomeIcon, PlayCircle, Tv, Gift, Star, Info, Phone
+  Sun, Moon, Monitor, LayoutDashboard, Film, Users, Plus, Download, RefreshCw, Eye, X, Menu, Home as HomeIcon, PlayCircle, Tv, Gift, Star, Info, Phone, Award
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { format } from 'date-fns';
@@ -309,6 +309,11 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                   {location.pathname === "/membership" && <div className="absolute left-0 w-1 h-5 bg-emerald-500 rounded-r-full" />}
                   <Gift className="w-4 h-4" /> {t("Membership")}
                   {location.pathname === "/membership" && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+                </Link>
+                <Link to="/rewards" onClick={() => setIsOpen(false)} className={clsx("relative flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors", location.pathname === "/rewards" ? "text-emerald-500 bg-emerald-500/10" : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800")}>
+                  {location.pathname === "/rewards" && <div className="absolute left-0 w-1 h-5 bg-emerald-500 rounded-r-full" />}
+                  <Award className="w-4 h-4" /> {t("Rewards")}
+                  {location.pathname === "/rewards" && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500" />}
                 </Link>
                 <Link to="/reviews" onClick={() => setIsOpen(false)} className={clsx("relative flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors", location.pathname === "/reviews" ? "text-emerald-500 bg-emerald-500/10" : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800")}>
                   {location.pathname === "/reviews" && <div className="absolute left-0 w-1 h-5 bg-emerald-500 rounded-r-full" />}
