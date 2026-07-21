@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
-import { collection, doc, updateDoc, getDoc, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit, deleteField } from 'firebase/firestore';
+import { collection, doc, updateDoc, getDoc, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit, deleteField, increment } from 'firebase/firestore';
 import { UserProfile, Role, Status, AnalyticsEvent, Content } from '../../types';
 import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, Bell, RefreshCw, Link2 as LinkIcon } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
@@ -485,6 +485,88 @@ export default function UserManagement() {
         updateData.expiryDate = new Date(editForm.expiryDate).toISOString();
       } else {
         updateData.expiryDate = null;
+      }
+
+      // Detect if membership expiry date increased by more than 5 days.
+      // That means they bought a membership!
+      let membershipDateIncreased = false;
+      if (updateData.expiryDate) {
+        const newTime = new Date(updateData.expiryDate).getTime();
+        let oldTime = 0;
+        if (selectedUser.expiryDate && selectedUser.expiryDate !== 'Lifetime') {
+          oldTime = new Date(selectedUser.expiryDate).getTime();
+        } else {
+          oldTime = Date.now(); // fallback to current time
+        }
+        
+        // Check if increased by more than 5 days (5 days in ms = 5 * 24 * 60 * 60 * 1000 = 432000000)
+        const diffDays = (newTime - oldTime) / (24 * 60 * 60 * 1000);
+        if (diffDays > 5) {
+          membershipDateIncreased = true;
+        }
+      }
+
+      if (membershipDateIncreased) {
+        // Change to paid status and automatically send reward to inviter
+        updateData.status = 'active'; // ensure user is active since they bought membership
+        
+        const inviterUid = selectedUser.referredBy;
+        if (inviterUid) {
+          try {
+            // Check if activation reward was already claimed
+            if (!selectedUser.activationRewardClaimed) {
+              const inviterRef = doc(db, 'users', inviterUid);
+              const inviterSnap = await getDoc(inviterRef);
+              
+              const batch = writeBatch(db);
+              
+              // Increment the inviter's expiryDate by 5 days
+              if (inviterSnap.exists()) {
+                const inviterData = inviterSnap.data();
+                let baseDate = new Date();
+                if (inviterData.expiryDate && inviterData.expiryDate !== 'Lifetime') {
+                  const currentExp = new Date(inviterData.expiryDate);
+                  if (currentExp > baseDate) {
+                    baseDate = currentExp;
+                  }
+                }
+                baseDate.setDate(baseDate.getDate() + 5);
+                const newInviterExpiryStr = baseDate.toISOString();
+                
+                batch.update(inviterRef, {
+                  expiryDate: newInviterExpiryStr,
+                  status: 'active'
+                });
+              }
+              
+              // Set the activationClaimed and status = 'paid' on the join record in /referral/all
+              batch.set(doc(db, 'referral', 'all'), {
+                joins: {
+                  [selectedUser.uid]: {
+                    status: 'paid',
+                    activationClaimed: true
+                  }
+                },
+                stats: {
+                  [inviterUid]: {
+                    totalPaid: increment(1)
+                  }
+                }
+              }, { merge: true });
+              
+              await batch.commit();
+              
+              // Also ensure updateData itself marks activationRewardClaimed as true on the user's profile
+              updateData.activationRewardClaimed = true;
+              console.log("Successfully sent 5 days reward to inviter:", inviterUid);
+            }
+          } catch (e) {
+            console.error("Failed to automatically grant referral activation reward:", e);
+          }
+        } else {
+          // If no inviter is present, we still set activationRewardClaimed to true to mark this user as activated/paid
+          updateData.activationRewardClaimed = true;
+        }
       }
 
       const currentEditingId = editingId;
