@@ -1895,10 +1895,19 @@ async function startServer() {
     const protocol = req.get("x-forwarded-proto") || req.protocol || "https";
     const baseUrl = `${protocol}://${host}`;
 
+    const hasRef = req.query.ref || urlPath.includes("ref=");
+
     let title = "MovizNow - Premium Movies & Series";
     let description =
       "Watch the latest movies and series on MovizNow. Your ultimate entertainment destination.";
     let image = `${baseUrl}/pwa-512x512.png`; // Use absolute URL for OG image
+
+    if (hasRef) {
+      title = "Join MovizNow - Premium Movies & Series";
+      description =
+        "Get 5 Days of premium membership for free on MovizNow! Watch and download your favorite movies and series.";
+      image = `${baseUrl}/moviznow_share_banner.jpg`;
+    }
 
     const movieMatch = urlPath.match(/^\/movie\/([^/?]+)/);
     if (movieMatch) {
