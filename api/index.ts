@@ -1896,6 +1896,11 @@ async function startServer() {
       host = host.split(",")[0].trim();
     }
     
+    // Fallback to VERCEL_URL if we are on Vercel and host is empty or points to localhost
+    if ((!host || host.includes("localhost") || host.includes("127.0.0.1") || host.includes("0.0.0.0") || host.includes("::1")) && process.env.VERCEL_URL) {
+      host = process.env.VERCEL_URL;
+    }
+    
     // Force HTTPS for all production environments to satisfy strict social card requirements (WhatsApp, Facebook, Twitter, Discord)
     const isLocalhost = host.includes("localhost") || host.includes("127.0.0.1") || host.includes("0.0.0.0") || host.includes("::1");
     const protocol = isLocalhost ? "http" : "https";
@@ -2604,7 +2609,10 @@ async function startServer() {
       }
     });
   } else {
-    const distPath = path.resolve(__dirname, "../dist");
+    let distPath = path.resolve(__dirname, "../dist");
+    if (!fs.existsSync(distPath)) {
+      distPath = path.join(process.cwd(), "dist");
+    }
     app.use(express.static(distPath, { index: false })); // Disable default index.html serving
 
     // Explicitly serve PWA files with correct MIME types
