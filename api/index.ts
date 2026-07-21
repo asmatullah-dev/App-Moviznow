@@ -2596,8 +2596,7 @@ async function startServer() {
         template = await vite.transformIndexHtml(url, template);
 
         // Remove any existing OG tags to avoid duplication
-        template = template.replace(/<meta property="og:[^>]+>/g, "");
-        template = template.replace(/<meta name="twitter:[^>]+>/g, "");
+        template = template.replace(/<meta[^>]*(property="og:|name="twitter:)[^>]*>/gi, "");
 
         const ogTags = await getOgTags(req);
         const html = template.replace("</head>", `${ogTags}</head>`);
@@ -2635,7 +2634,10 @@ async function startServer() {
 
     app.get("*", async (req, res) => {
       try {
-        const templatePath = path.join(distPath, "index.html");
+        let templatePath = path.join(distPath, "app.html");
+        if (!fs.existsSync(templatePath)) {
+          templatePath = path.join(distPath, "index.html");
+        }
         if (!fs.existsSync(templatePath)) {
           console.error(`Template not found at: ${templatePath}`);
           return res
@@ -2645,8 +2647,7 @@ async function startServer() {
         let template = fs.readFileSync(templatePath, "utf-8");
 
         // Remove any existing OG tags to avoid duplication
-        template = template.replace(/<meta property="og:[^>]+>/g, "");
-        template = template.replace(/<meta name="twitter:[^>]+>/g, "");
+        template = template.replace(/<meta[^>]*(property="og:|name="twitter:)[^>]*>/gi, "");
 
         const ogTags = await getOgTags(req);
         const html = template.replace("</head>", `${ogTags}</head>`);
