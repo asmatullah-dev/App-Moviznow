@@ -168,6 +168,22 @@ export default function MovieDetails() {
   const [isTrailerPopupOpen, setIsTrailerPopupOpen] = useState(false);
   const [isTrailerSelectionOpen, setIsTrailerSelectionOpen] = useState(false);
   const [showRatePrompt, setShowRatePrompt] = useState(false);
+  const [hasUserRated, setHasUserRated] = useState<boolean>(() => safeStorage.getItem('has_rated') === 'true');
+
+  useEffect(() => {
+    if (safeStorage.getItem('has_rated') === 'true') {
+      setHasUserRated(true);
+      return;
+    }
+    if (!profile?.uid) return;
+
+    fetchReviewsFromChunks(false).then((data) => {
+      if (data && data.some((r: any) => r.userId === profile.uid || (profile.email && r.userEmail === profile.email))) {
+        safeStorage.setItem('has_rated', 'true');
+        setHasUserRated(true);
+      }
+    }).catch(() => {});
+  }, [profile?.uid, profile?.email]);
   const [shareResultModal, setShareResultModal] = useState<{
     isOpen: boolean;
     text: string;
@@ -2601,7 +2617,7 @@ export default function MovieDetails() {
                   </a>
                 )}
                 
-                {!(safeStorage.getItem('has_rated') === 'true' && profile?.status !== 'pending' && profile?.status !== 'expired') && (
+                {!((hasUserRated || safeStorage.getItem('has_rated') === 'true') && profile?.status !== 'pending' && profile?.status !== 'expired') && (
                   <Link
                     to="/reviews"
                     className="bg-zinc-800 text-white dark:bg-zinc-200 dark:text-black px-6 py-3 text-sm sm:text-base rounded-xl font-bold flex items-center gap-2 transition-all hover:bg-zinc-700 dark:hover:bg-zinc-300 active:scale-95 shadow-lg"
@@ -4301,6 +4317,7 @@ export default function MovieDetails() {
         onConfirm={() => {
           setShowRatePrompt(false);
           safeStorage.setItem('has_rated', 'true');
+          setHasUserRated(true);
           navigate('/reviews');
         }}
         onCancel={() => {

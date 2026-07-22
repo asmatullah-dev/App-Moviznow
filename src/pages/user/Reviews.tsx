@@ -18,6 +18,7 @@ interface Review {
   text: string;
   date: string;
   city?: string;
+  userEmail?: string;
 }
 
 import { Header } from "../../components/Header";
@@ -60,6 +61,9 @@ export default function Reviews() {
           if (Array.isArray(parsed) && parsed.length > 0) {
             setReviews(parsed);
             setLoading(false); // Hide spinner if we have meaningful cached data
+            if (profile?.uid && parsed.some((r: any) => r.userId === profile.uid || (profile.email && r.userEmail === profile.email))) {
+              safeStorage.setItem('has_rated', 'true');
+            }
           }
         }
       } catch (e) {
@@ -72,6 +76,9 @@ export default function Reviews() {
         const data = await fetchReviewsFromChunks(true);
         if (data) {
           setReviews(data);
+          if (profile?.uid && data.some((r: any) => r.userId === profile.uid || (profile.email && r.userEmail === profile.email))) {
+            safeStorage.setItem('has_rated', 'true');
+          }
         }
       } catch (e) {
         console.error("Failed to load reviews from Firestore:", e);
@@ -81,7 +88,7 @@ export default function Reviews() {
       }
     };
     loadReviews();
-  }, []);
+  }, [profile?.uid, profile?.email]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -142,6 +149,9 @@ export default function Reviews() {
       const updatedReviews = reviews.filter(r => r.id !== reviewIdToDelete);
       setReviews(updatedReviews);
       safeStorage.setItem(CACHE_KEY, JSON.stringify(updatedReviews));
+      if (profile?.uid && !updatedReviews.some(r => r.userId === profile.uid || (profile.email && r.userEmail === profile.email))) {
+        safeStorage.removeItem('has_rated');
+      }
       setIsDeleteModalOpen(false);
       setReviewIdToDelete(null);
     } catch (e) {
