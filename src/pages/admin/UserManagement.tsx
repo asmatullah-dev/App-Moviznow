@@ -45,6 +45,7 @@ export default function UserManagement() {
   const [sortOrder, setSortOrder] = useState<SortOrder>(() => (sessionStorage.getItem('user_mgmt_sort_order') as any) || 'desc');
   const [filterRole, setFilterRole] = useState<Role | 'all'>(() => (sessionStorage.getItem('user_mgmt_role') as any) || 'all');
   const [filterLanguage, setFilterLanguage] = useState<string>(() => sessionStorage.getItem('user_mgmt_lang') || 'all');
+  const [filterReward, setFilterReward] = useState<string>(() => sessionStorage.getItem('user_mgmt_reward') || 'all');
   const [filterStatus, setFilterStatus] = useState<Status | 'all'>(() => (sessionStorage.getItem('user_mgmt_status') as any) || 'all');
 
   useEffect(() => {
@@ -54,7 +55,8 @@ export default function UserManagement() {
     sessionStorage.setItem('user_mgmt_role', filterRole);
     sessionStorage.setItem('user_mgmt_status', filterStatus);
     sessionStorage.setItem('user_mgmt_lang', filterLanguage);
-  }, [searchTerm, sortField, sortOrder, filterRole, filterStatus, filterLanguage]);
+    sessionStorage.setItem('user_mgmt_reward', filterReward);
+  }, [searchTerm, sortField, sortOrder, filterRole, filterStatus, filterLanguage, filterReward]);
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
 
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
@@ -1062,6 +1064,19 @@ export default function UserManagement() {
     if (filterStatus !== 'all') {
       result = result.filter(u => u.status === filterStatus);
     }
+    if (filterReward !== 'all') {
+      if (filterReward === 'notification') {
+        result = result.filter(u => u.notificationRewardClaimed);
+      } else if (filterReward === 'pwa') {
+        result = result.filter(u => u.pwaRewardClaimed);
+      } else if (filterReward === 'referred') {
+        result = result.filter(u => allUsers.some(au => au.referredBy === u.uid));
+      } else if (filterReward === 'joined_referral') {
+        result = result.filter(u => u.hasReceivedReferralReward || u.referredBy);
+      } else if (filterReward === 'active') {
+        result = result.filter(u => u.activationRewardClaimed);
+      }
+    }
 
     // Sort
     if (!searchTerm) {
@@ -1119,7 +1134,7 @@ export default function UserManagement() {
     }
 
     return result;
-  }, [users, searchTerm, filterRole, filterStatus, filterLanguage, sortField, sortOrder]);
+  }, [users, searchTerm, filterRole, filterStatus, filterLanguage, filterReward, sortField, sortOrder, allUsers]);
 
   const handleAddUser = async () => {
     if (!foundUser && !newUserForm.phone && !newUserForm.email) {
@@ -1323,13 +1338,14 @@ export default function UserManagement() {
               </div>
             )}
             <div className="flex gap-2 flex-1 overflow-x-auto pb-1 md:pb-0 items-center">
-              {(searchTerm || filterRole !== 'all' || filterStatus !== 'all' || filterLanguage !== 'all' || sortField !== 'createdAt' || sortOrder !== 'desc') && (
+              {(searchTerm || filterRole !== 'all' || filterStatus !== 'all' || filterLanguage !== 'all' || filterReward !== 'all' || sortField !== 'createdAt' || sortOrder !== 'desc') && (
                 <button
                   onClick={() => {
                     setSearchTerm('');
                     setFilterRole('all');
                     setFilterStatus('all');
                     setFilterLanguage('all');
+                    setFilterReward('all');
                     setSortField('createdAt');
                     setSortOrder('desc');
                   }}
@@ -1366,6 +1382,18 @@ export default function UserManagement() {
                 <option value="active">Active</option>
                 <option value="pending">Pending</option>
                 <option value="expired">Expired</option>
+              </select>
+              <select
+                value={filterReward}
+                onChange={(e) => setFilterReward(e.target.value)}
+                className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 focus:outline-none focus:border-emerald-500 min-w-[120px] text-xs"
+              >
+                <option value="all">All Rewards</option>
+                <option value="notification">Notification Reward</option>
+                <option value="pwa">App Install Reward</option>
+                <option value="referred">Referred Users</option>
+                <option value="active">Activation Reward</option>
+                <option value="joined_referral">Joined via Referral</option>
               </select>
               <select
                 value={filterLanguage}
@@ -1844,12 +1872,6 @@ export default function UserManagement() {
                                 <span className="font-medium text-emerald-600 dark:text-emerald-400">+3 Days</span>
                               </div>
                             )}
-                            {(selectedUser.hasReceivedReferralReward || selectedUser.referredBy) && (
-                              <div className="flex justify-between items-center text-xs">
-                                <span className="text-zinc-600 dark:text-zinc-400">Joined via Referral</span>
-                                <span className="font-medium text-emerald-600 dark:text-emerald-400">+5 Days</span>
-                              </div>
-                            )}
                             {referredUsers.length > 0 && (
                               <div className="flex justify-between items-center text-xs">
                                 <span className="text-zinc-600 dark:text-zinc-400">Referred {referredUsers.length} User{referredUsers.length !== 1 ? 's' : ''}</span>
@@ -1860,6 +1882,12 @@ export default function UserManagement() {
                               <div className="flex justify-between items-center text-xs">
                                 <span className="text-zinc-600 dark:text-zinc-400">{activatedReferredCount} Referral{activatedReferredCount !== 1 ? 's' : ''} Activated</span>
                                 <span className="font-medium text-emerald-600 dark:text-emerald-400">+{activatedReferredCount * 5} Days</span>
+                              </div>
+                            )}
+                            {(selectedUser.hasReceivedReferralReward || selectedUser.referredBy) && (
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="text-zinc-600 dark:text-zinc-400">Joined via Referral</span>
+                                <span className="font-medium text-emerald-600 dark:text-emerald-400">+5 Days</span>
                               </div>
                             )}
                           </div>

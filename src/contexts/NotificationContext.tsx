@@ -39,22 +39,40 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setLoading(true);
     try {
       let latestChunkId = 'notification_chunk_0';
+      let serverVersion = '0';
       try {
         const { getChunkMeta } = await import('../utils/chunkMeta');
         const meta = await getChunkMeta();
-        if (meta && meta.notifications && meta.notifications.latestChunkId) {
-            latestChunkId = meta.notifications.latestChunkId;
+        if (meta && meta.notifications) {
+            if (meta.notifications.latestChunkId) latestChunkId = meta.notifications.latestChunkId;
+            if (meta.notifications.version) serverVersion = meta.notifications.version.toString();
         }
       } catch (err) { }
       
       latestChunkIdRef.current = latestChunkId;
-
-      const chunkDoc = await getDoc(doc(db, 'notification_chunks', latestChunkId));
-      let allNotifs: AppNotification[] = [];
       
-      if (chunkDoc.exists()) {
-        const items = chunkDoc.data().items || {};
-        allNotifs = Object.values(items) as AppNotification[];
+      const cachedVersion = safeStorage.getItem('cached_notifications_version') || '0';
+      const cachedData = safeStorage.getItem('cached_notifications_data');
+      
+      let allNotifs: AppNotification[] = [];
+      let usedCache = false;
+      
+      if (cachedVersion === serverVersion && cachedData) {
+         try {
+             allNotifs = JSON.parse(cachedData);
+             usedCache = true;
+         } catch(e) {}
+      }
+      
+      if (!usedCache) {
+        const chunkDoc = await getDoc(doc(db, 'notification_chunks', latestChunkId));
+        if (chunkDoc.exists()) {
+          const items = chunkDoc.data().items || {};
+          allNotifs = Object.values(items) as AppNotification[];
+          
+          safeStorage.setItem('cached_notifications_version', serverVersion);
+          safeStorage.setItem('cached_notifications_data', JSON.stringify(allNotifs));
+        }
       }
 
       let filtered = allNotifs.filter(n => {
