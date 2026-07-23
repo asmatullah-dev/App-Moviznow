@@ -33,6 +33,7 @@ import {
   TrendingUp,
   Zap,
   AlertCircle,
+  Gift,
 Star } from "lucide-react";
 import { Helmet } from "react-helmet";
 import { clsx } from "clsx";
@@ -603,6 +604,12 @@ export default function Home({
                   <ShoppingCart className="w-3 h-3 sm:w-5 sm:h-5" /> {t('Cart')}
                 </Link>
               )}
+              <Link
+                to="/rewards"
+                className="flex items-center justify-center gap-1.5 sm:gap-2 bg-emerald-500 text-white dark:text-black px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-emerald-400 transition-all active:scale-95 shadow-lg shadow-emerald-500/20 border border-white/20"
+              >
+                <Gift className="w-3 h-3 sm:w-5 sm:h-5" /> {t('Rewards')}
+              </Link>
               <Link
                 to="/reviews"
                 className="flex items-center justify-center gap-1.5 sm:gap-2 bg-zinc-800 text-white dark:bg-zinc-200 dark:text-black px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-zinc-700 dark:hover:bg-zinc-300 transition-all active:scale-95 shadow-lg"

@@ -49,6 +49,7 @@ import {
   RefreshCw,
   ExternalLink,
   Send,
+  Gift,
 } from "lucide-react";
 import { logEvent } from "../../services/analytics";
 import AlertModal from "../../components/AlertModal";
@@ -2744,6 +2745,15 @@ export default function MovieDetails() {
                         : t("You do not have permission to access links for this content.")}
                 </p>
                 <div className="flex flex-wrap gap-3">
+                  {isPending && (
+                    <Link
+                      to="/rewards"
+                      className="inline-flex items-center gap-2 bg-emerald-500 text-white px-6 py-3 text-sm sm:text-base rounded-xl font-bold hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20"
+                    >
+                      <Gift className="w-5 h-5" />
+                      {t('Rewards')}
+                    </Link>
+                  )}
                   {settings?.isAdminContactEnabled !== false && (
                     <button
                       onClick={() => {

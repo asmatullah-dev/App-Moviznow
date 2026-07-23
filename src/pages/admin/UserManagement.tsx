@@ -1821,6 +1821,51 @@ export default function UserManagement() {
                         })()}
                       </div>
                     </div>
+                    {(() => {
+                      const referredUsers = allUsers.filter(u => u.referredBy === selectedUser.uid);
+                      const activatedReferredCount = referredUsers.filter(u => u.activationRewardClaimed).length;
+                      const hasAnyExtension = selectedUser.pwaRewardClaimed || selectedUser.notificationRewardClaimed || selectedUser.hasReceivedReferralReward || selectedUser.referredBy || referredUsers.length > 0;
+                      
+                      if (!hasAnyExtension) return null;
+                      
+                      return (
+                        <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
+                          <div className="text-zinc-500 text-[10px] uppercase font-bold mb-2">Membership Extensions</div>
+                          <div className="space-y-1.5">
+                            {selectedUser.pwaRewardClaimed && (
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="text-zinc-600 dark:text-zinc-400">App Install Reward</span>
+                                <span className="font-medium text-emerald-600 dark:text-emerald-400">+3 Days</span>
+                              </div>
+                            )}
+                            {selectedUser.notificationRewardClaimed && (
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="text-zinc-600 dark:text-zinc-400">Notification Reward</span>
+                                <span className="font-medium text-emerald-600 dark:text-emerald-400">+3 Days</span>
+                              </div>
+                            )}
+                            {(selectedUser.hasReceivedReferralReward || selectedUser.referredBy) && (
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="text-zinc-600 dark:text-zinc-400">Joined via Referral</span>
+                                <span className="font-medium text-emerald-600 dark:text-emerald-400">+5 Days</span>
+                              </div>
+                            )}
+                            {referredUsers.length > 0 && (
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="text-zinc-600 dark:text-zinc-400">Referred {referredUsers.length} User{referredUsers.length !== 1 ? 's' : ''}</span>
+                                <span className="font-medium text-emerald-600 dark:text-emerald-400">+{referredUsers.length * 5} Days</span>
+                              </div>
+                            )}
+                            {activatedReferredCount > 0 && (
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="text-zinc-600 dark:text-zinc-400">{activatedReferredCount} Referral{activatedReferredCount !== 1 ? 's' : ''} Activated</span>
+                                <span className="font-medium text-emerald-600 dark:text-emerald-400">+{activatedReferredCount * 5} Days</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {userReviews[selectedUser.uid] && userReviews[selectedUser.uid].length > 0 && (
                       <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 flex flex-col gap-3">
