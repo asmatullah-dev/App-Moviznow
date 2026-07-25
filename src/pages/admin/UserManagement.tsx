@@ -1901,7 +1901,7 @@ export default function UserManagement() {
                             {selectedUser.reviewRewardClaimed && (
                               <div className="flex justify-between items-center text-xs">
                                 <span className="text-zinc-600 dark:text-zinc-400">Review Reward</span>
-                                <span className="font-medium text-emerald-600 dark:text-emerald-400">+3 Days</span>
+                                <span className="font-medium text-emerald-600 dark:text-emerald-400">+5 Days</span>
                               </div>
                             )}
                             {referredUsers.length > 0 && (

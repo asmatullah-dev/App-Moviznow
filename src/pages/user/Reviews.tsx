@@ -127,7 +127,7 @@ export default function Reviews() {
       safeStorage.setItem(CACHE_KEY, JSON.stringify(updatedReviews));
       safeStorage.setItem('has_rated', 'true');
 
-      // Grant +3 days extension reward if not already claimed
+      // Grant +5 days extension reward if not already claimed
       if (profile && !profile.reviewRewardClaimed) {
         try {
           let baseDate = new Date();
@@ -137,7 +137,7 @@ export default function Reviews() {
               baseDate = currentExp;
             }
           }
-          baseDate.setDate(baseDate.getDate() + 3);
+          baseDate.setDate(baseDate.getDate() + 5);
           const updates: any = {
             reviewRewardClaimed: true,
             expiryDate: baseDate.toISOString()

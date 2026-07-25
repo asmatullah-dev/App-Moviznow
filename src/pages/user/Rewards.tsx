@@ -287,7 +287,7 @@ export default function Rewards() {
           baseDate = currentExp;
         }
       }
-      baseDate.setDate(baseDate.getDate() + 3);
+      baseDate.setDate(baseDate.getDate() + 5);
       const updates: any = {
         reviewRewardClaimed: true,
         expiryDate: baseDate.toISOString()
@@ -431,7 +431,7 @@ export default function Rewards() {
     },
     {
       label: t('Total Days'),
-      value: (referredCount * 5) + (activatedCount * 5) + (profile?.pwaRewardClaimed ? 3 : 0) + (profile?.notificationRewardClaimed ? 3 : 0) + (profile?.reviewRewardClaimed ? 3 : 0),
+      value: (referredCount * 5) + (activatedCount * 5) + (profile?.pwaRewardClaimed ? 3 : 0) + (profile?.notificationRewardClaimed ? 3 : 0) + (profile?.reviewRewardClaimed ? 5 : 0),
       icon: Clock,
       color: 'text-amber-500',
       bg: 'bg-amber-500/10'
@@ -651,7 +651,7 @@ export default function Rewards() {
                       <div className="flex items-center gap-2">
                         <h4 className="font-bold text-sm">{t('Submit a Review')}</h4>
                         <span className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                          +3 Days
+                          +5 Days
                         </span>
                       </div>
                       <p className="text-xs text-zinc-500">{t('Rate our app & share feedback')}</p>
@@ -661,7 +661,7 @@ export default function Rewards() {
                     onClick={() => navigate('/reviews')}
                     className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform flex items-center gap-2 shadow-sm"
                   >
-                    {t('Write Review (+3 Days)')}
+                    {t('Write Review (+5 Days)')}
                     <ArrowRight className="w-4 h-4" />
                   </button>
                 </div>
@@ -795,7 +795,7 @@ export default function Rewards() {
             {showReviewTask && (
               <li className="text-xs text-zinc-600 dark:text-zinc-400 flex items-start gap-2">
                 <span className="text-emerald-500 font-bold">•</span>
-                <span><strong className="text-zinc-800 dark:text-zinc-200">{t('Submit a Review (+3 Days)')}:</strong> {t('Write a review and rate our app to get a free 3 days membership extension.')}</span>
+                <span><strong className="text-zinc-800 dark:text-zinc-200">{t('Submit a Review (+5 Days)')}:</strong> {t('Write a review and rate our app to get a free 5 days membership extension.')}</span>
               </li>
             )}
           </ul>
