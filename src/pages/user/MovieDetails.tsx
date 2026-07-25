@@ -84,6 +84,26 @@ import { PageTransition } from "../../components/PageTransition";
 
 export default function MovieDetails() {
   const { id } = useParams<{ id: string }>();
+
+  if (id && /\.(jpg|jpeg|png|gif|webp|svg|ico)$/i.test(id)) {
+    return (
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center p-4">
+        <img
+          src={`/${id}`}
+          alt={id}
+          className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl"
+        />
+        <a
+          href={`/${id}`}
+          download
+          className="mt-4 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-500 transition-colors"
+        >
+          View / Download Image
+        </a>
+      </div>
+    );
+  }
+
   const { vibrate } = useHaptics();
   const {
     profile,
