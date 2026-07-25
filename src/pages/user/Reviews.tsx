@@ -126,6 +126,32 @@ export default function Reviews() {
       setReviews(updatedReviews);
       safeStorage.setItem(CACHE_KEY, JSON.stringify(updatedReviews));
       safeStorage.setItem('has_rated', 'true');
+
+      // Grant +3 days extension reward if not already claimed
+      if (profile && !profile.reviewRewardClaimed) {
+        try {
+          let baseDate = new Date();
+          if (profile.expiryDate && profile.expiryDate !== 'Lifetime') {
+            const currentExp = new Date(profile.expiryDate);
+            if (currentExp > baseDate) {
+              baseDate = currentExp;
+            }
+          }
+          baseDate.setDate(baseDate.getDate() + 3);
+          const updates: any = {
+            reviewRewardClaimed: true,
+            expiryDate: baseDate.toISOString()
+          };
+          if (profile.status === 'expired' || profile.status === 'pending') {
+            updates.status = 'active';
+          }
+          await updateUserProfileData(updates);
+          sessionStorage.setItem('reviewRewardClaimed', 'true');
+        } catch (err) {
+          console.error("Failed to extend membership for review", err);
+        }
+      }
+
       setText('');
       setRating(5);
       setCity('');

@@ -1070,6 +1070,8 @@ export default function UserManagement() {
         result = result.filter(u => u.notificationRewardClaimed);
       } else if (filterReward === 'pwa') {
         result = result.filter(u => u.pwaRewardClaimed);
+      } else if (filterReward === 'review') {
+        result = result.filter(u => u.reviewRewardClaimed);
       } else if (filterReward === 'referred') {
         result = result.filter(u => referredSet.has(u.uid));
       } else if (filterReward === 'joined_referral') {
@@ -1080,6 +1082,7 @@ export default function UserManagement() {
         result = result.filter(u => 
           u.notificationRewardClaimed || 
           u.pwaRewardClaimed || 
+          u.reviewRewardClaimed ||
           u.activationRewardClaimed || 
           u.hasReceivedReferralReward || 
           u.referredBy || 
@@ -1089,6 +1092,7 @@ export default function UserManagement() {
         result = result.filter(u => 
           !u.notificationRewardClaimed && 
           !u.pwaRewardClaimed && 
+          !u.reviewRewardClaimed &&
           !u.activationRewardClaimed && 
           !u.hasReceivedReferralReward && 
           !u.referredBy && 
@@ -1412,6 +1416,7 @@ export default function UserManagement() {
                 <option value="none">No Rewards</option>
                 <option value="notification">Notification Reward</option>
                 <option value="pwa">App Install Reward</option>
+                <option value="review">Review Reward</option>
                 <option value="referred">Referred Users</option>
                 <option value="active">Activation Reward</option>
                 <option value="joined_referral">Joined via Referral</option>
@@ -1873,7 +1878,7 @@ export default function UserManagement() {
                     {(() => {
                       const referredUsers = allUsers.filter(u => u.referredBy === selectedUser.uid);
                       const activatedReferredCount = referredUsers.filter(u => u.activationRewardClaimed).length;
-                      const hasAnyExtension = selectedUser.pwaRewardClaimed || selectedUser.notificationRewardClaimed || selectedUser.hasReceivedReferralReward || selectedUser.referredBy || referredUsers.length > 0;
+                      const hasAnyExtension = selectedUser.pwaRewardClaimed || selectedUser.notificationRewardClaimed || selectedUser.reviewRewardClaimed || selectedUser.hasReceivedReferralReward || selectedUser.referredBy || referredUsers.length > 0;
                       
                       if (!hasAnyExtension) return null;
                       
@@ -1890,6 +1895,12 @@ export default function UserManagement() {
                             {selectedUser.notificationRewardClaimed && (
                               <div className="flex justify-between items-center text-xs">
                                 <span className="text-zinc-600 dark:text-zinc-400">Notification Reward</span>
+                                <span className="font-medium text-emerald-600 dark:text-emerald-400">+3 Days</span>
+                              </div>
+                            )}
+                            {selectedUser.reviewRewardClaimed && (
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="text-zinc-600 dark:text-zinc-400">Review Reward</span>
                                 <span className="font-medium text-emerald-600 dark:text-emerald-400">+3 Days</span>
                               </div>
                             )}

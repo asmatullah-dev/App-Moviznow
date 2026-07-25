@@ -43,6 +43,7 @@ export interface UserProfile {
   activationRewardClaimed?: boolean;
   notificationRewardClaimed?: boolean;
   pwaRewardClaimed?: boolean;
+  reviewRewardClaimed?: boolean;
   claimedReferralSignups?: string[];
   claimedReferralActivations?: string[];
   referralStats?: {

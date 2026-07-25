@@ -217,6 +217,14 @@ function RewardsManager() {
         extensionDays += 3;
       }
 
+      // Review Reward (3 days)
+      const hasRated = safeStorage.getItem('has_rated') === 'true' || sessionStorage.getItem('reviewRewardClaimed') === 'true';
+      if (hasRated && !profile.reviewRewardClaimed) {
+        console.log("Claiming Review reward...");
+        updates.reviewRewardClaimed = true;
+        extensionDays += 3;
+      }
+
       if (extensionDays > 0) {
         claimingRef.current = true;
         let newExpiry = new Date();
@@ -243,7 +251,7 @@ function RewardsManager() {
     };
 
     checkRewards();
-  }, [isInstalled, profile?.uid, profile?.pwaRewardClaimed, profile?.notificationRewardClaimed, profile?.expiryDate]);
+  }, [isInstalled, profile?.uid, profile?.pwaRewardClaimed, profile?.notificationRewardClaimed, profile?.reviewRewardClaimed, profile?.expiryDate]);
 
   return null;
 }

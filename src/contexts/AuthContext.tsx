@@ -1235,6 +1235,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             activationRewardClaimed: mergedOldData.activationRewardClaimed || false,
             notificationRewardClaimed: mergedOldData.notificationRewardClaimed || false,
             pwaRewardClaimed: mergedOldData.pwaRewardClaimed || false,
+            reviewRewardClaimed: mergedOldData.reviewRewardClaimed || false,
             // Increment session data for the current session, unless it's an owner
             sessionsCount: isOwner
               ? mergedOldData.sessionsCount || 0

@@ -220,7 +220,7 @@ export async function fetchIMDbRating(imdbID: string) {
   return null;
 }
 
-export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initialImdbId = '', initialTitle = '', initialYear = '', initialType = '', onApply }) => {
+export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initialImdbId = '', initialTitle = '', initialYear = '', initialType = '', initialPosterUrl = '', onApply }) => {
   const [imdbId, setImdbId] = useState(initialImdbId);
   const [title, setTitle] = useState(initialTitle);
   const [year, setYear] = useState(initialYear);

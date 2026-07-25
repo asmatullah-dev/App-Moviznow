@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import confetti from 'canvas-confetti';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
@@ -40,10 +41,12 @@ const getReferralCodeForUid = (uid: string) => {
 };
 
 export default function Rewards() {
+  const navigate = useNavigate();
   const { profile, updateUserProfileData } = useAuth();
   const { t } = useLanguage();
   const { isInstalled, isInstallable, installApp } = usePWA();
   const [copied, setCopied] = useState(false);
+  const hasRated = safeStorage.getItem('has_rated') === 'true';
   const [referredCount, setReferredCount] = useState<number>(() => {
     const cached = safeStorage.getItem('referral_stats_count');
     return cached ? parseInt(cached) : 0;
@@ -63,8 +66,9 @@ export default function Rewards() {
 
   const referralLink = `${window.location.origin}/?ref=${profile?.referralCode || ''}`;
 
-  const showNotificationTask = 'Notification' in window && Notification.permission !== 'granted' && !profile?.notificationRewardClaimed;
-  const showInstallTask = (isInstallable || isInstalled) && !profile?.pwaRewardClaimed;
+  const showNotificationTask = !profile?.notificationRewardClaimed && ('Notification' in window ? Notification.permission !== 'granted' : true);
+  const showInstallTask = !profile?.pwaRewardClaimed && !isInstalled && isInstallable;
+  const showReviewTask = !profile?.reviewRewardClaimed && !hasRated;
 
   const getBadge = (count: number) => {
     if (count >= 50) return { name: t('Diamond Referrer'), icon: Crown, color: 'text-blue-400', bg: 'bg-blue-400/10', next: null };
@@ -263,13 +267,42 @@ export default function Rewards() {
     // Check if a reward was just claimed in this session
     const justClaimedNotification = sessionStorage.getItem('notificationRewardClaimed');
     const justClaimedPWA = sessionStorage.getItem('pwaRewardClaimed');
+    const justClaimedReview = sessionStorage.getItem('reviewRewardClaimed');
     
-    if (justClaimedNotification || justClaimedPWA) {
+    if (justClaimedNotification || justClaimedPWA || justClaimedReview) {
       triggerConfetti();
       sessionStorage.removeItem('notificationRewardClaimed');
       sessionStorage.removeItem('pwaRewardClaimed');
+      sessionStorage.removeItem('reviewRewardClaimed');
     }
   }, []);
+
+  const claimReviewReward = async () => {
+    if (!profile?.uid || profile.reviewRewardClaimed) return;
+    try {
+      let baseDate = new Date();
+      if (profile.expiryDate && profile.expiryDate !== 'Lifetime') {
+        const currentExp = new Date(profile.expiryDate);
+        if (currentExp > baseDate) {
+          baseDate = currentExp;
+        }
+      }
+      baseDate.setDate(baseDate.getDate() + 3);
+      const updates: any = {
+        reviewRewardClaimed: true,
+        expiryDate: baseDate.toISOString()
+      };
+      if (profile.status === 'expired' || profile.status === 'pending') {
+        updates.status = 'active';
+      }
+      await updateUserProfileData(updates);
+      sessionStorage.setItem('reviewRewardClaimed', 'true');
+      safeStorage.setItem('has_rated', 'true');
+      triggerConfetti();
+    } catch (e) {
+      console.error("Failed to claim review reward:", e);
+    }
+  };
 
   const handleCopy = async () => {
     const code = await ensureReferralCode();
@@ -398,7 +431,7 @@ export default function Rewards() {
     },
     {
       label: t('Total Days'),
-      value: (referredCount * 5) + (activatedCount * 5) + (profile?.pwaRewardClaimed ? 3 : 0) + (profile?.notificationRewardClaimed ? 3 : 0),
+      value: (referredCount * 5) + (activatedCount * 5) + (profile?.pwaRewardClaimed ? 3 : 0) + (profile?.notificationRewardClaimed ? 3 : 0) + (profile?.reviewRewardClaimed ? 3 : 0),
       icon: Clock,
       color: 'text-amber-500',
       bg: 'bg-amber-500/10'
@@ -544,7 +577,7 @@ export default function Rewards() {
         )}
 
         {/* Tasks Section */}
-        {(showNotificationTask || showInstallTask) && (
+        {(showNotificationTask || showInstallTask || showReviewTask) && (
           <div className="space-y-4">
             <h3 className="text-lg font-bold px-1">{t('One-Time Rewards')}</h3>
             
@@ -557,24 +590,22 @@ export default function Rewards() {
                       <Bell className="w-6 h-6" />
                     </div>
                     <div>
-                      <h4 className="font-bold text-sm">{t('Enable Notifications')}</h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-bold text-sm">{t('Enable Notifications')}</h4>
+                        <span className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                          +3 Days
+                        </span>
+                      </div>
                       <p className="text-xs text-zinc-500">{t('Stay updated with latest content')}</p>
                     </div>
                   </div>
-                  {profile?.notificationRewardClaimed ? (
-                    <div className="flex items-center gap-2 text-emerald-500 font-bold text-xs bg-emerald-500/10 px-3 py-1.5 rounded-full">
-                      <CheckCircle2 className="w-4 h-4" />
-                      {t('Claimed')}
-                    </div>
-                  ) : (
-                    <button 
-                      onClick={handleEnableNotifications}
-                      className="bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform flex items-center gap-2"
-                    >
-                      {t('Enable')}
-                      <ArrowRight className="w-4 h-4" />
-                    </button>
-                  )}
+                  <button 
+                    onClick={handleEnableNotifications}
+                    className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform flex items-center gap-2 shadow-sm"
+                  >
+                    {t('Enable (+3 Days)')}
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
                 </div>
               )}
 
@@ -586,28 +617,53 @@ export default function Rewards() {
                       <Download className="w-6 h-6" />
                     </div>
                     <div>
-                      <h4 className="font-bold text-sm">{t('Install App')}</h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-bold text-sm">{t('Install App')}</h4>
+                        <span className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                          +3 Days
+                        </span>
+                      </div>
                       <p className="text-xs text-zinc-500">{t('Better experience on home screen')}</p>
                     </div>
                   </div>
-                  {profile?.pwaRewardClaimed ? (
-                    <div className="flex items-center gap-2 text-emerald-500 font-bold text-xs bg-emerald-500/10 px-3 py-1.5 rounded-full">
-                      <CheckCircle2 className="w-4 h-4" />
-                      {t('Claimed')}
+                  <button 
+                    onClick={() => {
+                      installApp();
+                      sessionStorage.setItem('pwaRewardClaimed', 'true');
+                    }}
+                    disabled={isInstalled}
+                    className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform flex items-center gap-2 disabled:opacity-50 shadow-sm"
+                  >
+                    {isInstalled ? t('Installed') : t('Install (+3 Days)')}
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
+              {/* Review Task */}
+              {showReviewTask && (
+                <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 flex items-center justify-between group">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
+                      <MessageCircle className="w-6 h-6" />
                     </div>
-                  ) : (
-                    <button 
-                      onClick={() => {
-                        installApp();
-                        sessionStorage.setItem('pwaRewardClaimed', 'true');
-                      }}
-                      disabled={isInstalled}
-                      className="bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform flex items-center gap-2 disabled:opacity-50"
-                    >
-                      {isInstalled ? t('Installed') : t('Install')}
-                      <ArrowRight className="w-4 h-4" />
-                    </button>
-                  )}
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-bold text-sm">{t('Submit a Review')}</h4>
+                        <span className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                          +3 Days
+                        </span>
+                      </div>
+                      <p className="text-xs text-zinc-500">{t('Rate our app & share feedback')}</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => navigate('/reviews')}
+                    className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform flex items-center gap-2 shadow-sm"
+                  >
+                    {t('Write Review (+3 Days)')}
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
                 </div>
               )}
             </div>
@@ -636,25 +692,22 @@ export default function Rewards() {
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
                         user.isActivated ? 'bg-emerald-500/10 text-emerald-500' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500'
                       }`}>
-                        {(user.displayName || user.email || 'U').charAt(0).toUpperCase()}
+                        {(user.displayName || 'U').charAt(0).toUpperCase()}
                       </div>
                       <div className="flex flex-col min-w-0">
                         <span className="text-sm font-semibold truncate text-zinc-800 dark:text-zinc-200">
-                          {user.displayName || user.email}
+                          {user.displayName || 'User'}
                         </span>
-                        {user.displayName && (
-                          <span className="text-xs text-zinc-500 truncate">{user.email}</span>
-                        )}
                         <span className="text-[10px] text-zinc-400 mt-0.5">
                           {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : t('Recently')}
                           {' • '}
                           <span className={`font-semibold ${user.status === 'paid' ? 'text-emerald-500' : 'text-zinc-500'}`}>
-                            {user.status === 'paid' ? 'Paid User' : 'Login'}
+                            {user.status === 'paid' ? t('Paid User') : t('Login')}
                           </span>
                           {user.code && (
                             <>
                               {' • '}
-                              <span className="text-zinc-500">Code: <span className="font-mono">{user.code}</span></span>
+                              <span className="text-zinc-500">{t('Code')}: <span className="font-mono">{user.code}</span></span>
                             </>
                           )}
                         </span>
@@ -718,18 +771,33 @@ export default function Rewards() {
             <CheckCircle2 className="w-4 h-4 text-emerald-500" />
             {t('How it works')}
           </h4>
-          <ul className="space-y-2">
-            {[
-              t('Share your unique link or code with friends.'),
-              t('Claim 5 days of premium reward for each friend who joins using your link.'),
-              t('Claim an additional 5 days of premium reward when your friend buys a membership.'),
-              t('Click the Claim buttons above to extend your premium membership instantly.')
-            ].map((text, i) => (
-              <li key={i} className="text-xs text-zinc-500 flex gap-2">
-                <span className="text-zinc-400 font-bold">•</span>
-                {text}
+          <ul className="space-y-2.5">
+            <li className="text-xs text-zinc-600 dark:text-zinc-400 flex items-start gap-2">
+              <span className="text-emerald-500 font-bold">•</span>
+              <span><strong className="text-zinc-800 dark:text-zinc-200">{t('Referral Signup (+5 Days)')}:</strong> {t('Share your link/code with friends to get 5 days extension for every friend who joins.')}</span>
+            </li>
+            <li className="text-xs text-zinc-600 dark:text-zinc-400 flex items-start gap-2">
+              <span className="text-emerald-500 font-bold">•</span>
+              <span><strong className="text-zinc-800 dark:text-zinc-200">{t('Referral Activation (+5 Days)')}:</strong> {t('Get an extra 5 days extension when your referred friend purchases a membership.')}</span>
+            </li>
+            {showInstallTask && (
+              <li className="text-xs text-zinc-600 dark:text-zinc-400 flex items-start gap-2">
+                <span className="text-emerald-500 font-bold">•</span>
+                <span><strong className="text-zinc-800 dark:text-zinc-200">{t('Install App (+3 Days)')}:</strong> {t('Install our PWA app on your home screen for a 3 days membership extension.')}</span>
               </li>
-            ))}
+            )}
+            {showNotificationTask && (
+              <li className="text-xs text-zinc-600 dark:text-zinc-400 flex items-start gap-2">
+                <span className="text-emerald-500 font-bold">•</span>
+                <span><strong className="text-zinc-800 dark:text-zinc-200">{t('Enable Notifications (+3 Days)')}:</strong> {t('Enable push notifications to stay updated and get a 3 days membership extension.')}</span>
+              </li>
+            )}
+            {showReviewTask && (
+              <li className="text-xs text-zinc-600 dark:text-zinc-400 flex items-start gap-2">
+                <span className="text-emerald-500 font-bold">•</span>
+                <span><strong className="text-zinc-800 dark:text-zinc-200">{t('Submit a Review (+3 Days)')}:</strong> {t('Write a review and rate our app to get a free 3 days membership extension.')}</span>
+              </li>
+            )}
           </ul>
         </div>
       </div>
