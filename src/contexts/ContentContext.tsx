@@ -438,7 +438,8 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         const metaData = await import('../utils/chunkMeta').then(m => m.getChunkMeta(force));
         if (Object.keys(metaData).length > 0) {
             versions = metaData;
-        } else if (isAdmin) {
+        } else if (isAdmin && !safeStorage.getItem('content_chunks_migration_checked')) {
+            safeStorage.setItem('content_chunks_migration_checked', 'true');
             // First time setup or recovery
             const chunksSnap = await getDocs(collection(db, 'content_chunks'));
             if (chunksSnap.empty) {
@@ -638,7 +639,8 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         }
 
         // Migration logic for FCM tokens
-        if (isAdmin) {
+        if (isAdmin && !safeStorage.getItem('fcm_tokens_migration_checked')) {
+            safeStorage.setItem('fcm_tokens_migration_checked', 'true');
             try {
                 const metaData = await import('../utils/chunkMeta').then(m => m.getChunkMeta());
                 if (!metaData.fcm_tokens) {

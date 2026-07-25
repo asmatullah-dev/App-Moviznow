@@ -951,7 +951,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
         const initialLinks = splitLinks(initialInput).map(normalizeUrl).filter(Boolean);
         if (initialLinks.length > 0) {
           autoStartedInputRef.current = initialInput;
-          handleCheck(initialLinks);
+          handleCheck(initialLinks, initialInput);
         }
       }
     } else {

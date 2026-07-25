@@ -167,7 +167,7 @@ export const requestNotificationPermission = async (force: boolean = false) => {
         const CACHE_KEY = `fcm_token_v3_last_update_${auth.currentUser?.uid || 'anon'}`;
         const lastUpdate = localStorage.getItem(CACHE_KEY);
         const now = Date.now();
-        const oneDay = 24 * 60 * 60 * 1000;
+        const thirtyDays = 30 * 24 * 60 * 60 * 1000;
         const currentUserId = auth.currentUser?.uid || 'anonymous';
 
         let parsedCache: any = null;
@@ -178,7 +178,7 @@ export const requestNotificationPermission = async (force: boolean = false) => {
         const needsUpdate = isForced || !parsedCache || 
                             parsedCache.token !== token || 
                             parsedCache.userId !== currentUserId ||
-                            (now - parsedCache.timestamp > oneDay);
+                            (now - parsedCache.timestamp > thirtyDays);
 
         if (needsUpdate) {
           try {

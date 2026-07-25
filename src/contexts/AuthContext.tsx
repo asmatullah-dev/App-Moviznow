@@ -757,24 +757,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 }, { merge: true });
               }
             }
-            // Add user version to chunk_meta to prevent infinite writes
-            const metaRef = doc(db, "chunk_meta", "versions");
-            let skipCommit = false;
-            try {
-              const { updateDoc } = await import("firebase/firestore");
-              await updateDoc(metaRef, {
-                [`users.${currentUser.uid}`]: newVersion,
-              });
-            } catch (e) {
-              batch.set(
-                metaRef,
-                { users: { [currentUser.uid]: newVersion } },
-                { merge: true },
-              );
-              await batch.commit();
-              skipCommit = true;
-            }
-            if (!skipCommit) await batch.commit();
+            await batch.commit();
 
             if (isDailySync) localStorage.setItem(dailySyncKey, pktDate);
             safeStorage.setItem("needs_user_sync", "false");
@@ -1549,23 +1532,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const { writeBatch } = await import("firebase/firestore");
             const batch = writeBatch(db);
             batch.set(userRef, pendingUpdates, { merge: true });
-
-            let skipCommit = false;
-            try {
-              const { updateDoc } = await import("firebase/firestore");
-              await updateDoc(doc(db, "chunk_meta", "versions"), {
-                [`users.${currentUser.uid}`]: Date.now(),
-              });
-            } catch (e) {
-              batch.set(
-                doc(db, "chunk_meta", "versions"),
-                { users: { [currentUser.uid]: Date.now() } },
-                { merge: true },
-              );
-              await batch.commit();
-              skipCommit = true;
-            }
-            if (!skipCommit) await batch.commit();
+            await batch.commit();
 
             if (isDailySync) localStorage.setItem(dailySyncKey, pktDate);
             safeStorage.setItem("needs_user_sync", "false");
@@ -2385,23 +2352,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }, { merge: true });
         }
-
-        let skipCommit = false;
-        try {
-          const { updateDoc } = await import("firebase/firestore");
-          await updateDoc(doc(db, "chunk_meta", "versions"), {
-            [`users.${user.uid}`]: now,
-          });
-        } catch (e) {
-          batch.set(
-            doc(db, "chunk_meta", "versions"),
-            { users: { [user.uid]: now } },
-            { merge: true },
-          );
-          await batch.commit();
-          skipCommit = true;
-        }
-        if (!skipCommit) await batch.commit();
+            await batch.commit();
 
         console.log("Users doc updated successfully.");
       } catch (err: any) {
@@ -2443,23 +2394,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { writeBatch } = await import("firebase/firestore");
       const batch = writeBatch(db);
       batch.update(userRef, { hasPassword: true });
-
-      let skipCommit = false;
-      try {
-        const { updateDoc } = await import("firebase/firestore");
-        await updateDoc(doc(db, "chunk_meta", "versions"), {
-          [`users.${user.uid}`]: Date.now(),
-        });
-      } catch (e) {
-        batch.set(
-          doc(db, "chunk_meta", "versions"),
-          { users: { [user.uid]: Date.now() } },
-          { merge: true },
-        );
-        await batch.commit();
-        skipCommit = true;
-      }
-      if (!skipCommit) await batch.commit();
+            await batch.commit();
       if (profile) {
         setProfile({ ...profile, hasPassword: true });
       }

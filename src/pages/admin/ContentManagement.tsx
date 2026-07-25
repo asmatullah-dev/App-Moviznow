@@ -915,6 +915,13 @@ export default function ContentManagement() {
     seasons: Season[];
     mode: "standard" | "whatsapp";
   }>({ isOpen: false, content: null, seasons: [], mode: "standard" });
+  const [selectedShareSeasons, setSelectedShareSeasons] = useState<number[]>([]);
+  const [checkLinksSeasonModal, setCheckLinksSeasonModal] = useState<{
+    isOpen: boolean;
+    content: Content | null;
+    seasons: Season[];
+  }>({ isOpen: false, content: null, seasons: [] });
+  const [selectedCheckLinksSeasons, setSelectedCheckLinksSeasons] = useState<number[]>([]);
   const [notificationModal, setNotificationModal] = useState<{
     isOpen: boolean;
     content: Content | null;
@@ -931,9 +938,6 @@ export default function ContentManagement() {
     content: Content | null;
     mode: "standard" | "whatsapp";
   }>({ isOpen: false, content: null, mode: "standard" });
-  const [selectedShareSeasons, setSelectedShareSeasons] = useState<number[]>(
-    [],
-  );
   const [activeDropdownId, setActiveDropdownId] = useState<string | null>(null);
   const [dropdownPos, setDropdownPos] = useState<{ id: string; topStr: string; bottomStr: string; leftStr: string; maxHeightStr: string; alignBottom: boolean; alignRight: boolean } | null>(null);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
@@ -962,6 +966,9 @@ export default function ContentManagement() {
   );
   useModalBehavior(shareSeasonModal.isOpen, () =>
     setShareSeasonModal({ ...shareSeasonModal, isOpen: false }),
+  );
+  useModalBehavior(checkLinksSeasonModal.isOpen, () =>
+    setCheckLinksSeasonModal({ ...checkLinksSeasonModal, isOpen: false }),
   );
   useModalBehavior(notificationModal.isOpen, () =>
     setNotificationModal({ isOpen: false, content: null, status: "idle" }),
@@ -2659,7 +2666,7 @@ export default function ContentManagement() {
             seasons: parsedSeasons,
             mode,
           });
-          setSelectedShareSeasons(parsedSeasons.map((s) => s.seasonNumber));
+          setSelectedShareSeasons(parsedSeasons.map((s) => Number(s.seasonNumber)));
           return;
         }
       } catch (e) {
@@ -3266,76 +3273,103 @@ export default function ContentManagement() {
     setLoadingShareId(null);
   };
 
-  const handleCheckLinks = (content: Content) => {
-    let urls: string[] = [];
-    
-    const safeParse = (data: any) => {
-      if (!data) return [];
-      if (typeof data === 'string') {
-        try {
-          return JSON.parse(data);
-        } catch(e) {
-          return [];
+  const handleCheckLinks = (content: Content, selectedSeasons?: number[]) => {
+    try {
+      let urls: string[] = [];
+      
+      const safeParse = (data: any) => {
+        if (!data) return [];
+        if (typeof data === 'string') {
+          try {
+            return JSON.parse(data);
+          } catch(e) {
+            return [];
+          }
+        }
+        return data;
+      };
+
+      const extractUrls = (items: any) => {
+        if (!Array.isArray(items)) return;
+        items.forEach((ld: any) => {
+          if (ld?.url) urls.push(ld.url);
+          if (ld?.links && Array.isArray(ld.links)) {
+            ld.links.forEach((l: any) => {
+              if (l?.url) urls.push(l.url);
+            });
+          }
+        });
+      };
+
+      if (content.type === 'movie' && content.movieLinks) {
+         extractUrls(safeParse(content.movieLinks));
+      } else if (content.type === 'series') {
+         if (content.seasons) {
+            const parsed = safeParse(content.seasons);
+            
+            if (!selectedSeasons && Array.isArray(parsed) && parsed.length > 1) {
+              setCheckLinksSeasonModal({
+                isOpen: true,
+                content,
+                seasons: parsed
+              });
+              setSelectedCheckLinksSeasons(parsed.map((s: any) => Number(s.seasonNumber)));
+              return;
+            }
+
+            if (Array.isArray(parsed)) {
+              parsed.forEach((s: any) => {
+                if (selectedSeasons && !selectedSeasons.includes(Number(s.seasonNumber))) return;
+                extractUrls(s.zipLinks || []);
+                extractUrls(s.mkvLinks || []);
+                if (Array.isArray(s.episodes)) {
+                  s.episodes.forEach((e: any) => {
+                     extractUrls(e.links || []);
+                  });
+                }
+              });
+            }
+         }
+         if (content.fullSeasonZip) {
+            extractUrls(safeParse(content.fullSeasonZip));
+         }
+         if (content.fullSeasonMkv) {
+            extractUrls(safeParse(content.fullSeasonMkv));
+         }
+      }
+      
+      if ((content as any).telegramLinks) {
+        extractUrls(safeParse((content as any).telegramLinks));
+      }
+      
+      // Also grab trailer directly if we want
+      if (content.trailerUrl) urls.push(content.trailerUrl);
+      
+      if (content.trailers) {
+        const parsed = safeParse(content.trailers);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((t: any) => {
+            if (t?.url) urls.push(t.url);
+          });
         }
       }
-      return data;
-    };
 
-    const extractUrls = (items: any[]) => {
-      items?.forEach((ld: any) => {
-        if (ld?.url) urls.push(ld.url);
-        if (ld?.links && Array.isArray(ld.links)) {
-          ld.links.forEach((l: any) => {
-            if (l?.url) urls.push(l.url);
-          });
-        }
-      });
-    };
-
-    if (content.type === 'movie' && content.movieLinks) {
-       extractUrls(safeParse(content.movieLinks));
-    } else if (content.type === 'series') {
-       if (content.seasons) {
-          const parsed = safeParse(content.seasons);
-          parsed.forEach((s: any) => {
-            extractUrls(s.zipLinks || []);
-            extractUrls(s.mkvLinks || []);
-            s.episodes?.forEach((e: any) => {
-               extractUrls(e.links || []);
-            });
-          });
-       }
-       if (content.fullSeasonZip) {
-          extractUrls(safeParse(content.fullSeasonZip));
-       }
-       if (content.fullSeasonMkv) {
-          extractUrls(safeParse(content.fullSeasonMkv));
-       }
+      const urlString = urls
+        .filter(Boolean)
+        .filter((url) => {
+          const lowerUrl = String(url).toLowerCase();
+          return !lowerUrl.includes("youtube.com") && !lowerUrl.includes("youtu.be");
+        })
+        .filter((val, i, arr) => arr.indexOf(val) === i)
+        .join('\n');
+      
+      setContentLinkCheckerInput(urlString);
+      setCheckLinksContent(content);
+      setIsContentLinkCheckerOpen(true);
+    } catch (err: any) {
+      console.error("Error in handleCheckLinks:", err);
+      alert("Error parsing links: " + err.message);
     }
-    
-    if ((content as any).telegramLinks) {
-      extractUrls(safeParse((content as any).telegramLinks));
-    }
-    
-    // Also grab trailer directly if we want
-    if (content.trailerUrl) urls.push(content.trailerUrl);
-    
-    if (content.trailers) {
-      const parsed = safeParse(content.trailers);
-      parsed.forEach((t: any) => urls.push(t.url));
-    }
-
-    const urlString = urls
-      .filter(Boolean)
-      .filter((url) => {
-        const lowerUrl = String(url).toLowerCase();
-        return !lowerUrl.includes("youtube.com") && !lowerUrl.includes("youtu.be");
-      })
-      .filter((val, i, arr) => arr.indexOf(val) === i)
-      .join('\n');
-    setContentLinkCheckerInput(urlString);
-    setCheckLinksContent(content);
-    setIsContentLinkCheckerOpen(true);
   };
 
   const handleCopyData = async (content: Content) => {
@@ -5331,6 +5365,7 @@ export default function ContentManagement() {
         initialTitle={title}
         initialYear={year.toString()}
         initialType={type}
+        initialPosterUrl={posterUrl}
         onApply={applyFetchedData}
       />
       <LinkCheckerModal
@@ -5695,7 +5730,7 @@ export default function ContentManagement() {
                   onChange={(e) => {
                     if (e.target.checked) {
                       setSelectedShareSeasons(
-                        shareSeasonModal.seasons.map((s) => s.seasonNumber),
+                        shareSeasonModal.seasons.map((s) => Number(s.seasonNumber)),
                       );
                     } else {
                       setSelectedShareSeasons([]);
@@ -5709,20 +5744,21 @@ export default function ContentManagement() {
               {shareSeasonModal.seasons.map((season) => (
                 <label
                   key={season.id}
-                  className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer border transition-colors ${selectedShareSeasons.includes(season.seasonNumber) ? "bg-emerald-500/10 border-emerald-500 text-emerald-500" : "bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800/50"}`}
+                  className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer border transition-colors ${selectedShareSeasons.includes(Number(season.seasonNumber)) ? "bg-emerald-500/10 border-emerald-500 text-emerald-500" : "bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800/50"}`}
                 >
                   <input
                     type="checkbox"
-                    checked={selectedShareSeasons.includes(season.seasonNumber)}
+                    checked={selectedShareSeasons.includes(Number(season.seasonNumber))}
                     onChange={(e) => {
+                      const num = Number(season.seasonNumber);
                       if (e.target.checked) {
                         setSelectedShareSeasons((prev) => [
                           ...prev,
-                          season.seasonNumber,
+                          num,
                         ]);
                       } else {
                         setSelectedShareSeasons((prev) =>
-                          prev.filter((s) => s !== season.seasonNumber),
+                          prev.filter((s) => s !== num),
                         );
                       }
                     }}
@@ -5747,12 +5783,13 @@ export default function ContentManagement() {
               <button
                 onClick={() => {
                   if (shareSeasonModal.content) {
-                    handleSharePipeline(
-                      shareSeasonModal.content,
-                      shareSeasonModal.mode,
-                      selectedShareSeasons,
-                    );
+                    const content = shareSeasonModal.content;
+                    const mode = shareSeasonModal.mode;
+                    const seasons = selectedShareSeasons;
                     setShareSeasonModal({ ...shareSeasonModal, isOpen: false });
+                    setTimeout(() => {
+                      handleSharePipeline(content, mode, seasons);
+                    }, 150);
                   }
                 }}
                 disabled={selectedShareSeasons.length === 0}
@@ -5764,6 +5801,115 @@ export default function ContentManagement() {
                   <Share2 className="w-4 h-4" />
                 )}{" "}
                 Share ({selectedShareSeasons.length})
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Check Links Season Modal */}
+      {checkLinksSeasonModal.isOpen && checkLinksSeasonModal.content && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-md w-full relative">
+            <button
+              onClick={() =>
+                setCheckLinksSeasonModal({ ...checkLinksSeasonModal, isOpen: false })
+              }
+              className="absolute top-4 right-4 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className="text-xl font-bold mb-2">Check Links</h3>
+            <p className="text-zinc-500 dark:text-zinc-400 mb-6">
+              Select which seasons of "{checkLinksSeasonModal.content.title}" you
+              want to check links for.
+            </p>
+
+            <div className="max-h-60 overflow-y-auto space-y-2 mb-6 pr-2 custom-scrollbar">
+              <label
+                className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer border transition-colors ${selectedCheckLinksSeasons.length === checkLinksSeasonModal.seasons.length ? "bg-emerald-500/10 border-emerald-500 text-emerald-500" : "bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800/50"}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={
+                    selectedCheckLinksSeasons.length ===
+                    checkLinksSeasonModal.seasons.length
+                  }
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setSelectedCheckLinksSeasons(
+                        checkLinksSeasonModal.seasons.map((s) => Number(s.seasonNumber)),
+                      );
+                    } else {
+                      setSelectedCheckLinksSeasons([]);
+                    }
+                  }}
+                  className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-700 text-emerald-500 focus:ring-emerald-500/20 bg-white dark:bg-zinc-950"
+                />
+                <span className="font-medium">All Seasons</span>
+              </label>
+
+              <div className="h-px bg-zinc-100 dark:bg-zinc-800 my-2" />
+
+              {checkLinksSeasonModal.seasons.map((season) => {
+                const isSelected = selectedCheckLinksSeasons.includes(
+                  Number(season.seasonNumber),
+                );
+                return (
+                  <label
+                    key={season.seasonNumber}
+                    className={`flex items-center justify-between p-3 rounded-xl cursor-pointer border transition-colors ${isSelected ? "bg-emerald-500/5 border-emerald-500/50 text-emerald-600 dark:text-emerald-400" : "bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800/50"}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(e) => {
+                          const num = Number(season.seasonNumber);
+                          if (e.target.checked) {
+                            setSelectedCheckLinksSeasons((prev) =>
+                              [...prev, num].sort((a, b) => a - b),
+                            );
+                          } else {
+                            setSelectedCheckLinksSeasons((prev) =>
+                              prev.filter((n) => n !== num),
+                            );
+                          }
+                        }}
+                        className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-700 text-emerald-500 focus:ring-emerald-500/20 bg-white dark:bg-zinc-950"
+                      />
+                      <span className="font-medium">Season {season.seasonNumber}</span>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() =>
+                  setCheckLinksSeasonModal({ ...checkLinksSeasonModal, isOpen: false })
+                }
+                className="px-6 py-2 rounded-xl font-medium hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (checkLinksSeasonModal.content) {
+                    const content = checkLinksSeasonModal.content;
+                    const seasons = selectedCheckLinksSeasons;
+                    setCheckLinksSeasonModal({ ...checkLinksSeasonModal, isOpen: false });
+                    setTimeout(() => {
+                      handleCheckLinks(content, seasons);
+                    }, 150);
+                  }
+                }}
+                disabled={selectedCheckLinksSeasons.length === 0}
+                className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-xl font-bold transition-colors flex items-center gap-2"
+              >
+                <Link2 className="w-4 h-4" /> Check Links ({selectedCheckLinksSeasons.length})
               </button>
             </div>
           </div>

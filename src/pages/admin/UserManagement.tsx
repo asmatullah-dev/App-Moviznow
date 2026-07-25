@@ -1065,16 +1065,35 @@ export default function UserManagement() {
       result = result.filter(u => u.status === filterStatus);
     }
     if (filterReward !== 'all') {
+      const referredSet = new Set(allUsers.filter(au => au.referredBy).map(au => au.referredBy));
       if (filterReward === 'notification') {
         result = result.filter(u => u.notificationRewardClaimed);
       } else if (filterReward === 'pwa') {
         result = result.filter(u => u.pwaRewardClaimed);
       } else if (filterReward === 'referred') {
-        result = result.filter(u => allUsers.some(au => au.referredBy === u.uid));
+        result = result.filter(u => referredSet.has(u.uid));
       } else if (filterReward === 'joined_referral') {
         result = result.filter(u => u.hasReceivedReferralReward || u.referredBy);
       } else if (filterReward === 'active') {
         result = result.filter(u => u.activationRewardClaimed);
+      } else if (filterReward === 'any_reward') {
+        result = result.filter(u => 
+          u.notificationRewardClaimed || 
+          u.pwaRewardClaimed || 
+          u.activationRewardClaimed || 
+          u.hasReceivedReferralReward || 
+          u.referredBy || 
+          referredSet.has(u.uid)
+        );
+      } else if (filterReward === 'none') {
+        result = result.filter(u => 
+          !u.notificationRewardClaimed && 
+          !u.pwaRewardClaimed && 
+          !u.activationRewardClaimed && 
+          !u.hasReceivedReferralReward && 
+          !u.referredBy && 
+          !referredSet.has(u.uid)
+        );
       }
     }
 
@@ -1388,7 +1407,9 @@ export default function UserManagement() {
                 onChange={(e) => setFilterReward(e.target.value)}
                 className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 focus:outline-none focus:border-emerald-500 min-w-[120px] text-xs"
               >
-                <option value="all">All Rewards</option>
+                <option value="all">All Users</option>
+                <option value="any_reward">All Rewards</option>
+                <option value="none">No Rewards</option>
                 <option value="notification">Notification Reward</option>
                 <option value="pwa">App Install Reward</option>
                 <option value="referred">Referred Users</option>

@@ -23,8 +23,8 @@ let lastForceFetchTime = 0;
 
 export const getChunkMeta = async (forceRefresh = false) => {
   const nowMs = Date.now();
-  // If forceRefresh is requested but we just fetched within exactly 2000ms, use memory cache
-  const effectiveForceRefresh = forceRefresh && (nowMs - lastForceFetchTime > 2000);
+  // If forceRefresh is requested but we just fetched within 30 seconds, use memory/local cache
+  const effectiveForceRefresh = forceRefresh && (nowMs - lastForceFetchTime > 30000);
 
   if (memoryCache && !effectiveForceRefresh) return memoryCache;
 

@@ -30,7 +30,11 @@ export function TelegramDownloadModal({
       const res = await fetch(`/api/resolve-tg?url=${encodeURIComponent(url)}`);
       const data = await res.json();
       if (res.ok && data.url) {
-        window.location.href = data.url;
+        if (data.url.startsWith("tg://")) {
+          window.location.href = data.url;
+        } else {
+          window.open(data.url, "_blank") || (window.location.href = data.url);
+        }
       } else {
         setErrorId(id);
         alert(data.error || t("Failed to resolve Telegram link"));

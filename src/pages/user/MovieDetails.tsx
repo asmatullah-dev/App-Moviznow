@@ -114,18 +114,7 @@ export default function MovieDetails() {
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
 
   const content = useMemo(() => {
-    console.log("DEBUG: id=", id, "contentList length=", contentList.length);
-    if (contentList.length > 0) {
-      console.log("DEBUG: First content id=", contentList[0].id);
-    }
-    const found = contentList.find((c) => c.id === id) || null;
-    if (!found) {
-      console.log("DEBUG: Content NOT found for id=", id);
-      console.log("DEBUG: contentList=", contentList);
-    } else {
-      console.log("DEBUG: Content found=", found);
-    }
-    return found;
+    return contentList.find((c) => c.id === id) || null;
   }, [contentList, id]);
 
   const [loading, setLoading] = useState(() => {
@@ -138,9 +127,7 @@ export default function MovieDetails() {
     message: string;
   }>({ isOpen: false, title: "", message: "" });
 
-  useEffect(() => {
-    console.log("DEBUG: contentList changed, length=", contentList.length);
-  }, [contentList]);
+
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [isWatchLaterLoading, setIsWatchLaterLoading] = useState(false);
   const [isFavoriteLoading, setIsFavoriteLoading] = useState(false);
@@ -281,38 +268,38 @@ export default function MovieDetails() {
 
   // Reset state and load cache on ID change
   useEffect(() => {
+    let activeId = id;
     const foundInList = contentList.some((c) => c.id === id);
     if (!foundInList) setLoading(true);
+
+    // Clear state synchronously for new ID
+    setFullContent(null);
+    setCachedMetadata({ id: id || "", data: {} });
 
     if (id) {
       // Load full content cache asynchronously
       safeStorage.getItemAsync(`movie_details_${id}`).then((cachedFull) => {
+        if (activeId !== id) return; // Prevent state updates from stale closures
         if (cachedFull) {
           try {
             const parsed = JSON.parse(cachedFull);
             if (parsed.id === id) {
-              setFullContent(parsed);
-            } else {
-              setFullContent(null);
+              setFullContent(prev => prev?.id === id ? prev : parsed);
             }
           } catch (e) {
-            setFullContent(null);
+            // Ignore parse errors, let fetchFullContent handle fetching
           }
-        } else {
-          setFullContent(null);
         }
       });
 
       // Load metadata cache
       const cachedMeta = safeStorage.getItem(`content_cache_${id}`);
-      if (cachedMeta) {
+      if (cachedMeta && activeId === id) {
         try {
-          setCachedMetadata({ id: id || "", data: JSON.parse(cachedMeta) });
+          setCachedMetadata({ id: id, data: JSON.parse(cachedMeta) });
         } catch (e) {
-          setCachedMetadata({ id: id || "", data: {} });
+          // ignore
         }
-      } else {
-        setCachedMetadata({ id: id || "", data: {} });
       }
     } else {
       setFullContent(null);
@@ -325,6 +312,8 @@ export default function MovieDetails() {
     hasLoggedView.current = false;
     hasAttemptedRatingFetch.current = {};
     hasAttemptedStaticFetch.current = {};
+
+    return () => { activeId = null; };
   }, [id]);
 
   const [recentlyViewed, setRecentlyViewed] = useState<Content[]>([]);
@@ -341,27 +330,26 @@ export default function MovieDetails() {
   }, []);
 
   const isMinimal = useMemo(() => {
-    if (!content) return true;
+    const target = (fullContent?.id === id && fullContent) ? fullContent : content;
+    if (!target) return true;
     let parsedSeasons: any[] = [];
     try {
       parsedSeasons =
-        content.type === "series" && content.seasons
-          ? Array.isArray(content.seasons)
-            ? content.seasons
-            : JSON.parse(content.seasons as string)
+        target.type === "series" && target.seasons
+          ? Array.isArray(target.seasons)
+            ? target.seasons
+            : JSON.parse(target.seasons as string)
           : [];
     } catch (e) {}
-
     const hasFullSeasons =
-      content.type === "series" &&
+      target.type === "series" &&
       parsedSeasons.length > 0 &&
       parsedSeasons.some((s: any) => s.episodes && s.episodes.length > 1);
-
     return (
-      (content.type === "movie" && !content.movieLinks) ||
-      (content.type === "series" && !hasFullSeasons)
+      (target.type === "movie" && !target.movieLinks) ||
+      (target.type === "series" && !hasFullSeasons)
     );
-  }, [content]);
+  }, [content, fullContent, id]);
 
   const isStale = useMemo(() => {
     if (!content || !fullContent) return false;
@@ -1059,8 +1047,9 @@ export default function MovieDetails() {
           updates.releaseDate = details.release_date || details.first_air_date;
           hasUpdates = true;
         }
-        if ((force || !mergedContent.posterUrl) && details.poster_path) {
-          updates.posterUrl = `https://image.tmdb.org/t/p/w500${details.poster_path}`;
+        const newPosterUrl = details.poster_path ? `https://image.tmdb.org/t/p/w500${details.poster_path}` : undefined;
+        if (newPosterUrl && (force || !mergedContent.posterUrl || mergedContent.posterUrl !== newPosterUrl)) {
+          updates.posterUrl = newPosterUrl;
           hasUpdates = true;
         }
 
@@ -1494,7 +1483,11 @@ export default function MovieDetails() {
       const res = await fetch(`/api/resolve-tg?url=${encodeURIComponent(targetUrl)}`);
       const data = await res.json();
       if (res.ok && data.url) {
-        window.location.href = data.url;
+        if (data.url.startsWith("tg://")) {
+          window.location.href = data.url;
+        } else {
+          window.open(data.url, "_blank") || (window.location.href = data.url);
+        }
       } else {
         setAlertConfig({
           isOpen: true,
@@ -1600,6 +1593,17 @@ export default function MovieDetails() {
     if (!checkEligibility()) return;
 
     let targetUrl = url;
+    try {
+      const u = new URL(targetUrl);
+      const host = u.hostname.toLowerCase();
+      if (host.includes('hubcould') || host.includes('hubcloud') || host.includes('vcloud')) {
+        u.hostname = 'hubcloud.cx';
+        targetUrl = u.toString();
+      } else if (host.includes('hubdrive')) {
+        u.hostname = 'hubdrive.space';
+        targetUrl = u.toString();
+      }
+    } catch (e) {}
 
     if (linkId !== "sample") {
       // tracking removed
@@ -1627,11 +1631,8 @@ export default function MovieDetails() {
 
     if (
       targetUrl.includes("hubcloud") ||
-      targetUrl.includes("moviesdrive") ||
+      targetUrl.includes("hubcould") ||
       targetUrl.includes("hubdrive") ||
-      targetUrl.includes("skymovies") ||
-      targetUrl.includes("mdrive") ||
-      targetUrl.includes("filmygo") ||
       isVcloud
     ) {
       const clickId = targetUrl;
@@ -2284,7 +2285,8 @@ export default function MovieDetails() {
               {link.url &&
                 (link.url.toLowerCase().includes("hubcloud") ||
                   link.url.toLowerCase().includes("hubcould") ||
-                  link.url.toLowerCase().includes("hubdrive")) && (
+                  link.url.toLowerCase().includes("hubdrive") ||
+                  link.url.toLowerCase().includes("vcloud")) && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();

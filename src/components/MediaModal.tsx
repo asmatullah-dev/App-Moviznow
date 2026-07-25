@@ -11,6 +11,7 @@ interface MediaModalProps {
   initialTitle?: string;
   initialYear?: string;
   initialType?: string;
+  initialPosterUrl?: string;
   onApply?: (data: any) => void;
 }
 
@@ -534,6 +535,10 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
       Object.keys(parsedData).forEach(k => {
         if (k !== 'seasons' && parsedData[k] && (Array.isArray(parsedData[k]) ? parsedData[k].length > 0 : true)) {
           allFields[k] = true;
+          // Auto-deselect posterUrl if it's identical to the current one
+          if (k === 'posterUrl' && initialPosterUrl && parsedData[k] === initialPosterUrl) {
+             allFields[k] = false;
+          }
         }
       });
       

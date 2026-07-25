@@ -655,3 +655,174 @@ async function fetchHtml(url: string, isVcloud = false, force = false) {
       res.json({ url: normalizeDomain(req.body.url) });
     }
   });
+
+
+  linkExtractionRouter.get('/api/resolve-tg', async (req: any, res: any) => {
+    try {
+      let { url } = req.query;
+      if (!url || typeof url !== 'string') {
+        return res.status(400).json({ error: 'Valid URL required' });
+      }
+
+      url = url.trim();
+
+      const formatTgUrl = (rawUrl: string) => {
+        if (!rawUrl) return rawUrl;
+        if (rawUrl.startsWith('tg://')) return rawUrl;
+        try {
+          const u = new URL(rawUrl);
+          const domain = u.pathname.replace(/^\//, '').split('/')[0];
+          const start = u.searchParams.get('start');
+          if (domain && start) {
+            return `tg://resolve?domain=${domain}&start=${start}`;
+          } else if (domain) {
+            return `tg://resolve?domain=${domain}`;
+          }
+        } catch (e) {}
+        return rawUrl;
+      };
+
+      if (url.startsWith('tg://') || url.includes('t.me/') || url.includes('telegram.me/')) {
+        return res.json({ url: formatTgUrl(url) });
+      }
+
+      const findTgLinks = ($doc: cheerio.CheerioAPI, baseUrl: string) => {
+        let tgGoUrl = "";
+        let tgDirectUrl = "";
+        let gatewayUrl = "";
+        let nextGenUrl = "";
+
+        $doc('a').each((_, el) => {
+          const href = $doc(el).attr('href');
+          if (!href) return;
+          const text = $doc(el).text().trim().toLowerCase();
+          const html = $doc(el).html() || "";
+
+          if (href.includes('t.me/hubcloudreport') || href.includes('t.me/hubdrive') || href.includes('t.me/joinchat')) return;
+
+          if (href.includes('/tg/go')) {
+            tgGoUrl = href.startsWith('http') ? href : new URL(href, baseUrl).toString();
+          } else if (href.includes('tg://') || href.includes('t.me/') || href.includes('telegram.me/')) {
+            tgDirectUrl = href;
+          } else if (text.includes('telegram') || html.includes('fa-telegram')) {
+            tgGoUrl = href.startsWith('http') ? href : new URL(href, baseUrl).toString();
+          } else if (href.includes('gamerxyt.com')) {
+            gatewayUrl = href.startsWith('http') ? href : new URL(href, baseUrl).toString();
+          } else if (
+            text.includes('generate direct download link') ||
+            text.includes('download link') ||
+            href.includes('hubcloud.php') ||
+            href.includes('sportverse.cc') ||
+            href.includes('generator') ||
+            href.includes('vcloud.php')
+          ) {
+            if (!nextGenUrl) {
+              nextGenUrl = href.startsWith('http') ? href : new URL(href, baseUrl).toString();
+            }
+          }
+        });
+
+        if (!tgGoUrl) {
+          const html = $doc.html();
+          const tgGoMatch = html.match(/href=["'](https?:\/\/[^"']+\/tg\/go[^"']*)["']/i);
+          if (tgGoMatch) {
+            tgGoUrl = tgGoMatch[1].replace(/&amp;/g, '&');
+          }
+        }
+
+        if (!gatewayUrl) {
+          const html = $doc.html();
+          const gxMatch = html.match(/href=["'](https?:\/\/[^"']*gamerxyt\.com[^"']+)["']/i);
+          if (gxMatch) {
+            gatewayUrl = gxMatch[1].replace(/&amp;/g, '&');
+          }
+        }
+
+        return { tgGoUrl, tgDirectUrl, gatewayUrl, nextGenUrl };
+      };
+
+      const isVcloud = url.includes("vcloud");
+      const res1 = await fetchHtml(url, isVcloud, false);
+      let $ = cheerio.load(res1.data || "");
+      let found = findTgLinks($, url);
+
+      if (!found.tgGoUrl && !found.tgDirectUrl && !found.gatewayUrl && found.nextGenUrl) {
+        const res2 = await fetchHtml(found.nextGenUrl, isVcloud, false);
+        $ = cheerio.load(res2.data || "");
+        found = findTgLinks($, found.nextGenUrl);
+      }
+
+      let tgGoTarget = found.tgGoUrl;
+      let finalTg = found.tgDirectUrl;
+
+      if (!finalTg && !tgGoTarget && found.gatewayUrl) {
+        const resGw = await fetchHtml(found.gatewayUrl, false, false);
+        $ = cheerio.load(resGw.data || "");
+        const gwFound = findTgLinks($, found.gatewayUrl);
+        tgGoTarget = gwFound.tgGoUrl;
+        finalTg = gwFound.tgDirectUrl;
+      }
+
+      if (finalTg) {
+        return res.json({ url: formatTgUrl(finalTg) });
+      }
+
+      if (tgGoTarget) {
+        tgGoTarget = tgGoTarget.replace(/&amp;/g, '&');
+        
+        let resolvedTg = "";
+        try {
+          const headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+          };
+          const tgRes = await axios.get(tgGoTarget, { headers, timeout: 10000, maxRedirects: 5, validateStatus: () => true });
+          const finalResUrl = tgRes.request?.res?.responseUrl || tgGoTarget;
+
+          const $tg = cheerio.load(tgRes.data || "");
+
+          $tg("meta").each((_, el) => {
+            const content = $tg(el).attr("content");
+            if (content) {
+              const m = content.match(/tg:\/\/[^\s"',]+/);
+              if (m) resolvedTg = m[0];
+              else if (content.includes("t.me/") || content.includes("telegram.me/")) {
+                const m2 = content.match(/https?:\/\/(?:t\.me|telegram\.me)\/[^\s"',]+/);
+                if (m2) resolvedTg = m2[0];
+              }
+            }
+          });
+
+          if (!resolvedTg) {
+            $tg("a").each((_, el) => {
+              const href = $tg(el).attr("href");
+              if (href) {
+                const m = href.match(/tg:\/\/[^\s"',]+/);
+                if (m) resolvedTg = m[0];
+                else if (href.includes("t.me/") || href.includes("telegram.me/")) {
+                  resolvedTg = href;
+                }
+              }
+            });
+          }
+
+          if (!resolvedTg && (finalResUrl.includes("t.me/") || finalResUrl.includes("telegram.me/"))) {
+            resolvedTg = finalResUrl;
+          }
+        } catch (e: any) {
+          console.error("tg/go fetch failed:", e.message);
+        }
+
+        if (resolvedTg) {
+          return res.json({ url: formatTgUrl(resolvedTg) });
+        } else {
+          return res.json({ url: tgGoTarget });
+        }
+      }
+
+      return res.status(404).json({ error: 'Could not resolve Telegram link from this URL' });
+    } catch (error: any) {
+      console.error('Resolve TG error:', error.message || error);
+      res.status(500).json({ error: error.message || 'Failed to resolve Telegram link' });
+    }
+  });
