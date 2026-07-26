@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import confetti from 'canvas-confetti';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth, ensureSingleAndValidReferralCode } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { usePWA } from '../../contexts/PWAContext';
 import { 
@@ -219,7 +219,7 @@ export default function Rewards() {
       const userUpdates: any = {
         expiryDate: newExpiryStr
       };
-      if (profile.status === 'expired' || profile.status === 'pending') {
+      if (!profile.status || ['expired', 'pending'].includes(profile.status.toLowerCase())) {
         userUpdates.status = 'active';
       }
       
@@ -292,7 +292,7 @@ export default function Rewards() {
         reviewRewardClaimed: true,
         expiryDate: baseDate.toISOString()
       };
-      if (profile.status === 'expired' || profile.status === 'pending') {
+      if (!profile.status || ['expired', 'pending'].includes(profile.status.toLowerCase())) {
         updates.status = 'active';
       }
       await updateUserProfileData(updates);
@@ -331,20 +331,26 @@ export default function Rewards() {
     
     console.log('ensureReferralCode called, current profile.referralCode:', profile.referralCode);
     
-    // Every user has only one unique referral code connected to their account
-    if (!profile.referralCode) {
-      const newCode = getReferralCodeForUid(profile.uid);
-      console.log('Generating deterministic referral code:', newCode);
-      try {
-        await updateUserProfileData({ referralCode: newCode });
-        console.log('updateUserProfileData called for referralCode');
-        return newCode;
-      } catch (e) {
-        console.error('Failed to save referral code:', e);
-        return null;
+    try {
+      const code = await ensureSingleAndValidReferralCode(profile.uid, profile.referralCode);
+      if (code !== profile.referralCode) {
+        await updateUserProfileData({ referralCode: code });
       }
+      return code;
+    } catch (e) {
+      console.error('Failed to reconcile or save referral code:', e);
+      if (!profile.referralCode) {
+        const fallbackCode = getReferralCodeForUid(profile.uid);
+        try {
+          await updateUserProfileData({ referralCode: fallbackCode });
+          return fallbackCode;
+        } catch (err) {
+          console.error('Fallback save code failed:', err);
+          return null;
+        }
+      }
+      return profile.referralCode;
     }
-    return profile.referralCode;
   };
 
   const handleShare = async () => {

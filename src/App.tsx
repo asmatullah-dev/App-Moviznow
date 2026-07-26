@@ -235,7 +235,7 @@ function RewardsManager() {
         newExpiry.setDate(newExpiry.getDate() + extensionDays);
         updates.expiryDate = newExpiry.toISOString();
         
-        if (profile.status === 'expired' || profile.status === 'pending') {
+        if (!profile.status || ['expired', 'pending'].includes(profile.status.toLowerCase())) {
           updates.status = 'active';
         }
 

@@ -142,7 +142,7 @@ export default function Reviews() {
             reviewRewardClaimed: true,
             expiryDate: baseDate.toISOString()
           };
-          if (profile.status === 'expired' || profile.status === 'pending') {
+          if (!profile.status || ['expired', 'pending'].includes(profile.status.toLowerCase())) {
             updates.status = 'active';
           }
           await updateUserProfileData(updates);
