@@ -219,9 +219,7 @@ export default function Rewards() {
       const userUpdates: any = {
         expiryDate: newExpiryStr
       };
-      if (profile.status && ['expired', 'pending'].includes(profile.status.toLowerCase())) {
-        userUpdates.status = 'active';
-      }
+      userUpdates.status = 'active';
       
       // Update inviter's profile in users collection
       batch.update(doc(db, 'users', profile.uid), userUpdates);
@@ -292,9 +290,7 @@ export default function Rewards() {
         reviewRewardClaimed: true,
         expiryDate: baseDate.toISOString()
       };
-      if (profile.status && ['expired', 'pending'].includes(profile.status.toLowerCase())) {
-        updates.status = 'active';
-      }
+      updates.status = 'active';
       await updateUserProfileData(updates);
       sessionStorage.setItem('reviewRewardClaimed', 'true');
       safeStorage.setItem('has_rated', 'true');
