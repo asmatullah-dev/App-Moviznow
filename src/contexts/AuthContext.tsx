@@ -146,9 +146,25 @@ const generateReferralCode = (uid?: string) => {
 };
 
 export const ensureSingleAndValidReferralCode = async (uid: string, currentProfileCode?: string): Promise<string> => {
+  const userRef = doc(db, "users", uid);
   const refDocRef = doc(db, "referral", "all");
   
-  // 1. Fetch the unified referral document
+  let codeFromUserDoc: string | undefined = undefined;
+  
+  // 1. Fetch user document from Firestore to get their real saved referralCode
+  try {
+    const userSnap = await getDoc(userRef);
+    if (userSnap.exists()) {
+      const userData = userSnap.data();
+      if (userData?.referralCode) {
+        codeFromUserDoc = userData.referralCode;
+      }
+    }
+  } catch (err) {
+    console.error("Failed to read user doc in ensureSingleAndValidReferralCode:", err);
+  }
+
+  // 2. Fetch the unified referral document
   let codeFromAllCodes: string | undefined = undefined;
   let allCodes: Record<string, string> = {};
   let allCodeToUid: Record<string, string> = {};
@@ -165,8 +181,14 @@ export const ensureSingleAndValidReferralCode = async (uid: string, currentProfi
     console.error("Failed to read referral/all in ensureSingleAndValidReferralCode:", err);
   }
 
-  // 2. Determine the absolute best code to use
-  let chosenCode = codeFromAllCodes;
+  // 3. Determine the absolute best code to use
+  // Priority: 
+  //   a) Existing code in profile (passed in)
+  //   b) Code from user's Firestore document
+  //   c) Code from referral/all's codes[uid] map
+  //   d) First code in codeToUid mapping to uid
+  //   e) Generate new deterministic code
+  let chosenCode = currentProfileCode || codeFromUserDoc || codeFromAllCodes;
 
   if (!chosenCode) {
     for (const [code, mappedUid] of Object.entries(allCodeToUid)) {
@@ -175,10 +197,6 @@ export const ensureSingleAndValidReferralCode = async (uid: string, currentProfi
         break;
       }
     }
-  }
-  
-  if (!chosenCode && currentProfileCode && !allCodeToUid[currentProfileCode]) {
-    chosenCode = currentProfileCode;
   }
 
   // Generate deterministic if still missing
@@ -193,7 +211,7 @@ export const ensureSingleAndValidReferralCode = async (uid: string, currentProfi
     attempt++;
   }
 
-  // 3. Find and clean up any MULTIPLE codes in codeToUid that point to this user's UID
+  // 4. Find and clean up any MULTIPLE codes in codeToUid that point to this user's UID
   const duplicateCodesToDelete: string[] = [];
   for (const [code, mappedUid] of Object.entries(allCodeToUid)) {
     if (mappedUid === uid && code !== chosenCode) {
@@ -201,15 +219,22 @@ export const ensureSingleAndValidReferralCode = async (uid: string, currentProfi
     }
   }
 
-  // 4. Update Firestore if anything is out of sync or needs cleaning up
+  // 5. Update Firestore if anything is out of sync or needs cleaning up
+  const needsUserDocUpdate = codeFromUserDoc !== chosenCode;
   const needsReferralCodesUpdate = allCodes[uid] !== chosenCode;
   const needsReferralCodeToUidUpdate = allCodeToUid[chosenCode] !== uid;
   const hasDuplicatesToDelete = duplicateCodesToDelete.length > 0;
 
-  if (needsReferralCodesUpdate || needsReferralCodeToUidUpdate || hasDuplicatesToDelete) {
+  if (needsUserDocUpdate || needsReferralCodesUpdate || needsReferralCodeToUidUpdate || hasDuplicatesToDelete) {
     try {
-      const { deleteField, setDoc } = await import("firebase/firestore");
-      
+      const { deleteField } = await import("firebase/firestore");
+      const batch = writeBatch(db);
+
+      // Update user doc
+      if (needsUserDocUpdate) {
+        batch.set(userRef, { referralCode: chosenCode }, { merge: true });
+      }
+
       // Prepare updates for referral/all
       const referralUpdates: any = {
         codes: {
@@ -227,7 +252,8 @@ export const ensureSingleAndValidReferralCode = async (uid: string, currentProfi
         });
       }
 
-      await setDoc(refDocRef, referralUpdates, { merge: true });
+      batch.set(refDocRef, referralUpdates, { merge: true });
+      await batch.commit();
       console.log(`Reconciled referral code for user ${uid}. Chosen: ${chosenCode}, Cleared duplicates:`, duplicateCodesToDelete);
     } catch (e) {
       console.error("Failed to commit referral reconciliation batch:", e);
@@ -511,14 +537,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
-          if (modified) {
+          if (modified || !mergedProfile.referralCode) {
+            let newlyGenerated = false;
+            if (!mergedProfile.referralCode) {
+              mergedProfile.referralCode = generateReferralCode(currentUser.uid);
+              newlyGenerated = true;
+            }
+
             try {
               const pStr = safeStorage.getItem("pending_user_updates");
               let pAll = pStr ? JSON.parse(pStr) : {};
               pAll[currentUser.uid] = pAll[currentUser.uid] || {};
               
-              if (mergedProfile.reported_links) pAll[currentUser.uid].reported_links = mergedProfile.reported_links;
-              if (mergedProfile.movieRequests) pAll[currentUser.uid].movieRequests = mergedProfile.movieRequests;
+              if (modified) {
+                if (mergedProfile.reported_links) pAll[currentUser.uid].reported_links = mergedProfile.reported_links;
+                if (mergedProfile.movieRequests) pAll[currentUser.uid].movieRequests = mergedProfile.movieRequests;
+              }
+              if (newlyGenerated) {
+                pAll[currentUser.uid].referralCode = mergedProfile.referralCode;
+              }
               
               safeStorage.setItem("pending_user_updates", JSON.stringify(pAll));
             } catch (e) {
@@ -549,7 +586,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   const codeToUidMap = data.codeToUid || {};
                   foundInviterUid = codeToUidMap[storedRefCode];
                 }
-                
+
+                // 2. Fallback to users collection for legacy users
+                if (!foundInviterUid) {
+                  const usersRef = collection(db, "users");
+                  const q = query(usersRef, where("referralCode", "==", storedRefCode), limit(1));
+                  const snap = await getDocs(q);
+                  if (!snap.empty) {
+                    foundInviterUid = snap.docs[0].id;
+                    
+                    // Auto-migrate to the new document
+                    try {
+                      const batch = writeBatch(db);
+                      batch.set(doc(db, "referral", "all"), {
+                        codes: {
+                          [foundInviterUid]: storedRefCode
+                        },
+                        codeToUid: {
+                          [storedRefCode]: foundInviterUid
+                        }
+                      }, { merge: true });
+                      await batch.commit();
+                    } catch (e) {}
+                  }
+                }
+
                 if (foundInviterUid && foundInviterUid !== currentUser.uid) {
                   mergedProfile.referredBy = foundInviterUid;
                   mergedProfile.signupRewardClaimed = true;
@@ -802,11 +863,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             updatesToPush.lastActive = new Date().toISOString();
 
             if (Object.keys(updatesToPush).length > 0) {
-              const dataToSave = { ...updatesToPush };
-              if ('referralCode' in dataToSave) {
-                delete dataToSave.referralCode;
-              }
-              batch.set(userRef, dataToSave, { merge: true });
+              batch.set(userRef, updatesToPush, { merge: true });
               if (updatesToPush.referralCode) {
                 batch.set(doc(db, "referral", "all"), {
                   codes: {
@@ -1240,7 +1297,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 const codeToUidMap = data.codeToUid || {};
                 foundInviterUid = codeToUidMap[storedRefCode];
               }
-              
+
+              // 2. Fallback to users collection for legacy users
+              if (!foundInviterUid) {
+                const usersRef = collection(db, "users");
+                const q = query(usersRef, where("referralCode", "==", storedRefCode), limit(1));
+                const snap = await getDocs(q);
+                if (!snap.empty) {
+                  foundInviterUid = snap.docs[0].id;
+                  
+                  // Auto-migrate to the new document
+                  try {
+                    const batch = writeBatch(db);
+                    batch.set(doc(db, "referral", "all"), {
+                      codes: {
+                        [foundInviterUid]: storedRefCode
+                      },
+                      codeToUid: {
+                        [storedRefCode]: foundInviterUid
+                      }
+                    }, { merge: true });
+                    await batch.commit();
+                  } catch (e) {}
+                }
+              }
+
               if (foundInviterUid && foundInviterUid !== currentUser.uid) {
                 referredByUid = foundInviterUid;
               }
@@ -1341,11 +1422,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           try {
             const batch = writeBatch(db);
             // Set the new user record
-            const profileToSave = { ...newProfile };
-            if ('referralCode' in profileToSave) {
-              delete profileToSave.referralCode;
-            }
-            batch.set(userRef, profileToSave);
+            batch.set(userRef, newProfile);
 
             if (isNewlyReferred) {
               const displayName = currentUser.displayName || newProfile.displayName || currentUser.email || newProfile.email || "User";
@@ -1409,11 +1486,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             try {
               const { writeBatch } = await import("firebase/firestore");
               const fbBatch = writeBatch(db);
-              const fallbackProfile = { ...newProfile };
-              if ('referralCode' in fallbackProfile) {
-                delete fallbackProfile.referralCode;
-              }
-              fbBatch.set(userRef, fallbackProfile);
+              fbBatch.set(userRef, newProfile);
               fbBatch.set(doc(db, "referral", "all"), {
                 codes: {
                   [newProfile.uid]: newProfile.referralCode
@@ -1577,23 +1650,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           try {
             const { writeBatch } = await import("firebase/firestore");
             const batch = writeBatch(db);
-            const dataToSave = { ...pendingUpdates };
-            if ('referralCode' in dataToSave) {
-              delete dataToSave.referralCode;
-            }
-            batch.set(userRef, dataToSave, { merge: true });
-            
-            if (pendingUpdates.referralCode) {
-              batch.set(doc(db, "referral", "all"), {
-                codes: {
-                  [currentUser.uid]: pendingUpdates.referralCode
-                },
-                codeToUid: {
-                  [pendingUpdates.referralCode]: currentUser.uid
-                }
-              }, { merge: true });
-            }
-            
+            batch.set(userRef, pendingUpdates, { merge: true });
             await batch.commit();
 
             if (isDailySync) localStorage.setItem(dailySyncKey, pktDate);
@@ -1942,9 +1999,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const pendingAll = JSON.parse(pendingStr);
             if (pendingAll[result.user.uid]) {
               Object.assign(updates, pendingAll[result.user.uid]);
-              if ('referralCode' in updates) {
-                delete updates.referralCode;
-              }
               delete pendingAll[result.user.uid];
               safeStorage.setItem(
                 "pending_user_updates",
@@ -2386,13 +2440,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const { writeBatch } = await import("firebase/firestore");
         let batch = writeBatch(db);
-        
-        const dataToSave = { ...data };
-        if ('referralCode' in dataToSave) {
-          delete dataToSave.referralCode;
-        }
-        
-        batch.set(userRefPath, dataToSave, { merge: true });
+        batch.set(userRefPath, data, { merge: true });
         if (data.referralCode) {
           batch.set(doc(db, "referral", "all"), {
             codes: {

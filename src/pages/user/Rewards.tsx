@@ -219,7 +219,7 @@ export default function Rewards() {
       const userUpdates: any = {
         expiryDate: newExpiryStr
       };
-      if (!profile.status || ['expired', 'pending'].includes(profile.status.toLowerCase())) {
+      if (profile.status && ['expired', 'pending'].includes(profile.status.toLowerCase())) {
         userUpdates.status = 'active';
       }
       
@@ -292,7 +292,7 @@ export default function Rewards() {
         reviewRewardClaimed: true,
         expiryDate: baseDate.toISOString()
       };
-      if (!profile.status || ['expired', 'pending'].includes(profile.status.toLowerCase())) {
+      if (profile.status && ['expired', 'pending'].includes(profile.status.toLowerCase())) {
         updates.status = 'active';
       }
       await updateUserProfileData(updates);
