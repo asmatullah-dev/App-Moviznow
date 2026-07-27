@@ -41,6 +41,138 @@ import {
 } from '../utils/linkScanner';
 import { useModalBehavior } from '../hooks/useModalBehavior';
 
+const filterFilmygoHits = (hits: any[], pageUrl: string): any[] => {
+  if (!hits || hits.length === 0) return [];
+
+  const parseSizeInGB = (sizeStr?: string | null): number => {
+    if (!sizeStr) return 0;
+    const match = sizeStr.match(/(\d+(?:\.\d+)?)\s*(GB|MB)/i);
+    if (!match) return 0;
+    const val = parseFloat(match[1]);
+    const unit = match[2].toUpperCase();
+    if (unit === 'GB') return val;
+    if (unit === 'MB') return val / 1024;
+    return 0;
+  };
+
+  const isHindiLineHit = (h: any): boolean => {
+    const name = ((h.file_name || '') + ' ' + (h.label || '')).toLowerCase();
+    return /\bhindi\b.*?\bline\b/i.test(name);
+  };
+
+  let effectiveHits = hits;
+  const hasAnyHindiLine = effectiveHits.some(isHindiLineHit);
+
+  if (hasAnyHindiLine) {
+    effectiveHits = effectiveHits.filter(h => {
+      const name = ((h.file_name || '') + ' ' + (h.label || '')).toLowerCase();
+      if (/\bhindi\b/i.test(name)) {
+        return isHindiLineHit(h);
+      }
+      return true;
+    });
+  }
+
+  const pageUrlLower = pageUrl.toLowerCase();
+
+  const findHit = (res: '480p' | '720p' | '1080p', isHevc: boolean) => {
+    const candidates = effectiveHits.filter(h => {
+      const name = (h.file_name || '').toLowerCase();
+      const hasRes = name.includes(res);
+      const hasHevc = name.includes('hevc');
+      return hasRes && (isHevc ? hasHevc : !hasHevc);
+    });
+
+    if (candidates.length === 0) return undefined;
+
+    return candidates[0];
+  };
+
+  // Check if non-HEVC quality links exist at all in the hits list
+  const hasAnyNonHevc = effectiveHits.some(h => {
+    const name = (h.file_name || '').toLowerCase();
+    return (name.includes('480p') || name.includes('720p') || name.includes('1080p')) && !name.includes('hevc');
+  });
+
+  const isSeriesUrl = pageUrlLower.includes('series') || 
+                       pageUrlLower.includes('season') || 
+                       pageUrlLower.includes('s01') || 
+                       pageUrlLower.includes('s02') || 
+                       pageUrlLower.includes('s1') || 
+                       pageUrlLower.includes('s2') || 
+                       pageUrlLower.includes('episode');
+
+  // If URL indicates series or there are no non-HEVC links at all, treat as Series
+  const isSeries = isSeriesUrl || !hasAnyNonHevc;
+
+  const selected: any[] = [];
+
+  if (isSeries) {
+    // Series rule: select "480p HEVC", "720p HEVC", "1080p HEVC"
+    const hit480pHevc = findHit('480p', true);
+    const hit720pHevc = findHit('720p', true);
+    const hit1080pHevc = findHit('1080p', true);
+
+    if (hit480pHevc) selected.push(hit480pHevc);
+    if (hit720pHevc) selected.push(hit720pHevc);
+    if (hit1080pHevc) selected.push(hit1080pHevc);
+
+    if (selected.length === 0) {
+      for (const hit of hits) {
+        const nameLower = (hit.file_name || '').toLowerCase();
+        if (nameLower.includes('480p hevc') || 
+            nameLower.includes('720p hevc') || 
+            nameLower.includes('1080p hevc')) {
+          selected.push(hit);
+        }
+      }
+    }
+  } else {
+    // Movie rule:
+    // "Download Now 480p"
+    // "Download Now 720p"
+    // "Download Now 1080p"
+    // "Download Now 720p HEVC" (only if 720p size > 1.4GB)
+    // PLUS: If any resolution (480p, 720p, or 1080p) non-HEVC is missing, select its HEVC version as fallback!
+    const hit480p = findHit('480p', false);
+    const hit480pHevc = findHit('480p', true);
+
+    const hit720p = findHit('720p', false);
+    const hit720pHevc = findHit('720p', true);
+
+    const hit1080p = findHit('1080p', false);
+    const hit1080pHevc = findHit('1080p', true);
+
+    // 480p: prefer non-HEVC, fallback to HEVC if missing
+    if (hit480p) {
+      selected.push(hit480p);
+    } else if (hit480pHevc) {
+      selected.push(hit480pHevc);
+    }
+
+    // 720p: prefer non-HEVC. Select HEVC if size > 1.4GB or if non-HEVC is missing
+    if (hit720p) {
+      selected.push(hit720p);
+      const sizeGB = parseSizeInGB(hit720p.size);
+      if (sizeGB > 1.4 && hit720pHevc) {
+        selected.push(hit720pHevc);
+      }
+    } else if (hit720pHevc) {
+      selected.push(hit720pHevc);
+    }
+
+    // 1080p: prefer non-HEVC, fallback to HEVC if missing
+    if (hit1080p) {
+      selected.push(hit1080p);
+    } else if (hit1080pHevc) {
+      selected.push(hit1080pHevc);
+    }
+  }
+
+  // Return selected hits, deduplicated by the Set
+  return Array.from(new Set(selected));
+};
+
 type Props = {
   isOpen: boolean;
   onClose: () => void;
@@ -660,7 +792,22 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
             const hits = res.data?.hits || [];
             if (hits.length > 0) {
-              if (res.type === 'mdrive') {
+              if (res.type === 'filmygo') {
+                const autoHits = filterFilmygoHits(hits, res.original);
+                if (autoHits.length > 0) {
+                  processedExtractionsRef.current.add(res.original);
+                  const selectedUrls = autoHits.map(h => h.url).join('\n');
+                  const baseLink = res.original.replace(/^https?:\/\//, '').replace(/\/$/, '');
+                  const escapedBase = baseLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                  const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}/?`, 'g');
+                  nextInput = nextInput.replace(regex, selectedUrls);
+                  console.log(`FilmyGo auto-selected ${autoHits.length} hits without modal popup:`, { from: res.original, count: autoHits.length });
+                } else {
+                  // If page opened but no hubcloud links were found/matched, skip this link and proceed to next
+                  processedExtractionsRef.current.add(res.original);
+                  console.log("FilmyGo page opened but no matching hubcloud links found - skipping link:", res.original);
+                }
+              } else if (res.type === 'mdrive') {
                 if (hits.length === 1) {
                   processedExtractionsRef.current.add(res.original);
                   // Auto-extract the single link
@@ -684,9 +831,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
                 const escapedBase = baseLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                 const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}/?`, 'g');
                 nextInput = nextInput.replace(regex, singleLink);
-                console.log(`${res.type === 'moviesdrive' ? 'MoviesDrive' : res.type === 'filmygo' ? 'FilmyGo' : 'SkymoviesHD'} auto-replacement successful:`, { from: res.original, to: singleLink });
+                console.log(`${res.type === 'moviesdrive' ? 'MoviesDrive' : 'SkymoviesHD'} auto-replacement successful:`, { from: res.original, to: singleLink });
               } else {
-                // Show UI for this specific link (MoviesDrive, FilmyGo, SkyMoviesHD with more than 1 hit)
+                // Show UI for this specific link (MoviesDrive, SkyMoviesHD with more than 1 hit)
                 setMdriveUrl(res.original);
                 setMdriveResults(hits);
                 setMdriveSelectedIndices(new Set());

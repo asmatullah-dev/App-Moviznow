@@ -1007,15 +1007,55 @@ async function startServer() {
         }
       }
       
+      // Remove sidebars, recommended/trending posts, and footers so we only extract links belonging to this specific movie
+      $("aside, .sidebar, #secondary, .widget, .related-posts, .related, .trending, .popular-posts, .popular, footer, #footer, #comments").remove();
+
+      const $mainContainer = $(".entry-content, .post-content, article, main, .entry").length > 0
+        ? $(".entry-content, .post-content, article, main, .entry")
+        : $("body");
+
       const fdlData = new Map<string, { label: string }>();
-      $("a[href]").each((_, el) => {
+      $mainContainer.find("a[href]").each((_, el) => {
         let href = $(el).attr("href") || "";
         if (!href) return;
         href = href.trim();
-        if (href.includes("filesdl.in") || href.includes("hubcloud") || href.includes("vcloud") || href.includes("mdrive") || href.includes("fastdl")) {
-          let label = $(el).text().trim() || $(el).attr("title") || "Download Link";
-          label = label.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
-          fdlData.set(href, { label: label || "Download Link" });
+        if (href.includes("filesdl") || href.includes("linkmake") || href.includes("hubcloud") || href.includes("vcloud") || href.includes("mdrive") || href.includes("fastdl") || href.includes("page-download") || href.includes("download")) {
+          let rawLabel = $(el).text().trim() || $(el).attr("title") || "";
+          let label = rawLabel.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+
+          if (!label || /^(direct\s*)?download(\s*now)?$/i.test(label) || label.length < 3) {
+            const container = $(el).closest("p, div, tr, td, li, article");
+            let containerText = container.clone().children("a").remove().end().text().trim();
+            if (!containerText) {
+              containerText = container.prev().text().trim() || container.text().trim();
+            }
+            if (containerText) {
+              label = containerText.replace(/\s+/g, ' ').trim();
+            }
+          }
+
+          const lower = label.toLowerCase();
+          const hasHindiLine = /\bhindi\b.*?\bline\b/.test(lower);
+
+          if (lower.includes("480p") && lower.includes("hevc")) label = "Download Now 480p HEVC";
+          else if (lower.includes("720p") && lower.includes("hevc")) label = "Download Now 720p HEVC";
+          else if (lower.includes("1080p") && lower.includes("hevc")) label = "Download Now 1080p HEVC";
+          else if (lower.includes("480p")) label = "Download Now 480p";
+          else if (lower.includes("720p")) label = "Download Now 720p";
+          else if (lower.includes("1080p")) label = "Download Now 1080p";
+
+          if (hasHindiLine) {
+            label += " Hindi (Line)";
+          }
+
+          if (!label) label = "Download Link";
+
+          if (href.startsWith("/")) {
+            try { href = new URL(href, targetUrl).href; } catch(e) {}
+          }
+          if (href.startsWith("http")) {
+            fdlData.set(href, { label });
+          }
         }
       });
 
@@ -1023,7 +1063,7 @@ async function startServer() {
         const parts = text.split('<a ');
         for(let i = 1; i < parts.length; i++) {
           const p = parts[i];
-          const m = p.match(/href=["']([^"']*(?:filesdl\.in|hubcloud|vcloud|mdrive|fastdl)[^"']*)["']/i);
+          const m = p.match(/href=["']([^"']*(?:filesdl|linkmake|hubcloud|vcloud|mdrive|fastdl)[^"']*)["']/i);
           if (m) {
             const fdlUrl = m[1].trim();
             
@@ -1094,11 +1134,33 @@ async function startServer() {
       const results = await Promise.all(Array.from(fdlData.keys()).map(async (fdlUrl) => {
         try {
           const fdlRes = await axios.get(fdlUrl, { headers, httpsAgent });
-          const fdlText = fdlRes.data;
+          let fdlText = typeof fdlRes.data === 'string' ? fdlRes.data : JSON.stringify(fdlRes.data);
           
-          const hubcloudMatch = fdlText.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|hubdrive|skymovies|moviesdrive|mdrive|filmygo)\.[^"'\s<>\[\]]*/gi);
+          let hubcloudMatch = fdlText.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|vcloud|hubdrive)\.[^"'\s<>\[\]]*/gi);
+
+          // If no direct hubcloud match, check if fdlText contains linkmake/filesdl links that need a second hop
+          if (!hubcloudMatch) {
+            const nestedLinks = fdlText.match(/https?:\/\/[^"'\s<>\[\]]*(?:filesdl|linkmake)[^"'\s<>\[\]]*/gi);
+            if (nestedLinks && nestedLinks.length > 0) {
+              for (const nLink of nestedLinks) {
+                try {
+                  const nRes = await axios.get(nLink, { headers, httpsAgent });
+                  const nText = typeof nRes.data === 'string' ? nRes.data : JSON.stringify(nRes.data);
+                  const nHubMatch = nText.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|vcloud|hubdrive)\.[^"'\s<>\[\]]*/gi);
+                  if (nHubMatch) {
+                    hubcloudMatch = nHubMatch;
+                    fdlText = nText;
+                    break;
+                  }
+                } catch (e) {}
+              }
+            }
+          }
+
           if (hubcloudMatch) {
-            const sizeMatch = fdlText.match(/Size:<\/span>\s*<span>([^<]+)<\/span>/i) || fdlText.match(/(\d+(?:\.\d+)?\s*(?:GB|MB|KB))/i);
+            const sizeMatch = fdlText.match(/Size:<\/span>\s*<span>([^<]+)<\/span>/i) || 
+                              fdlText.match(/Size:\s*([0-9.]+\s*(?:GB|MB|KB))/i) || 
+                              fdlText.match(/(\d+(?:\.\d+)?\s*(?:GB|MB|KB))/i);
             const size = sizeMatch ? sizeMatch[1].toUpperCase() : null;
 
             let finalName = fdlData.get(fdlUrl)?.label || "HubCloud Link";

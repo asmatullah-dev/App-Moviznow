@@ -251,6 +251,12 @@ const ContentCard = memo(
       [content, profile, getMissingLabels],
     );
 
+    const hasNoHubcloud = useMemo(() => {
+      if (!isDuplicate) return false;
+      const urls = extractMediaUrls(content);
+      return !urls.some((url) => url.toLowerCase().includes("hubcloud"));
+    }, [isDuplicate, content]);
+
     return (
       <div
         className={clsx(
@@ -309,6 +315,11 @@ const ContentCard = memo(
               <div className="bg-red-600 animate-pulse text-white px-2 py-0.5 rounded shadow-lg shadow-red-600/40 text-[11px] font-black uppercase tracking-widest border border-red-400 whitespace-nowrap">
                 Duplicate
               </div>
+              {hasNoHubcloud && (
+                <div className="bg-sky-600 text-white px-2 py-0.5 rounded shadow-lg shadow-sky-600/40 text-[11px] font-black uppercase tracking-widest border border-sky-400 whitespace-nowrap">
+                  No Hubcloud
+                </div>
+              )}
               {duplicateLinkStatus === "all_same" && (
                 <div className="bg-purple-600 text-white px-2 py-0.5 rounded shadow-lg shadow-purple-600/40 text-[11px] font-black uppercase tracking-widest border border-purple-400 whitespace-nowrap">
                   All Same Links
@@ -4481,6 +4492,30 @@ export default function ContentManagement() {
     }
   };
 
+  const handleSelectRange = () => {
+    if (selectedContent.length === 0 || filteredContent.length === 0) return;
+
+    const selectedSet = new Set(selectedContent);
+    let firstIndex = -1;
+    let lastIndex = -1;
+
+    for (let i = 0; i < filteredContent.length; i++) {
+      if (selectedSet.has(filteredContent[i].id)) {
+        if (firstIndex === -1) firstIndex = i;
+        lastIndex = i;
+      }
+    }
+
+    if (firstIndex !== -1 && lastIndex !== -1 && firstIndex <= lastIndex) {
+      const rangeIds = filteredContent
+        .slice(firstIndex, lastIndex + 1)
+        .map((c) => c.id);
+
+      const newSelectedSet = new Set([...selectedContent, ...rangeIds]);
+      setSelectedContent(Array.from(newSelectedSet));
+    }
+  };
+
   const handleSelectContent = useCallback(
     (id: string, e?: React.SyntheticEvent) => {
       if (e) e.stopPropagation();
@@ -5099,6 +5134,14 @@ export default function ContentManagement() {
                     <span className="text-sm text-zinc-500 dark:text-zinc-400">
                       {selectedContent.length} selected
                     </span>
+                    <button
+                      type="button"
+                      onClick={handleSelectRange}
+                      className="text-xs bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 px-2 py-1 rounded-lg font-medium transition-colors whitespace-nowrap"
+                      title="Select all content between first and last selected content"
+                    >
+                      Range Selection
+                    </button>
                     <select
                       value=""
                       onChange={(e) => {
@@ -5314,31 +5357,46 @@ export default function ContentManagement() {
       </div>
 
       <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={
-              selectedContent.length === filteredContent.length &&
-              filteredContent.length > 0
-            }
-            onChange={handleSelectAll}
-            ref={(el) => {
-              if (el) {
-                el.indeterminate =
-                  selectedContent.length > 0 &&
-                  selectedContent.length < filteredContent.length;
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={
+                selectedContent.length === filteredContent.length &&
+                filteredContent.length > 0
               }
-            }}
-            className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-zinc-950"
-          />
-          <span className="text-sm text-zinc-500 dark:text-zinc-400">
-            {selectedContent.length === filteredContent.length &&
-            filteredContent.length > 0
-              ? "Deselect All"
-              : selectedContent.length > 0
-                ? "Deselect Selected"
-                : "Select All"}
-          </span>
+              onChange={handleSelectAll}
+              ref={(el) => {
+                if (el) {
+                  el.indeterminate =
+                    selectedContent.length > 0 &&
+                    selectedContent.length < filteredContent.length;
+                }
+              }}
+              className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-zinc-950 cursor-pointer"
+            />
+            <span
+              className="text-sm text-zinc-500 dark:text-zinc-400 cursor-pointer"
+              onClick={handleSelectAll}
+            >
+              {selectedContent.length === filteredContent.length &&
+              filteredContent.length > 0
+                ? "Deselect All"
+                : selectedContent.length > 0
+                  ? "Deselect Selected"
+                  : "Select All"}
+            </span>
+          </div>
+          {selectedContent.length > 0 && (
+            <button
+              type="button"
+              onClick={handleSelectRange}
+              className="text-xs bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 px-2.5 py-1 rounded-lg font-medium transition-colors whitespace-nowrap"
+              title="Select all content between first and last selected content"
+            >
+              Range Selection
+            </button>
+          )}
         </div>
         <div className="text-sm text-zinc-500 dark:text-zinc-400">
           {filteredContent.length} items found
