@@ -14,6 +14,9 @@ import {
   FileDown,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
   Info,
   Siren,
   Plus,
@@ -22,6 +25,7 @@ import {
   Search,
   Download,
   ExternalLink,
+  Film,
   Loader2 as LoaderIcon
 } from "lucide-react";
 import { QualityLinks, Language, Quality, LinkDef } from '../types';
@@ -129,14 +133,180 @@ export const LinkCheckerModal: React.FC<Props> = ({
   const [mdriveExtractingDirect, setMdriveExtractingDirect] = useState<Record<number, boolean>>({});
   const processedExtractionsRef = React.useRef<Set<string>>(new Set());
 
+  // MoviesDrive Search Results & Pagination State
+  const [moviesdriveSearchUrl, setMoviesdriveSearchUrl] = useState<string | null>(null);
+  const [moviesdriveSearchPosts, setMoviesdriveSearchPosts] = useState<{ title: string; url: string; image?: string }[]>([]);
+  const [moviesdriveSelectedIndices, setMoviesdriveSelectedIndices] = useState<Set<number>>(new Set());
+  const [moviesdriveSearchQuery, setMoviesdriveSearchQuery] = useState<string>("");
+  const [moviesdrivePageLoading, setMoviesdrivePageLoading] = useState<boolean>(false);
+  const [customPageInput, setCustomPageInput] = useState<string>("");
+
+  // Direct MoviesDrive Search Input State
+  const [showMoviesdriveSearchInput, setShowMoviesdriveSearchInput] = useState<boolean>(false);
+  const [moviesdriveSearchTerm, setMoviesdriveSearchTerm] = useState<string>("");
+
+  // Direct SkyMoviesHD Search Input State & Pagination Limit
+  const [showSkymoviesSearchInput, setShowSkymoviesSearchInput] = useState<boolean>(false);
+  const [skymoviesSearchTerm, setSkymoviesSearchTerm] = useState<string>("");
+  const [skymoviesVisibleLimit, setSkymoviesVisibleLimit] = useState<number>(50);
+
+  // Direct FilmyGo Search Input State
+  const [showFilmygoSearchInput, setShowFilmygoSearchInput] = useState<boolean>(false);
+  const [filmygoSearchTerm, setFilmygoSearchTerm] = useState<string>("");
+
+  React.useEffect(() => {
+    setSkymoviesVisibleLimit(50);
+  }, [moviesdriveSearchPosts, moviesdriveSearchUrl]);
+
+  const moviesdrivePageInfo = useMemo(() => {
+    if (!moviesdriveSearchUrl) return { query: "", page: 1, origin: "https://new6.moviesdrives.my", isSkyMovies: false, isFilmygo: false };
+    try {
+      const u = new URL(moviesdriveSearchUrl);
+      const isSky = u.hostname.includes("skymovies");
+      const isFilmy = u.hostname.includes("filmygo");
+      const q = u.searchParams.get("to-search") || u.searchParams.get("search") || u.searchParams.get("q") || u.searchParams.get("s") || "";
+      const p = parseInt(u.searchParams.get("to-page") || u.searchParams.get("page") || u.searchParams.get("p") || u.searchParams.get("pg") || "1", 10) || 1;
+      return { query: q, page: p, origin: u.origin || (isFilmy ? "https://filmygo.online" : "https://new6.moviesdrives.my"), isSkyMovies: isSky, isFilmygo: isFilmy };
+    } catch {
+      return { query: "", page: 1, origin: "https://new6.moviesdrives.my", isSkyMovies: false, isFilmygo: false };
+    }
+  }, [moviesdriveSearchUrl]);
+
+  const handleMoviesdrivePageChange = async (targetPage: number) => {
+    if (targetPage < 1 || !moviesdriveSearchUrl) return;
+    const { query, origin, isSkyMovies, isFilmygo } = moviesdrivePageInfo;
+    let newUrl = "";
+    let endpoint = "";
+    if (isSkyMovies) {
+      newUrl = `${origin}/search.php?search=${encodeURIComponent(query)}&cat=All&page=${targetPage}`;
+      endpoint = `/api/skymovieshd?url=${encodeURIComponent(newUrl)}`;
+    } else if (isFilmygo) {
+      newUrl = `${origin}/site-search.html?to-search=${encodeURIComponent(query)}&to-page=${targetPage}`;
+      endpoint = `/api/filmygo?url=${encodeURIComponent(newUrl)}`;
+    } else {
+      newUrl = `${origin}/search.html?q=${encodeURIComponent(query)}&page=${targetPage}`;
+      endpoint = `/api/moviesdrive?url=${encodeURIComponent(newUrl)}`;
+    }
+    setMoviesdriveSearchUrl(newUrl);
+    setMoviesdrivePageLoading(true);
+    try {
+      const res = await fetch(endpoint);
+      if (!res.ok) throw new Error('Catalog page fetch failed');
+      const data = await res.json();
+      if (data.is_search && Array.isArray(data.posts)) {
+        setMoviesdriveSearchPosts(data.posts);
+        const limit = isSkyMovies ? 50 : data.posts.length;
+        setMoviesdriveSelectedIndices(new Set(data.posts.slice(0, limit).map((_: any, idx: number) => idx)));
+        setMoviesdriveSearchQuery("");
+      }
+    } catch (e) {
+      console.error("Error fetching catalog page:", e);
+    } finally {
+      setMoviesdrivePageLoading(false);
+    }
+  };
+
+  const executeMoviesdriveSearch = (query: string) => {
+    const trimmed = query.trim();
+    let targetUrl = "";
+    if (!trimmed) {
+      targetUrl = "https://new6.moviesdrives.my/";
+    } else if (!trimmed.startsWith("http")) {
+      targetUrl = `https://new6.moviesdrives.my/search.html?q=${encodeURIComponent(trimmed)}&page=1`;
+    } else {
+      targetUrl = trimmed;
+    }
+    const currentVal = inputRef.current.trim();
+    let newInput = "";
+    if (!currentVal) {
+      newInput = targetUrl;
+    } else if (currentVal.includes(targetUrl)) {
+      newInput = currentVal;
+    } else {
+      newInput = `${currentVal}\n${targetUrl}`;
+    }
+    setInput(newInput);
+    setShowMoviesdriveSearchInput(false);
+    setShowSkymoviesSearchInput(false);
+    setShowFilmygoSearchInput(false);
+    setMoviesdriveSearchTerm("");
+    setTimeout(() => {
+      handleCheck(undefined, newInput);
+    }, 100);
+  };
+
+  const executeSkymoviesSearch = (query: string) => {
+    const trimmed = query.trim();
+    let targetUrl = "";
+    if (!trimmed) {
+      targetUrl = "https://skymovieshd.ceo/";
+    } else if (!trimmed.startsWith("http")) {
+      targetUrl = `https://skymovieshd.ceo/search.php?search=${encodeURIComponent(trimmed)}&cat=All`;
+    } else {
+      targetUrl = trimmed;
+    }
+    const currentVal = inputRef.current.trim();
+    let newInput = "";
+    if (!currentVal) {
+      newInput = targetUrl;
+    } else if (currentVal.includes(targetUrl)) {
+      newInput = currentVal;
+    } else {
+      newInput = `${currentVal}\n${targetUrl}`;
+    }
+    setInput(newInput);
+    setShowSkymoviesSearchInput(false);
+    setShowMoviesdriveSearchInput(false);
+    setShowFilmygoSearchInput(false);
+    setSkymoviesSearchTerm("");
+    setTimeout(() => {
+      handleCheck(undefined, newInput);
+    }, 100);
+  };
+
+  const executeFilmygoSearch = (query: string) => {
+    const trimmed = query.trim();
+    let targetUrl = "";
+    if (!trimmed) {
+      targetUrl = "https://filmygo.online/";
+    } else if (!trimmed.startsWith("http")) {
+      targetUrl = `https://filmygo.online/site-search.html?to-search=${encodeURIComponent(trimmed)}&to-page=1`;
+    } else {
+      targetUrl = trimmed;
+    }
+    const currentVal = inputRef.current.trim();
+    let newInput = "";
+    if (!currentVal) {
+      newInput = targetUrl;
+    } else if (currentVal.includes(targetUrl)) {
+      newInput = currentVal;
+    } else {
+      newInput = `${currentVal}\n${targetUrl}`;
+    }
+    setInput(newInput);
+    setShowFilmygoSearchInput(false);
+    setShowMoviesdriveSearchInput(false);
+    setShowSkymoviesSearchInput(false);
+    setFilmygoSearchTerm("");
+    setTimeout(() => {
+      handleCheck(undefined, newInput);
+    }, 100);
+  };
+
   const handleClose = useCallback(() => {
-    if (mdriveUrl) {
-      processedExtractionsRef.current.add(mdriveUrl);
+    if (moviesdriveSearchUrl) {
+      setMoviesdriveSearchUrl(null);
+      setMoviesdriveSearchPosts([]);
+      setMoviesdriveSelectedIndices(new Set());
+      setMoviesdriveSearchQuery("");
+      setMoviesdrivePageLoading(false);
+      setCustomPageInput("");
+    } else if (mdriveUrl) {
       setMdriveUrl(null);
     } else {
       onClose();
     }
-  }, [mdriveUrl, onClose]);
+  }, [moviesdriveSearchUrl, mdriveUrl, onClose]);
 
   useModalBehavior(isOpen, handleClose);
 
@@ -313,7 +483,10 @@ export const LinkCheckerModal: React.FC<Props> = ({
       
       // Use inputRef to ensure we have the absolute latest input
       const currentInput = inputRef.current;
-      const nextInput = currentInput.replace(regex, newLinksText);
+      let nextInput = currentInput.replace(regex, newLinksText);
+      if (nextInput === currentInput) {
+        nextInput = currentInput.trim() ? `${currentInput.trim()}\n${newLinksText}` : newLinksText;
+      }
       
       console.log("MDrive replacement:", { from: mdriveUrl, to: newLinksText, success: nextInput !== currentInput });
       setInput(nextInput);
@@ -331,8 +504,69 @@ export const LinkCheckerModal: React.FC<Props> = ({
     }
   };
 
+  const confirmMoviesdriveSearchSelection = () => {
+    if (moviesdriveSearchUrl && moviesdriveSelectedIndices.size > 0) {
+      const selectedPosts = moviesdriveSearchPosts.filter((_, i) => moviesdriveSelectedIndices.has(i));
+      const newLinksText = selectedPosts.map(p => p.url).join('\n');
+      
+      processedExtractionsRef.current.add(moviesdriveSearchUrl);
+
+      const currentInput = inputRef.current;
+      const targetSearchNorm = normalizeUrl(moviesdriveSearchUrl);
+
+      let replaced = false;
+      const lines = currentInput.split('\n');
+      const newLines = lines.map(line => {
+        const trimmed = line.trim();
+        if (!trimmed) return line;
+        if (trimmed === moviesdriveSearchUrl || normalizeUrl(trimmed) === targetSearchNorm || normalizeUrl(trimmed).includes(targetSearchNorm)) {
+          replaced = true;
+          return newLinksText;
+        }
+        return line;
+      });
+
+      let nextInput = newLines.join('\n');
+      if (!replaced) {
+        const baseLink = moviesdriveSearchUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+        const escapedBase = baseLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}/?`, 'gi');
+        nextInput = currentInput.replace(regex, newLinksText);
+      }
+
+      if (nextInput === currentInput) {
+        if (currentInput.includes(moviesdriveSearchUrl)) {
+          nextInput = currentInput.replace(moviesdriveSearchUrl, newLinksText);
+        } else {
+          nextInput = currentInput.trim() ? `${currentInput.trim()}\n${newLinksText}` : newLinksText;
+        }
+      }
+      
+      console.log("Catalog Search Page Replacement:", { from: moviesdriveSearchUrl, count: selectedPosts.length, replaced: nextInput !== currentInput });
+      setInput(nextInput);
+      
+      setMoviesdriveSearchUrl(null);
+      setMoviesdriveSearchPosts([]);
+      setMoviesdriveSelectedIndices(new Set());
+      setMoviesdriveSearchQuery("");
+      
+      setTimeout(() => {
+        handleCheck(undefined, nextInput);
+      }, 400);
+    } else if (moviesdriveSearchUrl) {
+      processedExtractionsRef.current.add(moviesdriveSearchUrl);
+      setMoviesdriveSearchUrl(null);
+      setMoviesdriveSearchPosts([]);
+      setMoviesdriveSelectedIndices(new Set());
+      setMoviesdriveSearchQuery("");
+    }
+  };
+
   const handleCheck = async (onlyUrls?: string[], initialInputOverride?: string, depth = 0, force = false) => {
     setError(null);
+    if (depth === 0 && !initialInputOverride) {
+      processedExtractionsRef.current.clear();
+    }
     if (depth > 5) {
       console.warn("Max check depth reached, stopping recursion.");
       setLoading(false);
@@ -413,6 +647,17 @@ export const LinkCheckerModal: React.FC<Props> = ({
               console.log("Auto-replacement successful:", { from: res.original, to: res.extracted });
             }
           } else if (res.type === 'mdrive' || res.type === 'moviesdrive' || res.type === 'filmygo' || res.type === 'skymovieshd') {
+            if ((res.type === 'moviesdrive' || res.type === 'skymovieshd' || res.type === 'filmygo') && res.data?.is_search && Array.isArray(res.data?.posts) && res.data.posts.length > 0) {
+              setMoviesdriveSearchUrl(res.original);
+              setMoviesdriveSearchPosts(res.data.posts);
+              const isSky = res.type === 'skymovieshd' || res.original.includes('skymovies');
+              const initialLimit = isSky ? 50 : res.data.posts.length;
+              setMoviesdriveSelectedIndices(new Set(res.data.posts.slice(0, initialLimit).map((_: any, idx: number) => idx)));
+              setMoviesdriveSearchQuery("");
+              pausedForUI = true;
+              break;
+            }
+
             const hits = res.data?.hits || [];
             if (hits.length > 0) {
               if (res.type === 'mdrive') {
@@ -945,6 +1190,10 @@ export const LinkCheckerModal: React.FC<Props> = ({
       setMdriveUrl(null);
       setMdriveResults([]);
       setMdriveSelectedIndices(new Set());
+      setMoviesdriveSearchUrl(null);
+      setMoviesdriveSearchPosts([]);
+      setMoviesdriveSelectedIndices(new Set());
+      setMoviesdriveSearchQuery("");
       processedExtractionsRef.current = new Set();
 
       if (autoStart && initialInput && autoStartedInputRef.current !== initialInput) {
@@ -1032,6 +1281,10 @@ export const LinkCheckerModal: React.FC<Props> = ({
     setMdriveUrl(null);
     setMdriveResults([]);
     setMdriveSelectedIndices(new Set());
+    setMoviesdriveSearchUrl(null);
+    setMoviesdriveSearchPosts([]);
+    setMoviesdriveSelectedIndices(new Set());
+    setMoviesdriveSearchQuery("");
     processedExtractionsRef.current = new Set();
   };
 
@@ -1109,7 +1362,284 @@ export const LinkCheckerModal: React.FC<Props> = ({
                   <button onClick={handleClose} className="rounded-full px-3 py-1.5 text-sm text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white transition">Close</button>
                 </div>
 
-                {mdriveUrl ? (
+                {moviesdriveSearchUrl ? (
+                  <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-1">
+                      <div>
+                        <h3 className="text-lg font-bold flex items-center gap-2 text-zinc-900 dark:text-white">
+                          <Search className={`w-5 h-5 ${moviesdrivePageInfo.isSkyMovies ? "text-purple-500" : moviesdrivePageInfo.isFilmygo ? "text-emerald-500" : "text-indigo-500"}`} />
+                          {moviesdrivePageInfo.isSkyMovies ? "SkyMoviesHD Search Page Contents" : moviesdrivePageInfo.isFilmygo ? "FilmyGo Search Page Contents" : "MoviesDrive Search Page Contents"}
+                        </h3>
+                        <p className="text-xs text-zinc-500 mt-0.5">
+                          Found {moviesdriveSearchPosts.length} contents on this search page. Select the items you want to scrape.
+                        </p>
+                      </div>
+                      <div className="flex gap-2 items-center shrink-0">
+                        <button 
+                          onClick={() => {
+                            if (moviesdrivePageInfo.isSkyMovies) {
+                              const visibleIndices = moviesdriveSearchPosts
+                                .map((post, originalIndex) => ({ post, originalIndex }))
+                                .filter(({ post }) => !moviesdriveSearchQuery || post.title.toLowerCase().includes(moviesdriveSearchQuery.toLowerCase()))
+                                .slice(0, skymoviesVisibleLimit)
+                                .map(x => x.originalIndex);
+
+                              const allVisibleSelected = visibleIndices.length > 0 && visibleIndices.every(i => moviesdriveSelectedIndices.has(i));
+                              if (allVisibleSelected) {
+                                setMoviesdriveSelectedIndices(prev => {
+                                  const next = new Set(prev);
+                                  visibleIndices.forEach(i => next.delete(i));
+                                  return next;
+                                });
+                              } else {
+                                setMoviesdriveSelectedIndices(prev => {
+                                  const next = new Set(prev);
+                                  visibleIndices.forEach(i => next.add(i));
+                                  return next;
+                                });
+                              }
+                            } else {
+                              if (moviesdriveSelectedIndices.size === moviesdriveSearchPosts.length) {
+                                setMoviesdriveSelectedIndices(new Set());
+                              } else {
+                                setMoviesdriveSelectedIndices(new Set(moviesdriveSearchPosts.map((_, i) => i)));
+                              }
+                            }
+                          }}
+                          className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-colors ${
+                            moviesdriveSelectedIndices.size > 0
+                              ? "text-red-500 hover:text-red-400 bg-red-500/10 border border-red-500/20"
+                              : "text-indigo-500 hover:text-indigo-400 bg-indigo-500/10 border border-indigo-500/20"
+                          }`}
+                        >
+                          {moviesdriveSelectedIndices.size > 0 ? "Deselect All" : "Select All"}
+                        </button>
+                        <button 
+                          onClick={() => {
+                            processedExtractionsRef.current.add(moviesdriveSearchUrl);
+                            setMoviesdriveSearchUrl(null);
+                            setMoviesdriveSearchPosts([]);
+                            setMoviesdriveSelectedIndices(new Set());
+                            setMoviesdriveSearchQuery("");
+                          }}
+                          className="text-xs font-bold text-zinc-500 hover:text-zinc-400 px-3 py-1.5 bg-zinc-500/10 rounded-xl"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="relative">
+                      <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+                      <input
+                        type="text"
+                        placeholder="Filter contents by name..."
+                        value={moviesdriveSearchQuery}
+                        onChange={(e) => setMoviesdriveSearchQuery(e.target.value)}
+                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm text-zinc-900 dark:text-zinc-100 outline-none focus:border-indigo-500 transition"
+                      />
+                    </div>
+
+                    {/* Pagination Controls - Only for MoviesDrive */}
+                    {!moviesdrivePageInfo.isSkyMovies && (
+                      <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800">
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => handleMoviesdrivePageChange(1)}
+                            disabled={moviesdrivePageInfo.page <= 1 || moviesdrivePageLoading}
+                            className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition flex items-center gap-1"
+                            title="First Page"
+                          >
+                            <ChevronsLeft className="w-3.5 h-3.5" />
+                            First
+                          </button>
+                          <button
+                            onClick={() => handleMoviesdrivePageChange(moviesdrivePageInfo.page - 1)}
+                            disabled={moviesdrivePageInfo.page <= 1 || moviesdrivePageLoading}
+                            className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition flex items-center gap-1"
+                            title="Previous Page"
+                          >
+                            <ChevronLeft className="w-3.5 h-3.5" />
+                            Prev
+                          </button>
+                          <span className={`text-xs font-bold px-3 py-1.5 rounded-xl border ${moviesdrivePageInfo.isFilmygo ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" : "bg-indigo-500/10 text-indigo-500 border-indigo-500/20"}`}>
+                            Page {moviesdrivePageInfo.page}
+                          </span>
+                          <button
+                            onClick={() => handleMoviesdrivePageChange(moviesdrivePageInfo.page + 1)}
+                            disabled={moviesdrivePageLoading}
+                            className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition flex items-center gap-1"
+                            title="Next Page"
+                          >
+                            Next
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        <form 
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            const num = parseInt(customPageInput, 10);
+                            if (!isNaN(num) && num >= 1) {
+                              handleMoviesdrivePageChange(num);
+                              setCustomPageInput("");
+                            }
+                          }}
+                          className="flex items-center gap-2"
+                        >
+                          <span className="text-xs text-zinc-500 font-medium">Custom Page:</span>
+                          <input
+                            type="number"
+                            min={1}
+                            placeholder="#"
+                            value={customPageInput}
+                            onChange={(e) => setCustomPageInput(e.target.value)}
+                            className="w-16 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-2 py-1 text-xs text-center font-bold text-zinc-900 dark:text-zinc-100 outline-none focus:border-indigo-500"
+                          />
+                          <button
+                            type="submit"
+                            disabled={!customPageInput || moviesdrivePageLoading}
+                            className="px-3 py-1 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-40 transition"
+                          >
+                            Go
+                          </button>
+                        </form>
+                      </div>
+                    )}
+
+                    {moviesdrivePageLoading ? (
+                      <div className="py-16 flex flex-col items-center justify-center gap-3">
+                        <LoaderIcon className="w-8 h-8 text-indigo-500 animate-spin" />
+                        <p className="text-sm font-medium text-zinc-500">Loading Page {moviesdrivePageInfo.page}...</p>
+                      </div>
+                    ) : (
+                      (() => {
+                        const filteredPosts = moviesdriveSearchPosts
+                          .map((post, originalIndex) => ({ post, originalIndex }))
+                          .filter(({ post }) => 
+                            !moviesdriveSearchQuery || 
+                            post.title.toLowerCase().includes(moviesdriveSearchQuery.toLowerCase())
+                          );
+
+                        const displayedPosts = moviesdrivePageInfo.isSkyMovies
+                          ? filteredPosts.slice(0, skymoviesVisibleLimit)
+                          : filteredPosts;
+
+                        return (
+                          <div className="flex flex-col gap-3">
+                            <div className="grid gap-2 max-h-[50vh] overflow-y-auto custom-scrollbar pr-2">
+                              {displayedPosts.map(({ post, originalIndex }) => {
+                                const isSelected = moviesdriveSelectedIndices.has(originalIndex);
+                                return (
+                                  <div 
+                                    key={originalIndex}
+                                    onClick={() => {
+                                      setMoviesdriveSelectedIndices(prev => {
+                                        const next = new Set(prev);
+                                        if (next.has(originalIndex)) next.delete(originalIndex);
+                                        else next.add(originalIndex);
+                                        return next;
+                                      });
+                                    }}
+                                    className={`group p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-4 ${
+                                      isSelected 
+                                        ? 'bg-indigo-500/10 border-indigo-500/40 shadow-sm' 
+                                        : 'bg-zinc-50 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-3 min-w-0">
+                                      <input 
+                                        type="checkbox" 
+                                        checked={isSelected}
+                                        onChange={() => {}}
+                                        className="w-4 h-4 rounded border-zinc-300 text-indigo-600 focus:ring-indigo-500 shrink-0 pointer-events-none"
+                                      />
+                                      {post.image ? (
+                                        <img 
+                                          src={post.image} 
+                                          alt="" 
+                                          className="w-10 h-14 object-cover rounded-lg shrink-0 border border-zinc-200 dark:border-zinc-800 bg-zinc-800 shadow-sm"
+                                          onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
+                                        />
+                                      ) : (
+                                        <div className="w-10 h-14 bg-zinc-200 dark:bg-zinc-800 rounded-lg shrink-0 flex items-center justify-center border border-zinc-300 dark:border-zinc-700">
+                                          <Film className="w-5 h-5 text-zinc-400" />
+                                        </div>
+                                      )}
+                                      <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-1.5 mb-1">
+                                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
+                                            #{originalIndex + 1}
+                                          </span>
+                                        </div>
+                                        <h4 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 leading-snug break-words">
+                                          {post.title}
+                                        </h4>
+                                      </div>
+                                    </div>
+
+                                    <div className="shrink-0 flex items-center gap-2">
+                                      <a 
+                                        href={post.url} 
+                                        target="_blank" 
+                                        rel="noreferrer" 
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition"
+                                        title="Open post in new tab"
+                                      >
+                                        <ExternalLink className="w-4 h-4" />
+                                      </a>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            {moviesdrivePageInfo.isSkyMovies && skymoviesVisibleLimit < filteredPosts.length && (
+                              <div className="pt-2 flex justify-center">
+                                <button
+                                  type="button"
+                                  onClick={() => setSkymoviesVisibleLimit(prev => prev + 50)}
+                                  className="px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-md shadow-purple-600/20 transition flex items-center gap-2"
+                                >
+                                  <ChevronDown className="w-4 h-4" />
+                                  Load More (50) — Showing {displayedPosts.length} of {filteredPosts.length}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()
+                    )}
+
+                    <div className="flex items-center justify-between pt-4 border-t border-zinc-200 dark:border-zinc-800">
+                      <span className="text-xs text-zinc-500 font-medium">
+                        {moviesdriveSelectedIndices.size} of {moviesdriveSearchPosts.length} selected
+                      </span>
+                      <div className="flex gap-2.5">
+                        <button 
+                          onClick={() => {
+                            setMoviesdriveSearchUrl(null);
+                            setMoviesdriveSearchPosts([]);
+                            setMoviesdriveSelectedIndices(new Set());
+                            setMoviesdriveSearchQuery("");
+                          }}
+                          className="px-4 py-2 rounded-xl text-xs font-bold text-zinc-500 hover:text-zinc-700 dark:hover:text-white transition-colors bg-zinc-100 dark:bg-zinc-800"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={confirmMoviesdriveSearchSelection}
+                          disabled={moviesdriveSelectedIndices.size === 0}
+                          className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-md shadow-indigo-600/20"
+                        >
+                          <Download className="w-4 h-4" />
+                          Scrape Selected ({moviesdriveSelectedIndices.size})
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : mdriveUrl ? (
                   <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
                     <div className="flex items-center justify-between px-1">
                       <div>
@@ -1407,21 +1937,153 @@ export const LinkCheckerModal: React.FC<Props> = ({
                   </div>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                  <button onClick={() => handleCheck()} disabled={loading} className="inline-flex items-center justify-center rounded-2xl gap-2 bg-cyan-500 px-4 py-2 text-sm font-bold text-white hover:bg-cyan-600 dark:hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}{loading ? "Checking..." : `Check ${links.length || ""} Link${links.length > 1 ? "s" : ""}`}</button>
-                  <button onClick={retryFailed} className="inline-flex items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-transparent px-4 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-2 disabled:opacity-50 transition-colors" disabled={loading || !results.some((r) => !r.ok || r.statusLabel === "UNKNOWN" || r.statusLabel === "MISSING_FILENAME" || r.statusLabel === "BROKEN" || r.statusLabel === "UNAVAILABLE")}><RefreshCw className="h-4 w-4" /> Retry Failed</button>
-                  <button onClick={copyResults} className="inline-flex items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-transparent px-4 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-2 disabled:opacity-50 transition-colors" disabled={!results.length}><Copy className="h-4 w-4" /> Copy Results</button>
-                  <button onClick={reset} className="inline-flex items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-transparent px-4 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-2 transition-colors"><Trash2 className="h-4 w-4" /> Reset</button>
+                {/* MoviesDrive Direct Search Input Bar */}
+                {showMoviesdriveSearchInput && (
+                  <form 
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      executeMoviesdriveSearch(moviesdriveSearchTerm);
+                    }}
+                    className="flex items-center gap-2 p-3 bg-indigo-500/10 border border-indigo-500/30 rounded-2xl animate-in fade-in slide-in-from-top-2 duration-200"
+                  >
+                    <Search className="w-4 h-4 text-indigo-500 shrink-0 ml-1" />
+                    <input
+                      type="text"
+                      placeholder="Search title or leave empty for Home page (new6.moviesdrives.my)..."
+                      value={moviesdriveSearchTerm}
+                      onChange={(e) => setMoviesdriveSearchTerm(e.target.value)}
+                      className="flex-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-1.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none focus:border-indigo-500 font-medium"
+                      autoFocus
+                    />
+                    <button
+                      type="submit"
+                      className="px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition shadow-sm flex items-center gap-1.5 shrink-0"
+                    >
+                      <Search className="w-3.5 h-3.5" />
+                      Search MoviesDrive
+                    </button>
+                  </form>
+                )}
+
+                {/* SkyMoviesHD Direct Search Input Bar */}
+                {showSkymoviesSearchInput && (
+                  <form 
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      executeSkymoviesSearch(skymoviesSearchTerm);
+                    }}
+                    className="flex items-center gap-2 p-3 bg-purple-500/10 border border-purple-500/30 rounded-2xl animate-in fade-in slide-in-from-top-2 duration-200"
+                  >
+                    <Search className="w-4 h-4 text-purple-500 shrink-0 ml-1" />
+                    <input
+                      type="text"
+                      placeholder="Search title or leave empty for Home page (skymovieshd.ceo)..."
+                      value={skymoviesSearchTerm}
+                      onChange={(e) => setSkymoviesSearchTerm(e.target.value)}
+                      className="flex-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-1.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none focus:border-purple-500 font-medium"
+                      autoFocus
+                    />
+                    <button
+                      type="submit"
+                      className="px-4 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs transition shadow-sm flex items-center gap-1.5 shrink-0"
+                    >
+                      <Search className="w-3.5 h-3.5" />
+                      Search SkyMoviesHD
+                    </button>
+                  </form>
+                )}
+
+                {/* FilmyGo Direct Search Input Bar */}
+                {showFilmygoSearchInput && (
+                  <form 
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      executeFilmygoSearch(filmygoSearchTerm);
+                    }}
+                    className="flex items-center gap-2 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl animate-in fade-in slide-in-from-top-2 duration-200"
+                  >
+                    <Search className="w-4 h-4 text-emerald-500 shrink-0 ml-1" />
+                    <input
+                      type="text"
+                      placeholder="Search title or leave empty for Home page (filmygo.online)..."
+                      value={filmygoSearchTerm}
+                      onChange={(e) => setFilmygoSearchTerm(e.target.value)}
+                      className="flex-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-1.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none focus:border-emerald-500 font-medium"
+                      autoFocus
+                    />
+                    <button
+                      type="submit"
+                      className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition shadow-sm flex items-center gap-1.5 shrink-0"
+                    >
+                      <Search className="w-3.5 h-3.5" />
+                      Search FilmyGo
+                    </button>
+                  </form>
+                )}
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button onClick={() => handleCheck()} disabled={loading} className="inline-flex items-center justify-center rounded-xl gap-1.5 bg-cyan-500 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-cyan-600 dark:hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm">{loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}{loading ? "Checking..." : `Check ${links.length || ""} Link${links.length > 1 ? "s" : ""}`}</button>
+                  <button 
+                    onClick={() => {
+                      const trimmedInput = input.trim();
+                      if (trimmedInput && !trimmedInput.startsWith("http")) {
+                        executeMoviesdriveSearch(trimmedInput);
+                      } else {
+                        setShowMoviesdriveSearchInput(prev => !prev);
+                        setShowSkymoviesSearchInput(false);
+                        setShowFilmygoSearchInput(false);
+                      }
+                    }} 
+                    className="inline-flex items-center justify-center rounded-xl border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 px-3.5 py-1.5 text-xs font-bold text-indigo-500 dark:text-indigo-400 gap-1.5 transition-colors shadow-sm"
+                    title="Toggle MoviesDrive search bar or search text"
+                  >
+                    <Search className="h-3.5 w-3.5" /> Search MoviesDrive
+                  </button>
+                  <button 
+                    onClick={() => {
+                      const trimmedInput = input.trim();
+                      if (trimmedInput && !trimmedInput.startsWith("http")) {
+                        executeSkymoviesSearch(trimmedInput);
+                      } else {
+                        setShowSkymoviesSearchInput(prev => !prev);
+                        setShowMoviesdriveSearchInput(false);
+                        setShowFilmygoSearchInput(false);
+                      }
+                    }} 
+                    className="inline-flex items-center justify-center rounded-xl border border-purple-500/30 bg-purple-500/10 hover:bg-purple-500/20 px-3.5 py-1.5 text-xs font-bold text-purple-500 dark:text-purple-400 gap-1.5 transition-colors shadow-sm"
+                    title="Toggle SkyMoviesHD search bar or search text"
+                  >
+                    <Search className="h-3.5 w-3.5" /> Search SkyMoviesHD
+                  </button>
+                  <button 
+                    onClick={() => {
+                      const trimmedInput = input.trim();
+                      if (trimmedInput && !trimmedInput.startsWith("http")) {
+                        executeFilmygoSearch(trimmedInput);
+                      } else {
+                        setShowFilmygoSearchInput(prev => !prev);
+                        setShowMoviesdriveSearchInput(false);
+                        setShowSkymoviesSearchInput(false);
+                      }
+                    }} 
+                    className="inline-flex items-center justify-center rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 px-3.5 py-1.5 text-xs font-bold text-emerald-500 dark:text-emerald-400 gap-1.5 transition-colors shadow-sm"
+                    title="Toggle FilmyGo search bar or search text"
+                  >
+                    <Search className="h-3.5 w-3.5" /> Search FilmyGo
+                  </button>
+                  <button onClick={retryFailed} className="inline-flex items-center justify-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-transparent px-3.5 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-1.5 disabled:opacity-50 transition-colors" disabled={loading || !results.some((r) => !r.ok || r.statusLabel === "UNKNOWN" || r.statusLabel === "MISSING_FILENAME" || r.statusLabel === "BROKEN" || r.statusLabel === "UNAVAILABLE")}><RefreshCw className="h-3.5 w-3.5" /> Retry Failed</button>
+                  <button onClick={copyResults} className="inline-flex items-center justify-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-transparent px-3.5 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-1.5 disabled:opacity-50 transition-colors" disabled={!results.length}><Copy className="h-3.5 w-3.5" /> Copy Results</button>
+                  <button onClick={reset} className="inline-flex items-center justify-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-transparent px-3.5 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-1.5 transition-colors"><Trash2 className="h-3.5 w-3.5" /> Reset</button>
                   
                   {!!results.length && (
-                    <button onClick={toggleSelectAll} className="inline-flex items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-transparent px-4 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-2 transition-colors">
+                    <button onClick={toggleSelectAll} className="inline-flex items-center justify-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-transparent px-3.5 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-1.5 transition-colors">
                       {selectedUrls.size === results.length ? "Deselect All" : "Select All"}
                     </button>
                   )}
 
                   {(onAddLinks || onBatchAddLinks) && selectedUrls.size > 0 && !loading && (
-                    <button onClick={handleAddLinks} className="inline-flex items-center justify-center rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white dark:text-black hover:bg-emerald-700 gap-2 ml-auto transition-colors">
-                      <LinkIcon className="h-4 w-4" />
+                    <button onClick={handleAddLinks} className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 gap-1.5 ml-auto transition-colors shadow-sm">
+                      <LinkIcon className="h-3.5 w-3.5" />
                       {isBatchMode ? `Add ${selectedUrls.size} Links Missing` : `Add ${selectedUrls.size} Link(s)`}
                     </button>
                   )}

@@ -762,7 +762,7 @@ async function startServer() {
          targetUrl = 'https://' + targetUrl;
       }
 
-      console.log(`[MoviesDrive] Extracting MDrive links from: ${targetUrl}`);
+      console.log(`[MoviesDrive] Extracting from: ${targetUrl}`);
 
       const headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -770,67 +770,156 @@ async function startServer() {
         'Referer': targetUrl
       };
 
-      const response = await fetch(targetUrl, { headers });
-      if (!response.ok) throw new Error(`MoviesDrive returned ${response.status}`);
-      const text = await response.text();
-      
-      const hits: any[] = [];
-      const seenUrls = new Set<string>();
-      const parts = text.split('<a ');
-      
-      for(let i = 1; i < parts.length; i++) {
-        const p = parts[i];
-        const m = p.match(/href=["']([^"']*(?:mdrive|mdrvie)\.lol\/archive\/[^"']*)["']/i);
-        if (m) {
-          const mUrl = m[1].trim();
-          if (!seenUrls.has(mUrl)) {
-            seenUrls.add(mUrl);
-            
-            // Extract label from the anchor text
-            let label = "";
-            const closeAnchorIndex = p.indexOf('</a>');
-            if (closeAnchorIndex !== -1) {
-              const anchorContent = p.substring(0, closeAnchorIndex);
-              const tagEndIndex = anchorContent.indexOf('>');
-              if (tagEndIndex !== -1) {
-                const innerHtml = anchorContent.substring(tagEndIndex + 1);
-                label = innerHtml.replace(/<[^>]*>/g, '').trim();
+      const urlObj = new URL(targetUrl);
+      const q = urlObj.searchParams.get('q') || urlObj.searchParams.get('s') || '';
+      const page = urlObj.searchParams.get('page') || '1';
+      const isSearchUrl = targetUrl.includes('search.html') || targetUrl.includes('search.php') || Boolean(q) || urlObj.pathname === '/' || urlObj.pathname === '' || urlObj.pathname.endsWith('index.html');
+
+      // 1. If URL is a search page or contains query parameter 'q' or 's', check search.php first
+      if (isSearchUrl && q) {
+        const searchApiUrl = `${urlObj.origin}/search.php?q=${encodeURIComponent(q)}&page=${page}`;
+        console.log(`[MoviesDrive] Querying search endpoint: ${searchApiUrl}`);
+        try {
+          const sRes = await fetch(searchApiUrl, { headers });
+          if (sRes.ok) {
+            const sData = await sRes.json().catch(() => null);
+            if (sData && Array.isArray(sData.hits) && sData.hits.length > 0) {
+              const posts = sData.hits.map((h: any) => {
+                const doc = h.document || h;
+                const permalink = doc.permalink || doc.url || "";
+                const fullUrl = permalink.startsWith("http")
+                  ? permalink
+                  : `${urlObj.origin}${permalink.startsWith("/") ? "" : "/"}${permalink}`;
+                const title = (doc.post_title || doc.title || "Untitled")
+                  .replace(/&#8211;/g, '-')
+                  .replace(/&amp;/g, '&')
+                  .replace(/\s+/g, ' ')
+                  .trim();
+                const image = doc.post_thumbnail || doc.image || doc.poster || doc.thumb || doc.thumbnail || "";
+                return { title, url: fullUrl, image };
+              }).filter((p: any) => p.url && p.title);
+
+              if (posts.length > 0) {
+                return res.json({ is_search: true, posts, found: posts.length });
               }
             }
-            
-            if (!label) label = "Download Link";
-            label = label.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
-            
-            hits.push({
-              file_name: label,
-              url: normalizeDomain(mUrl),
-              size: null,
-              is_direct: false
-            });
           }
+        } catch (sErr) {
+          console.warn(`[MoviesDrive] search.php error, falling back to HTML parse:`, sErr);
         }
       }
 
-      if (hits.length === 0) {
-        // Fallback: If no mdrive links, check for native hubcloud links just in case
-        const hubcloudMatch = text.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|hubdrive|skymovies|moviesdrive|mdrive|filmygo)\.[^"'\s<>\[\]]*/gi);
-        if (hubcloudMatch) {
-           hubcloudMatch.forEach(hubUrl => {
-              const cleanHubUrl = hubUrl.replace(/&amp;/g, '&');
-              if (!seenUrls.has(cleanHubUrl)) {
-                 seenUrls.add(cleanHubUrl);
-                 hits.push({
-                    file_name: "Original HubCloud Link",
-                    url: normalizeDomain(cleanHubUrl),
-                    size: null,
-                    is_direct: true
-                 });
+      // 2. Fetch the HTML page
+      const response = await fetch(targetUrl, { headers });
+      if (!response.ok) throw new Error(`MoviesDrive returned ${response.status}`);
+      const text = await response.text();
+
+      // Check if it's a single post containing MDrive links
+      const hasMdriveLinks = /(?:mdrive|mdrvie)\.lol\/archive\//i.test(text);
+
+      if (hasMdriveLinks) {
+        const hits: any[] = [];
+        const seenUrls = new Set<string>();
+        const parts = text.split('<a ');
+        
+        for(let i = 1; i < parts.length; i++) {
+          const p = parts[i];
+          const m = p.match(/href=["']([^"']*(?:mdrive|mdrvie)\.lol\/archive\/[^"']*)["']/i);
+          if (m) {
+            const mUrl = m[1].trim();
+            if (!seenUrls.has(mUrl)) {
+              seenUrls.add(mUrl);
+              
+              let label = "";
+              const closeAnchorIndex = p.indexOf('</a>');
+              if (closeAnchorIndex !== -1) {
+                const anchorContent = p.substring(0, closeAnchorIndex);
+                const tagEndIndex = anchorContent.indexOf('>');
+                if (tagEndIndex !== -1) {
+                  const innerHtml = anchorContent.substring(tagEndIndex + 1);
+                  label = innerHtml.replace(/<[^>]*>/g, '').trim();
+                }
               }
-           });
+              
+              if (!label) label = "Download Link";
+              label = label.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+              
+              hits.push({
+                file_name: label,
+                url: normalizeDomain(mUrl),
+                size: null,
+                is_direct: false
+              });
+            }
+          }
+        }
+
+        if (hits.length > 0) {
+          return res.json({ is_search: false, hits, found: hits.length });
         }
       }
-      
-      res.json({ hits, found: hits.length });
+
+      // 3. Fallback: Parse catalog/search/archive HTML with Cheerio if no MDrive links found directly
+      const $ = cheerio.load(text);
+      const postsMap = new Map<string, { title: string; image?: string }>();
+
+      $("a[href]").each((_, el) => {
+        let href = $(el).attr("href") || "";
+        if (!href) return;
+        if (href.startsWith("/")) href = urlObj.origin + href;
+        if (!href.startsWith("http")) return;
+
+        try {
+          const u = new URL(href);
+          if (u.hostname !== urlObj.hostname) return;
+          const path = u.pathname;
+          if (path === "/" || path.includes("search.html") || path.includes("search.php") || path.includes("/category/") || path.includes("/genre/") || path.includes("/tag/") || path.includes("/page/")) return;
+          if (/\.(jpg|jpeg|png|gif|webp|css|js|xml|svg|zip|rar|mkv|mp4)$/i.test(path)) return;
+          if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|mdrive|hubcloud|login|register|request|how-to|howto|faq|terms|sitemap|report)/i.test(path)) return;
+
+          let title = $(el).text().trim() || $(el).attr("title") || $(el).find("img").attr("alt") || "";
+          let image = $(el).find("img").attr("src") || $(el).find("img").attr("data-src") || "";
+          const container = $(el).closest("article, .post, .entry, .card, div");
+          if (!title) {
+            title = container.find("h1, h2, h3, h4, .entry-title, .post-title").text().trim();
+          }
+          if (!image) {
+            image = container.find("img").attr("src") || container.find("img").attr("data-src") || "";
+          }
+          title = title.replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+          if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how to|site search|search|faq|terms|sitemap|report|help)/i.test(title)) return;
+          if (title && title.length > 3 && !postsMap.has(href)) {
+            postsMap.set(href, { title, image: image || undefined });
+          }
+        } catch (e) {}
+      });
+
+      const posts = Array.from(postsMap.entries()).map(([postUrl, data]) => ({ title: data.title, url: postUrl, image: data.image }));
+
+      if (posts.length > 0 && isSearchUrl) {
+        return res.json({ is_search: true, posts, found: posts.length });
+      }
+
+      // Fallback for native HubCloud links on post page
+      const hits: any[] = [];
+      const seenUrls = new Set<string>();
+      const hubcloudMatch = text.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|hubdrive|skymovies|moviesdrive|mdrive|filmygo)\.[^"'\s<>\[\]]*/gi);
+      if (hubcloudMatch) {
+         hubcloudMatch.forEach(hubUrl => {
+            const cleanHubUrl = hubUrl.replace(/&amp;/g, '&');
+            if (!seenUrls.has(cleanHubUrl)) {
+               seenUrls.add(cleanHubUrl);
+               hits.push({
+                  file_name: "Original HubCloud Link",
+                  url: normalizeDomain(cleanHubUrl),
+                  size: null,
+                  is_direct: true
+               });
+            }
+         });
+      }
+
+      return res.json({ is_search: false, hits, found: hits.length });
     } catch (error: any) {
       console.error('MoviesDrive extract error:', error);
       res.status(500).json({ error: error.message });
@@ -862,34 +951,145 @@ async function startServer() {
 
       const response = await axios.get(targetUrl, { headers, httpsAgent });
       const text = response.data;
-      
-      const fdlData = new Map<string, { label: string }>();
-      const parts = text.split('<a ');
-      for(let i = 1; i < parts.length; i++) {
-        const p = parts[i];
-        const m = p.match(/href=["']([^"']*filesdl\.in\/[^"']*)["']/i);
-        if (m) {
-          const fdlUrl = m[1].trim();
-          
-          let label = "";
-          const closeAnchorIndex = p.indexOf('</a>');
-          if (closeAnchorIndex !== -1) {
-            const anchorContent = p.substring(0, closeAnchorIndex);
-            const tagEndIndex = anchorContent.indexOf('>');
-            if (tagEndIndex !== -1) {
-              const innerHtml = anchorContent.substring(tagEndIndex + 1);
-              label = innerHtml.replace(/<[^>]*>/g, '').trim();
+      const $ = cheerio.load(text);
+      const urlObj = new URL(targetUrl);
+
+      const searchParam = urlObj.searchParams.get('to-search') || urlObj.searchParams.get('search') || urlObj.searchParams.get('q') || urlObj.searchParams.get('s') || '';
+      const isSearchUrl = targetUrl.includes('site-search.html') || Boolean(searchParam) || urlObj.pathname === '/' || urlObj.pathname === '' || urlObj.pathname.endsWith('index.html');
+
+      if (isSearchUrl) {
+        console.log(`[FilmyGo] Search page detected, parsing catalog posts...`);
+        const postsMap = new Map<string, { title: string; image?: string }>();
+
+        $("a[href]").each((_, el) => {
+          let rawHref = $(el).attr("href") || "";
+          if (!rawHref || rawHref.startsWith("#") || rawHref.startsWith("javascript:")) return;
+
+          try {
+            const fullUrl = new URL(rawHref, targetUrl).href;
+            const u = new URL(fullUrl);
+            if (u.hostname !== urlObj.hostname) return;
+            const path = u.pathname;
+            const searchStr = u.search;
+
+            if (path === "/" || path.includes("site-search") || searchStr.includes("to-search=") || searchStr.includes("to-page=")) return;
+            if (path.includes("/category/") || path.includes("/genre/") || path.includes("/tag/") || path.includes("/page/")) return;
+            if (/\.(jpg|jpeg|png|gif|webp|css|js|xml|svg|zip|rar|mkv|mp4)$/i.test(path)) return;
+            if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|filesdl|login|register|request|site-request|how-to|howto|faq|terms|sitemap|report|help)/i.test(path) || /(request|site-request|report|contact|dmca|about|privacy|disclaimer)/i.test(fullUrl)) return;
+
+            let title = $(el).text().trim() || $(el).attr("title") || $(el).find("img").attr("alt") || "";
+            let image = $(el).find("img").attr("src") || $(el).find("img").attr("data-src") || "";
+            if (image) {
+              try { image = new URL(image, targetUrl).href; } catch(e) {}
             }
-          }
-          
-          if (!label) label = "Download Link";
-          label = label.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
-          
-          fdlData.set(fdlUrl, { label });
+            const container = $(el).closest("article, .post, .entry, .card, div, tr, td, p, li");
+            if (!title) {
+              title = container.find("h1, h2, h3, h4, .entry-title, .post-title, b, strong").text().trim();
+            }
+            if (!image) {
+              let imgSrc = container.find("img").attr("src") || container.find("img").attr("data-src") || "";
+              if (imgSrc) {
+                try { image = new URL(imgSrc, targetUrl).href; } catch(e) {}
+              }
+            }
+            title = title.replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+            if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how to|site search|search|faq|terms|sitemap|report|help)/i.test(title)) return;
+
+            if (title && title.length > 2 && !postsMap.has(fullUrl)) {
+              postsMap.set(fullUrl, { title, image: image || undefined });
+            }
+          } catch (e) {}
+        });
+
+        const posts = Array.from(postsMap.entries()).map(([postUrl, data]) => ({ title: data.title, url: postUrl, image: data.image }));
+        if (posts.length > 0) {
+          return res.json({ is_search: true, posts, found: posts.length });
         }
       }
       
-      if (fdlData.size === 0) return res.json({ hits: [], found: 0 });
+      const fdlData = new Map<string, { label: string }>();
+      $("a[href]").each((_, el) => {
+        let href = $(el).attr("href") || "";
+        if (!href) return;
+        href = href.trim();
+        if (href.includes("filesdl.in") || href.includes("hubcloud") || href.includes("vcloud") || href.includes("mdrive") || href.includes("fastdl")) {
+          let label = $(el).text().trim() || $(el).attr("title") || "Download Link";
+          label = label.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+          fdlData.set(href, { label: label || "Download Link" });
+        }
+      });
+
+      if (fdlData.size === 0) {
+        const parts = text.split('<a ');
+        for(let i = 1; i < parts.length; i++) {
+          const p = parts[i];
+          const m = p.match(/href=["']([^"']*(?:filesdl\.in|hubcloud|vcloud|mdrive|fastdl)[^"']*)["']/i);
+          if (m) {
+            const fdlUrl = m[1].trim();
+            
+            let label = "";
+            const closeAnchorIndex = p.indexOf('</a>');
+            if (closeAnchorIndex !== -1) {
+              const anchorContent = p.substring(0, closeAnchorIndex);
+              const tagEndIndex = anchorContent.indexOf('>');
+              if (tagEndIndex !== -1) {
+                const innerHtml = anchorContent.substring(tagEndIndex + 1);
+                label = innerHtml.replace(/<[^>]*>/g, '').trim();
+              }
+            }
+            
+            if (!label) label = "Download Link";
+            label = label.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+            
+            fdlData.set(fdlUrl, { label });
+          }
+        }
+      }
+      
+      if (fdlData.size === 0) {
+        if (isSearchUrl) {
+          // Fallback: Check if page contains catalog posts
+          const postsMap = new Map<string, { title: string; image?: string }>();
+          $("a[href]").each((_, el) => {
+            let href = $(el).attr("href") || "";
+            if (!href) return;
+            if (href.startsWith("/")) href = urlObj.origin + href;
+            if (!href.startsWith("http")) return;
+
+            try {
+              const u = new URL(href);
+              if (u.hostname !== urlObj.hostname) return;
+              const path = u.pathname;
+              if (path === "/" || path.includes("site-search.html") || path.includes("/category/") || path.includes("/genre/") || path.includes("/tag/") || path.includes("/page/")) return;
+              if (/\.(jpg|jpeg|png|gif|webp|css|js|xml|svg|zip|rar|mkv|mp4)$/i.test(path)) return;
+              if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|filesdl|login|register|request|site-request|how-to|howto|faq|terms|sitemap|report|help)/i.test(path)) return;
+
+              let title = $(el).text().trim() || $(el).attr("title") || $(el).find("img").attr("alt") || "";
+              let image = $(el).find("img").attr("src") || $(el).find("img").attr("data-src") || "";
+              const container = $(el).closest("article, .post, .entry, .card, div, tr, td, p, li");
+              if (!title) {
+                title = container.find("h1, h2, h3, h4, .entry-title, .post-title, b, strong").text().trim();
+              }
+              if (!image) {
+                image = container.find("img").attr("src") || container.find("img").attr("data-src") || "";
+              }
+              title = title.replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+              if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how to|site search|search|faq|terms|sitemap|report|help)/i.test(title)) return;
+
+              if (title && title.length > 2 && !postsMap.has(href)) {
+                postsMap.set(href, { title, image: image || undefined });
+              }
+            } catch (e) {}
+          });
+
+          const posts = Array.from(postsMap.entries()).map(([postUrl, data]) => ({ title: data.title, url: postUrl, image: data.image }));
+          if (posts.length > 0) {
+            return res.json({ is_search: true, posts, found: posts.length });
+          }
+        }
+
+        return res.json({ hits: [], found: 0 });
+      }
 
       const results = await Promise.all(Array.from(fdlData.keys()).map(async (fdlUrl) => {
         try {
@@ -981,10 +1181,56 @@ async function startServer() {
         'Referer': targetUrl
       };
 
+      const urlObj = new URL(targetUrl);
+      const searchParam = urlObj.searchParams.get('search') || urlObj.searchParams.get('q') || urlObj.searchParams.get('s') || '';
+      const isSearchUrl = targetUrl.includes('search.php') || Boolean(searchParam) || urlObj.pathname === '/' || urlObj.pathname === '' || urlObj.pathname.endsWith('index.php') || urlObj.pathname.endsWith('index.html');
+
       const response = await fetch(targetUrl, { headers });
       if (!response.ok) throw new Error(`SkymoviesHD returned ${response.status}`);
       const text = await response.text();
-      
+      const $ = cheerio.load(text);
+
+      if (isSearchUrl) {
+        console.log(`[SkymoviesHD] Search page detected, parsing catalog posts...`);
+        const postsMap = new Map<string, { title: string; image?: string }>();
+
+        $("a[href]").each((_, el) => {
+          let href = $(el).attr("href") || "";
+          if (!href) return;
+          if (href.startsWith("/")) href = urlObj.origin + href;
+          if (!href.startsWith("http")) return;
+
+          try {
+            const u = new URL(href);
+            const path = u.pathname;
+            if (path === "/" || path.includes("search.php") || path.includes("/category/") || path.includes("/genre/") || path.includes("/tag/") || path.includes("/page/")) return;
+            if (/\.(jpg|jpeg|png|gif|webp|css|js|xml|svg|zip|rar|mkv|mp4)$/i.test(path)) return;
+            if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|site-request|how-to|howto|faq|terms|sitemap|report|help)/i.test(path)) return;
+
+            let title = $(el).text().trim() || $(el).attr("title") || $(el).find("img").attr("alt") || "";
+            let image = $(el).find("img").attr("src") || $(el).find("img").attr("data-src") || "";
+            const container = $(el).closest("article, .post, .entry, .card, div, tr, td, p");
+            if (!title) {
+              title = container.find("h1, h2, h3, h4, .entry-title, .post-title, b, strong").text().trim();
+            }
+            if (!image) {
+              image = container.find("img").attr("src") || container.find("img").attr("data-src") || "";
+            }
+            title = title.replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+            if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how to|site search|search|faq|terms|sitemap|report|help)/i.test(title)) return;
+
+            if (title && title.length > 2 && !postsMap.has(href)) {
+              postsMap.set(href, { title, image: image || undefined });
+            }
+          } catch (e) {}
+        });
+
+        const posts = Array.from(postsMap.entries()).map(([postUrl, data]) => ({ title: data.title, url: postUrl, image: data.image })).reverse();
+        if (posts.length > 0) {
+          return res.json({ is_search: true, posts, found: posts.length });
+        }
+      }
+
       const hbData = new Map<string, { label: string }>();
       const parts = text.split('<a ');
       for(let i = 1; i < parts.length; i++) {
@@ -1011,7 +1257,45 @@ async function startServer() {
         }
       }
       
-      if (hbData.size === 0) return res.json({ hits: [], found: 0 });
+      if (hbData.size === 0) {
+        // Fallback: Check if page contains catalog post links
+        const postsMap = new Map<string, { title: string; image?: string }>();
+        $("a[href]").each((_, el) => {
+          let href = $(el).attr("href") || "";
+          if (!href) return;
+          if (href.startsWith("/")) href = urlObj.origin + href;
+          if (!href.startsWith("http")) return;
+
+          try {
+            const u = new URL(href);
+            const path = u.pathname;
+            if (path === "/" || path.includes("search.php") || path.includes("/category/") || path.includes("/genre/") || path.includes("/tag/") || path.includes("/page/")) return;
+            if (/\.(jpg|jpeg|png|gif|webp|css|js|xml|svg|zip|rar|mkv|mp4)$/i.test(path)) return;
+            if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register)/i.test(path)) return;
+
+            let title = $(el).text().trim() || $(el).attr("title") || $(el).find("img").attr("alt") || "";
+            let image = $(el).find("img").attr("src") || $(el).find("img").attr("data-src") || "";
+            const container = $(el).closest("article, .post, .entry, .card, div, tr, td, p");
+            if (!title) {
+              title = container.find("h1, h2, h3, h4, .entry-title, .post-title, b, strong").text().trim();
+            }
+            if (!image) {
+              image = container.find("img").attr("src") || container.find("img").attr("data-src") || "";
+            }
+            title = title.replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+            if (title && title.length > 2 && !postsMap.has(href)) {
+              postsMap.set(href, { title, image: image || undefined });
+            }
+          } catch (e) {}
+        });
+
+        const posts = Array.from(postsMap.entries()).map(([postUrl, data]) => ({ title: data.title, url: postUrl, image: data.image })).reverse();
+        if (posts.length > 0) {
+          return res.json({ is_search: true, posts, found: posts.length });
+        }
+
+        return res.json({ hits: [], found: 0 });
+      }
 
       const results = await Promise.all(Array.from(hbData.keys()).map(async (hbUrl) => {
         try {
