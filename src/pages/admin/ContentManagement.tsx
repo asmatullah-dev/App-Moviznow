@@ -122,6 +122,67 @@ import { ContentFormModal } from "../../components/ContentFormModal";
 
 import { BatchFetchModal } from "../../components/BatchFetchModal";
 
+const extractMediaUrls = (content: Content): string[] => {
+  const urls: string[] = [];
+
+  const safeParse = (data: any) => {
+    if (!data) return [];
+    if (typeof data === "string") {
+      try {
+        return JSON.parse(data);
+      } catch (e) {
+        return [];
+      }
+    }
+    return data;
+  };
+
+  const extractFromItems = (items: any) => {
+    if (!items) return;
+    const parsed = safeParse(items);
+    if (!Array.isArray(parsed)) return;
+    parsed.forEach((ld: any) => {
+      if (typeof ld === "string" && ld.trim()) {
+        urls.push(ld.trim());
+      } else if (ld && typeof ld === "object") {
+        if (ld.url && typeof ld.url === "string" && ld.url.trim()) {
+          urls.push(ld.url.trim());
+        }
+        if (Array.isArray(ld.links)) {
+          extractFromItems(ld.links);
+        }
+      }
+    });
+  };
+
+  if (content.type === "movie" && content.movieLinks) {
+    extractFromItems(content.movieLinks);
+  } else if (content.type === "series") {
+    if (content.seasons) {
+      const parsedSeasons = safeParse(content.seasons);
+      if (Array.isArray(parsedSeasons)) {
+        parsedSeasons.forEach((s: any) => {
+          extractFromItems(s.zipLinks);
+          extractFromItems(s.mkvLinks);
+          if (Array.isArray(s.episodes)) {
+            s.episodes.forEach((e: any) => {
+              extractFromItems(e.links);
+            });
+          }
+        });
+      }
+    }
+    if (content.fullSeasonZip) extractFromItems(content.fullSeasonZip);
+    if (content.fullSeasonMkv) extractFromItems(content.fullSeasonMkv);
+  }
+
+  if ((content as any).telegramLinks) {
+    extractFromItems((content as any).telegramLinks);
+  }
+
+  return urls;
+};
+
 interface ContentCardProps {
   content: Content;
   profile: any;
@@ -131,6 +192,7 @@ interface ContentCardProps {
   anySelected: boolean;
   isActiveDropdown: boolean;
   isDuplicate: boolean;
+  duplicateLinkStatus?: "all_same" | "same_link" | null;
   isShareLoading: boolean;
   isWhatsappLoading: boolean;
   handleSelectContent: (id: string, e?: React.SyntheticEvent) => void;
@@ -178,6 +240,7 @@ const ContentCard = memo(
     dropdownPos,
     setDropdownPos,
     isDuplicate,
+    duplicateLinkStatus,
     getMissingLabels,
     isShareLoading,
     isWhatsappLoading,
@@ -242,10 +305,20 @@ const ContentCard = memo(
             />
           </Link>
           {isDuplicate && (
-            <div className="absolute top-3 left-10 z-20 pointer-events-none">
-              <div className="bg-red-600 animate-pulse text-white px-2 py-0.5 rounded shadow-lg shadow-red-600/40 text-[11px] font-black uppercase tracking-widest border border-red-400">
+            <div className="absolute top-3 left-10 z-20 pointer-events-none flex flex-col gap-1 items-start">
+              <div className="bg-red-600 animate-pulse text-white px-2 py-0.5 rounded shadow-lg shadow-red-600/40 text-[11px] font-black uppercase tracking-widest border border-red-400 whitespace-nowrap">
                 Duplicate
               </div>
+              {duplicateLinkStatus === "all_same" && (
+                <div className="bg-purple-600 text-white px-2 py-0.5 rounded shadow-lg shadow-purple-600/40 text-[11px] font-black uppercase tracking-widest border border-purple-400 whitespace-nowrap">
+                  All Same Links
+                </div>
+              )}
+              {duplicateLinkStatus === "same_link" && (
+                <div className="bg-amber-600 text-white px-2 py-0.5 rounded shadow-lg shadow-amber-600/40 text-[11px] font-black uppercase tracking-widest border border-amber-400 whitespace-nowrap">
+                  Same Link
+                </div>
+              )}
             </div>
           )}
           {missingLabels.length > 0 && (
@@ -4097,6 +4170,85 @@ export default function ContentManagement() {
     return labels;
   }, []);
 
+  const duplicateLinkStatusMap = useMemo(() => {
+    const statusMap = new Map<string, "all_same" | "same_link" | null>();
+
+    const duplicateGroups = new Map<string, Content[]>();
+    contentList.forEach((c) => {
+      const title = (c.title || "").trim().toLowerCase();
+      const baseTitle =
+        c.type === "series"
+          ? title.replace(/\s+(s(eason)?|part|vol)\s*\d+/gi, "").trim()
+          : title;
+
+      let key = "";
+      if (c.type === "movie") {
+        key = `movie_${baseTitle}_${c.year || ""}`;
+      } else {
+        key = `series_${baseTitle}`;
+      }
+      if (!duplicateGroups.has(key)) {
+        duplicateGroups.set(key, []);
+      }
+      duplicateGroups.get(key)!.push(c);
+    });
+
+    duplicateGroups.forEach((items) => {
+      if (items.length <= 1) return;
+
+      const itemUrlsList = items.map((item) => ({
+        id: item.id,
+        urls: extractMediaUrls(item),
+      }));
+
+      const allItemsHaveUrls = itemUrlsList.every((x) => x.urls.length > 0);
+
+      const isSameUrlSet = (arr1: string[], arr2: string[]) => {
+        if (arr1.length !== arr2.length) return false;
+        const s1 = [...arr1].sort();
+        const s2 = [...arr2].sort();
+        return s1.every((val, idx) => val === s2[idx]);
+      };
+
+      const firstUrls = itemUrlsList[0]?.urls || [];
+      const allSameAcrossGroup =
+        allItemsHaveUrls &&
+        itemUrlsList.every((x) => isSameUrlSet(firstUrls, x.urls));
+
+      itemUrlsList.forEach(({ id, urls }) => {
+        if (urls.length === 0) {
+          statusMap.set(id, null);
+          return;
+        }
+
+        if (allSameAcrossGroup) {
+          statusMap.set(id, "all_same");
+          return;
+        }
+
+        const otherItems = itemUrlsList.filter((x) => x.id !== id);
+        const urlSet = new Set(urls);
+        let sharesLinkWithOther = false;
+        for (const other of otherItems) {
+          if (other.urls.some((u) => urlSet.has(u))) {
+            sharesLinkWithOther = true;
+            break;
+          }
+        }
+
+        const hasInternalDuplicate = new Set(urls).size < urls.length;
+
+        if (sharesLinkWithOther || hasInternalDuplicate) {
+          statusMap.set(id, "same_link");
+        } else {
+          statusMap.set(id, null);
+        }
+      });
+    });
+
+    return statusMap;
+  }, [contentList]);
+
   const duplicateIds = useMemo(() => {
     const ids = new Set<string>();
     const duplicateGroups = new Map<string, string[]>();
@@ -4247,6 +4399,50 @@ export default function ContentManagement() {
       const timeB = new Date(b.createdAt).getTime();
       return filterSort === "newest" ? timeB - timeA : timeA - timeB;
     });
+
+    if (showDuplicates) {
+      // Group items by duplicate group key so duplicate contents are adjacent to each other
+      const groupsMap = new Map<string, typeof sortedResult>();
+      sortedResult.forEach((c) => {
+        const title = (c.title || "").trim().toLowerCase();
+        const baseTitle =
+          c.type === "series"
+            ? title.replace(/\s+(s(eason)?|part|vol)\s*\d+/gi, "").trim()
+            : title;
+
+        let key = "";
+        if (c.type === "movie") {
+          key = `movie_${baseTitle}_${c.year || ""}`;
+        } else {
+          key = `series_${baseTitle}`;
+        }
+        if (!groupsMap.has(key)) {
+          groupsMap.set(key, []);
+        }
+        groupsMap.get(key)!.push(c);
+      });
+
+      const groups = Array.from(groupsMap.values());
+
+      // Sort items inside each duplicate group so that newest content comes first, followed by older duplicate content
+      groups.forEach((group) => {
+        group.sort((a, b) => {
+          const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return timeB - timeA;
+        });
+      });
+
+      // Sort duplicate groups by the newest item in each group (highest createdAt)
+      groups.sort((groupA, groupB) => {
+        const timeA = groupA[0]?.createdAt ? new Date(groupA[0].createdAt).getTime() : 0;
+        const timeB = groupB[0]?.createdAt ? new Date(groupB[0].createdAt).getTime() : 0;
+        return timeB - timeA;
+      });
+
+      return groups.flat();
+    }
+
     return sortedResult;
   }, [
     contentList,
@@ -5172,6 +5368,7 @@ export default function ContentManagement() {
                 anySelected={selectedContent.length > 0}
                 isActiveDropdown={activeDropdownId === content.id}
                 isDuplicate={duplicateIds.has(content.id)}
+                duplicateLinkStatus={duplicateLinkStatusMap.get(content.id)}
                 isShareLoading={loadingShareId === content.id}
                 isWhatsappLoading={loadingWhatsappShareId === content.id}
                 handleSelectContent={handleSelectContent}
