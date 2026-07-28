@@ -877,19 +877,47 @@ async function startServer() {
           if (/\.(jpg|jpeg|png|gif|webp|css|js|xml|svg|zip|rar|mkv|mp4)$/i.test(path)) return;
           if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|mdrive|hubcloud|login|register|request|how-to|howto|faq|terms|sitemap|report)/i.test(path)) return;
 
+          const getImgSrc = (imgEl: any): string => {
+            if (!imgEl || imgEl.length === 0) return "";
+            let src =
+              imgEl.attr("data-src") ||
+              imgEl.attr("data-original") ||
+              imgEl.attr("data-lazy-src") ||
+              imgEl.attr("data-cfsrc") ||
+              imgEl.attr("src") ||
+              "";
+            if (!src) {
+              const srcset = imgEl.attr("srcset") || imgEl.attr("data-srcset");
+              if (srcset) {
+                src = srcset.split(",")[0].trim().split(" ")[0];
+              }
+            }
+            return src || "";
+          };
+
           let title = $(el).text().trim() || $(el).attr("title") || $(el).find("img").attr("alt") || "";
-          let image = $(el).find("img").attr("src") || $(el).find("img").attr("data-src") || "";
+          let image = getImgSrc($(el).find("img"));
           const container = $(el).closest("article, .post, .entry, .card, div");
           if (!title) {
             title = container.find("h1, h2, h3, h4, .entry-title, .post-title").text().trim();
           }
           if (!image) {
-            image = container.find("img").attr("src") || container.find("img").attr("data-src") || "";
+            image = getImgSrc(container.find("img"));
+          }
+          if (!image) {
+            image = getImgSrc($(el).prev("img")) || getImgSrc($(el).next("img")) || getImgSrc($(el).parent().find("img"));
+          }
+          if (image) {
+            try { image = new URL(image, targetUrl).href; } catch(e) {}
           }
           title = title.replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
           if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how to|site search|search|faq|terms|sitemap|report|help)/i.test(title)) return;
-          if (title && title.length > 3 && !postsMap.has(href)) {
-            postsMap.set(href, { title, image: image || undefined });
+          if (title && title.length > 3) {
+            if (!postsMap.has(href)) {
+              postsMap.set(href, { title, image: image || undefined });
+            } else if (image && !postsMap.get(href)?.image) {
+              postsMap.get(href)!.image = image;
+            }
           }
         } catch (e) {}
       });
@@ -955,15 +983,37 @@ async function startServer() {
       const urlObj = new URL(targetUrl);
 
       const searchParam = urlObj.searchParams.get('to-search') || urlObj.searchParams.get('search') || urlObj.searchParams.get('q') || urlObj.searchParams.get('s') || '';
-      const isSearchUrl = targetUrl.includes('site-search.html') || Boolean(searchParam) || urlObj.pathname === '/' || urlObj.pathname === '' || urlObj.pathname.endsWith('index.html');
+      const isSearchUrl = targetUrl.includes('site-search.html') || Boolean(searchParam) || urlObj.searchParams.has('to-page') || urlObj.pathname === '/' || urlObj.pathname === '' || urlObj.pathname.endsWith('index.html');
 
       if (isSearchUrl) {
-        console.log(`[FilmyGo] Search page detected, parsing catalog posts...`);
+        console.log(`[FilmyGo] Search/catalog page detected: ${targetUrl}`);
+        
         const postsMap = new Map<string, { title: string; image?: string }>();
+
+        const getImgSrc = (imgEl: any): string => {
+          if (!imgEl || imgEl.length === 0) return "";
+          let src =
+            imgEl.attr("data-src") ||
+            imgEl.attr("data-original") ||
+            imgEl.attr("data-lazy-src") ||
+            imgEl.attr("data-cfsrc") ||
+            imgEl.attr("src") ||
+            "";
+          if (!src) {
+            const srcset = imgEl.attr("srcset") || imgEl.attr("data-srcset");
+            if (srcset) {
+              src = srcset.split(",")[0].trim().split(" ")[0];
+            }
+          }
+          return src || "";
+        };
 
         $("a[href]").each((_, el) => {
           let rawHref = $(el).attr("href") || "";
           if (!rawHref || rawHref.startsWith("#") || rawHref.startsWith("javascript:")) return;
+
+          // Skip links inside the trending slider or sticky lists
+          if ($(el).closest('.trending-slider, .images-list').length > 0) return;
 
           try {
             const fullUrl = new URL(rawHref, targetUrl).href;
@@ -978,28 +1028,54 @@ async function startServer() {
             if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|filesdl|login|register|request|site-request|how-to|howto|faq|terms|sitemap|report|help)/i.test(path) || /(request|site-request|report|contact|dmca|about|privacy|disclaimer)/i.test(fullUrl)) return;
 
             let title = $(el).text().trim() || $(el).attr("title") || $(el).find("img").attr("alt") || "";
-            let image = $(el).find("img").attr("src") || $(el).find("img").attr("data-src") || "";
+            let image = getImgSrc($(el).find("img"));
+
+            const container = $(el).closest("article, .post, .entry, .card, .item, .single-post, .film-item, div, tr, td, p, li");
+            if (!title) {
+              title = container.find("h1, h2, h3, h4, .entry-title, .post-title, .title, b, strong").text().trim();
+            }
+            if (!image) {
+              image = getImgSrc(container.find("img"));
+            }
+            if (!image) {
+              image = getImgSrc($(el).prev("img")) || getImgSrc($(el).next("img")) || getImgSrc($(el).parent().find("img"));
+            }
             if (image) {
               try { image = new URL(image, targetUrl).href; } catch(e) {}
             }
-            const container = $(el).closest("article, .post, .entry, .card, div, tr, td, p, li");
-            if (!title) {
-              title = container.find("h1, h2, h3, h4, .entry-title, .post-title, b, strong").text().trim();
-            }
-            if (!image) {
-              let imgSrc = container.find("img").attr("src") || container.find("img").attr("data-src") || "";
-              if (imgSrc) {
-                try { image = new URL(imgSrc, targetUrl).href; } catch(e) {}
-              }
-            }
+
             title = title.replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
             if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how to|site search|search|faq|terms|sitemap|report|help)/i.test(title)) return;
 
-            if (title && title.length > 2 && !postsMap.has(fullUrl)) {
-              postsMap.set(fullUrl, { title, image: image || undefined });
+            // Exclude category names that are incorrectly treated as posts
+            const isCategory = /^(animation movies?|bengali movies?|bhojpuri movies?|bollywood movies?|gujarati movies?|hindi hq dub movies?|hollywood movies?|marathi movies?|odia movies?|odia movie|punjabi movies?|south movies?|web series)$/i.test(title);
+            if (isCategory) return;
+
+            if (title && title.length > 2) {
+              if (!postsMap.has(fullUrl)) {
+                postsMap.set(fullUrl, { title, image: image || undefined });
+              } else if (image && !postsMap.get(fullUrl)?.image) {
+                postsMap.get(fullUrl)!.image = image;
+              }
             }
           } catch (e) {}
         });
+
+        // Secondary pass for any posts missing images
+        for (const [pUrl, pData] of postsMap.entries()) {
+          if (!pData.image) {
+            try {
+              const relPath = new URL(pUrl).pathname;
+              $(`a[href*="${relPath}"]`).each((_, aEl) => {
+                const parent = $(aEl).closest("article, .post, .entry, .card, .item, div, tr, li");
+                const foundImg = getImgSrc(parent.find("img"));
+                if (foundImg) {
+                  try { pData.image = new URL(foundImg, targetUrl).href; } catch(e) {}
+                }
+              });
+            } catch (e) {}
+          }
+        }
 
         const posts = Array.from(postsMap.entries()).map(([postUrl, data]) => ({ title: data.title, url: postUrl, image: data.image }));
         if (posts.length > 0) {
@@ -1019,7 +1095,25 @@ async function startServer() {
         let href = $(el).attr("href") || "";
         if (!href) return;
         href = href.trim();
-        if (href.includes("filesdl") || href.includes("linkmake") || href.includes("hubcloud") || href.includes("vcloud") || href.includes("mdrive") || href.includes("fastdl") || href.includes("page-download") || href.includes("download")) {
+        if (href.startsWith("/")) {
+          try { href = new URL(href, targetUrl).href; } catch(e) {}
+        }
+
+        // Ignore self-links back to targetUrl
+        if (href === targetUrl || href.replace(/\/$/, "") === targetUrl.replace(/\/$/, "")) return;
+
+        if (
+          href.includes("filesdl") ||
+          href.includes("linkmake") ||
+          href.includes("hubcloud") ||
+          href.includes("vcloud") ||
+          href.includes("hubdrive") ||
+          href.includes("mdrive") ||
+          href.includes("fastdl") ||
+          href.includes("gdflix") ||
+          href.includes("filepress") ||
+          href.includes("drivehub")
+        ) {
           let rawLabel = $(el).text().trim() || $(el).attr("title") || "";
           let label = rawLabel.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
 
@@ -1044,15 +1138,12 @@ async function startServer() {
           else if (lower.includes("720p")) label = "Download Now 720p";
           else if (lower.includes("1080p")) label = "Download Now 1080p";
 
-          if (hasHindiLine) {
+          if (hasHindiLine && !label.includes("Hindi (Line)")) {
             label += " Hindi (Line)";
           }
 
           if (!label) label = "Download Link";
 
-          if (href.startsWith("/")) {
-            try { href = new URL(href, targetUrl).href; } catch(e) {}
-          }
           if (href.startsWith("http")) {
             fdlData.set(href, { label });
           }
@@ -1063,9 +1154,13 @@ async function startServer() {
         const parts = text.split('<a ');
         for(let i = 1; i < parts.length; i++) {
           const p = parts[i];
-          const m = p.match(/href=["']([^"']*(?:filesdl|linkmake|hubcloud|vcloud|mdrive|fastdl)[^"']*)["']/i);
+          const m = p.match(/href=["']([^"']*(?:filesdl|linkmake|hubcloud|vcloud|mdrive|fastdl|gdflix|filepress|drivehub)[^"']*)["']/i);
           if (m) {
-            const fdlUrl = m[1].trim();
+            let fdlUrl = m[1].trim();
+            if (fdlUrl.startsWith("/")) {
+              try { fdlUrl = new URL(fdlUrl, targetUrl).href; } catch(e) {}
+            }
+            if (fdlUrl === targetUrl || fdlUrl.replace(/\/$/, "") === targetUrl.replace(/\/$/, "")) continue;
             
             let label = "";
             const closeAnchorIndex = p.indexOf('</a>');
@@ -1085,111 +1180,161 @@ async function startServer() {
           }
         }
       }
-      
-      if (fdlData.size === 0) {
-        if (isSearchUrl) {
-          // Fallback: Check if page contains catalog posts
-          const postsMap = new Map<string, { title: string; image?: string }>();
-          $("a[href]").each((_, el) => {
-            let href = $(el).attr("href") || "";
-            if (!href) return;
-            if (href.startsWith("/")) href = urlObj.origin + href;
-            if (!href.startsWith("http")) return;
 
-            try {
-              const u = new URL(href);
-              if (u.hostname !== urlObj.hostname) return;
-              const path = u.pathname;
-              if (path === "/" || path.includes("site-search.html") || path.includes("/category/") || path.includes("/genre/") || path.includes("/tag/") || path.includes("/page/")) return;
-              if (/\.(jpg|jpeg|png|gif|webp|css|js|xml|svg|zip|rar|mkv|mp4)$/i.test(path)) return;
-              if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|filesdl|login|register|request|site-request|how-to|howto|faq|terms|sitemap|report|help)/i.test(path)) return;
+      // Recursive multi-hop resolver for FilmyGo gates (e.g. FilmyGo -> LinkMake -> FilesDL -> HubCloud)
+      const visited = new Set<string>();
+      visited.add(targetUrl);
 
-              let title = $(el).text().trim() || $(el).attr("title") || $(el).find("img").attr("alt") || "";
-              let image = $(el).find("img").attr("src") || $(el).find("img").attr("data-src") || "";
-              const container = $(el).closest("article, .post, .entry, .card, div, tr, td, p, li");
-              if (!title) {
-                title = container.find("h1, h2, h3, h4, .entry-title, .post-title, b, strong").text().trim();
-              }
-              if (!image) {
-                image = container.find("img").attr("src") || container.find("img").attr("data-src") || "";
-              }
-              title = title.replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
-              if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how to|site search|search|faq|terms|sitemap|report|help)/i.test(title)) return;
+      async function resolveFilmyGoLink(
+        startUrl: string,
+        parentLabel: string,
+        depth = 0
+      ): Promise<Array<{ file_name: string; url: string; size: string | null; is_direct: boolean }>> {
+        if (depth > 4 || visited.has(startUrl)) return [];
+        visited.add(startUrl);
 
-              if (title && title.length > 2 && !postsMap.has(href)) {
-                postsMap.set(href, { title, image: image || undefined });
-              }
-            } catch (e) {}
+        try {
+          const res = await axios.get(startUrl, {
+            headers,
+            httpsAgent,
+            timeout: 10000,
+            maxRedirects: 5,
           });
 
-          const posts = Array.from(postsMap.entries()).map(([postUrl, data]) => ({ title: data.title, url: postUrl, image: data.image }));
-          if (posts.length > 0) {
-            return res.json({ is_search: true, posts, found: posts.length });
+          let htmlText = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+          const finalUrl = res.request?.res?.responseUrl || startUrl;
+          if (finalUrl && finalUrl !== startUrl) {
+            visited.add(finalUrl);
           }
-        }
 
-        return res.json({ hits: [], found: 0 });
-      }
+          // Direct match for HubCloud / VCloud / HubDrive / Mdrive / FastDL / GDFlix / FilePress
+          const hubMatches = htmlText.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|vcloud|hubdrive|mdrive|fastdl|gdflix|filepress|drivehub)\.[^"'\s<>\[\]]*/gi);
 
-      const results = await Promise.all(Array.from(fdlData.keys()).map(async (fdlUrl) => {
-        try {
-          const fdlRes = await axios.get(fdlUrl, { headers, httpsAgent });
-          let fdlText = typeof fdlRes.data === 'string' ? fdlRes.data : JSON.stringify(fdlRes.data);
-          
-          let hubcloudMatch = fdlText.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|vcloud|hubdrive)\.[^"'\s<>\[\]]*/gi);
+          if (hubMatches && hubMatches.length > 0) {
+            const sizeMatch = htmlText.match(/Size:<\/span>\s*<span>([^<]+)<\/span>/i) || 
+                              htmlText.match(/Size:\s*([0-9.]+\s*(?:GB|MB|KB))/i) || 
+                              htmlText.match(/(\d+(?:\.\d+)?\s*(?:GB|MB|KB))/i);
+            const size = sizeMatch ? sizeMatch[1].toUpperCase() : null;
 
-          // If no direct hubcloud match, check if fdlText contains linkmake/filesdl links that need a second hop
-          if (!hubcloudMatch) {
-            const nestedLinks = fdlText.match(/https?:\/\/[^"'\s<>\[\]]*(?:filesdl|linkmake)[^"'\s<>\[\]]*/gi);
-            if (nestedLinks && nestedLinks.length > 0) {
-              for (const nLink of nestedLinks) {
-                try {
-                  const nRes = await axios.get(nLink, { headers, httpsAgent });
-                  const nText = typeof nRes.data === 'string' ? nRes.data : JSON.stringify(nRes.data);
-                  const nHubMatch = nText.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|vcloud|hubdrive)\.[^"'\s<>\[\]]*/gi);
-                  if (nHubMatch) {
-                    hubcloudMatch = nHubMatch;
-                    fdlText = nText;
-                    break;
+            let finalName = parentLabel || "HubCloud Link";
+            if (size) {
+              const escapedSize = size.replace(/\./g, '\\.');
+              finalName = finalName.replace(new RegExp(`\\[?${escapedSize}\\]?`, 'gi'), "").trim();
+              finalName = finalName.replace(/[\[\]()\-_\s]+$/, "").trim();
+            }
+
+            return hubMatches.map((hubUrl) => ({
+              file_name: finalName || "HubCloud Link",
+              url: normalizeDomain(hubUrl.replace(/&amp;/g, '&')),
+              size,
+              is_direct: true,
+            }));
+          }
+
+          // Otherwise, parse HTML with Cheerio to find nested linkmake / filesdl / download links
+          const $page = cheerio.load(htmlText);
+          const nestedCandidates: Array<{ url: string; label: string }> = [];
+
+          $page("a[href]").each((_, el) => {
+            let href = $page(el).attr("href") || "";
+            if (!href || href.startsWith("#") || href.startsWith("javascript:")) return;
+
+            try {
+              href = new URL(href, finalUrl).href;
+            } catch (e) {
+              return;
+            }
+
+            if (visited.has(href)) return;
+
+            const lowerHref = href.toLowerCase();
+            const isTargetHost = href.includes("filmygo.");
+            
+            if (isTargetHost && (href === finalUrl || href.includes("site-search") || href.includes("category") || href.includes("contact"))) {
+              return;
+            }
+
+            if (
+              lowerHref.includes("filesdl") ||
+              lowerHref.includes("linkmake") ||
+              lowerHref.includes("hubcloud") ||
+              lowerHref.includes("vcloud") ||
+              lowerHref.includes("hubdrive") ||
+              lowerHref.includes("mdrive") ||
+              lowerHref.includes("fastdl") ||
+              lowerHref.includes("gdflix") ||
+              lowerHref.includes("filepress") ||
+              lowerHref.includes("drivehub") ||
+              lowerHref.includes("page-download") ||
+              lowerHref.includes("download")
+            ) {
+              let anchorText = $page(el).text().trim() || $page(el).attr("title") || "";
+              anchorText = anchorText.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+
+              let updatedLabel = parentLabel;
+              const lowerAnchor = anchorText.toLowerCase();
+
+              if (anchorText && !/^(direct\s*)?download(\s*now)?$/i.test(anchorText)) {
+                let resLabel = "";
+                if (lowerAnchor.includes("480p") && lowerAnchor.includes("hevc")) resLabel = "Download Now 480p HEVC";
+                else if (lowerAnchor.includes("720p") && lowerAnchor.includes("hevc")) resLabel = "Download Now 720p HEVC";
+                else if (lowerAnchor.includes("1080p") && lowerAnchor.includes("hevc")) resLabel = "Download Now 1080p HEVC";
+                else if (lowerAnchor.includes("480p")) resLabel = "Download Now 480p";
+                else if (lowerAnchor.includes("720p")) resLabel = "Download Now 720p";
+                else if (lowerAnchor.includes("1080p")) resLabel = "Download Now 1080p";
+
+                if (resLabel) {
+                  if (/\bhindi\b.*?\bline\b/i.test(lowerAnchor) || /\bhindi\b.*?\bline\b/i.test(parentLabel)) {
+                    resLabel += " Hindi (Line)";
                   }
-                } catch (e) {}
+                  updatedLabel = resLabel;
+                }
+              }
+
+              nestedCandidates.push({ url: href, label: updatedLabel });
+            }
+          });
+
+          // Fallback raw regex
+          if (nestedCandidates.length === 0) {
+            const rawMatches = htmlText.match(/https?:\/\/[^"'\s<>\[\]]*(?:filesdl|linkmake|hubcloud|vcloud|hubdrive|mdrive|fastdl|gdflix|filepress)[^"'\s<>\[\]]*/gi) || [];
+            for (const rawUrl of rawMatches) {
+              const cleanUrl = rawUrl.replace(/&amp;/g, '&');
+              if (!visited.has(cleanUrl)) {
+                nestedCandidates.push({ url: cleanUrl, label: parentLabel });
               }
             }
           }
 
-          if (hubcloudMatch) {
-            const sizeMatch = fdlText.match(/Size:<\/span>\s*<span>([^<]+)<\/span>/i) || 
-                              fdlText.match(/Size:\s*([0-9.]+\s*(?:GB|MB|KB))/i) || 
-                              fdlText.match(/(\d+(?:\.\d+)?\s*(?:GB|MB|KB))/i);
-            const size = sizeMatch ? sizeMatch[1].toUpperCase() : null;
+          const uniqueCandidates = nestedCandidates.filter((cand, index, self) =>
+            index === self.findIndex((c) => c.url === cand.url)
+          );
 
-            let finalName = fdlData.get(fdlUrl)?.label || "HubCloud Link";
-            if (size) {
-                const escapedSize = size.replace(/\./g, '\\.');
-                finalName = finalName.replace(new RegExp(`\\[?${escapedSize}\\]?`, 'gi'), "").trim();
-                finalName = finalName.replace(/[\[\]()\-_\s]+$/, "").trim();
-            }
+          const subResults = await Promise.all(
+            uniqueCandidates.map((cand) =>
+              resolveFilmyGoLink(cand.url, cand.label, depth + 1)
+            )
+          );
 
-            return hubcloudMatch.map(hubUrl => ({
-              file_name: finalName || "HubCloud Link",
-              url: normalizeDomain(hubUrl),
-              size: size,
-              is_direct: true
-            }));
-          }
-          return [];
+          return subResults.flat();
         } catch (e) {
           return [];
         }
-      }));
+      }
 
-      let finalHits = results.flat().filter((hit, index, self) => 
+      const rawResults = await Promise.all(
+        Array.from(fdlData.entries()).map(([fdlUrl, data]) =>
+          resolveFilmyGoLink(fdlUrl, data.label, 0)
+        )
+      );
+
+      let finalHits = rawResults.flat().filter((hit, index, self) => 
         index === self.findIndex((t) => t.url === hit.url)
       );
 
-      // Deduplicate Hubdrive vs Hubcloud based on finalName
+      // Deduplicate Hubdrive vs Hubcloud based on file_name
       const dedupedHits: any[] = [];
-      const seenFiles = new Map<string, string>(); // Add URL host to know which we kept
+      const seenFiles = new Map<string, string>();
       
       for (const hit of finalHits) {
          const isHubdrive = hit.url.includes('hubdrive.');
@@ -1269,20 +1414,48 @@ async function startServer() {
             if (/\.(jpg|jpeg|png|gif|webp|css|js|xml|svg|zip|rar|mkv|mp4)$/i.test(path)) return;
             if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|site-request|how-to|howto|faq|terms|sitemap|report|help)/i.test(path)) return;
 
+            const getImgSrc = (imgEl: any): string => {
+              if (!imgEl || imgEl.length === 0) return "";
+              let src =
+                imgEl.attr("data-src") ||
+                imgEl.attr("data-original") ||
+                imgEl.attr("data-lazy-src") ||
+                imgEl.attr("data-cfsrc") ||
+                imgEl.attr("src") ||
+                "";
+              if (!src) {
+                const srcset = imgEl.attr("srcset") || imgEl.attr("data-srcset");
+                if (srcset) {
+                  src = srcset.split(",")[0].trim().split(" ")[0];
+                }
+              }
+              return src || "";
+            };
+
             let title = $(el).text().trim() || $(el).attr("title") || $(el).find("img").attr("alt") || "";
-            let image = $(el).find("img").attr("src") || $(el).find("img").attr("data-src") || "";
+            let image = getImgSrc($(el).find("img"));
             const container = $(el).closest("article, .post, .entry, .card, div, tr, td, p");
             if (!title) {
               title = container.find("h1, h2, h3, h4, .entry-title, .post-title, b, strong").text().trim();
             }
             if (!image) {
-              image = container.find("img").attr("src") || container.find("img").attr("data-src") || "";
+              image = getImgSrc(container.find("img"));
+            }
+            if (!image) {
+              image = getImgSrc($(el).prev("img")) || getImgSrc($(el).next("img")) || getImgSrc($(el).parent().find("img"));
+            }
+            if (image) {
+              try { image = new URL(image, targetUrl).href; } catch(e) {}
             }
             title = title.replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
             if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how to|site search|search|faq|terms|sitemap|report|help)/i.test(title)) return;
 
-            if (title && title.length > 2 && !postsMap.has(href)) {
-              postsMap.set(href, { title, image: image || undefined });
+            if (title && title.length > 2) {
+              if (!postsMap.has(href)) {
+                postsMap.set(href, { title, image: image || undefined });
+              } else if (image && !postsMap.get(href)?.image) {
+                postsMap.get(href)!.image = image;
+              }
             }
           } catch (e) {}
         });

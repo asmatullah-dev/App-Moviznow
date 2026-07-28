@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
-import { Plus, Edit2, Trash2, Share2, Film, Tv, X, Save, Upload, Search, Eye, EyeOff, ArrowUp, ArrowDown, Copy, ClipboardPaste, GripVertical, Bell, RefreshCw, ChevronDown, ChevronUp, User, Lock, Loader2, MessageCircle, MoreVertical, Link2, AlertCircle, Check, TrendingUp, Clock } from 'lucide-react';
+import { Plus, Edit2, Trash2, Share2, Film, Tv, X, Save, Upload, Search, Eye, EyeOff, ArrowUp, ArrowDown, Copy, ClipboardPaste, GripVertical, Bell, RefreshCw, ChevronDown, ChevronUp, User, Lock, Loader2, MessageCircle, MoreVertical, Link2, AlertCircle, Check, TrendingUp, Clock, ArrowUpDown } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { Content, Genre, Language, Quality, QualityLinks, Season, Episode, LinkDef, Role, Trailer } from '../types';
 
@@ -256,14 +256,14 @@ const QualityInputs: React.FC<QualityInputsProps> = ({ links, onChange, droppabl
 export const ContentFormModal = ({ state, actions }: { state: any, actions: any }) => {
   const {
       isModalOpen, editingId, contentList, profile, type, status, initialStatus, addToTrending, addToNewlyAdded,
-      title, order, showTitleSuggestions, disableSuggestions, description, posterUrl, trailerUrl, trailerTitle, trailerYoutubeTitle,
+      title, secondTitle, order, showTitleSuggestions, disableSuggestions, description, posterUrl, trailerUrl, trailerTitle, trailerYoutubeTitle,
       trailerSeasonNumber, trailers, sampleUrl, imdbLink, imdbRating, year, releaseDate, runtime, selectedGenres, genres,
       selectedLanguages, languages, selectedQuality, qualities, subtitles, cast, country, isDescriptionExpanded, isCastExpanded,
       isCountryExpanded, movieLinks, seasons, expandedEpisodes, isSaving, titleSuggestions
   } = state;
 
   const {
-      setIsModalOpen, setIsAutoFillModalOpen, setType, setStatus, setTitle, setOrder, setShowTitleSuggestions, setDisableSuggestions,
+      setIsModalOpen, setIsAutoFillModalOpen, setType, setStatus, setTitle, setSecondTitle, setOrder, setShowTitleSuggestions, setDisableSuggestions,
       setDescription, setPosterUrl, handleImageUpload, setTrailerUrl, setTrailerTitle, setTrailerYoutubeTitle, setTrailerSeasonNumber,
       setTrailers, setSampleUrl, setImdbLink, setImdbRating, setYear, setReleaseDate, setRuntime, setSelectedGenres, setManageModal,
       setSelectedLanguages, setSelectedQuality, setSubtitles, setCast, setCountry, setIsDescriptionExpanded, setIsCastExpanded,
@@ -431,6 +431,35 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                       <label className="block text-xs font-medium text-zinc-500 mb-1">Release Year</label>
                       <input type="number" value={year || ''} onChange={(e) => setYear(parseInt(e.target.value) || new Date().getFullYear())} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-emerald-500" />
                     </div>
+                  </div>
+
+                  {/* 2b. 2nd Title (Dubbed / Alternate Name) */}
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block text-xs font-medium text-zinc-500">
+                        2nd Title <span className="text-zinc-400 font-normal dark:text-zinc-500">(Hindi Dubbed / Original / Alternate Name)</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const temp = title || '';
+                          setTitle(secondTitle || '');
+                          setSecondTitle(temp);
+                        }}
+                        className="text-[10px] text-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 font-bold flex items-center gap-1.5 px-2 py-0.5 rounded bg-emerald-500/10 dark:bg-emerald-500/20 border border-emerald-500/10 transition-colors cursor-pointer"
+                        title="Swap main Title and 2nd Title"
+                      >
+                        <ArrowUpDown className="w-3 h-3" />
+                        Swap Titles
+                      </button>
+                    </div>
+                    <input 
+                      type="text" 
+                      value={secondTitle || ''} 
+                      onChange={(e) => setSecondTitle(e.target.value)} 
+                      placeholder="e.g. Hindi name, original title, or alternate title"
+                      className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" 
+                    />
                   </div>
                   
                   {/* 3. Order+ Fetch +Master Fetch */}

@@ -67,6 +67,7 @@ import {
   findTMDBByImdb,
   searchTMDBByTitle,
   fetchTMDBDetails,
+  getBestAlternativeTitle,
   fetchIMDbRating,
   fetchKinoCheckTrailer,
   getBestTrailer,
@@ -1056,6 +1057,14 @@ export default function MovieDetails() {
       }
 
       if (details) {
+        if (force || !mergedContent.secondTitle) {
+          const mediaModalSecondTitle = getBestAlternativeTitle(details);
+          if (mediaModalSecondTitle) {
+            updates.secondTitle = mediaModalSecondTitle;
+            hasUpdates = true;
+          }
+        }
+
         if ((force || !mergedContent.description) && details.overview) {
           updates.description = details.overview;
           hasUpdates = true;
@@ -4286,6 +4295,7 @@ export default function MovieDetails() {
           }}
           initialImdbId={mergedContent.imdbLink?.match(/tt\d+/)?.[0] || ""}
           initialTitle={mergedContent.title}
+          initialSecondTitle={mergedContent.secondTitle || ""}
           initialYear={mergedContent.year?.toString() || ""}
         />
       )}

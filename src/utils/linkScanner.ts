@@ -390,6 +390,10 @@ export function detectMetadataForLink(
     return foundLangs.length > 0 ? foundLangs.join(" / ") : undefined;
   })();
 
+  const hasRange = /(?:e|ep|episode)\s*\d+\s*(?:-|to|&)\s*(?:e|ep)?\d+/i.test(lower);
+  const isMKV = lower.includes(".mkv") || (hasRange && !lower.includes(".zip"));
+  const isZIP = lower.includes(".zip");
+
   return {
     qualityLabel: quality,
     codecLabel: codec,
@@ -408,13 +412,13 @@ export function detectMetadataForLink(
       const seriesMatch = lower.match(seriesPattern);
       const season = seriesMatch ? parseInt(seriesMatch[1]) : undefined;
       const episode =
-        seriesMatch && seriesMatch[2] ? parseInt(seriesMatch[2]) : undefined;
+        !hasRange && seriesMatch && seriesMatch[2] ? parseInt(seriesMatch[2]) : undefined;
       return { season, episode, year };
     })(),
     isFullSeasonMKV:
-      /full\s*season|complete\s*season/i.test(lower) && lower.includes(".mkv"),
+      (/full\s*season|complete\s*season/i.test(lower) || hasRange) && isMKV,
     isFullSeasonZIP:
-      /full\s*season|complete\s*season/i.test(lower) && lower.includes(".zip"),
+      (/full\s*season|complete\s*season/i.test(lower) || hasRange) && isZIP,
   };
 }
 
@@ -629,9 +633,12 @@ export function detectFromFilename(
   const yearMatch = source.match(/\b(19\d{2}|20\d{2})\b/);
   if (yearMatch) result.year = parseInt(yearMatch[1]);
 
-  const combinedMatch =
+  const hasEpisodeRange = /(?:e|ep|episode)\s*\d+\s*(?:-|to|&)\s*(?:e|ep)?\d+/i.test(source);
+
+  const combinedMatch = hasEpisodeRange ? null : (
     source.match(/(?<=^|[^a-zA-Z0-9])s(\d+)e(\d+)(?![a-z0-9])/i) ||
-    source.match(/(?<=^|[^a-zA-Z0-9])dl\s+(\d+)\s+(\d+)(?![a-z0-9])/i);
+    source.match(/(?<=^|[^a-zA-Z0-9])dl\s+(\d+)\s+(\d+)(?![a-z0-9])/i)
+  );
   if (combinedMatch) {
     result.season = parseInt(combinedMatch[1]);
     result.episode = parseInt(combinedMatch[2]);
@@ -641,7 +648,7 @@ export function detectFromFilename(
     );
     if (seriesMatch) {
       result.season = parseInt(seriesMatch[2] || seriesMatch[3]);
-      const episodeMatch = source.match(
+      const episodeMatch = hasEpisodeRange ? null : source.match(
         /(?<=^|[^a-zA-Z0-9])(?:e(\d+)|episode\s*(\d+)|ep\s*(\d+))(?![a-z0-9])/i,
       );
       if (episodeMatch) {
@@ -652,6 +659,9 @@ export function detectFromFilename(
         // Full season detection
         if (source.includes(".mkv")) result.isFullSeasonMKV = true;
         if (source.includes(".zip")) result.isFullSeasonZIP = true;
+        if (hasEpisodeRange && !result.isFullSeasonMKV && !result.isFullSeasonZIP) {
+          result.isFullSeasonMKV = true;
+        }
       }
     }
   }

@@ -1,10 +1,11 @@
 import React, { useState, useMemo } from 'react';
-import { X, Search, Loader2, Film, Save } from 'lucide-react';
+import { X, Search, Loader2, Film, Save, ArrowUpDown } from 'lucide-react';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useModalBehavior } from '../hooks/useModalBehavior';
 
 interface MediaModalProps {
+  initialSecondTitle?: string;
   isOpen: boolean;
   onClose: () => void;
   initialImdbId?: string;
@@ -136,9 +137,81 @@ export async function searchTMDBByTitle(searchTitle: string, searchYear: string,
 }
 
 export async function fetchTMDBDetails(tmdbId: string, type: string) {
-  const url = `${TMDB_BASE}/${type}/${tmdbId}?api_key=${TMDB_API_KEY}&append_to_response=credits,external_ids,content_ratings,videos&include_video_language=hi,en,es,fr,de,it,pt,ru,zh,ja,ko,null`;
+  const url = `${TMDB_BASE}/${type}/${tmdbId}?api_key=${TMDB_API_KEY}&append_to_response=credits,external_ids,content_ratings,videos,alternative_titles&include_video_language=hi,en,es,fr,de,it,pt,ru,zh,ja,ko,null`;
   const res = await fetch(url);
   return await res.json();
+}
+
+export function getBestAlternativeTitle(details: any): string {
+  if (!details) return '';
+  const primaryTitle = (details.title || details.name || '').trim();
+  const originalTitle = (details.original_title || details.original_name || '').trim();
+  const originCountries: string[] = (
+    details.origin_country || 
+    details.production_countries?.map((c: any) => c.iso_3166_1) || 
+    []
+  ).map((c: string) => c.toUpperCase());
+
+  if (!primaryTitle) return '';
+
+  const isLatin = (s: string) => typeof s === 'string' && s.trim().length > 0 && !/[^\x00-\u024F\u1E00-\u1EFF\u2000-\u206F]/.test(s);
+
+  // If original title is already Latin
+  if (isLatin(originalTitle)) {
+    if (originalTitle.toLowerCase() !== primaryTitle.toLowerCase()) {
+      return originalTitle;
+    } else {
+      return '';
+    }
+  }
+
+  // If original title is non-Latin, search alternative titles for a Romanized / Latin title
+  const alts = (details.alternative_titles?.titles || details.alternative_titles?.results || []);
+  if (!alts || !alts.length) return '';
+
+  // Check if there is an alt title in origin country that matches primaryTitle.
+  // If so, primaryTitle is already the Romanized title in origin country!
+  const hasOriginPrimary = alts.some((a: any) => 
+    originCountries.includes((a.iso_3166_1 || '').toUpperCase()) && 
+    a.title && 
+    a.title.trim().toLowerCase() === primaryTitle.toLowerCase()
+  );
+  if (hasOriginPrimary && isLatin(primaryTitle)) {
+    return '';
+  }
+
+  // Filter out non-Latin titles or titles identical to primary title
+  let latinAlts = alts.filter((a: any) => a.title && isLatin(a.title) && a.title.trim().toLowerCase() !== primaryTitle.toLowerCase());
+
+  if (!latinAlts.length) return '';
+
+  // Filter out short titles or initialisms if full titles exist
+  const fullLatinAlts = latinAlts.filter((a: any) => {
+    const t = (a.type || '').toLowerCase();
+    return !t.includes('short') && !t.includes('initialism') && !t.includes('abbrev') && !t.includes('informal');
+  });
+
+  if (fullLatinAlts.length > 0) {
+    latinAlts = fullLatinAlts;
+  }
+
+  // Priority 1: Origin country match (e.g. IN for India, JP for Japan, KR for Korea)
+  const originAlt = latinAlts.find((a: any) => originCountries.includes((a.iso_3166_1 || '').toUpperCase()));
+  if (originAlt) return originAlt.title.trim();
+
+  // Priority 2: Type contains "romaji", "romanization", "transliteration"
+  const romajiAlt = latinAlts.find((a: any) => {
+    const t = (a.type || '').toLowerCase();
+    return t.includes('romaji') || t.includes('romaniz') || t.includes('translit');
+  });
+  if (romajiAlt) return romajiAlt.title.trim();
+
+  // Priority 3: Common origin/western countries (IN, US, GB, WW, 001)
+  const commonAlt = latinAlts.find((a: any) => ['IN', 'US', 'GB', 'WW', '001'].includes((a.iso_3166_1 || '').toUpperCase()));
+  if (commonAlt) return commonAlt.title.trim();
+
+  // Priority 4: First Latin alternative title
+  return latinAlts[0].title.trim();
 }
 
 export async function fetchSeriesSeasons(tmdbId: string, knownSeasons?: any[]) {
@@ -220,9 +293,10 @@ export async function fetchIMDbRating(imdbID: string) {
   return null;
 }
 
-export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initialImdbId = '', initialTitle = '', initialYear = '', initialType = '', initialPosterUrl = '', onApply }) => {
+export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initialImdbId = '', initialTitle = '', initialSecondTitle = '', initialYear = '', initialType = '', initialPosterUrl = '', onApply }) => {
   const [imdbId, setImdbId] = useState(initialImdbId);
   const [title, setTitle] = useState(initialTitle);
+  const [secondTitle, setSecondTitle] = useState(initialSecondTitle);
   const [year, setYear] = useState(initialYear);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -313,10 +387,16 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
     const initialFilter = searchForceType === 'movie' ? 'movie' : (searchForceType === 'series' || searchForceType === 'tv' ? 'tv' : 'all');
     setFilterType(initialFilter);
 
-    const performTitleSearch = async (t: string, y: string, ft?: string) => {
+    const performTitleSearch = async (t: string, t2: string, y: string, ft?: string) => {
       let res = await searchTMDBByTitle(t.trim(), y.trim(), ft);
       if ((!res || res.length === 0) && y.trim()) {
         res = await searchTMDBByTitle(t.trim(), '', ft);
+      }
+      if ((!res || res.length === 0) && t2.trim()) {
+        res = await searchTMDBByTitle(t2.trim(), y.trim(), ft);
+        if ((!res || res.length === 0) && y.trim()) {
+          res = await searchTMDBByTitle(t2.trim(), '', ft);
+        }
       }
       return res;
     };
@@ -332,7 +412,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
             try {
               const movieRes = await fetch(`${TMDB_BASE}/movie/${idStr}?api_key=${TMDB_API_KEY}`);
               if (movieRes.ok) {
-                await fetchFullDetails(idStr, 'movie');
+                await fetchFullDetails(idStr, 'movie', searchTitle);
                 return;
               }
             } catch (e) {}
@@ -342,7 +422,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
             try {
               const tvRes = await fetch(`${TMDB_BASE}/tv/${idStr}?api_key=${TMDB_API_KEY}`);
               if (tvRes.ok) {
-                await fetchFullDetails(idStr, 'tv');
+                await fetchFullDetails(idStr, 'tv', searchTitle);
                 return;
               }
             } catch (e) {}
@@ -350,12 +430,12 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
           
           // If not found by TMDB ID, fall back to title search if title is provided
           if (searchTitle.trim()) {
-            const results = await performTitleSearch(searchTitle, searchYear, searchForceType);
+            const results = await performTitleSearch(searchTitle, secondTitle, searchYear, searchForceType);
             if (results && results.length > 1) {
               setSearchResults(results);
               return;
             } else if (results && results.length === 1) {
-              await fetchFullDetails(results[0].item.id, results[0].type);
+              await fetchFullDetails(results[0].item.id, results[0].type, searchTitle);
               return;
             }
           }
@@ -365,17 +445,17 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
           const imdbID = match ? match[0] : idStr;
           const found = await findTMDBByImdb(imdbID, searchForceType);
           if (found) {
-            await fetchFullDetails(found.item.id, found.type);
+            await fetchFullDetails(found.item.id, found.type, searchTitle);
             return;
           } else {
             // If not found by IMDb ID, fall back to title search if title is provided
             if (searchTitle.trim()) {
-              const results = await performTitleSearch(searchTitle, searchYear, searchForceType);
+              const results = await performTitleSearch(searchTitle, secondTitle, searchYear, searchForceType);
               if (results && results.length > 1) {
                 setSearchResults(results);
                 return;
               } else if (results && results.length === 1) {
-                await fetchFullDetails(results[0].item.id, results[0].type);
+                await fetchFullDetails(results[0].item.id, results[0].type, searchTitle);
                 return;
               }
             }
@@ -383,11 +463,11 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
           }
         }
       } else if (searchTitle.trim()) {
-        const results = await performTitleSearch(searchTitle, searchYear, searchForceType);
+        const results = await performTitleSearch(searchTitle, secondTitle, searchYear, searchForceType);
         if (results && results.length > 1) {
           setSearchResults(results);
         } else if (results && results.length === 1) {
-          await fetchFullDetails(results[0].item.id, results[0].type);
+          await fetchFullDetails(results[0].item.id, results[0].type, searchTitle);
         } else {
           throw new Error('No movie or series found with that title/year.');
         }
@@ -437,7 +517,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
     });
   }, [searchResults, filterType, title, year]);
 
-  const fetchFullDetails = async (tmdbId: string, type: string) => {
+  const fetchFullDetails = async (tmdbId: string, type: string, searchTitle?: string) => {
     setLoading(true);
     setSearchResults(null);
     setYoutubeTrailerOptions(null);
@@ -475,8 +555,47 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
           if (trailerUrl) setTrailerSource('kinocheck');
       }
 
+      const primaryTitle = details.title || details.name;
+      const originalTitle = details.original_title || details.original_name;
+      const trimmedInputTitle = searchTitle !== undefined ? searchTitle.trim() : (title ? title.trim() : '');
+
+      // Words helper
+      const getWords = (str: string) => {
+        return (str || "")
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, " ")
+          .split(/\s+/)
+          .filter(w => w.length > 0);
+      };
+
+      const inputWords = getWords(trimmedInputTitle);
+      const tmdbWords = getWords(primaryTitle);
+      const hasWordMatch = inputWords.some(w => tmdbWords.includes(w));
+
+      let finalTitle = primaryTitle;
+      let finalSecondTitle = '';
+
+      if (trimmedInputTitle && !hasWordMatch) {
+        // "if no words matchs from main title and tmdb title then tmdb title and move main title to 2nd title"
+        finalTitle = primaryTitle;
+        finalSecondTitle = trimmedInputTitle;
+      } else {
+        // "fetch 2nd title from media modal if available otherwise use the main title to 2nd title"
+        const mediaModalSecondTitle = getBestAlternativeTitle(details);
+        if (mediaModalSecondTitle) {
+          finalSecondTitle = mediaModalSecondTitle;
+        } else {
+          finalSecondTitle = trimmedInputTitle;
+        }
+      }
+
+      if (finalSecondTitle && finalSecondTitle.toLowerCase() === finalTitle.toLowerCase()) {
+        finalSecondTitle = '';
+      }
+
       const parsedData: any = {
-        title: details.title || details.name,
+        title: finalTitle,
+        secondTitle: finalSecondTitle,
         type: type === 'tv' ? 'series' : 'movie',
         description: details.overview,
         year: (details.release_date || details.first_air_date || '').split('-')[0],
@@ -533,11 +652,13 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
       // Select all fields by default if not already set
       const allFields: Record<string, boolean> = {};
       Object.keys(parsedData).forEach(k => {
-        if (k !== 'seasons' && parsedData[k] && (Array.isArray(parsedData[k]) ? parsedData[k].length > 0 : true)) {
-          allFields[k] = true;
-          // Auto-deselect posterUrl if it's identical to the current one
-          if (k === 'posterUrl' && initialPosterUrl && parsedData[k] === initialPosterUrl) {
-             allFields[k] = false;
+        if (k !== 'seasons') {
+          if (k === 'secondTitle' || (parsedData[k] && (Array.isArray(parsedData[k]) ? parsedData[k].length > 0 : true))) {
+            allFields[k] = true;
+            // Auto-deselect posterUrl if it's identical to the current one
+            if (k === 'posterUrl' && initialPosterUrl && parsedData[k] === initialPosterUrl) {
+               allFields[k] = false;
+            }
           }
         }
       });
@@ -638,8 +759,11 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
           <div className="flex flex-wrap gap-3 items-center">
             <input type="text" value={imdbId} onChange={e => setImdbId(e.target.value)} placeholder="TMDB ID or IMDb ID (e.g., tt21842982)" className="flex-1 min-w-[140px] p-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500 transition-colors duration-300" />
             <span className="text-zinc-500 font-medium text-sm">OR</span>
-            <input type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="Movie/Series title" className="flex-1 min-w-[140px] p-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500 transition-colors duration-300" />
-            <input type="text" value={year} onChange={e => setYear(e.target.value)} placeholder="Year" className="w-24 p-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500 transition-colors duration-300" />
+            <div className="flex-1 min-w-[200px] flex gap-2">
+               <input type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="Title" className="flex-1 w-1/2 p-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500 transition-colors duration-300" />
+               <input type="text" value={secondTitle} onChange={e => setSecondTitle(e.target.value)} placeholder="2nd Title" className="flex-1 w-1/2 p-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500 transition-colors duration-300" />
+            </div>
+            <input type="text" value={year} onChange={e => setYear(e.target.value)} placeholder="Year" className="w-20 p-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500 transition-colors duration-300" />
             <div className="flex gap-2">
               <button 
                 onClick={() => handleFetchWithParams(imdbId, title, year, filterType === 'all' ? undefined : filterType)} 
@@ -770,8 +894,30 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
                   </div>
                 )}
                 <div className="flex-1 space-y-4">
+                  <div className="flex justify-between items-center pb-2 border-b border-zinc-100 dark:border-zinc-800/50">
+                    <span className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Fetched Fields</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFetchedData((prev: any) => {
+                          if (!prev) return prev;
+                          return {
+                            ...prev,
+                            title: prev.secondTitle || '',
+                            secondTitle: prev.title || ''
+                          };
+                        });
+                      }}
+                      className="text-[10px] text-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 font-bold flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-500/10 dark:bg-emerald-500/20 border border-emerald-500/10 transition-colors cursor-pointer"
+                      title="Swap fetched Title and 2nd Title"
+                    >
+                      <ArrowUpDown className="w-3 h-3" />
+                      Swap Titles
+                    </button>
+                  </div>
                   {[
                     { key: 'title', label: 'Title', value: fetchedData.title },
+                    { key: 'secondTitle', label: '2nd Title', value: fetchedData.secondTitle },
                     { key: 'type', label: 'Type', value: fetchedData.type },
                     { key: 'year', label: 'Year', value: fetchedData.year },
                     { key: 'releaseDate', label: 'Release Date', value: fetchedData.releaseDate },
@@ -780,7 +926,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
                     { key: 'imdbRating', label: 'IMDb Rating', value: fetchedData.imdbRating },
                     { key: 'imdbLink', label: 'IMDb Link', value: fetchedData.imdbLink },
                     { key: 'trailerUrl', label: 'Trailer URL', value: fetchedData.trailerUrl },
-                  ].map(field => field.value ? (
+                  ].map(field => (field.value !== undefined && field.value !== null && field.value !== '') || field.key === 'secondTitle' ? (
                     <div key={field.key} className="flex items-start gap-3">
                       <input 
                         type="checkbox" 
@@ -803,7 +949,9 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
                             </span>
                           )}
                         </div>
-                        <div className="text-sm text-zinc-900 dark:text-white break-all">{field.value}</div>
+                        <div className="text-sm text-zinc-900 dark:text-white break-all">
+                          {field.value || <span className="text-zinc-400 italic">None</span>}
+                        </div>
                         {field.key === 'trailerUrl' && fetchedData.trailerTitle && (
                           <div className="text-xs text-emerald-500 mt-1 font-medium">
                             Title: {fetchedData.trailerTitle}

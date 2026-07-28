@@ -34,7 +34,7 @@ export const levenshteinDistance = (a: string, b: string): number => {
 export const smartSearch = <T extends Record<string, any>>(
   items: T[],
   query: string,
-  fields: (keyof T)[] = ['title', 'name', 'displayName', 'email', 'phone'] as (keyof T)[]
+  fields: (keyof T)[] = ['title', 'secondTitle', 'name', 'displayName', 'email', 'phone'] as (keyof T)[]
 ): T[] => {
   if (!query.trim()) return [];
 

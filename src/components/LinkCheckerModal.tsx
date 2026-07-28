@@ -28,7 +28,8 @@ import {
   Film,
   Loader2 as LoaderIcon
 } from "lucide-react";
-import { QualityLinks, Language, Quality, LinkDef } from '../types';
+import { QualityLinks, Language, Quality, LinkDef, Content } from '../types';
+import { useContent } from '../contexts/ContentContext';
 import { 
   LinkCheckResult, 
   StatusLabel, 
@@ -40,6 +41,395 @@ import {
   performFullLinkScan
 } from '../utils/linkScanner';
 import { useModalBehavior } from '../hooks/useModalBehavior';
+
+const PostPoster: React.FC<{ image?: string; title: string }> = ({ image, title }) => {
+  const [imgError, setImgError] = useState(false);
+
+  if (!image || imgError) {
+    return (
+      <div className="w-10 h-14 bg-zinc-200 dark:bg-zinc-800 rounded-lg shrink-0 flex items-center justify-center border border-zinc-300 dark:border-zinc-700">
+        <Film className="w-5 h-5 text-zinc-400" />
+      </div>
+    );
+  }
+
+  return (
+    <img 
+      src={image} 
+      alt={title} 
+      onError={() => setImgError(true)}
+      className="w-10 h-14 object-cover rounded-lg shrink-0 border border-zinc-200 dark:border-zinc-800 bg-zinc-800 shadow-sm"
+    />
+  );
+};
+
+const extractTitleAndYear = (rawTitle: string): { title: string; year?: number; formatted: string } => {
+  if (!rawTitle) return { title: "", formatted: "" };
+
+  let text = rawTitle.trim();
+
+  // Strip prefix words like Download, Watch Online, Stream, etc.
+  text = text.replace(/^(download|watch|stream|movie|series)\b\s*/i, "");
+
+  // Match 4-digit year (1900-2099)
+  const yearMatch = text.match(/\b(19\d\d|20[0-2]\d)\b/);
+  let year: number | undefined = undefined;
+  if (yearMatch) {
+    year = parseInt(yearMatch[1], 10);
+  }
+
+  let cleanTitle = text;
+  if (yearMatch && yearMatch.index !== undefined) {
+    let beforeYear = text.substring(0, yearMatch.index).trim();
+    beforeYear = beforeYear.replace(/[\(\[\{\-_]+$/, "").trim();
+    if (beforeYear.length > 1) {
+      cleanTitle = beforeYear;
+    }
+  }
+
+  // Remove resolution, quality, format, audio, language noise keywords
+  const noiseRegex = /\b(480p|720p|1080p|2160p|4k|hdrip|web-dl|webrip|bluray|brrip|dvdrip|hdtv|camrip|dual audio|multi audio|hindi|english|tamil|telugu|punjabi|malayalam|kannada|bengali|marathi|urdu|subtitles|esub|esubs|x264|x265|hevc|aac|mkv|mp4|download|full movie|movie|season \d+|s\d+e?\d*)\b/gi;
+
+  cleanTitle = cleanTitle.replace(noiseRegex, "").replace(/[()\[\]{}:_|-]+/g, " ").replace(/\s+/g, " ").trim();
+
+  // Explicitly strip any season markers (S1, S2, S3, S4, S5, S01, S02, S03, Season 1, Season 2, etc.) from title
+  cleanTitle = cleanTitle
+    .replace(/\b(seasons?|s)\s*[-_]?\s*\d{1,2}\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const formatted = year && cleanTitle ? `${cleanTitle} (${year})` : cleanTitle;
+
+  return { title: cleanTitle, year, formatted };
+};
+
+const normalizeTitle = (str: string) => {
+  return str.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]/g, "");
+};
+
+const normalizeForCompare = (str: string, stripSeason: boolean = true): string => {
+  if (!str) return "";
+  let clean = str
+    .toLowerCase()
+    .replace(/&/g, " and ");
+
+  if (stripSeason) {
+    clean = clean
+      .replace(/\b(season|seasons)\s*\d{1,2}\b/gi, " ")
+      .replace(/\bs\d{1,2}\b/gi, " ");
+  }
+
+  return clean.replace(/[^a-z0-9]/g, "");
+};
+
+const tokenize = (str: string): string[] => {
+  return str
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/\b(season|seasons)\s*\d{1,2}\b/gi, " ")
+    .replace(/\bs\d{1,2}\b/gi, " ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(w => w.length > 0 && !["a", "an", "the", "and", "of", "in", "for", "part", "vol", "volume", "season", "seasons", "s1", "s2", "s3", "s4", "s5", "s01", "s02", "s03", "s04", "s05"].includes(w));
+};
+
+const levenshteinDistance = (a: string, b: string): number => {
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  const matrix: number[][] = [];
+  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1
+        );
+      }
+    }
+  }
+  return matrix[b.length][a.length];
+};
+
+const isFlexibleTitleMatch = (postCleanTitle: string, contentRawTitle: string): boolean => {
+  if (!postCleanTitle || !contentRawTitle) return false;
+
+  const contentParsed = extractTitleAndYear(contentRawTitle);
+  const contentCleanTitle = contentParsed.title || contentRawTitle;
+
+  // 1. Direct comparison with seasons stripped (e.g., "Loklok S1" vs "Loklok" or "Loki Season 2" vs "Loki S02")
+  const normP_season = normalizeForCompare(postCleanTitle, true);
+  const normC_season = normalizeForCompare(contentCleanTitle, true);
+
+  if (normP_season && normC_season && normP_season === normC_season) return true;
+
+  // 2. Direct comparison WITH seasons kept
+  const normP_full = normalizeForCompare(postCleanTitle, false);
+  const normC_full = normalizeForCompare(contentCleanTitle, false);
+
+  if (normP_full && normC_full && normP_full === normC_full) return true;
+
+  // 3. Substring match on season-stripped normalized strings
+  if (normP_season.length >= 4 && normC_season.length >= 4) {
+    if (normP_season.includes(normC_season) || normC_season.includes(normP_season)) return true;
+  }
+
+  // 4. Substring match on full normalized strings
+  if (normP_full.length >= 4 && normC_full.length >= 4) {
+    if (normP_full.includes(normC_full) || normC_full.includes(normP_full)) return true;
+  }
+
+  // 5. Edit distance for minor typos / symbol variations
+  const maxLen = Math.max(normP_season.length, normC_season.length);
+  const dist = levenshteinDistance(normP_season, normC_season);
+  if (maxLen >= 5 && dist <= 2) return true;
+  if (maxLen >= 10 && dist <= 3) return true;
+
+  // 6. Token-based word comparison (handles S1/S2/Season differences, symbol differences, 1-word differences)
+  const pTokens = tokenize(postCleanTitle);
+  const cTokens = tokenize(contentCleanTitle);
+
+  if (pTokens.length === 0 || cTokens.length === 0) return false;
+
+  const cSet = new Set(cTokens);
+  const common = pTokens.filter(t => cSet.has(t)).length;
+
+  const maxTokens = Math.max(pTokens.length, cTokens.length);
+  const minTokens = Math.min(pTokens.length, cTokens.length);
+
+  // If token sets match completely or differ by 1 word
+  if (maxTokens <= 3 && common >= minTokens) return true;
+  if (maxTokens > 3 && common >= maxTokens - 1) return true;
+
+  // Overlap ratio check: at least 70% of words in common
+  if (common / maxTokens >= 0.7) return true;
+
+  return false;
+};
+
+const getAllUrlsFromContent = (c: Content): string[] => {
+  const urls: string[] = [];
+  const safeParse = (data: any): any[] => {
+    if (!data) return [];
+    if (typeof data === 'string') {
+      try {
+        return JSON.parse(data);
+      } catch(e) {
+        return [];
+      }
+    }
+    return data;
+  };
+
+  const extractUrls = (items: any) => {
+    if (!Array.isArray(items)) return;
+    items.forEach((ld: any) => {
+      if (ld?.url) urls.push(ld.url);
+      if (ld?.links && Array.isArray(ld.links)) {
+        ld.links.forEach((l: any) => {
+          if (l?.url) urls.push(l.url);
+        });
+      }
+    });
+  };
+
+  if (c.movieLinks) {
+    extractUrls(safeParse(c.movieLinks));
+  }
+  if (c.seasons) {
+    const parsed = safeParse(c.seasons);
+    if (Array.isArray(parsed)) {
+      parsed.forEach((s: any) => {
+        extractUrls(s.zipLinks || []);
+        extractUrls(s.mkvLinks || []);
+        if (Array.isArray(s.episodes)) {
+          s.episodes.forEach((e: any) => {
+            extractUrls(e.links || []);
+          });
+        }
+      });
+    }
+  }
+  if (c.fullSeasonZip) {
+    extractUrls(safeParse(c.fullSeasonZip));
+  }
+  if (c.fullSeasonMkv) {
+    extractUrls(safeParse(c.fullSeasonMkv));
+  }
+  if ((c as any).telegramLinks) {
+    extractUrls(safeParse((c as any).telegramLinks));
+  }
+  if (c.trailerUrl) urls.push(c.trailerUrl);
+
+  return urls;
+};
+
+const checkGalleryAvailability = (
+  postTitle: string, 
+  contentList: Content[],
+  qualities: Quality[] = [],
+  languages: Language[] = []
+): { isAvailable: boolean; badgeLabel: 'Available' | 'Missing'; reason?: string; matchedContent?: Content; parsed: { title: string; year?: number; formatted: string } } => {
+  const parsed = extractTitleAndYear(postTitle);
+  if (!parsed.title) {
+    return { isAvailable: false, badgeLabel: 'Missing', reason: 'Unrecognized Title', parsed };
+  }
+
+  const normParsed = normalizeTitle(parsed.title);
+  if (!normParsed) {
+    return { isAvailable: false, badgeLabel: 'Missing', reason: 'Unrecognized Title', parsed };
+  }
+
+  const matched = contentList.find(c => {
+    if (!c || !c.title) return false;
+
+    // Flexible title match on primary title or 2nd title (handles dubbed titles, original titles, symbols, typos, 1-word difference)
+    const titleMatches = isFlexibleTitleMatch(parsed.title, c.title) || 
+      (c.secondTitle ? isFlexibleTitleMatch(parsed.title, c.secondTitle) : false);
+    if (!titleMatches) return false;
+
+    // Strict year check: if post has a year, check against main content year AND all season years (Season 1, Season 2, etc.)
+    if (parsed.year) {
+      const candidateYears: number[] = [];
+      if (c.year) candidateYears.push(c.year);
+
+      const titleYear = extractTitleAndYear(c.title).year;
+      if (titleYear) candidateYears.push(titleYear);
+
+      if (c.secondTitle) {
+        const secTitleYear = extractTitleAndYear(c.secondTitle).year;
+        if (secTitleYear) candidateYears.push(secTitleYear);
+      }
+
+      if (c.seasons) {
+        try {
+          const parsedSeasons: any[] = Array.isArray(c.seasons) ? c.seasons : JSON.parse(c.seasons as string);
+          if (Array.isArray(parsedSeasons)) {
+            parsedSeasons.forEach(s => {
+              if (s.year && typeof s.year === 'number') {
+                candidateYears.push(s.year);
+              }
+              if (s.title) {
+                const sYear = extractTitleAndYear(s.title).year;
+                if (sYear) candidateYears.push(sYear);
+              }
+            });
+          }
+        } catch (e) {
+          // ignore JSON parse error
+        }
+      }
+
+      if (candidateYears.length > 0) {
+        const hasMatchingYear = candidateYears.some(y => Math.abs(y - parsed.year!) <= 1);
+        if (!hasMatchingYear) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  });
+
+  if (!matched) {
+    return {
+      isAvailable: false,
+      badgeLabel: 'Missing',
+      reason: 'Not in Gallery',
+      parsed
+    };
+  }
+
+  // Quality evaluation: Digital releases (WEB-DL, WEBRip, HDRip, BluRay, BRRip)
+  const digitalQualityRegex = /\b(web-?dl|web-?rip|hdr-?ip|hd-?rip|bluray|blu-?ray|brrip|br-?rip)\b/i;
+  const postHasDigitalQuality = digitalQualityRegex.test(postTitle);
+
+  const libQualityObj = qualities.find(q => q.id === matched.qualityId);
+  const libQualityName = libQualityObj ? libQualityObj.name : "";
+  const combinedLibInfo = `${libQualityName} ${matched.title} ${matched.description || ""} ${matched.movieLinks || ""}`.toLowerCase();
+  
+  const libraryHasDigitalQuality = digitalQualityRegex.test(combinedLibInfo);
+
+  // If post has WEB-DL, HDRip, BluRay and library item is a lower quality print (e.g. CAM, PreDVD, HDCAM)
+  if (postHasDigitalQuality && !libraryHasDigitalQuality) {
+    return {
+      isAvailable: false,
+      badgeLabel: 'Missing',
+      reason: `Old Print in Library (${libQualityName || 'CAM/PreDVD'} → Upgrade: Digital)`,
+      matchedContent: matched,
+      parsed
+    };
+  }
+
+  // Audio / Language evaluation (Hindi Audio)
+  const postHasHindi = /\b(hindi|hin|dual audio|multi audio|hindi org|hindi clean)\b/i.test(postTitle);
+  if (postHasHindi) {
+    const libLangNames = (matched.languageIds || [])
+      .map(id => languages.find(l => l.id === id)?.name || "")
+      .filter(Boolean);
+    const libHasHindi = libLangNames.some(l => /hindi/i.test(l)) || 
+      /hindi/i.test(matched.title) || 
+      /hindi/i.test(matched.description || "");
+
+    if (!libHasHindi) {
+      return {
+        isAvailable: false,
+        badgeLabel: 'Missing',
+        reason: 'Missing Hindi Audio in Library',
+        matchedContent: matched,
+        parsed
+      };
+    }
+  }
+
+  // Line / HQ Audio vs Clean Audio
+  const postIsLineAudio = /\b(line audio|hq cam|cam audio)\b/i.test(postTitle);
+  const libraryHasLineAudio = /\b(line audio|hq cam|cam audio)\b/i.test(combinedLibInfo);
+
+  if (!postIsLineAudio && libraryHasLineAudio) {
+    return {
+      isAvailable: false,
+      badgeLabel: 'Missing',
+      reason: 'Clean Audio Upgrade Available (Library has Line Audio)',
+      matchedContent: matched,
+      parsed
+    };
+  }
+
+  // Check if library version has Pixeldrain but is missing Hubcloud links
+  const allLibUrls = getAllUrlsFromContent(matched);
+  const hasPixeldrain = allLibUrls.some(u => {
+    const l = u.toLowerCase();
+    return l.includes("pixeldrain") || l.includes("pixel.drain") || l.includes("pixeldra.in");
+  });
+  const hasHubcloud = allLibUrls.some(u => {
+    const l = u.toLowerCase();
+    return l.includes("hubcloud") || l.includes("vcloud") || l.includes("hubdrive");
+  });
+
+  if (hasPixeldrain && !hasHubcloud) {
+    return {
+      isAvailable: false,
+      badgeLabel: 'Missing',
+      reason: 'Only Pixel Version in Library (Missing Hubcloud Links)',
+      matchedContent: matched,
+      parsed
+    };
+  }
+
+  return {
+    isAvailable: true,
+    badgeLabel: 'Available',
+    reason: `In Gallery${libQualityName ? ` (${libQualityName})` : ''}`,
+    matchedContent: matched,
+    parsed
+  };
+};
 
 const filterFilmygoHits = (hits: any[], pageUrl: string): any[] => {
   if (!hits || hits.length === 0) return [];
@@ -234,6 +624,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
   qualities = [],
   disableAutoClipboard = false,
 }) => {
+  const { contentList = [] } = useContent();
+  const [availabilityFilter, setAvailabilityFilter] = useState<'all' | 'missing' | 'available'>('all');
   const [input, setInput] = useState(initialInput);
   const inputRef = React.useRef(input);
   useEffect(() => {
@@ -245,6 +637,19 @@ export const LinkCheckerModal: React.FC<Props> = ({
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<LinkCheckResult[]>([]);
   const [selectedUrls, setSelectedUrls] = useState<Set<string>>(new Set());
+  const eligibleUrlsForSelect = useMemo(() => {
+    return results.filter(r => {
+      const isHubcloud = r.url.toLowerCase().includes("hubcloud");
+      if (!isHubcloud) return true;
+      const hasPixeldrain = !!r.candidates?.some(c => c.text.toLowerCase().includes("pixeldrain") || c.href.toLowerCase().includes("pixeldrain"));
+      return hasPixeldrain;
+    }).map(r => r.url);
+  }, [results]);
+
+  const areAllEligibleSelected = useMemo(() => {
+    if (eligibleUrlsForSelect.length === 0) return false;
+    return eligibleUrlsForSelect.every(url => selectedUrls.has(url));
+  }, [eligibleUrlsForSelect, selectedUrls]);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [isReviewingBatch, setIsReviewingBatch] = useState(false);
@@ -268,7 +673,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
   // MoviesDrive Search Results & Pagination State
   const [moviesdriveSearchUrl, setMoviesdriveSearchUrl] = useState<string | null>(null);
   const [moviesdriveSearchPosts, setMoviesdriveSearchPosts] = useState<{ title: string; url: string; image?: string }[]>([]);
-  const [moviesdriveSelectedIndices, setMoviesdriveSelectedIndices] = useState<Set<number>>(new Set());
+  const [moviesdriveSelectedUrls, setMoviesdriveSelectedUrls] = useState<Set<string>>(new Set());
+  const [allAccumulatedPosts, setAllAccumulatedPosts] = useState<Map<string, { title: string; url: string; image?: string }>>(new Map());
+  const [hasUserInteractedSelection, setHasUserInteractedSelection] = useState<boolean>(false);
   const [moviesdriveSearchQuery, setMoviesdriveSearchQuery] = useState<string>("");
   const [moviesdrivePageLoading, setMoviesdrivePageLoading] = useState<boolean>(false);
   const [customPageInput, setCustomPageInput] = useState<string>("");
@@ -304,6 +711,61 @@ export const LinkCheckerModal: React.FC<Props> = ({
     }
   }, [moviesdriveSearchUrl]);
 
+  const moviesdrivePostsWithAvailability = useMemo(() => {
+    return moviesdriveSearchPosts.map((post, originalIndex) => {
+      const avail = checkGalleryAvailability(post.title, contentList, qualities, languages);
+      return { post, originalIndex, avail };
+    });
+  }, [moviesdriveSearchPosts, contentList, qualities, languages]);
+
+  const moviesdriveFilteredPosts = useMemo(() => {
+    return moviesdrivePostsWithAvailability.filter(({ post, avail }) => {
+      const matchesQuery = !moviesdriveSearchQuery || post.title.toLowerCase().includes(moviesdriveSearchQuery.toLowerCase());
+      if (!matchesQuery) return false;
+      if (availabilityFilter === 'missing') return !avail.isAvailable;
+      if (availabilityFilter === 'available') return avail.isAvailable;
+      return true;
+    });
+  }, [moviesdrivePostsWithAvailability, moviesdriveSearchQuery, availabilityFilter]);
+
+  const moviesdriveDisplayedPosts = useMemo(() => {
+    return moviesdrivePageInfo.isSkyMovies
+      ? moviesdriveFilteredPosts.slice(0, skymoviesVisibleLimit)
+      : moviesdriveFilteredPosts;
+  }, [moviesdriveFilteredPosts, moviesdrivePageInfo.isSkyMovies, skymoviesVisibleLimit]);
+
+  const { moviesdriveAvailCount, moviesdriveMissingCount } = useMemo(() => {
+    let availCount = 0;
+    let missingCount = 0;
+    moviesdrivePostsWithAvailability.forEach(({ avail }) => {
+      if (avail.isAvailable) availCount++;
+      else missingCount++;
+    });
+    return { moviesdriveAvailCount: availCount, moviesdriveMissingCount: missingCount };
+  }, [moviesdrivePostsWithAvailability]);
+
+  const areAllFilteredSelected = useMemo(() => {
+    if (moviesdriveFilteredPosts.length === 0) return false;
+    return moviesdriveFilteredPosts.every(({ post }) => moviesdriveSelectedUrls.has(post.url));
+  }, [moviesdriveFilteredPosts, moviesdriveSelectedUrls]);
+
+  const handleSelectAllFiltered = () => {
+    setHasUserInteractedSelection(true);
+    setMoviesdriveSelectedUrls(prev => {
+      const next = new Set(prev);
+      if (areAllFilteredSelected) {
+        moviesdriveFilteredPosts.forEach(({ post }) => {
+          next.delete(post.url);
+        });
+      } else {
+        moviesdriveFilteredPosts.forEach(({ post }) => {
+          if (post.url) next.add(post.url);
+        });
+      }
+      return next;
+    });
+  };
+
   const handleMoviesdrivePageChange = async (targetPage: number) => {
     if (targetPage < 1 || !moviesdriveSearchUrl) return;
     const { query, origin, isSkyMovies, isFilmygo } = moviesdrivePageInfo;
@@ -313,7 +775,11 @@ export const LinkCheckerModal: React.FC<Props> = ({
       newUrl = `${origin}/search.php?search=${encodeURIComponent(query)}&cat=All&page=${targetPage}`;
       endpoint = `/api/skymovieshd?url=${encodeURIComponent(newUrl)}`;
     } else if (isFilmygo) {
-      newUrl = `${origin}/site-search.html?to-search=${encodeURIComponent(query)}&to-page=${targetPage}`;
+      if (query) {
+        newUrl = `${origin}/site-search.html?to-search=${encodeURIComponent(query)}&to-page=${targetPage}`;
+      } else {
+        newUrl = `${origin}/?to-page=${targetPage}`;
+      }
       endpoint = `/api/filmygo?url=${encodeURIComponent(newUrl)}`;
     } else {
       newUrl = `${origin}/search.html?q=${encodeURIComponent(query)}&page=${targetPage}`;
@@ -327,9 +793,25 @@ export const LinkCheckerModal: React.FC<Props> = ({
       const data = await res.json();
       if (data.is_search && Array.isArray(data.posts)) {
         setMoviesdriveSearchPosts(data.posts);
-        const limit = isSkyMovies ? 50 : data.posts.length;
-        setMoviesdriveSelectedIndices(new Set(data.posts.slice(0, limit).map((_: any, idx: number) => idx)));
-        setMoviesdriveSearchQuery("");
+        
+        setAllAccumulatedPosts(prev => {
+          const nextMap = new Map(prev);
+          data.posts.forEach((p: any) => {
+            if (p.url) nextMap.set(p.url, p);
+          });
+          return nextMap;
+        });
+
+        if (!hasUserInteractedSelection) {
+          const limit = isSkyMovies ? 50 : data.posts.length;
+          setMoviesdriveSelectedUrls(prev => {
+            const next = new Set(prev);
+            data.posts.slice(0, limit).forEach((p: any) => {
+              if (p.url) next.add(p.url);
+            });
+            return next;
+          });
+        }
       }
     } catch (e) {
       console.error("Error fetching catalog page:", e);
@@ -400,7 +882,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
     const trimmed = query.trim();
     let targetUrl = "";
     if (!trimmed) {
-      targetUrl = "https://filmygo.online/";
+      targetUrl = "https://filmygo.online/?to-page=1";
     } else if (!trimmed.startsWith("http")) {
       targetUrl = `https://filmygo.online/site-search.html?to-search=${encodeURIComponent(trimmed)}&to-page=1`;
     } else {
@@ -429,7 +911,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
     if (moviesdriveSearchUrl) {
       setMoviesdriveSearchUrl(null);
       setMoviesdriveSearchPosts([]);
-      setMoviesdriveSelectedIndices(new Set());
+      setAllAccumulatedPosts(new Map());
+      setMoviesdriveSelectedUrls(new Set());
+      setHasUserInteractedSelection(false);
       setMoviesdriveSearchQuery("");
       setMoviesdrivePageLoading(false);
       setCustomPageInput("");
@@ -489,10 +973,18 @@ export const LinkCheckerModal: React.FC<Props> = ({
   };
 
   const toggleSelectAll = () => {
-    if (selectedUrls.size === results.length) {
-      setSelectedUrls(new Set());
+    if (areAllEligibleSelected) {
+      setSelectedUrls((prev) => {
+        const next = new Set(prev);
+        eligibleUrlsForSelect.forEach(url => next.delete(url));
+        return next;
+      });
     } else {
-      setSelectedUrls(new Set(results.map((r) => r.url)));
+      setSelectedUrls((prev) => {
+        const next = new Set(prev);
+        eligibleUrlsForSelect.forEach(url => next.add(url));
+        return next;
+      });
     }
   };
 
@@ -637,8 +1129,20 @@ export const LinkCheckerModal: React.FC<Props> = ({
   };
 
   const confirmMoviesdriveSearchSelection = () => {
-    if (moviesdriveSearchUrl && moviesdriveSelectedIndices.size > 0) {
-      const selectedPosts = moviesdriveSearchPosts.filter((_, i) => moviesdriveSelectedIndices.has(i));
+    if (moviesdriveSearchUrl && moviesdriveSelectedUrls.size > 0) {
+      const selectedPosts: { title: string; url: string; image?: string }[] = [];
+      
+      for (const [url, post] of allAccumulatedPosts.entries()) {
+        if (moviesdriveSelectedUrls.has(url)) {
+          selectedPosts.push(post);
+        }
+      }
+      for (const post of moviesdriveSearchPosts) {
+        if (moviesdriveSelectedUrls.has(post.url) && !selectedPosts.some(p => p.url === post.url)) {
+          selectedPosts.push(post);
+        }
+      }
+
       const newLinksText = selectedPosts.map(p => p.url).join('\n');
       
       processedExtractionsRef.current.add(moviesdriveSearchUrl);
@@ -679,7 +1183,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
       
       setMoviesdriveSearchUrl(null);
       setMoviesdriveSearchPosts([]);
-      setMoviesdriveSelectedIndices(new Set());
+      setAllAccumulatedPosts(new Map());
+      setMoviesdriveSelectedUrls(new Set());
+      setHasUserInteractedSelection(false);
       setMoviesdriveSearchQuery("");
       
       setTimeout(() => {
@@ -689,7 +1195,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
       processedExtractionsRef.current.add(moviesdriveSearchUrl);
       setMoviesdriveSearchUrl(null);
       setMoviesdriveSearchPosts([]);
-      setMoviesdriveSelectedIndices(new Set());
+      setAllAccumulatedPosts(new Map());
+      setMoviesdriveSelectedUrls(new Set());
+      setHasUserInteractedSelection(false);
       setMoviesdriveSearchQuery("");
     }
   };
@@ -784,7 +1292,19 @@ export const LinkCheckerModal: React.FC<Props> = ({
               setMoviesdriveSearchPosts(res.data.posts);
               const isSky = res.type === 'skymovieshd' || res.original.includes('skymovies');
               const initialLimit = isSky ? 50 : res.data.posts.length;
-              setMoviesdriveSelectedIndices(new Set(res.data.posts.slice(0, initialLimit).map((_: any, idx: number) => idx)));
+
+              const accMap = new Map<string, { title: string; url: string; image?: string }>();
+              res.data.posts.forEach((p: any) => {
+                if (p.url) accMap.set(p.url, p);
+              });
+              setAllAccumulatedPosts(accMap);
+
+              const initialSelected = new Set<string>();
+              res.data.posts.slice(0, initialLimit).forEach((p: any) => {
+                if (p.url) initialSelected.add(p.url);
+              });
+              setMoviesdriveSelectedUrls(initialSelected);
+              setHasUserInteractedSelection(false);
               setMoviesdriveSearchQuery("");
               pausedForUI = true;
               break;
@@ -920,8 +1440,14 @@ export const LinkCheckerModal: React.FC<Props> = ({
             allResults.push(result);
             completedCount++;
 
-            if (result.statusLabel === "WORKING" || result.statusLabel === "SMALL_FILE" || result.statusLabel === "MISSING_FILENAME" || result.statusLabel === "MISSING_METADATA" || result.statusLabel === "SIZE_MISMATCH") {
-              setSelectedUrls((prev) => new Set(prev).add(result.url));
+            const isHubcloud = result.url.toLowerCase().includes("hubcloud");
+            const hasPixeldrain = isHubcloud && !!result.candidates?.some(c => c.text.toLowerCase().includes("pixeldrain") || c.href.toLowerCase().includes("pixeldrain"));
+            const isSelectable = result.statusLabel === "WORKING" || result.statusLabel === "SMALL_FILE" || result.statusLabel === "MISSING_FILENAME" || result.statusLabel === "MISSING_METADATA" || result.statusLabel === "SIZE_MISMATCH";
+
+            if (isSelectable) {
+              if (!isHubcloud || hasPixeldrain) {
+                setSelectedUrls((prev) => new Set(prev).add(result.url));
+              }
             }
           } catch (e: any) {
             console.error(`Error checking link ${u}:`, e);
@@ -1027,6 +1553,12 @@ export const LinkCheckerModal: React.FC<Props> = ({
       // Clean up common prefix noise like "🎬", "*", etc
       title = title.replace(/^[🎬\s\*]+/, '');
 
+      // Explicitly strip any season markers (S1, S2, S3, S4, S5, S01, S02, S03, Season 1, Season 2, etc.) from title
+      title = title
+        .replace(/\b(seasons?|s)\s*[-_]?\s*\d{1,2}\b/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
       // Capitalize
       title = title.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
       return { title: title || undefined, year };
@@ -1112,10 +1644,17 @@ export const LinkCheckerModal: React.FC<Props> = ({
         unit: unit,
       };
 
+      const hasEpisodeRange = /(?:e|ep|episode)\s*\d+\s*(?:-|to|&)\s*(?:e|ep)?\d+/i.test(source);
+
       if (detectedS !== undefined) linkItem.season = detectedS;
-      if (detectedE !== undefined) linkItem.episode = detectedE;
-      if (source.includes('.zip')) linkItem.isFullSeasonZIP = true;
-      else if (/full season|all episodes|complete/i.test(source) && !detectedE) linkItem.isFullSeasonMKV = true;
+      if (detectedE !== undefined && !hasEpisodeRange) {
+        linkItem.episode = detectedE;
+      }
+      if (source.includes('.zip')) {
+        linkItem.isFullSeasonZIP = true;
+      } else if (hasEpisodeRange || /full season|all episodes|complete/i.test(source)) {
+        linkItem.isFullSeasonMKV = true;
+      }
       if (source.toLowerCase().includes('sample')) linkItem.isSample = true;
 
       return linkItem;
@@ -1225,12 +1764,13 @@ export const LinkCheckerModal: React.FC<Props> = ({
       }
 
       let isSeriesLink = false;
-      if (r.isFullSeasonMKV || r.isFullSeasonZIP || /full season|all episodes|complete/i.test(source)) {
+      const hasEpisodeRange = /(?:e|ep|episode)\s*\d+\s*(?:-|to|&)\s*(?:e|ep)?\d+/i.test(source);
+      if (r.isFullSeasonMKV || r.isFullSeasonZIP || /full season|all episodes|complete/i.test(source) || hasEpisodeRange) {
         isSeriesLink = true;
       }
 
       // Detect Series vs Movie
-      const combinedMatch = source.match(/\bs(\d+)e(\d+)(?![a-z0-9])/i);
+      const combinedMatch = hasEpisodeRange ? null : source.match(/\bs(\d+)e(\d+)(?![a-z0-9])/i);
       if (combinedMatch) {
          isSeriesLink = true;
         detectedSeason = parseInt(combinedMatch[1]);
@@ -1241,12 +1781,12 @@ export const LinkCheckerModal: React.FC<Props> = ({
            isSeriesLink = true;
           detectedSeason = parseInt(seriesMatch[2] || seriesMatch[3]);
           
-          const episodeMatch = source.match(/(?:e(\d+)|episode\s*(\d+))(?![a-z0-9])/i);
+          const episodeMatch = hasEpisodeRange ? null : source.match(/(?:e(\d+)|episode\s*(\d+))(?![a-z0-9])/i);
           if (episodeMatch) {
             detectedEpisode = parseInt(episodeMatch[1] || episodeMatch[2]);
           }
         } else {
-           const episodeMatch = source.match(/(?:e(\d+)|episode\s*(\d+))(?![a-z0-9])/i);
+           const episodeMatch = hasEpisodeRange ? null : source.match(/(?:e(\d+)|episode\s*(\d+))(?![a-z0-9])/i);
            if (episodeMatch && !source.match(/\b(movie|film)\b/i)) {
                isSeriesLink = true;
                detectedEpisode = parseInt(episodeMatch[1] || episodeMatch[2]);
@@ -1339,7 +1879,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
       setMdriveSelectedIndices(new Set());
       setMoviesdriveSearchUrl(null);
       setMoviesdriveSearchPosts([]);
-      setMoviesdriveSelectedIndices(new Set());
+      setAllAccumulatedPosts(new Map());
+      setMoviesdriveSelectedUrls(new Set());
+      setHasUserInteractedSelection(false);
       setMoviesdriveSearchQuery("");
       processedExtractionsRef.current = new Set();
 
@@ -1430,7 +1972,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
     setMdriveSelectedIndices(new Set());
     setMoviesdriveSearchUrl(null);
     setMoviesdriveSearchPosts([]);
-    setMoviesdriveSelectedIndices(new Set());
+    setAllAccumulatedPosts(new Map());
+    setMoviesdriveSelectedUrls(new Set());
+    setHasUserInteractedSelection(false);
     setMoviesdriveSearchQuery("");
     processedExtractionsRef.current = new Set();
   };
@@ -1469,6 +2013,18 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
   const sortedResults = useMemo(() => {
     return [...results].sort((a, b) => {
+      const isHubcloudA = a.url.toLowerCase().includes("hubcloud");
+      const isHubcloudB = b.url.toLowerCase().includes("hubcloud");
+
+      const hasPixeldrainA = isHubcloudA && !!a.candidates?.some(c => c.text.toLowerCase().includes("pixeldrain") || c.href.toLowerCase().includes("pixeldrain"));
+      const hasPixeldrainB = isHubcloudB && !!b.candidates?.some(c => c.text.toLowerCase().includes("pixeldrain") || c.href.toLowerCase().includes("pixeldrain"));
+
+      if (hasPixeldrainA && !hasPixeldrainB) return 1;
+      if (!hasPixeldrainA && hasPixeldrainB) return -1;
+
+      if (isHubcloudA && !isHubcloudB) return 1;
+      if (!isHubcloudA && isHubcloudB) return -1;
+
       // Group by type: ZIP, MKV, Episode, Movie
       const typeA = a.isFullSeasonZIP ? 1 : a.isFullSeasonMKV ? 2 : (a.season || a.episode) ? 3 : 4;
       const typeB = b.isFullSeasonZIP ? 1 : b.isFullSeasonMKV ? 2 : (b.season || b.episode) ? 3 : 4;
@@ -1524,49 +2080,45 @@ export const LinkCheckerModal: React.FC<Props> = ({
                       <div className="flex gap-2 items-center shrink-0">
                         <button 
                           onClick={() => {
-                            if (moviesdrivePageInfo.isSkyMovies) {
-                              const visibleIndices = moviesdriveSearchPosts
-                                .map((post, originalIndex) => ({ post, originalIndex }))
-                                .filter(({ post }) => !moviesdriveSearchQuery || post.title.toLowerCase().includes(moviesdriveSearchQuery.toLowerCase()))
-                                .slice(0, skymoviesVisibleLimit)
-                                .map(x => x.originalIndex);
-
-                              const allVisibleSelected = visibleIndices.length > 0 && visibleIndices.every(i => moviesdriveSelectedIndices.has(i));
-                              if (allVisibleSelected) {
-                                setMoviesdriveSelectedIndices(prev => {
-                                  const next = new Set(prev);
-                                  visibleIndices.forEach(i => next.delete(i));
-                                  return next;
-                                });
-                              } else {
-                                setMoviesdriveSelectedIndices(prev => {
-                                  const next = new Set(prev);
-                                  visibleIndices.forEach(i => next.add(i));
-                                  return next;
-                                });
-                              }
+                            setHasUserInteractedSelection(true);
+                            if (moviesdriveSelectedUrls.size > 0) {
+                              setMoviesdriveSelectedUrls(new Set());
                             } else {
-                              if (moviesdriveSelectedIndices.size === moviesdriveSearchPosts.length) {
-                                setMoviesdriveSelectedIndices(new Set());
-                              } else {
-                                setMoviesdriveSelectedIndices(new Set(moviesdriveSearchPosts.map((_, i) => i)));
+                              const allUrls = new Set<string>();
+                              moviesdriveSearchPosts.forEach(p => { if (p.url) allUrls.add(p.url); });
+                              for (const url of allAccumulatedPosts.keys()) {
+                                allUrls.add(url);
                               }
+                              setMoviesdriveSelectedUrls(allUrls);
                             }
                           }}
                           className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-colors ${
-                            moviesdriveSelectedIndices.size > 0
+                            moviesdriveSelectedUrls.size > 0
                               ? "text-red-500 hover:text-red-400 bg-red-500/10 border border-red-500/20"
                               : "text-indigo-500 hover:text-indigo-400 bg-indigo-500/10 border border-indigo-500/20"
                           }`}
                         >
-                          {moviesdriveSelectedIndices.size > 0 ? "Deselect All" : "Select All"}
+                          {moviesdriveSelectedUrls.size > 0 ? "Deselect All" : "Select All"}
+                        </button>
+                        <button 
+                          onClick={handleSelectAllFiltered}
+                          disabled={moviesdriveFilteredPosts.length === 0}
+                          className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-colors disabled:opacity-40 ${
+                            areAllFilteredSelected
+                              ? "text-rose-500 hover:text-rose-400 bg-rose-500/10 border border-rose-500/20"
+                              : "text-emerald-500 hover:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20"
+                          }`}
+                        >
+                          {areAllFilteredSelected ? "Deselect Filtered" : `Select Filtered (${moviesdriveFilteredPosts.length})`}
                         </button>
                         <button 
                           onClick={() => {
                             processedExtractionsRef.current.add(moviesdriveSearchUrl);
                             setMoviesdriveSearchUrl(null);
                             setMoviesdriveSearchPosts([]);
-                            setMoviesdriveSelectedIndices(new Set());
+                            setAllAccumulatedPosts(new Map());
+                            setMoviesdriveSelectedUrls(new Set());
+                            setHasUserInteractedSelection(false);
                             setMoviesdriveSearchQuery("");
                           }}
                           className="text-xs font-bold text-zinc-500 hover:text-zinc-400 px-3 py-1.5 bg-zinc-500/10 rounded-xl"
@@ -1576,18 +2128,47 @@ export const LinkCheckerModal: React.FC<Props> = ({
                       </div>
                     </div>
 
-                    <div className="relative">
-                      <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
-                      <input
-                        type="text"
-                        placeholder="Filter contents by name..."
-                        value={moviesdriveSearchQuery}
-                        onChange={(e) => setMoviesdriveSearchQuery(e.target.value)}
-                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm text-zinc-900 dark:text-zinc-100 outline-none focus:border-indigo-500 transition"
-                      />
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="relative flex-1">
+                        <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+                        <input
+                          type="text"
+                          placeholder="Filter contents by name..."
+                          value={moviesdriveSearchQuery}
+                          onChange={(e) => setMoviesdriveSearchQuery(e.target.value)}
+                          className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm text-zinc-900 dark:text-zinc-100 outline-none focus:border-indigo-500 transition"
+                        />
+                      </div>
+
+                      {/* Availability Filter Tabs */}
+                      <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-900 p-1 rounded-xl border border-zinc-200 dark:border-zinc-800 text-xs font-bold shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setAvailabilityFilter('all')}
+                          className={`px-3 py-1 rounded-lg transition ${availabilityFilter === 'all' ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+                        >
+                          All ({moviesdriveSearchPosts.length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAvailabilityFilter('missing')}
+                          className={`px-3 py-1 rounded-lg transition flex items-center gap-1 ${availabilityFilter === 'missing' ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30' : 'text-zinc-500 hover:text-amber-500'}`}
+                        >
+                          <AlertTriangle className="w-3 h-3" />
+                          Missing ({moviesdriveMissingCount})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAvailabilityFilter('available')}
+                          className={`px-3 py-1 rounded-lg transition flex items-center gap-1 ${availabilityFilter === 'available' ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30' : 'text-zinc-500 hover:text-emerald-500'}`}
+                        >
+                          <CheckCircle2 className="w-3 h-3" />
+                          Available ({moviesdriveAvailCount})
+                        </button>
+                      </div>
                     </div>
 
-                    {/* Pagination Controls - Only for MoviesDrive */}
+                    {/* Pagination Controls - Only for MoviesDrive / FilmyGo */}
                     {!moviesdrivePageInfo.isSkyMovies && (
                       <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800">
                         <div className="flex items-center gap-1.5">
@@ -1661,65 +2242,89 @@ export const LinkCheckerModal: React.FC<Props> = ({
                       </div>
                     ) : (
                       (() => {
-                        const filteredPosts = moviesdriveSearchPosts
-                          .map((post, originalIndex) => ({ post, originalIndex }))
-                          .filter(({ post }) => 
-                            !moviesdriveSearchQuery || 
-                            post.title.toLowerCase().includes(moviesdriveSearchQuery.toLowerCase())
+                        if (moviesdriveDisplayedPosts.length === 0) {
+                          return (
+                            <div className="py-12 text-center text-zinc-500 text-sm font-medium bg-zinc-50 dark:bg-zinc-900/50 rounded-2xl border border-zinc-200 dark:border-zinc-800">
+                              No contents match the current filter criteria.
+                            </div>
                           );
-
-                        const displayedPosts = moviesdrivePageInfo.isSkyMovies
-                          ? filteredPosts.slice(0, skymoviesVisibleLimit)
-                          : filteredPosts;
+                        }
 
                         return (
                           <div className="flex flex-col gap-3">
                             <div className="grid gap-2 max-h-[50vh] overflow-y-auto custom-scrollbar pr-2">
-                              {displayedPosts.map(({ post, originalIndex }) => {
-                                const isSelected = moviesdriveSelectedIndices.has(originalIndex);
+                              {moviesdriveDisplayedPosts.map(({ post, originalIndex, avail }) => {
+                                const isSelected = moviesdriveSelectedUrls.has(post.url);
                                 return (
                                   <div 
-                                    key={originalIndex}
+                                    key={post.url || originalIndex}
                                     onClick={() => {
-                                      setMoviesdriveSelectedIndices(prev => {
+                                      setHasUserInteractedSelection(true);
+                                      setMoviesdriveSelectedUrls(prev => {
                                         const next = new Set(prev);
-                                        if (next.has(originalIndex)) next.delete(originalIndex);
-                                        else next.add(originalIndex);
+                                        if (next.has(post.url)) next.delete(post.url);
+                                        else next.add(post.url);
                                         return next;
                                       });
                                     }}
-                                    className={`group p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-4 ${
+                                    className={`group p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
                                       isSelected 
-                                        ? 'bg-indigo-500/10 border-indigo-500/40 shadow-sm' 
+                                        ? 'bg-indigo-500/10 border-indigo-500/40 shadow-xs' 
                                         : 'bg-zinc-50 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'
                                     }`}
                                   >
-                                    <div className="flex items-center gap-3 min-w-0">
-                                      <input 
-                                        type="checkbox" 
-                                        checked={isSelected}
-                                        onChange={() => {}}
-                                        className="w-4 h-4 rounded border-zinc-300 text-indigo-600 focus:ring-indigo-500 shrink-0 pointer-events-none"
-                                      />
-                                      {post.image ? (
-                                        <img 
-                                          src={post.image} 
-                                          alt="" 
-                                          className="w-10 h-14 object-cover rounded-lg shrink-0 border border-zinc-200 dark:border-zinc-800 bg-zinc-800 shadow-sm"
-                                          onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
-                                        />
-                                      ) : (
-                                        <div className="w-10 h-14 bg-zinc-200 dark:bg-zinc-800 rounded-lg shrink-0 flex items-center justify-center border border-zinc-300 dark:border-zinc-700">
-                                          <Film className="w-5 h-5 text-zinc-400" />
+                                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                      {/* Poster with overlaid checkbox */}
+                                      <div className="relative shrink-0 select-none">
+                                        <PostPoster image={post.image} title={post.title} />
+                                        <div className={`absolute top-1 left-1 p-0.5 rounded-md flex items-center justify-center transition-all shadow-xs ${
+                                          isSelected 
+                                            ? 'bg-indigo-600 text-white ring-1 ring-white/30' 
+                                            : 'bg-black/60 backdrop-blur-xs ring-1 ring-white/20 hover:bg-black/80'
+                                        }`}>
+                                          <input 
+                                            type="checkbox" 
+                                            checked={isSelected}
+                                            onChange={() => {}}
+                                            className="w-3.5 h-3.5 rounded border-0 text-indigo-600 focus:ring-0 shrink-0 pointer-events-none cursor-pointer accent-indigo-600"
+                                          />
                                         </div>
-                                      )}
+                                      </div>
+                                      
                                       <div className="min-w-0 flex-1">
-                                        <div className="flex items-center gap-1.5 mb-1">
+                                        <div className="flex items-center gap-1.5 mb-1 flex-wrap">
                                           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
                                             #{originalIndex + 1}
                                           </span>
+
+                                          {/* Availability Badge */}
+                                          {avail.isAvailable ? (
+                                            <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1 shadow-xs">
+                                              <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
+                                              Available
+                                            </span>
+                                          ) : (
+                                            <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1 shadow-xs">
+                                              <AlertTriangle className="w-3 h-3 text-amber-500 shrink-0" />
+                                              Missing
+                                            </span>
+                                          )}
+
+                                          {/* Upgrade / Reason Tag */}
+                                          {avail.reason && !avail.isAvailable && avail.reason !== 'Not in Gallery' && (
+                                            <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 flex items-center gap-1 shadow-xs">
+                                              {avail.reason}
+                                            </span>
+                                          )}
+
+                                          {/* Recognized Title & Year Tag */}
+                                          {avail.parsed.formatted && (
+                                            <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-600 dark:text-indigo-300 border border-indigo-500/20 truncate max-w-[220px]">
+                                              Recognized: {avail.parsed.formatted}
+                                            </span>
+                                          )}
                                         </div>
-                                        <h4 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 leading-snug break-words">
+                                        <h4 className="text-xs sm:text-sm font-bold text-zinc-900 dark:text-zinc-100 leading-snug break-words">
                                           {post.title}
                                         </h4>
                                       </div>
@@ -1742,7 +2347,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                               })}
                             </div>
 
-                            {moviesdrivePageInfo.isSkyMovies && skymoviesVisibleLimit < filteredPosts.length && (
+                            {moviesdrivePageInfo.isSkyMovies && skymoviesVisibleLimit < moviesdriveFilteredPosts.length && (
                               <div className="pt-2 flex justify-center">
                                 <button
                                   type="button"
@@ -1750,7 +2355,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                                   className="px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-md shadow-purple-600/20 transition flex items-center gap-2"
                                 >
                                   <ChevronDown className="w-4 h-4" />
-                                  Load More (50) — Showing {displayedPosts.length} of {filteredPosts.length}
+                                  Load More (50) — Showing {moviesdriveDisplayedPosts.length} of {moviesdriveFilteredPosts.length}
                                 </button>
                               </div>
                             )}
@@ -1761,14 +2366,16 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
                     <div className="flex items-center justify-between pt-4 border-t border-zinc-200 dark:border-zinc-800">
                       <span className="text-xs text-zinc-500 font-medium">
-                        {moviesdriveSelectedIndices.size} of {moviesdriveSearchPosts.length} selected
+                        {moviesdriveSelectedUrls.size} selected
                       </span>
                       <div className="flex gap-2.5">
                         <button 
                           onClick={() => {
                             setMoviesdriveSearchUrl(null);
                             setMoviesdriveSearchPosts([]);
-                            setMoviesdriveSelectedIndices(new Set());
+                            setAllAccumulatedPosts(new Map());
+                            setMoviesdriveSelectedUrls(new Set());
+                            setHasUserInteractedSelection(false);
                             setMoviesdriveSearchQuery("");
                           }}
                           className="px-4 py-2 rounded-xl text-xs font-bold text-zinc-500 hover:text-zinc-700 dark:hover:text-white transition-colors bg-zinc-100 dark:bg-zinc-800"
@@ -1777,11 +2384,11 @@ export const LinkCheckerModal: React.FC<Props> = ({
                         </button>
                         <button
                           onClick={confirmMoviesdriveSearchSelection}
-                          disabled={moviesdriveSelectedIndices.size === 0}
+                          disabled={moviesdriveSelectedUrls.size === 0}
                           className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-md shadow-indigo-600/20"
                         >
                           <Download className="w-4 h-4" />
-                          Scrape Selected ({moviesdriveSelectedIndices.size})
+                          Scrape Selected ({moviesdriveSelectedUrls.size})
                         </button>
                       </div>
                     </div>
@@ -2224,7 +2831,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                   
                   {!!results.length && (
                     <button onClick={toggleSelectAll} className="inline-flex items-center justify-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-transparent px-3.5 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-1.5 transition-colors">
-                      {selectedUrls.size === results.length ? "Deselect All" : "Select All"}
+                      {areAllEligibleSelected ? "Deselect All" : "Select All"}
                     </button>
                   )}
 
@@ -2293,6 +2900,11 @@ export const LinkCheckerModal: React.FC<Props> = ({
                                   )}
                                   {result.isDirectDownload ? <div className="inline-flex rounded-full border border-blue-200 dark:border-blue-800 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-600 dark:text-blue-400"><FileDown className="h-3.5 w-3.5 mr-1" /> Direct Download</div> : null}
                                   {(result.mismatchWarnings?.length || 0) > 0 ? <div className="inline-flex rounded-full border border-pink-200 dark:border-pink-800 bg-pink-500/10 px-3 py-1 text-xs font-medium text-pink-600 dark:text-pink-400"><Siren className="h-3.5 w-3.5 mr-1" /> Mismatch</div> : null}
+                                  {result.url.toLowerCase().includes("hubcloud") && !result.candidates?.some(c => c.text.toLowerCase().includes("pixeldrain") || c.href.toLowerCase().includes("pixeldrain")) && (
+                                    <div className="inline-flex rounded-full border border-red-200 dark:border-red-800 bg-red-500/10 px-3 py-1 text-xs font-bold text-red-600 dark:text-red-400 animate-pulse">
+                                      Missing Pixeldrain
+                                    </div>
+                                  )}
                                 </div>
                                 <div className="mt-2 flex flex-wrap gap-2">
                                   {result.qualityLabel ? <span className="rounded-full border border-fuchsia-200 dark:border-fuchsia-800 bg-fuchsia-500/10 px-2.5 py-1 text-[11px] font-medium text-fuchsia-600 dark:text-fuchsia-300">{result.qualityLabel}</span> : null}
@@ -2305,19 +2917,36 @@ export const LinkCheckerModal: React.FC<Props> = ({
                                   {result.isFullSeasonMKV ? <span className="rounded-full border border-purple-200 dark:border-purple-800 bg-purple-500/10 px-2.5 py-1 text-[11px] font-bold text-purple-600 dark:text-purple-300">Full Season MKV</span> : null}
                                   {result.isFullSeasonZIP ? <span className="rounded-full border border-purple-200 dark:border-purple-800 bg-purple-500/10 px-2.5 py-1 text-[11px] font-bold text-purple-600 dark:text-purple-300">Full Season ZIP</span> : null}
                                 </div>
-                                {result.candidates && result.candidates.length > 0 && (
+                                {(result.url.toLowerCase().includes("hubcloud") || (result.candidates && result.candidates.length > 0)) && (
                                   <div className="mt-2 flex flex-wrap gap-2 items-center">
                                     <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 mr-1 flex items-center gap-1.5"><Server className="h-3.5 w-3.5" /> Downloads:</span>
-                                    {result.candidates.map((cand, idx) => {
-                                      // Improve text (e.g. from "[fslv2 server]" or "download [fsl server]")
-                                      let name = cand.text.replace(/download/i, '').replace(/\[|\]/g, '').trim();
-                                      if (!name) return null;
-                                      return (
-                                        <span key={idx} className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-200/50 dark:bg-zinc-800/50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-600 dark:text-zinc-300">
-                                          {name}
-                                        </span>
-                                      );
-                                    })}
+                                    {result.candidates && result.candidates.length > 0 ? (
+                                      <>
+                                        {result.candidates.map((cand, idx) => {
+                                          let name = cand.text.replace(/download/i, '').replace(/\[|\]/g, '').trim();
+                                          if (!name) return null;
+                                          const isPixeldrain = name.toLowerCase().includes("pixeldrain") || cand.href.toLowerCase().includes("pixeldrain");
+                                          return (
+                                            <span key={idx} className={`rounded-lg border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
+                                              isPixeldrain 
+                                                ? "border-emerald-200 dark:border-emerald-800 bg-emerald-500/10 text-emerald-600 dark:text-cyan-400" 
+                                                : "border-zinc-200 dark:border-zinc-700 bg-zinc-200/50 dark:bg-zinc-800/50 text-zinc-600 dark:text-zinc-300"
+                                            }`}>
+                                              {name}
+                                            </span>
+                                          );
+                                        })}
+                                        {result.url.toLowerCase().includes("hubcloud") && !result.candidates.some(c => c.text.toLowerCase().includes("pixeldrain") || c.href.toLowerCase().includes("pixeldrain")) && (
+                                          <span className="rounded-lg border border-red-200 dark:border-red-800 bg-red-500/10 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider text-red-600 dark:text-red-400 animate-pulse">
+                                            Missing Pixeldrain
+                                          </span>
+                                        )}
+                                      </>
+                                    ) : (
+                                      <span className="rounded-lg border border-red-200 dark:border-red-800 bg-red-500/10 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider text-red-600 dark:text-red-400 animate-pulse">
+                                        Missing Pixeldrain
+                                      </span>
+                                    )}
                                   </div>
                                 )}
                                 <div className="mt-2 break-all text-sm text-zinc-700 dark:text-zinc-200">{result.url}</div>

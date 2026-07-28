@@ -182,6 +182,7 @@ export interface Content {
   id: string;
   type: 'movie' | 'series';
   title: string;
+  secondTitle?: string; // Alternative / Dubbed title
   description: string;
   posterUrl: string;
   trailerUrl: string;

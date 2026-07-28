@@ -1,22 +1,28 @@
 import { Content, Season } from '../types';
 
+export const isRomanized = (s: string) => !/[^\x00-\u024F\u1E00-\u1EFF\u2000-\u206F]/.test(s);
+
 export const formatContentTitle = (content: Content) => {
+  const hasDistinctSecondTitle = content.secondTitle && content.secondTitle.toLowerCase() !== content.title.toLowerCase() && isRomanized(content.secondTitle);
+  const baseTitle = hasDistinctSecondTitle ? `${content.title} (${content.secondTitle})` : content.title;
+
   if (content.type === 'movie') {
-    return content.title;
+    return baseTitle;
   }
 
   // Use the pre-formatted seasonsCountText from search index if available and seasons are not loaded
   if (!content.seasons && (content as any).seasonsCountText) {
-    return `${content.title} (${(content as any).seasonsCountText})`;
+    return `${baseTitle} (${(content as any).seasonsCountText})`;
   }
 
   if (!content.seasons) {
-    return content.title;
+    return baseTitle;
   }
 
   try {
     const seasons: Season[] = Array.isArray(content.seasons) ? content.seasons : JSON.parse(content.seasons || '[]');
-    if (seasons.length === 0) return content.title;
+    
+    if (seasons.length === 0) return baseTitle;
 
     if (seasons.length === 1) {
       const season = seasons[0];
@@ -26,24 +32,24 @@ export const formatContentTitle = (content: Content) => {
         : 0;
       
       if (lastEpisode > 0) {
-        return `${content.title} (Season ${season.seasonNumber} Episode ${lastEpisode})`;
+        return `${baseTitle} (Season ${season.seasonNumber} Episode ${lastEpisode})`;
       }
-      return `${content.title} (Season ${season.seasonNumber})`;
+      return `${baseTitle} (Season ${season.seasonNumber})`;
     } else if (seasons.length === 2) {
       const seasonNumbers = seasons
         .map(s => s.seasonNumber)
         .sort((a, b) => a - b);
-      return `${content.title} (Season ${seasonNumbers.join(',')})`;
+      return `${baseTitle} (Season ${seasonNumbers.join(',')})`;
     } else {
       const seasonNumbers = seasons
         .map(s => s.seasonNumber)
         .sort((a, b) => a - b);
       const min = seasonNumbers[0];
       const max = seasonNumbers[seasonNumbers.length - 1];
-      return `${content.title} (Season ${min}-${max})`;
+      return `${baseTitle} (Season ${min}-${max})`;
     }
   } catch (e) {
-    return content.title;
+    return baseTitle;
   }
 };
 

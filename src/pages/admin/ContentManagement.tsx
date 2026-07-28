@@ -80,6 +80,7 @@ import {
   Check,
   TrendingUp,
   Clock,
+  GitMerge,
 } from "lucide-react";
 import {
   DragDropContext,
@@ -108,6 +109,7 @@ import {
   formatRuntime,
   formatDateToMonthDDYYYY,
   getContrastColor,
+  isRomanized,
 } from "../../utils/contentUtils";
 import { smartSearch } from "../../utils/searchUtils";
 import {
@@ -215,6 +217,7 @@ interface ContentCardProps {
     contentId: string,
     type: "trending" | "newly_added",
   ) => void;
+  handleMerge?: (content: Content) => void;
 }
 
 import { useScrollRestoration } from "../../hooks/useScrollRestoration";
@@ -245,6 +248,7 @@ const ContentCard = memo(
     isShareLoading,
     isWhatsappLoading,
     handleAddToSpecialCollection,
+    handleMerge,
   }: ContentCardProps) => {
     const missingLabels = useMemo(
       () => getMissingLabels(content, profile),
@@ -613,6 +617,18 @@ const ContentCard = memo(
                         <Copy className="w-4 h-4" /> Copy Data
                       </button>
                     )}
+                    {isDuplicate && handleMerge && (profile?.role === "admin" ||
+                      profile?.role === "owner") && (
+                      <button
+                        onClick={() => {
+                          handleMerge(content);
+                          setActiveDropdownId(null);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 text-sm text-indigo-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left"
+                      >
+                        <GitMerge className="w-4 h-4" /> Merge Duplicates
+                      </button>
+                    )}
                     {(profile?.role === "admin" ||
                       profile?.role === "owner") && (
                       <button
@@ -748,6 +764,7 @@ export default function ContentManagement() {
   const [addToTrending, setAddToTrending] = useState(false);
   const [addToNewlyAdded, setAddToNewlyAdded] = useState(false);
   const [title, setTitle] = useState("");
+  const [secondTitle, setSecondTitle] = useState("");
   const [order, setOrder] = useState<number | "">("");
   const [showTitleSuggestions, setShowTitleSuggestions] = useState(false);
   const [disableSuggestions, setDisableSuggestions] = useState(false);
@@ -863,6 +880,7 @@ export default function ContentManagement() {
     if (!debouncedSearchTerm.trim()) return [];
     return smartSearch(contentList, debouncedSearchTerm, [
       "title",
+      "secondTitle",
       "description",
       "cast",
       "country",
@@ -1028,6 +1046,7 @@ export default function ContentManagement() {
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [isMerging, setIsMerging] = useState(false);
   const [showMergeConfirm, setShowMergeConfirm] = useState(false);
+  const [specificMergeContent, setSpecificMergeContent] = useState<Content | null>(null);
   const [mergeData, setMergeData] = useState<{
     title: string;
     year: number | "";
@@ -1069,6 +1088,7 @@ export default function ContentManagement() {
   );
   useModalBehavior(isAutoFillModalOpen, () => setIsAutoFillModalOpen(false));
   useModalBehavior(showMergeConfirm, () => setShowMergeConfirm(false));
+  useModalBehavior(!!specificMergeContent, () => setSpecificMergeContent(null));
   // isMasterFetchModalOpen, isLinkCheckerOpen, isAdjustContentsModalOpen, manageModal, alertConfig, deleteId
   // are handled internally by their respective components (MediaModal, LinkCheckerModal, etc.)
 
@@ -1092,6 +1112,7 @@ export default function ContentManagement() {
       // Reset form first
       setEditingId(null);
       setTitle("");
+      setSecondTitle("");
       setDescription("");
       setPosterUrl("");
       setTrailerUrl("");
@@ -1224,6 +1245,7 @@ export default function ContentManagement() {
     setAddToTrending(false);
     setAddToNewlyAdded(false);
     setTitle("");
+    setSecondTitle("");
     setOrder("");
     setDescription("");
     setPosterUrl("");
@@ -1326,6 +1348,7 @@ export default function ContentManagement() {
     setStatus(contentToUse.status || "published");
     setInitialStatus(contentToUse.status || "published");
     setTitle(contentToUse.title || "");
+    setSecondTitle(contentToUse.secondTitle || "");
     setOrder(contentToUse.order !== undefined ? contentToUse.order : "");
     setDescription(contentToUse.description || "");
     setPosterUrl(contentToUse.posterUrl || "");
@@ -1451,6 +1474,7 @@ export default function ContentManagement() {
         type,
         status: finalStatus,
         title,
+        secondTitle: secondTitle || "",
         description: description || "",
         posterUrl,
         trailerUrl,
@@ -2108,7 +2132,10 @@ export default function ContentManagement() {
   };
 
   const applyFetchedData = (data: any) => {
-    if (data.title) setTitle(data.title);
+    if (data.title !== undefined) setTitle(data.title);
+    if (data.secondTitle !== undefined || data.altTitle !== undefined) {
+      setSecondTitle(data.secondTitle || data.altTitle || "");
+    }
     if (data.year) {
       const parsedYear = parseInt(data.year.toString());
       if (!isNaN(parsedYear)) setYear(parsedYear);
@@ -2306,8 +2333,8 @@ export default function ContentManagement() {
 
     const contentType = content.type === "movie" ? "Movie" : "Series";
     const yearStr = content.year ? ` (${content.year})` : "";
-
-    const title = `🎬 New ${languageName}${contentType} Added: ${content.title}${yearStr}`;
+    const displaySecondTitle = content.secondTitle && content.secondTitle.toLowerCase() !== content.title.toLowerCase() && isRomanized(content.secondTitle) ? ` – ${content.secondTitle}` : "";
+    const title = `🎬 New ${languageName}${contentType} Added: ${content.title}${displaySecondTitle}${yearStr}`;
 
     let body = "";
     if (genreNames) body += `${genreNames} ${contentType}`;
@@ -2849,7 +2876,8 @@ export default function ContentManagement() {
 
       const parts = [origin, contentGenres, typeStr].filter(Boolean);
       const partsStr = parts.join(" ");
-      text = `*${content.title} ${content.year || ""}*\n${partsStr}\n\n`;
+      const displaySecondTitle = content.secondTitle && content.secondTitle.toLowerCase() !== content.title.toLowerCase() && isRomanized(content.secondTitle) ? ` – ${content.secondTitle}` : "";
+      text = `*${content.title}${displaySecondTitle} ${content.year || ""}*\n${partsStr}\n\n`;
       text = text.trim();
 
       let files: File[] = [];
@@ -2941,7 +2969,8 @@ export default function ContentManagement() {
     selectedSeasonNumbers?: number[],
   ) => {
     setLoadingShareId(content.id);
-    let text = `🎬 *${content.title}${content.year ? ` (${content.year})` : ""}*\n\n`;
+    const displaySecondTitle = content.secondTitle && content.secondTitle.toLowerCase() !== content.title.toLowerCase() && isRomanized(content.secondTitle) ? ` – ${content.secondTitle}` : "";
+    let text = `🎬 *${content.title}${displaySecondTitle}${content.year ? ` (${content.year})` : ""}*\n\n`;
 
     const contentGenres = genres
       .filter((g) => content.genreIds?.includes(g.id))
@@ -3466,7 +3495,8 @@ export default function ContentManagement() {
       return;
     }
 
-    let text = `🎬 *${content.title}${content.year ? ` (${content.year})` : ""}*\n\n`;
+    const displaySecondTitle = content.secondTitle && content.secondTitle.toLowerCase() !== content.title.toLowerCase() && isRomanized(content.secondTitle) ? ` – ${content.secondTitle}` : "";
+    let text = `🎬 *${content.title}${displaySecondTitle}${content.year ? ` (${content.year})` : ""}*\n\n`;
     text += `Type: ${content.type ? content.type.charAt(0).toUpperCase() + content.type.slice(1) : ''}\n`;
 
     const contentGenres = genres
@@ -4377,6 +4407,7 @@ export default function ContentManagement() {
     if (debouncedSearchTerm) {
       result = smartSearch(result, debouncedSearchTerm, [
         "title",
+        "secondTitle",
         "description",
         "cast",
         "country",
@@ -4862,6 +4893,222 @@ export default function ContentManagement() {
       });
     } finally {
       setIsMerging(false);
+    }
+  };
+
+  const handleSpecificDuplicateMerge = async (content: Content) => {
+    try {
+      const getDuplicateKey = (c: Content) => {
+        const title = (c.title || "").trim().toLowerCase();
+        const baseTitle =
+          c.type === "series"
+            ? title.replace(/\s+(s(eason)?|part|vol)\s*\d+/gi, "").trim()
+            : title;
+
+        if (c.type === "movie") {
+          return `movie_${baseTitle}_${c.year || ""}`;
+        } else {
+          return `series_${baseTitle}`;
+        }
+      };
+
+      const key = getDuplicateKey(content);
+      const duplicates = contentList.filter(
+        (c) => c.id !== content.id && getDuplicateKey(c) === key
+      );
+
+      if (duplicates.length === 0) {
+        setAlertConfig({
+          isOpen: true,
+          title: "Merge Error",
+          message: "No other duplicate found to merge with.",
+        });
+        return;
+      }
+
+      const item1 = content;
+      const item2 = duplicates[0];
+
+      // To preserve orders, reviews, and favorites, we ALWAYS keep the older entry and delete the newer entry.
+      const time1 = new Date(item1.createdAt).getTime();
+      const time2 = new Date(item2.createdAt).getTime();
+      let contentToKeep: Content;
+      let contentToDelete: Content;
+
+      if (time1 <= time2) {
+        contentToKeep = item1;
+        contentToDelete = item2;
+      } else {
+        contentToKeep = item2;
+        contentToDelete = item1;
+      }
+
+      setLoading(true);
+
+      const isHubcloud = (url: string) => {
+        const u = (url || "").toLowerCase();
+        return (
+          u.includes("hubcloud") ||
+          u.includes("vcloud") ||
+          u.includes("hubdrive") ||
+          u.includes("pixeldrain")
+        );
+      };
+
+      const getNormName = (name: string) =>
+        (name || "").toLowerCase().trim().replace(/\s+/g, "");
+
+      const parseJSONLinks = (str: string | undefined): LinkDef[] => {
+        if (!str) return [];
+        try {
+          const parsed = JSON.parse(str);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+          return [];
+        }
+      };
+
+      const parseJSONSeasons = (str: string | undefined): Season[] => {
+        if (!str) return [];
+        try {
+          const parsed = JSON.parse(str);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+          return [];
+        }
+      };
+
+      const mergeQualityLinks = (
+        oldLinks: LinkDef[] = [],
+        newLinks: LinkDef[] = []
+      ): LinkDef[] => {
+        const merged: LinkDef[] = [...oldLinks];
+
+        for (const nLink of newLinks) {
+          const nNorm = getNormName(nLink.name);
+          const isNewHub = isHubcloud(nLink.url);
+
+          const existingIdx = merged.findIndex(
+            (oLink) => getNormName(oLink.name) === nNorm
+          );
+
+          if (existingIdx !== -1) {
+            // Only replace the older link if the newer matching link has a Hubcloud/high-priority URL.
+            if (isNewHub) {
+              merged[existingIdx] = nLink;
+            }
+          } else {
+            // Keep both if their names are different or the quality is new.
+            merged.push(nLink);
+          }
+        }
+
+        return merged;
+      };
+
+      const mergeSeasonsList = (
+        oldSeasons: Season[] = [],
+        newSeasons: Season[] = []
+      ): Season[] => {
+        const merged: Season[] = [...oldSeasons];
+
+        for (const nSeason of newSeasons) {
+          const existingIdx = merged.findIndex(
+            (s) => s.seasonNumber === nSeason.seasonNumber
+          );
+
+          if (existingIdx !== -1) {
+            const oSeason = merged[existingIdx];
+
+            // Merge zipLinks and mkvLinks safely
+            const mergedZipLinks = mergeQualityLinks(
+              oSeason.zipLinks || [],
+              nSeason.zipLinks || []
+            );
+            const mergedMkvLinks = mergeQualityLinks(
+              oSeason.mkvLinks || [],
+              nSeason.mkvLinks || []
+            );
+
+            // Merge episodes
+            const mergedEpisodes: Episode[] = [...(oSeason.episodes || [])];
+            for (const nEpisode of nSeason.episodes || []) {
+              const epIdx = mergedEpisodes.findIndex(
+                (e) => e.episodeNumber === nEpisode.episodeNumber
+              );
+              if (epIdx !== -1) {
+                const oEpisode = mergedEpisodes[epIdx];
+                mergedEpisodes[epIdx] = {
+                  ...oEpisode,
+                  links: mergeQualityLinks(
+                    oEpisode.links || [],
+                    nEpisode.links || []
+                  ),
+                };
+              } else {
+                mergedEpisodes.push(nEpisode);
+              }
+            }
+            mergedEpisodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
+
+            merged[existingIdx] = {
+              ...oSeason,
+              zipLinks: mergedZipLinks,
+              mkvLinks: mergedMkvLinks,
+              episodes: mergedEpisodes,
+            };
+          } else {
+            merged.push(nSeason);
+          }
+        }
+
+        merged.sort((a, b) => a.seasonNumber - b.seasonNumber);
+        return merged;
+      };
+
+      const fields: Partial<Content> = {};
+      if (contentToKeep.type === "movie") {
+        const oldLinks = parseJSONLinks(contentToKeep.movieLinks);
+        const newLinks = parseJSONLinks(contentToDelete.movieLinks);
+        fields.movieLinks = JSON.stringify(mergeQualityLinks(oldLinks, newLinks));
+      } else {
+        const oldSeasons = parseJSONSeasons(contentToKeep.seasons);
+        const newSeasons = parseJSONSeasons(contentToDelete.seasons);
+        fields.seasons = JSON.stringify(mergeSeasonsList(oldSeasons, newSeasons));
+
+        const oldZip = parseJSONLinks(contentToKeep.fullSeasonZip);
+        const newZip = parseJSONLinks(contentToDelete.fullSeasonZip);
+        fields.fullSeasonZip = JSON.stringify(mergeQualityLinks(oldZip, newZip));
+
+        const oldMkv = parseJSONLinks(contentToKeep.fullSeasonMkv);
+        const newMkv = parseJSONLinks(contentToDelete.fullSeasonMkv);
+        fields.fullSeasonMkv = JSON.stringify(mergeQualityLinks(oldMkv, newMkv));
+      }
+
+      await updateContentFields([
+        {
+          id: contentToKeep.id,
+          fields,
+          chunkId: contentToKeep.chunkId,
+        },
+      ]);
+
+      await deleteContent(contentToDelete.id, contentToDelete.chunkId);
+
+      setAlertConfig({
+        isOpen: true,
+        title: "Success",
+        message: `Successfully merged duplicates for "${contentToKeep.title}". Non-Hubcloud links were safely updated with Hubcloud links where available, preserving all unmatched entries.`,
+      });
+    } catch (error: any) {
+      console.error("Error merging duplicate contents:", error);
+      setAlertConfig({
+        isOpen: true,
+        title: "Error",
+        message: "Failed to merge: " + (error.message || error),
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -5442,6 +5689,7 @@ export default function ContentManagement() {
                 setDropdownPos={setDropdownPos}
                 getMissingLabels={getMissingLabels}
                 handleAddToSpecialCollection={handleAddToSpecialCollection}
+                handleMerge={setSpecificMergeContent}
               />
             ))}
           </div>
@@ -5471,6 +5719,7 @@ export default function ContentManagement() {
           addToTrending,
           addToNewlyAdded,
           title,
+          secondTitle,
           order,
           showTitleSuggestions,
           disableSuggestions,
@@ -5511,6 +5760,7 @@ export default function ContentManagement() {
           setType,
           setStatus,
           setTitle,
+          setSecondTitle,
           setOrder,
           setShowTitleSuggestions,
           setDisableSuggestions,
@@ -5618,6 +5868,7 @@ export default function ContentManagement() {
         onClose={() => setIsMasterFetchModalOpen(false)}
         initialImdbId={imdbLink}
         initialTitle={title}
+        initialSecondTitle={secondTitle}
         initialYear={year.toString()}
         initialType={type}
         initialPosterUrl={posterUrl}
@@ -5699,6 +5950,20 @@ export default function ContentManagement() {
         onConfirm={handleBulkDelete}
         onCancel={() => setShowBulkDeleteConfirm(false)}
         confirmText="Delete All"
+      />
+
+      <ConfirmModal
+        isOpen={!!specificMergeContent}
+        title="Merge Duplicate Content"
+        message={specificMergeContent ? `Are you sure you want to merge duplicates for "${specificMergeContent.title}"? This will keep the old content entry, remove its non-Hubcloud links, copy all Hubcloud links from the new/duplicate content, and delete the duplicate entry.` : ""}
+        onConfirm={async () => {
+          if (specificMergeContent) {
+            await handleSpecificDuplicateMerge(specificMergeContent);
+          }
+        }}
+        onCancel={() => setSpecificMergeContent(null)}
+        confirmText="Merge Now"
+        cancelText="Cancel"
       />
 
       <AnimatePresence>
