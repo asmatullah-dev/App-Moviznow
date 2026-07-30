@@ -289,7 +289,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (safeStorage.getItem(sessionKey)) return;
     safeStorage.setItem(sessionKey, "1");
 
-    const displayName = userName || "Movie Fan";
+    let finalDisplayName = userName;
+    if (!finalDisplayName || finalDisplayName === "Movie Fan" || finalDisplayName.includes("@")) {
+      try {
+        const { doc, getDoc } = await import("firebase/firestore");
+        const userRef = doc(db, "users", userUid);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists()) {
+          const userData = userSnap.data();
+          if (userData.displayName) {
+            finalDisplayName = userData.displayName;
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to fetch user displayName from Firestore:", e);
+      }
+    }
+
+    const displayName = finalDisplayName || "Movie Fan";
 
     // 1. Send Welcome Email if user has a valid email address
     if (userEmail && userEmail.includes("@") && !userEmail.endsWith("@moviznow.com")) {

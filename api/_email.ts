@@ -109,7 +109,8 @@ async function sendEmailMessage({
   subject,
   html,
   text,
-  replyTo
+  replyTo,
+  senderEmailOverride
 }: {
   config: any;
   to: string;
@@ -117,6 +118,7 @@ async function sendEmailMessage({
   html: string;
   text?: string;
   replyTo?: string;
+  senderEmailOverride?: string;
 }) {
   const resendKey = config.resendApiKey || process.env.RESEND_API_KEY;
 
@@ -127,13 +129,16 @@ async function sendEmailMessage({
       // Determine 'from' address for Resend:
       // If user provided a custom domain senderEmail (not @gmail.com/@yahoo.com), use it.
       // Otherwise default to Notify@MovizNow.com.
-      let fromAddress = config.senderEmail;
+      let fromAddress = senderEmailOverride || config.senderEmail;
       if (!fromAddress || /@(gmail|yahoo|hotmail|outlook|live)\.com$/i.test(fromAddress)) {
         fromAddress = "Notify@MovizNow.com";
       }
 
       const from = `"${config.senderName}" <${fromAddress}>`;
-      const replyToAddress = replyTo || (config.senderEmail && !config.senderEmail.includes("resend.dev") ? config.senderEmail : undefined);
+      let replyToAddress = replyTo || (config.senderEmail && !config.senderEmail.includes("resend.dev") ? config.senderEmail : undefined);
+      if (!replyToAddress || replyToAddress.toLowerCase().includes("wmoviznow@gmail.com")) {
+        replyToAddress = "contactus@MovizNow.com";
+      }
 
       const { data, error } = await resend.emails.send({
         from,
@@ -164,8 +169,11 @@ async function sendEmailMessage({
     throw new Error("No valid email configuration found. Please configure a Resend API Key or Gmail / SMTP Credentials in Admin Settings.");
   }
 
-  const fromAddress = config.user || config.senderEmail;
-  const replyToAddress = replyTo || config.user || config.senderEmail;
+  const fromAddress = senderEmailOverride || config.user || config.senderEmail;
+  let replyToAddress = replyTo || config.user || config.senderEmail;
+  if (!replyToAddress || replyToAddress.toLowerCase().includes("wmoviznow@gmail.com")) {
+    replyToAddress = "contactus@MovizNow.com";
+  }
 
   const info = await transporter.sendMail({
     from: `"${config.senderName}" <${fromAddress}>`,
@@ -194,7 +202,7 @@ emailRouter.post("/send-welcome", async (req, res) => {
       return res.json({ success: true, message: "Welcome emails are disabled in settings." });
     }
 
-    const siteUrl = appUrl || "https://moviznow.com";
+    const siteUrl = "https://MovizNow.com";
     const userName = displayName || "Movie Fan";
 
     const subject = isNewUser
@@ -264,6 +272,7 @@ emailRouter.post("/send-welcome", async (req, res) => {
       subject: subject,
       text: `${greeting}\n\n${introText}\n\nStart watching now at ${siteUrl}`,
       html: htmlContent,
+      senderEmailOverride: "Alerts@MovizNow.com",
     });
 
     console.log(`Welcome email sent successfully via ${result.provider}:`, result.messageId);
@@ -334,7 +343,7 @@ emailRouter.post("/send-movie-notification", async (req, res) => {
       return res.status(400).json({ error: "No recipient email addresses found. Please ensure users have valid email addresses in their profile." });
     }
 
-    const siteUrl = appUrl || "https://moviznow.com";
+    const siteUrl = "https://MovizNow.com";
     const watchUrl = contentId ? `${siteUrl}/${type === "series" ? "series" : "movie"}/${contentId}` : siteUrl;
     const displayTitle = secondTitle ? `${title} (${secondTitle})` : title;
 
@@ -440,21 +449,69 @@ emailRouter.post("/send-movie-notification", async (req, res) => {
     let successCount = 0;
     let lastErrorMsg = "";
 
-    // Send emails individually using unified send helper (Resend API or SMTP)
-    for (const recipient of recipients) {
+    const resendKey = config.resendApiKey || process.env.RESEND_API_KEY;
+    if (resendKey && resendKey.trim().length > 0) {
       try {
-        await sendEmailMessage({
-          config,
-          to: recipient,
-          subject: subject,
-          text: `${subject}\n\n${description || customMessage || ""}\n\nLink: ${isMovieNotification ? watchUrl : siteUrl}`,
-          html: htmlContent,
+        const resend = new Resend(resendKey.trim());
+        let fromAddress = config.senderEmail;
+        if (!fromAddress || /@(gmail|yahoo|hotmail|outlook|live)\.com$/i.test(fromAddress)) {
+          fromAddress = "Notify@MovizNow.com";
+        }
+
+        let replyToAddress = config.user || config.senderEmail;
+        if (!replyToAddress || replyToAddress.toLowerCase().includes("wmoviznow@gmail.com")) {
+          replyToAddress = "contactus@MovizNow.com";
+        }
+
+        const emailPayloads = recipients.map(recipient => {
+          const payload: any = {
+            from: `"${config.senderName}" <${fromAddress}>`,
+            to: [recipient],
+            subject: subject,
+            html: htmlContent,
+            text: `${subject}\n\n${description || customMessage || ""}\n\nLink: ${isMovieNotification ? watchUrl : siteUrl}`,
+          };
+          if (replyToAddress) {
+            payload.replyTo = `"${config.senderName}" <${replyToAddress}>`;
+          }
+          return payload;
         });
 
-        successCount++;
-      } catch (err: any) {
-        console.error(`Failed to send email to ${recipient}:`, err);
-        lastErrorMsg = err.message || String(err);
+        // Resend batch API supports up to 100 emails per batch
+        const BATCH_SIZE = 100;
+        for (let i = 0; i < emailPayloads.length; i += BATCH_SIZE) {
+          const batch = emailPayloads.slice(i, i + BATCH_SIZE);
+          const { data, error } = await resend.batch.send(batch);
+          if (error) {
+            console.error("Resend Batch API Error:", error);
+            lastErrorMsg = error.message || "Resend batch send failed.";
+          } else {
+            successCount += batch.length;
+          }
+        }
+      } catch (batchErr: any) {
+        console.error("Resend Batch execution failed, falling back to individual sending:", batchErr);
+        lastErrorMsg = batchErr.message || String(batchErr);
+      }
+    }
+
+    // Fallback if Resend batch send didn't succeed or is not configured
+    if (successCount === 0 && recipients.length > 0) {
+      for (const recipient of recipients) {
+        try {
+          await sendEmailMessage({
+            config,
+            to: recipient,
+            subject: subject,
+            text: `${subject}\n\n${description || customMessage || ""}\n\nLink: ${isMovieNotification ? watchUrl : siteUrl}`,
+            html: htmlContent,
+          });
+
+          successCount++;
+        } catch (err: any) {
+          console.error(`Failed to send email to ${recipient}:`, err);
+          lastErrorMsg = err.message || String(err);
+        }
       }
     }
 
