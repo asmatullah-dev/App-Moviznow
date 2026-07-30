@@ -61,6 +61,7 @@ import {
   formatReleaseDate,
   formatRuntime,
   getContrastColor,
+  isRomanized,
 } from "../../utils/contentUtils";
 import {
   MediaModal,
@@ -1059,7 +1060,7 @@ export default function MovieDetails() {
       if (details) {
         if (force || !mergedContent.secondTitle) {
           const mediaModalSecondTitle = getBestAlternativeTitle(details);
-          if (mediaModalSecondTitle) {
+          if (mediaModalSecondTitle && isRomanized(mediaModalSecondTitle)) {
             updates.secondTitle = mediaModalSecondTitle;
             hasUpdates = true;
           }

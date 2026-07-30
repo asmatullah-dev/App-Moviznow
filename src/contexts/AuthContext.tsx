@@ -283,6 +283,76 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const triggerWelcomeNotificationAndEmail = useCallback(async (userUid: string, userEmail?: string | null, userName?: string | null, isNewUser: boolean = false) => {
+    if (!userUid) return;
+    const sessionKey = `welcome_notif_sent_${userUid}_${new Date().toISOString().split('T')[0]}`;
+    if (safeStorage.getItem(sessionKey)) return;
+    safeStorage.setItem(sessionKey, "1");
+
+    const displayName = userName || "Movie Fan";
+
+    // 1. Send Welcome Email if user has a valid email address
+    if (userEmail && userEmail.includes("@") && !userEmail.endsWith("@moviznow.com")) {
+      const cachedSettingsStr = safeStorage.getItem("cached_app_settings");
+      let localEmailSettings = null;
+      if (cachedSettingsStr) {
+        try {
+          const parsedSettings = JSON.parse(cachedSettingsStr);
+          if (parsedSettings.emailSettings) {
+            localEmailSettings = parsedSettings.emailSettings;
+          }
+        } catch (e) {}
+      }
+
+      fetch("/api/email/send-welcome", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: userEmail,
+          displayName: displayName,
+          smtpSettings: localEmailSettings || undefined,
+          appUrl: window.location.origin,
+          isNewUser
+        }),
+      }).catch((e) => console.warn("Welcome email trigger notice:", e));
+    }
+
+    // 2. Add Welcome Back notification in Firestore notification_chunks for in-app Notifications tab
+    try {
+      const { doc, getDoc, serverTimestamp, writeBatch } = await import("firebase/firestore");
+      const id = "welcome_" + Math.random().toString(36).substring(2, 9);
+      const title = isNewUser ? `Welcome to MovizNow, ${displayName}! 🎉` : `Welcome back, ${displayName}! 👋`;
+      const body = isNewUser 
+        ? "We're thrilled to have you join our community! Get ready to explore thousands of high-quality movies and trending TV series."
+        : "Great to see you again on MovizNow! Explore trending movies, new releases, and stream your favorites.";
+      
+      const notifItem = {
+        id,
+        title,
+        body,
+        targetUserId: userUid,
+        createdBy: "system",
+        createdAt: new Date().toISOString()
+      };
+
+      const cid = "chunk_1";
+      const chunkRef = doc(db, 'notification_chunks', cid);
+      const chunkSnap = await getDoc(chunkRef);
+      const chunkItems = chunkSnap.exists() ? chunkSnap.data()?.items || {} : {};
+      const newChunkItems = { [id]: notifItem, ...chunkItems };
+
+      const batch = writeBatch(db);
+      batch.set(chunkRef, { items: newChunkItems, updatedAt: serverTimestamp() }, { merge: true });
+      batch.set(doc(db, 'chunk_meta', 'versions'), { notifications: { version: Date.now(), latestChunkId: cid } }, { merge: true });
+      await batch.commit();
+
+      safeStorage.removeItem('cached_notifications_version');
+      safeStorage.removeItem('cached_notifications_data');
+    } catch (err) {
+      console.warn("Welcome notification creation notice:", err);
+    }
+  }, []);
+
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -910,59 +980,72 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // Auto-expire logic
           const expiryNow = new Date();
           if (
-            data.status === "active" &&
-            data.expiryDate &&
-            data.role !== "owner"
+            (data.status === "active" || !data.status) &&
+            data.role !== "owner" &&
+            data.role !== "admin"
           ) {
-            // Parse expiry date by YYYY-MM-DD to avoid timezone shifting
-            const expiryDateStr = data.expiryDate.split("T")[0];
-            const parts = expiryDateStr.split("-");
-            // Create expiration boundary at 00:00:00 local time on the day AFTER the expiry date
-            const expiryBoundary = new Date(
-              parseInt(parts[0]),
-              parseInt(parts[1]) - 1,
-              parseInt(parts[2]) + 1,
-            );
-            if (expiryNow >= expiryBoundary) {
-              let isReallyExpired = true;
-              if (!serverProfile && navigator.onLine) {
-                try {
-                  const freshSnap = await getDoc(userRef);
-                  if (freshSnap.exists()) {
-                    const freshData = freshSnap.data() as UserProfile;
-                    serverProfile = freshData;
-                    if (freshData.expiryDate) {
-                      const fExpStr = freshData.expiryDate.split("T")[0];
-                      const fParts = fExpStr.split("-");
-                      const freshBoundary = new Date(
-                        parseInt(fParts[0]),
-                        parseInt(fParts[1]) - 1,
-                        parseInt(fParts[2]) + 1,
-                      );
-                      if (
-                        expiryNow < freshBoundary ||
-                        freshData.status !== "active"
-                      ) {
-                        isReallyExpired = false;
-                        data.expiryDate = freshData.expiryDate;
-                        data.status = freshData.status;
-                        if (mergedProfile) {
-                          mergedProfile.expiryDate = freshData.expiryDate;
-                          mergedProfile.status = freshData.status;
+            if (!data.expiryDate || data.expiryDate === "null" || data.expiryDate === "") {
+              // Active status without an expiry date is invalid for regular users — mark as expired!
+              updates.status = "expired";
+              data.status = "expired";
+              if (mergedProfile) {
+                mergedProfile.status = "expired";
+              }
+            } else if (data.expiryDate !== "Lifetime") {
+              // Parse expiry date by YYYY-MM-DD to avoid timezone shifting
+              const expiryDateStr = data.expiryDate.split("T")[0];
+              const parts = expiryDateStr.split("-");
+              if (parts.length === 3) {
+                // Create expiration boundary at 00:00:00 local time on the day AFTER the expiry date
+                const expiryBoundary = new Date(
+                  parseInt(parts[0]),
+                  parseInt(parts[1]) - 1,
+                  parseInt(parts[2]) + 1,
+                );
+                if (expiryNow >= expiryBoundary) {
+                  let isReallyExpired = true;
+                  if (!serverProfile && navigator.onLine) {
+                    try {
+                      const freshSnap = await getDoc(userRef);
+                      if (freshSnap.exists()) {
+                        const freshData = freshSnap.data() as UserProfile;
+                        serverProfile = freshData;
+                        if (freshData.expiryDate) {
+                          const fExpStr = freshData.expiryDate.split("T")[0];
+                          const fParts = fExpStr.split("-");
+                          if (fParts.length === 3) {
+                            const freshBoundary = new Date(
+                              parseInt(fParts[0]),
+                              parseInt(fParts[1]) - 1,
+                              parseInt(fParts[2]) + 1,
+                            );
+                            if (
+                              expiryNow < freshBoundary ||
+                              freshData.status !== "active"
+                            ) {
+                              isReallyExpired = false;
+                              data.expiryDate = freshData.expiryDate;
+                              data.status = freshData.status;
+                              if (mergedProfile) {
+                                mergedProfile.expiryDate = freshData.expiryDate;
+                                mergedProfile.status = freshData.status;
+                              }
+                            }
+                          }
                         }
                       }
+                    } catch (e) {
+                      console.error("Failed to fresh fetch for expiry check", e);
                     }
                   }
-                } catch (e) {
-                  console.error("Failed to fresh fetch for expiry check", e);
-                }
-              }
 
-              if (isReallyExpired) {
-                updates.status = "expired";
-                data.status = "expired";
-                if (mergedProfile) {
-                  mergedProfile.status = "expired";
+                  if (isReallyExpired) {
+                    updates.status = "expired";
+                    data.status = "expired";
+                    if (mergedProfile) {
+                      mergedProfile.status = "expired";
+                    }
+                  }
                 }
               }
             }
@@ -1025,6 +1108,104 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
+          // Also check for and merge any old duplicate records (e.g., pending_... or duplicate email/phone docs)
+          try {
+            const searchRef = collection(db, "users");
+            const findMatches = async (field: string, value: string) => {
+              if (!value) return [];
+              const q = query(searchRef, where(field, "==", value), limit(10));
+              const snap = await getDocs(q);
+              return snap.docs.filter((d) => d.id !== currentUser.uid);
+            };
+
+            let matchDocs: any[] = [];
+            const userEmail = currentUser.email || data.email;
+            if (userEmail && !userEmail.endsWith("@moviznow.com")) {
+              const emailMatches = await findMatches("email", userEmail);
+              const lowerEmailMatches = await findMatches("email", userEmail.toLowerCase());
+              matchDocs = [...matchDocs, ...emailMatches, ...lowerEmailMatches];
+            }
+
+            const userPhone = currentUser.phoneNumber || data.phone;
+            const stdPhone = userPhone ? standardizePhone(userPhone) : "";
+            if (stdPhone) {
+              const phoneMatches = await findMatches("phone", stdPhone);
+              const rawDigits = stdPhone.replace(/\D/g, "");
+              matchDocs = [...matchDocs, ...phoneMatches];
+              if (rawDigits) {
+                let baseNumber = rawDigits;
+                if (baseNumber.startsWith("92")) baseNumber = baseNumber.substring(2);
+                if (baseNumber.startsWith("0")) baseNumber = baseNumber.substring(1);
+                if (baseNumber) {
+                  const baseMatches = await findMatches("phone", baseNumber);
+                  const zeroMatches = await findMatches("phone", `0${baseNumber}`);
+                  const plus92Matches = await findMatches("phone", `+92${baseNumber}`);
+                  const dummyEmailMatches = await findMatches("email", `${baseNumber}@moviznow.com`);
+                  matchDocs = [...matchDocs, ...baseMatches, ...zeroMatches, ...plus92Matches, ...dummyEmailMatches];
+                }
+              }
+            }
+
+            const uniqueMatchDocs = matchDocs.filter((docItem, idx, self) => idx === self.findIndex((t) => t.id === docItem.id));
+            if (uniqueMatchDocs.length > 0) {
+              const oldDocIds = uniqueMatchDocs.map((d) => d.id);
+              console.log("Found duplicate documents to merge into existing profile:", oldDocIds);
+
+              uniqueMatchDocs.forEach((oldDoc) => {
+                const oldData = oldDoc.data() as UserProfile;
+                const rolePriority: Record<string, number> = {
+                  owner: 100, admin: 90, manager: 80, user_manager: 75, content_manager: 70, selected_content: 60, user: 10, trial: 5
+                };
+                const statusPriority: Record<string, number> = { active: 100, pending: 50, expired: 20, suspended: 0 };
+                const getRoleRank = (r: string) => rolePriority[r] || 0;
+                const getStatusRank = (s: string) => statusPriority[s] || 0;
+
+                if (getRoleRank(oldData.role) > getRoleRank(data.role)) data.role = oldData.role;
+                if (getStatusRank(oldData.status) > getStatusRank(data.status)) data.status = oldData.status;
+
+                if (oldData.expiryDate === "Lifetime" || data.expiryDate === "Lifetime") {
+                  data.expiryDate = "Lifetime";
+                } else if (oldData.expiryDate && (!data.expiryDate || oldData.expiryDate > data.expiryDate)) {
+                  data.expiryDate = oldData.expiryDate;
+                }
+
+                if ((!data.displayName || data.displayName.startsWith("User ")) && oldData.displayName && !oldData.displayName.startsWith("User ")) {
+                  data.displayName = oldData.displayName;
+                }
+                if (!data.phone && oldData.phone) data.phone = oldData.phone;
+                if ((!data.email || data.email.endsWith("@moviznow.com")) && oldData.email && !oldData.email.endsWith("@moviznow.com")) {
+                  data.email = oldData.email;
+                }
+                if (!data.city && oldData.city) data.city = oldData.city;
+                if (!data.managedBy && oldData.managedBy) data.managedBy = oldData.managedBy;
+
+                data.favorites = Array.from(new Set([...(data.favorites || []), ...(oldData.favorites || [])]));
+                data.watchLater = Array.from(new Set([...(data.watchLater || []), ...(oldData.watchLater || [])]));
+                data.assignedContent = Array.from(new Set([...(data.assignedContent || []), ...(oldData.assignedContent || [])]));
+
+                const existingOrders = data.orders || [];
+                (oldData.orders || []).forEach((o: any) => {
+                  if (!existingOrders.find((eo: any) => eo.id === o.id)) existingOrders.push(o);
+                });
+                data.orders = existingOrders;
+
+                data.sessionsCount = (data.sessionsCount || 0) + (oldData.sessionsCount || 0);
+                data.timeSpent = Math.max(data.timeSpent || 0, oldData.timeSpent || 0);
+                if (oldData.createdAt && (!data.createdAt || oldData.createdAt < data.createdAt)) {
+                  data.createdAt = oldData.createdAt;
+                }
+              });
+
+              const { writeBatch } = await import("firebase/firestore");
+              const batch = writeBatch(db);
+              batch.set(userRef, data, { merge: true });
+              oldDocIds.forEach((oldId) => batch.delete(doc(db, "users", oldId)));
+              await batch.commit();
+            }
+          } catch (e) {
+            console.error("Error merging duplicate records into existing account:", e);
+          }
+
           setProfile(data);
         } else {
           // Create new user profile
@@ -1058,6 +1239,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const standardizedUserPhone = standardizePhone(
             currentUser.phoneNumber || extractedPhone || pendingPhone || "",
           );
+
+          // Prevent creating a profile for completely empty/anonymous accounts without phone or email
+          if (currentUser.isAnonymous || (!currentUser.email && !standardizedUserPhone)) {
+             setLoading(false);
+             return false;
+          }
 
           let mergedOldData: any = {};
           let oldDocIds: string[] = [];
@@ -1276,7 +1463,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             email: currentUser.email || mergedOldData.email || "",
             phone: standardizedUserPhone || mergedOldData.phone || "",
             displayName:
-              currentUser.displayName || mergedOldData.displayName || "",
+              (currentUser.displayName && currentUser.displayName.trim()) ||
+              (mergedOldData.displayName && mergedOldData.displayName.trim()) ||
+              (standardizedUserPhone ? `User (${standardizedUserPhone})` : `User ${currentUser.uid.slice(0, 6)}`),
             photoURL: currentUser.photoURL || mergedOldData.photoURL || "",
             referralCode: mergedOldData.referralCode || generateReferralCode(currentUser.uid),
             referredBy: referredByUid || mergedOldData.referredBy || null,
@@ -1326,6 +1515,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             favorites: mergedOldData.favorites || [],
             watchLater: mergedOldData.watchLater || [],
             assignedContent: mergedOldData.assignedContent || [],
+            welcomeEmailSent: mergedOldData.welcomeEmailSent || false,
           };
 
           if (referredByUid) {
@@ -1409,6 +1599,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             });
 
             await batch.commit();
+
+            // Trigger welcome email for new user if email exists and hasn't been sent yet
+            const userEmail = currentUser.email || newProfile.email;
+            if (userEmail && !mergedOldData.welcomeEmailSent) {
+              const userName = currentUser.displayName || newProfile.displayName || "Movie Lover";
+              fetch("/api/email/send-welcome", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ email: userEmail, displayName: userName, appUrl: window.location.origin, isNewUser: true }),
+              })
+              .then(() => {
+                // Mark welcomeEmailSent as true in Firestore
+                const { updateDoc } = require("firebase/firestore");
+                updateDoc(userRef, { welcomeEmailSent: true }).catch(() => {});
+              })
+              .catch((e) => console.warn("Welcome email trigger notice:", e));
+            }
+
             console.log(
               `Successfully combined ${oldDocIds.length} accounts into new UID ${currentUser.uid}`,
             );
@@ -1889,6 +2097,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // If it doesn't exist, it will be created by onAuthStateChanged shortly
         setTimeout(applyUpdates, 3000);
       }
+
+      if (result.user) {
+        triggerWelcomeNotificationAndEmail(
+          result.user.uid,
+          result.user.email,
+          result.user.displayName,
+          !docExists
+        );
+      }
+
       setTimeout(() => {
         justLoggedInRef.current = false;
       }, 10000);
@@ -1943,6 +2161,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         batch.update(doc(db, "users", result.user.uid), updates);
         await batch.commit();
       } catch (e) {}
+
+      if (result.user) {
+        triggerWelcomeNotificationAndEmail(
+          result.user.uid,
+          result.user.email,
+          result.user.displayName || email.split("@")[0],
+          false // always an existing user on login
+        );
+      }
+
       setTimeout(() => {
         justLoggedInRef.current = false;
       }, 10000);

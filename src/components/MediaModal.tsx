@@ -3,6 +3,7 @@ import { X, Search, Loader2, Film, Save, ArrowUpDown } from 'lucide-react';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useModalBehavior } from '../hooks/useModalBehavior';
+import { isRomanized } from '../utils/contentUtils';
 
 interface MediaModalProps {
   initialSecondTitle?: string;
@@ -589,7 +590,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
         }
       }
 
-      if (finalSecondTitle && finalSecondTitle.toLowerCase() === finalTitle.toLowerCase()) {
+      if (finalSecondTitle && (finalSecondTitle.toLowerCase() === finalTitle.toLowerCase() || !isRomanized(finalSecondTitle))) {
         finalSecondTitle = '';
       }
 

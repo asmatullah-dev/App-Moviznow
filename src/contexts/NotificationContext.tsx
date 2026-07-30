@@ -145,7 +145,9 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
         await batch.commit();
         
-        // Also update local cache for consistency if user refreshes immediately
+        // Clear cached notifications version so fresh list is fetched on next load
+        safeStorage.removeItem('cached_notifications_version');
+        safeStorage.removeItem('cached_notifications_data');
         safeStorage.setItem('local_notif_chunk_' + cid, JSON.stringify(newChunkItems));
         
     } catch (e) {

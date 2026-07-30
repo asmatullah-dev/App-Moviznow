@@ -18,7 +18,7 @@ export function OfflineBanner() {
     // Check if we have essential cache
     const checkCache = () => {
       const hasContent = !!safeStorage.getItem('content_cache');
-      const hasSettings = !!localStorage.getItem('settings_cache');
+      const hasSettings = !!localStorage.getItem('cached_app_settings');
       setHasCache(hasContent || hasSettings);
     };
     checkCache();

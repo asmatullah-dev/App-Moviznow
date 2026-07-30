@@ -100,8 +100,7 @@ service cloud.firestore {
       return isAuthenticated() && 
              (userId.startsWith('pending_') || userId == request.auth.uid) &&
              (
-               (resourceData.get('email', '') != '' && ('email' in request.auth.token) && (request.auth.token.email is string) && resourceData.get('email', '').toLower() == request.auth.token.email.toLower()) || 
-               (resourceData.get('phone', '') != '' && ('phone_number' in request.auth.token) && resourceData.get('phone', '') == request.auth.token.phone_number) ||
+               isIdentityMatch(resourceData) ||
                (userId == 'pending_' + request.auth.token.get('phone_number', 'invalid')) ||
                (userId == 'pending_' + request.auth.uid)
              );
@@ -146,10 +145,18 @@ service cloud.firestore {
     }
 
     function isIdentityMatch(resourceData) {
+      let dbPhone = resourceData.get('phone', '');
+      let tokenPhone = request.auth != null && 'phone_number' in request.auth.token ? request.auth.token.phone_number : '';
       return isAuthenticated() && 
              (
                (resourceData.get('email', '') != '' && ('email' in request.auth.token) && (request.auth.token.email is string) && resourceData.get('email', '').toLower() == request.auth.token.email.toLower()) || 
-               (resourceData.get('phone', '') != '' && ('phone_number' in request.auth.token) && resourceData.get('phone', '') == request.auth.token.phone_number)
+               (dbPhone != '' && tokenPhone != '' && (
+                 dbPhone == tokenPhone || 
+                 '+92' + dbPhone == tokenPhone || 
+                 dbPhone.replace('^0', '+92') == tokenPhone ||
+                 '+' + dbPhone == tokenPhone ||
+                 dbPhone.replace('^92', '+92') == tokenPhone
+               ))
              );
     }
 

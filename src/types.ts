@@ -250,6 +250,20 @@ export interface BankAccount {
   iconUrl?: string;
 }
 
+export interface EmailSettings {
+  resendApiKey?: string;
+  emailProvider?: 'auto' | 'resend' | 'smtp';
+  smtpHost?: string;
+  smtpPort?: number;
+  smtpUser?: string;
+  smtpPass?: string;
+  smtpSecure?: boolean;
+  senderName?: string;
+  senderEmail?: string;
+  enableWelcomeEmail?: boolean;
+  enableNewContentEmail?: boolean;
+}
+
 export interface AppSettings {
   headerText: string;
   membershipFee: number;
@@ -274,6 +288,7 @@ export interface AppSettings {
   maintenanceMessage?: string;
   maintenanceEndTime?: string; // ISO string
   whatsappChannelLink?: string;
+  emailSettings?: EmailSettings;
   serviceAccounts?: {
     sourceKey?: string;
     targets?: {

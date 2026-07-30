@@ -85,6 +85,7 @@ async function getSyncApps(
 }
 
 import { translateRouter } from "./_translate.js";
+import { emailRouter } from "./_email.js";
 
 async function startServer() {
   const app = express();
@@ -92,6 +93,7 @@ async function startServer() {
 
   app.use(express.json({ limit: "50mb" }));
   app.use("/api", translateRouter);
+  app.use("/api/email", emailRouter);
 
   // Background Scan Endpoint
   app.post(
@@ -2665,6 +2667,7 @@ async function startServer() {
 
       for (const colName of collections) {
         let docsToSync: any[] = [];
+        let docsToDeleteFromTarget: string[] = [];
 
         if (specificIds && specificIds[colName]) {
           const ids = specificIds[colName];
@@ -2676,7 +2679,20 @@ async function startServer() {
           const sourceSnap = await sourceDb.collection(colName).get();
           docsToSync = sourceSnap.docs;
 
-          if (mode === "changed") {
+          if (mode === "all") {
+            // Full content sync push: If any doc exists in target but is missing from source (e.g. deleted user or content), delete it from target
+            const targetSnap = await targetDb.collection(colName).get();
+            const sourceIds = new Set(sourceSnap.docs.map((d) => d.id));
+
+            targetSnap.docs.forEach((tDoc) => {
+              if (!sourceIds.has(tDoc.id)) {
+                if (colName === "chunk_meta" && tDoc.id === "versions" && !syncAllData) {
+                  return; // Preserve versions metadata if not syncing all data
+                }
+                docsToDeleteFromTarget.push(tDoc.id);
+              }
+            });
+          } else if (mode === "changed") {
             const targetSnap = await targetDb.collection(colName).get();
             const targetMap = new Map(
               targetSnap.docs.map((d) => {
@@ -2726,6 +2742,19 @@ async function startServer() {
           docsToSync = docsToSync.filter(
             (d) => d.data().status === "published",
           );
+        }
+
+        // Delete extra documents from target if full content sync push (mode === 'all')
+        if (docsToDeleteFromTarget.length > 0) {
+          for (let i = 0; i < docsToDeleteFromTarget.length; i += 500) {
+            const batch = targetDb.batch();
+            const chunk = docsToDeleteFromTarget.slice(i, i + 500);
+            for (const docId of chunk) {
+              batch.delete(targetDb.collection(colName).doc(docId));
+            }
+            await batch.commit();
+          }
+          logs.push(`Deleted ${docsToDeleteFromTarget.length} obsolete items from target for ${colName}`);
         }
 
         if (docsToSync.length === 0) continue;

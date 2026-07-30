@@ -235,7 +235,9 @@ function RewardsManager() {
         newExpiry.setDate(newExpiry.getDate() + extensionDays);
         updates.expiryDate = newExpiry.toISOString();
         
-        updates.status = 'active';
+        if (profile.status !== 'suspended') {
+          updates.status = 'active';
+        }
 
         try {
           await updateUserProfileData(updates);

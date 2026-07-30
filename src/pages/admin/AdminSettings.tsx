@@ -4,7 +4,7 @@ import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { db, storage, auth, requestNotificationPermission } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useContent } from '../../contexts/ContentContext';
-import { Save, AlertCircle, GripVertical, Plus, Trash2, Layout, Wallet, Phone, Image as ImageIcon, Settings as SettingsIcon, RefreshCw, ShieldCheck, X, Eye, EyeOff, Database, Rocket, Loader2, Bell, BellOff, Info } from 'lucide-react';
+import { Save, AlertCircle, GripVertical, Plus, Trash2, Layout, Wallet, Phone, Image as ImageIcon, Settings as SettingsIcon, RefreshCw, ShieldCheck, X, Eye, EyeOff, Database, Rocket, Loader2, Bell, BellOff, Info, Mail, Check } from 'lucide-react';
 import { clsx } from 'clsx';
 import { Navigate } from 'react-router-dom';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
@@ -47,6 +47,17 @@ export default function AdminSettings() {
     isMaintenanceModeEnabled: false,
     maintenanceMessage: 'App is currently under maintenance. Please try again later.',
     whatsappChannelLink: '',
+    emailSettings: {
+      smtpHost: 'smtp.gmail.com',
+      smtpPort: 587,
+      smtpUser: '',
+      smtpPass: '',
+      smtpSecure: false,
+      senderName: 'MovizNow',
+      senderEmail: '',
+      enableWelcomeEmail: true,
+      enableNewContentEmail: true
+    },
     serviceAccounts: {
       sourceKey: '',
       targets: []
@@ -60,8 +71,52 @@ export default function AdminSettings() {
   const [isUpdatingIndex, setIsUpdatingIndex] = useState(false);
   const [isMigrating, setIsMigrating] = useState(false);
   const [migrationProgress, setMigrationProgress] = useState(0);
+  const [testingSmtp, setTestingSmtp] = useState(false);
+  const [smtpResult, setSmtpResult] = useState<{ success?: boolean; message?: string } | null>(null);
+
+  const handleTestSmtp = async () => {
+    setTestingSmtp(true);
+    setSmtpResult(null);
+    try {
+      const res = await fetch('/api/email/test-smtp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          resendApiKey: settings.emailSettings?.resendApiKey,
+          host: settings.emailSettings?.smtpHost,
+          port: settings.emailSettings?.smtpPort,
+          secure: settings.emailSettings?.smtpSecure,
+          user: settings.emailSettings?.smtpUser,
+          pass: settings.emailSettings?.smtpPass,
+          senderName: settings.emailSettings?.senderName,
+          senderEmail: settings.emailSettings?.senderEmail,
+          recipientEmail: settings.emailSettings?.senderEmail || settings.emailSettings?.smtpUser || profile?.email,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSmtpResult({ success: false, message: data.error || 'Email connection test failed.' });
+      } else {
+        setSmtpResult({ success: true, message: data.message });
+      }
+    } catch (err: any) {
+      setSmtpResult({ success: false, message: err.message || 'Failed to connect to backend server.' });
+    } finally {
+      setTestingSmtp(false);
+    }
+  };
 
   useEffect(() => {
+    // 1. Load cached settings from localStorage first for instant display
+    try {
+      const cachedStr = localStorage.getItem('cached_app_settings');
+      if (cachedStr) {
+        const parsed = JSON.parse(cachedStr);
+        setSettings(prev => ({ ...prev, ...parsed }));
+        setLoading(false);
+      }
+    } catch (e) {}
+
     const fetchSettings = async () => {
       try {
         const docRef = doc(db, 'settings', 'app_settings');
@@ -73,14 +128,30 @@ export default function AdminSettings() {
           ObjectData = { ...docSnap.data() };
         }
 
-        setSettings({
+        const mergedSettings: AppSettings = {
           ...settings,
           ...ObjectData,
           bankAccounts: ObjectData.bankAccounts || settings.bankAccounts,
           adminTabsOrder: ObjectData.adminTabsOrder || settings.adminTabsOrder,
           hiddenAdminTabs: ObjectData.hiddenAdminTabs || [],
+          emailSettings: {
+            resendApiKey: '',
+            smtpHost: 'smtp.gmail.com',
+            smtpPort: 587,
+            smtpUser: '',
+            smtpPass: '',
+            smtpSecure: false,
+            senderName: 'MovizNow',
+            senderEmail: '',
+            enableWelcomeEmail: true,
+            enableNewContentEmail: true,
+            ...(ObjectData.emailSettings || {})
+          },
           serviceAccounts: ObjectData.serviceAccounts || { sourceKey: '', targets: [] }
-        });
+        };
+
+        setSettings(mergedSettings);
+        localStorage.setItem('cached_app_settings', JSON.stringify(mergedSettings));
       } catch (err) {
         console.error('Error fetching settings:', err);
         setError('Failed to load settings.');
@@ -98,6 +169,8 @@ export default function AdminSettings() {
     setSuccess(false);
 
     try {
+      localStorage.setItem('cached_app_settings', JSON.stringify(settings));
+
       const { writeBatch } = await import('firebase/firestore');
       const batch = writeBatch(db);
       batch.set(doc(db, 'settings', 'app_settings'), settings);
@@ -666,6 +739,238 @@ export default function AdminSettings() {
                 rows={4}
                 className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none resize-none"
               />
+            </div>
+          </div>
+        </div>
+
+        {/* Email Notifications & SMTP Setup */}
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+          <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Mail className="w-5 h-5 text-rose-500" />
+              <div>
+                <h2 className="text-lg font-semibold text-zinc-900 dark:text-white">Email Notifications & Gmail SMTP</h2>
+                <p className="text-xs text-zinc-500">Configure welcome emails and new movie release alerts sent directly to user Gmail addresses.</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-6 space-y-6">
+            {/* Feature Toggles */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700">
+                <div>
+                  <h3 className="font-medium text-zinc-900 dark:text-white">Instant Welcome Email</h3>
+                  <p className="text-xs text-zinc-500">Automatically send a welcome email when a user joins with their email address.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSettings({
+                    ...settings,
+                    emailSettings: {
+                      ...settings.emailSettings,
+                      enableWelcomeEmail: !(settings.emailSettings?.enableWelcomeEmail !== false)
+                    }
+                  })}
+                  className={clsx(
+                    "relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0",
+                    settings.emailSettings?.enableWelcomeEmail !== false ? "bg-rose-500" : "bg-zinc-300 dark:bg-zinc-600"
+                  )}
+                >
+                  <span
+                    className={clsx(
+                      "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                      settings.emailSettings?.enableWelcomeEmail !== false ? "translate-x-6" : "translate-x-1"
+                    )}
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700">
+                <div>
+                  <h3 className="font-medium text-zinc-900 dark:text-white">New Movie "Watch Now" Alerts</h3>
+                  <p className="text-xs text-zinc-500">Allow sending batch email alerts for new and trending releases.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSettings({
+                    ...settings,
+                    emailSettings: {
+                      ...settings.emailSettings,
+                      enableNewContentEmail: !(settings.emailSettings?.enableNewContentEmail !== false)
+                    }
+                  })}
+                  className={clsx(
+                    "relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0",
+                    settings.emailSettings?.enableNewContentEmail !== false ? "bg-rose-500" : "bg-zinc-300 dark:bg-zinc-600"
+                  )}
+                >
+                  <span
+                    className={clsx(
+                      "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                      settings.emailSettings?.enableNewContentEmail !== false ? "translate-x-6" : "translate-x-1"
+                    )}
+                  />
+                </button>
+              </div>
+            </div>
+
+            {/* Resend API Configuration (Primary Anti-Spam Solution) */}
+            <div className="p-4 bg-rose-500/5 dark:bg-rose-950/20 rounded-xl border border-rose-500/20 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-medium text-rose-900 dark:text-rose-200 text-sm flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-rose-500" />
+                  Resend API Integration (Recommended to Avoid Spam)
+                </h3>
+                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                  Best Delivery Rate
+                </span>
+              </div>
+
+              <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                Resend uses authenticated DKIM/SPF domain keys. When an API key is entered below, MovizNow uses Resend to send instant notifications directly to user inboxes (preventing Spam folder placement).
+              </p>
+
+              <div>
+                <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300 block mb-1">
+                  Resend API Key (starts with <code className="text-rose-500">re_</code>)
+                </label>
+                <input
+                  type="password"
+                  value={settings.emailSettings?.resendApiKey || ''}
+                  onChange={(e) => setSettings({
+                    ...settings,
+                    emailSettings: { ...settings.emailSettings, resendApiKey: e.target.value }
+                  })}
+                  placeholder="re_123456789..."
+                  className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-rose-500 outline-none font-mono"
+                />
+                <p className="text-[11px] text-zinc-500 mt-1">
+                  Get a free API key at <a href="https://resend.com" target="_blank" rel="noreferrer" className="text-rose-500 hover:underline">resend.com</a> (Includes 3,000 free emails/month).
+                </p>
+              </div>
+            </div>
+
+            {/* SMTP Server Configuration */}
+            <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-xl border border-zinc-200 dark:border-zinc-700/80 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-medium text-zinc-900 dark:text-white text-sm flex items-center gap-2">
+                  <SettingsIcon className="w-4 h-4 text-zinc-400" />
+                  SMTP Server Credentials (e.g. Gmail / App Password)
+                </h3>
+                <span className="text-[11px] text-zinc-400">Works with Gmail, Outlook, Resend, SendGrid, etc.</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300 block mb-1">SMTP Host</label>
+                  <input
+                    type="text"
+                    value={settings.emailSettings?.smtpHost || 'smtp.gmail.com'}
+                    onChange={(e) => setSettings({
+                      ...settings,
+                      emailSettings: { ...settings.emailSettings, smtpHost: e.target.value }
+                    })}
+                    placeholder="smtp.gmail.com"
+                    className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-rose-500 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300 block mb-1">SMTP Port</label>
+                  <input
+                    type="number"
+                    value={settings.emailSettings?.smtpPort || 587}
+                    onChange={(e) => setSettings({
+                      ...settings,
+                      emailSettings: { ...settings.emailSettings, smtpPort: parseInt(e.target.value) || 587 }
+                    })}
+                    placeholder="587"
+                    className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-rose-500 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300 block mb-1">Gmail / SMTP Username</label>
+                  <input
+                    type="email"
+                    value={settings.emailSettings?.smtpUser || ''}
+                    onChange={(e) => setSettings({
+                      ...settings,
+                      emailSettings: { ...settings.emailSettings, smtpUser: e.target.value }
+                    })}
+                    placeholder="your-email@gmail.com"
+                    className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-rose-500 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300 block mb-1">Gmail App Password / SMTP Password</label>
+                  <input
+                    type="password"
+                    value={settings.emailSettings?.smtpPass || ''}
+                    onChange={(e) => setSettings({
+                      ...settings,
+                      emailSettings: { ...settings.emailSettings, smtpPass: e.target.value }
+                    })}
+                    placeholder="xxxx xxxx xxxx xxxx"
+                    className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-rose-500 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300 block mb-1">Sender Name</label>
+                  <input
+                    type="text"
+                    value={settings.emailSettings?.senderName || 'MovizNow'}
+                    onChange={(e) => setSettings({
+                      ...settings,
+                      emailSettings: { ...settings.emailSettings, senderName: e.target.value }
+                    })}
+                    placeholder="MovizNow Team"
+                    className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-rose-500 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300 block mb-1">Sender Email Address</label>
+                  <input
+                    type="email"
+                    value={settings.emailSettings?.senderEmail || ''}
+                    onChange={(e) => setSettings({
+                      ...settings,
+                      emailSettings: { ...settings.emailSettings, senderEmail: e.target.value }
+                    })}
+                    placeholder="noreply@moviznow.com"
+                    className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-rose-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              {smtpResult && (
+                <div className={clsx(
+                  "p-3 rounded-xl text-xs font-medium flex items-center gap-2",
+                  smtpResult.success ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20" : "bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20"
+                )}>
+                  {smtpResult.success ? <Check className="w-4 h-4 flex-shrink-0" /> : <AlertCircle className="w-4 h-4 flex-shrink-0" />}
+                  <span>{smtpResult.message}</span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between pt-2">
+                <p className="text-[11px] text-zinc-500">
+                  Tip: For Gmail, create an <strong>App Password</strong> in Google Account Security settings.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleTestSmtp}
+                  disabled={testingSmtp}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white rounded-xl text-xs font-medium transition-colors flex items-center gap-2"
+                >
+                  {testingSmtp ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />}
+                  {testingSmtp ? "Testing Connection..." : "Test SMTP Connection"}
+                </button>
+              </div>
             </div>
           </div>
         </div>

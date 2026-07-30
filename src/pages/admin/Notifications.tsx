@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useUsers } from "../../contexts/UsersContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import {
@@ -13,7 +13,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../../firebase";
 import { AppNotification, NotificationTemplate, UserProfile } from "../../types";
-import { Bell, Trash2, Search, Calendar, Loader2, Plus, Send, User, Users, FileText, X, ChevronRight, Edit2, ExternalLink, Info, Check, Clock } from "lucide-react";
+import { Bell, Trash2, Search, Calendar, Loader2, Plus, Send, User, Users, FileText, X, ChevronRight, Edit2, ExternalLink, Info, Check, Clock, Mail, RefreshCw } from "lucide-react";
 import { format, isToday, formatDistanceToNow } from "date-fns";
 import ConfirmModal from "../../components/ConfirmModal";
 import { useModalBehavior } from "../../hooks/useModalBehavior";
@@ -35,7 +35,31 @@ const USER_CACHE_KEY = 'moviznow_admin_user_cache';
 const USER_CACHE_EXPIRY = 1000 * 60 * 60; // 1 hour
 
 export default function Notifications() {
-  const { users: allUsers } = useUsers();
+  const { users: rawAllUsers, refreshUsers } = useUsers();
+
+  // Deduplicate allUsers strictly by uid to avoid duplicate rows
+  const allUsers = useMemo(() => {
+    const map = new Map<string, UserProfile>();
+    (rawAllUsers || []).forEach(u => {
+      if (u && u.uid && !map.has(u.uid)) {
+        map.set(u.uid, u);
+      }
+    });
+    return Array.from(map.values());
+  }, [rawAllUsers]);
+
+  const [isRefreshingUsers, setIsRefreshingUsers] = useState(false);
+
+  const handleRefreshUsers = useCallback(async () => {
+    setIsRefreshingUsers(true);
+    try {
+      await refreshUsers(true);
+    } catch (e) {
+      console.error("Error refreshing users:", e);
+    } finally {
+      setIsRefreshingUsers(false);
+    }
+  }, [refreshUsers]);
   const { 
     notifications, 
     sendNotification, 
@@ -74,7 +98,9 @@ export default function Notifications() {
     targetUserNames: [] as string[],
     buttonLabel: '',
     buttonUrl: '',
-    useCustomLink: false
+    useCustomLink: false,
+    sendFcm: true,
+    sendEmail: true
   });
   const [userSearchTerm, setUserSearchTerm] = useState("");
   const [userSearchResults, setUserSearchResults] = useState<UserProfile[]>([]);
@@ -190,8 +216,14 @@ export default function Notifications() {
 
   const handleSendNotification = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!sendForm.sendFcm && !sendForm.sendEmail) return;
+
     setProcessing(prev => ({ ...prev, send: true }));
+    let emailStatusMessage = "";
+    let emailErrorMessage = "";
+
     try {
+      // 1. Create In-App Notification Record (so it shows in Notifications history tab & user feed)
       const notificationData: any = {
         title: sendForm.title,
         body: sendForm.body,
@@ -209,21 +241,87 @@ export default function Notifications() {
 
       await sendNotification(notificationData);
 
-      // Send push notification via API
-      try {
-        await fetch('/api/notifications/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title: sendForm.title,
-            body: sendForm.body,
-            targetUserIds: sendForm.targetType === 'specific' ? sendForm.targetUserIds : undefined,
-            buttonLabel: sendForm.buttonLabel,
-            buttonUrl: sendForm.buttonUrl
-          })
-        });
-      } catch (fcmError) {
-        console.warn("FCM Send failed, but stored in Firestore", fcmError);
+      // Send push notification via API if FCM enabled
+      if (sendForm.sendFcm) {
+        try {
+          await fetch('/api/notifications/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: sendForm.title,
+              body: sendForm.body,
+              targetUserIds: sendForm.targetType === 'specific' ? sendForm.targetUserIds : undefined,
+              buttonLabel: sendForm.buttonLabel,
+              buttonUrl: sendForm.buttonUrl
+            })
+          });
+        } catch (fcmError) {
+          console.warn("FCM Send failed, but stored in Firestore", fcmError);
+        }
+      }
+
+      // 2. Send Email Notification if enabled
+      if (sendForm.sendEmail) {
+        try {
+          let targetEmails: string[] | undefined;
+          if (sendForm.targetType === 'specific' && sendForm.targetUserIds.length > 0) {
+            targetEmails = allUsers
+              .filter(u => sendForm.targetUserIds.includes(u.uid) && u.email)
+              .map(u => u.email)
+              .filter((e): e is string => !!e && typeof e === 'string' && e.includes('@'));
+
+            if (!targetEmails) {
+              targetEmails = []; // Always provide an array if 'specific' to prevent fallback to ALL users
+            }
+          } else {
+            // Target all users - collect all valid user emails from current users list
+            const userEmails = allUsers
+              .map(u => u.email)
+              .filter((e): e is string => !!e && typeof e === 'string' && e.includes('@'));
+            targetEmails = userEmails;
+          }
+
+          const cachedSettingsStr = localStorage.getItem("cached_app_settings");
+          let localEmailSettings = null;
+          if (cachedSettingsStr) {
+            try {
+              const parsedSettings = JSON.parse(cachedSettingsStr);
+              if (parsedSettings.emailSettings) {
+                localEmailSettings = parsedSettings.emailSettings;
+              }
+            } catch (e) {}
+          }
+
+          const res = await fetch('/api/email/send-movie-notification', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: sendForm.title,
+              description: sendForm.body,
+              customMessage: sendForm.body,
+              targetEmails,
+              smtpSettings: localEmailSettings || undefined,
+              appUrl: window.location.origin,
+              isManual: true
+            })
+          });
+
+          const data = await res.json();
+          if (!res.ok) {
+            emailErrorMessage = data.error || "Failed to deliver Gmail notification.";
+          } else {
+            emailStatusMessage = data.message || "Email notification sent successfully.";
+          }
+        } catch (emailErr: any) {
+          console.warn("Email notification trigger failed:", emailErr);
+          emailErrorMessage = emailErr.message || "Failed to trigger email notification.";
+        }
+      }
+
+      if (emailErrorMessage) {
+        alert(`⚠️ Notification sent in-app, but Email Alert failed:\n${emailErrorMessage}`);
+      } else if (sendForm.sendEmail && emailStatusMessage) {
+        alert(`✅ Notification Sent Successfully!\n${emailStatusMessage}`);
       }
 
       setIsSendModalOpen(false);
@@ -235,10 +333,13 @@ export default function Notifications() {
         targetUserNames: [],
         buttonLabel: '',
         buttonUrl: '',
-        useCustomLink: false
+        useCustomLink: false,
+        sendFcm: true,
+        sendEmail: true
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error sending notification:", error);
+      alert(`Error sending notification: ${error.message || 'Unknown error'}`);
     } finally {
       setProcessing(prev => ({ ...prev, send: false }));
     }
@@ -261,7 +362,7 @@ export default function Notifications() {
         usersToAdd = allUsers.filter(u => u.role === 'user');
         break;
       case 'selected_content':
-        usersToAdd = allUsers.filter(u => u.assignedContent && u.assignedContent.length > 0);
+        usersToAdd = allUsers.filter(u => u.role === 'selected_content');
         break;
     }
 
@@ -499,7 +600,9 @@ export default function Notifications() {
                             targetUserNames: [],
                             buttonLabel: template.buttonLabel || '',
                             buttonUrl: template.buttonUrl || '',
-                            useCustomLink: !!template.buttonUrl
+                            useCustomLink: !!template.buttonUrl,
+                            sendFcm: true,
+                            sendEmail: true
                           });
                           setIsSendModalOpen(true);
                         }}
@@ -575,6 +678,16 @@ export default function Notifications() {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-zinc-500 uppercase">Target Users ({sendForm.targetUserIds.length})</label>
+                <button
+                  type="button"
+                  onClick={handleRefreshUsers}
+                  disabled={isRefreshingUsers}
+                  className="flex items-center gap-1.5 text-xs font-bold text-blue-500 hover:text-blue-600 disabled:opacity-50 transition-colors"
+                  title="Fetch latest user list from database"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingUsers ? 'animate-spin' : ''}`} />
+                  {isRefreshingUsers ? "Refreshing..." : "Sync Users"}
+                </button>
               </div>
               
               <div className="flex flex-wrap gap-2 mb-2">
@@ -700,7 +813,7 @@ export default function Notifications() {
                             className="w-full flex items-center gap-3 p-3 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors text-left border-b border-zinc-100 dark:border-zinc-800 last:border-0"
                           >
                             <div className="w-8 h-8 bg-zinc-100 dark:bg-zinc-800 rounded-full flex items-center justify-center text-zinc-500 font-bold">
-                              {(u.displayName || u.email)[0].toUpperCase()}
+                              {(u.displayName || u.email || 'User')[0]?.toUpperCase() || 'U'}
                             </div>
                             <div className="flex-1">
                               <div className="font-bold text-sm text-zinc-900 dark:text-white">{u.displayName || 'No Name'}</div>
@@ -746,6 +859,48 @@ export default function Notifications() {
               className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 resize-none"
               placeholder="What would you like to say?"
             />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-zinc-500 uppercase">Delivery Methods (Send via One or Both)</label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* FCM Push Notification Toggle */}
+              <div 
+                onClick={() => setSendForm(prev => ({ ...prev, sendFcm: !prev.sendFcm }))}
+                className={`p-3 rounded-xl border transition-all cursor-pointer ${sendForm.sendFcm ? 'bg-blue-500/10 border-blue-500/40 text-blue-600 dark:text-blue-400' : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-500'}`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    <Bell className={`w-4 h-4 ${sendForm.sendFcm ? 'text-blue-500' : 'text-zinc-400'}`} />
+                    <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100">FCM Push Notification</span>
+                  </div>
+                  <div className={`w-8 h-4 rounded-full transition-colors relative ${sendForm.sendFcm ? 'bg-blue-500' : 'bg-zinc-300 dark:bg-zinc-700'}`}>
+                    <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${sendForm.sendFcm ? 'left-4.5' : 'left-0.5'}`} />
+                  </div>
+                </div>
+                <p className="text-[10px] text-zinc-500 leading-tight">In-app feed alert & web push popups</p>
+              </div>
+
+              {/* Email Alert Toggle */}
+              <div 
+                onClick={() => setSendForm(prev => ({ ...prev, sendEmail: !prev.sendEmail }))}
+                className={`p-3 rounded-xl border transition-all cursor-pointer ${sendForm.sendEmail ? 'bg-rose-500/10 border-rose-500/40 text-rose-600 dark:text-rose-400' : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-500'}`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    <Mail className={`w-4 h-4 ${sendForm.sendEmail ? 'text-rose-500' : 'text-zinc-400'}`} />
+                    <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100">Gmail Email Alert</span>
+                  </div>
+                  <div className={`w-8 h-4 rounded-full transition-colors relative ${sendForm.sendEmail ? 'bg-rose-500' : 'bg-zinc-300 dark:bg-zinc-700'}`}>
+                    <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${sendForm.sendEmail ? 'left-4.5' : 'left-0.5'}`} />
+                  </div>
+                </div>
+                <p className="text-[10px] text-zinc-500 leading-tight">Branded email to database addresses</p>
+              </div>
+            </div>
+            {!sendForm.sendFcm && !sendForm.sendEmail && (
+              <p className="text-[11px] text-amber-500 font-bold mt-1">⚠️ Please enable at least one delivery method (FCM Push or Email).</p>
+            )}
           </div>
 
           <div className="space-y-3 p-4 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl">
@@ -811,7 +966,7 @@ export default function Notifications() {
               type="submit"
               variant="blue"
               className="flex-1 flex items-center justify-center gap-2"
-              disabled={processing.send || (sendForm.targetType === 'specific' && sendForm.targetUserIds.length === 0)}
+              disabled={processing.send || (sendForm.targetType === 'specific' && sendForm.targetUserIds.length === 0) || (!sendForm.sendFcm && !sendForm.sendEmail)}
             >
               {processing.send ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
               Send to {sendForm.targetType === 'all' ? 'All' : sendForm.targetUserIds.length} Users

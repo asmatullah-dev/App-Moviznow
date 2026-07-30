@@ -23,7 +23,19 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
   const { profile } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>(() => {
     const cached = safeStorage.getItem('cached_all_users');
-    return cached ? JSON.parse(cached) : [];
+    if (!cached) return [];
+    try {
+      const parsed: UserProfile[] = JSON.parse(cached);
+      const uniqueMap = new Map<string, UserProfile>();
+      parsed.forEach(u => {
+        if (u && u.uid && !uniqueMap.has(u.uid)) {
+          uniqueMap.set(u.uid, u);
+        }
+      });
+      return Array.from(uniqueMap.values());
+    } catch (e) {
+      return [];
+    }
   });
   const [loading, setLoading] = useState(() => {
     const cached = safeStorage.getItem('cached_all_users');
@@ -164,13 +176,18 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       let currentUsers = [...locallyCachedUsers];
       let { getDocs, query, collection, where, documentId } = await import('firebase/firestore');
 
-      if (currentUsers.length === 0) {
-        // Fallback: If local cache is empty for some reason, do a full pull.
+      if (force || currentUsers.length === 0) {
+        // Full pull when forced or when local cache is empty
         try {
           updatedSomething = true;
           const q = query(collection(db, 'users'));
           const snapshot = await getDocs(q);
-          currentUsers = snapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id })) as UserProfile[];
+          const rawFetched = snapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id })) as UserProfile[];
+          const uMap = new Map<string, UserProfile>();
+          rawFetched.forEach(u => {
+            if (u && u.uid) uMap.set(u.uid, u);
+          });
+          currentUsers = Array.from(uMap.values());
         } catch (err) {
           handleFirestoreError(err, OperationType.LIST, 'users');
           throw err;

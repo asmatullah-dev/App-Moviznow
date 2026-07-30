@@ -149,6 +149,7 @@ export default function ReferralsManagement() {
         const referredUsers = Object.values(ref.joins || {}).map((j: any) => ({
           uid: j.uid,
           email: j.email,
+          phone: j.phone || '',
           displayName: j.displayName,
           createdAt: j.createdAt,
           status: j.status,
@@ -160,6 +161,7 @@ export default function ReferralsManagement() {
         return {
           uid: ref.uid,
           email: user.email || '',
+          phone: user.phone || '',
           displayName: user.displayName || '',
           photoURL: user.photoURL || null,
           referralCode: ref.code || user.referralCode || '',
@@ -370,8 +372,8 @@ export default function ReferralsManagement() {
                           )}
                         </div>
                         <div className="flex flex-col">
-                          <span className="font-bold text-sm">{inviter.displayName || 'No Name'}</span>
-                          <span className="text-xs text-zinc-500">{inviter.email}</span>
+                          <span className="font-bold text-sm">{inviter.displayName?.trim() || (inviter.phone ? `User (${inviter.phone})` : 'User')}</span>
+                          <span className="text-xs text-zinc-500">{inviter.email && !inviter.email.endsWith('@moviznow.com') ? inviter.email : (inviter.phone ? `${inviter.phone} (Phone)` : 'No Email')}</span>
                         </div>
                       </div>
                     </td>
@@ -425,7 +427,7 @@ export default function ReferralsManagement() {
                                           <UserIcon className="w-4 h-4 text-zinc-400" />
                                         </div>
                                         <div className="flex items-center gap-1.5 group/info relative">
-                                          <span className="text-xs font-bold truncate max-w-[120px]">{refUser.email}</span>
+                                          <span className="text-xs font-bold truncate max-w-[120px]">{refUser.displayName?.trim() || (refUser.email && !refUser.email.endsWith('@moviznow.com') ? refUser.email : (refUser.phone || 'User'))}</span>
                                           <Info className="w-3.5 h-3.5 text-zinc-400 cursor-help" />
                                           <div className="absolute left-0 bottom-full mb-2 hidden group-hover/info:block z-50 bg-zinc-900 text-white text-[10px] p-2 rounded-lg shadow-xl border border-zinc-700 w-40 pointer-events-none">
                                             <div className="space-y-1">

@@ -67,6 +67,7 @@ import {
   ClipboardPaste,
   GripVertical,
   Bell,
+  Mail,
   RefreshCw,
   ChevronDown,
   ChevronUp,
@@ -185,6 +186,29 @@ const extractMediaUrls = (content: Content): string[] => {
   return urls;
 };
 
+const isExtractableLink = (url: string) => {
+  if (!url) return false;
+  const l = url.toLowerCase();
+  return (
+    l.includes("hubcloud") ||
+    l.includes("hubcould") ||
+    l.includes("vcloud") ||
+    l.includes("hubdrive") ||
+    l.includes("moviesdrive") ||
+    l.includes("skymovies") ||
+    l.includes("mdrive") ||
+    l.includes("filmygo") ||
+    l.includes("gadgetsyn") ||
+    l.includes("techy") ||
+    l.includes("drivehub") ||
+    l.includes("gdflix") ||
+    l.includes("filepress") ||
+    l.includes("fastdl") ||
+    l.includes("filesdl") ||
+    l.includes("linkmake")
+  );
+};
+
 interface ContentCardProps {
   content: Content;
   profile: any;
@@ -208,6 +232,13 @@ interface ContentCardProps {
     isOpen: boolean;
     content: Content | null;
     status: "idle" | "sending" | "success" | "error";
+  }) => void;
+  setEmailModal?: (modal: {
+    isOpen: boolean;
+    content: Content | null;
+    customMessage: string;
+    status: "idle" | "sending" | "success" | "error";
+    resultMessage: string;
   }) => void;
   setActiveDropdownId: (id: string | null) => void;
   dropdownPos: { id: string; topStr: string; bottomStr: string; leftStr: string; maxHeightStr: string; alignBottom: boolean; alignRight: boolean } | null;
@@ -238,6 +269,7 @@ const ContentCard = memo(
     onTelegramDownload,
     setDeleteId,
     setNotificationModal,
+    setEmailModal,
     isActiveDropdown,
     setActiveDropdownId,
     dropdownPos,
@@ -551,7 +583,25 @@ const ContentCard = memo(
                         }}
                         className="w-full flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 text-sm text-blue-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left"
                       >
-                        <Bell className="w-4 h-4" /> Send Notification
+                        <Bell className="w-4 h-4" /> Send Push Notification
+                      </button>
+                    )}
+                    {(profile?.role === "admin" ||
+                      profile?.role === "owner") && (
+                      <button
+                        onClick={() => {
+                          setEmailModal?.({
+                            isOpen: true,
+                            content,
+                            customMessage: "",
+                            status: "idle",
+                            resultMessage: "",
+                          });
+                          setActiveDropdownId(null);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 text-sm text-rose-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-left font-medium"
+                      >
+                        <Mail className="w-4 h-4 text-rose-500" /> Send Email Alert
                       </button>
                     )}
                     {(profile?.role === "admin" ||
@@ -1029,6 +1079,19 @@ export default function ContentManagement() {
     content: Content | null;
     status: "idle" | "sending" | "success" | "error";
   }>({ isOpen: false, content: null, status: "idle" });
+  const [emailModal, setEmailModal] = useState<{
+    isOpen: boolean;
+    content: Content | null;
+    customMessage: string;
+    status: "idle" | "sending" | "success" | "error";
+    resultMessage: string;
+  }>({
+    isOpen: false,
+    content: null,
+    customMessage: "",
+    status: "idle",
+    resultMessage: "",
+  });
   const [shareResultModal, setShareResultModal] = useState<{
     isOpen: boolean;
     text: string;
@@ -1075,6 +1138,15 @@ export default function ContentManagement() {
   );
   useModalBehavior(notificationModal.isOpen, () =>
     setNotificationModal({ isOpen: false, content: null, status: "idle" }),
+  );
+  useModalBehavior(emailModal.isOpen, () =>
+    setEmailModal({
+      isOpen: false,
+      content: null,
+      customMessage: "",
+      status: "idle",
+      resultMessage: "",
+    }),
   );
   useModalBehavior(shareResultModal.isOpen, () =>
     setShareResultModal({ ...shareResultModal, isOpen: false }),
@@ -2134,7 +2206,8 @@ export default function ContentManagement() {
   const applyFetchedData = (data: any) => {
     if (data.title !== undefined) setTitle(data.title);
     if (data.secondTitle !== undefined || data.altTitle !== undefined) {
-      setSecondTitle(data.secondTitle || data.altTitle || "");
+      const sec = data.secondTitle || data.altTitle || "";
+      setSecondTitle(sec && isRomanized(sec) ? sec : "");
     }
     if (data.year) {
       const parsedYear = parseInt(data.year.toString());
@@ -2400,6 +2473,128 @@ export default function ContentManagement() {
     }
   };
 
+  const handleSendEmailToAll = async () => {
+    if (!emailModal.content) return;
+
+    setEmailModal((prev) => ({ ...prev, status: "sending" }));
+
+    try {
+      const content = emailModal.content;
+
+      // 1. Fetch description automatically if missing from media modal / TMDB details
+      let finalDescription = content.description || "";
+      if (!finalDescription.trim()) {
+        try {
+          const tmdbType = content.type === "series" ? "tv" : "movie";
+          const itemAny = content as any;
+          if (itemAny.tmdbId) {
+            const details = await fetchTMDBDetails(itemAny.tmdbId, tmdbType);
+            if (details && details.overview) {
+              finalDescription = details.overview;
+            }
+          } else if (itemAny.imdbId) {
+            const tmdbRes = await findTMDBByImdb(itemAny.imdbId);
+            const tmdbId = tmdbRes?.item?.id || (tmdbRes as any)?.id;
+            if (tmdbId) {
+              const details = await fetchTMDBDetails(tmdbId, tmdbType);
+              if (details && details.overview) {
+                finalDescription = details.overview;
+              }
+            }
+          }
+
+          if (!finalDescription.trim() && content.title) {
+            const searchResults = await searchTMDBByTitle(content.title, tmdbType);
+            if (searchResults && searchResults.length > 0) {
+              const firstItem = searchResults[0]?.item || searchResults[0];
+              if (firstItem && firstItem.id) {
+                const details = await fetchTMDBDetails(firstItem.id, tmdbType);
+                if (details && details.overview) {
+                  finalDescription = details.overview;
+                }
+              }
+            }
+          }
+        } catch (tmdbErr) {
+          console.warn("Could not auto-fetch missing description:", tmdbErr);
+        }
+      }
+
+      // 2. Load cached users and email settings from localStorage / local state
+      const cachedUsersStr = localStorage.getItem("cached_all_users");
+      let localUserEmails: string[] = [];
+      if (allUsers && allUsers.length > 0) {
+        localUserEmails = allUsers.map((u: any) => u.email).filter((e: string) => e && e.includes("@"));
+      } else if (cachedUsersStr) {
+        try {
+          const parsedUsers = JSON.parse(cachedUsersStr);
+          localUserEmails = parsedUsers.map((u: any) => u.email).filter((e: string) => e && e.includes("@"));
+        } catch (e) {}
+      }
+
+      const cachedSettingsStr = localStorage.getItem("cached_app_settings");
+      let localEmailSettings = null;
+      if (cachedSettingsStr) {
+        try {
+          const parsedSettings = JSON.parse(cachedSettingsStr);
+          if (parsedSettings.emailSettings) {
+            localEmailSettings = parsedSettings.emailSettings;
+          }
+        } catch (e) {}
+      }
+
+      const res = await fetch("/api/email/send-movie-notification", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          contentId: content.id,
+          title: content.title,
+          secondTitle: content.secondTitle,
+          posterUrl: content.posterUrl,
+          description: finalDescription,
+          year: content.year,
+          type: content.type,
+          customMessage: emailModal.customMessage,
+          appUrl: window.location.origin,
+          targetEmails: localUserEmails.length > 0 ? localUserEmails : undefined,
+          smtpSettings: localEmailSettings || undefined,
+          isManual: true,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to send email notification.");
+      }
+
+      setEmailModal((prev) => ({
+        ...prev,
+        status: "success",
+        resultMessage: data.message || `Email alert sent to ${data.count || "all"} user(s)!`,
+      }));
+
+      setTimeout(() => {
+        setEmailModal({
+          isOpen: false,
+          content: null,
+          customMessage: "",
+          status: "idle",
+          resultMessage: "",
+        });
+      }, 3000);
+    } catch (error: any) {
+      console.error("Error sending email notification:", error);
+      setEmailModal((prev) => ({
+        ...prev,
+        status: "error",
+        resultMessage: error.message || "Failed to send email notification.",
+      }));
+    }
+  };
+
   const handleAddToSpecialCollection = async (
     contentId: string,
     type: "trending" | "newly_added",
@@ -2556,12 +2751,7 @@ export default function ContentManagement() {
               return { ...link, url: "", tinyUrl: "" };
             }
             let extractedUrl = link.url;
-            if (
-              extractedUrl.includes("hubcloud") ||
-              
-              extractedUrl.includes("vcloud") ||
-              extractedUrl.includes("hubdrive")
-            ) {
+            if (isExtractableLink(extractedUrl)) {
               for (let attempt = 1; attempt <= 3; attempt++) {
                 let currentExtracted = false;
                 try {
@@ -2623,7 +2813,7 @@ export default function ContentManagement() {
 
           if (newContent.sampleUrl) {
              let processedSampleUrl = newContent.sampleUrl;
-             if (processedSampleUrl.includes("hubcloud") ||  processedSampleUrl.includes("vcloud") || processedSampleUrl.includes("hubdrive")) {
+             if (isExtractableLink(processedSampleUrl)) {
                 try {
                   const res = await fetch("/api/hubcloud/direct-link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: processedSampleUrl }) });
                   if (res.ok) {
@@ -2654,17 +2844,20 @@ export default function ContentManagement() {
               if (selectedSeasonNumbers && !selectedSeasonNumbers.includes(season.seasonNumber)) {
                  continue;
               }
-              if (season.zipLinks) {
-                linkPromises.push((async () => { season.zipLinks = await Promise.all(season.zipLinks!.map(processLink)); })());
+              const zipLinks = parseLinks(JSON.stringify(season.zipLinks || []));
+              if (zipLinks.length > 0) {
+                linkPromises.push((async () => { season.zipLinks = await Promise.all(zipLinks.map(processLink)); })());
               }
-              if (season.mkvLinks) {
-                linkPromises.push((async () => { season.mkvLinks = await Promise.all(season.mkvLinks!.map(processLink)); })());
+              const mkvLinks = parseLinks(JSON.stringify(season.mkvLinks || []));
+              if (mkvLinks.length > 0) {
+                linkPromises.push((async () => { season.mkvLinks = await Promise.all(mkvLinks.map(processLink)); })());
               }
-              if (season.episodes) {
+              if (season.episodes && Array.isArray(season.episodes)) {
                 for (let e = 0; e < season.episodes.length; e++) {
                   const ep = season.episodes[e];
-                  if (ep.links) {
-                    linkPromises.push((async () => { ep.links = await Promise.all(ep.links.map(processLink)); })());
+                  const epLinks = parseLinks(JSON.stringify(ep.links || []));
+                  if (epLinks.length > 0) {
+                    linkPromises.push((async () => { ep.links = await Promise.all(epLinks.map(processLink)); })());
                   }
                 }
               }
@@ -2877,7 +3070,117 @@ export default function ContentManagement() {
       const parts = [origin, contentGenres, typeStr].filter(Boolean);
       const partsStr = parts.join(" ");
       const displaySecondTitle = content.secondTitle && content.secondTitle.toLowerCase() !== content.title.toLowerCase() && isRomanized(content.secondTitle) ? ` – ${content.secondTitle}` : "";
-      text = `*${content.title}${displaySecondTitle} ${content.year || ""}*\n${partsStr}\n\n`;
+      text = `*${content.title}${displaySecondTitle} ${content.year || ""}*\n${partsStr}`;
+
+      if (content.type === "movie" && content.movieLinks) {
+        const links: QualityLinks = parseLinks(content.movieLinks);
+        const sortedLinks = [...links].filter((l) => l && l.url).sort((a, b) => {
+          const pA = (l: LinkDef) => {
+            const lName = (l.name || "").toLowerCase();
+            const lUrl = (l.url || "").toLowerCase();
+            if (lName.includes("pixeldrain") || lUrl.includes("pixeldrain")) return 1;
+            if (lName.includes("fsl") || lUrl.includes("fsl") || lName.includes("server 2") || lName.includes("server2")) return 2;
+            return 3;
+          };
+          const pDiff = pA(a) - pA(b);
+          if (pDiff !== 0) return pDiff;
+          return getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit);
+        });
+
+        if (sortedLinks.length > 0) {
+          text += `\n\n📥 *Download Links:*\n`;
+          sortedLinks.forEach((l) => {
+            const finalUrl = l.tinyUrl || l.url;
+            if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
+              text += `▪️ ${l.name} (${l.size}${l.unit})\n${finalUrl}\n`;
+            }
+          });
+        }
+      } else if (content.type === "series" && content.seasons) {
+        const parsedSeasons: Season[] = Array.isArray(content.seasons)
+          ? content.seasons
+          : JSON.parse(content.seasons || "[]");
+        const seasonsToShare = selectedSeasonNumbers
+          ? parsedSeasons.filter((s) =>
+              selectedSeasonNumbers.includes(s.seasonNumber),
+            )
+          : parsedSeasons;
+
+        seasonsToShare.forEach((season) => {
+          text += `\n\n📺 *Season ${season.seasonNumber}${season.year ? ` (${season.year})` : content.year ? ` (${content.year})` : ""}*\n`;
+          const zipLinks = parseLinks(JSON.stringify(season.zipLinks || []))
+            .filter((l) => l && l.url);
+          const mkvLinks = parseLinks(JSON.stringify(season.mkvLinks || []))
+            .filter((l) => l && l.url);
+
+          if (zipLinks.length > 0) {
+            text += `📦 *Full Season ZIP:*\n`;
+            zipLinks.forEach((link) => {
+              const finalUrl = link.tinyUrl || link.url;
+              if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
+                text += `  ▪️ ${link.name} (${link.size}${link.unit})\n  ${finalUrl}\n`;
+              }
+            });
+          }
+          if (mkvLinks.length > 0) {
+            text += `\n🎞️ *Full Season MKV:*\n`;
+            mkvLinks.forEach((link) => {
+              const finalUrl = link.tinyUrl || link.url;
+              if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
+                text += `  ▪️ ${link.name} (${link.size}${link.unit})\n  ${finalUrl}\n`;
+              }
+            });
+          }
+          if (season.episodes && season.episodes.length > 0) {
+            const allEpLinks = season.episodes.flatMap((ep) =>
+              parseLinks(JSON.stringify(ep.links || [])).filter((l) => l && l.url),
+            );
+            const uniqueQualities = [...new Set(allEpLinks.map((l) => l.name))];
+            const hasUniformQuality =
+              uniqueQualities.length === 1 &&
+              allEpLinks.length === season.episodes.length &&
+              season.episodes.every(
+                (ep) =>
+                  parseLinks(JSON.stringify(ep.links || [])).filter((l) => l && l.url)
+                    .length === 1,
+              );
+
+            if (hasUniformQuality) {
+              text += `\n🎬 *Episodes (${uniqueQualities[0]}):*\n`;
+              season.episodes.forEach((ep) => {
+                const link = parseLinks(JSON.stringify(ep.links || [])).find(
+                  (l) => l && l.url,
+                );
+                if (link) {
+                  const finalUrl = link.tinyUrl || link.url;
+                  if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
+                    text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""} (${link.size}${link.unit})\n${finalUrl}\n`;
+                  }
+                }
+              });
+            } else {
+              text += `\n🎬 *Episodes:*\n`;
+              season.episodes.forEach((ep) => {
+                text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}\n`;
+                const epLinks = parseLinks(JSON.stringify(ep.links || [])).filter((l) => l && l.url);
+                epLinks.forEach((link) => {
+                  const finalUrl = link.tinyUrl || link.url;
+                  if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
+                    text += `- ${link.name} (${link.size}${link.unit})\n${finalUrl}\n`;
+                  }
+                });
+              });
+            }
+          }
+        });
+      }
+
+      text += `\n\n🍿 Enjoy watching on ${settings?.headerText || "MovizNow"}!\n`;
+      text += `🔗 Watch here: MovizNow.com/${content.id}\n`;
+      let sn = settings?.supportNumber || "3363284466";
+      if (sn.startsWith("92")) sn = "0" + sn.substring(2);
+      else if (!sn.startsWith("0")) sn = "0" + sn;
+      text += `📞 WhatsApp: ${sn}`;
       text = text.trim();
 
       let files: File[] = [];
@@ -2997,7 +3300,7 @@ export default function ContentManagement() {
 
     let processedSampleUrl = content.sampleUrl;
 
-    if (processedSampleUrl && (processedSampleUrl.includes("hubcloud") ||  processedSampleUrl.includes("vcloud") || processedSampleUrl.includes("hubdrive"))) {
+    if (processedSampleUrl && isExtractableLink(processedSampleUrl)) {
       let sampleExtractionSuccess = false;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
@@ -3059,13 +3362,8 @@ export default function ContentManagement() {
 
       let extractedUrl = link.url;
       
-      // Extract HubCloud links
-      if (
-        extractedUrl.includes("hubcloud") ||
-        
-        extractedUrl.includes("vcloud") ||
-        extractedUrl.includes("hubdrive")
-      ) {
+      // Extract HubCloud and mirror links
+      if (isExtractableLink(extractedUrl)) {
         for (let attempt = 1; attempt <= 3; attempt++) {
           let currentExtracted = false;
           try {
@@ -3203,34 +3501,37 @@ export default function ContentManagement() {
       for (let s = 0; s < seasonsToShare.length; s++) {
         const season = seasonsToShare[s];
 
-        if (season.zipLinks) {
+        const zipLinks = parseLinks(JSON.stringify(season.zipLinks || []));
+        if (zipLinks.length > 0) {
           linkPromises.push(
             (async () => {
               const processed = await Promise.all(
-                season.zipLinks!.map(processLink),
+                zipLinks.map(processLink),
               );
               season.zipLinks = processed;
             })(),
           );
         }
-        if (season.mkvLinks) {
+        const mkvLinks = parseLinks(JSON.stringify(season.mkvLinks || []));
+        if (mkvLinks.length > 0) {
           linkPromises.push(
             (async () => {
               const processed = await Promise.all(
-                season.mkvLinks!.map(processLink),
+                mkvLinks.map(processLink),
               );
               season.mkvLinks = processed;
             })(),
           );
         }
-        if (season.episodes) {
+        if (season.episodes && Array.isArray(season.episodes)) {
           for (let e = 0; e < season.episodes.length; e++) {
             const ep = season.episodes[e];
-            if (ep.links) {
+            const epLinks = parseLinks(JSON.stringify(ep.links || []));
+            if (epLinks.length > 0) {
               linkPromises.push(
                 (async () => {
                   const processed = await Promise.all(
-                    ep.links.map(processLink),
+                    epLinks.map(processLink),
                   );
                   ep.links = processed;
                 })(),
@@ -5684,6 +5985,7 @@ export default function ContentManagement() {
                 onTelegramDownload={setTelegramDownloadContent}
                 setDeleteId={setDeleteId}
                 setNotificationModal={setNotificationModal}
+                setEmailModal={setEmailModal}
                 setActiveDropdownId={setActiveDropdownId}
                 dropdownPos={dropdownPos}
                 setDropdownPos={setDropdownPos}
@@ -6548,6 +6850,161 @@ export default function ContentManagement() {
                     })
                   }
                   className="bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-6 py-2 rounded-xl font-bold transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {emailModal.isOpen && emailModal.content && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+          <div className="bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-6 max-w-md w-full border border-zinc-200 dark:border-zinc-800 shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold flex items-center gap-2 text-zinc-900 dark:text-white">
+                <Mail className="w-6 h-6 text-rose-500" />
+                Send Email to All Users
+              </h2>
+              <button
+                onClick={() =>
+                  setEmailModal({
+                    isOpen: false,
+                    content: null,
+                    customMessage: "",
+                    status: "idle",
+                    resultMessage: "",
+                  })
+                }
+                className="p-1 rounded-lg text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-white dark:bg-zinc-950 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 mb-4 flex gap-4">
+              {emailModal.content.posterUrl && (
+                <img
+                  src={emailModal.content.posterUrl}
+                  alt="Poster"
+                  className="w-16 h-24 object-cover rounded-md shrink-0 border border-zinc-200 dark:border-zinc-800"
+                  referrerPolicy="no-referrer"
+                />
+              )}
+              <div className="flex-1 min-w-0">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-rose-500 bg-rose-500/10 px-2 py-0.5 rounded">
+                  {emailModal.content.type === "series" ? "TV Series" : "Movie"}
+                </span>
+                <h3 className="font-bold text-zinc-900 dark:text-white mt-1 mb-0.5 line-clamp-1">
+                  {emailModal.content.title} {emailModal.content.year ? `(${emailModal.content.year})` : ""}
+                </h3>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 line-clamp-2">
+                  {emailModal.content.description || "No description provided."}
+                </p>
+              </div>
+            </div>
+
+            {emailModal.status === "idle" && (
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label className="block text-xs font-bold text-zinc-500 uppercase mb-1.5">
+                    Optional Custom Message / Note
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={emailModal.customMessage}
+                    onChange={(e) =>
+                      setEmailModal((prev) => ({
+                        ...prev,
+                        customMessage: e.target.value,
+                      }))
+                    }
+                    placeholder="e.g. Watch in 4K Ultra HD print now available! Special weekend release..."
+                    className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-rose-500 resize-none"
+                  />
+                </div>
+                <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-600 dark:text-rose-400">
+                  📧 This will send a styled release email for <strong>{emailModal.content.title}</strong> to every user email address registered in the database.
+                </div>
+              </div>
+            )}
+
+            {emailModal.status === "sending" && (
+              <div className="flex flex-col items-center justify-center py-6">
+                <Loader2 className="w-10 h-10 animate-spin text-rose-500 mb-4" />
+                <p className="text-rose-500 font-medium">
+                  Sending release email to all database users...
+                </p>
+              </div>
+            )}
+
+            {emailModal.status === "success" && (
+              <div className="flex flex-col items-center justify-center py-6 text-center">
+                <div className="w-12 h-12 bg-emerald-500/20 rounded-full flex items-center justify-center mb-4">
+                  <Check className="w-6 h-6 text-emerald-500" />
+                </div>
+                <p className="text-emerald-500 font-bold text-base mb-1">
+                  Emails Sent Successfully!
+                </p>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-xs">
+                  {emailModal.resultMessage}
+                </p>
+              </div>
+            )}
+
+            {emailModal.status === "error" && (
+              <div className="flex flex-col items-center justify-center py-6 text-center">
+                <div className="w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mb-4">
+                  <X className="w-6 h-6 text-red-500" />
+                </div>
+                <p className="text-red-500 font-bold text-base mb-1">
+                  Failed to Send Email
+                </p>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-xs">
+                  {emailModal.resultMessage}
+                </p>
+              </div>
+            )}
+
+            {emailModal.status === "idle" && (
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() =>
+                    setEmailModal({
+                      isOpen: false,
+                      content: null,
+                      customMessage: "",
+                      status: "idle",
+                      resultMessage: "",
+                    })
+                  }
+                  className="px-5 py-2.5 rounded-xl font-medium text-sm hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSendEmailToAll}
+                  className="bg-rose-500 hover:bg-rose-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm transition-colors flex items-center gap-2 shadow-lg shadow-rose-500/20"
+                >
+                  <Mail className="w-4 h-4" /> Send Email Alert
+                </button>
+              </div>
+            )}
+
+            {emailModal.status === "error" && (
+              <div className="flex justify-end gap-3 mt-4">
+                <button
+                  onClick={() =>
+                    setEmailModal({
+                      isOpen: false,
+                      content: null,
+                      customMessage: "",
+                      status: "idle",
+                      resultMessage: "",
+                    })
+                  }
+                  className="bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-6 py-2 rounded-xl font-bold text-sm transition-colors"
                 >
                   Close
                 </button>

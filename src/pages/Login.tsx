@@ -420,6 +420,12 @@ export default function Login() {
             setCustomError(null);
             setIsLoggingIn(true);
             
+            if (!registeredUser?.displayName && (!displayName.trim() || displayName.trim().length < 2)) {
+              setCustomError("Please enter your Full Name (minimum 2 characters).");
+              setIsLoggingIn(false);
+              return;
+            }
+
             if (!optionalEmail.trim() && !emailWarningShown && (!registeredUser?.email || registeredUser.email.endsWith('@moviznow.com'))) {
               setEmailWarningShown(true);
               setIsLoggingIn(false);

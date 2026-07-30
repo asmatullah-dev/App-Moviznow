@@ -255,14 +255,21 @@ export default function UserManagement() {
           needsUpdate = true;
         }
         
-        // Auto-expire users whose expiry date has passed
-        if (user.status === 'active' && user.expiryDate && user.role !== 'owner') {
-          const expiryDateStr = user.expiryDate.split('T')[0];
-          const parts = expiryDateStr.split('-');
-          const expiryBoundary = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]) + 1);
-          if (now >= expiryBoundary) {
+        // Auto-expire users whose expiry date has passed or active users with no expiry date
+        if ((!user.status || user.status === 'active') && user.role !== 'owner' && user.role !== 'admin') {
+          if (!user.expiryDate || user.expiryDate === 'null' || user.expiryDate === '') {
             updates.status = 'expired';
             needsUpdate = true;
+          } else if (user.expiryDate !== 'Lifetime') {
+            const expiryDateStr = user.expiryDate.split('T')[0];
+            const parts = expiryDateStr.split('-');
+            if (parts.length === 3) {
+              const expiryBoundary = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]) + 1);
+              if (now >= expiryBoundary) {
+                updates.status = 'expired';
+                needsUpdate = true;
+              }
+            }
           }
         }
 
@@ -283,6 +290,81 @@ export default function UserManagement() {
       if (Object.keys(batchUpdates).length > 0) {
         updateMultipleUserFields(batchUpdates);
         finalizeUserChanges(true).catch(console.error);
+      }
+
+      // Check for duplicate users by email or phone and auto-consolidate
+      try {
+        const emailMap: Record<string, UserProfile[]> = {};
+        allUsers.forEach((u) => {
+          if (u.email && !u.email.endsWith('@moviznow.com')) {
+            const key = u.email.trim().toLowerCase();
+            if (!emailMap[key]) emailMap[key] = [];
+            emailMap[key].push(u);
+          }
+        });
+
+        Object.values(emailMap).forEach(async (group) => {
+          if (group.length > 1) {
+            // Sort to pick primary: Real UID > active status > oldest createdAt
+            group.sort((a, b) => {
+              const aIsPending = a.uid.startsWith('pending_');
+              const bIsPending = b.uid.startsWith('pending_');
+              if (aIsPending !== bIsPending) return aIsPending ? 1 : -1;
+              const aActive = a.status === 'active' ? 1 : 0;
+              const bActive = b.status === 'active' ? 1 : 0;
+              if (aActive !== bActive) return bActive - aActive;
+              return (a.createdAt || '').localeCompare(b.createdAt || '');
+            });
+
+            const primary = { ...group[0] };
+            const dups = group.slice(1);
+            const dupsToDelete: string[] = [];
+            let needsUpdate = false;
+
+            dups.forEach((dup) => {
+              // Only auto-merge if the duplicate is a pending_ account, or if the user is completely empty. We shouldn't delete real Firebase Auth UIDs automatically from the admin panel to avoid recreation loops.
+              if (dup.uid.startsWith('pending_') || dup.uid.startsWith('anonymous_') || (!dup.email && !dup.phone)) {
+                 dupsToDelete.push(dup.uid);
+                 needsUpdate = true;
+              } else {
+                 return; // Skip merging this real auth duplicate here, let AuthContext handle it when they log in
+              }
+              const rolePriority: Record<string, number> = {
+                owner: 100, admin: 90, manager: 80, user_manager: 75, content_manager: 70, selected_content: 60, user: 10, trial: 5
+              };
+              const statusPriority: Record<string, number> = { active: 100, pending: 50, expired: 20, suspended: 0 };
+              const getRoleRank = (r: string) => rolePriority[r] || 0;
+              const getStatusRank = (s: string) => statusPriority[s] || 0;
+
+              if (getRoleRank(dup.role) > getRoleRank(primary.role)) primary.role = dup.role;
+              if (getStatusRank(dup.status) > getStatusRank(primary.status)) primary.status = dup.status;
+              if (dup.expiryDate === 'Lifetime' || primary.expiryDate === 'Lifetime') {
+                primary.expiryDate = 'Lifetime';
+              } else if (dup.expiryDate && (!primary.expiryDate || dup.expiryDate > primary.expiryDate)) {
+                primary.expiryDate = dup.expiryDate;
+              }
+              if ((!primary.displayName || primary.displayName.startsWith('User ')) && dup.displayName && !dup.displayName.startsWith('User ')) {
+                primary.displayName = dup.displayName;
+              }
+              if (!primary.phone && dup.phone) primary.phone = dup.phone;
+              if (!primary.city && dup.city) primary.city = dup.city;
+
+              primary.favorites = Array.from(new Set([...(primary.favorites || []), ...(dup.favorites || [])]));
+              primary.watchLater = Array.from(new Set([...(primary.watchLater || []), ...(dup.watchLater || [])]));
+              primary.assignedContent = Array.from(new Set([...(primary.assignedContent || []), ...(dup.assignedContent || [])]));
+            });
+
+            if (needsUpdate && dupsToDelete.length > 0) {
+              const { doc, setDoc, deleteDoc } = await import('firebase/firestore');
+              await setDoc(doc(db, 'users', primary.uid), primary, { merge: true });
+              dupsToDelete.forEach(async (dupId) => {
+                await deleteDoc(doc(db, 'users', dupId));
+              });
+            }
+          }
+        });
+      } catch (e) {
+        console.error('Error auto-consolidating duplicate users:', e);
       }
     };
 
@@ -485,6 +567,11 @@ export default function UserManagement() {
       
       if (editForm.expiryDate) {
         updateData.expiryDate = new Date(editForm.expiryDate).toISOString();
+      } else if (editForm.status === 'active' && (editForm.role as string) !== 'owner' && (editForm.role as string) !== 'admin' && (selectedUser as any).role !== 'owner' && (selectedUser as any).role !== 'admin') {
+        // Active status requires an expiry date — default to 30 days if left empty
+        const defaultExp = new Date();
+        defaultExp.setDate(defaultExp.getDate() + 30);
+        updateData.expiryDate = defaultExp.toISOString();
       } else {
         updateData.expiryDate = null;
       }
@@ -1194,40 +1281,65 @@ export default function UserManagement() {
         } else {
           // No matches, create new pending user
           
+          let existingUser: any = null;
           if (standardizedPhone) {
             const existing = await findUsersByEmailOrPhone(standardizedPhone);
-            if (existing.length > 0) {
-               setAlertConfig({ isOpen: true, title: 'Error', message: 'A user with this WhatsApp number already exists. Please search for them instead.' });
-               setProcessing(prev => ({ ...prev, addUser: false }));
-               return;
-            }
+            if (existing.length > 0) existingUser = existing[0];
           }
-          if (emailToMatch && emailToMatch.indexOf('@moviznow.com') === -1) {
+          if (!existingUser && emailToMatch && emailToMatch.indexOf('@moviznow.com') === -1) {
             const existing = await findUsersByEmailOrPhone(emailToMatch);
-            if (existing.length > 0) {
-               setAlertConfig({ isOpen: true, title: 'Error', message: 'A user with this email already exists.' });
-               setProcessing(prev => ({ ...prev, addUser: false }));
-               return;
+            if (existing.length > 0) existingUser = existing[0];
+          }
+
+          if (existingUser) {
+            let defaultExpiryDate: string | null = existingUser.expiryDate || null;
+            if (newUserForm.expiryDate) {
+              defaultExpiryDate = new Date(newUserForm.expiryDate).toISOString();
+            } else if (newUserForm.status === 'active' && (newUserForm.role as string) !== 'owner' && (newUserForm.role as string) !== 'admin') {
+              const defaultExp = new Date();
+              defaultExp.setDate(defaultExp.getDate() + 30);
+              defaultExpiryDate = defaultExp.toISOString();
             }
+
+            const updateData: any = {
+              role: newUserForm.role,
+              status: newUserForm.status,
+              expiryDate: defaultExpiryDate,
+              displayName: newUserForm.displayName.trim() || existingUser.displayName,
+              city: newUserForm.city || existingUser.city
+            };
+            if ((profile?.role as string) === 'user_manager' || (profile?.role as string) === 'manager') {
+              updateData.managedBy = profile.uid;
+            }
+            updateUserFields(existingUser.uid, updateData);
+            setAlertConfig({ isOpen: true, title: 'Success', message: `Existing user account (${existingUser.email || existingUser.phone}) updated successfully.` });
+            setProcessing(prev => ({ ...prev, addUser: false }));
+            return;
           }
           
           const newUserId = `pending_${Date.now()}`;
+          let defaultExpiryDate: string | null = null;
+          if (newUserForm.expiryDate) {
+            defaultExpiryDate = new Date(newUserForm.expiryDate).toISOString();
+          } else if (newUserForm.status === 'active' && newUserForm.role !== 'owner' && newUserForm.role !== 'admin') {
+            const defaultExp = new Date();
+            defaultExp.setDate(defaultExp.getDate() + 30);
+            defaultExpiryDate = defaultExp.toISOString();
+          }
+
           const newUserData: any = {
             uid: newUserId,
             email: emailToMatch,
             phone: standardizedPhone,
-            displayName: newUserForm.displayName || '',
+            displayName: newUserForm.displayName.trim() || (standardizedPhone ? `User (${standardizedPhone})` : `User ${newUserId.slice(-6)}`),
             city: newUserForm.city || '',
             role: newUserForm.role,
             status: newUserForm.status,
+            expiryDate: defaultExpiryDate,
             hasPassword: false,
             createdAt: new Date().toISOString(),
             isUserManager: (newUserForm.role as string) === 'user_manager' || (newUserForm.role as string) === 'manager'
           };
-
-          if (newUserForm.expiryDate) {
-            newUserData.expiryDate = new Date(newUserForm.expiryDate).toISOString();
-          }
 
           if ((profile?.role as string) === 'user_manager' || (profile?.role as string) === 'manager') {
             newUserData.managedBy = profile.uid;
@@ -1496,9 +1608,11 @@ export default function UserManagement() {
                       )}
                       <div className="min-w-0 flex-1">
                         <div className="font-medium text-zinc-900 dark:text-white flex items-center gap-2 truncate">
-                          {user.displayName || 'No Name'} {user.city && <span className="text-zinc-500 font-normal">({user.city})</span>}
+                          {user.displayName && user.displayName.trim() !== '' ? user.displayName : (user.phone ? `User (${user.phone})` : `User ${user.uid.slice(0, 6)}`)} {user.city && <span className="text-zinc-500 font-normal">({user.city})</span>}
                         </div>
-                        <div className="text-zinc-500 dark:text-zinc-400 text-xs mt-0.5 truncate" title={user.email}>{user.email}</div>
+                        <div className="text-zinc-500 dark:text-zinc-400 text-xs mt-0.5 truncate" title={user.email}>
+                          {user.email && !user.email.endsWith('@moviznow.com') ? user.email : (user.phone ? `${user.phone} (Phone)` : 'No Email')}
+                        </div>
                         <div className="text-zinc-500 text-xs mt-0.5 flex items-center gap-1 truncate">
                           <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
                           {user.phone || 'No phone'}
@@ -1528,11 +1642,11 @@ export default function UserManagement() {
                       <div className="flex items-center gap-2 mt-1">
                       {user.role !== 'owner' && (
                         <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider
-                          ${(!user.status || user.status === 'active') ? 'bg-emerald-500/10 text-emerald-500' : 
+                          ${user.status === 'active' ? 'bg-emerald-500/10 text-emerald-500' : 
                             user.status === 'expired' ? 'bg-red-500/10 text-red-500' : 
                             'bg-yellow-500/10 text-yellow-500'}`}
                         >
-                          {user.status || 'active'}
+                          {user.status || 'pending'}
                         </span>
                       )}
                       {user.notification === 'yes' && (

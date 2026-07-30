@@ -21,10 +21,10 @@ export const useSettings = () => useContext(SettingsContext);
 
 export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [settings, setSettings] = useState<AppSettings | null>(() => {
-    const cached = localStorage.getItem('settings_cache');
+    const cached = localStorage.getItem('cached_app_settings');
     return cached ? JSON.parse(cached) : null;
   });
-  const [loading, setLoading] = useState(() => !localStorage.getItem('settings_cache'));
+  const [loading, setLoading] = useState(() => !localStorage.getItem('cached_app_settings'));
 
   const refreshSettings = useCallback(async (force: boolean = false) => {
     try {
@@ -32,16 +32,16 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const serverVersion = meta.settings || 0;
       const localVersion = parseInt(localStorage.getItem('cached_settings_version') || '0', 10);
 
-      if (force || !localStorage.getItem('settings_cache') || serverVersion > localVersion) {
+      if (force || !localStorage.getItem('cached_app_settings') || serverVersion > localVersion) {
         const docRef = doc(db, 'settings', 'app_settings');
         const docSnap = await getDoc(docRef);
         
         if (docSnap.exists()) {
           const data = docSnap.data() as AppSettings;
           setSettings(data);
-          localStorage.setItem('settings_cache', JSON.stringify(data));
+          localStorage.setItem('cached_app_settings', JSON.stringify(data));
           localStorage.setItem('cached_settings_version', serverVersion.toString());
-        } else if (!localStorage.getItem('settings_cache')) {
+        } else if (!localStorage.getItem('cached_app_settings')) {
           // Default settings if document doesn't exist
           const defaultSettings = {
             headerText: 'MovizNow',
@@ -73,7 +73,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             ]
           } as AppSettings;
           setSettings(defaultSettings);
-          localStorage.setItem('settings_cache', JSON.stringify(defaultSettings));
+          localStorage.setItem('cached_app_settings', JSON.stringify(defaultSettings));
           localStorage.setItem('cached_settings_version', Date.now().toString());
         }
       }
