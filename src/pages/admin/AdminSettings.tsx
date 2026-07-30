@@ -848,6 +848,20 @@ export default function AdminSettings() {
                 <p className="text-[11px] text-zinc-500 mt-1">
                   Get a free API key at <a href="https://resend.com" target="_blank" rel="noreferrer" className="text-rose-500 hover:underline">resend.com</a> (Includes 3,000 free emails/month).
                 </p>
+
+                <div className="mt-3 p-3 bg-amber-500/10 border border-amber-500/20 text-xs rounded-xl text-amber-700 dark:text-amber-400 space-y-1.5">
+                  <div className="font-bold flex items-center gap-1.5 text-amber-800 dark:text-amber-300">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-amber-500" />
+                    Resend Sandbox Domain Restriction Notice
+                  </div>
+                  <p className="leading-relaxed">
+                    By default, when using a newly registered Resend API Key, the platform sends from <code className="font-mono bg-amber-500/15 dark:bg-amber-500/20 px-1 py-0.5 rounded text-amber-600 dark:text-amber-300">onboarding@resend.dev</code>. 
+                    This sandbox domain <strong>only</strong> allows sending emails to your own registered Resend account address (e.g. your admin email).
+                  </p>
+                  <p className="leading-relaxed">
+                    To send to actual subscribers and other recipients, you <strong>must verify your custom domain</strong> in your Resend Dashboard and specify that verified email (e.g. <code className="font-mono bg-amber-500/15 dark:bg-amber-500/20 px-1 py-0.5 rounded text-amber-600 dark:text-amber-300">noreply@yourdomain.com</code>) under the <strong>Sender Email Address</strong> field below.
+                  </p>
+                </div>
               </div>
             </div>
 

@@ -52,7 +52,7 @@ async function getEmailConfig(clientSettings?: any) {
   const user = settings.smtpUser || process.env.SMTP_USER || process.env.GMAIL_USER || "";
   const pass = settings.smtpPass || process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || "";
   const senderName = settings.senderName || "MovizNow";
-  const senderEmail = settings.senderEmail || user || "onboarding@resend.dev";
+  const senderEmail = settings.senderEmail || user || "Notify@MovizNow.com";
   const enableWelcomeEmail = settings.enableWelcomeEmail !== false;
   const enableNewContentEmail = settings.enableNewContentEmail !== false;
 
@@ -126,10 +126,10 @@ async function sendEmailMessage({
 
       // Determine 'from' address for Resend:
       // If user provided a custom domain senderEmail (not @gmail.com/@yahoo.com), use it.
-      // Otherwise default to onboarding@resend.dev (Resend's default test domain).
+      // Otherwise default to Notify@MovizNow.com.
       let fromAddress = config.senderEmail;
       if (!fromAddress || /@(gmail|yahoo|hotmail|outlook|live)\.com$/i.test(fromAddress)) {
-        fromAddress = "onboarding@resend.dev";
+        fromAddress = "Notify@MovizNow.com";
       }
 
       const from = `"${config.senderName}" <${fromAddress}>`;
@@ -489,7 +489,7 @@ emailRouter.post("/test-smtp", async (req, res) => {
         const resend = new Resend(testResendKey);
         let fromAddr = senderEmail;
         if (!fromAddr || /@(gmail|yahoo|hotmail|outlook|live)\.com$/i.test(fromAddr)) {
-          fromAddr = "onboarding@resend.dev";
+          fromAddr = "Notify@MovizNow.com";
         }
 
         const { data, error } = await resend.emails.send({

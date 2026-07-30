@@ -6927,6 +6927,12 @@ export default function ContentManagement() {
                 <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-600 dark:text-rose-400">
                   📧 This will send a styled release email for <strong>{emailModal.content.title}</strong> to every user email address registered in the database.
                 </div>
+                <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[11px] text-amber-700 dark:text-amber-400 space-y-1">
+                  <span className="font-bold block">⚠️ Sandbox / Test Domain Notice:</span>
+                  <p className="leading-relaxed">
+                    If your Resend API is not linked to a verified custom domain, emails can <strong>only</strong> be successfully delivered to your own registered Resend account email address (due to Resend sandbox restrictions on <code className="font-mono bg-amber-500/15 dark:bg-amber-500/20 px-1 py-0.5 rounded text-amber-600 dark:text-amber-300">onboarding@resend.dev</code>).
+                  </p>
+                </div>
               </div>
             )}
 
