@@ -285,7 +285,7 @@ const ContentCard = React.memo(({
               <Play className="w-4 h-4 fill-current" />
             </button>
           )}
-          {isLocked && (profile?.role === 'selected_content' || profile?.role === 'user') && profile?.status !== 'expired' && (
+          {isLocked && (profile?.status === 'pending' || profile?.status === 'expired' || profile?.status !== 'active') && (
             isInCart ? (
               <Link
                 to="/cart"

@@ -2831,10 +2831,9 @@ export default function MovieDetails() {
                       )
                     </button>
                   )}
-                  {(((profile?.role === "selected_content" ||
-                    profile?.role === "user") &&
-                    (!isExpired || mergedContent.status === "selected_content")) ||
-                    isPending) &&
+                  {(profile?.status === "pending" ||
+                    profile?.status === "expired" ||
+                    (profile?.status !== "active" && !hasFullAccess)) &&
                     mergedContent?.type === "movie" &&
                     (cart.some(
                       (item) => item.contentId === mergedContent.id,
@@ -2864,10 +2863,9 @@ export default function MovieDetails() {
                         {t('Add to Cart')} (Rs {mergedContent.status === "selected_content" ? (settings?.movieFee || 50) * 2 : (settings?.movieFee || 50)})
                       </button>
                     ))}
-                  {(profile?.role === "selected_content" ||
-                    profile?.role === "user" ||
-                    isPending) &&
-                    (!isExpired || mergedContent.status === "selected_content") &&
+                  {(profile?.status === "pending" ||
+                    profile?.status === "expired" ||
+                    (profile?.status !== "active" && !hasFullAccess)) &&
                     mergedContent?.type === "series" && (
                       <p className="text-sm text-zinc-500 dark:text-zinc-400 w-full mt-2 italic">
                         Scroll down to add specific seasons to your cart.
@@ -3314,10 +3312,9 @@ export default function MovieDetails() {
                                       <Lock className="w-4 h-4" />{" "}
                                       {isPending ? "Pending" : "Restricted"}
                                     </span>
-                                    {(((profile?.role === "selected_content" ||
-                                      profile?.role === "user") &&
-                                      (profile?.status !== "expired" || mergedContent.status === "selected_content")) ||
-                                      profile?.status === "pending") &&
+                                    {(profile?.status === "pending" ||
+                                      profile?.status === "expired" ||
+                                      (profile?.status !== "active" && !hasFullAccess)) &&
                                       (cart.some(
                                         (item) =>
                                           item.contentId === mergedContent.id &&
@@ -4021,7 +4018,9 @@ export default function MovieDetails() {
           alertConfig.title === t("Content Locked")) && (
           <div className="flex flex-col gap-3">
             {lockedContentInfo &&
-              (!isExpired || mergedContent?.status === "selected_content") &&
+              (profile?.status === "pending" ||
+                profile?.status === "expired" ||
+                (profile?.status !== "active" && !hasFullAccess)) &&
               (cart.some(
                 (item) =>
                   item.contentId === lockedContentInfo.id &&

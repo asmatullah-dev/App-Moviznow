@@ -595,15 +595,12 @@ export default function Home({
                   {t('Get Membership')}
                 </Link>
               )}
-              {(profile?.role === "selected_content" ||
-                profile?.role === "user") && (
-                <Link
-                  to="/cart"
-                  className="flex items-center justify-center gap-1.5 sm:gap-2 bg-yellow-500 text-white dark:text-black px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-yellow-400 transition-all active:scale-95 shadow-lg shadow-yellow-500/20 border border-white/20"
-                >
-                  <ShoppingCart className="w-3 h-3 sm:w-5 sm:h-5" /> {t('Cart')}
-                </Link>
-              )}
+              <Link
+                to="/cart"
+                className="flex items-center justify-center gap-1.5 sm:gap-2 bg-yellow-500 text-white dark:text-black px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-yellow-400 transition-all active:scale-95 shadow-lg shadow-yellow-500/20 border border-white/20"
+              >
+                <ShoppingCart className="w-3 h-3 sm:w-5 sm:h-5" /> {t('Cart')}
+              </Link>
               <Link
                 to="/rewards"
                 className="flex items-center justify-center gap-1.5 sm:gap-2 bg-emerald-500 text-white dark:text-black px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-emerald-400 transition-all active:scale-95 shadow-lg shadow-emerald-500/20 border border-white/20"
@@ -666,6 +663,12 @@ export default function Home({
                 className="flex items-center justify-center gap-1.5 sm:gap-2 bg-red-500 text-white px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-red-600 transition-all active:scale-95 shadow-lg shadow-red-500/20 border border-white/20"
               >
                 {t("Renew Now")}
+              </Link>
+              <Link
+                to="/cart"
+                className="flex items-center justify-center gap-1.5 sm:gap-2 bg-red-500 text-white px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-red-600 transition-all active:scale-95 shadow-lg shadow-red-500/20 border border-white/20"
+              >
+                <ShoppingCart className="w-3 h-3 sm:w-5 sm:h-5" /> {t('Cart')}
               </Link>
               {settings?.isAdminContactEnabled !== false && (
                 <button

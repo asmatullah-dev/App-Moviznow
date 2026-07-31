@@ -9,9 +9,10 @@ export const CartButton = React.memo(() => {
   const { profile } = useAuth();
 
   if (!profile) return null;
-  const role = profile.role;
   const status = profile.status;
-  const showCart = (role === 'selected_content' && status !== 'expired') || status === 'pending' || cart.length > 0;
+
+  // Show Cart button for all users when status is Pending or Expired, hide on Active status
+  const showCart = (status === 'pending' || status === 'expired') || (status !== 'active' && cart.length > 0);
   
   if (!showCart) return null;
 
