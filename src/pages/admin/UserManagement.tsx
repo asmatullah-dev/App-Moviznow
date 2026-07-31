@@ -3,7 +3,7 @@ import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
 import { collection, doc, updateDoc, getDoc, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit, deleteField, increment } from 'firebase/firestore';
 import { UserProfile, Role, Status, AnalyticsEvent, Content } from '../../types';
-import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, Bell, RefreshCw, Link2 as LinkIcon } from 'lucide-react';
+import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, Bell, RefreshCw, Link2 as LinkIcon, Copy } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -60,6 +60,7 @@ export default function UserManagement() {
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
 
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
+  const [copiedUid, setCopiedUid] = useState(false);
   const [isEditingOverlay, setIsEditingOverlay] = useState(false);
   const [isAnalyticsLoading, setIsAnalyticsLoading] = useState(false);
   const [scannedAnalytics, setScannedAnalytics] = useState<Record<string, { timeSpent: number, favoritesCount: number, watchLaterCount: number, lastActive: string | null, hasScanned: boolean, sessionsCount: number }>>({});
@@ -255,19 +256,28 @@ export default function UserManagement() {
           needsUpdate = true;
         }
         
-        // Auto-expire users whose expiry date has passed or active users with no expiry date
-        if ((!user.status || user.status === 'active') && user.role !== 'owner' && user.role !== 'admin') {
+        // Reconcile user status with expiry date: if expiry date is in the future, set status to active; if passed, set to expired
+        if (user.role !== 'owner' && user.role !== 'admin') {
           if (!user.expiryDate || user.expiryDate === 'null' || user.expiryDate === '') {
-            updates.status = 'expired';
-            needsUpdate = true;
+            if (user.status !== 'expired' && user.status !== 'suspended' && user.status !== 'pending') {
+              updates.status = 'expired';
+              needsUpdate = true;
+            }
           } else if (user.expiryDate !== 'Lifetime') {
             const expiryDateStr = user.expiryDate.split('T')[0];
             const parts = expiryDateStr.split('-');
             if (parts.length === 3) {
               const expiryBoundary = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]) + 1);
               if (now >= expiryBoundary) {
-                updates.status = 'expired';
-                needsUpdate = true;
+                if (user.status !== 'expired' && user.status !== 'suspended') {
+                  updates.status = 'expired';
+                  needsUpdate = true;
+                }
+              } else {
+                if (user.status === 'expired' || !user.status) {
+                  updates.status = 'active';
+                  needsUpdate = true;
+                }
               }
             }
           }
@@ -355,11 +365,18 @@ export default function UserManagement() {
             });
 
             if (needsUpdate && dupsToDelete.length > 0) {
-              const { doc, setDoc, deleteDoc } = await import('firebase/firestore');
-              await setDoc(doc(db, 'users', primary.uid), primary, { merge: true });
-              dupsToDelete.forEach(async (dupId) => {
-                await deleteDoc(doc(db, 'users', dupId));
+              const { doc, writeBatch } = await import('firebase/firestore');
+              primary.uid = primary.uid;
+              const batch = writeBatch(db);
+              batch.set(doc(db, 'users', primary.uid), primary, { merge: true });
+              const metaUpdates: Record<string, number> = { [primary.uid]: Date.now() };
+              dupsToDelete.forEach((dupId) => {
+                batch.delete(doc(db, 'users', dupId));
+                metaUpdates[dupId] = -1;
               });
+              batch.set(doc(db, 'chunk_meta', 'versions'), { users: metaUpdates }, { merge: true });
+              await batch.commit();
+              refreshUsers(true).catch(console.error);
             }
           }
         });
@@ -1909,7 +1926,39 @@ export default function UserManagement() {
                       {selectedUser.city && <p className="text-zinc-600 dark:text-zinc-300 font-medium text-sm">{selectedUser.city}</p>}
                       <p className="text-zinc-500 dark:text-zinc-400 text-sm">{selectedUser.email?.endsWith('@moviznow.com') ? 'No Email' : selectedUser.email}</p>
                       <p className="text-zinc-500 dark:text-zinc-400 text-sm">{selectedUser.phone || 'No WhatsApp Number'}</p>
-                      <p className="text-zinc-500 dark:text-zinc-400 mt-1 font-mono text-[10px] break-all border border-zinc-200 dark:border-zinc-800 rounded px-1.5 py-0.5 inline-block">ID: {selectedUser.uid}</p>
+                      <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                        <span className="text-zinc-500 dark:text-zinc-400 font-mono text-[10px] break-all border border-zinc-200 dark:border-zinc-800 rounded px-1.5 py-0.5 inline-flex items-center gap-1 bg-zinc-50 dark:bg-zinc-900">
+                          <span className="font-semibold text-zinc-600 dark:text-zinc-300">UID:</span> {selectedUser.uid}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigator.clipboard.writeText(selectedUser.uid);
+                            setCopiedUid(true);
+                            setTimeout(() => setCopiedUid(false), 2000);
+                          }}
+                          className="text-[10px] px-2 py-0.5 rounded border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 transition-colors flex items-center gap-1"
+                          title="Copy exact UID to clipboard"
+                        >
+                          {copiedUid ? (
+                            <>
+                              <Check className="w-3 h-3 text-emerald-500" />
+                              <span className="text-emerald-500 font-medium">Copied!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3 text-zinc-400" />
+                              <span>Copy</span>
+                            </>
+                          )}
+                        </button>
+                        {selectedUser.uid.startsWith('pending_') && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 font-medium border border-amber-500/20" title="This user was added manually or is pending login; UID will convert to Auth UID when they sign in">
+                            Pending Auth
+                          </span>
+                        )}
+                      </div>
                       
                       <div className="flex flex-col gap-1 pt-2 mt-2 border-t border-zinc-200 dark:border-zinc-800">
                         <div className="text-xs text-zinc-600 dark:text-zinc-400">

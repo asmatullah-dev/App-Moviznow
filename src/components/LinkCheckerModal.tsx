@@ -26,6 +26,7 @@ import {
   Download,
   ExternalLink,
   Film,
+  Globe,
   Loader2 as LoaderIcon
 } from "lucide-react";
 import { QualityLinks, Language, Quality, LinkDef, Content } from '../types';
@@ -41,6 +42,14 @@ import {
   performFullLinkScan
 } from '../utils/linkScanner';
 import { useModalBehavior } from '../hooks/useModalBehavior';
+import {
+  getMoviesdriveDomain,
+  setMoviesdriveDomain,
+  getSkymoviesDomain,
+  setSkymoviesDomain,
+  getFilmygoDomain,
+  setFilmygoDomain
+} from '../utils/domains';
 
 const PostPoster: React.FC<{ image?: string; title: string }> = ({ image, title }) => {
   const [imgError, setImgError] = useState(false);
@@ -626,6 +635,17 @@ export const LinkCheckerModal: React.FC<Props> = ({
 }) => {
   const { contentList = [] } = useContent();
   const [availabilityFilter, setAvailabilityFilter] = useState<'all' | 'missing' | 'available'>('all');
+  const [showDomainSettings, setShowDomainSettings] = useState(false);
+  const [moviesdriveDomainInput, setMoviesdriveDomainInput] = useState(() => getMoviesdriveDomain());
+  const [skymoviesDomainInput, setSkymoviesDomainInput] = useState(() => getSkymoviesDomain());
+  const [filmygoDomainInput, setFilmygoDomainInput] = useState(() => getFilmygoDomain());
+
+  const handleSaveDomains = () => {
+    if (moviesdriveDomainInput) setMoviesdriveDomain(moviesdriveDomainInput);
+    if (skymoviesDomainInput) setSkymoviesDomain(skymoviesDomainInput);
+    if (filmygoDomainInput) setFilmygoDomain(filmygoDomainInput);
+    setShowDomainSettings(false);
+  };
   const [input, setInput] = useState(initialInput);
   const inputRef = React.useRef(input);
   useEffect(() => {
@@ -698,16 +718,19 @@ export const LinkCheckerModal: React.FC<Props> = ({
   }, [moviesdriveSearchPosts, moviesdriveSearchUrl]);
 
   const moviesdrivePageInfo = useMemo(() => {
-    if (!moviesdriveSearchUrl) return { query: "", page: 1, origin: "https://new6.moviesdrives.my", isSkyMovies: false, isFilmygo: false };
+    const mdDomain = getMoviesdriveDomain();
+    const skyDomain = getSkymoviesDomain();
+    const filmyDomain = getFilmygoDomain();
+    if (!moviesdriveSearchUrl) return { query: "", page: 1, origin: mdDomain, isSkyMovies: false, isFilmygo: false };
     try {
       const u = new URL(moviesdriveSearchUrl);
-      const isSky = u.hostname.includes("skymovies");
-      const isFilmy = u.hostname.includes("filmygo");
+      const isSky = u.hostname.includes("skymovies") || u.origin === skyDomain;
+      const isFilmy = u.hostname.includes("filmygo") || u.origin === filmyDomain;
       const q = u.searchParams.get("to-search") || u.searchParams.get("search") || u.searchParams.get("q") || u.searchParams.get("s") || "";
       const p = parseInt(u.searchParams.get("to-page") || u.searchParams.get("page") || u.searchParams.get("p") || u.searchParams.get("pg") || "1", 10) || 1;
-      return { query: q, page: p, origin: u.origin || (isFilmy ? "https://filmygo.online" : "https://new6.moviesdrives.my"), isSkyMovies: isSky, isFilmygo: isFilmy };
+      return { query: q, page: p, origin: u.origin || (isFilmy ? filmyDomain : isSky ? skyDomain : mdDomain), isSkyMovies: isSky, isFilmygo: isFilmy };
     } catch {
-      return { query: "", page: 1, origin: "https://new6.moviesdrives.my", isSkyMovies: false, isFilmygo: false };
+      return { query: "", page: 1, origin: mdDomain, isSkyMovies: false, isFilmygo: false };
     }
   }, [moviesdriveSearchUrl]);
 
@@ -822,11 +845,12 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
   const executeMoviesdriveSearch = (query: string) => {
     const trimmed = query.trim();
+    const domain = getMoviesdriveDomain();
     let targetUrl = "";
     if (!trimmed) {
-      targetUrl = "https://new6.moviesdrives.my/";
+      targetUrl = `${domain}/`;
     } else if (!trimmed.startsWith("http")) {
-      targetUrl = `https://new6.moviesdrives.my/search.html?q=${encodeURIComponent(trimmed)}&page=1`;
+      targetUrl = `${domain}/search.html?q=${encodeURIComponent(trimmed)}&page=1`;
     } else {
       targetUrl = trimmed;
     }
@@ -851,11 +875,12 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
   const executeSkymoviesSearch = (query: string) => {
     const trimmed = query.trim();
+    const domain = getSkymoviesDomain();
     let targetUrl = "";
     if (!trimmed) {
-      targetUrl = "https://skymovieshd.ceo/";
+      targetUrl = `${domain}/`;
     } else if (!trimmed.startsWith("http")) {
-      targetUrl = `https://skymovieshd.ceo/search.php?search=${encodeURIComponent(trimmed)}&cat=All`;
+      targetUrl = `${domain}/search.php?search=${encodeURIComponent(trimmed)}&cat=All`;
     } else {
       targetUrl = trimmed;
     }
@@ -880,11 +905,12 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
   const executeFilmygoSearch = (query: string) => {
     const trimmed = query.trim();
+    const domain = getFilmygoDomain();
     let targetUrl = "";
     if (!trimmed) {
-      targetUrl = "https://filmygo.online/?to-page=1";
+      targetUrl = `${domain}/?to-page=1`;
     } else if (!trimmed.startsWith("http")) {
-      targetUrl = `https://filmygo.online/site-search.html?to-search=${encodeURIComponent(trimmed)}&to-page=1`;
+      targetUrl = `${domain}/site-search.html?to-search=${encodeURIComponent(trimmed)}&to-page=1`;
     } else {
       targetUrl = trimmed;
     }
@@ -2703,7 +2729,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                     <Search className="w-4 h-4 text-indigo-500 shrink-0 ml-1" />
                     <input
                       type="text"
-                      placeholder="Search title or leave empty for Home page (new6.moviesdrives.my)..."
+                      placeholder={`Search title or leave empty for Home page (${getMoviesdriveDomain()})...`}
                       value={moviesdriveSearchTerm}
                       onChange={(e) => setMoviesdriveSearchTerm(e.target.value)}
                       className="flex-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-1.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none focus:border-indigo-500 font-medium"
@@ -2731,7 +2757,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                     <Search className="w-4 h-4 text-purple-500 shrink-0 ml-1" />
                     <input
                       type="text"
-                      placeholder="Search title or leave empty for Home page (skymovieshd.ceo)..."
+                      placeholder={`Search title or leave empty for Home page (${getSkymoviesDomain()})...`}
                       value={skymoviesSearchTerm}
                       onChange={(e) => setSkymoviesSearchTerm(e.target.value)}
                       className="flex-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-1.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none focus:border-purple-500 font-medium"
@@ -2759,7 +2785,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                     <Search className="w-4 h-4 text-emerald-500 shrink-0 ml-1" />
                     <input
                       type="text"
-                      placeholder="Search title or leave empty for Home page (filmygo.online)..."
+                      placeholder={`Search title or leave empty for Home page (${getFilmygoDomain()})...`}
                       value={filmygoSearchTerm}
                       onChange={(e) => setFilmygoSearchTerm(e.target.value)}
                       className="flex-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-1.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none focus:border-emerald-500 font-medium"
@@ -2773,6 +2799,76 @@ export const LinkCheckerModal: React.FC<Props> = ({
                       Search FilmyGo
                     </button>
                   </form>
+                )}
+
+                {/* Domain Configuration Panel */}
+                {showDomainSettings && (
+                  <div className="p-4 bg-amber-500/5 border border-amber-500/20 rounded-2xl space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <Globe className="w-4 h-4" /> Custom Search Domains (Saved in Local Storage)
+                      </h4>
+                      <button 
+                        type="button" 
+                        onClick={() => setShowDomainSettings(false)}
+                        className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 text-xs"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1">MoviesDrive Domain</label>
+                        <input
+                          type="text"
+                          value={moviesdriveDomainInput}
+                          onChange={(e) => setMoviesdriveDomainInput(e.target.value)}
+                          placeholder="https://new6.moviesdrives.my"
+                          className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-amber-500 font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1">SkyMoviesHD Domain</label>
+                        <input
+                          type="text"
+                          value={skymoviesDomainInput}
+                          onChange={(e) => setSkymoviesDomainInput(e.target.value)}
+                          placeholder="https://skymovieshd.ceo"
+                          className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-amber-500 font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1">FilmyGo Domain</label>
+                        <input
+                          type="text"
+                          value={filmygoDomainInput}
+                          onChange={(e) => setFilmygoDomainInput(e.target.value)}
+                          placeholder="https://filmygo.online"
+                          className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-amber-500 font-mono"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMoviesdriveDomainInput("https://new6.moviesdrives.my");
+                          setSkymoviesDomainInput("https://skymovieshd.ceo");
+                          setFilmygoDomainInput("https://filmygo.online");
+                        }}
+                        className="px-3 py-1 text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition"
+                      >
+                        Reset Defaults
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSaveDomains}
+                        className="px-4 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs transition shadow-sm flex items-center gap-1.5"
+                      >
+                        Save & Apply Domains
+                      </button>
+                    </div>
+                  </div>
                 )}
 
                 <div className="flex flex-wrap items-center gap-2">
@@ -2824,6 +2920,18 @@ export const LinkCheckerModal: React.FC<Props> = ({
                     title="Toggle FilmyGo search bar or search text"
                   >
                     <Search className="h-3.5 w-3.5" /> Search FilmyGo
+                  </button>
+                  <button
+                    onClick={() => {
+                      setMoviesdriveDomainInput(getMoviesdriveDomain());
+                      setSkymoviesDomainInput(getSkymoviesDomain());
+                      setFilmygoDomainInput(getFilmygoDomain());
+                      setShowDomainSettings(prev => !prev);
+                    }}
+                    className="inline-flex items-center justify-center rounded-xl border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 px-3.5 py-1.5 text-xs font-bold text-amber-600 dark:text-amber-400 gap-1.5 transition-colors shadow-sm"
+                    title="Configure custom search domains saved in local storage"
+                  >
+                    <Globe className="h-3.5 w-3.5" /> Site Domains
                   </button>
                   <button onClick={retryFailed} className="inline-flex items-center justify-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-transparent px-3.5 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-1.5 disabled:opacity-50 transition-colors" disabled={loading || !results.some((r) => !r.ok || r.statusLabel === "UNKNOWN" || r.statusLabel === "MISSING_FILENAME" || r.statusLabel === "BROKEN" || r.statusLabel === "UNAVAILABLE")}><RefreshCw className="h-3.5 w-3.5" /> Retry Failed</button>
                   <button onClick={copyResults} className="inline-flex items-center justify-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-transparent px-3.5 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-1.5 disabled:opacity-50 transition-colors" disabled={!results.length}><Copy className="h-3.5 w-3.5" /> Copy Results</button>

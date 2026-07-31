@@ -311,28 +311,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // 1. Send Welcome Email if user is NEW and has a valid Gmail address
     if (isNewUser && userEmail && isValidGmailAddress(userEmail)) {
-      const cachedSettingsStr = safeStorage.getItem("cached_app_settings");
-      let localEmailSettings = null;
-      if (cachedSettingsStr) {
-        try {
-          const parsedSettings = JSON.parse(cachedSettingsStr);
-          if (parsedSettings.emailSettings) {
-            localEmailSettings = parsedSettings.emailSettings;
-          }
-        } catch (e) {}
-      }
+      const emailSentKey = `welcome_email_sent_${userEmail.trim().toLowerCase()}`;
+      if (!safeStorage.getItem(emailSentKey)) {
+        safeStorage.setItem(emailSentKey, "true");
+        const cachedSettingsStr = safeStorage.getItem("cached_app_settings");
+        let localEmailSettings = null;
+        if (cachedSettingsStr) {
+          try {
+            const parsedSettings = JSON.parse(cachedSettingsStr);
+            if (parsedSettings.emailSettings) {
+              localEmailSettings = parsedSettings.emailSettings;
+            }
+          } catch (e) {}
+        }
 
-      fetch("/api/email/send-welcome", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: userEmail,
-          displayName: displayName,
-          smtpSettings: localEmailSettings || undefined,
-          appUrl: window.location.origin,
-          isNewUser
-        }),
-      }).catch((e) => console.warn("Welcome email trigger notice:", e));
+        const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Karachi";
+
+        fetch("/api/email/send-welcome", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: userEmail,
+            displayName: displayName,
+            smtpSettings: localEmailSettings || undefined,
+            appUrl: window.location.origin,
+            isNewUser,
+            timeZone: userTz
+          }),
+        }).catch((e) => console.warn("Welcome email trigger notice:", e));
+      }
     }
 
     // 2. Add Welcome Back notification in Firestore notification_chunks for in-app Notifications tab
@@ -1214,10 +1221,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 }
               });
 
+              data.uid = currentUser.uid;
               const { writeBatch } = await import("firebase/firestore");
               const batch = writeBatch(db);
               batch.set(userRef, data, { merge: true });
-              oldDocIds.forEach((oldId) => batch.delete(doc(db, "users", oldId)));
+              const metaUpdates: Record<string, number> = {
+                [currentUser.uid]: Date.now(),
+              };
+              oldDocIds.forEach((oldId) => {
+                batch.delete(doc(db, "users", oldId));
+                metaUpdates[oldId] = -1;
+              });
+              batch.set(doc(db, "chunk_meta", "versions"), { users: metaUpdates }, { merge: true });
               await batch.commit();
             }
           } catch (e) {
@@ -1611,28 +1626,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             };
             oldDocIds.forEach((oldId) => {
               batch.delete(doc(db, "users", oldId));
+              metaUpdates[oldId] = -1;
               console.log(
                 `Merged and scheduled deletion of old profile: ${oldId}`,
               );
             });
+            batch.set(doc(db, "chunk_meta", "versions"), { users: metaUpdates }, { merge: true });
 
             await batch.commit();
 
-            // Trigger welcome email for new user if email exists and hasn't been sent yet
+            // Trigger welcome email for new user via central handler (prevents duplicate emails)
             const userEmail = currentUser.email || newProfile.email;
             if (userEmail && isValidGmailAddress(userEmail) && !mergedOldData.welcomeEmailSent) {
               const userName = currentUser.displayName || newProfile.displayName || "Movie Lover";
-              fetch("/api/email/send-welcome", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ email: userEmail, displayName: userName, appUrl: window.location.origin, isNewUser: true }),
-              })
-              .then(() => {
-                // Mark welcomeEmailSent as true in Firestore
-                const { updateDoc } = require("firebase/firestore");
-                updateDoc(userRef, { welcomeEmailSent: true }).catch(() => {});
-              })
-              .catch((e) => console.warn("Welcome email trigger notice:", e));
+              triggerWelcomeNotificationAndEmail(currentUser.uid, userEmail, userName, true);
+              const { updateDoc } = require("firebase/firestore");
+              updateDoc(userRef, { welcomeEmailSent: true }).catch(() => {});
             }
 
             console.log(
@@ -2607,11 +2616,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Save local first!
+      const nowIso = new Date().toISOString();
+      data.uid = user.uid;
+      data.lastActive = nowIso;
+      data.updatedAt = nowIso;
+
+      if (data.expiryDate && data.expiryDate !== "Lifetime") {
+        const parts = data.expiryDate.split("T")[0].split("-");
+        if (parts.length === 3) {
+          const boundary = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]) + 1);
+          if (new Date() < boundary && data.status !== "suspended") {
+            data.status = "active";
+          }
+        }
+      }
+
       const updatedProfile = { ...profile, ...data };
       console.log('updateUserProfileData: updating profile with data:', data);
       setProfile(updatedProfile);
       safeStorage.setItem("profile_cache", JSON.stringify(updatedProfile));
       safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
+
+      try {
+        const cachedAllStr = safeStorage.getItem("cached_all_users");
+        if (cachedAllStr) {
+          let cachedAll: UserProfile[] = JSON.parse(cachedAllStr);
+          const idx = cachedAll.findIndex(u => u.uid === user.uid);
+          if (idx !== -1) {
+            cachedAll[idx] = { ...cachedAll[idx], ...data };
+          } else {
+            cachedAll.push({ ...profile, ...data } as UserProfile);
+          }
+          safeStorage.setItem("cached_all_users", JSON.stringify(cachedAll));
+        }
+      } catch (e) {}
 
       const userRefPath = doc(db, "users", user.uid);
 
@@ -2619,6 +2657,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const { writeBatch } = await import("firebase/firestore");
         let batch = writeBatch(db);
         batch.set(userRefPath, data, { merge: true });
+        batch.set(doc(db, "chunk_meta", "versions"), {
+          users: {
+            [user.uid]: Date.now()
+          }
+        }, { merge: true });
+
         if (data.referralCode) {
           batch.set(doc(db, "referral", "all"), {
             codes: {

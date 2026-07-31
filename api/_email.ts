@@ -285,10 +285,13 @@ async function sendEmailMessage({
   return { provider: "smtp", messageId: info.messageId };
 }
 
+// Global lock map for deduplicating welcome email sends
+const inFlightWelcomeEmails = new Map<string, number>();
+
 // 1. Send Welcome Email Endpoint
 emailRouter.post("/send-welcome", async (req, res) => {
   try {
-    const { email, displayName, appUrl, smtpSettings, isNewUser = true } = req.body;
+    const { email, displayName, appUrl, smtpSettings, isNewUser = true, timeZone } = req.body;
 
     if (!isNewUser) {
       return res.json({ success: true, message: "Welcome email skipped for existing user login." });
@@ -299,6 +302,23 @@ emailRouter.post("/send-welcome", async (req, res) => {
     }
 
     const cleanEmail = email.trim().toLowerCase();
+
+    // Deduplication check: if welcome email was already requested/processing in the last 15 minutes
+    const nowTs = Date.now();
+    for (const [key, ts] of inFlightWelcomeEmails.entries()) {
+      if (nowTs - ts > 15 * 60 * 1000) {
+        inFlightWelcomeEmails.delete(key);
+      }
+    }
+
+    if (inFlightWelcomeEmails.has(cleanEmail)) {
+      console.log(`[Welcome Email] Skipped duplicate in-flight/recent request for ${cleanEmail}`);
+      return res.json({ success: true, message: "Welcome email already sent or processing for this user." });
+    }
+
+    // Immediately acquire lock before any async Firestore or SMTP operations
+    inFlightWelcomeEmails.set(cleanEmail, nowTs);
+
     const firestore = getDb();
     if (firestore) {
       try {
@@ -324,28 +344,44 @@ emailRouter.post("/send-welcome", async (req, res) => {
     const siteUrl = "https://MovizNow.com";
     const userName = displayName || "Movie Fan";
 
-    const now = new Date();
-    const formattedTimestamp = now.toLocaleDateString("en-US", {
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      timeZoneName: "short"
-    });
+    // Format local date & time using user's country timezone
+    const userTimeZone = timeZone || "Asia/Karachi";
+    let formattedTimestamp = "";
+    try {
+      formattedTimestamp = new Date().toLocaleString("en-US", {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        timeZone: userTimeZone,
+        timeZoneName: "short"
+      });
+    } catch (e) {
+      formattedTimestamp = new Date().toLocaleString("en-US", {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        timeZoneName: "short"
+      });
+    }
 
     const subject = isNewUser
       ? `Account Security: Welcome to MovizNow, ${userName}`
       : `Security Alert: Account Access for ${userName}`;
 
     const greeting = isNewUser
-      ? `Welcome to MovizNow, ${userName}`
-      : `Welcome back, ${userName}`;
+      ? `Welcome to MovizNow, ${userName}! 🎉`
+      : `Welcome back, ${userName}! 👋`;
 
     const introText = isNewUser
-      ? `Your account was successfully registered and activated.`
+      ? `Your MovizNow account has been successfully registered and activated. We're excited to have you on board!`
       : `Your account was successfully logged in.`;
 
     const htmlContent = `
@@ -357,16 +393,23 @@ emailRouter.post("/send-welcome", async (req, res) => {
           body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #09090b; color: #f4f4f5; margin: 0; padding: 0; }
           .container { max-width: 600px; margin: 20px auto; background-color: #18181b; border-radius: 16px; border: 1px solid #27272a; overflow: hidden; }
           .header { background-color: #18181b; border-bottom: 1px solid #27272a; padding: 24px; text-align: center; }
-          .header h1 { margin: 0; font-size: 24px; font-weight: 800; color: #ffffff; letter-spacing: -0.5px; }
+          .header h1 { margin: 0; font-size: 26px; font-weight: 800; color: #ffffff; letter-spacing: -0.5px; }
           .content { padding: 32px 24px; line-height: 1.6; }
-          .greeting { font-size: 20px; font-weight: 700; color: #ffffff; margin-bottom: 12px; }
+          .greeting { font-size: 22px; font-weight: 700; color: #ffffff; margin-bottom: 12px; }
           .text { color: #a1a1aa; font-size: 15px; margin-bottom: 20px; }
-          .activity-card { background-color: #27272a; border-radius: 12px; border: 1px solid #3f3f46; padding: 18px 20px; margin: 24px 0; }
-          .activity-title { font-size: 13px; font-weight: 700; text-transform: uppercase; color: #10b981; margin-bottom: 8px; letter-spacing: 0.5px; }
-          .activity-detail { color: #e4e4e7; font-size: 14px; margin-bottom: 6px; }
+          
+          .features-card { background-color: #27272a; border-radius: 14px; border: 1px solid #3f3f46; padding: 20px 22px; margin: 24px 0; }
+          .features-title { font-size: 13px; font-weight: 800; text-transform: uppercase; color: #e11d48; margin-bottom: 14px; letter-spacing: 0.8px; }
+          .feature-item { font-size: 14px; color: #e4e4e7; margin-bottom: 10px; line-height: 1.5; }
+          .feature-item strong { color: #ffffff; }
+
+          .activity-card { background-color: #18181b; border-radius: 12px; border: 1px solid #27272a; padding: 16px 18px; margin: 20px 0; }
+          .activity-title { font-size: 12px; font-weight: 700; text-transform: uppercase; color: #10b981; margin-bottom: 6px; letter-spacing: 0.5px; }
+          .activity-detail { color: #d4d4d8; font-size: 13px; margin-bottom: 4px; }
           .activity-timestamp { font-family: monospace; color: #38bdf8; font-weight: 600; font-size: 13px; }
+
           .btn-container { text-align: center; margin: 32px 0 16px; }
-          .btn { background-color: #e11d48; color: #ffffff !important; padding: 14px 32px; font-weight: 700; font-size: 15px; text-decoration: none; border-radius: 12px; display: inline-block; }
+          .btn { background-color: #e11d48; color: #ffffff !important; padding: 14px 32px; font-weight: 700; font-size: 15px; text-decoration: none; border-radius: 12px; display: inline-block; box-shadow: 0 4px 14px rgba(225, 29, 72, 0.4); }
           .footer { text-align: center; padding: 20px; font-size: 12px; color: #71717a; border-top: 1px solid #27272a; }
         </style>
       </head>
@@ -379,19 +422,27 @@ emailRouter.post("/send-welcome", async (req, res) => {
             <div class="greeting">${greeting}</div>
             <p class="text">${introText}</p>
 
+            <div class="features-card">
+              <div class="features-title">✨ What MovizNow Provides For You</div>
+              <div class="feature-item">🍿 <strong>Massive HD & 4K Library:</strong> Access thousands of Movies, TV Series, Dual Audio titles, and Anime in highest quality.</div>
+              <div class="feature-item">⚡ <strong>Multiple Download Qualities:</strong> High-speed direct download links for 480p, 720p, 1080p, and 4K UHD.</div>
+              <div class="feature-item">🔔 <strong>Instant Releases & Movie Requests:</strong> Daily content additions and a dedicated Request feature to request any movie or series.</div>
+              <div class="feature-item">⭐ <strong>Personalized Experience:</strong> Save favorites, track your watch history, and enjoy fast ad-free navigation.</div>
+            </div>
+
             <div class="activity-card">
-              <div class="activity-title">🔒 Account Access Log</div>
-              <div class="activity-detail"><strong>Action:</strong> ${isNewUser ? 'New Account Registration' : 'Account Login Session'}</div>
-              <div class="activity-detail"><strong>Date & Time:</strong> <span class="activity-timestamp">${formattedTimestamp}</span></div>
+              <div class="activity-title">🔒 Account Registration Log</div>
+              <div class="activity-detail"><strong>Action:</strong> New User Registration</div>
+              <div class="activity-detail"><strong>Logged-In Time (${userTimeZone}):</strong> <span class="activity-timestamp">${formattedTimestamp}</span></div>
             </div>
 
             <div class="btn-container">
-              <a href="${siteUrl}" class="btn">Access Your Account</a>
+              <a href="${siteUrl}" class="btn">Start Exploring MovizNow</a>
             </div>
           </div>
           <div class="footer">
             <p>© ${new Date().getFullYear()} MovizNow. All rights reserved.</p>
-            <p>You received this transactional security notification because you ${isNewUser ? 'created an account' : 'logged in'} on MovizNow.</p>
+            <p>You received this transactional email because your account was created on MovizNow.</p>
           </div>
         </div>
       </body>
@@ -402,7 +453,7 @@ emailRouter.post("/send-welcome", async (req, res) => {
       config,
       to: email,
       subject: subject,
-      text: `${greeting}\n\n${introText}\n\nDate & Time of Activity: ${formattedTimestamp}\n\nAccess account: ${siteUrl}`,
+      text: `${greeting}\n\n${introText}\n\nWhat MovizNow Provides:\n- Massive HD & 4K Library (Movies, Web Series, Anime)\n- Multi-Quality Fast Direct Downloads (480p, 720p, 1080p, 4K)\n- Daily Updates & Movie Request System\n- Custom Watchlists & Favorites\n\nLogged-In Time (${userTimeZone}): ${formattedTimestamp}\n\nAccess MovizNow: ${siteUrl}`,
       html: htmlContent,
       senderEmailOverride: "Alerts@MovizNow.com",
     });

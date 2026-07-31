@@ -32,6 +32,7 @@ export interface UserProfile {
   isUserManager?: boolean; // Flag to keep user in User Managers list even if role changes
   previousStatus?: 'active' | 'pending' | 'suspended' | 'expired'; // Store previous status when manager role changes
   lastActive?: string; // ISO string
+  updatedAt?: string; // ISO string
   requirePasswordReset?: boolean;
   hasPassword?: boolean;
   sessionId?: string;

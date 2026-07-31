@@ -6,6 +6,41 @@ import { useAuth } from './AuthContext';
 import { safeStorage } from '../utils/safeStorage';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
 
+export function normalizeUserStatusAndExpiry(u: UserProfile): UserProfile {
+  if (!u || !u.uid) return u;
+  const now = new Date();
+
+  if (u.role === 'owner' || u.role === 'admin') {
+    return { ...u, status: 'active', expiryDate: u.expiryDate || 'Lifetime' };
+  }
+
+  // Check if expiryDate exists and is valid
+  if (u.expiryDate && u.expiryDate !== 'Lifetime') {
+    const expiryDateStr = u.expiryDate.split('T')[0];
+    const parts = expiryDateStr.split('-');
+    if (parts.length === 3) {
+      const expiryBoundary = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]) + 1);
+      if (now < expiryBoundary) {
+        // Expiry date is in the future -> User is ACTIVE (unless manually suspended)
+        if (u.status !== 'suspended') {
+          return { ...u, status: 'active' };
+        }
+      } else {
+        // Expiry date has passed -> User is EXPIRED (unless manually suspended)
+        if (u.status !== 'suspended') {
+          return { ...u, status: 'expired' };
+        }
+      }
+    }
+  } else if (!u.expiryDate || u.expiryDate === 'null' || u.expiryDate === '') {
+    if (u.status !== 'suspended' && u.status !== 'pending') {
+      return { ...u, status: 'expired' };
+    }
+  }
+
+  return u;
+}
+
 interface UsersContextType {
   users: UserProfile[];
   loading: boolean;
@@ -29,7 +64,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       const uniqueMap = new Map<string, UserProfile>();
       parsed.forEach(u => {
         if (u && u.uid && !uniqueMap.has(u.uid)) {
-          uniqueMap.set(u.uid, u);
+          uniqueMap.set(u.uid, normalizeUserStatusAndExpiry(u));
         }
       });
       return Array.from(uniqueMap.values());
@@ -48,7 +83,12 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     if (Object.keys(updates).length === 0) return;
 
     setUsers(prev => {
-      const next = prev.map(u => updates[u.uid] ? { ...u, ...updates[u.uid] } : u);
+      const next = prev.map(u => {
+        if (updates[u.uid]) {
+          return normalizeUserStatusAndExpiry({ ...u, ...updates[u.uid] });
+        }
+        return u;
+      });
       safeStorage.setItem('cached_all_users', JSON.stringify(next));
       return next;
     });
@@ -90,6 +130,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       const { writeBatch, deleteField } = await import('firebase/firestore');
       let batches = [writeBatch(db)];
       let opCount = 0;
+      const nowIso = new Date().toISOString();
 
       for (const uid of userIds) {
         if (opCount >= 490) {
@@ -98,6 +139,10 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         }
         
         let writeData: any = { ...pending[uid] };
+        writeData.uid = uid;
+        writeData.lastActive = nowIso;
+        writeData.updatedAt = nowIso;
+
         for (const key in writeData) {
           if (writeData[key] === '__DELETE_FIELD__') {
             writeData[key] = deleteField();
@@ -185,7 +230,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           const rawFetched = snapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id })) as UserProfile[];
           const uMap = new Map<string, UserProfile>();
           rawFetched.forEach(u => {
-            if (u && u.uid) uMap.set(u.uid, u);
+            if (u && u.uid) uMap.set(u.uid, normalizeUserStatusAndExpiry(u));
           });
           currentUsers = Array.from(uMap.values());
         } catch (err) {
@@ -195,7 +240,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       } else {
         // Fetch only recently active/updated users since our last run
         try {
-          const currentUsersMap = new Map(currentUsers.map(u => [u.uid, u]));
+          const currentUsersMap = new Map(currentUsers.map(u => [u.uid, normalizeUserStatusAndExpiry(u)]));
 
           // 1. Fetch recently active users
           const bufferTime = 60 * 60 * 1000;
@@ -206,7 +251,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           if (!snapshot.empty) {
             updatedSomething = true;
             const fetchedUsers = snapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id })) as UserProfile[];
-            fetchedUsers.forEach(u => currentUsersMap.set(u.uid, u));
+            fetchedUsers.forEach(u => currentUsersMap.set(u.uid, normalizeUserStatusAndExpiry(u)));
           }
 
           // 2. Fetch specific users modified by admins, found via chunkMeta
@@ -242,14 +287,14 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
                const snapshotMerged = await getDocs(qMerged);
                snapshotMerged.docs.forEach(doc => {
                   const u = { ...doc.data(), uid: doc.id } as UserProfile;
-                  currentUsersMap.set(u.uid, u);
+                  currentUsersMap.set(u.uid, normalizeUserStatusAndExpiry(u));
                });
             }
           }
           
           safeStorage.setItem('sync_user_mtimes', JSON.stringify(knownMtimes));
 
-          currentUsers = Array.from(currentUsersMap.values());
+          currentUsers = Array.from(currentUsersMap.values()).map(normalizeUserStatusAndExpiry);
         } catch (err) {
           handleFirestoreError(err, OperationType.LIST, 'users filter delta updates');
           throw err;

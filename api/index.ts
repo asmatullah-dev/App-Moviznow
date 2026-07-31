@@ -754,8 +754,8 @@ async function startServer() {
   app.get('/api/moviesdrive', async (req: express.Request, res: express.Response) => {
     try {
       let { url } = req.query;
-      if (!url || typeof url !== 'string' || (!url.includes('moviesdrives.') && !url.includes('moviesdrive.'))) {
-        return res.status(400).json({ error: 'Valid moviesdrives URL required' });
+      if (!url || typeof url !== 'string' || (!url.trim().startsWith('http') && !url.includes('.'))) {
+        return res.status(400).json({ error: 'Valid URL required' });
       }
 
       // Clean URL
@@ -960,7 +960,7 @@ async function startServer() {
   app.get('/api/filmygo', async (req: express.Request, res: express.Response) => {
     try {
       let { url } = req.query;
-      if (!url || typeof url !== 'string' || !url.includes('filmygo.')) {
+      if (!url || typeof url !== 'string' || (!url.trim().startsWith('http') && !url.includes('.'))) {
         return res.status(400).json({ error: 'Valid FilmyGo URL required' });
       }
 
@@ -1372,7 +1372,7 @@ async function startServer() {
   app.get('/api/skymovieshd', async (req: express.Request, res: express.Response) => {
     try {
       let { url } = req.query;
-      if (!url || typeof url !== 'string' || !url.includes('skymovies')) {
+      if (!url || typeof url !== 'string' || (!url.trim().startsWith('http') && !url.includes('.'))) {
         return res.status(400).json({ error: 'Valid SkymoviesHD URL required' });
       }
 

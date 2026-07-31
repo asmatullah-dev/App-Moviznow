@@ -203,11 +203,6 @@ export default function OrdersManagement() {
         );
 
         updates.assignedContent = Array.from(new Set([...(userData.assignedContent || []), ...contentIds]));
-
-        if (userData.status === 'pending') {
-          updates.status = 'active';
-          updates.role = 'selected_content';
-        }
       }
 
       const updatedOrders = userData.orders?.map(o => o.id === order.id ? { ...o, status: 'approved' } : o) || [];
