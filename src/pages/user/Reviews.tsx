@@ -229,6 +229,27 @@ export default function Reviews() {
           </div>
         </div>
 
+        {!profile && (
+          <div className="bg-zinc-50 dark:bg-zinc-900 p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 mb-12 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div>
+              <h3 className="font-bold text-lg text-zinc-900 dark:text-white mb-1">{t("Write a Review")}</h3>
+              <p className="text-xs text-zinc-500">{t("Log in to your account to post a review and get +5 Days free membership!")}</p>
+            </div>
+            <button
+              onClick={() => navigate('/login')}
+              className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2.5 px-6 rounded-xl transition-colors shrink-0 text-sm shadow-sm"
+            >
+              {t("Log In to Review")}
+            </button>
+          </div>
+        )}
+
+        {profile && reviews.filter(r => r.userId === profile.uid).length >= 2 && (
+          <div className="bg-emerald-500/10 border border-emerald-500/20 p-4 rounded-2xl text-center mb-12 text-sm text-emerald-600 dark:text-emerald-400 font-medium">
+            {t("You have submitted the maximum allowed 2 reviews per account. Thank you for your feedback!")}
+          </div>
+        )}
+
         {profile && reviews.filter(r => r.userId === profile.uid).length < 2 && (
           <form onSubmit={handleSubmit} className="bg-zinc-50 dark:bg-zinc-900 p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 mb-12">
             <h3 className="font-bold text-lg mb-4">{t("Write a Review")}</h3>
@@ -269,7 +290,7 @@ export default function Reviews() {
               className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 px-8 rounded-xl transition-colors flex items-center gap-2 disabled:opacity-50"
             >
               {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <MessageSquare className="w-5 h-5" />} 
-              {submitting ? t("Submitting...") : t("Submit Review")}
+              {submitting ? t("Submitting...") : t("Submit Review (+5 Days)")}
             </button>
           </form>
         )}

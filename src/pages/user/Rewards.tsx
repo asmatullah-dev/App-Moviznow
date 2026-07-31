@@ -310,13 +310,62 @@ export default function Rewards() {
   };
 
   const handleEnableNotifications = async () => {
+    if (!profile?.uid) return;
+    if (profile.notificationRewardClaimed) return;
+    
     if ('Notification' in window) {
       const permission = await Notification.requestPermission();
-      if (permission === 'granted') {
-        sessionStorage.setItem('notificationRewardClaimed', 'true');
-        // App.tsx RewardsManager will handle the actual reward claim
-        window.location.reload();
+      if (permission !== 'granted') {
+        alert(t('Please allow notifications permission in your browser to claim this reward.'));
+        return;
       }
+    }
+    
+    try {
+      let baseDate = new Date();
+      if (profile.expiryDate && profile.expiryDate !== 'Lifetime') {
+        const currentExp = new Date(profile.expiryDate);
+        if (currentExp > baseDate) baseDate = currentExp;
+      }
+      baseDate.setDate(baseDate.getDate() + 3);
+      const updates: any = {
+        notificationRewardClaimed: true,
+        expiryDate: baseDate.toISOString()
+      };
+      if (profile.status !== 'suspended') {
+        updates.status = 'active';
+      }
+      await updateUserProfileData(updates);
+      triggerConfetti();
+    } catch (e) {
+      console.error("Failed to claim notification reward:", e);
+    }
+  };
+
+  const handleClaimPWA = async () => {
+    if (!profile?.uid || profile.pwaRewardClaimed) return;
+    if (!isInstalled) {
+      installApp();
+      return;
+    }
+    try {
+      let baseDate = new Date();
+      if (profile.expiryDate && profile.expiryDate !== 'Lifetime') {
+        const currentExp = new Date(profile.expiryDate);
+        if (currentExp > baseDate) baseDate = currentExp;
+      }
+      baseDate.setDate(baseDate.getDate() + 3);
+      const updates: any = {
+        pwaRewardClaimed: true,
+        expiryDate: baseDate.toISOString()
+      };
+      if (profile.status !== 'suspended') {
+        updates.status = 'active';
+      }
+      await updateUserProfileData(updates);
+      triggerConfetti();
+    } catch (e) {
+      console.error("Failed to claim PWA reward:", e);
     }
   };
 
@@ -629,14 +678,10 @@ export default function Rewards() {
                     </div>
                   </div>
                   <button 
-                    onClick={() => {
-                      installApp();
-                      sessionStorage.setItem('pwaRewardClaimed', 'true');
-                    }}
-                    disabled={isInstalled}
-                    className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform flex items-center gap-2 disabled:opacity-50 shadow-sm"
+                    onClick={handleClaimPWA}
+                    className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform flex items-center gap-2 shadow-sm"
                   >
-                    {isInstalled ? t('Installed') : t('Install (+3 Days)')}
+                    {profile?.pwaRewardClaimed ? t('Claimed (+3 Days)') : (isInstalled ? t('Claim Reward (+3 Days)') : t('Install (+3 Days)'))}
                     <ArrowRight className="w-4 h-4" />
                   </button>
                 </div>

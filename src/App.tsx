@@ -191,69 +191,6 @@ import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { db } from './firebase';
 
 function RewardsManager() {
-  const { user, profile, updateUserProfileData } = useAuth();
-  const { isInstalled } = usePWA();
-  
-  const claimingRef = useRef(false);
-  
-  useEffect(() => {
-    if (!profile || !user || claimingRef.current) return;
-
-    const checkRewards = async () => {
-      const updates: any = {};
-      let extensionDays = 0;
-
-      // PWA Reward (3 days)
-      if (isInstalled && !profile.pwaRewardClaimed) {
-        console.log("Claiming PWA reward...");
-        updates.pwaRewardClaimed = true;
-        extensionDays += 3;
-      }
-
-      // Notification Reward (3 days)
-      const hasNotificationPermission = 'Notification' in window && Notification.permission === 'granted';
-      if (hasNotificationPermission && !profile.notificationRewardClaimed) {
-        console.log("Claiming Notification reward...");
-        updates.notificationRewardClaimed = true;
-        extensionDays += 3;
-      }
-
-      // Review Reward (5 days)
-      const hasRated = safeStorage.getItem('has_rated') === 'true' || sessionStorage.getItem('reviewRewardClaimed') === 'true';
-      if (hasRated && !profile.reviewRewardClaimed) {
-        console.log("Claiming Review reward...");
-        updates.reviewRewardClaimed = true;
-        extensionDays += 5;
-      }
-
-      if (extensionDays > 0) {
-        claimingRef.current = true;
-        let newExpiry = new Date();
-        if (profile.expiryDate && profile.expiryDate !== 'Lifetime') {
-          const currentExpiry = new Date(profile.expiryDate);
-          newExpiry = currentExpiry > new Date() ? currentExpiry : new Date();
-        }
-        newExpiry.setDate(newExpiry.getDate() + extensionDays);
-        updates.expiryDate = newExpiry.toISOString();
-        
-        if (profile.status !== 'suspended') {
-          updates.status = 'active';
-        }
-
-        try {
-          await updateUserProfileData(updates);
-          console.log(`Successfully claimed ${extensionDays} days of rewards`);
-        } catch (e) {
-          console.error("Failed to claim engagement rewards", e);
-        } finally {
-          claimingRef.current = false;
-        }
-      }
-    };
-
-    checkRewards();
-  }, [isInstalled, profile?.uid, profile?.pwaRewardClaimed, profile?.notificationRewardClaimed, profile?.reviewRewardClaimed, profile?.expiryDate]);
-
   return null;
 }
 

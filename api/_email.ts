@@ -222,6 +222,13 @@ async function sendEmailMessage({
         replyToAddress = "contactus@MovizNow.com";
       }
 
+      const transactionalHeaders = {
+        "Auto-Submitted": "auto-generated",
+        "X-Auto-Response-Suppress": "All",
+        "X-Entity-Ref-ID": `tx-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        "X-Transactional-Type": "account-security"
+      };
+
       const { data, error } = await callResendWithRetry(async () => {
         return await resend.emails.send({
           from,
@@ -230,6 +237,7 @@ async function sendEmailMessage({
           html,
           text: text || subject,
           replyTo: replyToAddress,
+          headers: transactionalHeaders
         });
       });
 
@@ -266,6 +274,12 @@ async function sendEmailMessage({
     subject,
     text: text || subject,
     html,
+    headers: {
+      "Auto-Submitted": "auto-generated",
+      "X-Auto-Response-Suppress": "All",
+      "X-Entity-Ref-ID": `tx-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      "X-Transactional-Type": "account-security"
+    }
   });
 
   return { provider: "smtp", messageId: info.messageId };
@@ -310,17 +324,29 @@ emailRouter.post("/send-welcome", async (req, res) => {
     const siteUrl = "https://MovizNow.com";
     const userName = displayName || "Movie Fan";
 
+    const now = new Date();
+    const formattedTimestamp = now.toLocaleDateString("en-US", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      timeZoneName: "short"
+    });
+
     const subject = isNewUser
-      ? `🎬 Welcome to MovizNow, ${userName}!`
-      : `👋 Welcome back to MovizNow, ${userName}!`;
+      ? `Account Security: Welcome to MovizNow, ${userName}`
+      : `Security Alert: Account Access for ${userName}`;
 
     const greeting = isNewUser
-      ? `Welcome to MovizNow, ${userName}! 👋`
-      : `Welcome back, ${userName}! 👋`;
+      ? `Welcome to MovizNow, ${userName}`
+      : `Welcome back, ${userName}`;
 
     const introText = isNewUser
-      ? `We're thrilled to have you join our community! Get ready to explore thousands of high-quality movies, trending TV series, and exclusive content right at your fingertips.`
-      : `Great to see you again! Dive right back into your favorite movies and series. We've added lots of new content since you were last here.`;
+      ? `Your account was successfully registered and activated.`
+      : `Your account was successfully logged in.`;
 
     const htmlContent = `
       <!DOCTYPE html>
@@ -330,41 +356,42 @@ emailRouter.post("/send-welcome", async (req, res) => {
         <style>
           body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #09090b; color: #f4f4f5; margin: 0; padding: 0; }
           .container { max-width: 600px; margin: 20px auto; background-color: #18181b; border-radius: 16px; border: 1px solid #27272a; overflow: hidden; }
-          .header { background: linear-gradient(135deg, #e11d48 0%, #be123c 100%); padding: 32px 24px; text-align: center; }
-          .header h1 { margin: 0; font-size: 28px; font-weight: 800; color: #ffffff; letter-spacing: -0.5px; }
+          .header { background-color: #18181b; border-bottom: 1px solid #27272a; padding: 24px; text-align: center; }
+          .header h1 { margin: 0; font-size: 24px; font-weight: 800; color: #ffffff; letter-spacing: -0.5px; }
           .content { padding: 32px 24px; line-height: 1.6; }
           .greeting { font-size: 20px; font-weight: 700; color: #ffffff; margin-bottom: 12px; }
           .text { color: #a1a1aa; font-size: 15px; margin-bottom: 20px; }
-          .features { background-color: #27272a; border-radius: 12px; padding: 20px; margin: 24px 0; }
-          .feature-item { display: flex; align-items: center; margin-bottom: 12px; color: #e4e4e7; font-size: 14px; }
+          .activity-card { background-color: #27272a; border-radius: 12px; border: 1px solid #3f3f46; padding: 18px 20px; margin: 24px 0; }
+          .activity-title { font-size: 13px; font-weight: 700; text-transform: uppercase; color: #10b981; margin-bottom: 8px; letter-spacing: 0.5px; }
+          .activity-detail { color: #e4e4e7; font-size: 14px; margin-bottom: 6px; }
+          .activity-timestamp { font-family: monospace; color: #38bdf8; font-weight: 600; font-size: 13px; }
           .btn-container { text-align: center; margin: 32px 0 16px; }
-          .btn { background-color: #e11d48; color: #ffffff !important; padding: 14px 32px; font-weight: 700; font-size: 16px; text-decoration: none; border-radius: 12px; display: inline-block; box-shadow: 0 4px 14px rgba(225, 29, 72, 0.4); }
+          .btn { background-color: #e11d48; color: #ffffff !important; padding: 14px 32px; font-weight: 700; font-size: 15px; text-decoration: none; border-radius: 12px; display: inline-block; }
           .footer { text-align: center; padding: 20px; font-size: 12px; color: #71717a; border-top: 1px solid #27272a; }
         </style>
       </head>
       <body>
         <div class="container">
           <div class="header">
-            <h1>🎬 MovizNow</h1>
+            <h1>MovizNow</h1>
           </div>
           <div class="content">
             <div class="greeting">${greeting}</div>
             <p class="text">${introText}</p>
-            
-            <div class="features">
-              <div class="feature-item">🍿 <strong>Unlimited Streaming:</strong> Watch trending movies and series anytime.</div>
-              <div class="feature-item">⭐ <strong>Watchlists & Favorites:</strong> Save titles to watch later.</div>
-              <div class="feature-item">🚀 <strong>Fast Downloads:</strong> Multiple print quality options available.</div>
-              <div class="feature-item">⚡ <strong>Request Movies:</strong> Ask for your favorite movies directly.</div>
+
+            <div class="activity-card">
+              <div class="activity-title">🔒 Account Access Log</div>
+              <div class="activity-detail"><strong>Action:</strong> ${isNewUser ? 'New Account Registration' : 'Account Login Session'}</div>
+              <div class="activity-detail"><strong>Date & Time:</strong> <span class="activity-timestamp">${formattedTimestamp}</span></div>
             </div>
 
             <div class="btn-container">
-              <a href="${siteUrl}" class="btn">Start Watching Now</a>
+              <a href="${siteUrl}" class="btn">Access Your Account</a>
             </div>
           </div>
           <div class="footer">
             <p>© ${new Date().getFullYear()} MovizNow. All rights reserved.</p>
-            <p>You received this email because you ${isNewUser ? 'recently signed up for' : 'logged into'} MovizNow.</p>
+            <p>You received this transactional security notification because you ${isNewUser ? 'created an account' : 'logged in'} on MovizNow.</p>
           </div>
         </div>
       </body>
@@ -375,7 +402,7 @@ emailRouter.post("/send-welcome", async (req, res) => {
       config,
       to: email,
       subject: subject,
-      text: `${greeting}\n\n${introText}\n\nStart watching now at ${siteUrl}`,
+      text: `${greeting}\n\n${introText}\n\nDate & Time of Activity: ${formattedTimestamp}\n\nAccess account: ${siteUrl}`,
       html: htmlContent,
       senderEmailOverride: "Alerts@MovizNow.com",
     });
