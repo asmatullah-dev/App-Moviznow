@@ -5,7 +5,60 @@ import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 import firebaseConfig from "../firebase-applet-config.json" with { type: "json" };
 
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export function isValidGmailAddress(email?: string | null): boolean {
+  if (!email || typeof email !== "string") return false;
+  const cleanEmail = email.trim().toLowerCase();
+  if (cleanEmail.endsWith("@moviznow.com")) return false;
+  const gmailRegex = /^[a-zA-Z0-9._%+-]+@g(oogle)?mail\.com$/;
+  return gmailRegex.test(cleanEmail);
+}
+
 export const emailRouter = express.Router();
+
+// Handle Unsubscribe requests
+emailRouter.all("/unsubscribe", async (req, res) => {
+  try {
+    const email = (req.query.email || req.body?.email || "").toString().trim().toLowerCase();
+    if (!email || !email.includes("@")) {
+      return res.status(400).json({ error: "Valid email parameter is required." });
+    }
+
+    const firestore = getDb();
+    if (firestore) {
+      try {
+        const usersRef = firestore.collection("users");
+        const snap = await usersRef.where("email", "==", email).get();
+        if (!snap.empty) {
+          const batch = firestore.batch();
+          snap.forEach((doc) => {
+            batch.update(doc.ref, {
+              emailNotificationsEnabled: false,
+              unsubscribedAt: new Date().toISOString(),
+            });
+          });
+          await batch.commit();
+        }
+      } catch (err) {
+        console.error("Firestore unsubscribe update error:", err);
+      }
+    }
+
+    if (req.method === "GET") {
+      return res.redirect(`/unsubscribe?email=${encodeURIComponent(email)}`);
+    }
+
+    return res.json({
+      success: true,
+      email,
+      message: `Email ${email} has been unsubscribed from movie & series notifications.`,
+    });
+  } catch (error: any) {
+    console.error("Error in unsubscribe endpoint:", error);
+    return res.status(500).json({ error: error.message || "Failed to process unsubscribe request." });
+  }
+});
 
 let adminApp: admin.app.App | undefined;
 
@@ -102,6 +155,30 @@ function createTransporter(config: any) {
   });
 }
 
+// Helper for delay to prevent hitting API rate limits
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Retry wrapper for Resend API calls to handle 429 Rate Limit errors gracefully
+async function callResendWithRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+  let attempt = 0;
+  while (attempt < maxRetries) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      attempt++;
+      const errMsg = err?.message || String(err);
+      const isRateLimit = errMsg.includes("rate limit") || errMsg.includes("Too many requests") || errMsg.includes("429") || (err?.statusCode === 429);
+      if (isRateLimit && attempt < maxRetries) {
+        console.warn(`Resend rate limit hit (attempt ${attempt}/${maxRetries}). Waiting ${1.5 * attempt}s before retry...`);
+        await sleep(1500 * attempt);
+      } else {
+        throw err;
+      }
+    }
+  }
+  throw new Error("Max retries reached for Resend API call");
+}
+
 // Unified Send Function (Tries Resend API first for inbox delivery, falls back to SMTP)
 async function sendEmailMessage({
   config,
@@ -120,6 +197,11 @@ async function sendEmailMessage({
   replyTo?: string;
   senderEmailOverride?: string;
 }) {
+  if (!to || !isValidGmailAddress(to)) {
+    console.warn(`[Email Skipped] Address '${to}' is not a valid Gmail address.`);
+    throw new Error(`Email sending skipped: '${to}' is not a valid Gmail address.`);
+  }
+
   const resendKey = config.resendApiKey || process.env.RESEND_API_KEY;
 
   if (resendKey && resendKey.trim().length > 0) {
@@ -140,13 +222,15 @@ async function sendEmailMessage({
         replyToAddress = "contactus@MovizNow.com";
       }
 
-      const { data, error } = await resend.emails.send({
-        from,
-        to,
-        subject,
-        html,
-        text: text || subject,
-        replyTo: replyToAddress,
+      const { data, error } = await callResendWithRetry(async () => {
+        return await resend.emails.send({
+          from,
+          to,
+          subject,
+          html,
+          text: text || subject,
+          replyTo: replyToAddress,
+        });
       });
 
       if (error) {
@@ -192,8 +276,29 @@ emailRouter.post("/send-welcome", async (req, res) => {
   try {
     const { email, displayName, appUrl, smtpSettings, isNewUser = true } = req.body;
 
-    if (!email) {
-      return res.status(400).json({ error: "Recipient email is required." });
+    if (!isNewUser) {
+      return res.json({ success: true, message: "Welcome email skipped for existing user login." });
+    }
+
+    if (!email || !isValidGmailAddress(email)) {
+      return res.status(400).json({ error: "Welcome email skipped: Recipient email must be a valid Gmail address (abc123@gmail.com)." });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const firestore = getDb();
+    if (firestore) {
+      try {
+        const userQuery = await firestore.collection("users").where("email", "==", cleanEmail).limit(1).get();
+        if (!userQuery.empty) {
+          const userDoc = userQuery.docs[0];
+          if (userDoc.data().welcomeEmailSent === true) {
+            return res.json({ success: true, message: "Welcome email already sent to this user." });
+          }
+          await userDoc.ref.update({ welcomeEmailSent: true });
+        }
+      } catch (e) {
+        console.warn("Firestore check for welcomeEmailSent failed:", e);
+      }
     }
 
     const config = await getEmailConfig(smtpSettings);
@@ -311,36 +416,89 @@ emailRouter.post("/send-movie-notification", async (req, res) => {
       return res.json({ success: true, message: "New content emails are disabled in settings." });
     }
 
-    // Determine target recipients
-    let recipients: string[] = [];
+    // Determine target recipients using Last-Active re-engagement algorithm
     const firestore = getDb();
-    let fetchFromDb = true;
+    const unsubscribedEmailsSet = new Set<string>();
+
+    if (firestore) {
+      try {
+        const unsubSnap = await firestore.collection("unsubscribed_emails").get();
+        unsubSnap.forEach((doc) => {
+          const data = doc.data();
+          if (data.email) unsubscribedEmailsSet.add(data.email.toLowerCase().trim());
+        });
+      } catch (e) {
+        console.warn("Could not fetch unsubscribed_emails collection:", e);
+      }
+    }
+
+    let candidateUsers: Array<{ email: string; lastActive?: string; emailNotificationsDisabled?: boolean; emailNotificationsEnabled?: boolean; unsubscribed?: boolean }> = [];
 
     if (Array.isArray(targetEmails)) {
-      recipients = targetEmails.filter(e => typeof e === "string" && e.includes("@"));
-      fetchFromDb = false; // If targetEmails array is provided (even if empty), don't fallback to all users
-    }
-    
-    if (fetchFromDb && firestore) {
-      // Fetch all user emails from Firestore if targetEmails was not supplied
+      candidateUsers = targetEmails.filter(e => typeof e === "string" && isValidGmailAddress(e)).map(e => ({ email: e }));
+    } else if (Array.isArray(req.body.targetUsers) && req.body.targetUsers.length > 0) {
+      candidateUsers = req.body.targetUsers.filter((u: any) => u && isValidGmailAddress(u.email));
+    } else if (firestore) {
       try {
         const usersSnap = await firestore.collection("users").get();
         usersSnap.forEach((doc) => {
           const data = doc.data();
-          if (data.email && typeof data.email === "string" && data.email.includes("@")) {
-            recipients.push(data.email);
+          if (data.email && isValidGmailAddress(data.email)) {
+            candidateUsers.push({
+              email: data.email,
+              lastActive: data.lastActive,
+              emailNotificationsDisabled: data.emailNotificationsDisabled,
+              emailNotificationsEnabled: data.emailNotificationsEnabled,
+              unsubscribed: data.unsubscribed,
+            });
           }
         });
       } catch (err) {
         console.error("Error fetching users from Firestore for email notification:", err);
       }
+    } else if (Array.isArray(targetEmails) && targetEmails.length > 0) {
+      candidateUsers = targetEmails.filter(e => isValidGmailAddress(e)).map(e => ({ email: e }));
     }
 
-    // Deduplicate emails
-    recipients = Array.from(new Set(recipients));
+    // Filter out unsubscribed / disabled users & invalid / non-gmail emails
+    const eligibleUsers = candidateUsers.filter(u => {
+      if (!u.email || !isValidGmailAddress(u.email)) return false;
+      const cleanEmail = u.email.toLowerCase().trim();
+      if (unsubscribedEmailsSet.has(cleanEmail)) return false;
+      if (u.unsubscribed === true) return false;
+      if (u.emailNotificationsDisabled === true) return false;
+      if (u.emailNotificationsEnabled === false) return false;
+      return true;
+    });
+
+    // Last Active re-engagement algorithm:
+    // Sort eligible users by lastActive ASCENDING (users inactive for the longest time come FIRST)
+    // Missing / null lastActive is treated as 0 (epoch 1970 - longest time ago)
+    eligibleUsers.sort((a, b) => {
+      const getTimestamp = (isoStr?: string) => {
+        if (!isoStr) return 0;
+        const t = new Date(isoStr).getTime();
+        return isNaN(t) ? 0 : t;
+      };
+      return getTimestamp(a.lastActive) - getTimestamp(b.lastActive);
+    });
+
+    // Deduplicate by email while preserving sorted order
+    const seenEmails = new Set<string>();
+    const deduplicatedSortedEmails: string[] = [];
+    for (const userObj of eligibleUsers) {
+      const clean = userObj.email.toLowerCase().trim();
+      if (!seenEmails.has(clean)) {
+        seenEmails.add(clean);
+        deduplicatedSortedEmails.push(userObj.email);
+      }
+    }
+
+    // Cap to MAX 50 recipients!
+    let recipients = deduplicatedSortedEmails.slice(0, 50);
 
     if (recipients.length === 0) {
-      return res.status(400).json({ error: "No recipient email addresses found. Please ensure users have valid email addresses in their profile." });
+      return res.status(400).json({ error: "No eligible recipient email addresses found (users may be unsubscribed or email notifications disabled)." });
     }
 
     const siteUrl = "https://MovizNow.com";
@@ -352,7 +510,16 @@ emailRouter.post("/send-movie-notification", async (req, res) => {
       ? `🎬 Watch Now: ${displayTitle}${year ? ` (${year})` : ""} is on MovizNow!`
       : `🔔 Notification: ${title}`;
 
-    const htmlContent = isMovieNotification ? `
+    const generateHtmlForRecipient = (recipientEmail: string) => {
+      const unsubLink = `${appUrl || siteUrl}/unsubscribe?email=${encodeURIComponent(recipientEmail)}`;
+      const unsubFooter = isMovieNotification ? `
+        <div style="text-align: center; padding: 16px 20px 24px; font-size: 11px; color: #a1a1aa; border-top: 1px solid #27272a; margin-top: 20px;">
+          <p style="margin: 0 0 6px;">Don't want to receive movie and series notification emails?</p>
+          <p style="margin: 0;"><a href="${unsubLink}" style="color: #e11d48; text-decoration: underline;">Unsubscribe from email notifications</a></p>
+        </div>
+      ` : '';
+
+      return isMovieNotification ? `
       <!DOCTYPE html>
       <html>
       <head>
@@ -402,6 +569,7 @@ emailRouter.post("/send-movie-notification", async (req, res) => {
           <div class="footer">
             <p>© ${new Date().getFullYear()} MovizNow. All rights reserved.</p>
             <p>You received this email from MovizNow because you are a registered member.</p>
+            ${unsubFooter}
           </div>
         </div>
       </body>
@@ -444,7 +612,7 @@ emailRouter.post("/send-movie-notification", async (req, res) => {
       </body>
       </html>
     `;
-
+    };
 
     let successCount = 0;
     let lastErrorMsg = "";
@@ -468,7 +636,7 @@ emailRouter.post("/send-movie-notification", async (req, res) => {
             from: `"${config.senderName}" <${fromAddress}>`,
             to: [recipient],
             subject: subject,
-            html: htmlContent,
+            html: generateHtmlForRecipient(recipient),
             text: `${subject}\n\n${description || customMessage || ""}\n\nLink: ${isMovieNotification ? watchUrl : siteUrl}`,
           };
           if (replyToAddress) {
@@ -477,17 +645,32 @@ emailRouter.post("/send-movie-notification", async (req, res) => {
           return payload;
         });
 
-        // Resend batch API supports up to 100 emails per batch
-        const BATCH_SIZE = 100;
+        // Batch send with throttling and rate-limit retry to stay safely under 10 req/s limit
+        const BATCH_SIZE = 25;
         for (let i = 0; i < emailPayloads.length; i += BATCH_SIZE) {
           const batch = emailPayloads.slice(i, i + BATCH_SIZE);
-          const { data, error } = await resend.batch.send(batch);
-          if (error) {
-            console.error("Resend Batch API Error:", error);
-            lastErrorMsg = error.message || "Resend batch send failed.";
-          } else {
-            successCount += batch.length;
+          let retries = 0;
+          let sentSuccessfully = false;
+
+          while (retries < 3 && !sentSuccessfully) {
+            retries++;
+            const { data, error } = await resend.batch.send(batch);
+            if (error) {
+              console.error(`Resend Batch API Error (Attempt ${retries}):`, error);
+              lastErrorMsg = error.message || "Resend batch send failed.";
+
+              if (error.message && (error.message.includes("rate limit") || error.message.includes("Too many requests"))) {
+                await delay(1200); // Wait 1.2s before retrying
+              } else {
+                break; // Non-rate-limit error
+              }
+            } else {
+              successCount += batch.length;
+              sentSuccessfully = true;
+            }
           }
+
+          await delay(300); // Wait 300ms between batches to stay under rate limit
         }
       } catch (batchErr: any) {
         console.error("Resend Batch execution failed, falling back to individual sending:", batchErr);
@@ -504,7 +687,7 @@ emailRouter.post("/send-movie-notification", async (req, res) => {
             to: recipient,
             subject: subject,
             text: `${subject}\n\n${description || customMessage || ""}\n\nLink: ${isMovieNotification ? watchUrl : siteUrl}`,
-            html: htmlContent,
+            html: generateHtmlForRecipient(recipient),
           });
 
           successCount++;
@@ -512,6 +695,7 @@ emailRouter.post("/send-movie-notification", async (req, res) => {
           console.error(`Failed to send email to ${recipient}:`, err);
           lastErrorMsg = err.message || String(err);
         }
+        await delay(200); // Delay 200ms between individual emails (5 req/s max)
       }
     }
 
@@ -651,5 +835,52 @@ emailRouter.post("/test-smtp", async (req, res) => {
       errorMsg = `Connection timed out connecting to ${req.body?.host || 'SMTP server'}. Please check host and port settings (Port 587 for TLS, Port 465 for SSL).`;
     }
     return res.status(500).json({ error: errorMsg });
+  }
+});
+
+// 4. Endpoint to handle unsubscribe requests
+emailRouter.all("/unsubscribe", async (req, res) => {
+  try {
+    const email = (req.body?.email || req.query?.email || "") as string;
+    if (!email || typeof email !== "string" || !email.includes("@")) {
+      return res.status(400).json({ error: "Valid email address is required to unsubscribe." });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const firestore = getDb();
+
+    if (firestore) {
+      try {
+        await firestore.collection("unsubscribed_emails").doc(cleanEmail.replace(/[^a-zA-Z0-9]/g, "_")).set({
+          email: cleanEmail,
+          unsubscribedAt: new Date().toISOString()
+        });
+      } catch (e) {
+        console.warn("Error writing to unsubscribed_emails collection:", e);
+      }
+
+      try {
+        const usersSnap = await firestore.collection("users").where("email", "==", cleanEmail).get();
+        usersSnap.forEach(async (docRef) => {
+          await docRef.ref.update({
+            emailNotificationsEnabled: false,
+            emailNotificationsDisabled: true,
+            unsubscribed: true,
+            unsubscribedAt: new Date().toISOString()
+          });
+        });
+      } catch (e) {
+        console.warn("Error updating user document for unsubscribe:", e);
+      }
+    }
+
+    if (req.method === "GET") {
+      return res.redirect(`/unsubscribe?email=${encodeURIComponent(cleanEmail)}`);
+    }
+
+    return res.json({ success: true, message: `Email ${cleanEmail} unsubscribed successfully.` });
+  } catch (err: any) {
+    console.error("Unsubscribe route error:", err);
+    return res.status(500).json({ error: err.message || "Failed to unsubscribe." });
   }
 });

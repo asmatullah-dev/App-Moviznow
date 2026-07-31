@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useUsers } from "../../contexts/UsersContext";
+import { isValidGmailAddress } from "../../utils/emailValidation";
 import { useNotifications } from "../../contexts/NotificationContext";
 import {
   collection,
@@ -231,6 +232,8 @@ export default function Notifications() {
         targetUserNames: sendForm.targetType === 'specific' ? sendForm.targetUserNames : null,
         buttonLabel: sendForm.buttonLabel || null,
         buttonUrl: sendForm.buttonUrl || null,
+        sendFcm: sendForm.sendFcm,
+        isFcmDisabled: !sendForm.sendFcm,
         createdBy: 'admin'
       };
 
@@ -264,21 +267,31 @@ export default function Notifications() {
       if (sendForm.sendEmail) {
         try {
           let targetEmails: string[] | undefined;
+          const isEligibleUser = (u: any) => {
+            if (!u || !isValidGmailAddress(u.email)) return false;
+            if (u.emailNotificationsEnabled === false || u.unsubscribed === true || u.isEmailUnsubscribed === true) return false;
+            return true;
+          };
+
           if (sendForm.targetType === 'specific' && sendForm.targetUserIds.length > 0) {
             targetEmails = allUsers
-              .filter(u => sendForm.targetUserIds.includes(u.uid) && u.email)
-              .map(u => u.email)
-              .filter((e): e is string => !!e && typeof e === 'string' && e.includes('@'));
+              .filter(u => sendForm.targetUserIds.includes(u.uid) && isEligibleUser(u))
+              .map(u => u.email);
 
             if (!targetEmails) {
               targetEmails = []; // Always provide an array if 'specific' to prevent fallback to ALL users
             }
           } else {
-            // Target all users - collect all valid user emails from current users list
-            const userEmails = allUsers
-              .map(u => u.email)
-              .filter((e): e is string => !!e && typeof e === 'string' && e.includes('@'));
-            targetEmails = userEmails;
+            // Intelligent 50-email Last Active Selection Algorithm
+            // Filters eligible users and sorts by lastActive ascending (oldest/least active first for re-engagement), capped at 50
+            const eligibleUsers = allUsers.filter(isEligibleUser);
+            eligibleUsers.sort((a: any, b: any) => {
+              const aTime = a.lastActive ? new Date(a.lastActive).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+              const bTime = b.lastActive ? new Date(b.lastActive).getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+              return aTime - bTime;
+            });
+            const selected50Users = eligibleUsers.slice(0, 50);
+            targetEmails = selected50Users.map((u: any) => u.email);
           }
 
           const cachedSettingsStr = localStorage.getItem("cached_app_settings");

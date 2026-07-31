@@ -20,7 +20,16 @@ export default function Settings() {
   const [email, setEmail] = useState(profile?.email?.endsWith('@moviznow.com') ? '' : (profile?.email || ''));
   const [phone, setPhone] = useState(profile?.phone || '');
   const [city, setCity] = useState(profile?.city || '');
+  const [emailNotificationsEnabled, setEmailNotificationsEnabled] = useState(profile?.emailNotificationsEnabled !== false);
   const [showPhoneWarning, setShowPhoneWarning] = useState(false);
+
+  useEffect(() => {
+    if (profile) {
+      setEmailNotificationsEnabled(
+        profile.emailNotificationsEnabled !== false && profile.emailNotificationsDisabled !== true && profile.unsubscribed !== true
+      );
+    }
+  }, [profile?.emailNotificationsEnabled, profile?.emailNotificationsDisabled, profile?.unsubscribed]);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -61,6 +70,7 @@ export default function Settings() {
         email: email,
         phone: phone,
         city: city,
+        emailNotificationsEnabled: emailNotificationsEnabled,
       }, newPassword || undefined);
       setSuccess(t('Profile updated successfully'));
       setCurrentPassword('');
@@ -204,6 +214,42 @@ export default function Settings() {
                   <p className="mt-1 text-[10px] text-zinc-500 dark:text-zinc-400">
                     {t('Required for membership.')}
                   </p>
+                </div>
+              </div>
+
+              <div className="h-px bg-zinc-200 dark:bg-zinc-800 my-8"></div>
+
+              <div className="space-y-4">
+                <h3 className="text-lg font-bold flex items-center gap-2">
+                  <Bell className="w-5 h-5 text-emerald-500" />
+                  {t('Notification Preferences')}
+                </h3>
+
+                <div className="bg-zinc-50 dark:bg-zinc-950 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <p className="font-semibold text-sm text-zinc-900 dark:text-white flex items-center gap-2">
+                      <Mail className="w-4 h-4 text-emerald-500" />
+                      {t('Movie & Series Email Alerts')}
+                    </p>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                      {t('Receive email updates when new movies and TV series are released on MovizNow.')}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setEmailNotificationsEnabled(!emailNotificationsEnabled)}
+                    className={clsx(
+                      "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                      emailNotificationsEnabled ? "bg-emerald-500" : "bg-zinc-300 dark:bg-zinc-700"
+                    )}
+                  >
+                    <span
+                      className={clsx(
+                        "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                        emailNotificationsEnabled ? "translate-x-5" : "translate-x-0"
+                      )}
+                    />
+                  </button>
                 </div>
               </div>
 

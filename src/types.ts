@@ -55,6 +55,11 @@ export interface UserProfile {
   movieRequests?: any[];
   trialActivated?: boolean;
   notification?: 'yes' | 'no';
+  emailNotificationsEnabled?: boolean;
+  emailNotificationsDisabled?: boolean;
+  unsubscribed?: boolean;
+  isEmailUnsubscribed?: boolean;
+  unsubscribedAt?: string;
 }
 
 export interface AppNotification {
@@ -71,6 +76,8 @@ export interface AppNotification {
   targetUserNames?: string[];
   buttonLabel?: string;
   buttonUrl?: string;
+  sendFcm?: boolean;
+  isFcmDisabled?: boolean;
 }
 
 export interface NotificationTemplate {

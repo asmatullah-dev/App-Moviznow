@@ -8,6 +8,7 @@ import React, {
 } from "react";
 import { auth, db } from "../firebase";
 import { safeStorage } from "../utils/safeStorage";
+import { isValidGmailAddress } from "../utils/emailValidation";
 import {
   onAuthStateChanged,
   User,
@@ -308,8 +309,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const displayName = finalDisplayName || "Movie Fan";
 
-    // 1. Send Welcome Email if user has a valid email address
-    if (userEmail && userEmail.includes("@") && !userEmail.endsWith("@moviznow.com")) {
+    // 1. Send Welcome Email if user is NEW and has a valid Gmail address
+    if (isNewUser && userEmail && isValidGmailAddress(userEmail)) {
       const cachedSettingsStr = safeStorage.getItem("cached_app_settings");
       let localEmailSettings = null;
       if (cachedSettingsStr) {
@@ -1619,7 +1620,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
             // Trigger welcome email for new user if email exists and hasn't been sent yet
             const userEmail = currentUser.email || newProfile.email;
-            if (userEmail && !mergedOldData.welcomeEmailSent) {
+            if (userEmail && isValidGmailAddress(userEmail) && !mergedOldData.welcomeEmailSent) {
               const userName = currentUser.displayName || newProfile.displayName || "Movie Lover";
               fetch("/api/email/send-welcome", {
                 method: "POST",

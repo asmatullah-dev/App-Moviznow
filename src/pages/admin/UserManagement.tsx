@@ -559,6 +559,7 @@ export default function UserManagement() {
         dob: editForm.dob,
         gender: editForm.gender,
         city: editForm.city,
+        emailNotificationsEnabled: editForm.emailNotificationsEnabled !== false,
       };
       
       // Update isUserManager flag to match role
@@ -1875,6 +1876,21 @@ export default function UserManagement() {
                       />
                     </div>
                   </div>
+
+                  <div className="mt-3 bg-zinc-50 dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+                    <div>
+                      <label className="block text-xs font-bold text-zinc-900 dark:text-white">Movie Email Notifications</label>
+                      <p className="text-[10px] text-zinc-500 dark:text-zinc-400">Enable or disable movie and series email alerts for this user</p>
+                    </div>
+                    <select
+                      value={editForm.emailNotificationsEnabled !== false ? "enabled" : "disabled"}
+                      onChange={(e) => setEditForm({ ...editForm, emailNotificationsEnabled: e.target.value === "enabled" })}
+                      className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2.5 py-1 text-xs font-bold focus:outline-none text-emerald-500"
+                    >
+                      <option value="enabled">Enabled</option>
+                      <option value="disabled">Disabled</option>
+                    </select>
+                  </div>
                 </div>
               ) : (
                 <div className="p-4 md:p-6 space-y-6">
@@ -1943,6 +1959,51 @@ export default function UserManagement() {
                         <div className="text-zinc-500 text-[10px] uppercase font-bold mb-0.5">Status</div>
                         <div className="capitalize font-bold text-zinc-900 dark:text-white text-sm">{selectedUser.status || 'active'}</div>
                       </div>
+                    </div>
+
+                    {/* Email Notification Toggle for User */}
+                    <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
+                      <div>
+                        <div className="text-zinc-500 text-[10px] uppercase font-bold mb-0.5">Email Notifications</div>
+                        <div className="font-bold text-sm flex items-center gap-1.5">
+                          <span className={selectedUser.emailNotificationsEnabled === false || selectedUser.emailNotificationsDisabled === true || selectedUser.unsubscribed === true ? "text-red-500" : "text-emerald-500"}>
+                            {selectedUser.emailNotificationsEnabled === false || selectedUser.emailNotificationsDisabled === true || selectedUser.unsubscribed === true ? "Disabled" : "Enabled"}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          const isCurrentlyDisabled = selectedUser.emailNotificationsEnabled === false || selectedUser.emailNotificationsDisabled === true || selectedUser.unsubscribed === true;
+                          const newStatus = isCurrentlyDisabled; // if disabled, toggle to true (enabled)
+                          try {
+                            await updateDoc(doc(db, "users", selectedUser.uid), {
+                              emailNotificationsEnabled: newStatus,
+                              emailNotificationsDisabled: !newStatus,
+                              unsubscribed: !newStatus
+                            });
+                            setSelectedUser(prev => prev ? ({
+                              ...prev,
+                              emailNotificationsEnabled: newStatus,
+                              emailNotificationsDisabled: !newStatus,
+                              unsubscribed: !newStatus
+                            }) : null);
+                            updateUserFields(selectedUser.uid, {
+                              emailNotificationsEnabled: newStatus,
+                              emailNotificationsDisabled: !newStatus,
+                              unsubscribed: !newStatus
+                            });
+                          } catch (err) {
+                            console.error("Failed to update user email notification preference:", err);
+                          }
+                        }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                          selectedUser.emailNotificationsEnabled === false || selectedUser.emailNotificationsDisabled === true || selectedUser.unsubscribed === true
+                            ? "bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20"
+                            : "bg-red-500/10 text-red-500 hover:bg-red-500/20"
+                        }`}
+                      >
+                        {selectedUser.emailNotificationsEnabled === false || selectedUser.emailNotificationsDisabled === true || selectedUser.unsubscribed === true ? "Enable Email" : "Disable Email"}
+                      </button>
                     </div>
                     
                     <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 flex justify-between items-center">

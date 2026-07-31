@@ -29,6 +29,7 @@ import {
   deleteField,
 } from "firebase/firestore";
 import { useAuth } from "../../contexts/AuthContext";
+import { isValidGmailAddress } from "../../utils/emailValidation";
 import { useContent } from "../../contexts/ContentContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { useUsers } from "../../contexts/UsersContext";
@@ -2520,17 +2521,34 @@ export default function ContentManagement() {
         }
       }
 
-      // 2. Load cached users and email settings from localStorage / local state
+      // 2. Intelligent 50-email Last Active Selection Algorithm
+      // Filters active/eligible users, sorts by lastActive date ascending (oldest/least active first for re-engagement), capped at 50
       const cachedUsersStr = localStorage.getItem("cached_all_users");
-      let localUserEmails: string[] = [];
+      let candidateUsers: any[] = [];
       if (allUsers && allUsers.length > 0) {
-        localUserEmails = allUsers.map((u: any) => u.email).filter((e: string) => e && e.includes("@"));
+        candidateUsers = [...allUsers];
       } else if (cachedUsersStr) {
         try {
-          const parsedUsers = JSON.parse(cachedUsersStr);
-          localUserEmails = parsedUsers.map((u: any) => u.email).filter((e: string) => e && e.includes("@"));
+          candidateUsers = JSON.parse(cachedUsersStr);
         } catch (e) {}
       }
+
+      const eligibleUsers = candidateUsers.filter((u: any) => {
+        if (!u || !isValidGmailAddress(u.email)) return false;
+        if (u.emailNotificationsEnabled === false || u.unsubscribed === true || u.isEmailUnsubscribed === true) return false;
+        return true;
+      });
+
+      // Sort by last active ascending (users who haven't visited in the longest time come first)
+      eligibleUsers.sort((a: any, b: any) => {
+        const aTime = a.lastActive ? new Date(a.lastActive).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+        const bTime = b.lastActive ? new Date(b.lastActive).getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+        return aTime - bTime;
+      });
+
+      // Select top 50 least-recently-active users
+      const selected50Users = eligibleUsers.slice(0, 50);
+      const localUserEmails = selected50Users.map((u: any) => u.email);
 
       const cachedSettingsStr = localStorage.getItem("cached_app_settings");
       let localEmailSettings = null;

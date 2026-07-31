@@ -59,6 +59,7 @@ import ReferralsManagement from './pages/admin/ReferralsManagement';
 import ContentSync from './pages/admin/ContentSync';
 import InstallApp from './pages/InstallApp';
 import Rewards from './pages/user/Rewards';
+import Unsubscribe from './pages/Unsubscribe';
 
 const LoadingFallback = () => (
   <div className="min-h-screen bg-white dark:bg-zinc-950 transition-colors duration-300 flex flex-col items-center justify-center gap-6">
@@ -356,6 +357,7 @@ export default function App() {
                         <Route path="/maintenance" element={<MaintenancePage />} />
                         <Route path="/app" element={<InstallApp />} />
                         <Route path="/install" element={<InstallApp />} />
+                        <Route path="/unsubscribe" element={<Unsubscribe />} />
                         
                         {/* User Routes */}
                         <Route path="/" element={<ProtectedRoute><Home onOpenMediaModal={() => setIsMediaModalOpen(true)} /></ProtectedRoute>} />

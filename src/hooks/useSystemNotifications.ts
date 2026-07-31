@@ -33,6 +33,11 @@ export function useSystemNotifications(profile: UserProfile | null) {
 
     shownNotificationIds.current.add(latestNotification.id);
 
+    // Skip showing system notification if FCM / Push toggle was disabled when sending
+    if (latestNotification.sendFcm === false || latestNotification.isFcmDisabled === true) {
+      return;
+    }
+
     // Only show if it's a notification meant for us
     const isTargetingAll = !latestNotification.targetUserIds && !latestNotification.targetUserId;
     const isTargetingUs = 
