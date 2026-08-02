@@ -1271,7 +1271,7 @@ export default function Home({
 
         <div className="text-center text-xs text-zinc-500 dark:text-zinc-600 font-mono">
           {/* @ts-ignore */}
-          v{typeof __APP_VERSION__ !== 'undefined' ? `${__APP_VERSION__} (Referral Addition)` : '2.7.6 (Referral Addition)'}
+          v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.7.7'}
         </div>
       </footer>
 

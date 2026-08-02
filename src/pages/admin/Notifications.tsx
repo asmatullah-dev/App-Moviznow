@@ -269,7 +269,7 @@ export default function Notifications() {
           let targetEmails: string[] | undefined;
           const isEligibleUser = (u: any) => {
             if (!u || !isValidGmailAddress(u.email)) return false;
-            if (u.emailNotificationsEnabled === false || u.unsubscribed === true || u.isEmailUnsubscribed === true) return false;
+            if (u.emailNotificationsEnabled === false || u.emailNotificationsDisabled === true || u.unsubscribed === true || u.isEmailUnsubscribed === true) return false;
             return true;
           };
 

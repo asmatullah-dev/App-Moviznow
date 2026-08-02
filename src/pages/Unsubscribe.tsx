@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { CheckCircle2, AlertCircle, Loader2, ArrowLeft, Lock, UserX, LogOut } from 'lucide-react';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, collection, query, where, getDocs, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -12,14 +12,85 @@ export default function Unsubscribe() {
   const { user, profile, loading: authLoading, logout } = useAuth();
 
   const targetEmail = (searchParams.get('email') || '').trim().toLowerCase();
-  const loggedInEmail = (user?.email || profile?.email || '').trim().toLowerCase();
+
+  // Get logged in email from AuthContext or local cached storage
+  const getLoggedInUserEmail = (): string | null => {
+    if (user?.email) return user.email.trim().toLowerCase();
+    if (profile?.email) return profile.email.trim().toLowerCase();
+
+    try {
+      const cachedProfileStr = localStorage.getItem('profile_cache');
+      if (cachedProfileStr) {
+        const parsed = JSON.parse(cachedProfileStr);
+        if (parsed && parsed.email) {
+          return parsed.email.trim().toLowerCase();
+        }
+      }
+    } catch (e) {}
+
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('firebase:authUser:')) {
+          const item = localStorage.getItem(key);
+          if (item) {
+            const parsed = JSON.parse(item);
+            if (parsed && parsed.email) {
+              return parsed.email.trim().toLowerCase();
+            }
+          }
+        }
+      }
+    } catch (e) {}
+
+    return null;
+  };
+
+  const loggedInEmail = getLoggedInUserEmail();
+  const isEmailValid = !!targetEmail && targetEmail.includes('@');
 
   const [status, setStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
   const [message, setMessage] = useState('');
 
-  const isEmailValid = !!targetEmail && targetEmail.includes('@');
+  const updateFirestoreUser = async (userEmail: string): Promise<boolean> => {
+    try {
+      const q = query(collection(db, 'users'), where('email', '==', userEmail.toLowerCase()));
+      const snap = await getDocs(q);
+      
+      let updated = false;
+      if (!snap.empty) {
+        for (const userDoc of snap.docs) {
+          await updateDoc(doc(db, 'users', userDoc.id), {
+            emailNotificationsEnabled: false,
+            emailNotificationsDisabled: true,
+            unsubscribed: true,
+            unsubscribedAt: new Date().toISOString()
+          });
+          updated = true;
+        }
+      }
+
+      // Also update unsubscribed_emails collection directly in Firestore
+      try {
+        const unsubDocRef = doc(db, 'unsubscribed_emails', userEmail.replace(/[^a-zA-Z0-9]/g, '_'));
+        await setDoc(unsubDocRef, {
+          email: userEmail,
+          unsubscribedAt: new Date().toISOString()
+        }, { merge: true });
+        updated = true;
+      } catch (e) {
+        console.warn('unsubscribed_emails setDoc failed:', e);
+      }
+
+      return updated;
+    } catch (e) {
+      console.warn('Firestore direct unsubscribe failed:', e);
+    }
+    return false;
+  };
 
   const executeUnsubscribe = async () => {
+    if (!isEmailValid) return;
     setStatus('processing');
     try {
       const res = await fetch('/api/email/unsubscribe', {
@@ -31,6 +102,7 @@ export default function Unsubscribe() {
       const data = await res.json();
 
       if (res.ok && data.success) {
+        await updateFirestoreUser(targetEmail);
         setStatus('success');
         setMessage(data.message || `You have been unsubscribed from movie & series email notifications.`);
       } else {
@@ -64,33 +136,11 @@ export default function Unsubscribe() {
       return;
     }
 
-    if (user && loggedInEmail === targetEmail && status === 'idle') {
+    // Only unsubscribe if logged-in user email matches the link target email
+    if (loggedInEmail && loggedInEmail === targetEmail && status === 'idle') {
       executeUnsubscribe();
     }
-  }, [authLoading, user, loggedInEmail, targetEmail, isEmailValid]);
-
-  const updateFirestoreUser = async (userEmail: string): Promise<boolean> => {
-    try {
-      const { collection, query, where, getDocs } = await import('firebase/firestore');
-      const q = query(collection(db, 'users'), where('email', '==', userEmail.toLowerCase()));
-      const snap = await getDocs(q);
-      
-      if (!snap.empty) {
-        for (const userDoc of snap.docs) {
-          await updateDoc(doc(db, 'users', userDoc.id), {
-            emailNotificationsEnabled: false,
-            emailNotificationsDisabled: true,
-            unsubscribed: true,
-            unsubscribedAt: new Date().toISOString()
-          });
-        }
-        return true;
-      }
-    } catch (e) {
-      console.warn('Firestore direct unsubscribe failed:', e);
-    }
-    return false;
-  };
+  }, [authLoading, loggedInEmail, targetEmail, isEmailValid]);
 
   const handleGoToLogin = () => {
     const currentUrl = location.pathname + location.search;
@@ -138,7 +188,8 @@ export default function Unsubscribe() {
           </div>
         )}
 
-        {!authLoading && isEmailValid && !user && (
+        {/* User NOT logged in */}
+        {!authLoading && isEmailValid && !loggedInEmail && (
           <div className="py-6 space-y-4">
             <div className="w-16 h-16 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-2xl flex items-center justify-center mx-auto">
               <Lock className="w-8 h-8" />
@@ -167,7 +218,8 @@ export default function Unsubscribe() {
           </div>
         )}
 
-        {!authLoading && isEmailValid && user && loggedInEmail !== targetEmail && (
+        {/* Account Mismatch: Logged in as user X, but link is for user Y */}
+        {!authLoading && isEmailValid && loggedInEmail && loggedInEmail !== targetEmail && (
           <div className="py-6 space-y-4">
             <div className="w-16 h-16 bg-red-500/10 border border-red-500/20 text-red-400 rounded-2xl flex items-center justify-center mx-auto">
               <UserX className="w-8 h-8" />
@@ -196,7 +248,8 @@ export default function Unsubscribe() {
           </div>
         )}
 
-        {!authLoading && isEmailValid && user && loggedInEmail === targetEmail && status === 'processing' && (
+        {/* Processing Unsubscribe for matched user */}
+        {!authLoading && isEmailValid && loggedInEmail === targetEmail && status === 'processing' && (
           <div className="py-8 space-y-4">
             <Loader2 className="w-12 h-12 text-rose-500 animate-spin mx-auto" />
             <h2 className="text-xl font-bold">Unsubscribing...</h2>
@@ -204,7 +257,8 @@ export default function Unsubscribe() {
           </div>
         )}
 
-        {!authLoading && isEmailValid && user && loggedInEmail === targetEmail && status === 'success' && (
+        {/* Successfully Unsubscribed */}
+        {!authLoading && isEmailValid && loggedInEmail === targetEmail && status === 'success' && (
           <div className="py-6 space-y-4">
             <div className="w-16 h-16 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-2xl flex items-center justify-center mx-auto">
               <CheckCircle2 className="w-8 h-8" />
@@ -228,7 +282,8 @@ export default function Unsubscribe() {
           </div>
         )}
 
-        {!authLoading && isEmailValid && user && loggedInEmail === targetEmail && status === 'error' && (
+        {/* Error during unsubscribe */}
+        {!authLoading && isEmailValid && loggedInEmail === targetEmail && status === 'error' && (
           <div className="py-6 space-y-4">
             <div className="w-16 h-16 bg-red-500/10 border border-red-500/20 text-red-400 rounded-2xl flex items-center justify-center mx-auto">
               <AlertCircle className="w-8 h-8" />
