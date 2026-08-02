@@ -48,6 +48,90 @@ interface ContentContextType {
 
 const ContentContext = createContext<ContentContextType | undefined>(undefined);
 
+export function normalizeDataForComparison(val: any): any {
+  if (val === null || val === undefined || val === "" || val === "[]" || val === "{}") return "";
+  if (Array.isArray(val) && val.length === 0) return "";
+  if (typeof val === "string") {
+    const trimmed = val.trim();
+    if (trimmed === "" || trimmed === "[]" || trimmed === "{}") return "";
+    if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed) && parsed.length === 0) return "";
+        if (typeof parsed === "object" && parsed !== null && Object.keys(parsed).length === 0) return "";
+        return JSON.stringify(parsed);
+      } catch (e) {
+        return trimmed;
+      }
+    }
+    return trimmed;
+  }
+  if (Array.isArray(val)) {
+    return JSON.stringify(val);
+  }
+  if (typeof val === "object" && val !== null) {
+    return JSON.stringify(val);
+  }
+  return val;
+}
+
+export function isContentDataEqual(existing: any, updated: any): boolean {
+  if (!existing || !updated) return false;
+  const fieldsToCompare = [
+    "title",
+    "secondTitle",
+    "type",
+    "status",
+    "description",
+    "posterUrl",
+    "sampleUrl",
+    "year",
+    "releaseDate",
+    "runtime",
+    "imdbRating",
+    "country",
+    "movieLinks",
+    "seasons",
+    "fullSeasonZip",
+    "fullSeasonMkv",
+    "genreIds",
+    "languageIds",
+    "qualityIds",
+    "order",
+    "comment",
+    "cast",
+    "addedBy",
+    "category",
+  ];
+
+  for (const field of fieldsToCompare) {
+    const normExisting = normalizeDataForComparison(existing[field]);
+    const normUpdated = normalizeDataForComparison(updated[field]);
+    if (normExisting !== normUpdated) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export const checkHasPendingChanges = (): boolean => {
+  try {
+    const chunkUpdates = safeStorage.getItem('pending_chunk_updates');
+    if (chunkUpdates && chunkUpdates !== '[]') {
+      const arr = JSON.parse(chunkUpdates);
+      if (Array.isArray(arr) && arr.length > 0) return true;
+    }
+    const collUpdates = safeStorage.getItem('pending_collection_updates');
+    if (collUpdates && collUpdates !== '[]') {
+      const arr = JSON.parse(collUpdates);
+      if (Array.isArray(arr) && arr.length > 0) return true;
+    }
+    const metaUpdates = safeStorage.getItem('pending_metadata_updates');
+    if (metaUpdates === 'true') return true;
+  } catch (e) {}
+  return false;
+};
+
 export function ContentProvider({ children }: { children: React.ReactNode }) {
   const { profile, loading: authProfileLoading, refreshProfile } = useAuth();
   const { users: allUsers, refreshUsers, finalizeUserChanges } = useUsers();
@@ -97,11 +181,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     
     setLoading(false);
   }, []);
-  const [hasPendingChanges, setHasPendingChanges] = useState(() => {
-    return !!safeStorage.getItem('pending_chunk_updates') || 
-           !!safeStorage.getItem('pending_collection_updates') || 
-           !!safeStorage.getItem('pending_metadata_updates');
-  });
+  const [hasPendingChanges, setHasPendingChanges] = useState(() => checkHasPendingChanges());
 
   const COLLECTION_CHUNK_SIZE = 1000;
   const COLLECTION_CHUNK_PREFIX = 'collection_chunk_';
@@ -828,6 +908,28 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
   const saveContentInternal = async (content: Content, localOnly = false) => {
     const isAdminOrEditor = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
+
+    const existing = contentList.find(c => c.id === content.id);
+    const isNewItem = !existing;
+
+    if (!isNewItem && isContentDataEqual(existing, content)) {
+      setContentList(prev => {
+        const idx = prev.findIndex(c => c.id === content.id);
+        if (idx === -1) return prev;
+        const newList = [...prev];
+        newList[idx] = { ...content, chunkId: content.chunkId || existing.chunkId };
+        return newList;
+      });
+      return;
+    }
+
+    if (isNewItem && isAdminOrEditor) {
+      const createdStr = safeStorage.getItem('pending_created_items') || '[]';
+      const createdSet = new Set(JSON.parse(createdStr));
+      createdSet.add(content.id);
+      safeStorage.setItem('pending_created_items', JSON.stringify(Array.from(createdSet)));
+    }
+
     const { cleanContentForChunk } = await import('../utils/chunkUtils');
     const minified = cleanContentForChunk(content);
     let chunkId = content.chunkId;
@@ -939,7 +1041,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         if (!pendingItemsMap[chunkId].includes(content.id)) pendingItemsMap[chunkId].push(content.id);
         safeStorage.setItem('pending_item_updates', JSON.stringify(pendingItemsMap));
 
-        setHasPendingChanges(true);
+        setHasPendingChanges(checkHasPendingChanges());
     }
     setContentList(prev => {
         const idx = prev.findIndex(c => c.id === content.id);
@@ -975,17 +1077,32 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
   const updateContentFields = async (updates: { id: string, fields: Partial<Content>, chunkId?: string }[]) => {
     const isAdminOrEditor = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
+
+    const meaningfulUpdates = updates.filter(u => {
+        const item = contentList.find(c => c.id === u.id);
+        if (!item) return true;
+        return Object.entries(u.fields).some(([key, val]) => {
+            const norm1 = normalizeDataForComparison(item[key as keyof Content]);
+            const norm2 = normalizeDataForComparison(val);
+            return norm1 !== norm2;
+        });
+    });
+
+    if (meaningfulUpdates.length === 0) {
+        return;
+    }
+
     const affectedChunkIds = new Set<string>();
     const { minifyContent } = await import('../utils/chunkUtils');
 
     // Group updates by chunkId to avoid O(N*M) repeated JSON stringifying/parsing
-    const chunkUpdates: Record<string, typeof updates> = {};
+    const chunkUpdates: Record<string, typeof meaningfulUpdates> = {};
 
     let localMeta: Record<string, any> = {};
     const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
     try { localMeta = JSON.parse(localMetaString); } catch(e) {}
 
-    for (const update of updates) {
+    for (const update of meaningfulUpdates) {
         let chunkId = update.chunkId;
         if (!chunkId) {
             chunkId = contentList.find(c => c.id === update.id)?.chunkId;
@@ -1058,12 +1175,12 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         });
         safeStorage.setItem('pending_item_updates', JSON.stringify(pendingItemsMap));
 
-        setHasPendingChanges(true);
+        setHasPendingChanges(checkHasPendingChanges());
     }
 
     setContentList(prev => {
         const next = [...prev];
-        updates.forEach(u => {
+        meaningfulUpdates.forEach(u => {
             const idx = next.findIndex(c => c.id === u.id);
             if (idx !== -1) next[idx] = { ...next[idx], ...u.fields };
         });
@@ -1073,7 +1190,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
     if (!isAdminOrEditor) {
         const { updateContentFieldsInChunks } = await import('../utils/chunkUtils');
-        await updateContentFieldsInChunks(updates);
+        await updateContentFieldsInChunks(meaningfulUpdates);
     }
   };
 
@@ -1085,6 +1202,10 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     let localMeta: Record<string, any> = {};
     const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
     try { localMeta = JSON.parse(localMetaString); } catch(e) {}
+
+    const createdStr = safeStorage.getItem('pending_created_items') || '[]';
+    const createdSet = new Set(JSON.parse(createdStr));
+    let createdSetChanged = false;
 
     for (const item of items) {
         let chunkId = item.chunkId;
@@ -1103,10 +1224,37 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         if (!chunkId) continue;
         
         affectedChunkIds.add(chunkId);
-        if (!chunkUpdates[chunkId]) {
-            chunkUpdates[chunkId] = [];
+
+        if (createdSet.has(item.id)) {
+            createdSet.delete(item.id);
+            createdSetChanged = true;
+
+            const pendingItemsStr = safeStorage.getItem('pending_item_updates') || '{}';
+            const pendingItemsMap = JSON.parse(pendingItemsStr);
+            if (pendingItemsMap[chunkId]) {
+                pendingItemsMap[chunkId] = pendingItemsMap[chunkId].filter((id: string) => id !== item.id);
+                if (pendingItemsMap[chunkId].length === 0) {
+                    delete pendingItemsMap[chunkId];
+                    const pendingStr = safeStorage.getItem('pending_chunk_updates') || '[]';
+                    const pendingIds = JSON.parse(pendingStr).filter((cid: string) => cid !== chunkId);
+                    if (pendingIds.length > 0) {
+                        safeStorage.setItem('pending_chunk_updates', JSON.stringify(pendingIds));
+                    } else {
+                        safeStorage.removeItem('pending_chunk_updates');
+                    }
+                }
+                safeStorage.setItem('pending_item_updates', JSON.stringify(pendingItemsMap));
+            }
+        } else {
+            if (!chunkUpdates[chunkId]) {
+                chunkUpdates[chunkId] = [];
+            }
+            chunkUpdates[chunkId].push(item);
         }
-        chunkUpdates[chunkId].push(item);
+    }
+
+    if (createdSetChanged) {
+        safeStorage.setItem('pending_created_items', JSON.stringify(Array.from(createdSet)));
     }
 
     for (const chunkId of Object.keys(chunkUpdates)) {
@@ -1127,10 +1275,10 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     // Save metadata back
     safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
 
-    if (isAdminOrEditor && affectedChunkIds.size > 0) {
+    if (isAdminOrEditor && affectedChunkIds.size > 0 && Object.keys(chunkUpdates).length > 0) {
         const pendingStr = safeStorage.getItem('pending_chunk_updates') || '[]';
         const pendingIds = new Set(JSON.parse(pendingStr));
-        affectedChunkIds.forEach(cid => pendingIds.add(cid));
+        Object.keys(chunkUpdates).forEach(cid => pendingIds.add(cid));
         safeStorage.setItem('pending_chunk_updates', JSON.stringify(Array.from(pendingIds)));
 
         const pendingItemsStr = safeStorage.getItem('pending_item_updates') || '{}';
@@ -1142,8 +1290,6 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
             });
         });
         safeStorage.setItem('pending_item_updates', JSON.stringify(pendingItemsMap));
-
-        setHasPendingChanges(true);
     }
 
     const idsToDelete = new Set(items.map(i => i.id));
@@ -1152,6 +1298,14 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         safeStorage.setItem('content_cache', JSON.stringify(next));
         return next;
     });
+
+    const hasPending = checkHasPendingChanges();
+    setHasPendingChanges(hasPending);
+    if (!hasPending) {
+        safeStorage.removeItem('pending_chunk_updates');
+        safeStorage.removeItem('pending_item_updates');
+        safeStorage.removeItem('pending_created_items');
+    }
 
     if (!isAdminOrEditor) {
         const { deleteContentsFromChunks } = await import('../utils/chunkUtils');
@@ -1170,12 +1324,12 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     if (type === 'quality') setQualities(items);
     
     safeStorage.setItem('pending_metadata_updates', 'true');
-    setHasPendingChanges(true);
+    setHasPendingChanges(checkHasPendingChanges());
   };
 
   const bumpCollectionsVersion = async () => {
     // No longer bumping directly to server, handled via finalizeChanges for consistency
-    setHasPendingChanges(true);
+    setHasPendingChanges(checkHasPendingChanges());
   };
 
   const saveCollectionInternal = async (coll: AppCollection) => {

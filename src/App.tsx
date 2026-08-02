@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { Suspense, lazy, useState, useEffect, useRef } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
@@ -60,6 +60,36 @@ import ContentSync from './pages/admin/ContentSync';
 import InstallApp from './pages/InstallApp';
 import Rewards from './pages/user/Rewards';
 import Unsubscribe from './pages/Unsubscribe';
+
+function CatchAllRedirect() {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const pathname = location.pathname;
+    const search = location.search;
+
+    if (pathname.includes('/unsubscribe')) {
+      const emailMatch = search.match(/[?&]email=([^&]+)/) || pathname.match(/email=([^&]+)/);
+      const emailParam = emailMatch ? `?email=${emailMatch[1]}` : search;
+      navigate('/unsubscribe' + emailParam, { replace: true });
+      return;
+    }
+
+    if (pathname.startsWith('/http://') || pathname.startsWith('/https://')) {
+      try {
+        const rawUrl = pathname.substring(1) + search;
+        const parsed = new URL(rawUrl);
+        navigate(parsed.pathname + parsed.search, { replace: true });
+        return;
+      } catch (e) {}
+    }
+
+    navigate('/', { replace: true });
+  }, [location, navigate]);
+
+  return null;
+}
 
 const LoadingFallback = () => (
   <div className="min-h-screen bg-white dark:bg-zinc-950 transition-colors duration-300 flex flex-col items-center justify-center gap-6">
@@ -336,6 +366,7 @@ export default function App() {
                           <Route path="sync" element={<ContentSync />} />
                           <Route path="settings" element={<AdminSettings />} />
                         </Route>
+                        <Route path="*" element={<CatchAllRedirect />} />
                       </Routes>
                     </Suspense>
                   </BrowserRouter>

@@ -22,11 +22,31 @@ emailRouter.all("/unsubscribe", async (req, res) => {
   try {
     const email = (req.query.email || req.body?.email || "").toString().trim().toLowerCase();
     if (!email || !email.includes("@")) {
-      return res.status(400).json({ error: "Valid email parameter is required." });
+      return res.status(400).json({ error: "Valid email address is required to unsubscribe." });
     }
 
+    if (req.method === "GET") {
+      const rawHost = (req.headers.host || "").toString();
+      const protocol = (req.headers["x-forwarded-proto"] || "https").toString();
+      const isDevOrLocal = rawHost.includes("localhost") || rawHost.includes("ais-dev") || rawHost.includes("run.app");
+      const redirectUrl = isDevOrLocal
+        ? `${protocol}://${rawHost}/unsubscribe?email=${encodeURIComponent(email)}`
+        : `https://MovizNow.com/unsubscribe?email=${encodeURIComponent(email)}`;
+      return res.redirect(redirectUrl);
+    }
+
+    // POST request: process unsubscribe in Firestore
     const firestore = getDb();
     if (firestore) {
+      try {
+        await firestore.collection("unsubscribed_emails").doc(email.replace(/[^a-zA-Z0-9]/g, "_")).set({
+          email: email,
+          unsubscribedAt: new Date().toISOString()
+        });
+      } catch (e) {
+        console.warn("Error writing to unsubscribed_emails collection:", e);
+      }
+
       try {
         const usersRef = firestore.collection("users");
         const snap = await usersRef.where("email", "==", email).get();
@@ -35,6 +55,8 @@ emailRouter.all("/unsubscribe", async (req, res) => {
           snap.forEach((doc) => {
             batch.update(doc.ref, {
               emailNotificationsEnabled: false,
+              emailNotificationsDisabled: true,
+              unsubscribed: true,
               unsubscribedAt: new Date().toISOString(),
             });
           });
@@ -43,10 +65,6 @@ emailRouter.all("/unsubscribe", async (req, res) => {
       } catch (err) {
         console.error("Firestore unsubscribe update error:", err);
       }
-    }
-
-    if (req.method === "GET") {
-      return res.redirect(`/unsubscribe?email=${encodeURIComponent(email)}`);
     }
 
     return res.json({
@@ -589,7 +607,7 @@ emailRouter.post("/send-movie-notification", async (req, res) => {
       : `🔔 Notification: ${title}`;
 
     const generateHtmlForRecipient = (recipientEmail: string) => {
-      const unsubLink = `${appUrl || siteUrl}/unsubscribe?email=${encodeURIComponent(recipientEmail)}`;
+      const unsubLink = `https://moviznow.com/unsubscribe?email=${encodeURIComponent(recipientEmail)}`;
       const unsubFooter = isMovieNotification ? `
         <div style="text-align: center; padding: 16px 20px 24px; font-size: 11px; color: #a1a1aa; border-top: 1px solid #27272a; margin-top: 20px;">
           <p style="margin: 0 0 6px;">Don't want to receive movie and series notification emails?</p>
@@ -916,49 +934,4 @@ emailRouter.post("/test-smtp", async (req, res) => {
   }
 });
 
-// 4. Endpoint to handle unsubscribe requests
-emailRouter.all("/unsubscribe", async (req, res) => {
-  try {
-    const email = (req.body?.email || req.query?.email || "") as string;
-    if (!email || typeof email !== "string" || !email.includes("@")) {
-      return res.status(400).json({ error: "Valid email address is required to unsubscribe." });
-    }
 
-    const cleanEmail = email.trim().toLowerCase();
-    const firestore = getDb();
-
-    if (firestore) {
-      try {
-        await firestore.collection("unsubscribed_emails").doc(cleanEmail.replace(/[^a-zA-Z0-9]/g, "_")).set({
-          email: cleanEmail,
-          unsubscribedAt: new Date().toISOString()
-        });
-      } catch (e) {
-        console.warn("Error writing to unsubscribed_emails collection:", e);
-      }
-
-      try {
-        const usersSnap = await firestore.collection("users").where("email", "==", cleanEmail).get();
-        usersSnap.forEach(async (docRef) => {
-          await docRef.ref.update({
-            emailNotificationsEnabled: false,
-            emailNotificationsDisabled: true,
-            unsubscribed: true,
-            unsubscribedAt: new Date().toISOString()
-          });
-        });
-      } catch (e) {
-        console.warn("Error updating user document for unsubscribe:", e);
-      }
-    }
-
-    if (req.method === "GET") {
-      return res.redirect(`/unsubscribe?email=${encodeURIComponent(cleanEmail)}`);
-    }
-
-    return res.json({ success: true, message: `Email ${cleanEmail} unsubscribed successfully.` });
-  } catch (err: any) {
-    console.error("Unsubscribe route error:", err);
-    return res.status(500).json({ error: err.message || "Failed to unsubscribe." });
-  }
-});

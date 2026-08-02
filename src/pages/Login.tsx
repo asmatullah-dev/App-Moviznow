@@ -66,7 +66,36 @@ export default function Login() {
       }
       
       if (!profile.requirePasswordReset) {
-        const from = location.state?.from || { pathname: profile.role === 'admin' ? '/admin' : '/' };
+        const searchParams = new URLSearchParams(location.search);
+        let redirectUrl = searchParams.get('redirect');
+        let from = location.state?.from;
+        
+        if (!from && redirectUrl) {
+          if (redirectUrl.startsWith('http://') || redirectUrl.startsWith('https://')) {
+            try {
+              const parsed = new URL(redirectUrl);
+              from = parsed.pathname + parsed.search;
+            } catch (e) {
+              from = redirectUrl;
+            }
+          } else {
+            from = redirectUrl;
+          }
+        }
+
+        if (!from) {
+          from = profile.role === 'admin' ? '/admin' : '/';
+        }
+
+        if (typeof from === 'string' && (from.startsWith('/http://') || from.startsWith('/https://'))) {
+          try {
+            const parsed = new URL(from.substring(1));
+            from = parsed.pathname + parsed.search;
+          } catch (e) {
+            from = '/';
+          }
+        }
+
         navigate(from, { replace: true });
       }
     }

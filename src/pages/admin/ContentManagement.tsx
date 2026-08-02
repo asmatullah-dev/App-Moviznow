@@ -30,7 +30,7 @@ import {
 } from "firebase/firestore";
 import { useAuth } from "../../contexts/AuthContext";
 import { isValidGmailAddress } from "../../utils/emailValidation";
-import { useContent } from "../../contexts/ContentContext";
+import { useContent, isContentDataEqual } from "../../contexts/ContentContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { useUsers } from "../../contexts/UsersContext";
 import {
@@ -1604,6 +1604,13 @@ export default function ContentManagement() {
           ...cleanedData,
           id: currentEditingId,
         } as Content;
+
+        if (existingContent && isContentDataEqual(existingContent, fullContent)) {
+          setIsModalOpen(false);
+          resetForm();
+          return;
+        }
+
         await saveContent(fullContent);
         safeStorage.removeItem(`movie_details_${currentEditingId}`);
       } else {
