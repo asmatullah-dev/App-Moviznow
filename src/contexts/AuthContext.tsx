@@ -342,9 +342,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    // 2. Add Welcome Back notification in Firestore notification_chunks for in-app Notifications tab
+    // 2. Add Welcome notification in local notification cache & Firestore (if admin)
     try {
-      const { doc, getDoc, serverTimestamp, writeBatch } = await import("firebase/firestore");
       const id = "welcome_" + Math.random().toString(36).substring(2, 9);
       const title = isNewUser ? `Welcome to MovizNow, ${displayName}! 🎉` : `Welcome back, ${displayName}! 👋`;
       const body = isNewUser 
@@ -360,21 +359,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         createdAt: new Date().toISOString()
       };
 
-      const cid = "chunk_1";
-      const chunkRef = doc(db, 'notification_chunks', cid);
-      const chunkSnap = await getDoc(chunkRef);
-      const chunkItems = chunkSnap.exists() ? chunkSnap.data()?.items || {} : {};
-      const newChunkItems = { [id]: notifItem, ...chunkItems };
+      // Store in local storage notification cache for immediate in-app display
+      try {
+        const cachedStr = safeStorage.getItem('cached_notifications_data');
+        let localList: any[] = cachedStr ? JSON.parse(cachedStr) : [];
+        if (!localList.some(n => n.id === id || (n.title === title && n.targetUserId === userUid))) {
+          localList = [notifItem, ...localList];
+          safeStorage.setItem('cached_notifications_data', JSON.stringify(localList));
+        }
+      } catch (e) {}
 
-      const batch = writeBatch(db);
-      batch.set(chunkRef, { items: newChunkItems, updatedAt: serverTimestamp() }, { merge: true });
-      batch.set(doc(db, 'chunk_meta', 'versions'), { notifications: { version: Date.now(), latestChunkId: cid } }, { merge: true });
-      await batch.commit();
+      // Try writing to Firestore notification_chunks if admin user
+      const userEmailLower = (userEmail || '').toLowerCase();
+      const isAdminUser = [
+        "asmatn628@gmail.com",
+        "asmatullah9327@gmail.com",
+        "kabirahmaddev@gmail.com",
+        "wamoviesstation@gmail.com"
+      ].includes(userEmailLower);
 
-      safeStorage.removeItem('cached_notifications_version');
-      safeStorage.removeItem('cached_notifications_data');
+      if (isAdminUser) {
+        const { doc, getDoc, serverTimestamp, writeBatch } = await import("firebase/firestore");
+        const cid = "chunk_1";
+        const chunkRef = doc(db, 'notification_chunks', cid);
+        const chunkSnap = await getDoc(chunkRef);
+        const chunkItems = chunkSnap.exists() ? chunkSnap.data()?.items || {} : {};
+        const newChunkItems = { [id]: notifItem, ...chunkItems };
+
+        const batch = writeBatch(db);
+        batch.set(chunkRef, { items: newChunkItems, updatedAt: serverTimestamp() }, { merge: true });
+        batch.set(doc(db, 'chunk_meta', 'versions'), { notifications: { version: Date.now(), latestChunkId: cid } }, { merge: true });
+        await batch.commit();
+
+        safeStorage.removeItem('cached_notifications_version');
+      }
     } catch (err) {
-      console.warn("Welcome notification creation notice:", err);
+      // Ignore background notification creation notices
     }
   }, []);
 
@@ -477,13 +497,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         let serverProfile: UserProfile | null = null;
         let docSnap;
 
-        // 7. Before updating user data, first check version from content_meta, if different new version first read the user data doc
-        if (navigator.onLine && (versionChanged || !localProfile || force)) {
+        // 7. Always verify user UID in Firestore when online
+        if (navigator.onLine) {
           try {
             docSnap = await getDoc(userRef);
             if (docSnap.exists()) {
               serverProfile = docSnap.data() as UserProfile;
               updatedSomething = true;
+            } else if (!justLoggedInRef.current) {
+              console.warn(
+                `User UID ${currentUser.uid} not found in Firestore. Logging out and routing to login.`,
+              );
+              safeStorage.removeItem("profile_cache");
+              safeStorage.removeItem("profile_doc_snap");
+              safeStorage.removeItem(`profile_version_${currentUser.uid}`);
+              safeStorage.removeItem("cached_all_users");
+              localStorage.removeItem("session_started");
+              setProfile(null);
+              setUser(null);
+              setLoading(false);
+              await signOut(auth).catch(() => {});
+              return false;
             }
           } catch (e) {
             console.error(
@@ -495,17 +529,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               throw e;
             }
           }
-        } else if (navigator.onLine) {
-          // Just checking if we need to retrieve snapshot for later (legacy checks)
-          const cachedDocSnapStr = safeStorage.getItem("profile_doc_snap");
-          if (!cachedDocSnapStr && !localProfile) {
-            try {
-              docSnap = await getDoc(userRef);
-              if (docSnap.exists()) {
-                serverProfile = docSnap.data() as UserProfile;
-              }
-            } catch (e) {}
-          }
+        }
+
+        if (localProfile && localProfile.uid && localProfile.uid !== currentUser.uid) {
+          console.warn("UID mismatch between auth and local storage. Invalid user session.");
+          safeStorage.removeItem("profile_cache");
+          safeStorage.removeItem("profile_doc_snap");
+          safeStorage.removeItem(`profile_version_${currentUser.uid}`);
+          safeStorage.removeItem("cached_all_users");
+          localStorage.removeItem("session_started");
+          setProfile(null);
+          setUser(null);
+          setLoading(false);
+          await signOut(auth).catch(() => {});
+          return false;
         }
 
         // 3. Update user data if changed versions then sync it with local storage version like time in app, favorites, watch later... merge data intelligently first in local storage
@@ -1138,9 +1175,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const searchRef = collection(db, "users");
             const findMatches = async (field: string, value: string) => {
               if (!value) return [];
-              const q = query(searchRef, where(field, "==", value), limit(10));
-              const snap = await getDocs(q);
-              return snap.docs.filter((d) => d.id !== currentUser.uid);
+              try {
+                const q = query(searchRef, where(field, "==", value), limit(10));
+                const snap = await getDocs(q);
+                return snap.docs.filter((d) => d.id !== currentUser.uid);
+              } catch (err) {
+                return [];
+              }
             };
 
             let matchDocs: any[] = [];
@@ -1175,6 +1216,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (uniqueMatchDocs.length > 0) {
               const oldDocIds = uniqueMatchDocs.map((d) => d.id);
               console.log("Found duplicate documents to merge into existing profile:", oldDocIds);
+
+              const origRole = data.role;
+              const origStatus = data.status;
+              const origExpiry = data.expiryDate;
 
               uniqueMatchDocs.forEach((oldDoc) => {
                 const oldData = oldDoc.data() as UserProfile;
@@ -1221,19 +1266,54 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 }
               });
 
+              // Check if user is admin
+              const userEmailLower = (currentUser.email || '').toLowerCase();
+              const isUserAdmin = [
+                "asmatn628@gmail.com",
+                "asmatullah9327@gmail.com",
+                "kabirahmaddev@gmail.com",
+                "wamoviesstation@gmail.com"
+              ].includes(userEmailLower) || origRole === 'admin' || origRole === 'owner';
+
+              if (!isUserAdmin) {
+                // Non-admins cannot update role/status/expiry directly in standard merge
+                data.role = origRole;
+                data.status = origStatus;
+                data.expiryDate = origExpiry;
+              }
+
               data.uid = currentUser.uid;
-              const { writeBatch } = await import("firebase/firestore");
+              const payloadToSave: any = { ...data };
+              if (!isUserAdmin) {
+                delete payloadToSave.role;
+                delete payloadToSave.status;
+                delete payloadToSave.expiryDate;
+                delete payloadToSave.trialActivated;
+                delete payloadToSave.managedBy;
+                delete payloadToSave.permissions;
+                delete payloadToSave.assignedContent;
+              }
+
+              const { writeBatch, deleteDoc, setDoc } = await import("firebase/firestore");
               const batch = writeBatch(db);
-              batch.set(userRef, data, { merge: true });
-              const metaUpdates: Record<string, number> = {
-                [currentUser.uid]: Date.now(),
-              };
-              oldDocIds.forEach((oldId) => {
-                batch.delete(doc(db, "users", oldId));
-                metaUpdates[oldId] = -1;
-              });
-              batch.set(doc(db, "chunk_meta", "versions"), { users: metaUpdates }, { merge: true });
+              batch.set(userRef, payloadToSave, { merge: true });
               await batch.commit();
+
+              // Update version metadata safely
+              try {
+                const metaUpdates: Record<string, number> = { [currentUser.uid]: Date.now() };
+                oldDocIds.forEach((oldId) => { metaUpdates[oldId] = -1; });
+                await setDoc(doc(db, "chunk_meta", "versions"), { users: metaUpdates }, { merge: true });
+              } catch (metaErr) {}
+
+              // Clean up duplicate documents safely
+              for (const oldId of oldDocIds) {
+                try {
+                  await deleteDoc(doc(db, "users", oldId));
+                } catch (delErr) {
+                  console.warn("Could not delete duplicate document:", oldId, delErr);
+                }
+              }
             }
           } catch (e) {
             console.error("Error merging duplicate records into existing account:", e);
@@ -1286,9 +1366,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const searchRef = collection(db, "users");
             const findMatches = async (field: string, value: string) => {
               if (!value) return [];
-              const q = query(searchRef, where(field, "==", value), limit(5));
-              const snap = await getDocs(q);
-              return snap.docs.filter((d) => d.id !== currentUser.uid);
+              try {
+                const q = query(searchRef, where(field, "==", value), limit(5));
+                const snap = await getDocs(q);
+                return snap.docs.filter((d) => d.id !== currentUser.uid);
+              } catch (err) {
+                return [];
+              }
             };
 
             let matchDocs: any[] = [];
@@ -1620,20 +1704,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               }, { merge: true });
             }
 
-            // Delete all old records that were merged
-            const metaUpdates: Record<string, number> = {
-              [currentUser.uid]: Date.now(),
-            };
-            oldDocIds.forEach((oldId) => {
-              batch.delete(doc(db, "users", oldId));
-              metaUpdates[oldId] = -1;
-              console.log(
-                `Merged and scheduled deletion of old profile: ${oldId}`,
-              );
-            });
-            batch.set(doc(db, "chunk_meta", "versions"), { users: metaUpdates }, { merge: true });
-
             await batch.commit();
+
+            // Update version metadata safely
+            try {
+              const { setDoc } = await import("firebase/firestore");
+              const metaUpdates: Record<string, number> = { [currentUser.uid]: Date.now() };
+              oldDocIds.forEach((oldId) => { metaUpdates[oldId] = -1; });
+              await setDoc(doc(db, "chunk_meta", "versions"), { users: metaUpdates }, { merge: true });
+            } catch (metaErr) {}
+
+            // Delete old duplicate documents safely
+            if (oldDocIds && oldDocIds.length > 0) {
+              const { deleteDoc } = await import("firebase/firestore");
+              for (const oldId of oldDocIds) {
+                try {
+                  await deleteDoc(doc(db, "users", oldId));
+                  console.log(`Merged and deleted old profile: ${oldId}`);
+                } catch (delErr) {
+                  console.warn("Could not delete duplicate document:", oldId, delErr);
+                }
+              }
+            }
 
             // Trigger welcome email for new user via central handler (prevents duplicate emails)
             const userEmail = currentUser.email || newProfile.email;
@@ -1706,6 +1798,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (currentUser) {
         const userRef = doc(db, "users", currentUser.uid);
+
+        // ALWAYS verify user UID exists in Firestore on auth state change or refresh
+        if (navigator.onLine && !justLoggedInRef.current) {
+          try {
+            const docSnap = await getDoc(userRef);
+            if (!docSnap.exists()) {
+              console.warn(`User UID ${currentUser.uid} not found in Firestore. Routing to login.`);
+              safeStorage.removeItem("profile_cache");
+              safeStorage.removeItem("profile_doc_snap");
+              safeStorage.removeItem(`profile_version_${currentUser.uid}`);
+              safeStorage.removeItem("cached_all_users");
+              localStorage.removeItem("session_started");
+              setProfile(null);
+              setUser(null);
+              setLoading(false);
+              await signOut(auth).catch(() => {});
+              return;
+            }
+          } catch (e) {
+            console.error("Error verifying UID in Firestore:", e);
+          }
+        }
+
+        const cachedProfileStr = safeStorage.getItem("profile_cache");
+        if (cachedProfileStr) {
+          try {
+            const cachedP = JSON.parse(cachedProfileStr);
+            if (cachedP && cachedP.uid && cachedP.uid !== currentUser.uid) {
+              console.warn("Mismatched UID in local storage. Clearing cache.");
+              safeStorage.removeItem("profile_cache");
+              safeStorage.removeItem("profile_doc_snap");
+              safeStorage.removeItem(`profile_version_${currentUser.uid}`);
+              safeStorage.removeItem("cached_all_users");
+            }
+          } catch (e) {}
+        }
 
         const sessionKey = `last_session_start_${currentUser.uid}`;
         const dailySyncKey = `last_daily_sync_${currentUser.uid}`;
@@ -2760,8 +2888,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     safeStorage.removeItem("profile_cache");
     safeStorage.removeItem("cached_chunk_users_versions");
     safeStorage.removeItem("cached_all_users");
+    safeStorage.removeItem("referral_stats_count");
+    safeStorage.removeItem("referral_stats_activated");
+    safeStorage.removeItem("referral_users_list");
     if (auth.currentUser) {
       localStorage.removeItem(`last_daily_sync_${auth.currentUser.uid}`);
+      safeStorage.removeItem(`referral_stats_count_${auth.currentUser.uid}`);
+      safeStorage.removeItem(`referral_stats_activated_${auth.currentUser.uid}`);
+      safeStorage.removeItem(`referral_users_list_${auth.currentUser.uid}`);
     }
     setProfile(null);
     setUser(null);

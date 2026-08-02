@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Loader2, CheckCircle2, XCircle, Search, RefreshCw } from 'lucide-react';
 import { useModalBehavior } from '../hooks/useModalBehavior';
 import { LinkCheckResult, performFullLinkScan, guessLinkType } from '../utils/linkScanner';
-import { searchTMDBByTitle, fetchTMDBDetails, fetchSeriesSeasons, fetchIMDbRating, getBestTrailer, searchYouTubeTrailer, fetchKinoCheckTrailer } from './MediaModal';
+import { searchTMDBByTitle, fetchTMDBDetails, fetchSeriesSeasons, fetchIMDbRating, getBestTrailer, searchYouTubeTrailer, fetchKinoCheckTrailer, getBestAlternativeTitle } from './MediaModal';
 import { db } from '../firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { useContent } from '../contexts/ContentContext';
@@ -15,6 +15,25 @@ interface Props {
   mode: 'media' | 'links'; // 'media' = fetch missing OMDB/TMDB data, 'links' = fetch missing links
   genres?: { id: string; name: string }[];
 }
+
+const FIELD_ORDER = [
+  'title',
+  'secondTitle',
+  'description',
+  'type',
+  'year',
+  'releaseDate',
+  'country',
+  'runtime',
+  'imdbRating',
+  'imdbLink',
+  'trailerUrl',
+  'cast',
+  'genres',
+  'seasons',
+  'episodes',
+  'posterUrl',
+];
 
 export const BatchFetchModal: React.FC<Props> = ({
   isOpen,
@@ -30,19 +49,9 @@ export const BatchFetchModal: React.FC<Props> = ({
   
   const [fetchFields, setFetchFields] = useState<Record<string, boolean>>(() => {
     const saved = localStorage.getItem('batchFetchModal_fetchFields');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        // Force seasons and episodes to true
-        parsed.seasons = true;
-        parsed.episodes = true;
-        return parsed;
-      } catch (e) {
-        console.error("Error parsing saved batchFetch fields:", e);
-      }
-    }
-    return {
+    const defaultFields: Record<string, boolean> = {
       title: true,
+      secondTitle: true,
       description: true,
       type: true,
       year: true,
@@ -57,8 +66,29 @@ export const BatchFetchModal: React.FC<Props> = ({
       seasons: true,
       episodes: true,
       posterUrl: true,
-      backdropUrl: true,
     };
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        delete parsed.backdropUrl;
+        const result: Record<string, boolean> = {};
+        FIELD_ORDER.forEach(key => {
+          if (key === 'secondTitle') {
+            result[key] = parsed[key] !== undefined ? parsed[key] : true;
+          } else if (key === 'seasons' || key === 'episodes') {
+            result[key] = true;
+          } else if (key in parsed) {
+            result[key] = parsed[key];
+          } else if (key in defaultFields) {
+            result[key] = defaultFields[key];
+          }
+        });
+        return result;
+      } catch (e) {
+        console.error("Error parsing saved batchFetch fields:", e);
+      }
+    }
+    return defaultFields;
   });
 
   useEffect(() => {
@@ -139,6 +169,13 @@ export const BatchFetchModal: React.FC<Props> = ({
             const updates: any = {};
             
             if (fetchFields.title) updates.title = details.title || details.name || data.title;
+            if (fetchFields.secondTitle) {
+               const altTitle = getBestAlternativeTitle(details);
+               const currentMainTitle = updates.title || details.title || details.name || data.title || '';
+               if (altTitle && altTitle.toLowerCase() !== currentMainTitle.toLowerCase()) {
+                  updates.secondTitle = altTitle;
+               }
+            }
             if (fetchFields.description) updates.description = details.overview || data.description;
             if (fetchFields.type) {
                 // Ensure 'tv' is mapped to 'Series' regardless of source
@@ -429,17 +466,20 @@ export const BatchFetchModal: React.FC<Props> = ({
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-sm font-medium text-zinc-300">Select data to fetch:</h3>
                     <div className="flex gap-2">
-                       <button onClick={() => setFetchFields({title:true, description:true, type:true, year:true, releaseDate:true, country:true, runtime:true, imdbRating:true, imdbLink:true, trailerUrl:true, cast:true, genres:true, seasons:true, episodes:true, posterUrl:true, backdropUrl:true})} className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 rounded text-zinc-300">Select All</button>
-                       <button onClick={() => setFetchFields({title:false, description:false, type:false, year:false, releaseDate:false, country:false, runtime:false, imdbRating:false, imdbLink:false, trailerUrl:false, cast:false, genres:false, seasons:false, episodes:false, posterUrl:false, backdropUrl:false})} className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 rounded text-zinc-300">Deselect All</button>
+                       <button onClick={() => setFetchFields({title:true, secondTitle:true, description:true, type:true, year:true, releaseDate:true, country:true, runtime:true, imdbRating:true, imdbLink:true, trailerUrl:true, cast:true, genres:true, seasons:true, episodes:true, posterUrl:true})} className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 rounded text-zinc-300">Select All</button>
+                       <button onClick={() => setFetchFields({title:false, secondTitle:false, description:false, type:false, year:false, releaseDate:false, country:false, runtime:false, imdbRating:false, imdbLink:false, trailerUrl:false, cast:false, genres:false, seasons:false, episodes:false, posterUrl:false})} className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 rounded text-zinc-300">Deselect All</button>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto custom-scrollbar">
-                    {Object.entries(fetchFields).map(([key, val]) => (
-                      <label key={key} className="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" checked={val} onChange={e => setFetchFields(f => ({ ...f, [key]: e.target.checked }))} className="w-4 h-4 rounded border-zinc-700 text-emerald-500 focus:ring-emerald-500/20 bg-zinc-900" />
-                        <span className="text-xs text-zinc-400 font-medium uppercase">{key.replace(/([A-Z])/g, ' $1').trim()}</span>
-                      </label>
-                    ))}
+                    {FIELD_ORDER.map((key) => {
+                      const val = fetchFields[key] ?? false;
+                      return (
+                        <label key={key} className="flex items-center gap-2 cursor-pointer">
+                          <input type="checkbox" checked={val} onChange={e => setFetchFields(f => ({ ...f, [key]: e.target.checked }))} className="w-4 h-4 rounded border-zinc-700 text-emerald-500 focus:ring-emerald-500/20 bg-zinc-900" />
+                          <span className="text-xs text-zinc-400 font-medium uppercase">{key === 'secondTitle' ? '2nd Title' : key.replace(/([A-Z])/g, ' $1').trim()}</span>
+                        </label>
+                      );
+                    })}
                   </div>
                </div>
             )}

@@ -133,6 +133,7 @@ service cloud.firestore {
       
       let isClaiming = (d.get('pwaRewardClaimed', false) == true && r.get('pwaRewardClaimed', false) == false) ||
                        (d.get('notificationRewardClaimed', false) == true && r.get('notificationRewardClaimed', false) == false) ||
+                       (d.get('reviewRewardClaimed', false) == true && r.get('reviewRewardClaimed', false) == false) ||
                        (d.get('claimedReferralSignups', []).size() > r.get('claimedReferralSignups', []).size()) ||
                        (d.get('claimedReferralActivations', []).size() > r.get('claimedReferralActivations', []).size()) ||
                        (d.get('signupRewardClaimed', false) == true && r.get('signupRewardClaimed', false) == false);
@@ -146,17 +147,33 @@ service cloud.firestore {
 
     function isIdentityMatch(resourceData) {
       let dbPhone = resourceData.get('phone', '');
-      let tokenPhone = request.auth != null && 'phone_number' in request.auth.token ? request.auth.token.phone_number : '';
+      let dbEmail = resourceData.get('email', '').toLower();
+      let tokenPhone = request.auth != null && ('phone_number' in request.auth.token) ? request.auth.token.phone_number : '';
+      let tokenEmail = request.auth != null && ('email' in request.auth.token) && (request.auth.token.email is string) ? request.auth.token.email.toLower() : '';
+      
+      let userDoc = exists(/databases/$(database)/documents/users/$(request.auth.uid)) ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data : {};
+      let userDocPhone = userDoc.get('phone', '');
+      let userDocEmail = userDoc.get('email', '').toLower();
+
       return isAuthenticated() && 
              (
-               (resourceData.get('email', '') != '' && ('email' in request.auth.token) && (request.auth.token.email is string) && resourceData.get('email', '').toLower() == request.auth.token.email.toLower()) || 
+               (dbEmail != '' && tokenEmail != '' && dbEmail == tokenEmail) || 
+               (dbEmail != '' && userDocEmail != '' && dbEmail == userDocEmail) ||
                (dbPhone != '' && tokenPhone != '' && (
                  dbPhone == tokenPhone || 
                  '+92' + dbPhone == tokenPhone || 
                  dbPhone.replace('^0', '+92') == tokenPhone ||
                  '+' + dbPhone == tokenPhone ||
                  dbPhone.replace('^92', '+92') == tokenPhone
-               ))
+               )) ||
+               (dbPhone != '' && userDocPhone != '' && (
+                 dbPhone == userDocPhone ||
+                 '+92' + dbPhone == userDocPhone ||
+                 dbPhone == '+92' + userDocPhone ||
+                 '0' + dbPhone == userDocPhone ||
+                 dbPhone == '0' + userDocPhone
+               )) ||
+               (dbEmail != '' && userDocPhone != '' && dbEmail == userDocPhone + '@moviznow.com')
              );
     }
 
@@ -174,13 +191,13 @@ service cloud.firestore {
     }
     match /users/{userId} {
       // 1. Owner Access: Basic CRUD with field restrictions
-      allow get: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidUser(request.resource.data) &&
-                       (isAdmin() || request.resource.data.get('role', 'user') in ['user', 'trial', 'selected_content']);
+      allow get: if isOwner(userId) || (resource != null && isIdentityMatch(resource.data));
+      allow create: if (isOwner(userId) || isPendingOwner(userId, request.resource.data)) && isValidUser(request.resource.data) &&
+                       (isAdmin() || request.resource.data.get('role', 'user') in ['user', 'trial', 'selected_content', 'temporary']);
       
-      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+      allow update: if (isOwner(userId) || (resource != null && isIdentityMatch(resource.data))) && isValidUser(request.resource.data) && 
                        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'status', 'expiryDate', 'trialActivated', 'managedBy', 'permissions', 'assignedContent'])
-                       || isTrialActivation(userId) || isRewardClaim(userId)) ||
+                       || protectedUserFieldsUnchanged() || isTrialActivation(userId) || isRewardClaim(userId)) ||
                        (isAdminOrEditor() && isValidUser(request.resource.data)) ||
                        (isUserManager() && resource.data.get('managedBy', null) == request.auth.uid && request.resource.data.get('managedBy', null) == request.auth.uid && isValidUser(request.resource.data));
 
@@ -200,7 +217,7 @@ service cloud.firestore {
                        (isUserManager() && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended') ||
                        (isAdminOrEditor() && request.resource.data.get('role', 'user') in ['user', 'trial', 'selected_content'])
                     ));
-      allow delete: if isAdmin() || isAdminOrEditor() || isPendingOwner(userId, resource.data) || isIdentityMatch(resource.data);
+      allow delete: if isAdmin() || isAdminOrEditor() || isPendingOwner(userId, resource.data) || isIdentityMatch(resource.data) || (isAuthenticated() && (userId.startsWith('pending_') || userId == request.auth.uid));
     }
 
     match /genres/{genreId} {

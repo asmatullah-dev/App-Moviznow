@@ -1,10 +1,13 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { AlertTriangle, X } from 'lucide-react';
 
 interface PWAContextType {
   deferredPrompt: any;
   isInstallable: boolean;
   isInstalled: boolean;
   isChecking: boolean;
+  pwaWarning: string | null;
+  dismissWarning: () => void;
   installApp: () => Promise<void>;
 }
 
@@ -15,11 +18,19 @@ export function PWAProvider({ children }: { children: React.ReactNode }) {
   const [isInstallable, setIsInstallable] = useState(!!(window as any).deferredPrompt);
   const [isInstalled, setIsInstalled] = useState(false);
   const [isChecking, setIsChecking] = useState(true);
+  const [pwaWarning, setPwaWarning] = useState<string | null>(null);
   const isInstallableRef = React.useRef(isInstallable);
 
   useEffect(() => {
     isInstallableRef.current = isInstallable;
   }, [isInstallable]);
+
+  useEffect(() => {
+    if (pwaWarning) {
+      const timer = setTimeout(() => setPwaWarning(null), 8000);
+      return () => clearTimeout(timer);
+    }
+  }, [pwaWarning]);
 
   useEffect(() => {
     // Check if already installed
@@ -82,10 +93,14 @@ export function PWAProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  const dismissWarning = () => setPwaWarning(null);
+
   const installApp = async () => {
     const prompt = deferredPrompt || (window as any).deferredPrompt;
     if (!prompt) {
+      const msg = "PWA: No deferred prompt available in this browser. To install MovizNow, please open your browser menu (⋮ or Share icon) and choose 'Add to Home Screen' or 'Install App'.";
       console.warn('PWA: No deferredPrompt available');
+      setPwaWarning(msg);
       return;
     }
 
@@ -98,13 +113,30 @@ export function PWAProvider({ children }: { children: React.ReactNode }) {
         (window as any).deferredPrompt = null;
         setIsInstallable(false);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('PWA: Installation failed:', err);
+      setPwaWarning(`PWA Installation Notice: ${err?.message || 'Could not trigger installation prompt.'}`);
     }
   };
 
   return (
-    <PWAContext.Provider value={{ deferredPrompt, isInstallable, isInstalled, isChecking, installApp }}>
+    <PWAContext.Provider value={{ deferredPrompt, isInstallable, isInstalled, isChecking, pwaWarning, dismissWarning, installApp }}>
+      {pwaWarning && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[99999] w-[92%] max-w-md bg-amber-500 text-zinc-950 p-4 rounded-2xl shadow-2xl backdrop-blur-md flex items-start gap-3 border border-amber-300 animate-in fade-in slide-in-from-top duration-300">
+          <AlertTriangle className="w-5 h-5 shrink-0 text-zinc-950 mt-0.5" />
+          <div className="flex-1 text-xs font-semibold leading-relaxed">
+            <div className="font-extrabold text-sm mb-0.5">PWA Installation Notice</div>
+            {pwaWarning}
+          </div>
+          <button
+            onClick={dismissWarning}
+            className="shrink-0 p-1.5 rounded-lg bg-zinc-950/10 hover:bg-zinc-950/20 text-zinc-950 transition-colors"
+            title="Dismiss"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
       {children}
     </PWAContext.Provider>
   );

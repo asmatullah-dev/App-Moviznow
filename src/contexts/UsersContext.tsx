@@ -285,9 +285,16 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
                const chunk = uidsArray.slice(i, i + 30);
                const qMerged = query(collection(db, 'users'), where(documentId(), 'in', chunk));
                const snapshotMerged = await getDocs(qMerged);
+               const foundUids = new Set<string>();
                snapshotMerged.docs.forEach(doc => {
                   const u = { ...doc.data(), uid: doc.id } as UserProfile;
                   currentUsersMap.set(u.uid, normalizeUserStatusAndExpiry(u));
+                  foundUids.add(doc.id);
+               });
+               chunk.forEach(reqUid => {
+                 if (!foundUids.has(reqUid) && currentUsersMap.has(reqUid)) {
+                   currentUsersMap.delete(reqUid);
+                 }
                });
             }
           }

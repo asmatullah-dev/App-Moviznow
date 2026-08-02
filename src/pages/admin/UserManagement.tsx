@@ -797,6 +797,16 @@ export default function UserManagement() {
 
       await batch.commit();
 
+      // Immediately remove from local storage cache so UI updates synchronously
+      const cachedStr = safeStorage.getItem('cached_all_users');
+      if (cachedStr) {
+        try {
+          const cached: UserProfile[] = JSON.parse(cachedStr);
+          const updated = cached.filter(u => u.uid !== currentDeleteConfirm);
+          safeStorage.setItem('cached_all_users', JSON.stringify(updated));
+        } catch (e) {}
+      }
+
       // OPTIONAL: Immediately hide it from UI if refreshUsers takes time
       // But refreshUsers should pick up the -1 mtime anyway
       await refreshUsers(true);

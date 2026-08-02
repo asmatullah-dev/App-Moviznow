@@ -47,22 +47,10 @@ export default function Rewards() {
   const { isInstalled, isInstallable, installApp } = usePWA();
   const [copied, setCopied] = useState(false);
   const hasRated = safeStorage.getItem('has_rated') === 'true';
-  const [referredCount, setReferredCount] = useState<number>(() => {
-    const cached = safeStorage.getItem('referral_stats_count');
-    return cached ? parseInt(cached) : 0;
-  });
-  const [activatedCount, setActivatedCount] = useState<number>(() => {
-    const cached = safeStorage.getItem('referral_stats_activated');
-    return cached ? parseInt(cached) : 0;
-  });
-  const [referredUsersList, setReferredUsersList] = useState<any[]>(() => {
-    const cached = safeStorage.getItem('referral_users_list');
-    return cached ? JSON.parse(cached) : [];
-  });
-  const [isLoadingStats, setIsLoadingStats] = useState(() => {
-    const cached = safeStorage.getItem('referral_users_list');
-    return !cached;
-  });
+  const [referredCount, setReferredCount] = useState<number>(0);
+  const [activatedCount, setActivatedCount] = useState<number>(0);
+  const [referredUsersList, setReferredUsersList] = useState<any[]>([]);
+  const [isLoadingStats, setIsLoadingStats] = useState(true);
 
   const referralLink = `${window.location.origin}/?ref=${profile?.referralCode || ''}`;
 
@@ -102,58 +90,62 @@ export default function Rewards() {
         myJoins = Object.values(joins).filter((j: any) => j.inviterUid === profile.uid);
       }
 
-      // If the referral document is empty, fallback to users collection query for migration
+      // If the referral document is empty, fallback to users collection query for migration if allowed
       if (myJoins.length === 0) {
-        const q = query(
-          collection(db, 'users'),
-          where('referredBy', '==', profile.uid),
-          limit(500)
-        );
-        const snap = await getDocs(q);
-        
-        // Let's migrate these existing referrals to /referral/all
-        if (!snap.empty) {
-          const batch = writeBatch(db);
-          const migratedJoins: any = {};
+        try {
+          const q = query(
+            collection(db, 'users'),
+            where('referredBy', '==', profile.uid),
+            limit(500)
+          );
+          const snap = await getDocs(q);
           
-          snap.docs.forEach(docSnap => {
-            const data = docSnap.data();
-            const uid = docSnap.id;
-            const isPaid = (data.orders && data.orders.length > 0) || data.activationRewardClaimed;
+          // Let's migrate these existing referrals to /referral/all
+          if (!snap.empty) {
+            const batch = writeBatch(db);
+            const migratedJoins: any = {};
             
-            const joinRecord = {
-              uid,
-              code: profile.referralCode || 'UNKNOWN',
-              inviterUid: profile.uid,
-              displayName: data.displayName || data.email || 'User',
-              email: data.email || '',
-              status: isPaid ? 'paid' : 'login',
-              createdAt: data.createdAt || new Date().toISOString(),
-              signupClaimed: data.signupRewardClaimed || false,
-              activationClaimed: data.activationRewardClaimed || false
-            };
+            snap.docs.forEach(docSnap => {
+              const data = docSnap.data();
+              const uid = docSnap.id;
+              const isPaid = (data.orders && data.orders.length > 0) || data.activationRewardClaimed;
+              
+              const joinRecord = {
+                uid,
+                code: profile.referralCode || 'UNKNOWN',
+                inviterUid: profile.uid,
+                displayName: data.displayName || data.email || 'User',
+                email: data.email || '',
+                status: isPaid ? 'paid' : 'login',
+                createdAt: data.createdAt || new Date().toISOString(),
+                signupClaimed: data.signupRewardClaimed || false,
+                activationClaimed: data.activationRewardClaimed || false
+              };
+              
+              migratedJoins[uid] = joinRecord;
+            });
             
-            migratedJoins[uid] = joinRecord;
-          });
-          
-          batch.set(doc(db, 'referral', 'all'), {
-            codes: {
-              [profile.uid]: profile.referralCode || 'UNKNOWN'
-            },
-            codeToUid: {
-              [profile.referralCode || 'UNKNOWN']: profile.uid
-            },
-            joins: migratedJoins,
-            stats: {
-              [profile.uid]: {
-                totalJoined: snap.size,
-                totalPaid: snap.docs.filter(d => (d.data().orders && d.data().orders.length > 0) || d.data().activationRewardClaimed).length
+            batch.set(doc(db, 'referral', 'all'), {
+              codes: {
+                [profile.uid]: profile.referralCode || 'UNKNOWN'
+              },
+              codeToUid: {
+                [profile.referralCode || 'UNKNOWN']: profile.uid
+              },
+              joins: migratedJoins,
+              stats: {
+                [profile.uid]: {
+                  totalJoined: snap.size,
+                  totalPaid: snap.docs.filter(d => (d.data().orders && d.data().orders.length > 0) || d.data().activationRewardClaimed).length
+                }
               }
-            }
-          }, { merge: true });
+            }, { merge: true });
 
-          await batch.commit();
-          myJoins = Object.values(migratedJoins);
+            await batch.commit();
+            myJoins = Object.values(migratedJoins);
+          }
+        } catch (err) {
+          // Ignore legacy migration query permission errors for non-admin users
         }
       }
 
@@ -189,9 +181,11 @@ export default function Rewards() {
       setActivatedCount(activated);
       setReferredUsersList(sortedUsers);
 
-      safeStorage.setItem('referral_stats_count', myJoins.length.toString());
-      safeStorage.setItem('referral_stats_activated', activated.toString());
-      safeStorage.setItem('referral_users_list', JSON.stringify(sortedUsers));
+      if (profile?.uid) {
+        safeStorage.setItem(`referral_stats_count_${profile.uid}`, myJoins.length.toString());
+        safeStorage.setItem(`referral_stats_activated_${profile.uid}`, activated.toString());
+        safeStorage.setItem(`referral_users_list_${profile.uid}`, JSON.stringify(sortedUsers));
+      }
     } catch (e) {
       console.error("Error fetching referral stats:", e);
     } finally {
@@ -249,6 +243,39 @@ export default function Rewards() {
   };
 
   useEffect(() => {
+    // Remove legacy un-scoped items
+    safeStorage.removeItem('referral_stats_count');
+    safeStorage.removeItem('referral_stats_activated');
+    safeStorage.removeItem('referral_users_list');
+
+    if (!profile?.uid) {
+      setReferredCount(0);
+      setActivatedCount(0);
+      setReferredUsersList([]);
+      setIsLoadingStats(false);
+      return;
+    }
+
+    // Load user-specific cache if available
+    const countCached = safeStorage.getItem(`referral_stats_count_${profile.uid}`);
+    const actCached = safeStorage.getItem(`referral_stats_activated_${profile.uid}`);
+    const listCached = safeStorage.getItem(`referral_users_list_${profile.uid}`);
+
+    setReferredCount(countCached ? parseInt(countCached) : 0);
+    setActivatedCount(actCached ? parseInt(actCached) : 0);
+    if (listCached) {
+      try {
+        setReferredUsersList(JSON.parse(listCached));
+        setIsLoadingStats(false);
+      } catch (e) {
+        setReferredUsersList([]);
+        setIsLoadingStats(true);
+      }
+    } else {
+      setReferredUsersList([]);
+      setIsLoadingStats(true);
+    }
+
     fetchReferralStats();
   }, [profile?.uid]);
 
@@ -628,94 +655,113 @@ export default function Rewards() {
         )}
 
         {/* Tasks Section */}
-        {(showNotificationTask || showInstallTask || showReviewTask) && (
-          <div className="space-y-4">
-            <h3 className="text-lg font-bold px-1">{t('One-Time Rewards')}</h3>
-            
-            <div className="space-y-3">
-              {/* Notification Task */}
-              {showNotificationTask && (
-                <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 flex items-center justify-between group">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center">
-                      <Bell className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-bold text-sm">{t('Enable Notifications')}</h4>
-                        <span className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                          +3 Days
-                        </span>
-                      </div>
-                      <p className="text-xs text-zinc-500">{t('Stay updated with latest content')}</p>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={handleEnableNotifications}
-                    className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform flex items-center gap-2 shadow-sm"
-                  >
-                    {t('Enable (+3 Days)')}
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
+        <div className="space-y-4">
+          <h3 className="text-lg font-bold px-1">{t('One-Time Rewards')}</h3>
+          
+          <div className="space-y-3">
+            {/* Review Task */}
+            <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 flex items-center justify-between group">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
+                  <MessageCircle className="w-6 h-6" />
                 </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-bold text-sm">{t('Submit a Review')}</h4>
+                    <span className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                      +5 Days
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-500">{t('Rate our app & share feedback')}</p>
+                </div>
+              </div>
+              {profile?.reviewRewardClaimed ? (
+                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/20">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                  {t('Claimed (+5 Days)')}
+                </span>
+              ) : (
+                <button 
+                  onClick={() => {
+                    if (hasRated) {
+                      claimReviewReward();
+                    } else {
+                      navigate('/reviews');
+                    }
+                  }}
+                  className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform flex items-center gap-2 shadow-sm"
+                >
+                  {hasRated ? t('Claim Reward (+5 Days)') : t('Write Review (+5 Days)')}
+                  <ArrowRight className="w-4 h-4" />
+                </button>
               )}
+            </div>
 
-              {/* PWA Task */}
-              {showInstallTask && (
-                <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 flex items-center justify-between group">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-purple-500/10 text-purple-500 flex items-center justify-center">
-                      <Download className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-bold text-sm">{t('Install App')}</h4>
-                        <span className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                          +3 Days
-                        </span>
-                      </div>
-                      <p className="text-xs text-zinc-500">{t('Better experience on home screen')}</p>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={handleClaimPWA}
-                    className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform flex items-center gap-2 shadow-sm"
-                  >
-                    {profile?.pwaRewardClaimed ? t('Claimed (+3 Days)') : (isInstalled ? t('Claim Reward (+3 Days)') : t('Install (+3 Days)'))}
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
+            {/* Notification Task */}
+            <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 flex items-center justify-between group">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center">
+                  <Bell className="w-6 h-6" />
                 </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-bold text-sm">{t('Enable Notifications')}</h4>
+                    <span className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                      +3 Days
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-500">{t('Stay updated with latest content')}</p>
+                </div>
+              </div>
+              {profile?.notificationRewardClaimed ? (
+                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/20">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                  {t('Claimed (+3 Days)')}
+                </span>
+              ) : (
+                <button 
+                  onClick={handleEnableNotifications}
+                  className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform flex items-center gap-2 shadow-sm"
+                >
+                  {'Notification' in window && Notification.permission === 'granted' ? t('Claim Reward (+3 Days)') : t('Enable (+3 Days)')}
+                  <ArrowRight className="w-4 h-4" />
+                </button>
               )}
+            </div>
 
-              {/* Review Task */}
-              {showReviewTask && (
-                <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 flex items-center justify-between group">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
-                      <MessageCircle className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-bold text-sm">{t('Submit a Review')}</h4>
-                        <span className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                          +5 Days
-                        </span>
-                      </div>
-                      <p className="text-xs text-zinc-500">{t('Rate our app & share feedback')}</p>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => navigate('/reviews')}
-                    className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform flex items-center gap-2 shadow-sm"
-                  >
-                    {t('Write Review (+5 Days)')}
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
+            {/* PWA Task */}
+            <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 flex items-center justify-between group">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-purple-500/10 text-purple-500 flex items-center justify-center">
+                  <Download className="w-6 h-6" />
                 </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-bold text-sm">{t('Install App')}</h4>
+                    <span className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                      +3 Days
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-500">{t('Better experience on home screen')}</p>
+                </div>
+              </div>
+              {profile?.pwaRewardClaimed ? (
+                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/20">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                  {t('Claimed (+3 Days)')}
+                </span>
+              ) : (
+                <button 
+                  onClick={handleClaimPWA}
+                  className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform flex items-center gap-2 shadow-sm"
+                >
+                  {isInstalled ? t('Claim Reward (+3 Days)') : t('Install (+3 Days)')}
+                  <ArrowRight className="w-4 h-4" />
+                </button>
               )}
             </div>
           </div>
-        )}
+        </div>
 
         {/* Recent Referral Activity */}
         {!isLoadingStats && referredUsersList.length > 0 && (
