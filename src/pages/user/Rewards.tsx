@@ -22,13 +22,16 @@ import {
   Star,
   Medal,
   Crown,
-  Zap
+  Zap,
+  Sparkles,
+  Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, query, where, getDocs, limit, doc, getDoc, writeBatch, increment } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
 import { Header } from '../../components/Header';
+import { fetchReviewsFromChunks } from '../../utils/chunkUtils';
 
 const getReferralCodeForUid = (uid: string) => {
   let hash = 0;
@@ -43,10 +46,12 @@ const getReferralCodeForUid = (uid: string) => {
 export default function Rewards() {
   const navigate = useNavigate();
   const { profile, updateUserProfileData } = useAuth();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { isInstalled, isInstallable, installApp } = usePWA();
   const [copied, setCopied] = useState(false);
-  const hasRated = safeStorage.getItem('has_rated') === 'true';
+  const [hasRatedState, setHasRatedState] = useState<boolean>(safeStorage.getItem('has_rated') === 'true');
+  const [claimingReview, setClaimingReview] = useState(false);
+  const [claimingNotification, setClaimingNotification] = useState(false);
   const [referredCount, setReferredCount] = useState<number>(0);
   const [activatedCount, setActivatedCount] = useState<number>(0);
   const [referredUsersList, setReferredUsersList] = useState<any[]>([]);
@@ -56,19 +61,18 @@ export default function Rewards() {
 
   const showNotificationTask = !profile?.notificationRewardClaimed && ('Notification' in window ? Notification.permission !== 'granted' : true);
   const showInstallTask = !profile?.pwaRewardClaimed && !isInstalled && isInstallable;
-  const showReviewTask = !profile?.reviewRewardClaimed && !hasRated;
+  const showReviewTask = !profile?.reviewRewardClaimed && !hasRatedState;
 
   const getBadge = (count: number) => {
-    if (count >= 50) return { name: t('Diamond Referrer'), icon: Crown, color: 'text-blue-400', bg: 'bg-blue-400/10', next: null };
-    if (count >= 25) return { name: t('Platinum Referrer'), icon: Trophy, color: 'text-zinc-400', bg: 'bg-zinc-400/10', next: 50 };
-    if (count >= 10) return { name: t('Gold Referrer'), icon: Star, color: 'text-amber-400', bg: 'bg-amber-400/10', next: 25 };
-    if (count >= 5) return { name: t('Silver Referrer'), icon: Medal, color: 'text-slate-400', bg: 'bg-slate-400/10', next: 10 };
-    if (count >= 1) return { name: t('Bronze Referrer'), icon: Award, color: 'text-orange-400', bg: 'bg-orange-400/10', next: 5 };
-    return { name: t('Newcomer'), icon: Users, color: 'text-zinc-500', bg: 'bg-zinc-500/10', next: 1 };
+    if (count >= 50) return { name: t('Diamond Referrer'), icon: Crown, color: 'text-cyan-400', bg: 'bg-cyan-500/20 border-cyan-500/40', next: null };
+    if (count >= 25) return { name: t('Platinum Referrer'), icon: Trophy, color: 'text-purple-300', bg: 'bg-purple-500/20 border-purple-500/40', next: 50 };
+    if (count >= 10) return { name: t('Gold Referrer'), icon: Star, color: 'text-amber-400', bg: 'bg-amber-500/20 border-amber-500/40', next: 25 };
+    if (count >= 5) return { name: t('Silver Referrer'), icon: Medal, color: 'text-rose-300', bg: 'bg-rose-500/20 border-rose-500/40', next: 10 };
+    if (count >= 1) return { name: t('Bronze Referrer'), icon: Award, color: 'text-orange-400', bg: 'bg-orange-500/20 border-orange-500/40', next: 5 };
+    return { name: t('Newcomer'), icon: Users, color: 'text-zinc-400', bg: 'bg-zinc-800 border-zinc-700', next: 1 };
   };
 
   useEffect(() => {
-    // Generate referral code on mount if missing
     if (profile && !profile.referralCode) {
       const newCode = getReferralCodeForUid(profile.uid);
       updateUserProfileData({ referralCode: newCode }).catch(console.error);
@@ -81,16 +85,13 @@ export default function Rewards() {
     if (!profile?.uid) return;
 
     try {
-      // 1. Get referral document for the current user (using unified doc)
       const refDoc = await getDoc(doc(db, 'referral', 'all'));
       let myJoins: any[] = [];
       if (refDoc.exists()) {
         const joins = refDoc.data()?.joins || {};
-        // Filter joins by current user's uid as inviterUid
         myJoins = Object.values(joins).filter((j: any) => j.inviterUid === profile.uid);
       }
 
-      // If the referral document is empty, fallback to users collection query for migration if allowed
       if (myJoins.length === 0) {
         try {
           const q = query(
@@ -100,7 +101,6 @@ export default function Rewards() {
           );
           const snap = await getDocs(q);
           
-          // Let's migrate these existing referrals to /referral/all
           if (!snap.empty) {
             const batch = writeBatch(db);
             const migratedJoins: any = {};
@@ -145,7 +145,7 @@ export default function Rewards() {
             myJoins = Object.values(migratedJoins);
           }
         } catch (err) {
-          // Ignore legacy migration query permission errors for non-admin users
+          // Ignore legacy migration query permission errors
         }
       }
 
@@ -176,7 +176,6 @@ export default function Rewards() {
         return dateB - dateA;
       });
 
-      // Update state and cache
       setReferredCount(myJoins.length);
       setActivatedCount(activated);
       setReferredUsersList(sortedUsers);
@@ -199,7 +198,6 @@ export default function Rewards() {
     try {
       const batch = writeBatch(db);
       
-      // Calculate new expiry date
       let baseDate = new Date();
       if (profile.expiryDate && profile.expiryDate !== 'Lifetime') {
         const currentExp = new Date(profile.expiryDate);
@@ -211,14 +209,12 @@ export default function Rewards() {
       const newExpiryStr = baseDate.toISOString();
       
       const userUpdates: any = {
-        expiryDate: newExpiryStr
+        expiryDate: newExpiryStr,
+        status: 'active'
       };
-      userUpdates.status = 'active';
       
-      // Update inviter's profile in users collection
       batch.update(doc(db, 'users', profile.uid), userUpdates);
       
-      // Update claim status in the user's referral document
       const claimField = type === 'signup' ? 'signupClaimed' : 'activationClaimed';
       batch.set(doc(db, 'referral', 'all'), {
         joins: {
@@ -230,12 +226,8 @@ export default function Rewards() {
       
       await batch.commit();
       
-      // Update local profile state
       await updateUserProfileData(userUpdates);
-      
-      // Refresh statistics & list
       await fetchReferralStats();
-      
       triggerConfetti();
     } catch (e) {
       console.error("Failed to claim reward:", e);
@@ -243,7 +235,6 @@ export default function Rewards() {
   };
 
   useEffect(() => {
-    // Remove legacy un-scoped items
     safeStorage.removeItem('referral_stats_count');
     safeStorage.removeItem('referral_stats_activated');
     safeStorage.removeItem('referral_users_list');
@@ -256,7 +247,6 @@ export default function Rewards() {
       return;
     }
 
-    // Load user-specific cache if available
     const countCached = safeStorage.getItem(`referral_stats_count_${profile.uid}`);
     const actCached = safeStorage.getItem(`referral_stats_activated_${profile.uid}`);
     const listCached = safeStorage.getItem(`referral_users_list_${profile.uid}`);
@@ -281,15 +271,14 @@ export default function Rewards() {
 
   const triggerConfetti = () => {
     confetti({
-      particleCount: 100,
-      spread: 70,
+      particleCount: 120,
+      spread: 80,
       origin: { y: 0.6 },
-      colors: ['#10b981', '#34d399', '#ffffff']
+      colors: ['#f43f5e', '#a855f7', '#f59e0b', '#ffffff']
     });
   };
 
   useEffect(() => {
-    // Check if a reward was just claimed in this session
     const justClaimedNotification = sessionStorage.getItem('notificationRewardClaimed');
     const justClaimedPWA = sessionStorage.getItem('pwaRewardClaimed');
     const justClaimedReview = sessionStorage.getItem('reviewRewardClaimed');
@@ -300,11 +289,42 @@ export default function Rewards() {
       sessionStorage.removeItem('pwaRewardClaimed');
       sessionStorage.removeItem('reviewRewardClaimed');
     }
-  }, []);
+
+    if (profile?.uid) {
+      fetchReviewsFromChunks(false).then(allReviews => {
+        if (allReviews && Array.isArray(allReviews)) {
+          const userHasReviewed = allReviews.some((r: any) =>
+            r.userId === profile.uid || (profile.email && r.userEmail === profile.email)
+          );
+          if (userHasReviewed) {
+            safeStorage.setItem('has_rated', 'true');
+            setHasRatedState(true);
+          } else {
+            safeStorage.removeItem('has_rated');
+            setHasRatedState(false);
+          }
+        }
+      }).catch(console.error);
+    }
+  }, [profile?.uid, profile?.email]);
 
   const claimReviewReward = async () => {
-    if (!profile?.uid || profile.reviewRewardClaimed) return;
+    if (!profile?.uid || profile.reviewRewardClaimed || claimingReview) return;
+    setClaimingReview(true);
     try {
+      const allReviews = await fetchReviewsFromChunks(true);
+      const userHasReviewed = allReviews?.some((r: any) => 
+        r.userId === profile.uid || (profile.email && r.userEmail === profile.email)
+      );
+
+      if (!userHasReviewed) {
+        safeStorage.removeItem('has_rated');
+        setHasRatedState(false);
+        alert(t('You have not submitted a review yet. Please write a review first to get +5 Days free VIP access!'));
+        navigate('/reviews');
+        return;
+      }
+
       let baseDate = new Date();
       if (profile.expiryDate && profile.expiryDate !== 'Lifetime') {
         const currentExp = new Date(profile.expiryDate);
@@ -315,15 +335,19 @@ export default function Rewards() {
       baseDate.setDate(baseDate.getDate() + 5);
       const updates: any = {
         reviewRewardClaimed: true,
-        expiryDate: baseDate.toISOString()
+        expiryDate: baseDate.toISOString(),
+        status: 'active'
       };
-      updates.status = 'active';
       await updateUserProfileData(updates);
       sessionStorage.setItem('reviewRewardClaimed', 'true');
       safeStorage.setItem('has_rated', 'true');
+      setHasRatedState(true);
       triggerConfetti();
     } catch (e) {
       console.error("Failed to claim review reward:", e);
+      alert(t("Failed to claim review reward. Please try again."));
+    } finally {
+      setClaimingReview(false);
     }
   };
 
@@ -337,18 +361,25 @@ export default function Rewards() {
   };
 
   const handleEnableNotifications = async () => {
-    if (!profile?.uid) return;
-    if (profile.notificationRewardClaimed) return;
+    if (!profile?.uid || profile.notificationRewardClaimed || claimingNotification) return;
     
-    if ('Notification' in window) {
-      const permission = await Notification.requestPermission();
+    if (!('Notification' in window)) {
+      alert(t('Push notifications are not supported in this browser/device. Please allow notifications in a supported browser to claim.'));
+      return;
+    }
+
+    setClaimingNotification(true);
+    try {
+      let permission = Notification.permission;
+      if (permission !== 'granted') {
+        permission = await Notification.requestPermission();
+      }
+
       if (permission !== 'granted') {
         alert(t('Please allow notifications permission in your browser to claim this reward.'));
         return;
       }
-    }
-    
-    try {
+      
       let baseDate = new Date();
       if (profile.expiryDate && profile.expiryDate !== 'Lifetime') {
         const currentExp = new Date(profile.expiryDate);
@@ -363,9 +394,13 @@ export default function Rewards() {
         updates.status = 'active';
       }
       await updateUserProfileData(updates);
+      sessionStorage.setItem('notificationRewardClaimed', 'true');
       triggerConfetti();
     } catch (e) {
       console.error("Failed to claim notification reward:", e);
+      alert(t("Failed to claim notification reward. Please try again."));
+    } finally {
+      setClaimingNotification(false);
     }
   };
 
@@ -400,8 +435,6 @@ export default function Rewards() {
 
   const ensureReferralCode = async () => {
     if (!profile) return null;
-    
-    console.log('ensureReferralCode called, current profile.referralCode:', profile.referralCode);
     
     try {
       const code = await ensureSingleAndValidReferralCode(profile.uid, profile.referralCode);
@@ -454,7 +487,7 @@ export default function Rewards() {
       const { doc, setDoc, increment } = await import('firebase/firestore');
       
       const code = await ensureReferralCode();
-      if (!code) return; // Need a code to write the document properly
+      if (!code) return;
 
       await setDoc(doc(db, 'referral', 'all'), {
         codes: {
@@ -497,265 +530,333 @@ export default function Rewards() {
       label: t('Signups'),
       value: isLoadingStats ? '...' : referredCount,
       icon: Users,
-      color: 'text-blue-500',
-      bg: 'bg-blue-500/10'
+      color: 'text-purple-400',
+      bg: 'bg-purple-500/10 border-purple-500/20'
     },
     {
       label: t('Paid Members'),
       value: isLoadingStats ? '...' : activatedCount,
       icon: CheckCircle2,
-      color: 'text-emerald-500',
-      bg: 'bg-emerald-500/10'
+      color: 'text-amber-400',
+      bg: 'bg-amber-500/10 border-amber-500/20'
     },
     {
       label: t('Total Days'),
       value: (referredCount * 5) + (activatedCount * 5) + (profile?.pwaRewardClaimed ? 3 : 0) + (profile?.notificationRewardClaimed ? 3 : 0) + (profile?.reviewRewardClaimed ? 5 : 0),
       icon: Clock,
-      color: 'text-amber-500',
-      bg: 'bg-amber-500/10'
+      color: 'text-rose-400',
+      bg: 'bg-rose-500/10 border-rose-500/20'
     }
   ];
 
   return (
-    <div className="min-h-screen bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white pb-20 transition-colors duration-300">
+    <div className="min-h-screen bg-zinc-950 text-white pb-24 relative overflow-hidden">
       <Header showBackButton={true} />
 
-      <div className="max-w-2xl mx-auto px-4 py-8 space-y-8">
+      {/* Ambient Decorative Background Glows */}
+      <div className="absolute top-20 left-1/2 -translate-x-1/2 w-full max-w-7xl h-96 bg-gradient-to-r from-rose-600/15 via-purple-600/15 to-amber-600/15 blur-3xl pointer-events-none rounded-full" />
+      <div className="absolute top-96 right-0 w-80 h-80 bg-rose-500/10 blur-3xl pointer-events-none rounded-full" />
+      <div className="absolute top-[30rem] left-0 w-80 h-80 bg-amber-500/10 blur-3xl pointer-events-none rounded-full" />
+
+      <div className="max-w-2xl mx-auto px-4 py-8 space-y-8 relative z-10">
         {/* Title Section */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-500">
-              <Gift className="w-5 h-5" />
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="p-3 bg-gradient-to-br from-rose-500 to-amber-500 rounded-2xl shadow-lg shadow-rose-500/25 text-white">
+              <Gift className="w-6 h-6 animate-pulse" />
             </div>
-            <h1 className="text-2xl font-bold">{t('Rewards & Referrals')}</h1>
+            <div>
+              <div className="flex items-center gap-1.5 text-xs font-bold text-rose-400 tracking-wider uppercase mb-0.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span>MovizNow Rewards</span>
+              </div>
+              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">{t('Rewards & Referrals')}</h1>
+            </div>
           </div>
           
           {/* Badge */}
-          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${currentBadge.bg} ${currentBadge.color} border border-current/10`}>
+          <div className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full ${currentBadge.bg} ${currentBadge.color} border shadow-md shrink-0`}>
             <currentBadge.icon className="w-4 h-4" />
-            <span className="text-xs font-bold uppercase tracking-wider">{currentBadge.name}</span>
+            <span className="text-xs font-extrabold uppercase tracking-wider">{currentBadge.name}</span>
           </div>
         </div>
 
         {/* Badge Progress */}
         {!isLoadingStats && currentBadge.next && (
-          <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4">
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest">{t('Next Goal')}</span>
-              <span className="text-xs font-bold text-emerald-500">{referredCount} / {currentBadge.next} {t('Referrals')}</span>
+          <div className="bg-gradient-to-r from-zinc-900/90 via-zinc-900/80 to-zinc-900/90 border border-rose-500/20 rounded-2xl p-4 sm:p-5 shadow-xl backdrop-blur-md">
+            <div className="flex justify-between items-center mb-2.5">
+              <span className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
+                <Zap className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+                {t('Next Goal')}
+              </span>
+              <span className="text-xs font-extrabold text-amber-400">
+                {referredCount} / {currentBadge.next} {t('Referrals')}
+              </span>
             </div>
-            <div className="h-2 w-full bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+            <div className="h-2.5 w-full bg-zinc-800/80 rounded-full overflow-hidden p-0.5 border border-zinc-700/50">
               <motion.div 
                 initial={{ width: 0 }}
-                animate={{ width: `${(referredCount / currentBadge.next) * 100}%` }}
-                className="h-full bg-emerald-500 rounded-full"
+                animate={{ width: `${Math.min(100, (referredCount / currentBadge.next) * 100)}%` }}
+                className="h-full bg-gradient-to-r from-rose-500 via-purple-500 to-amber-500 rounded-full shadow-lg shadow-rose-500/30"
               />
             </div>
           </div>
         )}
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-3 gap-3 sm:gap-4">
           {stats.map((stat, i) => (
             <motion.div
               key={stat.label}
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.1 }}
-              className="bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-4 flex flex-col items-center text-center border border-zinc-200 dark:border-zinc-800"
+              transition={{ delay: i * 0.08 }}
+              className="bg-gradient-to-b from-zinc-900/90 to-zinc-950/90 rounded-2xl p-3.5 sm:p-4 flex flex-col items-center text-center border border-zinc-800/80 hover:border-rose-500/30 transition-all shadow-lg backdrop-blur-md"
             >
-              <div className={`w-10 h-10 rounded-full ${stat.bg} ${stat.color} flex items-center justify-center mb-3`}>
+              <div className={`w-10 h-10 rounded-xl ${stat.bg} ${stat.color} border flex items-center justify-center mb-2.5 shadow-inner`}>
                 <stat.icon className="w-5 h-5" />
               </div>
-              <div className="text-lg font-bold">{stat.value}</div>
-              <div className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">{stat.label}</div>
+              <div className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">{stat.value}</div>
+              <div className="text-[10px] sm:text-xs text-zinc-400 uppercase tracking-wider font-bold mt-0.5">{stat.label}</div>
             </motion.div>
           ))}
         </div>
 
-        {/* Main Referral Card */}
-        <section className="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-3xl p-8 text-white relative overflow-hidden shadow-xl shadow-emerald-500/20">
-          <div className="relative z-10">
-            <h2 className="text-2xl font-bold mb-2">{t('Refer & Earn')}</h2>
-            <p className="text-emerald-50/80 text-sm mb-8 max-w-[200px]">
-              {t('Invite friends and both of you get 5 days of premium instantly!')}
-            </p>
-            
-          <div className="flex flex-col gap-3">
-            <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 flex items-center justify-between border border-white/20">
-              <div className="flex flex-col">
-                <span className="text-[10px] uppercase tracking-wider opacity-60 font-bold">{t('Your Code')}</span>
-                <span className="font-mono text-xl font-bold">{profile?.referralCode || '------'}</span>
+        {/* Main Hero Referral Card */}
+        <section className="relative overflow-hidden bg-gradient-to-br from-rose-950/80 via-purple-950/70 to-amber-950/80 border border-rose-500/40 rounded-3xl p-6 sm:p-8 text-white shadow-2xl shadow-rose-950/50 backdrop-blur-xl">
+          {/* Ambient Glow Effects inside Card */}
+          <div className="absolute -top-16 -right-16 w-56 h-56 bg-rose-500/25 blur-3xl rounded-full pointer-events-none" />
+          <div className="absolute -bottom-16 -left-16 w-56 h-56 bg-amber-500/25 blur-3xl rounded-full pointer-events-none" />
+
+          <div className="relative z-10 space-y-6">
+            <div className="space-y-2">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider bg-rose-500/20 border border-rose-500/30 text-rose-300">
+                <Zap className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+                <span>+5 {t('Days')} VIP {t('Per Friend')}</span>
               </div>
+              <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
+                {t('Refer & Earn')}
+              </h2>
+              <p className="text-zinc-200 text-xs sm:text-sm leading-relaxed max-w-lg">
+                {t('Invite friends to MovizNow and unlock 5 days of premium access for both of you!')}
+              </p>
+            </div>
+            
+            <div className="flex flex-col gap-3.5">
+              {/* Referral Code Box */}
+              <div className="bg-zinc-950/70 border border-rose-500/30 rounded-2xl p-4 flex items-center justify-between shadow-inner backdrop-blur-md">
+                <div className="flex flex-col" dir={language === 'ur' ? 'rtl' : 'ltr'}>
+                  <span className="text-[10px] uppercase tracking-wider text-rose-300 font-extrabold">{t('Your Code')}</span>
+                  <span className="font-mono text-xl sm:text-2xl font-black text-amber-300 tracking-wider">{profile?.referralCode || '------'}</span>
+                </div>
+                <button 
+                  onClick={handleCopy}
+                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold text-xs sm:text-sm flex items-center gap-2 transition-all shadow-md active:scale-95"
+                >
+                  {copied ? (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-300" />
+                      <span>{t('Copied!')}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" />
+                      <span>{t('Copy Code')}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Share Options */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <button 
+                  onClick={handleCopyLink}
+                  className="bg-zinc-900/80 hover:bg-zinc-800 border border-zinc-700 text-zinc-100 font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all text-xs sm:text-sm active:scale-95"
+                >
+                  <Copy className="w-4 h-4 text-rose-400" />
+                  <span>{t('Copy Link')}</span>
+                </button>
+                <button 
+                  onClick={shareWhatsApp}
+                  className="bg-[#25D366] text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 hover:bg-[#22c35e] transition-all text-xs sm:text-sm shadow-lg shadow-[#25D366]/20 active:scale-95"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  <span>WhatsApp</span>
+                </button>
+                <button 
+                  onClick={shareTelegram}
+                  className="bg-[#0088cc] text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 hover:bg-[#0077b3] transition-all text-xs sm:text-sm shadow-lg shadow-[#0088cc]/20 active:scale-95"
+                >
+                  <Send className="w-4 h-4" />
+                  <span>Telegram</span>
+                </button>
+              </div>
+
               <button 
-                onClick={handleCopy}
-                className="w-10 h-10 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors"
+                onClick={handleShare}
+                className="w-full bg-gradient-to-r from-rose-600 via-purple-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-extrabold py-3.5 sm:py-4 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-xl shadow-rose-600/30 text-sm sm:text-base active:scale-95 mt-1"
               >
-                {copied ? <CheckCircle2 className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
+                <Share2 className="w-5 h-5" />
+                <span>{t('Invite & Earn 5 Days Free')}</span>
               </button>
             </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <button 
-                onClick={handleCopyLink}
-                className="bg-white/10 hover:bg-white/20 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-colors border border-white/10"
-              >
-                <Copy className="w-4 h-4" />
-                {t('Link')}
-              </button>
-              <button 
-                onClick={shareWhatsApp}
-                className="bg-[#25D366] text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-[#25D366]/90 transition-colors shadow-lg shadow-[#25D366]/20"
-              >
-                <MessageCircle className="w-4 h-4" />
-                WhatsApp
-              </button>
-              <button 
-                onClick={shareTelegram}
-                className="bg-[#0088cc] text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-[#0088cc]/90 transition-colors shadow-lg shadow-[#0088cc]/20"
-              >
-                <Send className="w-4 h-4" />
-                Telegram
-              </button>
-            </div>
-
-            <button 
-              onClick={handleShare}
-              className="w-full bg-white text-emerald-600 font-bold py-4 rounded-2xl flex items-center justify-center gap-2 hover:bg-emerald-50 transition-colors shadow-lg md:hidden"
-            >
-              <Share2 className="w-5 h-5" />
-              {t('Native Share')}
-            </button>
-          </div>
           </div>
 
-          {/* Decorative elements */}
-          <div className="absolute top-[-20px] right-[-20px] w-40 h-40 bg-white/10 rounded-full blur-3xl" />
-          <div className="absolute bottom-[-40px] left-[-40px] w-60 h-60 bg-emerald-400/20 rounded-full blur-3xl" />
-          <TrendingUp className="absolute right-8 top-8 w-24 h-24 text-white/10 rotate-12" />
+          <TrendingUp className="absolute right-6 top-6 w-28 h-28 text-white/5 rotate-12 pointer-events-none" />
         </section>
 
         {/* Empty State / Invitation Illustration */}
         {!isLoadingStats && referredCount === 0 && (
-          <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-8 flex flex-col items-center text-center gap-4">
-            <div className="space-y-2">
-              <h3 className="text-lg font-bold">{t('Invite your first friend')}</h3>
-              <p className="text-sm text-zinc-500 max-w-[260px] mx-auto">
+          <div className="bg-gradient-to-b from-zinc-900/90 to-zinc-950/90 border border-rose-500/20 rounded-3xl p-6 sm:p-8 flex flex-col items-center text-center gap-4 shadow-lg backdrop-blur-md">
+            <div className="p-4 bg-gradient-to-br from-rose-500/20 to-amber-500/20 rounded-full border border-rose-500/30 text-amber-400">
+              <Users className="w-8 h-8" />
+            </div>
+            <div className="space-y-1.5" dir={language === 'ur' ? 'rtl' : 'ltr'}>
+              <h3 className="text-lg font-extrabold text-white">{t('Invite your first friend')}</h3>
+              <p className="text-xs sm:text-sm text-zinc-300 max-w-sm mx-auto leading-relaxed">
                 {t('Sharing is caring! Invite your friends to join MovizNow and unlock exclusive rewards together.')}
               </p>
             </div>
             <button 
               onClick={handleShare}
-              className="mt-2 flex items-center gap-2 text-emerald-500 font-bold text-sm hover:underline"
+              className="mt-1 flex items-center gap-2 text-rose-400 hover:text-rose-300 font-extrabold text-xs sm:text-sm transition-colors group"
             >
-              {t('Start Sharing Now')}
-              <ArrowRight className="w-4 h-4" />
+              <span>{t('Start Sharing Now')}</span>
+              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform rtl:group-hover:-translate-x-1" />
             </button>
           </div>
         )}
 
         {/* Tasks Section */}
         <div className="space-y-4">
-          <h3 className="text-lg font-bold px-1">{t('One-Time Rewards')}</h3>
+          <div className="flex items-center justify-between px-1">
+            <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
+              <Gift className="w-5 h-5 text-amber-400" />
+              <span>{t('One-Time Rewards')}</span>
+            </h3>
+            <span className="text-xs font-bold text-amber-400/90 bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/20">
+              🎁 Bonus VIP Days
+            </span>
+          </div>
           
           <div className="space-y-3">
             {/* Review Task */}
-            <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 flex items-center justify-between group">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
-                  <MessageCircle className="w-6 h-6" />
+            <div className="bg-gradient-to-b from-zinc-900/90 to-zinc-950/90 border border-zinc-800/90 hover:border-amber-500/30 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all shadow-md backdrop-blur-md">
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0 shadow-inner">
+                  <Star className="w-6 h-6 fill-amber-400/20" />
                 </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h4 className="font-bold text-sm">{t('Submit a Review')}</h4>
-                    <span className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                      +5 Days
+                <div className="space-y-0.5" dir={language === 'ur' ? 'rtl' : 'ltr'}>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="font-bold text-sm text-white">{t('Submit a Review')}</h4>
+                    <span className="text-[10px] font-extrabold text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded-full border border-amber-500/30">
+                      +5 {t('Days')} VIP
                     </span>
                   </div>
-                  <p className="text-xs text-zinc-500">{t('Rate our app & share feedback')}</p>
+                  <p className="text-xs text-zinc-400">{t('Rate our app & share feedback')}</p>
                 </div>
               </div>
               {profile?.reviewRewardClaimed ? (
-                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/20">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/20 self-start sm:self-auto">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                   {t('Claimed (+5 Days)')}
                 </span>
               ) : (
                 <button 
                   onClick={() => {
-                    if (hasRated) {
+                    if (hasRatedState) {
                       claimReviewReward();
                     } else {
                       navigate('/reviews');
                     }
                   }}
-                  className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform flex items-center gap-2 shadow-sm"
+                  disabled={claimingReview}
+                  className="bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-md shadow-rose-600/20 active:scale-95 disabled:opacity-50 self-stretch sm:self-auto"
                 >
-                  {hasRated ? t('Claim Reward (+5 Days)') : t('Write Review (+5 Days)')}
-                  <ArrowRight className="w-4 h-4" />
+                  {claimingReview ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>{t('Verifying...')}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>{hasRatedState ? t('Claim Reward (+5 Days)') : t('Write Review (+5 Days)')}</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
                 </button>
               )}
             </div>
 
             {/* Notification Task */}
-            <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 flex items-center justify-between group">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center">
+            <div className="bg-gradient-to-b from-zinc-900/90 to-zinc-950/90 border border-zinc-800/90 hover:border-purple-500/30 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all shadow-md backdrop-blur-md">
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-purple-500/20 to-rose-500/20 border border-purple-500/30 text-purple-400 flex items-center justify-center shrink-0 shadow-inner">
                   <Bell className="w-6 h-6" />
                 </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h4 className="font-bold text-sm">{t('Enable Notifications')}</h4>
-                    <span className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                      +3 Days
+                <div className="space-y-0.5" dir={language === 'ur' ? 'rtl' : 'ltr'}>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="font-bold text-sm text-white">{t('Enable Notifications')}</h4>
+                    <span className="text-[10px] font-extrabold text-purple-300 bg-purple-500/20 px-2 py-0.5 rounded-full border border-purple-500/30">
+                      +3 {t('Days')} VIP
                     </span>
                   </div>
-                  <p className="text-xs text-zinc-500">{t('Stay updated with latest content')}</p>
+                  <p className="text-xs text-zinc-400">{t('Stay updated with latest content')}</p>
                 </div>
               </div>
               {profile?.notificationRewardClaimed ? (
-                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/20">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/20 self-start sm:self-auto">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                   {t('Claimed (+3 Days)')}
                 </span>
               ) : (
                 <button 
                   onClick={handleEnableNotifications}
-                  className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform flex items-center gap-2 shadow-sm"
+                  disabled={claimingNotification}
+                  className="bg-gradient-to-r from-purple-600 to-rose-600 hover:from-purple-500 hover:to-rose-500 text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-md shadow-purple-600/20 active:scale-95 disabled:opacity-50 self-stretch sm:self-auto"
                 >
-                  {'Notification' in window && Notification.permission === 'granted' ? t('Claim Reward (+3 Days)') : t('Enable (+3 Days)')}
-                  <ArrowRight className="w-4 h-4" />
+                  {claimingNotification ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>{t('Enabling...')}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>{'Notification' in window && Notification.permission === 'granted' ? t('Claim Reward (+3 Days)') : t('Enable (+3 Days)')}</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
                 </button>
               )}
             </div>
 
             {/* PWA Task */}
-            <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 flex items-center justify-between group">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-xl bg-purple-500/10 text-purple-500 flex items-center justify-center">
+            <div className="bg-gradient-to-b from-zinc-900/90 to-zinc-950/90 border border-zinc-800/90 hover:border-rose-500/30 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all shadow-md backdrop-blur-md">
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-rose-500/20 to-amber-500/20 border border-rose-500/30 text-rose-400 flex items-center justify-center shrink-0 shadow-inner">
                   <Download className="w-6 h-6" />
                 </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h4 className="font-bold text-sm">{t('Install App')}</h4>
-                    <span className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                      +3 Days
+                <div className="space-y-0.5" dir={language === 'ur' ? 'rtl' : 'ltr'}>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="font-bold text-sm text-white">{t('Install App')}</h4>
+                    <span className="text-[10px] font-extrabold text-rose-300 bg-rose-500/20 px-2 py-0.5 rounded-full border border-rose-500/30">
+                      +3 {t('Days')} VIP
                     </span>
                   </div>
-                  <p className="text-xs text-zinc-500">{t('Better experience on home screen')}</p>
+                  <p className="text-xs text-zinc-400">{t('Better experience on home screen')}</p>
                 </div>
               </div>
               {profile?.pwaRewardClaimed ? (
-                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/20">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/20 self-start sm:self-auto">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                   {t('Claimed (+3 Days)')}
                 </span>
               ) : (
                 <button 
                   onClick={handleClaimPWA}
-                  className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform flex items-center gap-2 shadow-sm"
+                  className="bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-md shadow-rose-600/20 active:scale-95 self-stretch sm:self-auto"
                 >
-                  {isInstalled ? t('Claim Reward (+3 Days)') : t('Install (+3 Days)')}
+                  <span>{isInstalled ? t('Claim Reward (+3 Days)') : t('Install (+3 Days)')}</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
               )}
@@ -766,41 +867,41 @@ export default function Rewards() {
         {/* Recent Referral Activity */}
         {!isLoadingStats && referredUsersList.length > 0 && (
           <div className="space-y-4">
-            <h3 className="text-lg font-bold px-1 flex items-center gap-2">
-              <Clock className="w-5 h-5 text-emerald-500" />
-              {t('Recent Referral Activity')}
+            <h3 className="text-lg font-extrabold text-white px-1 flex items-center gap-2">
+              <Clock className="w-5 h-5 text-rose-400" />
+              <span>{t('Recent Referral Activity')}</span>
             </h3>
             
-            <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden">
-              <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
+            <div className="bg-gradient-to-b from-zinc-900/90 to-zinc-950/90 border border-zinc-800 rounded-2xl overflow-hidden shadow-lg backdrop-blur-md">
+              <div className="divide-y divide-zinc-800/80">
                 {referredUsersList.map((user, i) => (
                   <motion.div 
                     key={user.id}
-                    initial={{ opacity: 0, x: -20 }}
+                    initial={{ opacity: 0, x: -15 }}
                     animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: i * 0.05 }}
-                    className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 group hover:bg-white dark:hover:bg-zinc-800/50 transition-colors"
+                    transition={{ delay: i * 0.04 }}
+                    className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-zinc-800/40 transition-colors"
                   >
                     <div className="flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
-                        user.isActivated ? 'bg-emerald-500/10 text-emerald-500' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500'
+                      <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-black shrink-0 ${
+                        user.isActivated ? 'bg-gradient-to-br from-amber-500 to-rose-500 text-white shadow-md' : 'bg-zinc-800 text-zinc-400 border border-zinc-700'
                       }`}>
                         {(user.displayName || 'U').charAt(0).toUpperCase()}
                       </div>
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-sm font-semibold truncate text-zinc-800 dark:text-zinc-200">
+                      <div className="flex flex-col min-w-0" dir={language === 'ur' ? 'rtl' : 'ltr'}>
+                        <span className="text-sm font-bold truncate text-white">
                           {user.displayName || 'User'}
                         </span>
                         <span className="text-[10px] text-zinc-400 mt-0.5">
                           {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : t('Recently')}
                           {' • '}
-                          <span className={`font-semibold ${user.status === 'paid' ? 'text-emerald-500' : 'text-zinc-500'}`}>
-                            {user.status === 'paid' ? t('Paid User') : t('Login')}
+                          <span className={`font-extrabold ${user.status === 'paid' ? 'text-amber-400' : 'text-zinc-400'}`}>
+                            {user.status === 'paid' ? t('Paid Member') : t('Login')}
                           </span>
                           {user.code && (
                             <>
                               {' • '}
-                              <span className="text-zinc-500">{t('Code')}: <span className="font-mono">{user.code}</span></span>
+                              <span className="text-zinc-400">{t('Code')}: <span className="font-mono text-rose-300">{user.code}</span></span>
                             </>
                           )}
                         </span>
@@ -808,21 +909,21 @@ export default function Rewards() {
                     </div>
                     
                     {/* Rewards Controls */}
-                    <div className="flex flex-wrap items-center gap-2 sm:gap-4 justify-end">
+                    <div className="flex flex-wrap items-center gap-2 justify-end">
                       {/* 1. Signup Reward */}
                       <div className="flex items-center gap-2">
                         {!user.signupClaimed ? (
                           <button
                             onClick={() => claimReward(user.id, 'signup')}
-                            className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow-sm active:scale-95 transition-all flex items-center gap-1.5"
+                            className="bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-extrabold text-xs px-3 py-1.5 rounded-lg shadow-md active:scale-95 transition-all flex items-center gap-1.5"
                           >
                             <Gift className="w-3.5 h-3.5" />
-                            {t('Claim Signup (+5 Days)')}
+                            <span>{t('Claim Signup (+5 Days)')}</span>
                           </button>
                         ) : (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 px-2 py-1 rounded-md border border-emerald-100 dark:border-emerald-900/30">
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                            {t('Signup Claimed (+5)')}
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-400 bg-emerald-950/40 px-2.5 py-1 rounded-md border border-emerald-800/40">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>{t('Signup Claimed (+5)')}</span>
                           </span>
                         )}
                       </div>
@@ -833,19 +934,19 @@ export default function Rewards() {
                           !user.activationClaimed ? (
                             <button
                               onClick={() => claimReward(user.id, 'activation')}
-                              className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow-sm active:scale-95 transition-all flex items-center gap-1.5"
+                              className="bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 text-white font-extrabold text-xs px-3 py-1.5 rounded-lg shadow-md active:scale-95 transition-all flex items-center gap-1.5"
                             >
-                              <Crown className="w-3.5 h-3.5" />
-                              {t('Claim Activation (+5 Days)')}
+                              <Crown className="w-3.5 h-3.5 text-amber-300" />
+                              <span>{t('Claim Activation (+5 Days)')}</span>
                             </button>
                           ) : (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 px-2 py-1 rounded-md border border-emerald-100 dark:border-emerald-900/30">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                              {t('Activation Claimed (+5)')}
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-300 bg-amber-950/40 px-2.5 py-1 rounded-md border border-amber-800/40">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-amber-400" />
+                              <span>{t('Activation Claimed (+5)')}</span>
                             </span>
                           )
                         ) : (
-                          <span className="text-[10px] text-zinc-400 italic bg-zinc-100 dark:bg-zinc-800/80 px-2 py-1 rounded-md">
+                          <span className="text-[10px] text-zinc-400 italic bg-zinc-800/80 px-2 py-1 rounded-md border border-zinc-700/50">
                             {t('Pending activation for +5 days')}
                           </span>
                         )}
@@ -859,36 +960,36 @@ export default function Rewards() {
         )}
 
         {/* Information Section */}
-        <div className="bg-zinc-50 dark:bg-zinc-900/50 rounded-2xl p-6 border border-zinc-200 dark:border-zinc-800 border-dashed">
-          <h4 className="font-bold text-sm mb-3 flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-            {t('How it works')}
+        <div className="bg-gradient-to-b from-zinc-900/70 to-zinc-950/70 rounded-2xl p-5 sm:p-6 border border-rose-500/20 border-dashed backdrop-blur-md">
+          <h4 className="font-extrabold text-sm mb-3 flex items-center gap-2 text-rose-300">
+            <CheckCircle2 className="w-4 h-4 text-amber-400" />
+            <span>{t('How it works')}</span>
           </h4>
-          <ul className="space-y-2.5">
-            <li className="text-xs text-zinc-600 dark:text-zinc-400 flex items-start gap-2">
-              <span className="text-emerald-500 font-bold">•</span>
-              <span><strong className="text-zinc-800 dark:text-zinc-200">{t('Referral Signup (+5 Days)')}:</strong> {t('Share your link/code with friends to get 5 days extension for every friend who joins.')}</span>
+          <ul className="space-y-2.5" dir={language === 'ur' ? 'rtl' : 'ltr'}>
+            <li className="text-xs text-zinc-300 flex items-start gap-2">
+              <span className="text-amber-400 font-bold">•</span>
+              <span><strong className="text-white">{t('Referral Signup (+5 Days)')}:</strong> {t('Share your link/code with friends to get 5 days extension for every friend who joins.')}</span>
             </li>
-            <li className="text-xs text-zinc-600 dark:text-zinc-400 flex items-start gap-2">
-              <span className="text-emerald-500 font-bold">•</span>
-              <span><strong className="text-zinc-800 dark:text-zinc-200">{t('Referral Activation (+5 Days)')}:</strong> {t('Get an extra 5 days extension when your referred friend purchases a membership.')}</span>
+            <li className="text-xs text-zinc-300 flex items-start gap-2">
+              <span className="text-amber-400 font-bold">•</span>
+              <span><strong className="text-white">{t('Referral Activation (+5 Days)')}:</strong> {t('Get an extra 5 days extension when your referred friend purchases a membership.')}</span>
             </li>
             {showInstallTask && (
-              <li className="text-xs text-zinc-600 dark:text-zinc-400 flex items-start gap-2">
-                <span className="text-emerald-500 font-bold">•</span>
-                <span><strong className="text-zinc-800 dark:text-zinc-200">{t('Install App (+3 Days)')}:</strong> {t('Install our PWA app on your home screen for a 3 days membership extension.')}</span>
+              <li className="text-xs text-zinc-300 flex items-start gap-2">
+                <span className="text-rose-400 font-bold">•</span>
+                <span><strong className="text-white">{t('Install App (+3 Days)')}:</strong> {t('Install our PWA app on your home screen for a 3 days membership extension.')}</span>
               </li>
             )}
             {showNotificationTask && (
-              <li className="text-xs text-zinc-600 dark:text-zinc-400 flex items-start gap-2">
-                <span className="text-emerald-500 font-bold">•</span>
-                <span><strong className="text-zinc-800 dark:text-zinc-200">{t('Enable Notifications (+3 Days)')}:</strong> {t('Enable push notifications to stay updated and get a 3 days membership extension.')}</span>
+              <li className="text-xs text-zinc-300 flex items-start gap-2">
+                <span className="text-purple-400 font-bold">•</span>
+                <span><strong className="text-white">{t('Enable Notifications (+3 Days)')}:</strong> {t('Enable push notifications to stay updated and get a 3 days membership extension.')}</span>
               </li>
             )}
             {showReviewTask && (
-              <li className="text-xs text-zinc-600 dark:text-zinc-400 flex items-start gap-2">
-                <span className="text-emerald-500 font-bold">•</span>
-                <span><strong className="text-zinc-800 dark:text-zinc-200">{t('Submit a Review (+5 Days)')}:</strong> {t('Write a review and rate our app to get a free 5 days membership extension.')}</span>
+              <li className="text-xs text-zinc-300 flex items-start gap-2">
+                <span className="text-amber-400 font-bold">•</span>
+                <span><strong className="text-white">{t('Submit a Review (+5 Days)')}:</strong> {t('Write a review and rate our app to get a free 5 days membership extension.')}</span>
               </li>
             )}
           </ul>
@@ -897,3 +998,4 @@ export default function Rewards() {
     </div>
   );
 }
+

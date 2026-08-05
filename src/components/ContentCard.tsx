@@ -5,6 +5,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Heart, Clock, ShoppingCart, Play, X, Lock, Star } from 'lucide-react';
 import { Content, Quality, Language, Genre } from '../types';
 import { formatContentTitle, getContrastColor } from '../utils/contentUtils';
+import { getOptimizedImageUrl, getImageSrcSet } from '../utils/imageUtils';
 import { clsx } from 'clsx';
 import { useCart } from '../contexts/CartContext';
 import { useSettings } from '../contexts/SettingsContext';
@@ -172,114 +173,114 @@ const ContentCard = React.memo(({
     return (match && match[2].length === 11) ? `https://www.youtube.com/embed/${match[2]}` : null;
   };
 
+  const rawPoster = content.posterUrl || settings?.defaultAppImage || 'https://picsum.photos/seed/movie/400/600';
+  const optimizedPoster = getOptimizedImageUrl(rawPoster, isSmall ? 185 : 342);
+  const posterSrcSet = getImageSrcSet(rawPoster);
+
   return (
-    <motion.div 
-      initial={{ opacity: 0, y: 10, scale: 1 }}
-      animate={isClicked ? { scale: 1.05, zIndex: 30, opacity: 1, y: 0 } : { opacity: 1, y: 0, scale: 1, zIndex: 1 }}
-      transition={{ duration: 0.3 }}
-      className={clsx("group relative flex flex-col h-full transform-gpu", {
-        "transition-all duration-300 hover:scale-[1.05] active:scale-[1.05]": !isClicked
+    <div 
+      className={clsx("group relative flex flex-col h-full transition-transform duration-200 hover:-translate-y-1 active:scale-[0.98]", {
+        "scale-105 z-30": isClicked
       })}
     >
-      {/* Color Gradient Layer (1px) */}
-      <div className="relative rounded-[15.5px] p-[1px] bg-[linear-gradient(to_bottom_right,#ff0000,#ef4444,#f97316,#facc15,#4ade80,#06b6d4,#3b82f6,#a855f7)] z-10 flex flex-col h-full">
-        {/* Gap Layer (0.5px gap) */}
-        <div className="relative flex flex-col h-full bg-black rounded-[14.5px] p-[0.5px] transition-colors">
-          {/* Inner Content */}
-          <div className="relative flex flex-col h-full bg-zinc-50 dark:bg-zinc-900 rounded-[14px] overflow-hidden">
-          <Link 
-             to={`/${content.type === 'series' ? 'series' : 'movie'}/${content.id}`} 
-             onClick={() => {
-               setIsClicked(true);
-             }}
-             className="absolute inset-0 z-10" aria-label={`View details for ${content.title}`} />
-          
-          <div className="relative aspect-[2/3] w-full bg-zinc-100 dark:bg-zinc-800 block">
-            <img
-            src={content.posterUrl || settings?.defaultAppImage || 'https://picsum.photos/seed/movie/400/600'}
+      {/* Modern Sleek Card Container */}
+      <div className="relative flex flex-col h-full bg-white dark:bg-zinc-900/90 rounded-2xl overflow-hidden border border-zinc-200/80 dark:border-zinc-800/80 hover:border-emerald-500/50 dark:hover:border-emerald-500/50 shadow-md hover:shadow-xl hover:shadow-emerald-500/10 transition-shadow duration-200">
+        <Link 
+          to={`/${content.type === 'series' ? 'series' : 'movie'}/${content.id}`} 
+          onClick={() => {
+            setIsClicked(true);
+          }}
+          className="absolute inset-0 z-10" aria-label={`View details for ${content.title}`} />
+        
+        <div className="relative aspect-[2/3] w-full bg-zinc-100 dark:bg-zinc-800 block overflow-hidden">
+          <img
+            src={optimizedPoster}
             alt={content.title}
-            loading="lazy"
-            className="w-full h-full object-cover"
+            loading="eager"
+            decoding="async"
+            className="w-full h-full object-cover transition-transform duration-200 ease-out group-hover:scale-105"
             referrerPolicy="no-referrer"
           />
           
-          {/* Overlay on hover */}
-          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-            <div className="bg-emerald-500 rounded-full p-3 transform translate-y-4 group-hover:translate-y-0 transition-transform">
-              <Heart className="w-6 h-6 text-zinc-900 dark:text-white fill-current" />
+          {/* Subtle Dark Vignette & Play Indicator on hover */}
+          <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/90 via-zinc-950/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center">
+            <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-400 text-white flex items-center justify-center shadow-lg shadow-emerald-500/40 transform scale-75 group-hover:scale-100 transition-transform duration-200">
+              <Play className="w-5 h-5 sm:w-6 sm:h-6 fill-current translate-x-0.5" />
             </div>
           </div>
 
-            <div className="absolute top-1.5 right-1.5 flex flex-col items-end gap-1 z-20">
-              <div className={clsx(
-                "px-1 py-0.5 rounded-sm font-bold uppercase tracking-wider text-white shadow-sm",
-                content.type === 'movie' ? 'bg-blue-500/90' : 'bg-purple-500/90',
-                isSmall ? 'text-[6px]' : 'text-[8px]'
-              )}>
-                {content.type}
-              </div>
-              
-              {qualityObj && (
-                <div 
-                  className={clsx(
-                    "px-1 py-0.5 rounded-sm font-bold uppercase tracking-wider shadow-sm select-none",
-                    isSmall ? 'text-[6px]' : 'text-[8px]'
-                  )}
-                  style={{ 
-                    backgroundColor: qualityObj.color || '#10b981',
-                    color: getContrastColor(qualityObj.color || '#10b981')
-                  }}
-                >
-                  {qualityObj.name}
-                </div>
-              )}
-
-              {matchingSeason && (
-                <div className={clsx(
-                  "px-1 py-0.5 rounded-sm font-bold uppercase tracking-wider bg-emerald-500 text-white shadow-sm",
-                  isSmall ? 'text-[6px]' : 'text-[8px]'
-                )}>
-                  Season {matchingSeason.seasonNumber}
-                </div>
-              )}
+          {/* Top Right Badges */}
+          <div className="absolute top-2 right-2 flex flex-col items-end gap-1 z-10">
+            <div className={clsx(
+              "px-1.5 py-0.5 rounded-md font-extrabold uppercase tracking-wider text-white shadow-md border border-white/20",
+              content.type === 'movie' ? 'bg-blue-600' : 'bg-purple-600',
+              isSmall ? 'text-[6px]' : 'text-[9px]'
+            )}>
+              {content.type}
             </div>
+            
+            {qualityObj && (
+              <div 
+                className={clsx(
+                  "px-1.5 py-0.5 rounded-md font-black uppercase tracking-wider shadow-sm select-none",
+                  isSmall ? 'text-[6px]' : 'text-[9px]'
+                )}
+                style={{ 
+                  backgroundColor: qualityObj.color || '#10b981',
+                  color: getContrastColor(qualityObj.color || '#10b981')
+                }}
+              >
+                {qualityObj.name}
+              </div>
+            )}
 
-          <div className="absolute top-1.5 left-1.5 flex flex-col gap-1 z-20">
+            {matchingSeason && (
+              <div className={clsx(
+                "px-1.5 py-0.5 rounded-md font-bold uppercase tracking-wider bg-emerald-500 text-white shadow-sm",
+                isSmall ? 'text-[6px]' : 'text-[9px]'
+              )}>
+                S{matchingSeason.seasonNumber}
+              </div>
+            )}
+          </div>
+
+          {/* Top Left Badges */}
+          <div className="absolute top-2 left-2 flex flex-col gap-1 z-10">
             {content.status === 'draft' && canSeeDraft && (
               <div className={clsx(
-                "px-1 py-0.5 rounded-sm font-bold uppercase tracking-wider bg-orange-500 text-white shadow-sm",
-                isSmall ? 'text-[6px]' : 'text-[8px]'
+                "px-1.5 py-0.5 rounded-md font-bold uppercase tracking-wider bg-amber-500 text-white shadow-sm",
+                isSmall ? 'text-[6px]' : 'text-[9px]'
               )}>
                 Draft
               </div>
             )}
             {content.status === 'selected_content' && canSeeDraft && (
               <div className={clsx(
-                "px-1 py-0.5 rounded-sm font-bold uppercase tracking-wider bg-pink-500 text-white shadow-sm flex items-center gap-0.5",
-                isSmall ? 'text-[6px]' : 'text-[8px]'
+                "px-1.5 py-0.5 rounded-md font-bold uppercase tracking-wider bg-pink-500 text-white shadow-sm flex items-center gap-0.5",
+                isSmall ? 'text-[6px]' : 'text-[9px]'
               )}>
                 <Star className={isSmall ? "w-2 h-2" : "w-2.5 h-2.5"} /> SCO
               </div>
             )}
             {isLocked && (
               <div className={clsx(
-                "px-1 py-0.5 rounded-sm font-bold uppercase tracking-wider flex items-center gap-1 shadow-sm",
-                isPending ? "bg-yellow-500 text-white dark:text-black" : "bg-red-500 text-white",
-                isSmall ? 'text-[6px]' : 'text-[8px]'
+                "px-1.5 py-0.5 rounded-md font-extrabold uppercase tracking-wider flex items-center gap-1 shadow-sm",
+                isPending ? "bg-amber-500 text-black" : "bg-rose-600 text-white",
+                isSmall ? 'text-[6px]' : 'text-[9px]'
               )}>
-                <svg xmlns="http://www.w3.org/2000/svg" width={isSmall ? "6" : "8"} height={isSmall ? "6" : "8"} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-                {isPending ? 'Pending' : 'Restricted'}
+                <Lock className={isSmall ? "w-2 h-2" : "w-2.5 h-2.5"} />
+                <span>{isPending ? 'Pending' : 'Restricted'}</span>
               </div>
             )}
           </div>
         </div>
 
         {/* Action Buttons - High Z-index to be clickable over the Link overlay */}
-        <div className="absolute bottom-[88px] right-2 flex flex-col gap-2 z-30 opacity-0 lg:group-hover:opacity-100 transition-opacity pointer-events-none lg:group-hover:pointer-events-auto hidden lg:flex">
+        <div className="absolute bottom-[88px] right-2 flex flex-col gap-2 z-20 opacity-0 lg:group-hover:opacity-100 transition-opacity pointer-events-none lg:group-hover:pointer-events-auto hidden lg:flex">
           {(allTrailers.length > 0) && (
             <button
               onClick={handleWatchTrailer}
-              className="p-2 rounded-full backdrop-blur-md transition-all hover:scale-110 shadow-lg bg-red-600 text-white pointer-events-auto"
+              className="p-2 rounded-full transition-transform hover:scale-110 shadow-lg bg-red-600 text-white pointer-events-auto cursor-pointer"
               title="Watch Trailer"
             >
               <Play className="w-4 h-4 fill-current" />
@@ -290,7 +291,7 @@ const ContentCard = React.memo(({
               <Link
                 to="/cart"
                 onClick={(e) => e.stopPropagation()}
-                className="p-2 rounded-full backdrop-blur-md transition-all hover:scale-110 shadow-lg bg-emerald-500 text-white pointer-events-auto"
+                className="p-2 rounded-full transition-transform hover:scale-110 shadow-lg bg-emerald-500 text-white pointer-events-auto cursor-pointer"
                 title="View Cart"
               >
                 <ShoppingCart className="w-4 h-4 fill-current" />
@@ -298,7 +299,7 @@ const ContentCard = React.memo(({
             ) : (
               <button
                 onClick={handleAddToCart}
-                className="p-2 rounded-full backdrop-blur-md transition-all hover:scale-110 shadow-lg bg-black/50 text-zinc-900 dark:text-white hover:bg-emerald-500 pointer-events-auto"
+                className="p-2 rounded-full transition-transform hover:scale-110 shadow-lg bg-zinc-900/90 text-white hover:bg-emerald-500 pointer-events-auto cursor-pointer"
                 title="Add to Cart"
               >
                 <ShoppingCart className="w-4 h-4" />
@@ -309,7 +310,7 @@ const ContentCard = React.memo(({
             <Link
               to="/top-up"
               onClick={(e) => e.stopPropagation()}
-              className="p-2 rounded-full backdrop-blur-md transition-all hover:scale-110 shadow-lg bg-black/50 text-zinc-900 dark:text-white hover:bg-emerald-500 pointer-events-auto"
+              className="p-2 rounded-full transition-transform hover:scale-110 shadow-lg bg-zinc-900/90 text-white hover:bg-emerald-500 pointer-events-auto cursor-pointer"
               title="Top Up Membership"
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
@@ -323,8 +324,8 @@ const ContentCard = React.memo(({
               onToggleFavorite(content.id);
             }}
             className={clsx(
-              "p-2 rounded-full backdrop-blur-md transition-all hover:scale-110 shadow-lg pointer-events-auto",
-              isFavorite ? "bg-emerald-500 text-white" : "bg-black/50 text-zinc-900 dark:text-white hover:bg-emerald-500"
+              "p-2 rounded-full transition-transform hover:scale-110 shadow-lg pointer-events-auto cursor-pointer",
+              isFavorite ? "bg-emerald-500 text-white" : "bg-zinc-900/90 text-white hover:bg-emerald-500"
             )}
             title={isFavorite ? "Remove from Favorites" : "Add to Favorites"}
           >
@@ -338,8 +339,8 @@ const ContentCard = React.memo(({
               onToggleWatchLater(content.id);
             }}
             className={clsx(
-              "p-2 rounded-full backdrop-blur-md transition-all hover:scale-110 shadow-lg pointer-events-auto",
-              isWatchLater ? "bg-emerald-500 text-white" : "bg-black/50 text-zinc-900 dark:text-white hover:bg-emerald-500"
+              "p-2 rounded-full transition-transform hover:scale-110 shadow-lg pointer-events-auto cursor-pointer",
+              isWatchLater ? "bg-emerald-500 text-white" : "bg-zinc-900/90 text-white hover:bg-emerald-500"
             )}
             title={isWatchLater ? "Remove from Watch Later" : "Add to Watch Later"}
           >
@@ -348,34 +349,34 @@ const ContentCard = React.memo(({
         </div>
 
           <div className={clsx(
-            "flex flex-col flex-1 bg-zinc-50 dark:bg-zinc-900",
-            isSmall ? 'p-2' : 'p-3'
+            "flex flex-col bg-white dark:bg-zinc-900/90",
+            isSmall ? 'p-2' : 'flex-1 p-3 sm:p-3.5'
           )}>
             <h3 className={clsx(
-              "font-bold leading-tight mb-1 group-hover:text-emerald-500 transition-colors",
-              isSmall ? 'text-[10px] line-clamp-1' : 'text-sm md:text-base'
+              "font-extrabold leading-snug mb-1 text-zinc-900 dark:text-white group-hover:text-emerald-500 transition-colors",
+              isSmall ? 'text-[11px] line-clamp-2' : 'text-sm sm:text-base line-clamp-3'
             )}>{formatContentTitle(content)}</h3>
             <div className={clsx(
-              "flex items-center gap-2 text-zinc-500 mb-2",
-              isSmall ? 'text-[8px]' : 'text-sm'
+              "flex items-center gap-2 text-zinc-500 dark:text-zinc-400 font-medium",
+              isSmall ? 'text-[9px]' : 'text-xs mb-1.5'
             )}>
-              <span>{content.year}</span>
+              {content.year && <span>{content.year}</span>}
               {content.runtime && (
                 <>
-                  <span className="w-1 h-1 bg-zinc-700 rounded-full"></span>
+                  <span className="w-1 h-1 bg-zinc-400 dark:bg-zinc-600 rounded-full"></span>
                   <span>{content.runtime}</span>
                 </>
               )}
             </div>
-            {!isSmall && (
-              <div className="flex flex-col gap-0.5 mt-auto select-none">
+            {!isSmall && (contentGenres || contentLangs) && (
+              <div className="flex flex-col gap-0.5 mt-auto select-none pt-1.5 border-t border-zinc-100 dark:border-zinc-800/80">
                 {contentGenres && (
-                  <p className="text-zinc-500 text-[10px] line-clamp-1 italic">
+                  <p className="text-zinc-500 dark:text-zinc-400 text-[11px] line-clamp-1 font-medium">
                     {contentGenres}
                   </p>
                 )}
                 {contentLangs && (
-                  <p className="text-zinc-500 dark:text-zinc-400 text-sm font-medium line-clamp-1">
+                  <p className="text-emerald-600 dark:text-emerald-400 text-xs font-bold line-clamp-1">
                     {contentLangs}
                   </p>
                 )}
@@ -383,8 +384,6 @@ const ContentCard = React.memo(({
             )}
           </div>
         </div>
-      </div>
-    </div>
 
       {/* Trailer Selection Modal */}
       {isTrailerSelectionOpen && (
@@ -451,7 +450,7 @@ const ContentCard = React.memo(({
           </div>
         </div>
       )}
-    </motion.div>
+    </div>
   );
 });
 

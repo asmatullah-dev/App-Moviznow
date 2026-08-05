@@ -341,7 +341,6 @@ if (messaging) {
             badge: '/launcher.svg',
             data: { url: url },
             tag: payload.messageId, // Use messageId to avoid duplicates
-            renotify: true
           } as any);
         } else {
           console.log('[FCM] Showing notification via browser Notification API');
@@ -352,7 +351,6 @@ if (messaging) {
             badge: '/launcher.svg',
             data: { url: url },
             tag: payload.messageId,
-            renotify: true
           } as any);
           if (url) {
             notif.onclick = () => window.open(url, '_blank');

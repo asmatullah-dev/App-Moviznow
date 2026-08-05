@@ -9,9 +9,14 @@ import ConfirmModal from './ConfirmModal';
 import AlertModal from './AlertModal';
 
 export default function PreviousOrders() {
-  const { profile, updateUserProfileData } = useAuth();
+  const { profile, updateUserProfileData, refreshProfile } = useAuth();
   const { settings } = useSettings();
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    refreshProfile(true);
+  }, [refreshProfile]);
+
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
     title: string;

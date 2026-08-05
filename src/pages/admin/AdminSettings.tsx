@@ -3,6 +3,7 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { db, storage, auth, requestNotificationPermission } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useSettings } from '../../contexts/SettingsContext';
 import { useContent } from '../../contexts/ContentContext';
 import { Save, AlertCircle, GripVertical, Plus, Trash2, Layout, Wallet, Phone, Image as ImageIcon, Settings as SettingsIcon, RefreshCw, ShieldCheck, X, Eye, EyeOff, Database, Rocket, Loader2, Bell, BellOff, Info, Mail, Check } from 'lucide-react';
 import { clsx } from 'clsx';
@@ -14,6 +15,7 @@ import { AppSettings, BankAccount } from '../../types';
 
 export default function AdminSettings() {
   const { profile } = useAuth();
+  const { refreshSettings } = useSettings();
   const { contentList } = useContent();
   const [settings, setSettings] = useState<AppSettings>({
     headerText: 'MovizNow',
@@ -176,6 +178,8 @@ export default function AdminSettings() {
       batch.set(doc(db, 'settings', 'app_settings'), settings);
       batch.set(doc(db, 'chunk_meta', 'versions'), { settings: Date.now() }, { merge: true });
       await batch.commit();
+      
+      await refreshSettings(true);
 
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
@@ -363,6 +367,16 @@ export default function AdminSettings() {
                 onChange={(e) => setSettings({ ...settings, whatsappChannelLink: e.target.value })}
                 className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
                 placeholder="https://whatsapp.com/channel/..."
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Scrolling Text</label>
+              <input
+                type="text"
+                value={settings.scrollingText || ''}
+                onChange={(e) => setSettings({ ...settings, scrollingText: e.target.value })}
+                className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                placeholder="Enter scrolling text for home page..."
               />
             </div>
             <div className="space-y-2 md:col-span-2">

@@ -5,6 +5,7 @@ import { collection, query, orderBy, doc, updateDoc, limit, getDocs } from 'fire
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useNotifications } from '../contexts/NotificationContext';
+import { useLanguage } from '../contexts/LanguageContext';
 import { AppNotification } from '../types';
 import { formatDistanceToNow } from 'date-fns';
 import { Link } from 'react-router-dom';
@@ -16,6 +17,7 @@ interface NotificationMenuProps {}
 export const NotificationMenu = React.memo(() => {
   const { profile, updateUserProfileData } = useAuth();
   const { notifications, loading } = useNotifications();
+  const { t } = useLanguage();
   const [isOpen, setIsOpen] = useState(false);
   const [localLastCheck, setLocalLastCheck] = useState<Date | null>(null);
   const mountTime = useRef(new Date());
@@ -90,29 +92,29 @@ export const NotificationMenu = React.memo(() => {
                 exit={{ scale: 0.95, opacity: 0, y: 10 }}
                 transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
                 style={{ willChange: 'transform, opacity' }}
-                className="w-full max-w-md bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]"
+                className="w-full max-w-md bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]"
               >
-                <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between bg-white dark:bg-zinc-950 shrink-0">
+                <div className="p-4 sm:p-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between bg-white dark:bg-zinc-950 shrink-0">
 
                 <div className="flex items-center gap-3">
-                  <h3 className="font-bold text-zinc-900 dark:text-white">Notifications</h3>
+                  <h3 className="font-bold text-base sm:text-lg text-zinc-900 dark:text-white">{t("Notifications")}</h3>
                   {unreadCount > 0 && (
-                    <span className="text-xs font-medium text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-full">{unreadCount} new</span>
+                    <span className="text-xs font-bold text-emerald-500 bg-emerald-500/10 px-2.5 py-0.5 rounded-full">{unreadCount} {t("new")}</span>
                   )}
                 </div>
                 <button 
                   onClick={() => setIsOpen(false)}
-                  className="p-1.5 rounded-full text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                  className="p-1.5 rounded-full text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
               
-              <div className="overflow-y-auto flex-1">
+              <div className="overflow-y-auto flex-1 custom-scrollbar">
                 {notifications.length === 0 ? (
-                  <div className="p-12 text-center text-zinc-500">
-                    <Bell className="w-12 h-12 mx-auto mb-4 opacity-20" />
-                    <p className="text-lg">No notifications yet</p>
+                  <div className="p-12 text-center text-zinc-500 dark:text-zinc-400">
+                    <Bell className="w-12 h-12 mx-auto mb-3 opacity-20" />
+                    <p className="text-sm font-medium">{t("No notifications yet")}</p>
                   </div>
                 ) : (
                   <div className="divide-y divide-zinc-200 dark:divide-zinc-800/50">
@@ -127,24 +129,35 @@ export const NotificationMenu = React.memo(() => {
                             <img 
                               src={notification.posterUrl} 
                               alt="Poster" 
-                              className="w-12 h-16 object-cover rounded-md shrink-0 border border-zinc-200 dark:border-zinc-800"
+                              className="w-12 h-16 object-cover rounded-xl shrink-0 border border-zinc-200 dark:border-zinc-800 shadow-sm"
                               referrerPolicy="no-referrer"
                             />
                           ) : (
-                            <div className="w-12 h-16 bg-zinc-100 dark:bg-zinc-800 rounded-md shrink-0 flex items-center justify-center">
-                              <Bell className="w-5 h-5 text-zinc-600" />
+                            <div className="w-12 h-16 bg-zinc-200/60 dark:bg-zinc-800/60 rounded-xl shrink-0 flex items-center justify-center border border-zinc-200 dark:border-zinc-800">
+                              <Bell className="w-5 h-5 text-zinc-400" />
                             </div>
                           )}
                           <div className="flex-1 min-w-0">
                             <h4 className="text-sm font-bold text-zinc-900 dark:text-white mb-1 leading-tight">{notification.title}</h4>
-                            <p className="text-xs text-zinc-500 dark:text-zinc-400 line-clamp-2 mb-2">{notification.body}</p>
+                            <p className="text-xs text-zinc-500 dark:text-zinc-400 line-clamp-2 mb-2 leading-relaxed">{notification.body}</p>
                             <div className="flex items-center justify-between">
-                              <span className="text-[10px] text-zinc-500 font-medium">
-                                {formatDistanceToNow(new Date(notification.createdAt), { addSuffix: true })}
+                              <span className="text-[10px] text-zinc-400 font-medium">
+                                {(() => {
+                                  try {
+                                    if (!notification.createdAt) return '';
+                                    const d = typeof notification.createdAt === 'object' && (notification.createdAt as any)?.seconds 
+                                      ? new Date((notification.createdAt as any).seconds * 1000) 
+                                      : new Date(notification.createdAt);
+                                    if (isNaN(d.getTime())) return '';
+                                    return formatDistanceToNow(d, { addSuffix: true });
+                                  } catch (e) {
+                                    return '';
+                                  }
+                                })()}
                               </span>
                               {actionLabel && (
-                                <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider">
-                                  {actionLabel}
+                                <span className="text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-md uppercase tracking-wider">
+                                  {t(actionLabel)}
                                 </span>
                               )}
                             </div>

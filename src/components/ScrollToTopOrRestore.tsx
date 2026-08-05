@@ -10,18 +10,15 @@ export function ScrollToTopOrRestore() {
     const restore = () => {
       if (navigationType === 'POP') {
         const savedPosition = globalScrollState.get(location.key) ?? 0;
-        window.scrollTo(0, savedPosition);
+        if (savedPosition > 0) {
+          window.scrollTo(0, savedPosition);
+        }
       } else {
         window.scrollTo(0, 0);
       }
     };
     
-    // Try immediately
     restore();
-    
-    // And after a short delay for layout shifts
-    const timer = setTimeout(restore, 100);
-    return () => clearTimeout(timer);
   }, [location, navigationType]);
 
   useEffect(() => {

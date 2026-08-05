@@ -380,7 +380,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (isAdminUser) {
         const { doc, getDoc, serverTimestamp, writeBatch } = await import("firebase/firestore");
-        const cid = "chunk_1";
+        const cid = "notification_chunk_0";
         const chunkRef = doc(db, 'notification_chunks', cid);
         const chunkSnap = await getDoc(chunkRef);
         const chunkItems = chunkSnap.exists() ? chunkSnap.data()?.items || {} : {};

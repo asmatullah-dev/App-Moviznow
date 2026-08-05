@@ -3,13 +3,13 @@ import {
   collection, 
   doc, 
   getDoc, 
-  setDoc, 
   getDocs, 
   query, 
-  orderBy, 
   limit as firestoreLimit,
+  deleteDoc,
   writeBatch,
-  serverTimestamp
+  serverTimestamp,
+  onSnapshot
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from './AuthContext';
@@ -35,7 +35,6 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const latestChunkIdRef = useRef<string>('notification_chunk_0');
 
   const fetchNotifications = useCallback(async () => {
-    if (!profile) return;
     setLoading(true);
     try {
       let latestChunkId = 'notification_chunk_0';
@@ -49,7 +48,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         }
       } catch (err) { }
       
-      latestChunkIdRef.current = latestChunkId;
+      latestChunkIdRef.current = latestChunkId || 'notification_chunk_0';
       
       const cachedVersion = safeStorage.getItem('cached_notifications_version') || '0';
       const cachedData = safeStorage.getItem('cached_notifications_data');
@@ -57,20 +56,63 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       let allNotifs: AppNotification[] = [];
       let usedCache = false;
       
-      if (cachedVersion === serverVersion && cachedData) {
+      if (cachedVersion && serverVersion && cachedVersion === serverVersion && cachedVersion !== '0' && cachedData) {
          try {
-             allNotifs = JSON.parse(cachedData);
-             usedCache = true;
+             const parsed = JSON.parse(cachedData);
+             if (Array.isArray(parsed) && parsed.length > 0) {
+               allNotifs = parsed;
+               usedCache = true;
+             }
          } catch(e) {}
       }
       
       if (!usedCache) {
-        const chunkDoc = await getDoc(doc(db, 'notification_chunks', latestChunkId));
-        if (chunkDoc.exists()) {
-          const items = chunkDoc.data().items || {};
-          allNotifs = Object.values(items) as AppNotification[];
-          
-          safeStorage.setItem('cached_notifications_version', serverVersion);
+        const notifMap = new Map<string, AppNotification>();
+        
+        // 1. Fetch specifically from notification_chunk_0 first
+        try {
+          const chunk0Doc = await getDoc(doc(db, 'notification_chunks', 'notification_chunk_0'));
+          if (chunk0Doc.exists()) {
+            const items = chunk0Doc.data().items || {};
+            Object.values(items).forEach((item: any) => {
+              if (item && item.id && item.title) {
+                notifMap.set(item.id, item as AppNotification);
+              }
+            });
+          }
+        } catch (err) {
+          console.error("Error reading notification_chunk_0:", err);
+        }
+
+        // 2. Fetch all notification_chunks collection documents
+        try {
+          const chunksSnap = await getDocs(collection(db, 'notification_chunks'));
+          chunksSnap.docs.forEach(cDoc => {
+            const items = cDoc.data().items || {};
+            Object.values(items).forEach((item: any) => {
+              if (item && item.id && item.title) {
+                notifMap.set(item.id, item as AppNotification);
+              }
+            });
+          });
+        } catch (err) { }
+
+        // 3. Fallback check for standalone notifications collection if any exist
+        try {
+          const notifsSnap = await getDocs(query(collection(db, 'notifications'), firestoreLimit(50)));
+          notifsSnap.docs.forEach(nDoc => {
+            const data = nDoc.data();
+            if (data && data.title) {
+              const item = { id: nDoc.id, ...data } as AppNotification;
+              notifMap.set(item.id, item);
+            }
+          });
+        } catch (err) { }
+
+        allNotifs = Array.from(notifMap.values());
+        
+        if (allNotifs.length > 0 || serverVersion !== '0') {
+          safeStorage.setItem('cached_notifications_version', serverVersion !== '0' ? serverVersion : Date.now().toString());
           safeStorage.setItem('cached_notifications_data', JSON.stringify(allNotifs));
         }
       }
@@ -78,12 +120,22 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       let filtered = allNotifs.filter(n => {
         const isTargeted = n.targetUserId || (n.targetUserIds && n.targetUserIds.length > 0);
         if (isTargeted) {
-          return n.targetUserId === profile?.uid || n.targetUserIds?.includes(profile?.uid || '');
+          if (!profile?.uid) return false;
+          return n.targetUserId === profile.uid || n.targetUserIds?.includes(profile.uid);
         }
         return true;
       });
 
-      filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      const getNotifTime = (n: AppNotification) => {
+        if (!n || !n.createdAt) return 0;
+        if (typeof n.createdAt === 'object' && (n.createdAt as any)?.seconds) {
+          return (n.createdAt as any).seconds * 1000;
+        }
+        const t = new Date(n.createdAt).getTime();
+        return isNaN(t) ? 0 : t;
+      };
+
+      filtered.sort((a, b) => getNotifTime(b) - getNotifTime(a));
       setNotifications(filtered);
     } catch (e) {
       console.error("Failed to fetch notifications:", e);
@@ -94,7 +146,49 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   useEffect(() => {
     fetchNotifications();
-  }, [fetchNotifications]);
+
+    const unsubscribe = onSnapshot(doc(db, 'notification_chunks', 'notification_chunk_0'), (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        const items = data.items || {};
+        const chunkNotifs: AppNotification[] = Object.values(items);
+        if (chunkNotifs.length > 0) {
+          setNotifications(prev => {
+            const map = new Map<string, AppNotification>();
+            chunkNotifs.forEach(n => {
+              if (n && n.id) map.set(n.id, n);
+            });
+            prev.forEach(n => {
+              if (n && n.id && !map.has(n.id)) map.set(n.id, n);
+            });
+            const merged = Array.from(map.values());
+            const filtered = merged.filter(n => {
+              const isTargeted = n.targetUserId || (n.targetUserIds && n.targetUserIds.length > 0);
+              if (isTargeted) {
+                if (!profile?.uid) return false;
+                return n.targetUserId === profile.uid || n.targetUserIds?.includes(profile.uid);
+              }
+              return true;
+            });
+            const getNotifTime = (n: AppNotification) => {
+              if (!n || !n.createdAt) return 0;
+              if (typeof n.createdAt === 'object' && (n.createdAt as any)?.seconds) {
+                return (n.createdAt as any).seconds * 1000;
+              }
+              const t = new Date(n.createdAt).getTime();
+              return isNaN(t) ? 0 : t;
+            };
+            filtered.sort((a, b) => getNotifTime(b) - getNotifTime(a));
+            return filtered;
+          });
+        }
+      }
+    }, (err) => {
+      console.warn("Realtime notification snapshot listener error:", err);
+    });
+
+    return () => unsubscribe();
+  }, [fetchNotifications, profile?.uid]);
 
   const sendNotification = async (notifData: Omit<AppNotification, 'id' | 'createdAt'>) => {
     const id = Math.random().toString(36).substring(2, 15);
@@ -202,6 +296,10 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
             await batch.commit();
             safeStorage.setItem('local_notif_chunk_' + foundChunkId, JSON.stringify(chunkItems));
+        } else {
+            try {
+                await deleteDoc(doc(db, 'notifications', id));
+            } catch (e) {}
         }
     } catch (e) {
         console.error("Failed to delete notification:", e);

@@ -244,6 +244,7 @@ export interface Order {
   status: 'pending' | 'approved' | 'declined' | 'cancelled';
   createdAt: string;
   months?: number; // For membership
+  planName?: string; // For membership payment plan name
   items?: CartItem[]; // For content
 }
 
@@ -296,6 +297,7 @@ export interface AppSettings {
   maintenanceMessage?: string;
   maintenanceEndTime?: string; // ISO string
   whatsappChannelLink?: string;
+  scrollingText?: string;
   emailSettings?: EmailSettings;
   serviceAccounts?: {
     sourceKey?: string;

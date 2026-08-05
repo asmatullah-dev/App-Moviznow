@@ -41,6 +41,9 @@ import {
   Lock,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
+  ChevronRight,
+  Sparkles,
   Loader2,
   Search,
   AlertTriangle,
@@ -178,22 +181,34 @@ export default function MovieDetails() {
   const [isTrailerPopupOpen, setIsTrailerPopupOpen] = useState(false);
   const [isTrailerSelectionOpen, setIsTrailerSelectionOpen] = useState(false);
   const [showRatePrompt, setShowRatePrompt] = useState(false);
-  const [hasUserRated, setHasUserRated] = useState<boolean>(() => safeStorage.getItem('has_rated') === 'true');
+  const [hasUserRated, setHasUserRated] = useState<boolean>(() => safeStorage.getItem('has_rated') === 'true' || !!profile?.reviewRewardClaimed);
+  const recommendedScrollRef = useRef<HTMLDivElement>(null);
+
+  const scrollRecommended = (direction: 'left' | 'right') => {
+    if (recommendedScrollRef.current) {
+      const scrollAmount = direction === 'left' ? -350 : 350;
+      recommendedScrollRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
 
   useEffect(() => {
-    if (safeStorage.getItem('has_rated') === 'true') {
+    if (safeStorage.getItem('has_rated') === 'true' || profile?.reviewRewardClaimed) {
       setHasUserRated(true);
       return;
     }
-    if (!profile?.uid) return;
+    if (!profile?.uid && !profile?.email) return;
 
     fetchReviewsFromChunks(false).then((data) => {
-      if (data && data.some((r: any) => r.userId === profile.uid || (profile.email && r.userEmail === profile.email))) {
+      if (data && data.some((r: any) => 
+        (profile?.uid && r.userId === profile.uid) || 
+        (profile?.email && r.userEmail === profile.email) ||
+        (profile?.displayName && r.userName === profile.displayName)
+      )) {
         safeStorage.setItem('has_rated', 'true');
         setHasUserRated(true);
       }
     }).catch(() => {});
-  }, [profile?.uid, profile?.email]);
+  }, [profile?.uid, profile?.email, profile?.displayName, profile?.reviewRewardClaimed]);
   const [shareResultModal, setShareResultModal] = useState<{
     isOpen: boolean;
     text: string;
@@ -334,6 +349,7 @@ export default function MovieDetails() {
     hasLoggedView.current = false;
     hasAttemptedRatingFetch.current = {};
     hasAttemptedStaticFetch.current = {};
+    hasAttemptedEpisodeFetch.current = {};
 
     return () => { activeId = null; };
   }, [id]);
@@ -852,6 +868,7 @@ export default function MovieDetails() {
   // Removed buggy popstate logic for popups
 
   const hasAttemptedStaticFetch = useRef<Record<string, boolean>>({});
+  const hasAttemptedEpisodeFetch = useRef<Record<string, boolean>>({});
   const hasAttemptedRatingFetch = useRef<Record<string, boolean>>({});
 
   // Fetch Live IMDb Rating independently
@@ -926,7 +943,6 @@ export default function MovieDetails() {
 
   const fetchMissingData = async (force = false) => {
     if (!mergedContent || !id || isOffline) return;
-    if (!force && hasAttemptedStaticFetch.current[id]) return;
 
     // If we are currently fetching the full document from Firebase, wait for it
     if (isMinimal && (!fullContent || fullContent.id !== id) && !fetchFailed)
@@ -949,21 +965,25 @@ export default function MovieDetails() {
     } catch (e) {
       console.error("Error parsing seasons in fetchMissingData:", e);
     }
+
     const needsEpisodeData =
       mergedContent?.type === "series" &&
+      seasons.length > 0 &&
       seasons.some(
         (s: any) =>
-          s.episodes &&
+          !s.episodes ||
+          s.episodes.length === 0 ||
           s.episodes.some(
             (ep: any) =>
-              ep.links &&
-              ep.links.length > 0 &&
-              (!ep.description ||
-                !ep.duration ||
-                !ep.title ||
-                /^Episode\s+\d+$/i.test(ep.title)),
+              !ep.description ||
+              !ep.duration ||
+              !ep.title ||
+              /^Episode\s+\d+$/i.test(ep.title) ||
+              /^episode/i.test(ep.description || "")
           ),
       );
+
+    if (!force && hasAttemptedStaticFetch.current[id] && (!needsEpisodeData || hasAttemptedEpisodeFetch.current[id])) return;
 
     const needsStaticData =
       force ||
@@ -1199,7 +1219,8 @@ export default function MovieDetails() {
         }
 
         // Episode Data Fetching for Series
-        if (mergedContent.type === "series" && mergedContent.seasons) {
+        if (mergedContent.type === "series" && seasons.length > 0) {
+          hasAttemptedEpisodeFetch.current[id] = true;
           try {
             const existingSeasonsData = details.seasons || [];
             const seasonsDataFromTMDB = await fetchSeriesSeasons(
@@ -2260,9 +2281,18 @@ export default function MovieDetails() {
           return (
             <div
               key={linkKey}
-              className={`relative flex flex-col bg-zinc-100 dark:bg-zinc-800 rounded-xl overflow-hidden border border-zinc-300 dark:border-zinc-700 flex-1 min-w-[200px] max-w-sm ${isLocked ? "opacity-60 grayscale-[0.5]" : ""}`}
+              className={`relative flex flex-col bg-gradient-to-br from-white via-zinc-50/80 to-emerald-500/5 dark:from-zinc-900 dark:via-zinc-900 dark:to-emerald-950/20 rounded-2xl p-4 border border-zinc-200/90 dark:border-zinc-800 shadow-md hover:shadow-xl hover:border-emerald-500/50 hover:scale-[1.01] transition-all flex-1 min-w-[250px] max-w-sm ${isLocked ? "opacity-75 grayscale-[0.2]" : ""}`}
             >
-              <div className="flex flex-col w-full divide-y divide-zinc-300 dark:divide-zinc-700">
+              <div className="flex items-center justify-between gap-2 mb-3.5">
+                <span className="text-xs font-black text-zinc-900 dark:text-zinc-100 bg-zinc-200/80 dark:bg-zinc-800/90 border border-zinc-300/50 dark:border-zinc-700/50 px-3 py-1 rounded-xl truncate max-w-[160px] shadow-2xs">
+                  {link.name}
+                </span>
+                <span className="text-xs font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-3 py-1 rounded-xl shrink-0 shadow-2xs">
+                  {isLocked ? "Locked" : `${link.size} ${link.unit}`}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
                 <button
                   onClick={() =>
                     handlePlayClick(
@@ -2276,16 +2306,17 @@ export default function MovieDetails() {
                       formattedTitle,
                     )
                   }
-                  className="w-full flex items-center justify-center gap-2 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white py-3 text-sm sm:text-base font-semibold transition-colors"
+                  className="flex-1 flex items-center justify-center gap-1.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 active:scale-95 text-white py-2.5 px-3 rounded-xl text-xs sm:text-sm font-extrabold shadow-lg shadow-emerald-500/20 border border-emerald-400/30 transition-all cursor-pointer"
                   title={isLocked ? "Locked" : "Play"}
                 >
                   {isLocked ? (
-                    <Lock className="w-5 h-5 text-amber-500" />
+                    <Lock className="w-4 h-4 text-amber-200" />
                   ) : (
-                    <Play className="w-5 h-5" />
+                    <Play className="w-4 h-4 fill-current" />
                   )}
-                  <span className="truncate max-w-[90%]">{isLocked ? "Locked" : "Play"} {link.name}</span>
+                  <span>{isLocked ? "Locked" : "Play"}</span>
                 </button>
+
                 <button
                   onClick={() =>
                     handlePlayClick(
@@ -2299,74 +2330,73 @@ export default function MovieDetails() {
                       formattedTitle,
                     )
                   }
-                  className="w-full flex items-center justify-center gap-2 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white py-3 transition-colors"
-                  title={isLocked ? "Locked" : link.name}
+                  className="flex-1 flex items-center justify-center gap-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 active:scale-95 text-white py-2.5 px-3 rounded-xl text-xs sm:text-sm font-extrabold shadow-lg shadow-cyan-600/20 border border-cyan-400/30 transition-all cursor-pointer"
+                  title={isLocked ? "Locked" : "Download"}
                 >
                   {isLocked ? (
-                    <Lock className="w-5 h-5 text-amber-500" />
+                    <Lock className="w-4 h-4 text-amber-200" />
                   ) : (
-                    <Download className="w-5 h-5" />
+                    <Download className="w-4 h-4" />
                   )}
-                  <span className="text-sm font-medium text-zinc-600 dark:text-zinc-400">
-                    {isLocked ? "Locked" : `${link.size} ${link.unit}`}
-                  </span>
+                  <span>{isLocked ? "Locked" : "Download"}</span>
                 </button>
-              </div>
-              {link.url &&
-                (link.url.toLowerCase().includes("hubcloud") ||
-                  link.url.toLowerCase().includes("hubcould") ||
-                  link.url.toLowerCase().includes("hubdrive") ||
-                  link.url.toLowerCase().includes("vcloud")) && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (isLocked) {
-                        handlePlayClick(
-                          link.url,
-                          fullName,
-                          link.id,
-                          isZip,
-                          link.tinyUrl,
-                          isLocked,
-                          seasonInfo,
-                          formattedTitle,
-                        );
-                        return;
-                      }
-                      const targetUrl = (() => {
-                        try {
-                          const u = new URL(link.url);
-                          const host = u.hostname.toLowerCase();
-                          if (host.includes('hubcould') || host.includes('hubcloud') || host.includes('vcloud')) {
-                            u.hostname = 'hubcloud.cx';
-                            return u.toString();
-                          } else if (host.includes('hubdrive')) {
-                            u.hostname = 'hubdrive.space';
-                            return u.toString();
-                          }
-                        } catch (e) {}
-                        return link.url;
-                      })();
 
-                      setTelegramConfirmModal({
-                        isOpen: true,
-                        url: targetUrl,
-                        id: linkKey,
-                      });
-                    }}
-                    className="absolute bottom-1 right-1 p-1.5 text-[#24A1DE] hover:opacity-80 transition-opacity"
-                    title={isLocked ? t("Locked") : t("Download via Telegram")}
-                    disabled={resolvingTgId === linkKey}
-                  >
-                    {isLocked ? (
-                      <Lock className="w-[22px] h-[22px] text-amber-500" />
-                    ) : resolvingTgId === linkKey ? (
-                      <Loader2 className="w-[22px] h-[22px] animate-spin" />
-                    ) : (
-                      <Send className="w-[22px] h-[22px]" />
-                    )}
-                  </button>
-                )}
+                {link.url &&
+                  (link.url.toLowerCase().includes("hubcloud") ||
+                    link.url.toLowerCase().includes("hubcould") ||
+                    link.url.toLowerCase().includes("hubdrive") ||
+                    link.url.toLowerCase().includes("vcloud")) && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (isLocked) {
+                          handlePlayClick(
+                            link.url,
+                            fullName,
+                            link.id,
+                            isZip,
+                            link.tinyUrl,
+                            isLocked,
+                            seasonInfo,
+                            formattedTitle,
+                          );
+                          return;
+                        }
+                        const targetUrl = (() => {
+                          try {
+                            const u = new URL(link.url);
+                            const host = u.hostname.toLowerCase();
+                            if (host.includes('hubcould') || host.includes('hubcloud') || host.includes('vcloud')) {
+                              u.hostname = 'hubcloud.cx';
+                              return u.toString();
+                            } else if (host.includes('hubdrive')) {
+                              u.hostname = 'hubdrive.space';
+                              return u.toString();
+                            }
+                          } catch (e) {}
+                          return link.url;
+                        })();
+
+                        setTelegramConfirmModal({
+                          isOpen: true,
+                          url: targetUrl,
+                          id: linkKey,
+                        });
+                      }}
+                      className="p-2.5 bg-[#24A1DE]/10 hover:bg-[#24A1DE]/20 text-[#24A1DE] border border-[#24A1DE]/30 rounded-xl transition-all active:scale-95 shrink-0 cursor-pointer shadow-sm"
+                      title={isLocked ? "Locked" : "Download via Telegram"}
+                      disabled={resolvingTgId === linkKey}
+                    >
+                      {isLocked ? (
+                        <Lock className="w-4 h-4 text-amber-500" />
+                      ) : resolvingTgId === linkKey ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Send className="w-4 h-4" />
+                      )}
+                    </button>
+                  )}
+              </div>
             </div>
           );
         })}
@@ -2514,7 +2544,7 @@ export default function MovieDetails() {
         <meta name="twitter:image" content={imageUrl} />
       </Helmet>
       {/* Hero Section */}
-      <div className="relative min-h-[60vh] md:min-h-[70vh] w-full flex flex-col justify-end">
+      <div className="relative min-h-[65vh] md:min-h-[75vh] w-full flex flex-col justify-end overflow-hidden">
         <div className="absolute inset-0 overflow-hidden">
           <img
             key={mergedContent.id + "-hero"}
@@ -2524,21 +2554,23 @@ export default function MovieDetails() {
               "https://picsum.photos/seed/movie/1920/1080"
             }
             alt={mergedContent.title}
-            className="w-full h-full object-cover opacity-30"
+            className="w-full h-full object-cover opacity-65 dark:opacity-55 scale-[1.02] blur-[1px] transition-all duration-700 brightness-95"
             referrerPolicy="no-referrer"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-white dark:from-zinc-950 via-white/60 dark:via-zinc-950/60 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-white via-white/75 to-black/40 dark:from-zinc-950 dark:via-zinc-950/80 dark:to-black/60" />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-transparent to-white dark:to-zinc-950 opacity-90 pointer-events-none" />
+          <div className="absolute inset-0 bg-radial from-emerald-500/20 via-transparent to-transparent opacity-75 pointer-events-none" />
         </div>
 
-        <div className="absolute top-0 left-0 w-full p-4 z-[100] pointer-events-none flex justify-between items-center">
+        <div className="absolute top-0 left-0 w-full p-4 md:p-6 z-[100] pointer-events-none flex justify-between items-center">
           <button
             onClick={() => {
               sessionStorage.setItem("from_movie_details", "true");
               navigate("/");
             }}
-            className="inline-flex items-center gap-2 text-white hover:text-emerald-400 bg-black/40 backdrop-blur-md px-4 py-2 rounded-full transition-colors pointer-events-auto cursor-pointer border border-white/10"
+            className="inline-flex items-center gap-2 text-white hover:text-emerald-400 bg-black/60 hover:bg-black/80 backdrop-blur-xl px-5 py-2.5 rounded-full transition-all duration-300 pointer-events-auto cursor-pointer border border-white/20 shadow-xl hover:scale-105 active:scale-95"
           >
-            <ArrowLeft className="w-5 h-5" /> Back
+            <ArrowLeft className="w-5 h-5" /> <span className="font-semibold text-sm">{t('Back')}</span>
           </button>
           <div className="pointer-events-auto"></div>
         </div>
@@ -2546,31 +2578,36 @@ export default function MovieDetails() {
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, ease: "easeOut" }}
-          className="relative z-10 flex items-end justify-center p-8 pt-32 pb-4 w-full"
+          transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+          className="relative z-10 flex items-end justify-center p-4 sm:p-8 pt-28 sm:pt-36 pb-6 w-full"
         >
-          <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center md:items-end gap-8 text-center md:text-left w-full">
-            <img
-              key={mergedContent.id + "-poster"}
-              src={
-                mergedContent.posterUrl ||
-                settings?.defaultAppImage ||
-                "https://picsum.photos/seed/movie/400/600"
-              }
-              alt={mergedContent.title}
-              className="w-48 md:w-64 rounded-2xl shadow-2xl cursor-pointer hover:scale-105 transition-transform border border-zinc-200 dark:border-zinc-800"
-              referrerPolicy="no-referrer"
-              onClick={() => setIsPosterExpanded(true)}
-            />
+          <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center md:items-end gap-6 sm:gap-10 text-center md:text-left w-full">
+            <div className="relative group shrink-0">
+              <div className="absolute -inset-1 bg-gradient-to-r from-emerald-500 to-cyan-500 rounded-3xl blur opacity-30 group-hover:opacity-75 transition duration-500"></div>
+              <img
+                key={mergedContent.id + "-poster"}
+                src={
+                  mergedContent.posterUrl ||
+                  settings?.defaultAppImage ||
+                  "https://picsum.photos/seed/movie/400/600"
+                }
+                alt={mergedContent.title}
+                className="relative w-44 sm:w-56 md:w-64 rounded-2xl shadow-2xl cursor-pointer hover:scale-[1.03] transition-all duration-300 border border-white/20 dark:border-zinc-800/80 object-cover aspect-[2/3]"
+                referrerPolicy="no-referrer"
+                onClick={() => setIsPosterExpanded(true)}
+              />
+            </div>
 
-            <div className="flex-1">
-              <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 mb-4">
-                <span className="bg-emerald-500 text-white px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider">
+            <div className="flex-1 space-y-4">
+              <div className="flex flex-wrap items-center justify-center md:justify-start gap-2.5">
+                <span className="bg-emerald-500/90 hover:bg-emerald-500 text-white px-3.5 py-1 rounded-full text-xs font-extrabold uppercase tracking-widest shadow-lg shadow-emerald-500/20 backdrop-blur-md">
                   {mergedContent.type}
                 </span>
-                <span className="text-zinc-600 dark:text-zinc-300 font-medium">
-                  {mergedContent.year}
-                </span>
+                {mergedContent.year && (
+                  <span className="bg-zinc-200/80 dark:bg-zinc-800/80 text-zinc-800 dark:text-zinc-200 px-3 py-1 rounded-full text-xs font-bold border border-zinc-300 dark:border-zinc-700">
+                    {mergedContent.year}
+                  </span>
+                )}
                 {mergedContent.qualityId &&
                   (() => {
                     const qualityObj = qualities.find(
@@ -2579,7 +2616,7 @@ export default function MovieDetails() {
                     if (!qualityObj) return null;
                     return (
                       <span
-                        className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider shadow-lg"
+                        className="px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider shadow-lg border border-white/20"
                         style={{
                           backgroundColor: qualityObj.color || "#10b981",
                           color: getContrastColor(
@@ -2593,11 +2630,11 @@ export default function MovieDetails() {
                   })()}
               </div>
 
-              <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-6 leading-tight drop-shadow-md">
+              <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black text-zinc-900 dark:text-white leading-[1.1] tracking-tight drop-shadow-md">
                 {formatContentTitle(mergedContent)}
               </h1>
 
-              <div className="flex flex-wrap items-center justify-center md:justify-start gap-2">
+              <div className="flex flex-wrap items-center justify-center md:justify-start gap-2.5 pt-2">
                 {(mergedContent.trailerUrl ||
                   (mergedContent.type === "series" &&
                     seasons.some((s) => s.trailerUrl))) && (
@@ -2610,14 +2647,14 @@ export default function MovieDetails() {
                         setIsTrailerPopupOpen(true);
                       }
                     }}
-                    className={`${getYouTubeEmbedUrl(allTrailers[0]?.url || "") ? "bg-red-600 hover:bg-red-700" : "bg-emerald-500 hover:bg-emerald-600"} text-white px-6 py-3 text-sm sm:text-base rounded-xl font-bold flex items-center gap-2 transition-all active:scale-95 border border-white/20 shadow-lg`}
+                    className={`${getYouTubeEmbedUrl(allTrailers[0]?.url || "") ? "bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500" : "bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500"} text-white px-6 py-3.5 text-sm sm:text-base rounded-2xl font-bold flex items-center gap-2.5 transition-all duration-300 active:scale-95 border border-white/20 shadow-xl shadow-red-600/20`}
                   >
                     {getYouTubeEmbedUrl(allTrailers[0]?.url || "") ? (
-                      <Youtube className="w-5 h-5" />
+                      <Youtube className="w-5 h-5 fill-current" />
                     ) : (
-                      <Play className="w-5 h-5" />
+                      <Play className="w-5 h-5 fill-current" />
                     )}
-                    Watch Trailer
+                    <span>{t('Watch Trailer')}</span>
                   </button>
                 )}
                 {mergedContent.sampleUrl && (
@@ -2634,9 +2671,9 @@ export default function MovieDetails() {
                         `${mergedContent.title || ""} - Sample`,
                       )
                     }
-                    className="bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-6 py-3 text-sm sm:text-base rounded-xl font-bold flex items-center gap-2 transition-all active:scale-95 border border-zinc-300 dark:border-zinc-700 shadow-sm"
+                    className="bg-zinc-100 dark:bg-zinc-800/90 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-6 py-3.5 text-sm sm:text-base rounded-2xl font-bold flex items-center gap-2 transition-all active:scale-95 border border-zinc-300 dark:border-zinc-700 shadow-sm"
                   >
-                    <Play className="w-5 h-5" /> Sample
+                    <Play className="w-5 h-5 fill-current text-emerald-500" /> <span>{t('Sample')}</span>
                   </button>
                 )}
                 {mergedContent.imdbLink && (
@@ -2644,18 +2681,18 @@ export default function MovieDetails() {
                     href={mergedContent.imdbLink}
                     target="_blank"
                     rel="noreferrer"
-                    className="bg-yellow-500 hover:bg-yellow-600 text-black px-6 py-3 text-sm sm:text-base rounded-xl font-bold flex items-center gap-2 transition-colors shadow-lg"
+                    className="bg-gradient-to-r from-yellow-400 to-amber-500 hover:from-yellow-300 hover:to-amber-400 text-black px-5 py-3.5 text-sm sm:text-base rounded-2xl font-black flex items-center gap-2 transition-all shadow-lg active:scale-95"
                   >
                     IMDb
                   </a>
                 )}
                 
-                {!((hasUserRated || safeStorage.getItem('has_rated') === 'true') && profile?.status !== 'pending' && profile?.status !== 'expired') && (
+                {((profile?.status === 'pending' || profile?.status === 'expired') || !(hasUserRated || safeStorage.getItem('has_rated') === 'true' || profile?.reviewRewardClaimed)) && (
                   <Link
                     to="/reviews"
-                    className="bg-zinc-800 text-white dark:bg-zinc-200 dark:text-black px-6 py-3 text-sm sm:text-base rounded-xl font-bold flex items-center gap-2 transition-all hover:bg-zinc-700 dark:hover:bg-zinc-300 active:scale-95 shadow-lg"
+                    className="bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 px-5 py-3.5 text-sm sm:text-base rounded-2xl font-bold flex items-center gap-2 transition-all hover:opacity-90 active:scale-95 shadow-lg"
                   >
-                    <MessageCircle className="w-5 h-5" /> {profile?.status === 'pending' || profile?.status === 'expired' ? t('Check Reviews') : t('Rate our app')}
+                    <MessageCircle className="w-5 h-5" /> <span>{profile?.status === 'pending' || profile?.status === 'expired' ? t('Check Reviews') : t('Rate our app')}</span>
                   </Link>
                 )}
 
@@ -2663,7 +2700,7 @@ export default function MovieDetails() {
                   <button
                     onClick={toggleWatchLater}
                     disabled={isWatchLaterLoading}
-                    className={`p-3 sm:p-3.5 rounded-xl border transition-colors ${profile?.watchLater?.includes(mergedContent.id) ? "bg-emerald-500/20 border-emerald-500 text-emerald-500" : "bg-zinc-50/80 dark:bg-zinc-900/80 backdrop-blur-sm border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300"} ${isWatchLaterLoading ? "opacity-50 cursor-not-allowed" : ""}`}
+                    className={`p-3.5 rounded-2xl border transition-all duration-300 ${profile?.watchLater?.includes(mergedContent.id) ? "bg-emerald-500/20 border-emerald-500 text-emerald-500 shadow-lg shadow-emerald-500/10" : "bg-zinc-100/80 dark:bg-zinc-900/80 backdrop-blur-md border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200"} ${isWatchLaterLoading ? "opacity-50 cursor-not-allowed" : ""}`}
                     title="Watch Later"
                   >
                     {isWatchLaterLoading ? (
@@ -2676,7 +2713,7 @@ export default function MovieDetails() {
                   <button
                     onClick={toggleFavorite}
                     disabled={isFavoriteLoading}
-                    className={`p-3 sm:p-3.5 rounded-xl border transition-colors ${profile?.favorites?.includes(mergedContent.id) ? "bg-red-500/20 border-red-500 text-red-500" : "bg-zinc-50/80 dark:bg-zinc-900/80 backdrop-blur-sm border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300"} ${isFavoriteLoading ? "opacity-50 cursor-not-allowed" : ""}`}
+                    className={`p-3.5 rounded-2xl border transition-all duration-300 ${profile?.favorites?.includes(mergedContent.id) ? "bg-red-500/20 border-red-500 text-red-500 shadow-lg shadow-red-500/10" : "bg-zinc-100/80 dark:bg-zinc-900/80 backdrop-blur-md border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200"} ${isFavoriteLoading ? "opacity-50 cursor-not-allowed" : ""}`}
                     title="Favorite"
                   >
                     {isFavoriteLoading ? (
@@ -2691,7 +2728,7 @@ export default function MovieDetails() {
                   <button
                     onClick={handleShare}
                     disabled={isShareLoading}
-                    className={`p-3 sm:p-3.5 rounded-xl border bg-zinc-50/80 dark:bg-zinc-900/80 backdrop-blur-sm border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-colors ${isShareLoading ? "opacity-50 cursor-not-allowed" : ""}`}
+                    className={`p-3.5 rounded-2xl border bg-zinc-100/80 dark:bg-zinc-900/80 backdrop-blur-md border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 transition-all duration-300 ${isShareLoading ? "opacity-50 cursor-not-allowed" : ""}`}
                     title="Share"
                   >
                     {isShareLoading ? (
@@ -2706,26 +2743,26 @@ export default function MovieDetails() {
                   <div className="flex flex-wrap gap-2 mt-4 md:mt-0">
                     <button
                       onClick={() => setIsMediaModalOpen(true)}
-                      className="px-6 py-3 text-sm sm:text-base rounded-xl border bg-cyan-500/10 border-cyan-500 text-cyan-500 hover:bg-cyan-500/20 transition-colors flex items-center gap-2"
+                      className="px-5 py-3 text-sm rounded-2xl border bg-cyan-500/10 border-cyan-500/30 text-cyan-500 hover:bg-cyan-500/20 transition-all flex items-center gap-2 font-bold"
                       title="Fetch Media Data"
                     >
-                      <Search className="w-5 h-5" />
+                      <Search className="w-4 h-4" />
                       <span className="hidden sm:inline">Fetch</span>
                     </button>
                     <Link
                       to={`/admin/content?edit=${mergedContent.id}`}
-                      className="px-6 py-3 text-sm sm:text-base rounded-xl border bg-emerald-500/10 border-emerald-500 text-emerald-500 hover:bg-emerald-500/20 transition-colors flex items-center gap-2"
+                      className="px-5 py-3 text-sm rounded-2xl border bg-emerald-500/10 border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/20 transition-all flex items-center gap-2 font-bold"
                       title="Edit Content"
                     >
-                      <Edit2 className="w-5 h-5" />
+                      <Edit2 className="w-4 h-4" />
                       <span className="hidden sm:inline">Edit</span>
                     </Link>
                     <button
                       onClick={() => setDeleteId(mergedContent.id)}
-                      className="px-6 py-3 text-sm sm:text-base rounded-xl border bg-red-500/10 border-red-500 text-red-500 hover:bg-red-500/20 transition-colors flex items-center gap-2"
+                      className="px-5 py-3 text-sm rounded-2xl border bg-red-500/10 border-red-500/30 text-red-500 hover:bg-red-500/20 transition-all flex items-center gap-2 font-bold"
                       title="Delete Content"
                     >
-                      <Trash2 className="w-5 h-5" />
+                      <Trash2 className="w-4 h-4" />
                       <span className="hidden sm:inline">Delete</span>
                     </button>
                   </div>
@@ -2897,17 +2934,27 @@ export default function MovieDetails() {
           <div className="lg:col-span-2 space-y-8">
             <section>
               {displayData ? (
-                <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-2xl p-6 md:p-8 flex flex-col md:flex-row gap-8 relative overflow-hidden group">
-                  <div className="flex-1 space-y-4">
-                    <div className="relative">
-                      <div className="float-right flex items-center gap-2 mb-2">
+                <div className="bg-gradient-to-br from-white/95 via-zinc-50/90 to-cyan-500/10 dark:from-zinc-900/95 dark:via-zinc-950 dark:to-cyan-950/40 border border-cyan-500/30 dark:border-cyan-500/20 rounded-3xl p-6 md:p-8 shadow-2xl backdrop-blur-xl relative overflow-hidden group">
+                  <div className="absolute -top-12 -right-12 w-40 h-40 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
+                  <div className="flex-1 space-y-5">
+                    <div className="relative flex flex-wrap items-start justify-between gap-4">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 text-xs font-bold text-cyan-500 uppercase tracking-widest">
+                          <Film className="w-4 h-4" /> {mergedContent.type === 'series' ? 'Series Specifications' : 'Movie Specifications'}
+                        </div>
+                        <h3 className="text-2xl sm:text-3xl font-black text-cyan-950 dark:text-cyan-300 leading-tight">
+                          {displayData.title}{" "}
+                          {displayData.year ? `(${displayData.year})` : ""}
+                        </h3>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
                         {displayData.rating && (
-                          <div className="bg-[#f5c518] text-black px-2 py-1 rounded flex items-center gap-1.5 font-black text-xs shadow-[0_0_15px_rgba(245,197,24,0.3)] whitespace-nowrap">
-                            <span className="bg-black text-[#f5c518] px-1 rounded-sm text-[10px] tracking-tighter">
+                          <div className="bg-[#f5c518] text-black px-3 py-1.5 rounded-xl flex items-center gap-1.5 font-black text-xs sm:text-sm shadow-[0_0_20px_rgba(245,197,24,0.4)] whitespace-nowrap">
+                            <span className="bg-black text-[#f5c518] px-1.5 py-0.5 rounded text-[10px] font-extrabold tracking-tighter">
                               IMDb
                             </span>
-                            <div className="flex items-center gap-0.5">
-                              <span className="text-[10px]">⭐</span>
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs">⭐</span>
                               <span>
                                 {displayData.rating.replace("/10", "")}
                               </span>
@@ -2918,62 +2965,62 @@ export default function MovieDetails() {
                           <RefreshCw className="w-4 h-4 text-cyan-500 animate-spin" />
                         )}
                       </div>
-                      <h3 className="text-3xl font-bold text-cyan-700 dark:text-cyan-400 leading-tight">
-                        {displayData.title}{" "}
-                        {displayData.year ? `(${displayData.year})` : ""}
-                      </h3>
                     </div>
 
-                    <div className="flex flex-wrap gap-6 text-sm font-medium text-cyan-700/80 dark:text-cyan-400/80">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2">
                       {displayData.releaseDate && (
-                        <div className="flex flex-col">
-                          <span className="text-zinc-500 text-[10px] uppercase tracking-wider">
-                            Release Date
+                        <div className="bg-white/80 dark:bg-zinc-900/80 border border-cyan-500/15 rounded-2xl p-3 flex flex-col shadow-sm">
+                          <span className="text-zinc-400 dark:text-zinc-500 text-[10px] uppercase font-bold tracking-wider mb-1 flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-cyan-500" /> Release Date
                           </span>
-                          <span>
+                          <span className="text-xs sm:text-sm font-extrabold text-zinc-800 dark:text-zinc-200">
                             {formatReleaseDate(displayData.releaseDate)}
                           </span>
                         </div>
                       )}
                       {displayData.duration &&
                         mergedContent.type !== "series" && (
-                          <div className="flex flex-col">
-                            <span className="text-zinc-500 text-[10px] uppercase tracking-wider">
-                              Runtime
+                          <div className="bg-white/80 dark:bg-zinc-900/80 border border-cyan-500/15 rounded-2xl p-3 flex flex-col shadow-sm">
+                            <span className="text-zinc-400 dark:text-zinc-500 text-[10px] uppercase font-bold tracking-wider mb-1 flex items-center gap-1">
+                              <Clock className="w-3 h-3 text-cyan-500" /> Runtime
                             </span>
-                            <span>{formatRuntime(displayData.duration)}</span>
+                            <span className="text-xs sm:text-sm font-extrabold text-zinc-800 dark:text-zinc-200">
+                              {formatRuntime(displayData.duration)}
+                            </span>
                           </div>
                         )}
                       {displayData.country &&
                         !displayData.country.includes(",") && (
-                          <div className="flex flex-col">
-                            <span className="text-zinc-500 text-[10px] uppercase tracking-wider">
-                              Country
+                          <div className="bg-white/80 dark:bg-zinc-900/80 border border-cyan-500/15 rounded-2xl p-3 flex flex-col shadow-sm">
+                            <span className="text-zinc-400 dark:text-zinc-500 text-[10px] uppercase font-bold tracking-wider mb-1 flex items-center gap-1">
+                              <Globe className="w-3 h-3 text-cyan-500" /> Country
                             </span>
-                            <span>{displayData.country}</span>
+                            <span className="text-xs sm:text-sm font-extrabold text-zinc-800 dark:text-zinc-200 truncate">
+                              {displayData.country}
+                            </span>
                           </div>
                         )}
                     </div>
 
-                    <div className="flex flex-col gap-2 pt-2 border-t border-cyan-500/10">
+                    <div className="flex flex-col gap-3 pt-3 border-t border-cyan-500/15">
                       {displayData.country &&
                         displayData.country.includes(",") && (
-                          <div className="flex items-baseline gap-2">
-                            <span className="text-zinc-500 text-xs font-medium">
+                          <div className="flex items-center gap-2 text-xs sm:text-sm">
+                            <span className="text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider text-[11px] w-20 shrink-0">
                               Country
                             </span>
-                            <span className="text-sm font-medium text-cyan-700/80 dark:text-cyan-400/80">
+                            <span className="font-semibold text-zinc-800 dark:text-zinc-200">
                               {displayData.country}
                             </span>
                           </div>
                         )}
                       {mergedContent.qualityId && (
-                        <div className="flex items-baseline gap-2">
-                          <span className="text-zinc-500 text-xs font-medium">
+                        <div className="flex items-center gap-2 text-xs sm:text-sm">
+                          <span className="text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider text-[11px] w-20 shrink-0">
                             Quality
                           </span>
                           <span 
-                            className="text-sm font-medium text-cyan-700/80 dark:text-cyan-400/80 underline underline-offset-2 decoration-cyan-500/50 hover:text-cyan-600 dark:hover:text-cyan-300 transition-colors cursor-pointer"
+                            className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold text-cyan-700 bg-cyan-500/10 dark:text-cyan-300 border border-cyan-500/20 hover:bg-cyan-500/20 transition-all cursor-pointer underline underline-offset-2 decoration-cyan-500/60 hover:decoration-cyan-400"
                             onClick={() => handleFilterNavigation("home_quality", mergedContent.qualityId || "")}
                           >
                             {displayData.quality}
@@ -2981,53 +3028,55 @@ export default function MovieDetails() {
                         </div>
                       )}
                       {mergedContent.genreIds && mergedContent.genreIds.length > 0 && (
-                        <div className="flex items-baseline gap-2">
-                          <span className="text-zinc-500 text-xs font-medium">
+                        <div className="flex items-center gap-2 text-xs sm:text-sm">
+                          <span className="text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider text-[11px] w-20 shrink-0">
                             Genre
                           </span>
-                          <span className="text-sm font-medium text-cyan-700/80 dark:text-cyan-400/80 flex gap-1 flex-wrap">
-                            {mergedContent.genreIds.map((id, index) => {
+                          <div className="flex gap-1.5 flex-wrap">
+                            {mergedContent.genreIds.map((id) => {
                                const g = genres.find(genre => genre.id === id);
                                if (!g) return null;
                                return (
-                                 <span key={id}>
-                                   <span className="underline underline-offset-2 decoration-cyan-500/50 hover:text-emerald-500 transition-colors cursor-pointer" onClick={() => {
-                                      handleFilterNavigation("home_genre", id);
-                                   }}>{g.name}</span>
-                                   {index < mergedContent.genreIds!.length - 1 ? ", " : ""}
+                                 <span 
+                                   key={id} 
+                                   className="px-2.5 py-0.5 rounded-lg text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all cursor-pointer underline underline-offset-2 decoration-emerald-500/60 hover:decoration-emerald-400"
+                                   onClick={() => handleFilterNavigation("home_genre", id)}
+                                 >
+                                   {g.name}
                                  </span>
                                );
                             })}
-                          </span>
+                          </div>
                         </div>
                       )}
                       {mergedContent.languageIds && mergedContent.languageIds.length > 0 && (
-                        <div className="flex items-baseline gap-2">
-                          <span className="text-zinc-500 text-xs font-medium">
+                        <div className="flex items-center gap-2 text-xs sm:text-sm">
+                          <span className="text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider text-[11px] w-20 shrink-0">
                             Language
                           </span>
-                          <span className="text-sm font-medium text-cyan-700/80 dark:text-cyan-400/80 flex gap-1 flex-wrap">
-                            {mergedContent.languageIds.map((id, index) => {
+                          <div className="flex gap-1.5 flex-wrap">
+                            {mergedContent.languageIds.map((id) => {
                                const l = languages.find(lang => lang.id === id);
                                if (!l) return null;
                                return (
-                                 <span key={id}>
-                                   <span className="underline underline-offset-2 decoration-cyan-500/50 hover:text-emerald-500 transition-colors cursor-pointer" onClick={() => {
-                                      handleFilterNavigation("home_language", id);
-                                   }}>{l.name}</span>
-                                   {index < mergedContent.languageIds!.length - 1 ? ", " : ""}
+                                 <span 
+                                   key={id} 
+                                   className="px-2.5 py-0.5 rounded-lg text-xs font-semibold bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 hover:bg-cyan-500/20 transition-all cursor-pointer underline underline-offset-2 decoration-cyan-500/60 hover:decoration-cyan-400"
+                                   onClick={() => handleFilterNavigation("home_language", id)}
+                                 >
+                                   {l.name}
                                  </span>
                                );
                             })}
-                          </span>
+                          </div>
                         </div>
                       )}
                       {mergedContent.subtitles && (
-                        <div className="flex items-baseline gap-2">
-                          <span className="text-zinc-500 text-xs font-medium">
+                        <div className="flex items-center gap-2 text-xs sm:text-sm">
+                          <span className="text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider text-[11px] w-20 shrink-0">
                             Subtitle
                           </span>
-                          <span className="text-sm font-medium text-cyan-700/80 dark:text-cyan-400/80">
+                          <span className="text-xs font-semibold text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-lg">
                             Yes
                           </span>
                         </div>
@@ -3037,14 +3086,14 @@ export default function MovieDetails() {
                     {displayData.castArray &&
                       displayData.castArray.length > 0 && (
                         <div className="pt-2">
-                          <h4 className="text-sm font-bold text-cyan-700 dark:text-cyan-400 mb-2 uppercase tracking-wider opacity-70">
+                          <h4 className="text-xs font-extrabold text-cyan-700 dark:text-cyan-400 mb-2 uppercase tracking-wider opacity-80">
                             Cast
                           </h4>
                           <div className="flex flex-wrap gap-1.5">
                             {displayData.castArray.map((actor, idx) => (
                               <span
                                 key={`display-cast-${actor}-${idx}`}
-                                className="bg-cyan-500/5 border border-cyan-500/10 px-2 py-1 rounded-md text-[11px] text-zinc-500 dark:text-zinc-400"
+                                className="bg-white/80 dark:bg-zinc-900/80 border border-cyan-500/15 px-2.5 py-1 rounded-lg text-xs font-medium text-zinc-700 dark:text-zinc-300 shadow-sm"
                               >
                                 {actor}
                               </span>
@@ -3054,13 +3103,13 @@ export default function MovieDetails() {
                       )}
 
                     {(displayData.description || mergedContent.description) && (
-                      <div className="pt-2">
-                        <h4 className="text-sm font-bold text-cyan-700 dark:text-cyan-400 mb-1 uppercase tracking-wider opacity-70">
+                      <div className="pt-2 border-t border-cyan-500/15">
+                        <h4 className="text-xs font-extrabold text-cyan-700 dark:text-cyan-400 mb-1.5 uppercase tracking-wider opacity-80">
                           {t('Synopsis')}
                         </h4>
                         <div 
                           dir={language === 'ur' ? 'rtl' : 'ltr'}
-                          className={`text-zinc-500 dark:text-zinc-400 leading-relaxed ${language === 'ur' || language === 'ur-roman' ? 'text-base sm:text-lg font-medium' : 'text-xs'}`}
+                          className={`text-zinc-600 dark:text-zinc-300 leading-relaxed ${language === 'ur' || language === 'ur-roman' ? 'text-base sm:text-lg font-medium' : 'text-xs sm:text-sm'}`}
                         >
                           <Translate
                             loadingFallback={
@@ -3080,87 +3129,119 @@ export default function MovieDetails() {
                 </div>
               ) : (
                 <div className="space-y-12">
-                  <section className="bg-cyan-500/5 border border-cyan-500/20 rounded-2xl p-8 relative group">
-                    <div className="relative mb-6">
+                  <section className="bg-gradient-to-br from-white/95 via-zinc-50/90 to-cyan-500/10 dark:from-zinc-900/95 dark:via-zinc-950 dark:to-cyan-950/40 border border-cyan-500/30 dark:border-cyan-500/20 rounded-3xl p-6 md:p-8 shadow-2xl backdrop-blur-xl relative overflow-hidden group">
+                    <div className="relative mb-6 flex flex-wrap items-start justify-between gap-4">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 text-xs font-bold text-cyan-500 uppercase tracking-widest">
+                          <Film className="w-4 h-4" /> {mergedContent.type === 'series' ? 'Series Specifications' : 'Movie Specifications'}
+                        </div>
+                        <h3 className="text-2xl sm:text-3xl font-black text-cyan-950 dark:text-cyan-300 leading-tight">
+                          {formatContentTitle(mergedContent)}
+                        </h3>
+                      </div>
                       {mergedContent.imdbRating && (
-                        <div className="float-right ml-4 mb-2 bg-[#f5c518] text-black px-2 py-1 rounded flex items-center gap-1.5 font-black text-xs shadow-[0_0_15px_rgba(245,197,24,0.3)] whitespace-nowrap">
-                          <span className="bg-black text-[#f5c518] px-1 rounded-sm text-[10px] tracking-tighter">
+                        <div className="bg-[#f5c518] text-black px-3 py-1.5 rounded-xl flex items-center gap-1.5 font-black text-xs sm:text-sm shadow-[0_0_20px_rgba(245,197,24,0.4)] whitespace-nowrap shrink-0">
+                          <span className="bg-black text-[#f5c518] px-1.5 py-0.5 rounded text-[10px] font-extrabold tracking-tighter">
                             IMDb
                           </span>
-                          <div className="flex items-center gap-0.5">
-                            <span className="text-[10px]">⭐</span>
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs">⭐</span>
                             <span>
                               {mergedContent.imdbRating.replace("/10", "")}
                             </span>
                           </div>
                         </div>
                       )}
-                      <h3 className="text-3xl font-bold text-cyan-700 dark:text-cyan-400 leading-tight">
-                        {formatContentTitle(mergedContent)}
-                      </h3>
                     </div>
 
-                    <div className="flex flex-wrap gap-6 mb-8 text-sm font-medium text-cyan-700/80 dark:text-cyan-400/80">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
                       {mergedContent.year && (
-                        <span className="flex items-center gap-2 bg-cyan-500/10 px-3 py-1.5 rounded-lg">
-                          <Clock className="w-4 h-4 text-cyan-500" />{" "}
-                          {mergedContent.year}
-                        </span>
+                        <div className="bg-white/80 dark:bg-zinc-900/80 border border-cyan-500/15 rounded-2xl p-3 flex flex-col shadow-sm">
+                          <span className="text-zinc-400 dark:text-zinc-500 text-[10px] uppercase font-bold tracking-wider mb-1 flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-cyan-500" /> Year
+                          </span>
+                          <span className="text-xs sm:text-sm font-extrabold text-zinc-800 dark:text-zinc-200">
+                            {mergedContent.year}
+                          </span>
+                        </div>
                       )}
                       {mergedContent.releaseDate && (
-                        <span className="flex items-center gap-2 bg-cyan-500/10 px-3 py-1.5 rounded-lg">
-                          <Film className="w-4 h-4 text-cyan-500" />{" "}
-                          {formatReleaseDate(mergedContent.releaseDate)}
-                        </span>
+                        <div className="bg-white/80 dark:bg-zinc-900/80 border border-cyan-500/15 rounded-2xl p-3 flex flex-col shadow-sm">
+                          <span className="text-zinc-400 dark:text-zinc-500 text-[10px] uppercase font-bold tracking-wider mb-1 flex items-center gap-1">
+                            <Film className="w-3 h-3 text-cyan-500" /> Release Date
+                          </span>
+                          <span className="text-xs sm:text-sm font-extrabold text-zinc-800 dark:text-zinc-200">
+                            {formatReleaseDate(mergedContent.releaseDate)}
+                          </span>
+                        </div>
                       )}
                       {mergedContent.runtime &&
                         mergedContent.type !== "series" && (
-                          <span className="flex items-center gap-2 bg-cyan-500/10 px-3 py-1.5 rounded-lg">
-                            <Clock className="w-4 h-4 text-cyan-500" />{" "}
-                            {formatRuntime(mergedContent.runtime)}
-                          </span>
+                          <div className="bg-white/80 dark:bg-zinc-900/80 border border-cyan-500/15 rounded-2xl p-3 flex flex-col shadow-sm">
+                            <span className="text-zinc-400 dark:text-zinc-500 text-[10px] uppercase font-bold tracking-wider mb-1 flex items-center gap-1">
+                              <Clock className="w-3 h-3 text-cyan-500" /> Runtime
+                            </span>
+                            <span className="text-xs sm:text-sm font-extrabold text-zinc-800 dark:text-zinc-200">
+                              {formatRuntime(mergedContent.runtime)}
+                            </span>
+                          </div>
                         )}
                       {mergedContent.country && (
-                        <span className="flex items-center gap-2 bg-cyan-500/10 px-3 py-1.5 rounded-lg">
-                          <Globe className="w-4 h-4 text-cyan-500" />{" "}
-                          {mergedContent.country}
-                        </span>
+                        <div className="bg-white/80 dark:bg-zinc-900/80 border border-cyan-500/15 rounded-2xl p-3 flex flex-col shadow-sm">
+                          <span className="text-zinc-400 dark:text-zinc-500 text-[10px] uppercase font-bold tracking-wider mb-1 flex items-center gap-1">
+                            <Globe className="w-3 h-3 text-cyan-500" /> Country
+                          </span>
+                          <span className="text-xs sm:text-sm font-extrabold text-zinc-800 dark:text-zinc-200 truncate">
+                            {mergedContent.country}
+                          </span>
+                        </div>
                       )}
+                    </div>
+
+                    <div className="flex flex-col gap-3 pt-3 border-t border-cyan-500/15 mb-6">
                       {mergedContent.genreIds && mergedContent.genreIds.length > 0 && (
-                        <span className="flex items-center gap-2 bg-cyan-500/10 px-3 py-1.5 rounded-lg select-none">
-                          Genre: <span className="flex gap-1 flex-wrap">
-                            {mergedContent.genreIds.map((id, index) => {
+                        <div className="flex items-center gap-2 text-xs sm:text-sm">
+                          <span className="text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider text-[11px] w-20 shrink-0">
+                            Genre
+                          </span>
+                          <div className="flex gap-1.5 flex-wrap">
+                            {mergedContent.genreIds.map((id) => {
                                const g = genres.find(genre => genre.id === id);
                                if (!g) return null;
                                return (
-                                 <span key={id}>
-                                   <button className="underline underline-offset-2 decoration-cyan-500/50 hover:text-emerald-500 transition-colors" onClick={() => {
-                                      handleFilterNavigation("home_genre", id);
-                                   }}>{g.name}</button>
-                                   {index < mergedContent.genreIds!.length - 1 ? ", " : ""}
+                                 <span 
+                                   key={id}
+                                   className="px-2.5 py-0.5 rounded-lg text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all cursor-pointer underline underline-offset-2 decoration-emerald-500/60 hover:decoration-emerald-400"
+                                   onClick={() => handleFilterNavigation("home_genre", id)}
+                                 >
+                                   {g.name}
                                  </span>
                                );
                             })}
-                          </span>
-                        </span>
+                          </div>
+                        </div>
                       )}
                       {mergedContent.languageIds && mergedContent.languageIds.length > 0 && (
-                        <span className="flex items-center gap-2 bg-cyan-500/10 px-3 py-1.5 rounded-lg select-none">
-                          Language: <span className="flex gap-1 flex-wrap">
-                            {mergedContent.languageIds.map((id, index) => {
+                        <div className="flex items-center gap-2 text-xs sm:text-sm">
+                          <span className="text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider text-[11px] w-20 shrink-0">
+                            Language
+                          </span>
+                          <div className="flex gap-1.5 flex-wrap">
+                            {mergedContent.languageIds.map((id) => {
                                const l = languages.find(lang => lang.id === id);
                                if (!l) return null;
                                return (
-                                 <span key={id}>
-                                   <button className="underline underline-offset-2 decoration-cyan-500/50 hover:text-emerald-500 transition-colors" onClick={() => {
-                                      handleFilterNavigation("home_language", id);
-                                   }}>{l.name}</button>
-                                   {index < mergedContent.languageIds!.length - 1 ? ", " : ""}
+                                 <span 
+                                   key={id}
+                                   className="px-2.5 py-0.5 rounded-lg text-xs font-semibold bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 hover:bg-cyan-500/20 transition-all cursor-pointer underline underline-offset-2 decoration-cyan-500/60 hover:decoration-cyan-400"
+                                   onClick={() => handleFilterNavigation("home_language", id)}
+                                 >
+                                   {l.name}
                                  </span>
                                );
                             })}
-                          </span>
-                        </span>
+                          </div>
+                        </div>
                       )}
                       {mergedContent.qualityId &&
                         (() => {
@@ -3169,34 +3250,39 @@ export default function MovieDetails() {
                           );
                           if (!qualityObj) return null;
                           return (
-                            <button
-                              onClick={() => {
-                                handleFilterNavigation("home_quality", mergedContent.qualityId || "");
-                              }}
-                              className="flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold shadow-lg transition-transform hover:scale-105 underline underline-offset-2 decoration-white/50 select-none"
-                              style={{
-                                backgroundColor: qualityObj.color || "#10b981",
-                                color: getContrastColor(
-                                  qualityObj.color || "#10b981",
-                                ),
-                              }}
-                            >
-                              Quality: {qualityObj.name}
-                            </button>
+                            <div className="flex items-center gap-2 text-xs sm:text-sm">
+                              <span className="text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider text-[11px] w-20 shrink-0">
+                                Quality
+                              </span>
+                              <button
+                                onClick={() => {
+                                  handleFilterNavigation("home_quality", mergedContent.qualityId || "");
+                                }}
+                                className="flex items-center gap-1.5 px-3 py-1 rounded-lg font-bold shadow-md transition-transform hover:scale-105 select-none text-xs underline underline-offset-2 decoration-white/60 hover:decoration-white cursor-pointer"
+                                style={{
+                                  backgroundColor: qualityObj.color || "#10b981",
+                                  color: getContrastColor(
+                                    qualityObj.color || "#10b981",
+                                  ),
+                                }}
+                              >
+                                {qualityObj.name}
+                              </button>
+                            </div>
                           );
                         })()}
                     </div>
 
                     {mergedContent.cast && mergedContent.cast.length > 0 && (
                       <div className="mb-6">
-                        <h3 className="text-sm font-bold text-cyan-700 dark:text-cyan-400 mb-2 uppercase tracking-wider opacity-70">
+                        <h4 className="text-xs font-extrabold text-cyan-700 dark:text-cyan-400 mb-2 uppercase tracking-wider opacity-80">
                           Cast
-                        </h3>
+                        </h4>
                         <div className="flex flex-wrap gap-1.5">
                           {mergedContent.cast.map((actor, idx) => (
                             <span
                               key={`cast-${actor}-${idx}`}
-                              className="bg-cyan-500/5 border border-cyan-500/10 px-2 py-1 rounded-md text-[11px] text-zinc-500 dark:text-zinc-400"
+                              className="bg-white/80 dark:bg-zinc-900/80 border border-cyan-500/15 px-2.5 py-1 rounded-lg text-xs font-medium text-zinc-700 dark:text-zinc-300 shadow-sm"
                             >
                               {actor}
                             </span>
@@ -3205,12 +3291,12 @@ export default function MovieDetails() {
                       </div>
                     )}
 
-                    <h3 className="text-sm font-bold mb-1 text-cyan-700 dark:text-cyan-400 uppercase tracking-wider opacity-70">
+                    <h4 className="text-xs font-extrabold mb-1.5 text-cyan-700 dark:text-cyan-400 uppercase tracking-wider opacity-80">
                       {t('Synopsis')}
-                    </h3>
+                    </h4>
                     <div 
                       dir={language === 'ur' ? 'rtl' : 'ltr'}
-                      className={`text-zinc-500 dark:text-zinc-400 leading-relaxed ${language === 'ur' || language === 'ur-roman' ? 'text-base sm:text-lg font-medium' : 'text-xs'}`}
+                      className={`text-zinc-600 dark:text-zinc-300 leading-relaxed ${language === 'ur' || language === 'ur-roman' ? 'text-base sm:text-lg font-medium' : 'text-xs sm:text-sm'}`}
                     >
                       <Translate
                         loadingFallback={
@@ -3230,8 +3316,13 @@ export default function MovieDetails() {
             </section>
 
             {/* Links Section */}
-            <section>
-              <h2 className="text-2xl font-bold mb-6">Download & Play</h2>
+            <section className="space-y-6">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-500">
+                  <Download className="w-6 h-6" />
+                </div>
+                <h2 className="text-2xl sm:text-3xl font-black tracking-tight">{t('Download & Play')}</h2>
+              </div>
 
               {mergedContent.type === "movie" &&
                 mergedContent.movieLinks &&
@@ -3246,10 +3337,15 @@ export default function MovieDetails() {
                     );
                     if (!rendered) return null;
                     return (
-                      <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6">
-                        <h3 className="font-bold mb-4 text-zinc-500 dark:text-zinc-400">
-                          Movie Links
-                        </h3>
+                      <div className="bg-gradient-to-br from-zinc-50 via-white to-zinc-100/60 dark:from-zinc-900/90 dark:via-zinc-900 dark:to-zinc-950 border border-zinc-200 dark:border-zinc-800/80 rounded-3xl p-6 sm:p-8 shadow-xl">
+                        <div className="flex items-center justify-between mb-5 pb-3 border-b border-zinc-200/80 dark:border-zinc-800/80">
+                          <h3 className="font-extrabold text-base sm:text-lg text-zinc-800 dark:text-zinc-200 uppercase tracking-wider flex items-center gap-2">
+                            <Film className="w-5 h-5 text-emerald-500" /> {t('Movie Links')}
+                          </h3>
+                          <span className="text-xs font-semibold text-zinc-500 bg-zinc-200/80 dark:bg-zinc-800 px-3 py-1 rounded-full">
+                            {links.length} {links.length === 1 ? 'Option' : 'Options'}
+                          </span>
+                        </div>
                         {rendered}
                       </div>
                     );
@@ -3583,22 +3679,35 @@ export default function MovieDetails() {
 
             {/* Recommended Movies Section */}
             {recommendedMovies.length > 0 && (
-              <div className="mt-12">
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-xl font-bold text-zinc-900 dark:text-white flex items-center gap-2">
-                    <Heart className="w-5 h-5 text-cyan-500" />
-                    {t('Recommended For You')}
-                  </h2>
+              <div className="mt-10 space-y-5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-cyan-500/10 dark:bg-cyan-500/20 border border-cyan-500/30 rounded-xl text-cyan-500 shadow-sm">
+                      <Heart className="w-4 h-4 fill-cyan-500/30" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg sm:text-xl font-bold text-zinc-900 dark:text-white tracking-tight flex items-center gap-2">
+                        {t('Recommended For You')}
+                      </h2>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                        {t('Handpicked recommendations matching this genre & quality')}
+                      </p>
+                    </div>
+                  </div>
                 </div>
-                <div className="relative group">
+
+                <div className="relative group bg-zinc-50/50 dark:bg-zinc-900/40 border border-zinc-200/80 dark:border-zinc-800/80 rounded-2xl p-4 sm:p-5 shadow-sm overflow-hidden">
+                  <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-6 bg-gradient-to-r from-zinc-50/50 dark:from-zinc-900/40 to-transparent z-10" />
+                  <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-zinc-50/50 dark:from-zinc-900/40 to-transparent z-10" />
+
                   <div
-                    className="flex overflow-x-auto gap-4 pb-4 snap-x snap-mandatory hide-scrollbar"
+                    className="flex overflow-x-auto gap-4 sm:gap-5 pb-1 pt-0.5 snap-x snap-mandatory hide-scrollbar scroll-smooth"
                     style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
                   >
                     {recommendedMovies.map((recContent, rmIdx) => (
                       <div
                         key={recContent.id || `rec-${rmIdx}`}
-                        className="min-w-[160px] sm:min-w-[200px] md:min-w-[240px] snap-start"
+                        className="min-w-[170px] sm:min-w-[210px] md:min-w-[240px] snap-start hover:scale-[1.02] transition-transform duration-300"
                       >
                         <ContentCard
                           content={recContent}
@@ -3638,50 +3747,37 @@ export default function MovieDetails() {
             onClick={closeLinkPopup}
           >
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.2 }}
-              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-md w-full relative shadow-2xl"
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 max-w-md w-full relative shadow-2xl overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
               <button
                 onClick={closeLinkPopup}
-                className="absolute top-4 right-4 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors"
+                className="absolute top-5 right-5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors p-1 rounded-full hover:bg-zinc-200 dark:hover:bg-zinc-800"
                 disabled={extractingLinkId === linkPopup.url}
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="24"
-                  height="24"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
+                <X className="w-5 h-5" />
               </button>
-              <h3 className="text-xl font-bold mb-2">{t('Play Content')}</h3>
-              <div className="flex justify-between items-center mb-6">
-                <p className="text-zinc-500 dark:text-zinc-400">
-                  {t('How would you like to open')} <span dir="ltr" className="inline-block mx-1 font-bold">"{linkPopup.name}"</span>{language === 'ur' ? '؟' : '?'}
+              <h3 className="text-xl font-bold mb-2 text-zinc-900 dark:text-white">{t('Play Content')}</h3>
+              <div className="flex justify-between items-center mb-6 gap-2">
+                <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                  {t('How would you like to open')} <span dir="ltr" className="inline-block mx-1 font-bold text-zinc-900 dark:text-zinc-100">"{linkPopup.name}"</span>{language === 'ur' ? '؟' : '?'}
                 </p>
                 {linkPopup.size && (
-                  <span className="px-2.5 py-1 bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-lg text-xs font-bold whitespace-nowrap">
+                  <span className="px-3 py-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-bold whitespace-nowrap">
                     {linkPopup.size}
                   </span>
                 )}
               </div>
 
               {extractingLinkId === linkPopup.url && (
-                <div className="absolute inset-0 bg-white/50 dark:bg-zinc-900/50 backdrop-blur-sm z-10 flex flex-col items-center justify-center rounded-2xl">
-                  <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-emerald-500 mb-2"></div>
-                  <p className="text-sm font-medium text-zinc-900 dark:text-white">
-                    Extracting link...
+                <div className="absolute inset-0 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm z-20 flex flex-col items-center justify-center rounded-3xl">
+                  <Loader2 className="animate-spin h-9 w-9 text-emerald-500 mb-3" />
+                  <p className="text-sm font-bold text-zinc-900 dark:text-white">
+                    {t('Extracting link...')}
                   </p>
                 </div>
               )}
@@ -3689,7 +3785,7 @@ export default function MovieDetails() {
               <div className="flex flex-col gap-3">
                 {linkPopup.candidates && linkPopup.candidates.length > 0 && (
                   <div className="mb-1">
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-2">
                       {t('Select Server')}:
                     </label>
                     <select
@@ -3697,7 +3793,7 @@ export default function MovieDetails() {
                       onChange={(e) =>
                         setLinkPopup({ ...linkPopup, url: e.target.value })
                       }
-                      className="w-full bg-zinc-100 dark:bg-zinc-800 border-none rounded-xl p-3 text-sm font-medium text-zinc-900 dark:text-white outline-none ring-2 ring-transparent focus:ring-emerald-500 transition-all cursor-pointer"
+                      className="w-full bg-zinc-100 dark:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-700/60 rounded-xl p-3 text-sm font-medium text-zinc-900 dark:text-white outline-none ring-2 ring-transparent focus:ring-emerald-500 transition-all cursor-pointer"
                     >
                       {linkPopup.candidates.map((c, i) => (
                         <option key={i} value={c.href}>
@@ -3718,15 +3814,15 @@ export default function MovieDetails() {
                   <>
                     <button
                       onClick={() => handlePlayExternal("generic")}
-                      className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 px-6 text-base rounded-xl transition-colors flex items-center justify-center gap-2"
+                      className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 px-6 text-sm sm:text-base rounded-xl transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2"
                     >
-                      <Play className="w-5 h-5" /> Play in Video Player
+                      <Play className="w-5 h-5 fill-current" /> {t('Play in Video Player')}
                     </button>
 
                     <div className="grid grid-cols-2 gap-3">
                       <button
                         onClick={() => handlePlayExternal("mx")}
-                        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl transition-colors flex items-center justify-center gap-2 text-sm sm:text-base"
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 text-sm"
                       >
                         <svg
                           width="20"
@@ -3734,7 +3830,7 @@ export default function MovieDetails() {
                           viewBox="0 0 24 24"
                           fill="none"
                           xmlns="http://www.w3.org/2000/svg"
-                          className="w-5 h-5"
+                          className="w-5 h-5 shrink-0"
                         >
                           <rect
                             width="24"
@@ -3748,11 +3844,11 @@ export default function MovieDetails() {
                             fill="currentColor"
                           />
                         </svg>
-                        MX Player
+                        {t('MX Player')}
                       </button>
                       <button
                         onClick={() => handlePlayExternal("vlc")}
-                        className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 px-6 rounded-xl transition-colors flex items-center justify-center gap-2 text-sm sm:text-base"
+                        className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 text-sm"
                       >
                         <svg
                           width="20"
@@ -3760,7 +3856,7 @@ export default function MovieDetails() {
                           viewBox="0 0 24 24"
                           fill="none"
                           xmlns="http://www.w3.org/2000/svg"
-                          className="w-5 h-5"
+                          className="w-5 h-5 shrink-0"
                         >
                           <path d="M12 2L5 22H19L12 2Z" fill="currentColor" />
                           <path
@@ -3774,7 +3870,7 @@ export default function MovieDetails() {
                             strokeWidth="2.5"
                           />
                         </svg>
-                        VLC Player
+                        {t('VLC Player')}
                       </button>
                     </div>
                   </>
@@ -3783,29 +3879,31 @@ export default function MovieDetails() {
                 <button
                   onClick={handleReportLink}
                   disabled={isReporting}
-                  className="w-full bg-red-600/20 hover:bg-red-600/30 text-red-500 font-bold py-3 px-6 text-base rounded-xl transition-colors flex items-center justify-center gap-2 border border-red-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full bg-red-500/10 hover:bg-red-500/20 text-red-500 font-bold py-3 px-6 text-sm rounded-xl transition-colors flex items-center justify-center gap-2 border border-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isReporting ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
-                    <AlertTriangle className="w-5 h-5" />
+                    <AlertTriangle className="w-4 h-4" />
                   )}
-                  {isReporting ? "Sending..." : "Report Link (if not Working)"}
+                  {isReporting ? t("Sending...") : t("Report Link (if not Working)")}
                 </button>
 
-                <button
-                  onClick={() => handlePlayExternal("download")}
-                  className="w-full bg-zinc-700 hover:bg-zinc-600 text-white font-bold py-3 px-6 text-base rounded-xl transition-colors flex items-center justify-center gap-2"
-                >
-                  <Copy className="w-5 h-5" /> Copy Link
-                </button>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => handlePlayExternal("download")}
+                    className="w-full bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white font-bold py-3 px-4 text-sm rounded-xl transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Copy className="w-4 h-4" /> {t('Copy Link')}
+                  </button>
 
-                <button
-                  onClick={handlePlayDirectly}
-                  className="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 px-6 text-base rounded-xl transition-colors flex items-center justify-center gap-2"
-                >
-                  <Download className="w-5 h-5" /> Download
-                </button>
+                  <button
+                    onClick={handlePlayDirectly}
+                    className="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 px-4 text-sm rounded-xl transition-colors shadow-md flex items-center justify-center gap-2"
+                  >
+                    <Download className="w-4 h-4" /> Download
+                  </button>
+                </div>
               </div>
             </motion.div>
           </motion.div>
@@ -3879,17 +3977,17 @@ export default function MovieDetails() {
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-md w-full relative shadow-2xl"
+              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 max-w-md w-full relative shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
               <button
                 onClick={() => setIsTrailerSelectionOpen(false)}
-                className="absolute top-4 right-4 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors"
+                className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-1 rounded-full hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
               >
                 <X className="w-6 h-6" />
               </button>
               <h3 className="text-xl font-bold mb-4 text-zinc-900 dark:text-white">
-                Select Trailer
+                {t('Select Trailer')}
               </h3>
               <div className="flex flex-col gap-3">
                 {allTrailers.map((trailer, idx) => {
@@ -3969,21 +4067,21 @@ export default function MovieDetails() {
                         onClick={(e) => e.stopPropagation()}
                       >
                         <Youtube className="w-3.5 h-3.5" />
-                        Open externally
+                        {t('Open externally')}
                       </a>
                     </div>
                   </div>
                 ) : (
                   <div className="w-full h-full flex flex-col items-center justify-center text-zinc-900 dark:text-white gap-4 bg-zinc-50 dark:bg-zinc-900">
                     <Play className="w-16 h-16 opacity-50" />
-                    <p>This trailer cannot be played directly here.</p>
+                    <p>{t('This trailer cannot be played directly here.')}</p>
                     <a
                       href={activeTrailerUrl || mergedContent.trailerUrl || ""}
                       target="_blank"
                       rel="noreferrer"
                       className="bg-emerald-500 hover:bg-emerald-600 px-6 py-3 text-sm sm:text-base rounded-xl font-bold transition-colors"
                     >
-                      Open in New Tab
+                      {t('Open in New Tab')}
                     </a>
                   </div>
                 )}

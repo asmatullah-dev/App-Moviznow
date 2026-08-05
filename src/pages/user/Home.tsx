@@ -34,12 +34,23 @@ import {
   Zap,
   AlertCircle,
   Gift,
-Star } from "lucide-react";
+  Star,
+  Share2,
+  CheckCircle2,
+  Play,
+  Info,
+  Flame,
+  Tv,
+  SlidersHorizontal,
+  Compass,
+  Sparkles
+} from "lucide-react";
 import { Helmet } from "react-helmet";
 import { clsx } from "clsx";
 import { format } from "date-fns";
 import ConfirmModal from "../../components/ConfirmModal";
 import { formatContentTitle, getContrastColor } from "../../utils/contentUtils";
+import { getOptimizedImageUrl, getImageSrcSet } from "../../utils/imageUtils";
 import { smartSearch } from "../../utils/searchUtils";
 
 import ContentCard from "../../components/ContentCard";
@@ -59,6 +70,7 @@ import { useHaptics } from "../../hooks/useHaptics";
 
 import { Header } from "../../components/Header";
 import { PageTransition } from "../../components/PageTransition";
+import Marquee from "react-fast-marquee";
 
 export default function Home({
   onOpenMediaModal,
@@ -83,18 +95,20 @@ export default function Home({
     loading,
     isOffline,
   } = useContent();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { cart } = useCart();
   const { settings } = useSettings();
   const { isInstallable, installApp } = usePWA();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   useEffect(() => {
-    const typeParam = searchParams.get("type");
-    if (typeParam === "movie" || typeParam === "series") {
-      setSelectedType(typeParam);
-    } else if (typeParam === "all" || typeParam === "" || typeParam === null) {
-      setSelectedType("");
+    if (searchParams.has("type")) {
+      const typeParam = searchParams.get("type");
+      if (typeParam === "movie" || typeParam === "series") {
+        setSelectedType(typeParam);
+      } else if (typeParam === "all" || typeParam === "") {
+        setSelectedType("");
+      }
     }
   }, [searchParams]);
 
@@ -114,8 +128,12 @@ export default function Home({
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const [reviewsData, setReviewsData] = useState({ average: "0.0", total: 0 });
+  const [hasUserRated, setHasUserRated] = useState<boolean>(() => safeStorage.getItem('has_rated') === 'true');
 
   useEffect(() => {
+    if (safeStorage.getItem('has_rated') === 'true') {
+      setHasUserRated(true);
+    }
     const loadReviews = async () => {
       try {
         const cachedData = safeStorage.getItem('cached_reviews_data');
@@ -134,11 +152,15 @@ export default function Home({
         if (data && data.length > 0) {
            const avg = (data.reduce((acc, curr) => acc + curr.rating, 0) / data.length).toFixed(1);
            setReviewsData({ average: avg, total: data.length });
+           if (profile?.uid && data.some((r: any) => r.userId === profile.uid || (profile.email && r.userEmail === profile.email))) {
+             safeStorage.setItem('has_rated', 'true');
+             setHasUserRated(true);
+           }
         }
       } catch(e) {}
     };
     loadReviews();
-  }, []);
+  }, [profile?.uid, profile?.email]);
 
   // ... (rest of the component)
 
@@ -186,6 +208,50 @@ export default function Home({
     );
   });
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
+
+  const [isReferralBannerDismissed, setIsReferralBannerDismissed] = useState(() => {
+    return sessionStorage.getItem('referral_banner_dismissed') === 'true';
+  });
+  const [copiedReferralLink, setCopiedReferralLink] = useState(false);
+
+  const isPendingOrExpiredUser = useMemo(() => {
+    if (!profile) return true;
+    const status = String(profile.status || '');
+    if (status === 'pending' || status === 'expired') return true;
+    if (profile.expiryDate && new Date(profile.expiryDate) < new Date() && status !== 'active') return true;
+    return false;
+  }, [profile]);
+
+  const referralLink = useMemo(() => {
+    return `${window.location.origin}/?ref=${profile?.referralCode || ''}`;
+  }, [profile?.referralCode]);
+
+  const handleCopyReferralLink = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(referralLink);
+      setCopiedReferralLink(true);
+      setTimeout(() => setCopiedReferralLink(false), 2500);
+    }
+  }, [referralLink]);
+
+  const handleShareReferral = useCallback(async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const shareData = {
+      title: 'MovizNow',
+      text: t('Get 5 days of premium membership for free on MovizNow!'),
+      url: referralLink,
+    };
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData);
+      } catch (err) {}
+    } else {
+      handleCopyReferralLink(e);
+    }
+  }, [referralLink, handleCopyReferralLink, t]);
 
   const [selectedCollection, setSelectedCollection] =
     useState<AppCollection | null>(() => {
@@ -339,6 +405,33 @@ export default function Home({
     }
     return result;
   }, [contentList, profile]);
+
+  // Featured Hero Carousel Spotlight items
+  const [currentHeroIndex, setCurrentHeroIndex] = useState(0);
+  const [isHeroHovered, setIsHeroHovered] = useState(false);
+
+  const heroContentItems = useMemo(() => {
+    if (permittedContentList.length === 0) return [];
+    const featured = permittedContentList.filter((c: any) => c.isFeatured || c.featured);
+    if (featured.length >= 2) return featured.slice(0, 6);
+    if (trendingCollection && trendingCollection.contentIds.length > 0) {
+      const trendingItems = trendingCollection.contentIds
+        .map(id => permittedContentList.find(c => c.id === id))
+        .filter((c): c is Content => !!c);
+      if (trendingItems.length >= 2) return trendingItems.slice(0, 6);
+    }
+    return permittedContentList
+      .filter(c => !!c.posterUrl)
+      .slice(0, 6);
+  }, [permittedContentList, trendingCollection]);
+
+  useEffect(() => {
+    if (heroContentItems.length <= 1 || isHeroHovered) return;
+    const timer = setInterval(() => {
+      setCurrentHeroIndex((prev) => (prev + 1) % heroContentItems.length);
+    }, 6000);
+    return () => clearInterval(timer);
+  }, [heroContentItems.length, isHeroHovered]);
 
   const uniqueYears = useMemo(() => {
     const years = new Set<number>();
@@ -572,9 +665,316 @@ export default function Home({
         showBackButton={false}
       />
 
+      {settings?.scrollingText && (
+        <div className="sticky top-16 z-40 w-full bg-emerald-50/90 dark:bg-emerald-950/90 backdrop-blur-md border-b border-emerald-500/20 py-1 flex items-center shrink-0 shadow-sm">
+          <Marquee speed={40} gradient={false} className="overflow-hidden">
+            <span className="text-base sm:text-lg font-bold text-emerald-700 dark:text-emerald-400 mx-4">
+              {settings.scrollingText}
+            </span>
+            <span className="text-base sm:text-lg font-bold text-emerald-700 dark:text-emerald-400 mx-4">
+              {settings.scrollingText}
+            </span>
+          </Marquee>
+        </div>
+      )}
+
       {/* Main Content */}
       <PageTransition className="flex-1 w-full">
-      <main className="max-w-7xl mx-auto w-full px-4 pt-4 pb-8">
+      <main className="relative max-w-7xl mx-auto w-full px-4 pt-4 pb-12 overflow-hidden">
+        {/* Ambient Light Effects */}
+        <div className="absolute top-0 left-1/4 w-96 h-96 bg-emerald-500/10 blur-[130px] rounded-full pointer-events-none -z-10" />
+        <div className="absolute top-1/3 right-1/4 w-96 h-96 bg-purple-500/10 blur-[130px] rounded-full pointer-events-none -z-10" />
+
+        {/* Featured Hero Carousel Spotlight Banner */}
+        {!hideScrollingTabs && heroContentItems.length > 0 && (
+          <div 
+            className="relative w-full mb-8 rounded-3xl overflow-hidden border border-zinc-200/80 dark:border-zinc-800/80 bg-zinc-950 shadow-2xl group transition-all"
+            onMouseEnter={() => setIsHeroHovered(true)}
+            onMouseLeave={() => setIsHeroHovered(false)}
+          >
+            <AnimatePresence mode="wait">
+              {heroContentItems.map((item, idx) => {
+                if (idx !== currentHeroIndex) return null;
+                const isFav = profile?.favorites?.includes(item.id);
+                const isWL = profile?.watchLater?.includes(item.id);
+                const canPlay = getCanPlay(item);
+                const qualityName = qualities.find(q => q.id === item.qualityId)?.name || 'HD';
+                const langNames = languages
+                  .filter(l => item.languageIds?.includes(l.id))
+                  .map(l => l.name)
+                  .slice(0, 2)
+                  .join(" • ");
+                const genreNames = genres
+                  .filter(g => item.genreIds?.includes(g.id))
+                  .map(g => g.name)
+                  .slice(0, 3)
+                  .join(" / ");
+
+                return (
+                  <motion.div
+                    key={item.id}
+                    initial={{ opacity: 0, scale: 1.01 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.99 }}
+                    transition={{ duration: 0.25, ease: "easeOut" }}
+                    className="relative min-h-[420px] sm:min-h-[480px] md:min-h-[540px] flex items-end p-5 sm:p-8 md:p-12 overflow-hidden"
+                  >
+                    {/* Background Image & Vignettes */}
+                    <div className="absolute inset-0 z-0">
+                      <img
+                        src={getOptimizedImageUrl(item.posterUrl || settings?.defaultAppImage, 1280)}
+                        srcSet={getImageSrcSet(item.posterUrl || settings?.defaultAppImage)}
+                        sizes="(max-width: 768px) 780px, 1280px"
+                        alt={item.title}
+                        loading="eager"
+                        decoding="async"
+                        className="w-full h-full object-cover object-center filter brightness-95 contrast-105 transform-gpu transition-transform duration-300 scale-105 group-hover:scale-110"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/60 via-70% to-transparent z-10" />
+                      <div className="absolute inset-0 bg-gradient-to-r from-zinc-950/90 via-zinc-950/40 via-45% to-transparent z-10 rtl:bg-gradient-to-l" />
+                      <div className="absolute top-0 right-0 left-0 h-20 bg-gradient-to-b from-zinc-950/50 to-transparent z-10" />
+                    </div>
+
+                    {/* Content Details & Poster Side-by-Side */}
+                    <div className="relative z-20 w-full flex flex-col md:flex-row items-end justify-between gap-6 pb-12 sm:pb-2">
+                      <div className="max-w-2xl space-y-3 sm:space-y-4 w-full">
+                        <div className="flex items-center gap-2 flex-wrap pr-16 sm:pr-0">
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] sm:text-xs font-black uppercase tracking-wider bg-gradient-to-r from-rose-500 via-purple-500 to-amber-500 text-white shadow-lg shadow-purple-500/20">
+                            <Flame className="w-3.5 h-3.5 fill-current animate-bounce" />
+                            <span>{t("Trending Spotlight")}</span>
+                          </span>
+                          
+                          <span className="px-2.5 py-0.5 rounded-lg text-xs font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 backdrop-blur-md">
+                            {item.type === 'series' ? t('Series') : t('Movie')}
+                          </span>
+
+                          {item.year && (
+                            <span className="px-2.5 py-0.5 rounded-lg text-xs font-bold bg-zinc-800/80 text-zinc-300 border border-zinc-700/50 backdrop-blur-md">
+                              {item.year}
+                            </span>
+                          )}
+
+                          {qualityName && (
+                            <span className="px-2.5 py-0.5 rounded-lg text-xs font-black bg-amber-500/20 text-amber-300 border border-amber-500/30 backdrop-blur-md">
+                              {qualityName}
+                            </span>
+                          )}
+                        </div>
+
+                        <h1 className="text-2xl sm:text-4xl md:text-5xl font-black text-white tracking-tight leading-tight drop-shadow-2xl">
+                          {formatContentTitle(item)}
+                        </h1>
+
+                        {(genreNames || langNames) && (
+                          <p className="text-xs sm:text-sm text-zinc-300 font-medium flex items-center gap-2 flex-wrap">
+                            {genreNames && <span>{genreNames}</span>}
+                            {genreNames && langNames && <span className="text-emerald-500">•</span>}
+                            {langNames && <span className="text-emerald-400 font-bold">{langNames}</span>}
+                          </p>
+                        )}
+
+                        <p className="text-xs sm:text-sm text-zinc-300/90 leading-relaxed line-clamp-2 sm:line-clamp-3 max-w-xl font-normal drop-shadow">
+                          {item.description}
+                        </p>
+
+                        <div className="pt-2 flex items-center gap-3 flex-wrap max-w-full sm:max-w-md">
+                          <Link
+                            to={item.type === 'series' ? `/series/${item.id}` : `/movie/${item.id}`}
+                            onClick={() => vibrate(50)}
+                            className="px-6 py-3 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-white font-black text-xs sm:text-sm flex items-center gap-2 shadow-xl shadow-emerald-500/30 active:scale-95 transition-all transform hover:scale-105"
+                          >
+                            <Play className="w-4 h-4 fill-current" />
+                            <span>{canPlay ? t('Watch Now') : t('View Details')}</span>
+                          </Link>
+
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              vibrate(50);
+                              toggleFavorite(item.id);
+                            }}
+                            className={clsx(
+                              "p-3 rounded-xl border backdrop-blur-md transition-all active:scale-95 flex items-center justify-center",
+                              isFav 
+                                ? "bg-rose-500/20 border-rose-500/50 text-rose-400" 
+                                : "bg-zinc-800/80 hover:bg-zinc-700/80 border-zinc-700/60 text-zinc-200"
+                            )}
+                            title={t('Favorites')}
+                          >
+                            <Heart className={clsx("w-5 h-5", isFav && "fill-current")} />
+                          </button>
+
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              vibrate(50);
+                              toggleWatchLater(item.id);
+                            }}
+                            className={clsx(
+                              "p-3 rounded-xl border backdrop-blur-md transition-all active:scale-95 flex items-center justify-center",
+                              isWL 
+                                ? "bg-indigo-500/20 border-indigo-500/50 text-indigo-400" 
+                                : "bg-zinc-800/80 hover:bg-zinc-700/80 border-zinc-700/60 text-zinc-200"
+                            )}
+                            title={t('Watch Later')}
+                          >
+                            <Clock className={clsx("w-5 h-5", isWL && "fill-current")} />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Mini Poster Card Badge */}
+                      <div className="hidden sm:block shrink-0 relative group/thumb">
+                        <div className="w-28 h-40 sm:w-36 sm:h-52 md:w-44 md:h-64 rounded-2xl overflow-hidden border-2 border-emerald-500/40 shadow-2xl bg-zinc-900 transition-transform duration-300 group-hover/thumb:scale-105">
+                          <img 
+                            src={getOptimizedImageUrl(item.posterUrl || settings?.defaultAppImage, 342)} 
+                            alt={item.title} 
+                            loading="eager"
+                            decoding="async"
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
+
+            {heroContentItems.length > 1 && (
+              <div className="absolute bottom-4 right-4 rtl:right-auto rtl:left-4 z-30 flex items-center gap-2 bg-zinc-950/80 backdrop-blur-md p-1.5 rounded-full border border-zinc-700/70 shadow-2xl">
+                <button
+                  onClick={() => {
+                    vibrate(30);
+                    setCurrentHeroIndex((prev) => (prev - 1 + heroContentItems.length) % heroContentItems.length);
+                  }}
+                  className="p-1.5 hover:bg-zinc-800 rounded-full text-zinc-300 hover:text-white transition-colors"
+                  title="Previous slide"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+
+                <div className="flex items-center gap-1.5 px-1">
+                  {heroContentItems.map((_, dotIdx) => (
+                    <button
+                      key={`dot-${dotIdx}`}
+                      onClick={() => {
+                        vibrate(30);
+                        setCurrentHeroIndex(dotIdx);
+                      }}
+                      className={clsx(
+                        "h-2 rounded-full transition-all duration-300",
+                        dotIdx === currentHeroIndex 
+                          ? "w-6 bg-emerald-500 shadow-sm shadow-emerald-500/50" 
+                          : "w-2 bg-zinc-600 hover:bg-zinc-400"
+                      )}
+                    />
+                  ))}
+                </div>
+
+                <button
+                  onClick={() => {
+                    vibrate(30);
+                    setCurrentHeroIndex((prev) => (prev + 1) % heroContentItems.length);
+                  }}
+                  className="p-1.5 hover:bg-zinc-800 rounded-full text-zinc-300 hover:text-white transition-colors"
+                  title="Next slide"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+                {/* Referral Banner for Pending & Expired Users */}
+        {isPendingOrExpiredUser && !isReferralBannerDismissed && (
+          <div className="relative overflow-hidden bg-gradient-to-r from-rose-900/40 via-purple-900/30 to-amber-900/40 dark:from-rose-950/60 dark:via-purple-950/50 dark:to-amber-950/60 border border-rose-500/30 dark:border-rose-500/40 shadow-xl rounded-2xl sm:rounded-3xl p-4 sm:p-6 mb-8 text-white transition-all">
+            {/* Ambient Background Glows */}
+            <div className="absolute -top-12 -right-12 w-48 h-48 bg-rose-500/20 blur-3xl rounded-full pointer-events-none" />
+            <div className="absolute -bottom-12 -left-12 w-48 h-48 bg-amber-500/20 blur-3xl rounded-full pointer-events-none" />
+
+            {/* Dismiss / Close button */}
+            <button
+              onClick={() => {
+                setIsReferralBannerDismissed(true);
+                sessionStorage.setItem('referral_banner_dismissed', 'true');
+              }}
+              className="absolute top-3 right-3 rtl:right-auto rtl:left-3 p-1.5 text-zinc-400 hover:text-white bg-zinc-800/60 hover:bg-zinc-800 rounded-full transition-colors z-10"
+              title={t('Dismiss')}
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 sm:gap-6 relative z-0">
+              <div className="flex items-start gap-3 sm:gap-4 flex-1 min-w-0">
+                <div className="p-3 sm:p-4 bg-gradient-to-br from-rose-500 to-amber-500 rounded-2xl shadow-lg shadow-rose-500/20 text-white shrink-0 animate-pulse">
+                  <Gift className="w-6 h-6 sm:w-8 sm:h-8" />
+                </div>
+                <div className="space-y-1.5 pr-8 rtl:pr-0 rtl:pl-8 md:pr-0 md:rtl:pl-0" dir={language === 'ur' ? 'rtl' : 'ltr'}>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-extrabold uppercase tracking-wider bg-rose-500/20 border border-rose-500/30 text-rose-300">
+                      {t('Special Referral Offer')}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold bg-amber-500/20 border border-amber-500/30 text-amber-300 flex items-center gap-1">
+                      <Zap className="w-3 h-3 text-amber-400 fill-amber-400" />
+                      <span>{t('+5 Days VIP')}</span>
+                    </span>
+                  </div>
+                  <h3 className="font-extrabold text-base sm:text-xl text-white tracking-tight leading-snug">
+                    {t('Get 5 Days Free VIP Access!')}
+                  </h3>
+                  <p className="text-zinc-300 text-xs sm:text-sm leading-relaxed max-w-2xl">
+                    {t('Invite friends to MovizNow and unlock 5 days of premium access for both of you!')}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto shrink-0 pt-1 md:pt-0">
+                <Link
+                  to="/rewards"
+                  className="flex-1 md:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 sm:px-5 sm:py-3 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold rounded-xl text-xs sm:text-sm transition-all shadow-lg shadow-rose-600/25 active:scale-95 text-center"
+                >
+                  <Gift className="w-4 h-4" />
+                  <span>{t('Invite & Earn 5 Days Free')}</span>
+                </Link>
+                <button
+                  onClick={handleShareReferral}
+                  className="flex-1 md:flex-initial flex items-center justify-center gap-2 px-3.5 py-2.5 sm:px-4 sm:py-3 bg-zinc-800/80 hover:bg-zinc-800 border border-zinc-700 text-zinc-200 font-semibold rounded-xl text-xs sm:text-sm transition-all active:scale-95"
+                >
+                  {copiedReferralLink ? (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      <span className="text-emerald-400">{t('Copied!')}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Share2 className="w-4 h-4 text-rose-400" />
+                      <span>{t('Share Offer')}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Re-open trigger pill if dismissed */}
+        {isPendingOrExpiredUser && isReferralBannerDismissed && (
+          <div className="mb-6 flex justify-end">
+            <button
+              onClick={() => {
+                setIsReferralBannerDismissed(false);
+                sessionStorage.removeItem('referral_banner_dismissed');
+              }}
+              className="inline-flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-rose-500/10 via-amber-500/10 to-rose-500/10 border border-rose-500/20 hover:border-rose-500/40 text-rose-400 dark:text-rose-300 rounded-full text-xs font-semibold transition-all shadow-sm hover:scale-105 active:scale-95"
+            >
+              <Gift className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+              <span>🎁 {t('Get 5 Days Free VIP Access!')}</span>
+            </button>
+          </div>
+        )}
+
         {/* Status Banner */}
         {profile?.status === "pending" && (
           <div className="bg-yellow-500/10 border border-yellow-500 text-yellow-600 dark:text-yellow-500 p-4 sm:p-6 rounded-2xl mb-8 flex flex-row items-center justify-between gap-4 sm:gap-8">
@@ -607,12 +1007,14 @@ export default function Home({
               >
                 <Gift className="w-3 h-3 sm:w-5 sm:h-5" /> {t('Rewards')}
               </Link>
-              <Link
-                to="/reviews"
-                className="flex items-center justify-center gap-1.5 sm:gap-2 bg-zinc-800 text-white dark:bg-zinc-200 dark:text-black px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-zinc-700 dark:hover:bg-zinc-300 transition-all active:scale-95 shadow-lg"
-              >
-                <MessageCircle className="w-3 h-3 sm:w-5 sm:h-5" /> {profile?.status && (['pending', 'expired'] as string[]).includes(profile.status) ? t('Check Reviews') : t('Rate our app')}
-              </Link>
+              {((profile?.status && (['pending', 'expired'] as string[]).includes(profile.status)) || !(hasUserRated || safeStorage.getItem('has_rated') === 'true')) && (
+                <Link
+                  to="/reviews"
+                  className="flex items-center justify-center gap-1.5 sm:gap-2 bg-zinc-800 text-white dark:bg-zinc-200 dark:text-black px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-zinc-700 dark:hover:bg-zinc-300 transition-all active:scale-95 shadow-lg"
+                >
+                  <MessageCircle className="w-3 h-3 sm:w-5 sm:h-5" /> {profile?.status && (['pending', 'expired'] as string[]).includes(profile.status) ? t('Check Reviews') : t('Rate our app')}
+                </Link>
+              )}
               {settings?.isAdminContactEnabled !== false && (
                 <button
                   onClick={() => {
@@ -699,12 +1101,14 @@ export default function Home({
                   <MessageCircle className="w-3 h-3 sm:w-5 sm:h-5" /> {t("Contact Admin")}
                 </button>
               )}
-              <Link
-                to="/reviews"
-                className="flex items-center justify-center gap-1.5 sm:gap-2 bg-zinc-800 text-white dark:bg-zinc-200 dark:text-black px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-zinc-700 dark:hover:bg-zinc-300 transition-all active:scale-95 shadow-lg"
-              >
-                <MessageCircle className="w-3 h-3 sm:w-5 sm:h-5" /> {profile?.status && (['pending', 'expired'] as string[]).includes(profile.status) ? t('Check Reviews') : t('Rate our app')}
-              </Link>
+              {((profile?.status && (['pending', 'expired'] as string[]).includes(profile.status)) || !(hasUserRated || safeStorage.getItem('has_rated') === 'true')) && (
+                <Link
+                  to="/reviews"
+                  className="flex items-center justify-center gap-1.5 sm:gap-2 bg-zinc-800 text-white dark:bg-zinc-200 dark:text-black px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-zinc-700 dark:hover:bg-zinc-300 transition-all active:scale-95 shadow-lg"
+                >
+                  <MessageCircle className="w-3 h-3 sm:w-5 sm:h-5" /> {profile?.status && (['pending', 'expired'] as string[]).includes(profile.status) ? t('Check Reviews') : t('Rate our app')}
+                </Link>
+              )}
             </div>
           </div>
         )}
@@ -762,7 +1166,7 @@ export default function Home({
                   <select
                     value={sort}
                     onChange={(e) => setSort(e.target.value as any)}
-                    className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
+                    className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-800 dark:text-zinc-200 focus:border-emerald-500 shadow-sm cursor-pointer hover:border-emerald-500/50 transition-colors"
                   >
                     <option value="default">{t('Default Order')}</option>
                     <option value="newest">{t('Recently Added')}</option>
@@ -773,7 +1177,7 @@ export default function Home({
                   <select
                     value={selectedType}
                     onChange={(e) => setSelectedType(e.target.value)}
-                    className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
+                    className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-800 dark:text-zinc-200 focus:border-emerald-500 shadow-sm cursor-pointer hover:border-emerald-500/50 transition-colors"
                   >
                     <option value="">{t('Types')}</option>
                     <option value="movie">{t('Movies')}</option>
@@ -783,7 +1187,7 @@ export default function Home({
                   <select
                     value={selectedGenre}
                     onChange={(e) => setSelectedGenre(e.target.value)}
-                    className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
+                    className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-800 dark:text-zinc-200 focus:border-emerald-500 shadow-sm cursor-pointer hover:border-emerald-500/50 transition-colors"
                   >
                     <option value="">{t('Genres')}</option>
                     {[...genres]
@@ -798,7 +1202,7 @@ export default function Home({
                   <select
                     value={selectedLanguage}
                     onChange={(e) => setSelectedLanguage(e.target.value)}
-                    className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
+                    className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-800 dark:text-zinc-200 focus:border-emerald-500 shadow-sm cursor-pointer hover:border-emerald-500/50 transition-colors"
                   >
                     <option value="">{t('Langs')}</option>
                     {[...languages]
@@ -813,7 +1217,7 @@ export default function Home({
                   <select
                     value={selectedQuality}
                     onChange={(e) => setSelectedQuality(e.target.value)}
-                    className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
+                    className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-800 dark:text-zinc-200 focus:border-emerald-500 shadow-sm cursor-pointer hover:border-emerald-500/50 transition-colors"
                   >
                     <option value="">{t('Quals')}</option>
                     {[...qualities]
@@ -828,7 +1232,7 @@ export default function Home({
                   <select
                     value={selectedYear}
                     onChange={(e) => setSelectedYear(e.target.value)}
-                    className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
+                    className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-800 dark:text-zinc-200 focus:border-emerald-500 shadow-sm cursor-pointer hover:border-emerald-500/50 transition-colors"
                   >
                     <option value="">{t('Years')}</option>
                     {uniqueYears.map((y) => (
@@ -844,13 +1248,21 @@ export default function Home({
         </AnimatePresence>{" "}
         {/* Recently Viewed Section */}
         {!hideScrollingTabs && recentlyViewed.length > 0 && (
-          <div className="mb-6 sm:mb-8">
-            <div className="flex items-center justify-between mb-4 border-b border-zinc-200 dark:border-zinc-800 pb-2">
-              <h2 className="text-lg sm:text-xl font-bold tracking-tight text-zinc-900 dark:text-white flex items-center gap-2">
-                <span className="w-1.5 h-6 bg-indigo-500 rounded-full"></span>
-                <Clock className="w-5 h-5 text-indigo-500" />
-                {t('Recently Viewed')}
-              </h2>
+          <div className="mb-8">
+            <div className="flex items-center justify-between mb-4 pb-2 border-b border-zinc-200/80 dark:border-zinc-800/80">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-500 shadow-sm">
+                  <Clock className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg sm:text-xl font-extrabold tracking-tight text-zinc-900 dark:text-white">
+                    {t('Recently Viewed')}
+                  </h2>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+                    {t('Continue where you left off')}
+                  </p>
+                </div>
+              </div>
             </div>
             <div className="relative group">
               <ScrollableRow
@@ -863,7 +1275,7 @@ export default function Home({
                   .map((content) => (
                     <div
                       key={content.id}
-                      className="w-[100px] sm:w-[130px] shrink-0 snap-start"
+                      className="w-[110px] sm:w-[140px] shrink-0 snap-start"
                     >
                       <ContentCard
                         content={content}
@@ -883,19 +1295,22 @@ export default function Home({
         )}
         {/* Trending Section */}
         {!hideScrollingTabs && trendingCollection && (
-          <div className="mb-6 sm:mb-8">
-            <div className="flex items-center justify-between mb-4 border-b border-zinc-200 dark:border-zinc-800 pb-2">
-              <div className="flex flex-col">
-                <h2 className="text-lg sm:text-xl font-bold tracking-tight text-zinc-900 dark:text-white flex items-center gap-2">
-                  <span className="w-1.5 h-6 bg-pink-500 rounded-full"></span>
-                  <TrendingUp className="w-5 h-5 text-pink-500" />
-                  {t('Trending')}
-                </h2>
-                {trendingCollection.description && (
-                  <p className="text-[10px] sm:text-xs text-zinc-500 dark:text-zinc-400 mt-1 ml-3.5 italic">
-                    {trendingCollection.description}
-                  </p>
-                )}
+          <div className="mb-8">
+            <div className="flex items-center justify-between mb-4 pb-2 border-b border-zinc-200/80 dark:border-zinc-800/80">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-pink-500/10 border border-pink-500/20 text-pink-500 shadow-sm">
+                  <TrendingUp className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg sm:text-xl font-extrabold tracking-tight text-zinc-900 dark:text-white">
+                    {t('Trending Now')}
+                  </h2>
+                  {trendingCollection.description && (
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+                      {trendingCollection.description}
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
             <div className="relative group">
@@ -937,19 +1352,22 @@ export default function Home({
         )}
         {/* Newly Added Section */}
         {!hideScrollingTabs && newlyAddedCollection && (
-          <div className="mb-6 sm:mb-8">
-            <div className="flex items-center justify-between mb-4 border-b border-zinc-200 dark:border-zinc-800 pb-2">
-              <div className="flex flex-col">
-                <h2 className="text-lg sm:text-xl font-bold tracking-tight text-zinc-900 dark:text-white flex items-center gap-2">
-                  <span className="w-1.5 h-6 bg-cyan-500 rounded-full"></span>
-                  <Zap className="w-5 h-5 text-cyan-500" />
-                  {t('Newly Added')}
-                </h2>
-                {newlyAddedCollection.description && (
-                  <p className="text-[10px] sm:text-xs text-zinc-500 dark:text-zinc-400 mt-1 ml-3.5 italic">
-                    {newlyAddedCollection.description}
-                  </p>
-                )}
+          <div className="mb-8">
+            <div className="flex items-center justify-between mb-4 pb-2 border-b border-zinc-200/80 dark:border-zinc-800/80">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-500 shadow-sm">
+                  <Zap className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg sm:text-xl font-extrabold tracking-tight text-zinc-900 dark:text-white">
+                    {t('Newly Added')}
+                  </h2>
+                  {newlyAddedCollection.description && (
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+                      {newlyAddedCollection.description}
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
             <div className="relative group">
@@ -991,12 +1409,16 @@ export default function Home({
         )}
         {/* Collections Overview */}
         {!hideScrollingTabs && otherCollections.length > 0 && (
-          <div className="mb-6 sm:mb-8">
-            <div className="flex items-center justify-between mb-4 border-b border-zinc-200 dark:border-zinc-800 pb-2">
-              <h2 className="text-lg sm:text-xl font-bold tracking-tight text-zinc-900 dark:text-white flex items-center gap-2">
-                <span className="w-1.5 h-6 bg-emerald-500 rounded-full"></span>
-                {t('Collections')}
-              </h2>
+          <div className="mb-8">
+            <div className="flex items-center justify-between mb-4 pb-2 border-b border-zinc-200/80 dark:border-zinc-800/80">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-500 shadow-sm">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <h2 className="text-lg sm:text-xl font-extrabold tracking-tight text-zinc-900 dark:text-white">
+                  {t('Curated Collections')}
+                </h2>
+              </div>
             </div>
             <div className="relative group">
               <ScrollableRow
@@ -1019,41 +1441,37 @@ export default function Home({
                         vibrate(50);
                         setSelectedCollection(collection);
                       }}
-                      className="w-[140px] h-[210px] sm:w-[180px] sm:h-[270px] shrink-0 snap-start relative transition-all hover:scale-[1.02] group shadow-sm cursor-pointer transform-gpu"
+                      className="w-[150px] h-[220px] sm:w-[190px] sm:h-[280px] shrink-0 snap-start relative transition-all duration-200 hover:-translate-y-1 active:scale-95 group shadow-md hover:shadow-xl hover:shadow-purple-500/10 rounded-2xl overflow-hidden border border-zinc-200/80 dark:border-zinc-800/80 hover:border-purple-500/50 cursor-pointer transform-gpu"
                     >
-                      <div className="absolute -inset-[1px] bg-gradient-to-br from-emerald-500 to-emerald-700 rounded-2xl z-0 transition-all duration-300 group-hover:blur-sm" />
-
-                      <div className="relative h-full w-full rounded-[15px] p-[1px] bg-gradient-to-br from-emerald-400 via-emerald-500 to-emerald-600 z-10">
-                        <div className="relative h-full w-full bg-black rounded-[14px] p-[0.5px]">
-                          <div className="relative h-full w-full bg-zinc-50 dark:bg-zinc-900 rounded-[13.5px] overflow-hidden">
-                            {posterUrl ? (
-                              <div className="absolute inset-0">
-                                <img
-                                  src={posterUrl}
-                                  alt=""
-                                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-                                />
-                                <div className="absolute inset-0 bg-black/60 group-hover:bg-black/40 transition-colors" />
-                              </div>
-                            ) : (
-                              <div className="absolute inset-0 bg-gradient-to-br from-zinc-100 to-zinc-200 dark:from-zinc-800 dark:to-zinc-900" />
-                            )}
-
-                            <div className="relative z-10 p-4 h-full flex flex-col items-center justify-center border border-zinc-200/20 dark:border-zinc-700/50 rounded-2xl group-hover:border-emerald-500/50 transition-colors">
-                              <h3 className="text-white font-bold text-center drop-shadow-md line-clamp-2 text-sm sm:text-lg">
-                                {collection.title}
-                              </h3>
-                              {collection.description && (
-                                <p className="text-[8px] sm:text-xs text-white/60 mt-1 text-center line-clamp-2 italic px-2">
-                                  {collection.description}
-                                </p>
-                              )}
-                              <span className="text-[10px] sm:text-sm text-white/70 mt-2">
-                                {collection.contentIds.length} Contents
-                              </span>
-                            </div>
-                          </div>
+                      {posterUrl ? (
+                        <div className="absolute inset-0">
+                          <img
+                            src={getOptimizedImageUrl(posterUrl, 342)}
+                            srcSet={getImageSrcSet(posterUrl)}
+                            sizes="(max-width: 640px) 150px, 190px"
+                            alt={collection.title}
+                            loading="eager"
+                            decoding="async"
+                            className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/60 to-zinc-950/30 group-hover:via-zinc-950/40 transition-colors duration-200" />
                         </div>
+                      ) : (
+                        <div className="absolute inset-0 bg-gradient-to-br from-purple-900/40 to-zinc-900" />
+                      )}
+
+                      <div className="relative z-10 p-4 h-full flex flex-col justify-end">
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/30 w-fit mb-2 backdrop-blur-md">
+                          Collection
+                        </span>
+                        <h3 className="text-white font-extrabold text-left drop-shadow-md line-clamp-2 text-sm sm:text-base leading-snug">
+                          {collection.title}
+                        </h3>
+                        {collection.description && (
+                          <p className="text-[10px] sm:text-xs text-zinc-300 mt-1 text-left line-clamp-2">
+                            {collection.description}
+                          </p>
+                        )}
                       </div>
                     </button>
                   );
@@ -1062,21 +1480,99 @@ export default function Home({
             </div>
           </div>
         )}
+{/* Quick Category Chips Navigation */}
+        <div className="flex items-center gap-2 overflow-x-auto p-1.5 mb-8 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-xl border border-zinc-200/80 dark:border-zinc-800/80 rounded-2xl shadow-lg hide-scrollbar">
+          <button
+            onClick={() => {
+              vibrate(30);
+              setSelectedType("");
+              clearFilters();
+            }}
+            className={clsx(
+              "px-4 py-2 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all active:scale-95 flex items-center gap-2 border",
+              selectedType === "" && !hasActiveFilters
+                ? "bg-gradient-to-r from-emerald-500 to-teal-500 text-white border-transparent shadow-lg shadow-emerald-500/20"
+                : "bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700"
+            )}
+          >
+            <Compass className="w-4 h-4" />
+            <span>{t("All Catalog")}</span>
+          </button>
+
+          <button
+            onClick={() => {
+              vibrate(30);
+              setSelectedType("movie");
+              setCurrentPage(1);
+            }}
+            className={clsx(
+              "px-4 py-2 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all active:scale-95 flex items-center gap-2 border",
+              selectedType === "movie"
+                ? "bg-gradient-to-r from-emerald-500 to-teal-500 text-white border-transparent shadow-lg shadow-emerald-500/20"
+                : "bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700"
+            )}
+          >
+            <Film className="w-4 h-4" />
+            <span>{t("Movies")}</span>
+          </button>
+
+          <button
+            onClick={() => {
+              vibrate(30);
+              setSelectedType("series");
+              setCurrentPage(1);
+            }}
+            className={clsx(
+              "px-4 py-2 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all active:scale-95 flex items-center gap-2 border",
+              selectedType === "series"
+                ? "bg-gradient-to-r from-emerald-500 to-teal-500 text-white border-transparent shadow-lg shadow-emerald-500/20"
+                : "bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700"
+            )}
+          >
+            <Tv className="w-4 h-4" />
+            <span>{t("Series")}</span>
+          </button>
+
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={clsx(
+              "px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all active:scale-95 flex items-center gap-2 border ml-auto",
+              hasActiveFilters || showFilters
+                ? "bg-amber-500/10 text-amber-500 border-amber-500/30"
+                : "bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800"
+            )}
+          >
+            <SlidersHorizontal className="w-4 h-4" />
+            <span>{t("Filters")}</span>
+            {hasActiveFilters && (
+              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+            )}
+          </button>
+        </div>
         {/* Grid Title */}
-        <div className="flex items-center justify-between mb-4 border-b border-zinc-200 dark:border-zinc-800 pb-2 mt-8">
-          <h2 className="text-lg sm:text-xl font-bold tracking-tight text-zinc-900 dark:text-white flex items-center gap-2">
-            <span className="w-1.5 h-6 bg-blue-500 rounded-full"></span>
-            All Contents
-          </h2>
+        <div className="flex items-center justify-between mb-6 pb-2 border-b border-zinc-200/80 dark:border-zinc-800/80 mt-10">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 shadow-sm">
+              <Film className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-lg sm:text-xl font-extrabold tracking-tight text-zinc-900 dark:text-white">
+                {t('Explore Catalog')}
+              </h2>
+            </div>
+          </div>
           {currentPage > 1 && (
             <button
               onClick={() => {
+                vibrate(30);
                 setCurrentPage(1);
                 clearFilters();
+                window.scrollTo({ top: 0, behavior: "smooth" });
               }}
-              className="text-sm text-emerald-500 hover:text-emerald-400 font-medium transition-colors"
+              className="px-3.5 py-1.5 rounded-xl text-xs sm:text-sm text-emerald-500 hover:text-emerald-400 font-bold border border-emerald-500/20 bg-emerald-500/10 transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
             >
-              Go to Home
+              <ChevronLeft className="w-4 h-4" />
+              <span>{t('Go to Home')}</span>
             </button>
           )}
         </div>
@@ -1092,7 +1588,9 @@ export default function Home({
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6">
+            <div 
+              className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6"
+            >
               {paginatedContent.map((content) => (
                 <ContentCard
                   key={content.id}
@@ -1291,48 +1789,49 @@ export default function Home({
         {selectedCollection && (
           <motion.div
             key="collection-modal"
-            ref={collectionScrollRef}
             initial={{ opacity: 0, y: "100%" }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: "100%" }}
-            transition={{ type: "spring", damping: 25, stiffness: 200 }}
-            className="fixed inset-0 z-[100] bg-white dark:bg-zinc-950 overflow-y-auto"
+            transition={{ type: "spring", damping: 28, stiffness: 250 }}
+            className="fixed inset-0 z-[100] bg-white dark:bg-zinc-950 flex flex-col overflow-hidden"
           >
-            <div className="sticky top-0 z-20 flex items-center justify-between p-4 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-xl border-b border-zinc-200 dark:border-zinc-800">
-              <div className="flex items-center gap-4">
-                <div>
-                  <h2 className="text-xl font-bold text-zinc-900 dark:text-white flex items-center gap-2">
-                    <span className="w-1.5 h-6 bg-emerald-500 rounded-full"></span>
+            <div className="shrink-0 z-50 flex items-center justify-between gap-3 p-3.5 sm:p-5 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 shadow-md">
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                <span className="w-1.5 h-6 bg-emerald-500 rounded-full shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-base sm:text-xl font-bold text-zinc-900 dark:text-white truncate">
                     {selectedCollection.title}
                   </h2>
                   {selectedCollection.description && (
-                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 ml-3.5 italic">
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 truncate italic">
                       {selectedCollection.description}
                     </p>
                   )}
                 </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
                 <select
                   value={collectionSort}
                   onChange={(e) => setCollectionSort(e.target.value as any)}
-                  className="bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500 outline-none"
+                  className="bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs font-semibold focus:border-emerald-500 outline-none cursor-pointer"
                 >
                   <option value="default">{t('Default Order')}</option>
                   <option value="newest">{t('Newest First')}</option>
                   <option value="az">{t('A-Z')}</option>
                 </select>
+                <button
+                  onClick={() => {
+                    setSelectedCollection(null);
+                    setCollectionSort("default");
+                  }}
+                  className="p-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-full text-zinc-500 dark:text-zinc-300 transition-colors cursor-pointer"
+                  title="Close"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-              <button
-                onClick={() => {
-                  setSelectedCollection(null);
-                  setCollectionSort("default");
-                }}
-                className="p-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-full text-zinc-500 transition-colors"
-                title="Close"
-              >
-                <X className="w-5 h-5" />
-              </button>
             </div>
-            <div className="max-w-7xl mx-auto p-4 md:p-8">
+            <div ref={collectionScrollRef} className="flex-1 overflow-y-auto max-w-7xl w-full mx-auto p-4 md:p-8">
               {selectedCollection.contentIds.length === 0 ? (
                 <div className="text-center py-20 text-zinc-500">
                   <Film className="w-16 h-16 mx-auto mb-4 opacity-20" />

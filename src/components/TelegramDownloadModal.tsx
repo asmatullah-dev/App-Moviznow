@@ -147,7 +147,7 @@ export function TelegramDownloadModal({
               <div className="p-4 sm:p-6 overflow-y-auto custom-scrollbar flex-1 space-y-6">
                  {content.type === "movie" && content.movieLinks && (
                    <div className="space-y-4">
-                     <h3 className="text-sm font-semibold text-zinc-900 dark:text-white uppercase tracking-wider">Movie Links</h3>
+                     <h3 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t("Movie Links")}</h3>
                      {renderQualityLinks(content.movieLinks, "movie")}
                    </div>
                  )}
@@ -156,43 +156,43 @@ export function TelegramDownloadModal({
                    <div className="space-y-6">
                      {content.fullSeasonZip && renderQualityLinks(content.fullSeasonZip, "full_zip") && (
                        <div className="space-y-4">
-                          <h3 className="text-sm font-semibold text-zinc-900 dark:text-white uppercase tracking-wider">Full Series ZIP</h3>
+                          <h3 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t("Full Series ZIP")}</h3>
                           {renderQualityLinks(content.fullSeasonZip, "full_zip")}
                        </div>
                      )}
                      {content.fullSeasonMkv && renderQualityLinks(content.fullSeasonMkv, "full_mkv") && (
                        <div className="space-y-4">
-                          <h3 className="text-sm font-semibold text-zinc-900 dark:text-white uppercase tracking-wider">Full Series MKV</h3>
+                          <h3 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t("Full Series MKV")}</h3>
                           {renderQualityLinks(content.fullSeasonMkv, "full_mkv")}
                        </div>
                      )}
                      {seasons.map((season: any, sIdx: number) => (
                        <div key={season.id || `season_${sIdx}`} className="space-y-4">
-                         <h3 className="text-sm font-semibold text-zinc-900 dark:text-white uppercase tracking-wider">Season {season.seasonNumber || (sIdx + 1)}</h3>
+                         <h3 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t("Season")} {season.seasonNumber || (sIdx + 1)}</h3>
                          
                          {season.zipLinks && (
                            <div className="mb-4">
-                              <h4 className="text-xs font-semibold text-zinc-500 uppercase mb-2">ZIP Links</h4>
+                              <h4 className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-2">ZIP Links</h4>
                               {renderQualityLinks(season.zipLinks, `sz_${season.id}`)}
                            </div>
                          )}
 
                          {season.mkvLinks && (
                            <div className="mb-4">
-                              <h4 className="text-xs font-semibold text-zinc-500 uppercase mb-2">MKV Links</h4>
+                              <h4 className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-2">MKV Links</h4>
                               {renderQualityLinks(season.mkvLinks, `smk_${season.id}`)}
                            </div>
                          )}
 
                          {season.episodes && season.episodes.length > 0 && (
                            <div>
-                              <h4 className="text-xs font-semibold text-zinc-500 uppercase mb-2">Episodes</h4>
+                              <h4 className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-2">{t("Episodes")}</h4>
                               <div className="space-y-3">
                                 {season.episodes.map((ep: any, epIdx: number) => (
-                                  <div key={ep.id || `ep_${epIdx}`} className="p-3 border border-zinc-200 dark:border-zinc-800 rounded-xl">
-                                    <div className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">Ep {ep.episodeNumber || (epIdx + 1)} - {ep.title || "Episode"}</div>
+                                  <div key={ep.id || `ep_${epIdx}`} className="p-3 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-zinc-50/50 dark:bg-zinc-800/30">
+                                    <div className="text-xs font-bold text-zinc-800 dark:text-zinc-200 mb-2">Ep {ep.episodeNumber || (epIdx + 1)} - {ep.title || "Episode"}</div>
                                     <div className="space-y-2">
-                                      {ep.links ? renderQualityLinks(ep.links, `se_${season.id}_${ep.id}`) : <span className="text-xs text-zinc-500">No links</span>}
+                                      {ep.links ? renderQualityLinks(ep.links, `se_${season.id}_${ep.id}`) : <span className="text-xs text-zinc-500">{t("No links")}</span>}
                                     </div>
                                   </div>
                                 ))}

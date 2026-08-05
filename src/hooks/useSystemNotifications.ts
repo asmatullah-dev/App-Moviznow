@@ -53,46 +53,9 @@ export function useSystemNotifications(profile: UserProfile | null) {
     const userTime = new Date(profile.createdAt).getTime();
 
     if (notifTime > userTime) {
-      // Fallback: If FCM is not configured or fails, show notification manually
-      const showManualNotification = () => {
-        if (Notification.permission === 'granted') {
-          navigator.serviceWorker.getRegistrations().then((registrations) => {
-            const myReg = registrations.find(
-              (reg) => reg.active && (reg.active.scriptURL.includes("sw.js") || reg.active.scriptURL.includes("firebase-messaging-sw.js"))
-            );
-            
-            let targetUrl = '/';
-            if (latestNotification.buttonUrl) {
-              targetUrl = latestNotification.buttonUrl;
-            } else if (latestNotification.contentId) {
-              targetUrl = latestNotification.type === 'movie' ? `/movie/${latestNotification.contentId}` : `/series/${latestNotification.contentId}`;
-            }
-
-            const options = {
-              body: latestNotification.body,
-              icon: latestNotification.posterUrl || '/launcher.svg',
-              image: latestNotification.posterUrl,
-              badge: '/launcher.svg',
-              data: { url: targetUrl },
-              tag: latestNotification.id,
-              renotify: true
-            };
-
-            if (myReg) {
-              myReg.showNotification(latestNotification.title, options as any);
-            } else {
-              new Notification(latestNotification.title, options as any);
-            }
-          }).catch(err => {
-            new Notification(latestNotification.title, {
-              body: latestNotification.body,
-              icon: latestNotification.posterUrl || '/launcher.svg',
-            } as any);
-          });
-        }
-      };
-
-      showManualNotification();
+      // FCM (Firebase Cloud Messaging) already handles displaying the push notifications.
+      // We do not need to manually trigger browser Notification API here because it causes duplicates.
+      // showManualNotification() has been removed.
     }
   }, [profile, notifications]);
 }

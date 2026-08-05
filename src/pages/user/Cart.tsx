@@ -3,10 +3,13 @@ import { useCart } from '../../contexts/CartContext';
 import { useAuth, standardizePhone } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useSettings } from '../../contexts/SettingsContext';
-import { ArrowLeft, Trash2, Copy, Check, Send, Loader2, Wallet, Smartphone, CreditCard, Banknote } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { ArrowLeft, Trash2, Copy, Check, Send, Loader2, Wallet, Smartphone, CreditCard, Banknote, ShoppingBag, Film, Tv, Sparkles, CheckCircle2, Compass } from 'lucide-react';
+import { useNavigate, Link } from 'react-router-dom';
 import AlertModal from '../../components/AlertModal';
-
+import { NotificationMenu } from '../../components/NotificationMenu';
+import { UserProfileMenu } from '../../components/UserProfileMenu';
+import { CartButton } from '../../components/CartButton';
+import { AdminButtons } from '../../components/AdminButtons';
 
 import { motion } from 'framer-motion';
 import PreviousOrders from '../../components/PreviousOrders';
@@ -86,56 +89,121 @@ export default function Cart() {
   };
 
   return (
-    <motion.div 
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="min-h-screen bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white p-4 md:p-8 transition-colors duration-300"
-    >
-      <div className="max-w-2xl mx-auto">
-        <button onClick={() => navigate('/')} className="flex items-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white mb-6 transition-all active:scale-95">
-          <ArrowLeft className="w-5 h-5 mr-2" />
-          {t('Back to Home')}
-        </button>
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white flex flex-col transition-colors duration-300">
+      <header className="sticky top-0 z-40 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md border-b border-zinc-200/80 dark:border-zinc-800/80 transition-colors duration-300">
+        <div className="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => navigate('/')} 
+              className="p-2 -ml-2 rounded-xl text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800/60 transition-all active:scale-95 cursor-pointer"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-500 text-white flex items-center justify-center shadow-md shadow-emerald-500/20">
+                <ShoppingBag className="w-4 h-4" />
+              </div>
+              <h1 className="text-lg font-extrabold text-zinc-900 dark:text-white">{t('Your Cart')}</h1>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <NotificationMenu />
+            <AdminButtons profile={profile} />
+            <UserProfileMenu />
+          </div>
+        </div>
+      </header>
 
-        <h1 className="text-2xl font-bold mb-6">{t('Your Cart')}</h1>
+      <main className="flex-1 max-w-2xl mx-auto w-full px-4 py-8">
+        {/* Banner */}
+        <div className="relative mb-6 rounded-3xl overflow-hidden bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-700 p-6 text-white shadow-xl shadow-emerald-500/10">
+          <div className="absolute top-0 right-0 -translate-y-12 translate-x-12 w-64 h-64 bg-white/10 rounded-full blur-2xl pointer-events-none" />
+          <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 backdrop-blur-md text-xs font-bold tracking-wider uppercase mb-2 text-emerald-100">
+                <ShoppingBag className="w-3.5 h-3.5" />
+                <span>{t('Checkout Items')}</span>
+              </div>
+              <h2 className="text-2xl font-black tracking-tight">{t('Complete Your Order')}</h2>
+              <p className="text-emerald-100/90 text-xs sm:text-sm mt-1 max-w-md font-medium">
+                {t('Review your selected movies and series seasons before confirming your payment.')}
+              </p>
+            </div>
 
-        <div className="bg-zinc-50 dark:bg-zinc-900 rounded-xl p-6 mb-6">
+            <div className="px-4 py-2.5 rounded-2xl bg-white/10 backdrop-blur-md border border-white/15 flex items-center gap-2 self-start sm:self-center">
+              <Sparkles className="w-4 h-4 text-emerald-200" />
+              <span className="text-xs font-extrabold text-white">
+                {cart.length} {cart.length === 1 ? t('Item') : t('Items')}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Cart items list */}
+        <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 mb-6 border border-zinc-200/80 dark:border-zinc-800/80 shadow-sm">
           {cart.length > 0 ? (
-            <div className="space-y-4">
+            <div className="space-y-3">
               {cart.map((item, index) => (
-                <div key={index} className="flex items-start sm:items-center justify-between gap-4 border-b border-zinc-200 dark:border-zinc-800 pb-4 last:border-0 last:pb-0">
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold">{item.title}</h3>
-                    <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                      {item.type === 'season' ? `Season ${item.seasonNumber}` : t('Movie')}
-                    </p>
+                <div 
+                  key={index} 
+                  className="flex items-center justify-between gap-4 p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-950/80 border border-zinc-200/60 dark:border-zinc-800/60 transition-all"
+                >
+                  <div className="flex items-center gap-3.5 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0 font-bold">
+                      {item.type === 'season' ? <Tv className="w-5 h-5" /> : <Film className="w-5 h-5" />}
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="font-extrabold text-sm text-zinc-900 dark:text-white truncate">{item.title}</h3>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+                        {item.type === 'season' ? `${t('Season')} ${item.seasonNumber}` : t('Movie')}
+                      </p>
+                    </div>
                   </div>
+
                   <div className="flex items-center gap-3 shrink-0">
-                    <span className="font-bold whitespace-nowrap">Rs {item.price}</span>
+                    <span className="font-extrabold text-sm text-emerald-600 dark:text-emerald-400 px-3 py-1 bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800/80 rounded-xl shadow-2xs">
+                      Rs {item.price}
+                    </span>
                     <button 
                       onClick={() => removeFromCart(item.contentId, item.seasonId)}
-                      className="text-red-500 hover:text-red-400 p-2 -mr-2"
+                      className="p-2 rounded-xl text-zinc-400 hover:text-red-500 hover:bg-red-500/10 transition-all cursor-pointer active:scale-95"
+                      title={t('Remove Item')}
                     >
-                      <Trash2 className="w-5 h-5" />
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-center text-zinc-500 dark:text-zinc-400">{t('Your cart is empty. Add Movies and Series (Seasons) from home page and start watching.')}</p>
+            <div className="text-center py-8">
+              <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-400 flex items-center justify-center">
+                <ShoppingBag className="w-6 h-6" />
+              </div>
+              <p className="text-sm font-bold text-zinc-700 dark:text-zinc-300 mb-1">{t('Your cart is empty')}</p>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-xs mx-auto mb-4 font-medium">
+                {t('Add Movies and Series (Seasons) from home page and start watching.')}
+              </p>
+              <Link 
+                to="/" 
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-extrabold text-xs shadow-md shadow-emerald-500/20 active:scale-95 transition-all"
+              >
+                <Compass className="w-4 h-4" />
+                <span>{t('Browse Content')}</span>
+              </Link>
+            </div>
           )}
           
-          <div className="flex justify-between items-center border-t border-zinc-200 dark:border-zinc-800 pt-4 mt-4">
-            <span className="text-lg font-semibold">{t('Total Amount')}</span>
-            <span className="text-2xl font-bold text-red-500">Rs {totalPrice}</span>
+          <div className="flex justify-between items-center border-t border-zinc-200/80 dark:border-zinc-800/80 pt-4 mt-5">
+            <span className="text-sm font-semibold text-zinc-500 dark:text-zinc-400">{t('Total Amount')}</span>
+            <span className="text-2xl font-black text-emerald-600 dark:text-emerald-400">Rs {totalPrice}</span>
           </div>
         </div>
 
-                {!profile?.phone && (
-          <div className="bg-zinc-50 dark:bg-zinc-900 rounded-xl p-6 mb-6 shadow-2xl border border-zinc-200 dark:border-zinc-800/50">
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <Smartphone className="w-5 h-5 text-emerald-500" />
+        {!profile?.phone && (
+          <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 mb-6 border border-zinc-200/80 dark:border-zinc-800/80 shadow-sm">
+            <h2 className="text-base font-extrabold mb-3 flex items-center gap-2 text-zinc-900 dark:text-white">
+              <Smartphone className="w-4 h-4 text-emerald-500" />
               {t('WhatsApp Number')}
             </h2>
             <input
@@ -143,18 +211,18 @@ export default function Cart() {
               value={whatsappNumber}
               onChange={(e) => setWhatsappNumber(e.target.value)}
               placeholder="e.g. 03001234567"
-              className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-zinc-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all outline-none"
+              className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all outline-none"
             />
           </div>
         )}
 
-{settings?.isPaymentEnabled !== false && (
-          <div className="bg-zinc-50 dark:bg-zinc-900 rounded-xl p-6 mb-6 shadow-2xl border border-zinc-200 dark:border-zinc-800/50">
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <Wallet className="w-5 h-5 text-emerald-500" />
+        {settings?.isPaymentEnabled !== false && (
+          <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 mb-6 border border-zinc-200/80 dark:border-zinc-800/80 shadow-sm">
+            <h2 className="text-base font-extrabold mb-2 flex items-center gap-2 text-zinc-900 dark:text-white">
+              <Wallet className="w-4 h-4 text-emerald-500" />
               {t('Payment Details')}
             </h2>
-            <p className="text-zinc-500 dark:text-zinc-400 mb-6 text-sm">
+            <p className="text-zinc-500 dark:text-zinc-400 mb-5 text-xs font-medium">
               {t('Please send the payment to the following account via any of these methods:')}
             </p>
             
@@ -163,32 +231,35 @@ export default function Cart() {
         )}
 
         <div className="text-center mb-6">
-          <p className="text-zinc-500 dark:text-zinc-400 text-sm">
+          <p className="text-zinc-500 dark:text-zinc-400 text-xs font-medium">
             {settings?.isPaymentEnabled !== false ? t('After Payment Send Screenshot for Approval') : t('Submit your request for approval')}
           </p>
         </div>
 
-        <button
-          onClick={handleConfirm}
-          disabled={loading || confirmed || cart.length === 0}
-          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50 border border-white/20 shadow-lg mb-4"
-        >
-          {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : confirmed ? t('Confirmed') : t('Confirm Order')}
-        </button>
-
-        {settings?.isAdminContactEnabled !== false && (
+        <div className="space-y-3 mb-8">
           <button
-            onClick={handleSendPaymentScreenshot}
-            disabled={loading}
-            className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50 border border-white/20 shadow-lg"
+            onClick={handleConfirm}
+            disabled={loading || confirmed || cart.length === 0}
+            className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-extrabold py-3.5 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-98 disabled:opacity-50 shadow-lg shadow-blue-500/20 text-sm cursor-pointer"
           >
-            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-            {loading ? t('Processing...') : (settings?.isPaymentEnabled !== false ? t('Send Payment Screenshot') : t('Contact Admin For Order'))}
+            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : confirmed ? <CheckCircle2 className="w-5 h-5" /> : null}
+            <span>{loading ? t('Processing...') : confirmed ? t('Order Confirmed') : t('Confirm Order')}</span>
           </button>
-        )}
+
+          {settings?.isAdminContactEnabled !== false && (
+            <button
+              onClick={handleSendPaymentScreenshot}
+              disabled={loading}
+              className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-extrabold py-3.5 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-98 disabled:opacity-50 shadow-lg shadow-emerald-500/20 text-sm cursor-pointer"
+            >
+              {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+              <span>{loading ? t('Processing...') : (settings?.isPaymentEnabled !== false ? t('Send Payment Screenshot') : t('Contact Admin For Order'))}</span>
+            </button>
+          )}
+        </div>
 
         <PreviousOrders />
-      </div>
+      </main>
 
       <AlertModal
         isOpen={alertConfig.isOpen}
@@ -196,6 +267,6 @@ export default function Cart() {
         title={alertConfig.title}
         message={alertConfig.message}
       />
-    </motion.div>
+    </div>
   );
 }
