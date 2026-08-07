@@ -794,36 +794,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
 
             if (extensionDays > 0) {
-              const inviterRef = doc(db, "users", mergedProfile.referredBy);
-              const inviterSnap = await getDoc(inviterRef);
-              if (inviterSnap.exists()) {
-                const inviterData = inviterSnap.data();
-                const { writeBatch } = await import("firebase/firestore");
-                const batch = writeBatch(db);
-                const inviterUpdates: any = {};
-                
-                if (inviterData.expiryDate !== "Lifetime") {
-                  let newExpiry = new Date();
-                  if (inviterData.expiryDate) {
-                    const currentExpiry = new Date(inviterData.expiryDate);
-                    newExpiry = currentExpiry > new Date() ? currentExpiry : new Date();
-                  }
-                  newExpiry.setDate(newExpiry.getDate() + extensionDays);
-                  inviterUpdates.expiryDate = newExpiry.toISOString();
-                  
-                  inviterUpdates.status = "active";
-                }
-                
-                if (Object.keys(inviterUpdates).length > 0) {
-                  batch.update(inviterRef, inviterUpdates);
-                }
-                batch.update(userRef, updates);
-                await batch.commit();
-                
-                // Update local profile state
-                Object.assign(mergedProfile, updates);
-                safeStorage.setItem("profile_cache", JSON.stringify(mergedProfile));
-              }
+              const { writeBatch } = await import("firebase/firestore");
+              const batch = writeBatch(db);
+              batch.set(userRef, updates, { merge: true });
+              await batch.commit();
+              
+              // Update local profile state
+              Object.assign(mergedProfile, updates);
+              safeStorage.setItem("profile_cache", JSON.stringify(mergedProfile));
             }
           } catch (e) {
             console.error("Failed to process referral rewards", e);
@@ -1582,6 +1560,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             displayName:
               (currentUser.displayName && currentUser.displayName.trim()) ||
               (mergedOldData.displayName && mergedOldData.displayName.trim()) ||
+              (currentUser.email ? currentUser.email.split('@')[0] : '') ||
               (standardizedUserPhone ? `User (${standardizedUserPhone})` : `User ${currentUser.uid.slice(0, 6)}`),
             photoURL: currentUser.photoURL || mergedOldData.photoURL || "",
             referralCode: mergedOldData.referralCode || generateReferralCode(currentUser.uid),

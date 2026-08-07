@@ -889,7 +889,7 @@ export default function Home({
 
                 {/* Referral Banner for Pending & Expired Users */}
         {isPendingOrExpiredUser && !isReferralBannerDismissed && (
-          <div className="relative overflow-hidden bg-gradient-to-r from-rose-900/40 via-purple-900/30 to-amber-900/40 dark:from-rose-950/60 dark:via-purple-950/50 dark:to-amber-950/60 border border-rose-500/30 dark:border-rose-500/40 shadow-xl rounded-2xl sm:rounded-3xl p-4 sm:p-6 mb-8 text-white transition-all">
+          <div className="relative overflow-hidden bg-gradient-to-r from-rose-950 via-purple-950 to-amber-950 border border-rose-500/30 dark:border-rose-500/40 shadow-xl rounded-2xl sm:rounded-3xl p-4 sm:p-6 mb-8 text-white transition-all">
             {/* Ambient Background Glows */}
             <div className="absolute -top-12 -right-12 w-48 h-48 bg-rose-500/20 blur-3xl rounded-full pointer-events-none" />
             <div className="absolute -bottom-12 -left-12 w-48 h-48 bg-amber-500/20 blur-3xl rounded-full pointer-events-none" />

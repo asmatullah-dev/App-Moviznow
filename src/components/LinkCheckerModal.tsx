@@ -51,6 +51,65 @@ import {
   setFilmygoDomain
 } from '../utils/domains';
 
+export const getLocationTag = (item: {
+  season?: number;
+  episode?: number;
+  isFullSeasonMKV?: boolean;
+  isFullSeasonZIP?: boolean;
+  fileName?: string;
+  url?: string;
+  finalUrl?: string;
+}): string | null => {
+  let season = item.season;
+  let episode = item.episode;
+  let isFullSeasonMKV = item.isFullSeasonMKV;
+  let isFullSeasonZIP = item.isFullSeasonZIP;
+
+  // Fallback parsing from fileName, url, or finalUrl if season or episode missing
+  if (season === undefined && episode === undefined) {
+    const textToScan = `${item.fileName || ''} ${item.finalUrl || ''} ${item.url || ''}`.toLowerCase();
+    const hasRange = /(?:e|ep|episode)\s*\d+\s*(?:-|to|&)\s*(?:e|ep)?\d+/i.test(textToScan);
+
+    const combinedMatch = hasRange ? null : (
+      textToScan.match(/(?<=^|[^a-zA-Z0-9])s(\d+)\s*e(\d+)(?![a-z0-9])/i) ||
+      textToScan.match(/season\s*(\d+).*?episode\s*(\d+)/i) ||
+      textToScan.match(/(?<=^|[^a-zA-Z0-9])dl\s+(\d+)\s+(\d+)(?![a-z0-9])/i)
+    );
+
+    if (combinedMatch) {
+      season = parseInt(combinedMatch[1], 10);
+      episode = parseInt(combinedMatch[2], 10);
+    } else {
+      const sMatch = textToScan.match(/(?<=^|[^a-zA-Z0-9])(?:s(\d+)|season\s*(\d+)|ss\s*(\d+))(?![a-z0-9])/i);
+      const eMatch = hasRange ? null : textToScan.match(/(?<=^|[^a-zA-Z0-9])(?:e(\d+)|episode\s*(\d+)|ep\s*(\d+))(?![a-z0-9])/i);
+
+      if (sMatch) season = parseInt(sMatch[1] || sMatch[2] || sMatch[3], 10);
+      if (eMatch) episode = parseInt(eMatch[1] || eMatch[2] || eMatch[3], 10);
+
+      if (textToScan.includes(".zip")) isFullSeasonZIP = true;
+      else if (textToScan.includes(".mkv") || hasRange || /full season|complete season|all episodes/i.test(textToScan)) {
+        isFullSeasonMKV = true;
+      }
+    }
+  }
+
+  if (season !== undefined && episode !== undefined) {
+    return `S${season}E${episode}`;
+  }
+  if (season !== undefined) {
+    if (isFullSeasonZIP) return `S${season} ZIP`;
+    if (isFullSeasonMKV) return `S${season} MKV`;
+    return `S${season}`;
+  }
+  if (episode !== undefined) {
+    return `E${episode}`;
+  }
+  if (isFullSeasonZIP) return `ZIP`;
+  if (isFullSeasonMKV) return `MKV`;
+
+  return null;
+};
+
 const PostPoster: React.FC<{ image?: string; title: string }> = ({ image, title }) => {
   const [imgError, setImgError] = useState(false);
 
@@ -601,6 +660,7 @@ type Props = {
     }[]
   ) => void;
   onResults?: (results: LinkCheckResult[]) => void;
+  content?: Content | null;
   languages?: Language[];
   qualities?: Quality[];
   disableAutoClipboard?: boolean;
@@ -629,6 +689,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
   onAddLinks,
   onBatchAddLinks,
   onResults,
+  content,
   languages = [],
   qualities = [],
   disableAutoClipboard = false,
@@ -766,6 +827,241 @@ export const LinkCheckerModal: React.FC<Props> = ({
     });
     return { moviesdriveAvailCount: availCount, moviesdriveMissingCount: missingCount };
   }, [moviesdrivePostsWithAvailability]);
+
+  const searchLocationInContent = React.useCallback((contentObj: any, url: string, finalUrl?: string) => {
+    if (!contentObj) return null;
+
+    const normUrl = normalizeUrl(url);
+    const normFinal = finalUrl ? normalizeUrl(finalUrl) : undefined;
+    const targetUrls = [url, finalUrl, normUrl, normFinal].filter(Boolean) as string[];
+
+    const extractId = (u: string) => {
+      if (!u) return null;
+      const m = u.match(/\/(?:u|l|file|d|get|drive|link)\/([a-zA-Z0-9_-]+)/i);
+      if (m) return m[1];
+      return null;
+    };
+
+    const targetIds = [extractId(url), finalUrl ? extractId(finalUrl) : null].filter((id): id is string => !!id && id.length >= 4);
+
+    const isMatch = (candUrl?: string) => {
+      if (!candUrl) return false;
+      if (targetUrls.some(tu => tu && (candUrl.includes(tu) || tu.includes(candUrl)))) return true;
+      const candNorm = normalizeUrl(candUrl);
+      if (targetUrls.some(tu => tu && (candNorm.includes(tu) || tu.includes(candNorm)))) return true;
+      const candId = extractId(candUrl);
+      if (candId && targetIds.some(tid => tid === candId || candUrl.includes(tid))) return true;
+      return false;
+    };
+
+    const safeParse = (data: any) => {
+      if (!data) return [];
+      if (typeof data === 'string') {
+        try { return JSON.parse(data); } catch { return []; }
+      }
+      return data;
+    };
+
+    // Check seasons
+    const seasonsData = safeParse(contentObj.seasons);
+    if (Array.isArray(seasonsData)) {
+      for (const s of seasonsData) {
+        const sNum = s.seasonNumber ?? s.season ?? s.number;
+        const parsedSNum = sNum !== undefined ? parseInt(String(sNum), 10) : undefined;
+
+        // Check zipLinks
+        const zipLinks = safeParse(s.zipLinks);
+        if (Array.isArray(zipLinks)) {
+          for (const zl of zipLinks) {
+            if (isMatch(zl.url)) {
+              const zS = zl.season !== undefined ? parseInt(String(zl.season), 10) : parsedSNum;
+              const zE = zl.episode !== undefined ? parseInt(String(zl.episode), 10) : undefined;
+              return {
+                season: zS,
+                episode: zE,
+                isFullSeasonZIP: zl.isFullSeasonZIP ?? true,
+                isFullSeasonMKV: zl.isFullSeasonMKV,
+                qualityLabel: zl.name || zl.quality
+              };
+            }
+          }
+        }
+
+        // Check mkvLinks
+        const mkvLinks = safeParse(s.mkvLinks);
+        if (Array.isArray(mkvLinks)) {
+          for (const ml of mkvLinks) {
+            if (isMatch(ml.url)) {
+              const mS = ml.season !== undefined ? parseInt(String(ml.season), 10) : parsedSNum;
+              const mE = ml.episode !== undefined ? parseInt(String(ml.episode), 10) : undefined;
+              return {
+                season: mS,
+                episode: mE,
+                isFullSeasonMKV: ml.isFullSeasonMKV ?? true,
+                isFullSeasonZIP: ml.isFullSeasonZIP,
+                qualityLabel: ml.name || ml.quality
+              };
+            }
+          }
+        }
+
+        // Check episodes
+        const episodes = safeParse(s.episodes);
+        if (Array.isArray(episodes)) {
+          for (const ep of episodes) {
+            const epNum = ep.episodeNumber ?? ep.episode ?? ep.number ?? ep.ep;
+            const parsedEpNum = epNum !== undefined ? parseInt(String(epNum), 10) : undefined;
+
+            const links = safeParse(ep.links);
+            if (Array.isArray(links)) {
+              for (const l of links) {
+                if (isMatch(l.url)) {
+                  const lS = l.season !== undefined ? parseInt(String(l.season), 10) : parsedSNum;
+                  const lE = l.episode !== undefined ? parseInt(String(l.episode), 10) : parsedEpNum;
+                  return {
+                    season: lS,
+                    episode: lE,
+                    isFullSeasonMKV: l.isFullSeasonMKV,
+                    isFullSeasonZIP: l.isFullSeasonZIP,
+                    qualityLabel: l.name || l.quality
+                  };
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Check top-level content fields
+    const topZip = safeParse(contentObj.fullSeasonZip || contentObj.zipLinks);
+    if (Array.isArray(topZip)) {
+      for (const zl of topZip) {
+        if (isMatch(zl.url)) {
+          return {
+            season: zl.season !== undefined ? parseInt(String(zl.season), 10) : undefined,
+            episode: zl.episode !== undefined ? parseInt(String(zl.episode), 10) : undefined,
+            isFullSeasonZIP: zl.isFullSeasonZIP ?? true,
+            qualityLabel: zl.name || zl.quality
+          };
+        }
+      }
+    }
+
+    const topMkv = safeParse(contentObj.fullSeasonMkv || contentObj.mkvLinks);
+    if (Array.isArray(topMkv)) {
+      for (const ml of topMkv) {
+        if (isMatch(ml.url)) {
+          return {
+            season: ml.season !== undefined ? parseInt(String(ml.season), 10) : undefined,
+            episode: ml.episode !== undefined ? parseInt(String(ml.episode), 10) : undefined,
+            isFullSeasonMKV: ml.isFullSeasonMKV ?? true,
+            qualityLabel: ml.name || ml.quality
+          };
+        }
+      }
+    }
+
+    return null;
+  }, []);
+
+  const resolveLocationAndMetadata = React.useCallback((res: LinkCheckResult) => {
+    let season = res.season;
+    let episode = res.episode;
+    let isFullSeasonMKV = res.isFullSeasonMKV;
+    let isFullSeasonZIP = res.isFullSeasonZIP;
+    let qualityLabel = res.qualityLabel;
+
+    const url = res.url || '';
+    const finalUrl = res.finalUrl || '';
+
+    // 1. Try search in passed `content` prop or items in `contentList`
+    const searchTargets = [content, ...(contentList || [])].filter(Boolean);
+
+    for (const cItem of searchTargets) {
+      const loc = searchLocationInContent(cItem, url, finalUrl);
+      if (loc) {
+        if (season === undefined) season = loc.season;
+        if (episode === undefined) episode = loc.episode;
+        if (isFullSeasonMKV === undefined || !isFullSeasonMKV) isFullSeasonMKV = loc.isFullSeasonMKV;
+        if (isFullSeasonZIP === undefined || !isFullSeasonZIP) isFullSeasonZIP = loc.isFullSeasonZIP;
+        if (!qualityLabel) qualityLabel = loc.qualityLabel;
+        if (season !== undefined || episode !== undefined || isFullSeasonMKV || isFullSeasonZIP) {
+          break;
+        }
+      }
+    }
+
+    // 2. Try extractedMetaRef.current by direct URL, normalized URL, or file ID
+    if (season === undefined && episode === undefined && !isFullSeasonMKV && !isFullSeasonZIP) {
+      const normUrl = normalizeUrl(url);
+      const normFinal = finalUrl ? normalizeUrl(finalUrl) : undefined;
+
+      let meta = extractedMetaRef.current[url] || 
+                 extractedMetaRef.current[normUrl] || 
+                 (normFinal ? extractedMetaRef.current[normFinal] : undefined);
+
+      if (!meta || (meta.season === undefined && meta.episode === undefined)) {
+        try {
+          const extractId = (u: string) => {
+            const m = u.match(/\/(?:u|l|file|d|get|drive|link)\/([a-zA-Z0-9_-]+)/i) || u.match(/([a-zA-Z0-9_-]{8,})/);
+            return m ? m[1] : null;
+          };
+          const id = extractId(url) || (finalUrl ? extractId(finalUrl) : null);
+          if (id && id.length >= 4) {
+            for (const [mUrl, mData] of Object.entries(extractedMetaRef.current)) {
+              if (mUrl.includes(id)) {
+                meta = mData;
+                break;
+              }
+            }
+          }
+        } catch (e) {}
+      }
+
+      if (meta) {
+        if (season === undefined) season = meta.season;
+        if (episode === undefined) episode = meta.episode;
+        if (isFullSeasonMKV === undefined) isFullSeasonMKV = meta.isFullSeasonMKV;
+        if (isFullSeasonZIP === undefined) isFullSeasonZIP = meta.isFullSeasonZIP;
+        if (!qualityLabel) qualityLabel = meta.qualityLabel;
+      }
+    }
+
+    // 3. Try parsing from inputRef.current text with upwards scanning
+    if (season === undefined && episode === undefined && !isFullSeasonMKV && !isFullSeasonZIP) {
+      const textMeta = detectMetadataForLink(inputRef.current, url, languages, qualities);
+      if (season === undefined) season = textMeta.season;
+      if (episode === undefined) episode = textMeta.episode;
+      if (isFullSeasonMKV === undefined) isFullSeasonMKV = textMeta.isFullSeasonMKV;
+      if (isFullSeasonZIP === undefined) isFullSeasonZIP = textMeta.isFullSeasonZIP;
+      if (!qualityLabel) qualityLabel = textMeta.qualityLabel;
+    }
+
+    // 4. Try parsing from url / finalUrl string itself as last resort
+    if (season === undefined && episode === undefined && !isFullSeasonMKV && !isFullSeasonZIP) {
+      const urlText = `${finalUrl} ${url}`;
+      const sMatch = urlText.match(/(?<=^|[^a-zA-Z0-9])(?:s(\d+)|season\s*(\d+))(?![a-z0-9])/i);
+      const eMatch = urlText.match(/(?<=^|[^a-zA-Z0-9])(?:e(\d+)|episode\s*(\d+))(?![a-z0-9])/i);
+      if (sMatch) season = parseInt(sMatch[1] || sMatch[2], 10);
+      if (eMatch) episode = parseInt(eMatch[1] || eMatch[2], 10);
+      if (urlText.toLowerCase().includes(".zip")) isFullSeasonZIP = true;
+      if (urlText.toLowerCase().includes(".mkv")) isFullSeasonMKV = true;
+    }
+
+    const mergedResult: LinkCheckResult = {
+      ...res,
+      season,
+      episode,
+      isFullSeasonMKV,
+      isFullSeasonZIP,
+      qualityLabel: res.qualityLabel || qualityLabel
+    };
+
+    const tag = getLocationTag(mergedResult);
+
+    return { mergedResult, tag };
+  }, [content, contentList, languages, qualities, searchLocationInContent]);
 
   const areAllFilteredSelected = useMemo(() => {
     if (moviesdriveFilteredPosts.length === 0) return false;
@@ -1477,11 +1773,21 @@ export const LinkCheckerModal: React.FC<Props> = ({
             }
           } catch (e: any) {
             console.error(`Error checking link ${u}:`, e);
+            const meta = extractedMetaRef.current[u] || extractedMetaRef.current[normalizeUrl(u)] || {};
             const errorResult: LinkCheckResult = {
               url: u,
               ok: false,
               statusLabel: "UNKNOWN",
-              message: e?.message || "Check failed due to a network or fetch error."
+              message: e?.message || "Check failed due to a network or fetch error.",
+              season: meta.season,
+              episode: meta.episode,
+              isFullSeasonMKV: meta.isFullSeasonMKV,
+              isFullSeasonZIP: meta.isFullSeasonZIP,
+              qualityLabel: meta.qualityLabel,
+              codecLabel: meta.codecLabel,
+              audioLabel: meta.audioLabel,
+              subtitleLabel: meta.subtitleLabel,
+              printQualityLabel: meta.printQualityLabel,
             };
             allResults.push(errorResult);
             completedCount++;
@@ -1672,10 +1978,11 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
       const hasEpisodeRange = /(?:e|ep|episode)\s*\d+\s*(?:-|to|&)\s*(?:e|ep)?\d+/i.test(source);
 
-      if (detectedS !== undefined) linkItem.season = detectedS;
-      if (detectedE !== undefined && !hasEpisodeRange) {
-        linkItem.episode = detectedE;
-      }
+      const finalS = detectedS !== undefined ? detectedS : r.season;
+      const finalE = (detectedE !== undefined && !hasEpisodeRange) ? detectedE : r.episode;
+
+      if (finalS !== undefined) linkItem.season = finalS;
+      if (finalE !== undefined) linkItem.episode = finalE;
       if (source.includes('.zip')) {
         linkItem.isFullSeasonZIP = true;
       } else if (hasEpisodeRange || /full season|all episodes|complete/i.test(source)) {
@@ -2516,15 +2823,27 @@ export const LinkCheckerModal: React.FC<Props> = ({
                               {mdriveSelectedIndices.has(i) && <CheckCircle2 className="w-4 h-4 text-white" />}
                             </div>
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <h4 className="text-sm font-bold truncate text-zinc-900 dark:text-white flex-1">
-                                  {item.file_name || 'HubCloud Link'}
-                                </h4>
-                              </div>
-                              <p className="text-[10px] text-zinc-500 flex items-center gap-2 mt-1 truncate">
-                                <LinkIcon className="w-3 h-3" />
-                                {item.url}
-                              </p>
+                              {(() => {
+                                const locTag = getLocationTag({ fileName: item.file_name, url: item.url });
+                                return (
+                                  <>
+                                    <div className="flex items-center gap-2">
+                                      {locTag && (
+                                        <span className="px-2 py-0.5 rounded text-[11px] font-mono font-extrabold bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 border border-indigo-500/30 shrink-0">
+                                          {locTag}
+                                        </span>
+                                      )}
+                                      <h4 className="text-sm font-bold truncate text-zinc-900 dark:text-white flex-1">
+                                        {item.file_name || 'HubCloud Link'}
+                                      </h4>
+                                    </div>
+                                    <p className="text-[10px] text-zinc-500 flex items-center gap-2 mt-1 truncate">
+                                      <LinkIcon className="w-3 h-3 shrink-0" />
+                                      <span className="truncate">{item.url}</span>
+                                    </p>
+                                  </>
+                                );
+                              })()}
                             </div>
                             <div className="flex items-center gap-2">
                               {(item.size || item.file_size) ? (
@@ -2980,7 +3299,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
                 )}
 
                 <div className="space-y-3 max-h-[500px] overflow-auto pr-1">
-                  {sortedResults.map((result) => {
+                  {sortedResults.map((rawResult) => {
+                    const { mergedResult: result, tag: locationTag } = resolveLocationAndMetadata(rawResult);
                     const statusLabel = result.statusLabel || (result.ok ? "WORKING" : "UNKNOWN");
                     const openRow = !!expanded[result.url];
                     
@@ -3014,16 +3334,24 @@ export const LinkCheckerModal: React.FC<Props> = ({
                                     </div>
                                   )}
                                 </div>
-                                <div className="mt-2 flex flex-wrap gap-2">
+                                <div className="mt-2 flex flex-wrap gap-2 items-center">
                                   {result.qualityLabel ? <span className="rounded-full border border-fuchsia-200 dark:border-fuchsia-800 bg-fuchsia-500/10 px-2.5 py-1 text-[11px] font-medium text-fuchsia-600 dark:text-fuchsia-300">{result.qualityLabel}</span> : null}
                                   {result.printQualityLabel ? <span className="rounded-full border border-rose-200 dark:border-rose-800 bg-rose-500/10 px-2.5 py-1 text-[11px] font-medium text-rose-600 dark:text-rose-300">{result.printQualityLabel}</span> : null}
                                   {result.codecLabel ? <span className="rounded-full border border-indigo-200 dark:border-indigo-800 bg-indigo-500/10 px-2.5 py-1 text-[11px] font-medium text-indigo-600 dark:text-indigo-300">{result.codecLabel}</span> : null}
                                   {result.audioLabel ? <span className="rounded-full border border-emerald-200 dark:border-emerald-800 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-300">{result.audioLabel}</span> : null}
                                   {result.subtitleLabel ? <span className="rounded-full border border-amber-200 dark:border-amber-800 bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium text-amber-600 dark:text-amber-300">{result.subtitleLabel}</span> : null}
-                                  {result.season ? <span className="rounded-full border border-blue-200 dark:border-blue-800 bg-blue-500/10 px-2.5 py-1 text-[11px] font-bold text-blue-600 dark:text-blue-300">Season {result.season}</span> : null}
-                                  {result.episode ? <span className="rounded-full border border-indigo-200 dark:border-indigo-800 bg-indigo-500/10 px-2.5 py-1 text-[11px] font-bold text-indigo-600 dark:text-indigo-300">Episode {result.episode}</span> : null}
-                                  {result.isFullSeasonMKV ? <span className="rounded-full border border-purple-200 dark:border-purple-800 bg-purple-500/10 px-2.5 py-1 text-[11px] font-bold text-purple-600 dark:text-purple-300">Full Season MKV</span> : null}
-                                  {result.isFullSeasonZIP ? <span className="rounded-full border border-purple-200 dark:border-purple-800 bg-purple-500/10 px-2.5 py-1 text-[11px] font-bold text-purple-600 dark:text-purple-300">Full Season ZIP</span> : null}
+                                  {locationTag ? (
+                                    <span className="rounded-full border border-indigo-300 dark:border-indigo-700 bg-indigo-500/20 px-2.5 py-1 text-[11px] font-extrabold text-indigo-600 dark:text-indigo-300 shadow-xs">
+                                      Location: {locationTag}
+                                    </span>
+                                  ) : (
+                                    <>
+                                      {result.season ? <span className="rounded-full border border-blue-200 dark:border-blue-800 bg-blue-500/10 px-2.5 py-1 text-[11px] font-bold text-blue-600 dark:text-blue-300">Season {result.season}</span> : null}
+                                      {result.episode ? <span className="rounded-full border border-indigo-200 dark:border-indigo-800 bg-indigo-500/10 px-2.5 py-1 text-[11px] font-bold text-indigo-600 dark:text-indigo-300">Episode {result.episode}</span> : null}
+                                      {result.isFullSeasonMKV ? <span className="rounded-full border border-purple-200 dark:border-purple-800 bg-purple-500/10 px-2.5 py-1 text-[11px] font-bold text-purple-600 dark:text-purple-300">Full Season MKV</span> : null}
+                                      {result.isFullSeasonZIP ? <span className="rounded-full border border-purple-200 dark:border-purple-800 bg-purple-500/10 px-2.5 py-1 text-[11px] font-bold text-purple-600 dark:text-purple-300">Full Season ZIP</span> : null}
+                                    </>
+                                  )}
                                 </div>
                                 {(result.url.toLowerCase().includes("hubcloud") || (result.candidates && result.candidates.length > 0)) && (
                                   <div className="mt-2 flex flex-wrap gap-2 items-center">
@@ -3057,7 +3385,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
                                     )}
                                   </div>
                                 )}
-                                <div className="mt-2 break-all text-sm text-zinc-700 dark:text-zinc-200">{result.url}</div>
+                                <div className="mt-2 flex items-center gap-2 flex-wrap">
+                                  <span className="break-all text-sm font-medium text-zinc-700 dark:text-zinc-200 select-all">{result.url}</span>
+                                </div>
                                 {result.finalUrl && result.finalUrl !== result.url && (
                                   <div className="mt-1 break-all text-xs text-zinc-500 dark:text-zinc-400">Redirects to: {result.finalUrl}</div>
                                 )}
@@ -3092,6 +3422,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                               {result.codecLabel ? <div>Codec: {result.codecLabel}</div> : null}
                               {result.audioLabel ? <div>Audio: {result.audioLabel}</div> : null}
                               {result.subtitleLabel ? <div>Subtitles: {result.subtitleLabel}</div> : null}
+                              {locationTag ? <div>Location: <span className="font-mono font-bold text-indigo-500 dark:text-indigo-400">{locationTag}</span></div> : null}
                               {result.season ? <div>Season: {result.season}</div> : null}
                               {result.episode ? <div>Episode: {result.episode}</div> : null}
                               {result.isFullSeasonMKV ? <div>Full Season MKV: Yes</div> : null}

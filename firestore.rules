@@ -72,10 +72,10 @@ service cloud.firestore {
       let name = data.get('displayName', null);
       let refCode = data.get('referralCode', null);
       
-      let emailValid = email == null || (email is string && email.size() < 100);
+      let emailValid = email == null || (email is string && email.size() < 150);
       let phoneValid = phone == null || (phone is string && phone.size() < 50);
-      let nameValid = name == null || (name is string && name.size() < 100);
-      let refCodeValid = refCode == null || (refCode is string && refCode.size() < 20);
+      let nameValid = name == null || (name is string && name.size() < 200);
+      let refCodeValid = refCode == null || (refCode is string && refCode.size() < 50);
       
       // Only validate 'role' and 'status' if they exist in the update payload
       let roleValid = !('role' in data) || (data.role in ['admin', 'owner', 'manager', 'user_manager', 'content_manager', 'user', 'trial', 'selected_content', 'editor', 'temporary']);
@@ -87,9 +87,10 @@ service cloud.firestore {
     function protectedUserFieldsUnchanged() {
       let d = request.resource.data;
       let r = resource.data;
+      let statusIsExpired = d.get('status', '') == 'expired';
       // If a field is not present in the update, it is considered "unchanged" (i.e. we don't care if it's there or not, as long as it isn't being modified)
       return d.get('role', r.get('role', null)) == r.get('role', null) &&
-             d.get('status', r.get('status', null)) == r.get('status', null) &&
+             (d.get('status', r.get('status', null)) == r.get('status', null) || statusIsExpired) &&
              d.get('expiryDate', r.get('expiryDate', null)) == r.get('expiryDate', null) &&
              d.get('managedBy', r.get('managedBy', null)) == r.get('managedBy', null) &&
              d.get('permissions', r.get('permissions', null)) == r.get('permissions', null) &&
@@ -210,7 +211,9 @@ service cloud.firestore {
                                (('limit' in request.query) && request.query.limit <= 500) &&
                                (
                                  (request.query.filters.size() == 1 && request.query.filters[0].op == '==' && request.query.filters[0].field == 'referredBy' && request.query.filters[0].value == request.auth.uid) ||
-                                 (request.query.filters.size() == 1 && request.query.filters[0].op == '==' && request.query.filters[0].field == 'referralCode')
+                                 (request.query.filters.size() == 1 && request.query.filters[0].op == '==' && request.query.filters[0].field == 'referralCode') ||
+                                 (request.query.filters.size() == 1 && request.query.filters[0].op == '==' && request.query.filters[0].field == 'email') ||
+                                 (request.query.filters.size() == 1 && request.query.filters[0].op == '==' && request.query.filters[0].field == 'phone')
                                )
                              );
       allow create: if isAdmin() || (isValidUser(request.resource.data) && (

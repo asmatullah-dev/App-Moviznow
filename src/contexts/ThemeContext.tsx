@@ -25,16 +25,25 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const root = window.document.documentElement;
     
     const applyTheme = (t: Theme) => {
+      let isDark = false;
       if (t === 'dark') {
         root.classList.add('dark');
+        isDark = true;
       } else if (t === 'light') {
         root.classList.remove('dark');
+        isDark = false;
       } else {
-        if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (isDark) {
           root.classList.add('dark');
         } else {
           root.classList.remove('dark');
         }
+      }
+      
+      const metaThemeColor = document.querySelector('meta[name="theme-color"]');
+      if (metaThemeColor) {
+        metaThemeColor.setAttribute('content', isDark ? '#09090b' : '#ffffff');
       }
     };
 

@@ -2959,7 +2959,7 @@ export default function ContentManagement() {
             }
           }
       } else if (isMissingData) {
-         setShareAnywayConfig({ isOpen: true, content, mode });
+         setShareAnywayConfig({ isOpen: true, content: updatedContent, mode });
          return;
       }
 
@@ -2968,7 +2968,6 @@ export default function ContentManagement() {
       } else {
         await executeShare(updatedContent, selectedSeasonNumbers);
       }
-
     } catch (error) {
       console.error("Share Pipeline Error:", error);
       setShareAnywayConfig({ isOpen: true, content, mode });

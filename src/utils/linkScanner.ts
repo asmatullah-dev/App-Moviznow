@@ -251,8 +251,30 @@ export function detectMetadataForLink(
   qualities?: Quality[],
 ) {
   const lines = text.split(/\r?\n/);
-  const idx = lines.findIndex((line) => line.includes(url));
-  const windowLines = [
+  let idx = lines.findIndex((line) => line.includes(url));
+
+  if (idx === -1) {
+    try {
+      const parsed = new URL(url);
+      const path = parsed.pathname;
+      if (path && path.length > 2) {
+        idx = lines.findIndex((line) => line.includes(path));
+      }
+      if (idx === -1) {
+        const fileIdMatch = path.match(/\/(?:u|l|file|d|get|drive|link)\/([a-zA-Z0-9_-]+)/i);
+        if (fileIdMatch?.[1]) {
+          idx = lines.findIndex((line) => line.includes(fileIdMatch[1]));
+        }
+      }
+    } catch (e) {}
+  }
+
+  if (idx === -1) {
+    const lowerUrl = url.toLowerCase();
+    idx = lines.findIndex((line) => line.toLowerCase().includes(lowerUrl));
+  }
+
+  const windowLines = idx !== -1 ? [
     lines[idx - 3] || "",
     lines[idx - 2] || "",
     lines[idx - 1] || "",
@@ -260,7 +282,7 @@ export function detectMetadataForLink(
     lines[idx + 1] || "",
     lines[idx + 2] || "",
     lines[idx + 3] || "",
-  ].join(" ");
+  ].join(" ") : text;
 
   const lower = windowLines.toLowerCase();
 
@@ -407,12 +429,87 @@ export function detectMetadataForLink(
     ...(() => {
       const yearMatch = lower.match(/\b(19\d{2}|20\d{2})\b/);
       const year = yearMatch ? parseInt(yearMatch[1]) : undefined;
-      const seriesPattern =
-        /(?<=^|[^a-zA-Z0-9])(?:s(?:eason)?\s*(\d+))(?:\s*e(?:pisode|p)?\s*(\d+))?(?![a-z0-9])/i;
-      const seriesMatch = lower.match(seriesPattern);
-      const season = seriesMatch ? parseInt(seriesMatch[1]) : undefined;
-      const episode =
-        !hasRange && seriesMatch && seriesMatch[2] ? parseInt(seriesMatch[2]) : undefined;
+      
+      let season: number | undefined;
+      let episode: number | undefined;
+
+      // 1. Upward scan from line idx (where link was found) for nearest season/episode header
+      if (idx !== -1) {
+        for (let i = idx; i >= Math.max(0, idx - 50); i--) {
+          const lineStr = lines[i] || "";
+          const lowerLine = lineStr.toLowerCase();
+
+          const hasRangeInLine = /(?:e|ep|episode)\s*\d+\s*(?:-|to|&)\s*(?:e|ep)?\d+/i.test(lowerLine);
+
+          const combMatch = !hasRangeInLine ? (
+            lowerLine.match(/(?<=^|[^a-zA-Z0-9])s(\d+)\s*e(\d+)(?![a-z0-9])/i) ||
+            lowerLine.match(/season\s*(\d+).*?episode\s*(\d+)/i) ||
+            lowerLine.match(/(?<=^|[^a-zA-Z0-9])dl\s+(\d+)\s+(\d+)(?![a-z0-9])/i)
+          ) : null;
+
+          if (combMatch) {
+            if (season === undefined) season = parseInt(combMatch[1], 10);
+            if (episode === undefined) episode = parseInt(combMatch[2], 10);
+          } else {
+            if (season === undefined) {
+              const sMatch = lowerLine.match(/(?<=^|[^a-zA-Z0-9])(?:s(\d+)|season\s*(\d+)|ss\s*(\d+))(?![a-z0-9])/i);
+              if (sMatch) season = parseInt(sMatch[1] || sMatch[2] || sMatch[3], 10);
+            }
+            if (episode === undefined && !hasRangeInLine) {
+              const eMatch = lowerLine.match(/(?<=^|[^a-zA-Z0-9])(?:e(\d+)|episode\s*(\d+)|ep\s*(\d+))(?![a-z0-9])/i);
+              if (eMatch) episode = parseInt(eMatch[1] || eMatch[2] || eMatch[3], 10);
+            }
+          }
+
+          if (season !== undefined && episode !== undefined) break;
+          // If we found a season header and no episode, stop if line looks like a season heading
+          if (season !== undefined && /season\s*\d+|s\d+\b/i.test(lowerLine) && !/episode|ep\s*\d+/i.test(lowerLine)) {
+            break;
+          }
+        }
+      }
+
+      // 2. Fallback window scan
+      if (season === undefined && episode === undefined) {
+        const combinedMatch = !hasRange ? (
+          lower.match(/(?<=^|[^a-zA-Z0-9])s(\d+)\s*e(\d+)(?![a-z0-9])/i) ||
+          lower.match(/season\s*(\d+).*?episode\s*(\d+)/i) ||
+          lower.match(/(?<=^|[^a-zA-Z0-9])dl\s+(\d+)\s+(\d+)(?![a-z0-9])/i)
+        ) : null;
+
+        if (combinedMatch) {
+          season = parseInt(combinedMatch[1], 10);
+          episode = parseInt(combinedMatch[2], 10);
+        } else {
+          const sMatch = lower.match(/(?<=^|[^a-zA-Z0-9])(?:s(\d+)|season\s*(\d+)|ss\s*(\d+))(?![a-z0-9])/i);
+          const eMatch = !hasRange ? lower.match(/(?<=^|[^a-zA-Z0-9])(?:e(\d+)|episode\s*(\d+)|ep\s*(\d+))(?![a-z0-9])/i) : null;
+
+          if (sMatch) season = parseInt(sMatch[1] || sMatch[2] || sMatch[3], 10);
+          if (eMatch) episode = parseInt(eMatch[1] || eMatch[2] || eMatch[3], 10);
+        }
+      }
+
+      // 3. Fallback full text scan
+      if (season === undefined && episode === undefined) {
+        const fullLower = text.toLowerCase();
+        const fullCombinedMatch = !hasRange ? (
+          fullLower.match(/(?<=^|[^a-zA-Z0-9])s(\d+)\s*e(\d+)(?![a-z0-9])/i) ||
+          fullLower.match(/season\s*(\d+).*?episode\s*(\d+)/i) ||
+          fullLower.match(/(?<=^|[^a-zA-Z0-9])dl\s+(\d+)\s+(\d+)(?![a-z0-9])/i)
+        ) : null;
+
+        if (fullCombinedMatch) {
+          season = parseInt(fullCombinedMatch[1], 10);
+          episode = parseInt(fullCombinedMatch[2], 10);
+        } else {
+          const sMatch = fullLower.match(/(?<=^|[^a-zA-Z0-9])(?:s(\d+)|season\s*(\d+)|ss\s*(\d+))(?![a-z0-9])/i);
+          const eMatch = !hasRange ? fullLower.match(/(?<=^|[^a-zA-Z0-9])(?:e(\d+)|episode\s*(\d+)|ep\s*(\d+))(?![a-z0-9])/i) : null;
+
+          if (sMatch) season = parseInt(sMatch[1] || sMatch[2] || sMatch[3], 10);
+          if (eMatch) episode = parseInt(eMatch[1] || eMatch[2] || eMatch[3], 10);
+        }
+      }
+
       return { season, episode, year };
     })(),
     isFullSeasonMKV:
@@ -458,8 +555,9 @@ export function detectFromFilename(
   finalUrl?: string,
   languages?: Language[],
   qualities?: Quality[],
+  rawUrl?: string,
 ) {
-  const source = `${fileName || ""} ${finalUrl || ""}`.toLowerCase();
+  const source = `${fileName || ""} ${finalUrl || ""} ${rawUrl || ""}`.toLowerCase();
 
   const qualityMatch = source.match(
     /\b(2160p|4k|1440p|1080p|720p|480p|360p|540p)\b/i,
@@ -916,12 +1014,30 @@ export async function performFullLinkScan(
     }
   }
 
-  const postMeta = extractedMeta[url] || {};
+  const normUrl = normalizeUrl(url);
+  let postMeta = extractedMeta[url] || extractedMeta[base.url] || extractedMeta[normUrl];
+
+  if (!postMeta || (postMeta.season === undefined && postMeta.episode === undefined)) {
+    try {
+      const extractId = (u: string) => u.match(/\/(?:u|l|file|d|get|drive|link)\/([a-zA-Z0-9_-]+)/i)?.[1];
+      const fileId = extractId(url) || extractId(base.url || '') || extractId(finalUrlToUse || '');
+      if (fileId) {
+        for (const [mUrl, mData] of Object.entries(extractedMeta)) {
+          if (mUrl.includes(fileId)) {
+            postMeta = { ...mData, ...postMeta };
+            break;
+          }
+        }
+      }
+    } catch (e) {}
+  }
+  if (!postMeta) postMeta = {};
   const fileMeta = detectFromFilename(
     base.fileName,
-    base.finalUrl,
+    base.finalUrl || base.url || url,
     languages,
     qualities,
+    url
   );
   const hasFileName = !!base.fileName;
 
@@ -937,8 +1053,8 @@ export async function performFullLinkScan(
       fileMeta.subtitleLabel ||
       (hasFileName ? undefined : postMeta.subtitleLabel),
     printQualityLabel: fileMeta.printQualityLabel || postMeta.printQualityLabel,
-    season: fileMeta.season || postMeta.season,
-    episode: fileMeta.episode || postMeta.episode,
+    season: fileMeta.season ?? postMeta.season,
+    episode: fileMeta.episode ?? postMeta.episode,
     isFullSeasonMKV: fileMeta.isFullSeasonMKV || postMeta.isFullSeasonMKV,
     isFullSeasonZIP: fileMeta.isFullSeasonZIP || postMeta.isFullSeasonZIP,
     year: fileMeta.year || postMeta.year || base.year,
