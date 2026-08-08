@@ -58,7 +58,7 @@ export function ContactSupportButtons({ content }: ContactSupportButtonsProps) {
                 )}, ${String(profile?.status || "Unknown").replace(/\b\w/g, (c) => c.toUpperCase())}\n\n`;
 
               if (content) {
-                msg += `${t("Content Issue:")}\nID: ${content.id}\nTitle: ${content.title}${content.year ? ` (${content.year})` : ''}\n\n${t("Your message/question:")}\n${t("I need help with this content.")}`;
+                msg += `${t("Content Issue:")}\nID: MovizNow.com/${content.id}\nTitle: ${content.title}${content.year ? ` (${content.year})` : ''}\n\n${t("Your message/question:")}\n${t("I need help with this content.")}`;
               } else {
                 msg += `${t("Your message/question:")}\n`;
               }

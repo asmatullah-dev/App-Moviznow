@@ -1711,7 +1711,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (userEmail && isValidGmailAddress(userEmail) && !mergedOldData.welcomeEmailSent) {
               const userName = currentUser.displayName || newProfile.displayName || "Movie Lover";
               triggerWelcomeNotificationAndEmail(currentUser.uid, userEmail, userName, true);
-              const { updateDoc } = require("firebase/firestore");
               updateDoc(userRef, { welcomeEmailSent: true }).catch(() => {});
             }
 

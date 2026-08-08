@@ -39,6 +39,8 @@ export type LinkCheckResult = {
   mismatchWarnings?: string[];
   confidenceScore?: number;
   candidates?: { text: string; href: string }[];
+  linkName?: string;
+  locationName?: string;
 };
 
 export function normalizeUrl(input: string) {

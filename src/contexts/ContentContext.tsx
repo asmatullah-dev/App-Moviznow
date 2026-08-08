@@ -809,7 +809,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     }
     // Auto-check should NOT be forced (force=false)
     checkForUpdates(false);
-  }, [profile?.role, authProfileLoading]);
+  }, [profile?.role, profile?.phone, authProfileLoading]);
 
   const checkForUpdates = async (force: boolean = false) => {
     if (authProfileLoading || !profile) {
@@ -859,7 +859,9 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     
     // Always refresh if first login / never successfully synced
     const hasCompletedSync = safeStorage.getItem('has_completed_initial_sync');
-    const noLocalData = !hasCompletedSync;
+    const localContent = safeStorage.getItem('content_cache');
+    const isLibraryEmpty = !localContent || localContent === '[]';
+    const noLocalData = !hasCompletedSync || isLibraryEmpty;
 
     if (!force && lastCheckPeriod === checkPeriod && !noLocalData) {
         // Already checked for this period (the 7AM cycle)

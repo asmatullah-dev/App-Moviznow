@@ -80,10 +80,19 @@ body {
 
 @keyframes marquee {
   0% {
-    transform: translateX(100vw);
+    transform: translate3d(100vw, 0, 0);
   }
   100% {
-    transform: translateX(-100%);
+    transform: translate3d(-100%, 0, 0);
+  }
+}
+
+@keyframes smoothMarqueeScroll {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
   }
 }
 
@@ -91,6 +100,7 @@ body {
   display: inline-block;
   white-space: nowrap;
   animation: marquee 20s linear infinite;
+  will-change: transform;
 }
 
 

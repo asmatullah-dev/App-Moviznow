@@ -207,14 +207,8 @@ service cloud.firestore {
       allow get: if isOwner(userId) || isAdminOrEditor() || isUserManager() || (resource != null && (isIdentityMatch(resource.data) || resource.data.referredBy == request.auth.uid));
       allow list: if isAdminOrEditor() || 
                              isUserManager() || 
-                             (request.auth != null && 
-                               (('limit' in request.query) && request.query.limit <= 500) &&
-                               (
-                                 (request.query.filters.size() == 1 && request.query.filters[0].op == '==' && request.query.filters[0].field == 'referredBy' && request.query.filters[0].value == request.auth.uid) ||
-                                 (request.query.filters.size() == 1 && request.query.filters[0].op == '==' && request.query.filters[0].field == 'referralCode') ||
-                                 (request.query.filters.size() == 1 && request.query.filters[0].op == '==' && request.query.filters[0].field == 'email') ||
-                                 (request.query.filters.size() == 1 && request.query.filters[0].op == '==' && request.query.filters[0].field == 'phone')
-                               )
+                             (
+                               request.query.limit <= 50
                              );
       allow create: if isAdmin() || (isValidUser(request.resource.data) && (
                        (isUserManager() && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended') ||

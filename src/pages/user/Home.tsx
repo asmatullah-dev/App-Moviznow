@@ -43,7 +43,8 @@ import {
   Tv,
   SlidersHorizontal,
   Compass,
-  Sparkles
+  Sparkles,
+  RefreshCw
 } from "lucide-react";
 import { Helmet } from "react-helmet";
 import { clsx } from "clsx";
@@ -70,7 +71,7 @@ import { useHaptics } from "../../hooks/useHaptics";
 
 import { Header } from "../../components/Header";
 import { PageTransition } from "../../components/PageTransition";
-import Marquee from "react-fast-marquee";
+import { ScrollingBanner } from "../../components/ScrollingBanner";
 
 export default function Home({
   onOpenMediaModal,
@@ -94,6 +95,7 @@ export default function Home({
     collections,
     loading,
     isOffline,
+    checkForUpdates,
   } = useContent();
   const { t, language } = useLanguage();
   const { cart } = useCart();
@@ -161,6 +163,14 @@ export default function Home({
     };
     loadReviews();
   }, [profile?.uid, profile?.email]);
+
+  const autoRefreshAttempted = useRef(false);
+  useEffect(() => {
+    if (!loading && contentList.length === 0 && !autoRefreshAttempted.current) {
+      autoRefreshAttempted.current = true;
+      checkForUpdates(true).catch(console.error);
+    }
+  }, [loading, contentList.length, checkForUpdates]);
 
   // ... (rest of the component)
 
@@ -433,6 +443,18 @@ export default function Home({
     return () => clearInterval(timer);
   }, [heroContentItems.length, isHeroHovered]);
 
+  // Preload hero banner images to eliminate image decode lag on poster transitions
+  useEffect(() => {
+    if (!heroContentItems.length) return;
+    heroContentItems.forEach((item) => {
+      const url = item.posterUrl || settings?.defaultAppImage;
+      if (url) {
+        const img = new Image();
+        img.src = getOptimizedImageUrl(url, 1280);
+      }
+    });
+  }, [heroContentItems, settings?.defaultAppImage]);
+
   const uniqueYears = useMemo(() => {
     const years = new Set<number>();
     permittedContentList.forEach((c) => {
@@ -666,16 +688,7 @@ export default function Home({
       />
 
       {settings?.scrollingText && (
-        <div className="sticky top-16 z-40 w-full bg-emerald-50/90 dark:bg-emerald-950/90 backdrop-blur-md border-b border-emerald-500/20 py-1 flex items-center shrink-0 shadow-sm">
-          <Marquee speed={40} gradient={false} className="overflow-hidden">
-            <span className="text-base sm:text-lg font-bold text-emerald-700 dark:text-emerald-400 mx-4">
-              {settings.scrollingText}
-            </span>
-            <span className="text-base sm:text-lg font-bold text-emerald-700 dark:text-emerald-400 mx-4">
-              {settings.scrollingText}
-            </span>
-          </Marquee>
-        </div>
+        <ScrollingBanner text={settings.scrollingText} />
       )}
 
       {/* Main Content */}
@@ -688,7 +701,8 @@ export default function Home({
         {/* Featured Hero Carousel Spotlight Banner */}
         {!hideScrollingTabs && heroContentItems.length > 0 && (
           <div 
-            className="relative w-full mb-8 rounded-3xl overflow-hidden border border-zinc-200/80 dark:border-zinc-800/80 bg-zinc-950 shadow-2xl group transition-all"
+            className="relative w-full mb-8 rounded-3xl overflow-hidden border border-zinc-200/80 dark:border-zinc-800/80 bg-zinc-950 shadow-2xl group transition-all transform-gpu"
+            style={{ isolation: "isolate" }}
             onMouseEnter={() => setIsHeroHovered(true)}
             onMouseLeave={() => setIsHeroHovered(false)}
           >
@@ -713,11 +727,11 @@ export default function Home({
                 return (
                   <motion.div
                     key={item.id}
-                    initial={{ opacity: 0, scale: 1.01 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.99 }}
-                    transition={{ duration: 0.25, ease: "easeOut" }}
-                    className="relative min-h-[420px] sm:min-h-[480px] md:min-h-[540px] flex items-end p-5 sm:p-8 md:p-12 overflow-hidden"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.3, ease: "easeInOut" }}
+                    className="relative min-h-[420px] sm:min-h-[480px] md:min-h-[540px] flex items-end p-5 sm:p-8 md:p-12 overflow-hidden transform-gpu"
                   >
                     {/* Background Image & Vignettes */}
                     <div className="absolute inset-0 z-0">
@@ -1582,9 +1596,19 @@ export default function Home({
             <div className="w-6 h-6 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin"></div>
           </div>
         ) : filteredAndSortedContent.length === 0 ? (
-          <div className="text-center py-20 text-zinc-500">
+          <div className="text-center py-20 text-zinc-500 flex flex-col items-center">
             <Film className="w-16 h-16 mx-auto mb-4 opacity-20" />
-            <p className="text-xl">{t('No content found')}</p>
+            <p className="text-xl mb-4">{t('No content found')}</p>
+            <button
+              onClick={() => {
+                vibrate(50);
+                checkForUpdates(true).catch(console.error);
+              }}
+              className="px-6 py-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 font-bold border border-emerald-500/20 transition-all active:scale-95 flex items-center gap-2"
+            >
+              <RefreshCw className="w-5 h-5" />
+              {t('Refresh Library')}
+            </button>
           </div>
         ) : (
           <>

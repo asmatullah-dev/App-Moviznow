@@ -6228,6 +6228,7 @@ export default function ContentManagement() {
         disableAutoClipboard={true}
         languages={languages}
         qualities={qualities}
+        content={checkLinksContent || undefined}
       />
 
       <ConfirmModal

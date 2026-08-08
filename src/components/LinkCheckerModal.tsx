@@ -59,7 +59,30 @@ export const getLocationTag = (item: {
   fileName?: string;
   url?: string;
   finalUrl?: string;
+  locationName?: string;
+  linkName?: string;
+  qualityLabel?: string;
+  codecLabel?: string;
 }): string | null => {
+  if (item.locationName && item.locationName.trim().length > 0) {
+    let loc = item.locationName.trim();
+    if (item.isFullSeasonZIP && !/\bZIP\b/i.test(loc)) {
+      loc = `${loc} ZIP`;
+    } else if (item.isFullSeasonMKV && !/\bMKV\b/i.test(loc)) {
+      loc = `${loc} MKV`;
+    }
+    return loc;
+  }
+  if (item.linkName && item.linkName.trim().length > 0) {
+    let loc = item.linkName.trim();
+    if (item.isFullSeasonZIP && !/\bZIP\b/i.test(loc)) {
+      loc = `${loc} ZIP`;
+    } else if (item.isFullSeasonMKV && !/\bMKV\b/i.test(loc)) {
+      loc = `${loc} MKV`;
+    }
+    return loc;
+  }
+
   let season = item.season;
   let episode = item.episode;
   let isFullSeasonMKV = item.isFullSeasonMKV;
@@ -93,19 +116,30 @@ export const getLocationTag = (item: {
     }
   }
 
+  const qual = item.qualityLabel || '';
+  const codec = item.codecLabel ? ` ${item.codecLabel}` : '';
+
   if (season !== undefined && episode !== undefined) {
     return `S${season}E${episode}`;
   }
   if (season !== undefined) {
-    if (isFullSeasonZIP) return `S${season} ZIP`;
-    if (isFullSeasonMKV) return `S${season} MKV`;
+    if (isFullSeasonZIP) return qual ? `S${season} ${qual}${codec} ZIP`.trim() : `S${season} ZIP`;
+    if (isFullSeasonMKV) return qual ? `S${season} ${qual}${codec} MKV`.trim() : `S${season} MKV`;
     return `S${season}`;
   }
   if (episode !== undefined) {
     return `E${episode}`;
   }
-  if (isFullSeasonZIP) return `ZIP`;
-  if (isFullSeasonMKV) return `MKV`;
+  if (isFullSeasonZIP) {
+    return qual ? `${qual}${codec} ZIP`.trim() : 'ZIP';
+  }
+  if (isFullSeasonMKV) {
+    return qual ? `${qual}${codec} MKV`.trim() : 'MKV';
+  }
+
+  if (qual) {
+    return `${qual}${codec}`.trim();
+  }
 
   return null;
 };
@@ -862,6 +896,25 @@ export const LinkCheckerModal: React.FC<Props> = ({
       return data;
     };
 
+    // Check movieLinks
+    const movieLinks = safeParse(contentObj.movieLinks);
+    if (Array.isArray(movieLinks)) {
+      for (const ml of movieLinks) {
+        if (isMatch(ml.url)) {
+          const lName = ml.name || ml.quality || 'Movie Link';
+          return {
+            season: undefined,
+            episode: undefined,
+            isFullSeasonMKV: ml.isFullSeasonMKV,
+            isFullSeasonZIP: ml.isFullSeasonZIP,
+            qualityLabel: ml.quality || ml.name,
+            linkName: lName,
+            locationName: lName
+          };
+        }
+      }
+    }
+
     // Check seasons
     const seasonsData = safeParse(contentObj.seasons);
     if (Array.isArray(seasonsData)) {
@@ -876,12 +929,31 @@ export const LinkCheckerModal: React.FC<Props> = ({
             if (isMatch(zl.url)) {
               const zS = zl.season !== undefined ? parseInt(String(zl.season), 10) : parsedSNum;
               const zE = zl.episode !== undefined ? parseInt(String(zl.episode), 10) : undefined;
+              const rawQual = zl.name || zl.quality || '';
+              let lName = rawQual;
+              if (lName && !/\bZIP\b/i.test(lName)) {
+                lName = `${lName} ZIP`;
+              } else if (!lName) {
+                lName = zS !== undefined ? `S${zS} ZIP` : 'ZIP';
+              }
+
+              let locTag = rawQual;
+              if (zS !== undefined && locTag && !locTag.toLowerCase().includes(`s${zS}`)) {
+                locTag = `S${zS} ${locTag}`.trim();
+              }
+              if (!locTag) locTag = zS !== undefined ? `S${zS} ZIP` : 'ZIP';
+              if (!/\bZIP\b/i.test(locTag)) {
+                locTag = `${locTag} ZIP`;
+              }
+
               return {
                 season: zS,
                 episode: zE,
                 isFullSeasonZIP: zl.isFullSeasonZIP ?? true,
                 isFullSeasonMKV: zl.isFullSeasonMKV,
-                qualityLabel: zl.name || zl.quality
+                qualityLabel: zl.name || zl.quality,
+                linkName: lName,
+                locationName: locTag
               };
             }
           }
@@ -894,12 +966,31 @@ export const LinkCheckerModal: React.FC<Props> = ({
             if (isMatch(ml.url)) {
               const mS = ml.season !== undefined ? parseInt(String(ml.season), 10) : parsedSNum;
               const mE = ml.episode !== undefined ? parseInt(String(ml.episode), 10) : undefined;
+              const rawQual = ml.name || ml.quality || '';
+              let lName = rawQual;
+              if (lName && !/\bMKV\b/i.test(lName)) {
+                lName = `${lName} MKV`;
+              } else if (!lName) {
+                lName = mS !== undefined ? `S${mS} MKV` : 'MKV';
+              }
+
+              let locTag = rawQual;
+              if (mS !== undefined && locTag && !locTag.toLowerCase().includes(`s${mS}`)) {
+                locTag = `S${mS} ${locTag}`.trim();
+              }
+              if (!locTag) locTag = mS !== undefined ? `S${mS} MKV` : 'MKV';
+              if (!/\bMKV\b/i.test(locTag)) {
+                locTag = `${locTag} MKV`;
+              }
+
               return {
                 season: mS,
                 episode: mE,
                 isFullSeasonMKV: ml.isFullSeasonMKV ?? true,
                 isFullSeasonZIP: ml.isFullSeasonZIP,
-                qualityLabel: ml.name || ml.quality
+                qualityLabel: ml.name || ml.quality,
+                linkName: lName,
+                locationName: locTag
               };
             }
           }
@@ -918,12 +1009,25 @@ export const LinkCheckerModal: React.FC<Props> = ({
                 if (isMatch(l.url)) {
                   const lS = l.season !== undefined ? parseInt(String(l.season), 10) : parsedSNum;
                   const lE = l.episode !== undefined ? parseInt(String(l.episode), 10) : parsedEpNum;
+                  const lName = l.name || l.quality || (lS !== undefined && lE !== undefined ? `S${lS}E${lE}` : `E${lE}`);
+                  let locTag = '';
+                  if (lS !== undefined && lE !== undefined) {
+                    locTag = `S${lS}E${lE}`;
+                    if (l.name || l.quality) locTag += ` ${l.name || l.quality}`;
+                  } else if (lE !== undefined) {
+                    locTag = `E${lE}`;
+                    if (l.name || l.quality) locTag += ` ${l.name || l.quality}`;
+                  } else {
+                    locTag = l.name || l.quality || '';
+                  }
                   return {
                     season: lS,
                     episode: lE,
                     isFullSeasonMKV: l.isFullSeasonMKV,
                     isFullSeasonZIP: l.isFullSeasonZIP,
-                    qualityLabel: l.name || l.quality
+                    qualityLabel: l.name || l.quality,
+                    linkName: lName,
+                    locationName: locTag
                   };
                 }
               }
@@ -938,11 +1042,31 @@ export const LinkCheckerModal: React.FC<Props> = ({
     if (Array.isArray(topZip)) {
       for (const zl of topZip) {
         if (isMatch(zl.url)) {
+          const zS = zl.season !== undefined ? parseInt(String(zl.season), 10) : undefined;
+          const rawQual = zl.name || zl.quality || '';
+          let lName = rawQual;
+          if (lName && !/\bZIP\b/i.test(lName)) {
+            lName = `${lName} ZIP`;
+          } else if (!lName) {
+            lName = zS !== undefined ? `S${zS} ZIP` : 'ZIP';
+          }
+
+          let locTag = rawQual;
+          if (zS !== undefined && locTag && !locTag.toLowerCase().includes(`s${zS}`)) {
+            locTag = `S${zS} ${locTag}`.trim();
+          }
+          if (!locTag) locTag = zS !== undefined ? `S${zS} ZIP` : 'ZIP';
+          if (!/\bZIP\b/i.test(locTag)) {
+            locTag = `${locTag} ZIP`;
+          }
+
           return {
-            season: zl.season !== undefined ? parseInt(String(zl.season), 10) : undefined,
+            season: zS,
             episode: zl.episode !== undefined ? parseInt(String(zl.episode), 10) : undefined,
             isFullSeasonZIP: zl.isFullSeasonZIP ?? true,
-            qualityLabel: zl.name || zl.quality
+            qualityLabel: zl.name || zl.quality,
+            linkName: lName,
+            locationName: locTag
           };
         }
       }
@@ -952,11 +1076,31 @@ export const LinkCheckerModal: React.FC<Props> = ({
     if (Array.isArray(topMkv)) {
       for (const ml of topMkv) {
         if (isMatch(ml.url)) {
+          const mS = ml.season !== undefined ? parseInt(String(ml.season), 10) : undefined;
+          const rawQual = ml.name || ml.quality || '';
+          let lName = rawQual;
+          if (lName && !/\bMKV\b/i.test(lName)) {
+            lName = `${lName} MKV`;
+          } else if (!lName) {
+            lName = mS !== undefined ? `S${mS} MKV` : 'MKV';
+          }
+
+          let locTag = rawQual;
+          if (mS !== undefined && locTag && !locTag.toLowerCase().includes(`s${mS}`)) {
+            locTag = `S${mS} ${locTag}`.trim();
+          }
+          if (!locTag) locTag = mS !== undefined ? `S${mS} MKV` : 'MKV';
+          if (!/\bMKV\b/i.test(locTag)) {
+            locTag = `${locTag} MKV`;
+          }
+
           return {
-            season: ml.season !== undefined ? parseInt(String(ml.season), 10) : undefined,
+            season: mS,
             episode: ml.episode !== undefined ? parseInt(String(ml.episode), 10) : undefined,
             isFullSeasonMKV: ml.isFullSeasonMKV ?? true,
-            qualityLabel: ml.name || ml.quality
+            qualityLabel: ml.name || ml.quality,
+            linkName: lName,
+            locationName: locTag
           };
         }
       }
@@ -971,6 +1115,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
     let isFullSeasonMKV = res.isFullSeasonMKV;
     let isFullSeasonZIP = res.isFullSeasonZIP;
     let qualityLabel = res.qualityLabel;
+    let linkName = res.linkName;
+    let locationName = res.locationName;
 
     const url = res.url || '';
     const finalUrl = res.finalUrl || '';
@@ -986,7 +1132,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
         if (isFullSeasonMKV === undefined || !isFullSeasonMKV) isFullSeasonMKV = loc.isFullSeasonMKV;
         if (isFullSeasonZIP === undefined || !isFullSeasonZIP) isFullSeasonZIP = loc.isFullSeasonZIP;
         if (!qualityLabel) qualityLabel = loc.qualityLabel;
-        if (season !== undefined || episode !== undefined || isFullSeasonMKV || isFullSeasonZIP) {
+        if (!linkName) linkName = loc.linkName;
+        if (!locationName) locationName = loc.locationName;
+        if (season !== undefined || episode !== undefined || isFullSeasonMKV || isFullSeasonZIP || linkName || locationName) {
           break;
         }
       }
@@ -1025,6 +1173,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
         if (isFullSeasonMKV === undefined) isFullSeasonMKV = meta.isFullSeasonMKV;
         if (isFullSeasonZIP === undefined) isFullSeasonZIP = meta.isFullSeasonZIP;
         if (!qualityLabel) qualityLabel = meta.qualityLabel;
+        if (!linkName) linkName = (meta as any).linkName;
+        if (!locationName) locationName = (meta as any).locationName;
       }
     }
 
@@ -1055,7 +1205,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
       episode,
       isFullSeasonMKV,
       isFullSeasonZIP,
-      qualityLabel: res.qualityLabel || qualityLabel
+      qualityLabel: res.qualityLabel || qualityLabel,
+      linkName,
+      locationName
     };
 
     const tag = getLocationTag(mergedResult);
@@ -3303,11 +3455,6 @@ export const LinkCheckerModal: React.FC<Props> = ({
                     const { mergedResult: result, tag: locationTag } = resolveLocationAndMetadata(rawResult);
                     const statusLabel = result.statusLabel || (result.ok ? "WORKING" : "UNKNOWN");
                     const openRow = !!expanded[result.url];
-                    
-                    // Calculate final name for display
-                    let finalName = result.qualityLabel || '720p';
-                    if (result.codecLabel === "HEVC") finalName += " HEVC";
-                    if (result.audioLabel && result.audioLabel.includes("Dual") && result.codecLabel !== "HEVC") finalName += " Dual";
 
                     return (
                       <div key={`${result.url}-${result.qualityLabel || "na"}`} className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 overflow-hidden transition-colors duration-300">
@@ -3321,11 +3468,6 @@ export const LinkCheckerModal: React.FC<Props> = ({
                                 <div className="flex items-center gap-2 flex-wrap">
                                   {result.ok ? <CheckCircle2 className="h-5 w-5 text-emerald-500 dark:text-emerald-400" /> : <XCircle className="h-5 w-5 text-red-500 dark:text-red-400" />}
                                   <div className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${badgeMap[statusLabel]}`}>{statusLabel}</div>
-                                  {result.ok && (
-                                    <div className="inline-flex rounded-full border border-cyan-200 dark:border-cyan-800 bg-cyan-500/10 px-3 py-1 text-xs font-bold text-cyan-600 dark:text-cyan-400">
-                                      Name: {finalName}
-                                    </div>
-                                  )}
                                   {result.isDirectDownload ? <div className="inline-flex rounded-full border border-blue-200 dark:border-blue-800 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-600 dark:text-blue-400"><FileDown className="h-3.5 w-3.5 mr-1" /> Direct Download</div> : null}
                                   {(result.mismatchWarnings?.length || 0) > 0 ? <div className="inline-flex rounded-full border border-pink-200 dark:border-pink-800 bg-pink-500/10 px-3 py-1 text-xs font-medium text-pink-600 dark:text-pink-400"><Siren className="h-3.5 w-3.5 mr-1" /> Mismatch</div> : null}
                                   {result.url.toLowerCase().includes("hubcloud") && !result.candidates?.some(c => c.text.toLowerCase().includes("pixeldrain") || c.href.toLowerCase().includes("pixeldrain")) && (
