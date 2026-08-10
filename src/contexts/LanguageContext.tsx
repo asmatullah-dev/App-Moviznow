@@ -584,6 +584,8 @@ const translations: Record<string, Record<Language, string>> = {
   'Redirecting to home in': { en: 'Redirecting to home in', 'ur-roman': 'Home par ja rahe hain', ur: 'ہوم پر واپس جا رہے ہیں' },
   'Please enter a valid WhatsApp number with correct length': { en: 'Please enter a valid WhatsApp number with correct length', 'ur-roman': 'Sahi length wala WhatsApp number dalein.', ur: 'براہ کرم درست لمبائی کے ساتھ ایک درست واٹس ایپ نمبر درج کریں' },
   'Failed to save WhatsApp number. Please try again.': { en: 'Failed to save WhatsApp number. Please try again.', 'ur-roman': 'WhatsApp number save nahi ho saka. Dobara koshish karein.', ur: 'واٹس ایپ نمبر محفوظ کرنے میں ناکامی۔ براہ کرم دوبارہ کوشش کریں۔' },
+  'Report Broken Link': { en: 'Report Broken Link', 'ur-roman': 'Kharab Link Ki Report Karein', ur: 'خراب لنک کی رپورٹ کریں' },
+  'Are you sure you want to report this link as broken or not working? Our team will check and update it.': { en: 'Are you sure you want to report this link as broken or not working? Our team will check and update it.', 'ur-roman': 'Kya aap yaqeenan is link ki kharab hone ki report karna chahte hain? Humari team isko check karke update karegi.', ur: 'کیا آپ واقعی اس لنک کے خراب ہونے کی رپورٹ کرنا چاہتے ہیں؟ ہماری ٹیم اس کی جانچ کرے گی اور اسے اپ ڈیٹ کرے گی۔' },
 };
 
 interface LanguageContextType {

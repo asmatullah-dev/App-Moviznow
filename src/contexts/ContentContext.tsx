@@ -375,35 +375,34 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         let localMeta: Record<string, any> = {};
         try { localMeta = JSON.parse(localMetaString); } catch(e) {}
 
-        if (contentPendingStr) {
-            for (const key of Object.keys(versionsUpdate)) {
-                if (key !== 'collections' && key !== 'lastGlobalUpdate' && key !== 'metadata') {
-                    // Force refresh of chunk locally so we download other admin's changes merged
-                    localMeta[key] = { version: 0, count: 0 };
-                }
+        // Update local version metadata with the exact server versions just committed
+        for (const [key, val] of Object.entries(versionsUpdate)) {
+            if (key !== 'lastGlobalUpdate') {
+                localMeta[key] = val;
             }
+        }
+
+        if (contentPendingStr) {
             safeStorage.removeItem('pending_chunk_updates');
             safeStorage.removeItem('pending_item_updates');
         }
 
         if (collectionPendingStr) {
             safeStorage.removeItem('pending_collection_updates');
-            localMeta.collections = 0; // Force sync of collections as well
         }
 
         if (metadataPending) {
             safeStorage.removeItem('pending_metadata_updates');
-            localMeta.metadata = 0; // Force sync of metadata
         }
 
         safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+        const { updateChunkMetaLocalCache } = await import('../utils/chunkMeta');
+        updateChunkMetaLocalCache(versionsUpdate);
+
         setHasPendingChanges(false);
+        refreshContentFromLocal();
+        refreshCollectionsFromLocal();
         console.log(`Sync successful.`);
-        
-        // Immediately fetch the merged result
-        setTimeout(() => {
-             syncWithServer(true).catch(console.error);
-        }, 500);
     } catch (e) {
         console.error("Sync failed", e);
         throw e;
@@ -570,7 +569,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         const localVersion = typeof localV === 'object' ? localV.version : localV;
         const hasData = !!safeStorage.getItem('content_chunk_' + chunkId);
         
-        if (!hasData || !localVersion || localVersion < (version as number)) {
+        if (force || !hasData || !localVersion || localVersion < (version as number)) {
             chunksToFetch.push(chunkId);
         }
     }
@@ -630,7 +629,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         const hasMetadata = !!genresCacheStr && genresCacheStr !== '[]';
         const hasPendingMetadata = !!safeStorage.getItem('pending_metadata_updates');
         
-        if (!hasPendingMetadata && (!hasMetadata || !localMetaVersion || localMetaVersion < metadataVersion)) {
+        if (!hasPendingMetadata && (force || !hasMetadata || !localMetaVersion || localMetaVersion < metadataVersion)) {
             try {
                 const metaDoc = await getDoc(doc(db, 'content_chunks', 'metadata'));
                 if (metaDoc.exists()) {
@@ -766,23 +765,29 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         const latestCollChunkId = (collectionsMeta && typeof collectionsMeta === 'object' ? collectionsMeta.latestChunkId : null) || 'collection_chunk_0';
         latestCollChunkIdRef.current = latestCollChunkId;
 
-        if (!safeStorage.getItem('collections_cache') || localCollectionsVersion < collectionsVersion) {
+        if (force || !safeStorage.getItem('collections_cache') || localCollectionsVersion < collectionsVersion) {
             let allCollections: AppCollection[] = [];
             
             const matchIndex = latestCollChunkId.match(/(\d+)$/);
             const maxIndex = matchIndex ? parseInt(matchIndex[1]) : 0;
             
+            const collPromises = [];
             for (let i = 0; i <= maxIndex; i++) {
-                try {
-                    const cid = COLLECTION_CHUNK_PREFIX + i;
-                    const cDoc = await getDoc(doc(db, 'collection_chunks', cid));
-                    if (cDoc.exists()) {
-                        const items = cDoc.data().items || {};
-                        const chunkList = Object.values(items) as AppCollection[];
-                        allCollections = [...allCollections, ...chunkList];
-                        safeStorage.setItem('local_collection_chunk_' + cid, JSON.stringify(items));
-                    }
-                } catch(e) { console.error(e); }
+                const cid = COLLECTION_CHUNK_PREFIX + i;
+                collPromises.push(
+                    getDoc(doc(db, 'collection_chunks', cid))
+                        .then(cDoc => ({ cid, cDoc }))
+                        .catch(e => { console.error(e); return null; })
+                );
+            }
+            const collResults = await Promise.all(collPromises);
+            for (const res of collResults) {
+                if (res && res.cDoc && res.cDoc.exists()) {
+                    const items = res.cDoc.data().items || {};
+                    const chunkList = Object.values(items) as AppCollection[];
+                    allCollections = [...allCollections, ...chunkList];
+                    safeStorage.setItem('local_collection_chunk_' + res.cid, JSON.stringify(items));
+                }
             }
             
             const sorted = allCollections.sort((a, b) => (b.order || 0) - (a.order || 0));
@@ -876,27 +881,45 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
     let updatedSomething = false;
 
+    const tasks: Promise<boolean>[] = [];
+
     // Trigger profile refresh 
-    try {
-        const userUpdated = await refreshProfile(force, force ? 'manual' : 'auto');
-        if (userUpdated) updatedSomething = true;
-    } catch(err) {
-        console.error(err);
-    }
+    tasks.push(
+      refreshProfile(force, force ? 'manual' : 'auto')
+        .then(res => Boolean(res))
+        .catch(err => {
+          console.error("Profile refresh error:", err);
+          return false;
+        })
+    );
     
     // Refresh users list if admin and push pending user changes
     if (isAdmin) {
       finalizeUserChanges(force).catch(console.error);
-      try {
-          const { updatedSomething: usersUpdated } = await refreshUsers(force);
-          if (usersUpdated) updatedSomething = true;
-      } catch (e) {
-          console.error(e);
-      }
+      tasks.push(
+        refreshUsers(force)
+          .then(res => Boolean(res?.updatedSomething))
+          .catch(err => {
+            console.error("Users refresh error:", err);
+            return false;
+          })
+      );
     }
 
-    const dataUpdated = await syncWithServer(force);
-    if (dataUpdated) updatedSomething = true;
+    // Sync content with server
+    tasks.push(
+      syncWithServer(force)
+        .then(res => Boolean(res))
+        .catch(err => {
+          console.error("Sync with server error:", err);
+          return false;
+        })
+    );
+
+    const syncResults = await Promise.all(tasks);
+    if (syncResults.some(Boolean)) {
+      updatedSomething = true;
+    }
     
     // Record that we checked in this period
     safeStorage.setItem('last_meta_check_period', checkPeriod);
@@ -1293,12 +1316,14 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         safeStorage.removeItem('pending_created_items');
     }
 
-    // Directly delete from Firestore chunks
-    try {
-        const { deleteContentsFromChunks } = await import('../utils/chunkUtils');
-        await deleteContentsFromChunks(items);
-    } catch(e) {
-        console.error("Error deleting from Firestore chunks:", e);
+    // Directly delete from Firestore chunks for non-admin/editor users (admins and editors use pending changes)
+    if (!isAdminOrEditor) {
+        try {
+            const { deleteContentsFromChunks } = await import('../utils/chunkUtils');
+            await deleteContentsFromChunks(items);
+        } catch(e) {
+            console.error("Error deleting from Firestore chunks:", e);
+        }
     }
   };
 

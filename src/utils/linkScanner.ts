@@ -786,14 +786,11 @@ export async function performFullLinkScan(
   // HubCloud interception
   let hubcloudTitle = "";
   const lowUrl = normalizedUrl.toLowerCase();
-  const isHubcloudVariant = lowUrl.includes("hubcloud") || 
-    lowUrl.includes("vcloud") || 
-    lowUrl.includes("hubdrive") ||
-    lowUrl.includes("moviesdrive") ||
-    lowUrl.includes("skymovies") ||
-    lowUrl.includes("sky movies") ||
-    lowUrl.includes("mdrive") ||
-    lowUrl.includes("filmygo");
+  const isHubcloudVariant = /(hubcloud|vcloud|hubdrive|drivehub|gdflix|hubcdn|hblinks)/i.test(lowUrl) && 
+    !lowUrl.includes("skymovies") && 
+    !lowUrl.includes("moviesdrive") && 
+    !lowUrl.includes("filmygo") &&
+    !lowUrl.includes("mdrive");
 
   if (isHubcloudVariant) {
     base = {
@@ -802,13 +799,13 @@ export async function performFullLinkScan(
       statusLabel: "WORKING",
       message: "Assuming working (initial)",
     };
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= 1; attempt++) {
       try {
         const extractController = new AbortController();
-        const extractTimeout = setTimeout(() => extractController.abort(), 25000);
+        const extractTimeout = setTimeout(() => extractController.abort(), 7000);
         
         const directController = new AbortController();
-        const directTimeout = setTimeout(() => directController.abort(), 25000);
+        const directTimeout = setTimeout(() => directController.abort(), 7000);
 
         const [res, dLinkRes] = await Promise.allSettled([
           fetch("/api/hubcloud/extract", {
@@ -907,10 +904,6 @@ export async function performFullLinkScan(
           message: "Assuming working (network error)",
         };
         finalUrlToUse = url;
-      }
-      
-      if (attempt < 3) {
-        await new Promise(resolve => setTimeout(resolve, 800));
       }
     }
   } else if (url.includes("?token=") || url.includes("&token=")) {

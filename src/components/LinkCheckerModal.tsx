@@ -51,6 +51,18 @@ import {
   setFilmygoDomain
 } from '../utils/domains';
 
+export const isMissingPixeldrain = (r: { url?: string; candidates?: Array<{ text: string; href: string }> } | null | undefined): boolean => {
+  if (!r || !r.url) return false;
+  const url = r.url.toLowerCase();
+  const isHubcloud = url.includes("hubcloud") || url.includes("vcloud") || url.includes("hubdrive") || url.includes("drivehub") || url.includes("gdflix") || url.includes("hubcdn") || url.includes("hblinks");
+  if (!isHubcloud) return false;
+  if (!r.candidates || r.candidates.length === 0) return true;
+  return !r.candidates.some(c => 
+    (c.text && c.text.toLowerCase().includes("pixeldrain")) || 
+    (c.href && c.href.toLowerCase().includes("pixeldrain"))
+  );
+};
+
 export const getLocationTag = (item: {
   season?: number;
   episode?: number;
@@ -147,7 +159,9 @@ export const getLocationTag = (item: {
 const PostPoster: React.FC<{ image?: string; title: string }> = ({ image, title }) => {
   const [imgError, setImgError] = useState(false);
 
-  if (!image || imgError) {
+  const isDummy = !image || imgError || /arw\.gif|logo|favicon|icon|\.gif$/i.test(image);
+
+  if (isDummy) {
     return (
       <div className="w-10 h-14 bg-zinc-200 dark:bg-zinc-800 rounded-lg shrink-0 flex items-center justify-center border border-zinc-300 dark:border-zinc-700">
         <Film className="w-5 h-5 text-zinc-400" />
@@ -375,7 +389,8 @@ const checkGalleryAvailability = (
   postTitle: string, 
   contentList: Content[],
   qualities: Quality[] = [],
-  languages: Language[] = []
+  languages: Language[] = [],
+  titleIndex?: Map<string, Content>
 ): { isAvailable: boolean; badgeLabel: 'Available' | 'Missing'; reason?: string; matchedContent?: Content; parsed: { title: string; year?: number; formatted: string } } => {
   const parsed = extractTitleAndYear(postTitle);
   if (!parsed.title) {
@@ -387,56 +402,66 @@ const checkGalleryAvailability = (
     return { isAvailable: false, badgeLabel: 'Missing', reason: 'Unrecognized Title', parsed };
   }
 
-  const matched = contentList.find(c => {
-    if (!c || !c.title) return false;
-
-    // Flexible title match on primary title or 2nd title (handles dubbed titles, original titles, symbols, typos, 1-word difference)
-    const titleMatches = isFlexibleTitleMatch(parsed.title, c.title) || 
-      (c.secondTitle ? isFlexibleTitleMatch(parsed.title, c.secondTitle) : false);
-    if (!titleMatches) return false;
-
-    // Strict year check: if post has a year, check against main content year AND all season years (Season 1, Season 2, etc.)
-    if (parsed.year) {
-      const candidateYears: number[] = [];
-      if (c.year) candidateYears.push(c.year);
-
-      const titleYear = extractTitleAndYear(c.title).year;
-      if (titleYear) candidateYears.push(titleYear);
-
-      if (c.secondTitle) {
-        const secTitleYear = extractTitleAndYear(c.secondTitle).year;
-        if (secTitleYear) candidateYears.push(secTitleYear);
-      }
-
-      if (c.seasons) {
-        try {
-          const parsedSeasons: any[] = Array.isArray(c.seasons) ? c.seasons : JSON.parse(c.seasons as string);
-          if (Array.isArray(parsedSeasons)) {
-            parsedSeasons.forEach(s => {
-              if (s.year && typeof s.year === 'number') {
-                candidateYears.push(s.year);
-              }
-              if (s.title) {
-                const sYear = extractTitleAndYear(s.title).year;
-                if (sYear) candidateYears.push(sYear);
-              }
-            });
-          }
-        } catch (e) {
-          // ignore JSON parse error
-        }
-      }
-
-      if (candidateYears.length > 0) {
-        const hasMatchingYear = candidateYears.some(y => Math.abs(y - parsed.year!) <= 1);
-        if (!hasMatchingYear) {
-          return false;
-        }
-      }
+  let matched: Content | undefined = undefined;
+  if (titleIndex && titleIndex.has(normParsed)) {
+    const candidate = titleIndex.get(normParsed)!;
+    if (!parsed.year || !candidate.year || Math.abs(candidate.year - parsed.year) <= 1) {
+      matched = candidate;
     }
+  }
 
-    return true;
-  });
+  if (!matched) {
+    matched = contentList.find(c => {
+      if (!c || !c.title) return false;
+
+      // Flexible title match on primary title or 2nd title (handles dubbed titles, original titles, symbols, typos, 1-word difference)
+      const titleMatches = isFlexibleTitleMatch(parsed.title, c.title) || 
+        (c.secondTitle ? isFlexibleTitleMatch(parsed.title, c.secondTitle) : false);
+      if (!titleMatches) return false;
+
+      // Strict year check: if post has a year, check against main content year AND all season years (Season 1, Season 2, etc.)
+      if (parsed.year) {
+        const candidateYears: number[] = [];
+        if (c.year) candidateYears.push(c.year);
+
+        const titleYear = extractTitleAndYear(c.title).year;
+        if (titleYear) candidateYears.push(titleYear);
+
+        if (c.secondTitle) {
+          const secTitleYear = extractTitleAndYear(c.secondTitle).year;
+          if (secTitleYear) candidateYears.push(secTitleYear);
+        }
+
+        if (c.seasons) {
+          try {
+            const parsedSeasons: any[] = Array.isArray(c.seasons) ? c.seasons : JSON.parse(c.seasons as string);
+            if (Array.isArray(parsedSeasons)) {
+              parsedSeasons.forEach(s => {
+                if (s.year && typeof s.year === 'number') {
+                  candidateYears.push(s.year);
+                }
+                if (s.title) {
+                  const sYear = extractTitleAndYear(s.title).year;
+                  if (sYear) candidateYears.push(sYear);
+                }
+              });
+            }
+          } catch (e) {
+            // ignore JSON parse error
+          }
+        }
+
+        if (candidateYears.length > 0) {
+          const hasMatchingYear = candidateYears.some(y => Math.abs(y - parsed.year!) <= 1);
+          if (!hasMatchingYear) {
+            return false;
+          }
+        }
+      }
+
+      return true;
+    });
+  }
 
   if (!matched) {
     return {
@@ -661,6 +686,10 @@ const filterFilmygoHits = (hits: any[], pageUrl: string): any[] => {
     }
   }
 
+  if (selected.length === 0) {
+    return effectiveHits;
+  }
+
   // Return selected hits, deduplicated by the Set
   return Array.from(new Set(selected));
 };
@@ -829,12 +858,28 @@ export const LinkCheckerModal: React.FC<Props> = ({
     }
   }, [moviesdriveSearchUrl]);
 
+  const contentTitleIndex = useMemo(() => {
+    const map = new Map<string, Content>();
+    if (!contentList) return map;
+    contentList.forEach(c => {
+      if (c.title) {
+        const norm = normalizeTitle(c.title);
+        if (norm) map.set(norm, c);
+      }
+      if (c.secondTitle) {
+        const norm = normalizeTitle(c.secondTitle);
+        if (norm) map.set(norm, c);
+      }
+    });
+    return map;
+  }, [contentList]);
+
   const moviesdrivePostsWithAvailability = useMemo(() => {
     return moviesdriveSearchPosts.map((post, originalIndex) => {
-      const avail = checkGalleryAvailability(post.title, contentList, qualities, languages);
+      const avail = checkGalleryAvailability(post.title, contentList, qualities, languages, contentTitleIndex);
       return { post, originalIndex, avail };
     });
-  }, [moviesdriveSearchPosts, contentList, qualities, languages]);
+  }, [moviesdriveSearchPosts, contentList, qualities, languages, contentTitleIndex]);
 
   const moviesdriveFilteredPosts = useMemo(() => {
     return moviesdrivePostsWithAvailability.filter(({ post, avail }) => {
@@ -1110,32 +1155,37 @@ export const LinkCheckerModal: React.FC<Props> = ({
   }, []);
 
   const resolveLocationAndMetadata = React.useCallback((res: LinkCheckResult) => {
+    // Remove location fetching or retrieving for working links; retrieve only for non-working links.
+    const isWorking = res.ok || res.statusLabel === "WORKING" || res.statusLabel === "REDIRECT" || res.statusLabel === "PROTECTED";
+
     let season = res.season;
     let episode = res.episode;
     let isFullSeasonMKV = res.isFullSeasonMKV;
     let isFullSeasonZIP = res.isFullSeasonZIP;
     let qualityLabel = res.qualityLabel;
     let linkName = res.linkName;
-    let locationName = res.locationName;
+    let locationName = isWorking ? undefined : res.locationName;
 
     const url = res.url || '';
     const finalUrl = res.finalUrl || '';
 
-    // 1. Try search in passed `content` prop or items in `contentList`
-    const searchTargets = [content, ...(contentList || [])].filter(Boolean);
+    // 1. Try search in passed `content` prop or items in `contentList` (only for non-working links to retrieve location)
+    if (!isWorking) {
+      const searchTargets = [content, ...(contentList || [])].filter(Boolean);
 
-    for (const cItem of searchTargets) {
-      const loc = searchLocationInContent(cItem, url, finalUrl);
-      if (loc) {
-        if (season === undefined) season = loc.season;
-        if (episode === undefined) episode = loc.episode;
-        if (isFullSeasonMKV === undefined || !isFullSeasonMKV) isFullSeasonMKV = loc.isFullSeasonMKV;
-        if (isFullSeasonZIP === undefined || !isFullSeasonZIP) isFullSeasonZIP = loc.isFullSeasonZIP;
-        if (!qualityLabel) qualityLabel = loc.qualityLabel;
-        if (!linkName) linkName = loc.linkName;
-        if (!locationName) locationName = loc.locationName;
-        if (season !== undefined || episode !== undefined || isFullSeasonMKV || isFullSeasonZIP || linkName || locationName) {
-          break;
+      for (const cItem of searchTargets) {
+        const loc = searchLocationInContent(cItem, url, finalUrl);
+        if (loc) {
+          if (season === undefined) season = loc.season;
+          if (episode === undefined) episode = loc.episode;
+          if (isFullSeasonMKV === undefined || !isFullSeasonMKV) isFullSeasonMKV = loc.isFullSeasonMKV;
+          if (isFullSeasonZIP === undefined || !isFullSeasonZIP) isFullSeasonZIP = loc.isFullSeasonZIP;
+          if (!qualityLabel) qualityLabel = loc.qualityLabel;
+          if (!linkName) linkName = loc.linkName;
+          if (!locationName) locationName = loc.locationName;
+          if (season !== undefined || episode !== undefined || isFullSeasonMKV || isFullSeasonZIP || linkName || locationName) {
+            break;
+          }
         }
       }
     }
@@ -1207,10 +1257,10 @@ export const LinkCheckerModal: React.FC<Props> = ({
       isFullSeasonZIP,
       qualityLabel: res.qualityLabel || qualityLabel,
       linkName,
-      locationName
+      locationName: isWorking ? undefined : locationName
     };
 
-    const tag = getLocationTag(mergedResult);
+    const tag = isWorking ? null : getLocationTag(mergedResult);
 
     return { mergedResult, tag };
   }, [content, contentList, languages, qualities, searchLocationInContent]);
@@ -1302,22 +1352,22 @@ export const LinkCheckerModal: React.FC<Props> = ({
     } else {
       targetUrl = trimmed;
     }
-    const currentVal = inputRef.current.trim();
-    let newInput = "";
-    if (!currentVal) {
-      newInput = targetUrl;
-    } else if (currentVal.includes(targetUrl)) {
-      newInput = currentVal;
-    } else {
-      newInput = `${currentVal}\n${targetUrl}`;
-    }
-    setInput(newInput);
+    
+    // Clear cache & active search overlays for fresh search
+    processedExtractionsRef.current.delete(normalizeUrl(targetUrl));
+    processedExtractionsRef.current.delete(targetUrl);
+    setMoviesdriveSearchUrl(null);
+    setMoviesdriveSearchPosts([]);
+    setAllAccumulatedPosts(new Map());
+    setMoviesdriveSelectedUrls(new Set());
+
+    setInput(targetUrl);
     setShowMoviesdriveSearchInput(false);
     setShowSkymoviesSearchInput(false);
     setShowFilmygoSearchInput(false);
     setMoviesdriveSearchTerm("");
     setTimeout(() => {
-      handleCheck(undefined, newInput);
+      handleCheck(undefined, targetUrl, 0, true);
     }, 100);
   };
 
@@ -1332,22 +1382,22 @@ export const LinkCheckerModal: React.FC<Props> = ({
     } else {
       targetUrl = trimmed;
     }
-    const currentVal = inputRef.current.trim();
-    let newInput = "";
-    if (!currentVal) {
-      newInput = targetUrl;
-    } else if (currentVal.includes(targetUrl)) {
-      newInput = currentVal;
-    } else {
-      newInput = `${currentVal}\n${targetUrl}`;
-    }
-    setInput(newInput);
+
+    // Clear cache & active search overlays for fresh search
+    processedExtractionsRef.current.delete(normalizeUrl(targetUrl));
+    processedExtractionsRef.current.delete(targetUrl);
+    setMoviesdriveSearchUrl(null);
+    setMoviesdriveSearchPosts([]);
+    setAllAccumulatedPosts(new Map());
+    setMoviesdriveSelectedUrls(new Set());
+
+    setInput(targetUrl);
     setShowSkymoviesSearchInput(false);
     setShowMoviesdriveSearchInput(false);
     setShowFilmygoSearchInput(false);
     setSkymoviesSearchTerm("");
     setTimeout(() => {
-      handleCheck(undefined, newInput);
+      handleCheck(undefined, targetUrl, 0, true);
     }, 100);
   };
 
@@ -1362,22 +1412,22 @@ export const LinkCheckerModal: React.FC<Props> = ({
     } else {
       targetUrl = trimmed;
     }
-    const currentVal = inputRef.current.trim();
-    let newInput = "";
-    if (!currentVal) {
-      newInput = targetUrl;
-    } else if (currentVal.includes(targetUrl)) {
-      newInput = currentVal;
-    } else {
-      newInput = `${currentVal}\n${targetUrl}`;
-    }
-    setInput(newInput);
+
+    // Clear cache & active search overlays for fresh search
+    processedExtractionsRef.current.delete(normalizeUrl(targetUrl));
+    processedExtractionsRef.current.delete(targetUrl);
+    setMoviesdriveSearchUrl(null);
+    setMoviesdriveSearchPosts([]);
+    setAllAccumulatedPosts(new Map());
+    setMoviesdriveSelectedUrls(new Set());
+
+    setInput(targetUrl);
     setShowFilmygoSearchInput(false);
     setShowMoviesdriveSearchInput(false);
     setShowSkymoviesSearchInput(false);
     setFilmygoSearchTerm("");
     setTimeout(() => {
-      handleCheck(undefined, newInput);
+      handleCheck(undefined, targetUrl, 0, true);
     }, 100);
   };
 
@@ -1681,7 +1731,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
     if (depth === 0 && !initialInputOverride) {
       processedExtractionsRef.current.clear();
     }
-    if (depth > 5) {
+    if (depth > 10) {
       console.warn("Max check depth reached, stopping recursion.");
       setLoading(false);
       return;
@@ -1690,10 +1740,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
     // Derive links directly from input or use provided override
     const currentInputSnapshot = initialInputOverride || inputRef.current;
     
-    // We no longer normalize domains to hubcloud.cx to allow dynamic domains
-    let normalizedInput = currentInputSnapshot;
-    
-    let currentLinks = onlyUrls || splitLinks(normalizedInput).map(normalizeUrl).filter(Boolean);
+    let currentLinks = onlyUrls || splitLinks(currentInputSnapshot).map(normalizeUrl).filter(Boolean);
     
     if (!currentLinks.length) {
       setError("Please paste at least one valid link first.");
@@ -1701,11 +1748,27 @@ export const LinkCheckerModal: React.FC<Props> = ({
       return;
     }
 
+    const mdDomain = getMoviesdriveDomain();
+    const skyDomain = getSkymoviesDomain();
+    const filmyDomain = getFilmygoDomain();
+
     // 1. Identify all extractable links
-    const extractableLinks = currentLinks.filter(u => 
-      (u.includes('howblogs.xyz') || u.includes('filesdl.in') || u.includes('filesdl.top') || u.includes('mdrive.lol') || u.includes('mdrvie.lol') || u.includes('moviesdrives.') || u.includes('moviesdrive.') || u.includes('filmygo.') || u.includes('skymovies')) && 
-      !processedExtractionsRef.current.has(u)
-    );
+    const extractableLinks = currentLinks.filter(u => {
+      const normU = normalizeUrl(u);
+      const isExtractableHost = 
+        normU.includes('howblogs.xyz') || normU.includes('sky-blogs.xyz') ||
+        normU.includes('filesdl.in') || normU.includes('filesdl.top') || normU.includes('filesdl.') || normU.includes('linkmake.') ||
+        normU.includes('mdrive.lol') || normU.includes('mdrvie.lol') ||
+        normU.includes('moviesdrives.') || normU.includes('moviesdrive.') ||
+        normU.includes('filmygo.') || normU.includes('skymovies') ||
+        (mdDomain && normU.includes(normalizeUrl(mdDomain))) ||
+        (skyDomain && normU.includes(normalizeUrl(skyDomain))) ||
+        (filmyDomain && normU.includes(normalizeUrl(filmyDomain)));
+
+      return isExtractableHost && 
+        !processedExtractionsRef.current.has(u) && 
+        !processedExtractionsRef.current.has(normU);
+    });
 
     if (extractableLinks.length > 0) {
       setLoading(true);
@@ -1714,74 +1777,109 @@ export const LinkCheckerModal: React.FC<Props> = ({
         // Take up to 5 links at once
         const batch = extractableLinks.slice(0, 5);
         const results = await Promise.all(batch.map(async (targetUrl) => {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 12000);
           try {
             const normUrl = normalizeUrl(targetUrl);
             if (normUrl.includes('mdrive.lol') || normUrl.includes('mdrvie.lol')) {
-              const res = await fetch(`/api/mdrive?url=${encodeURIComponent(normUrl)}`);
+              const res = await fetch(`/api/mdrive?url=${encodeURIComponent(normUrl)}`, { signal: controller.signal });
+              clearTimeout(timer);
               if (!res.ok) throw new Error('MDrive fetch failed');
               const data = await res.json();
               return { type: 'mdrive', original: targetUrl, data };
-            } else if (normUrl.includes('moviesdrives.') || normUrl.includes('moviesdrive.')) {
-              const res = await fetch(`/api/moviesdrive?url=${encodeURIComponent(normUrl)}`);
+            } else if (normUrl.includes('moviesdrives.') || normUrl.includes('moviesdrive.') || (mdDomain && normUrl.includes(normalizeUrl(mdDomain)))) {
+              const res = await fetch(`/api/moviesdrive?url=${encodeURIComponent(normUrl)}`, { signal: controller.signal });
+              clearTimeout(timer);
               if (!res.ok) throw new Error('MoviesDrive fetch failed');
               const data = await res.json();
               return { type: 'moviesdrive', original: targetUrl, data };
-            } else if (normUrl.includes('filmygo.')) {
-              const res = await fetch(`/api/filmygo?url=${encodeURIComponent(normUrl)}`);
+            } else if (normUrl.includes('filmygo.') || (filmyDomain && normUrl.includes(normalizeUrl(filmyDomain)))) {
+              const res = await fetch(`/api/filmygo?url=${encodeURIComponent(normUrl)}`, { signal: controller.signal });
+              clearTimeout(timer);
               if (!res.ok) throw new Error('FilmyGo fetch failed');
               const data = await res.json();
               return { type: 'filmygo', original: targetUrl, data };
-            } else if (normUrl.includes('skymovies')) {
-              const res = await fetch(`/api/skymovieshd?url=${encodeURIComponent(normUrl)}`);
+            } else if (normUrl.includes('skymovies') || (skyDomain && normUrl.includes(normalizeUrl(skyDomain)))) {
+              const res = await fetch(`/api/skymovieshd?url=${encodeURIComponent(normUrl)}`, { signal: controller.signal });
+              clearTimeout(timer);
               if (!res.ok) throw new Error('SkymoviesHD fetch failed');
               const data = await res.json();
               return { type: 'skymovieshd', original: targetUrl, data };
             } else {
               const endpoint = normUrl.includes('howblogs.xyz') ? '/api/howblogs' : '/api/filesdl';
-              const res = await fetch(`${endpoint}?url=${encodeURIComponent(normUrl)}`);
+              const res = await fetch(`${endpoint}?url=${encodeURIComponent(normUrl)}`, { signal: controller.signal });
+              clearTimeout(timer);
               if (!res.ok) throw new Error('Extraction failed');
               const data = await res.json();
               return { type: 'auto', original: targetUrl, extracted: data.url };
             }
           } catch (e) {
+            clearTimeout(timer);
             console.error(`Failed to extract ${targetUrl}:`, e);
             return { type: 'error', original: targetUrl };
           }
         }));
 
         let nextInput = currentInputSnapshot;
+
+        const markProcessed = (origUrl: string) => {
+          processedExtractionsRef.current.add(origUrl);
+          processedExtractionsRef.current.add(normalizeUrl(origUrl));
+        };
+
+        const replaceOriginalUrl = (origUrl: string, replacement: string) => {
+          markProcessed(origUrl);
+          const baseLink = origUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+          const escapedBase = baseLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}/?`, 'g');
+          let updated = nextInput.replace(regex, replacement);
+          if (updated === nextInput) {
+            updated = nextInput.split('\n').map(line => {
+              const trimmed = line.trim();
+              if (!trimmed) return line;
+              if (trimmed === origUrl.trim() || normalizeUrl(trimmed) === normalizeUrl(origUrl)) {
+                return replacement;
+              }
+              return line;
+            }).join('\n');
+          }
+          nextInput = updated;
+        };
+
         for (const res of results) {
           if (res.type === 'auto') {
-            processedExtractionsRef.current.add(res.original);
+            markProcessed(res.original);
             if (res.extracted && res.extracted !== res.original) {
-              const baseLink = res.original.replace(/^https?:\/\//, '').replace(/\/$/, '');
-              const escapedBase = baseLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-              const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}/?`, 'g');
-              nextInput = nextInput.replace(regex, res.extracted);
+              replaceOriginalUrl(res.original, res.extracted);
               console.log("Auto-replacement successful:", { from: res.original, to: res.extracted });
             }
           } else if (res.type === 'mdrive' || res.type === 'moviesdrive' || res.type === 'filmygo' || res.type === 'skymovieshd') {
-            if ((res.type === 'moviesdrive' || res.type === 'skymovieshd' || res.type === 'filmygo') && res.data?.is_search && Array.isArray(res.data?.posts) && res.data.posts.length > 0) {
-              setMoviesdriveSearchUrl(res.original);
-              setMoviesdriveSearchPosts(res.data.posts);
-              const isSky = res.type === 'skymovieshd' || res.original.includes('skymovies');
-              const initialLimit = isSky ? 50 : res.data.posts.length;
+            if ((res.type === 'moviesdrive' || res.type === 'skymovieshd' || res.type === 'filmygo') && res.data?.is_search) {
+              markProcessed(res.original);
+              if (Array.isArray(res.data?.posts) && res.data.posts.length > 0) {
+                setMoviesdriveSearchUrl(res.original);
+                setMoviesdriveSearchPosts(res.data.posts);
+                const isSky = res.type === 'skymovieshd' || res.original.includes('skymovies');
+                const initialLimit = isSky ? 10 : Math.min(res.data.posts.length, 25);
 
-              const accMap = new Map<string, { title: string; url: string; image?: string }>();
-              res.data.posts.forEach((p: any) => {
-                if (p.url) accMap.set(p.url, p);
-              });
-              setAllAccumulatedPosts(accMap);
+                const accMap = new Map<string, { title: string; url: string; image?: string }>();
+                res.data.posts.forEach((p: any) => {
+                  if (p.url) accMap.set(p.url, p);
+                });
+                setAllAccumulatedPosts(accMap);
 
-              const initialSelected = new Set<string>();
-              res.data.posts.slice(0, initialLimit).forEach((p: any) => {
-                if (p.url) initialSelected.add(p.url);
-              });
-              setMoviesdriveSelectedUrls(initialSelected);
-              setHasUserInteractedSelection(false);
-              setMoviesdriveSearchQuery("");
-              pausedForUI = true;
-              break;
+                const initialSelected = new Set<string>();
+                res.data.posts.slice(0, initialLimit).forEach((p: any) => {
+                  if (p.url) initialSelected.add(p.url);
+                });
+                setMoviesdriveSelectedUrls(initialSelected);
+                setHasUserInteractedSelection(false);
+                setMoviesdriveSearchQuery("");
+                pausedForUI = true;
+                break;
+              } else {
+                setError(`No matching contents found on ${res.type === 'skymovieshd' ? 'SkyMoviesHD' : res.type === 'filmygo' ? 'FilmyGo' : 'MoviesDrive'}.`);
+              }
             }
 
             const hits = res.data?.hits || [];
@@ -1789,29 +1887,22 @@ export const LinkCheckerModal: React.FC<Props> = ({
               if (res.type === 'filmygo') {
                 const autoHits = filterFilmygoHits(hits, res.original);
                 if (autoHits.length > 0) {
-                  processedExtractionsRef.current.add(res.original);
                   const selectedUrls = autoHits.map(h => h.url).join('\n');
-                  const baseLink = res.original.replace(/^https?:\/\//, '').replace(/\/$/, '');
-                  const escapedBase = baseLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                  const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}/?`, 'g');
-                  nextInput = nextInput.replace(regex, selectedUrls);
+                  replaceOriginalUrl(res.original, selectedUrls);
                   console.log(`FilmyGo auto-selected ${autoHits.length} hits without modal popup:`, { from: res.original, count: autoHits.length });
                 } else {
-                  // If page opened but no hubcloud links were found/matched, skip this link and proceed to next
-                  processedExtractionsRef.current.add(res.original);
-                  console.log("FilmyGo page opened but no matching hubcloud links found - skipping link:", res.original);
+                  // Show selection UI if autoHits is empty but hits exist
+                  setMdriveUrl(res.original);
+                  setMdriveResults(hits);
+                  setMdriveSelectedIndices(new Set());
+                  pausedForUI = true;
+                  break;
                 }
               } else if (res.type === 'mdrive') {
                 if (hits.length === 1) {
-                  processedExtractionsRef.current.add(res.original);
-                  // Auto-extract the single link
-                  const baseLink = res.original.replace(/^https?:\/\//, '').replace(/\/$/, '');
-                  const escapedBase = baseLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                  const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}/?`, 'g');
-                  nextInput = nextInput.replace(regex, hits[0].url);
+                  replaceOriginalUrl(res.original, hits[0].url);
                   console.log("MDrive auto-extraction successful (1 link).");
                 } else {
-                  // Show the selection modal if more than 1 hubcloud link is found
                   setMdriveUrl(res.original);
                   setMdriveResults(hits);
                   setMdriveSelectedIndices(new Set());
@@ -1819,15 +1910,10 @@ export const LinkCheckerModal: React.FC<Props> = ({
                   break;
                 }
               } else if (hits.length === 1) {
-                processedExtractionsRef.current.add(res.original);
                 const singleLink = hits[0].url;
-                const baseLink = res.original.replace(/^https?:\/\//, '').replace(/\/$/, '');
-                const escapedBase = baseLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}/?`, 'g');
-                nextInput = nextInput.replace(regex, singleLink);
+                replaceOriginalUrl(res.original, singleLink);
                 console.log(`${res.type === 'moviesdrive' ? 'MoviesDrive' : 'SkymoviesHD'} auto-replacement successful:`, { from: res.original, to: singleLink });
               } else {
-                // Show UI for this specific link (MoviesDrive, SkyMoviesHD with more than 1 hit)
                 setMdriveUrl(res.original);
                 setMdriveResults(hits);
                 setMdriveSelectedIndices(new Set());
@@ -1836,11 +1922,11 @@ export const LinkCheckerModal: React.FC<Props> = ({
               }
             } else {
               // 0 hits
-              processedExtractionsRef.current.add(res.original);
+              markProcessed(res.original);
             }
           } else if (res.type === 'error') {
             console.log("Extraction error for", res.original, "- skipping from this session");
-            processedExtractionsRef.current.add(res.original);
+            markProcessed(res.original);
           }
         }
 
@@ -1854,8 +1940,6 @@ export const LinkCheckerModal: React.FC<Props> = ({
       } catch (err: any) {
         setError(err.message);
       } finally {
-        // We set loading false even if paused, because the UI popup is a separate modal state.
-        // Keeping "Checking..." on the main button while the popup is open looks like it's stuck.
         setLoading(false);
       }
       return;
@@ -2466,9 +2550,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
   const retryFailed = () => {
     const failed = results
-      .filter((r) => !r.ok || r.statusLabel === "UNKNOWN" || r.statusLabel === "MISSING_FILENAME" || r.statusLabel === "BROKEN" || r.statusLabel === "UNAVAILABLE")
+      .filter((r) => !r.ok || r.statusLabel === "UNKNOWN" || r.statusLabel === "MISSING_FILENAME" || r.statusLabel === "BROKEN" || r.statusLabel === "UNAVAILABLE" || isMissingPixeldrain(r))
       .map((r) => r.url);
-    if (failed.length) handleCheck(failed);
+    if (failed.length) handleCheck(failed, undefined, 0, true);
   };
 
   const copyResults = async () => {
@@ -2497,9 +2581,28 @@ export const LinkCheckerModal: React.FC<Props> = ({
   }, [results]);
 
   const sortedResults = useMemo(() => {
-    return [...results].sort((a, b) => {
-      const isHubcloudA = a.url.toLowerCase().includes("hubcloud");
-      const isHubcloudB = b.url.toLowerCase().includes("hubcloud");
+    const items = results.map((rawResult) => {
+      const { mergedResult: result, tag: locationTag } = resolveLocationAndMetadata(rawResult);
+      const isWorking = Boolean(
+        result.ok ||
+        result.statusLabel === "WORKING" ||
+        result.statusLabel === "REDIRECT" ||
+        result.statusLabel === "PROTECTED"
+      );
+      return { rawResult, result, locationTag, isWorking };
+    });
+
+    items.sort((itemA, itemB) => {
+      // 1. Working links first, non-working links at the end
+      if (itemA.isWorking && !itemB.isWorking) return -1;
+      if (!itemA.isWorking && itemB.isWorking) return 1;
+
+      const a = itemA.result;
+      const b = itemB.result;
+
+      // 2. Hubcloud / Pixeldrain prioritization
+      const isHubcloudA = (a.url || "").toLowerCase().includes("hubcloud");
+      const isHubcloudB = (b.url || "").toLowerCase().includes("hubcloud");
 
       const hasPixeldrainA = isHubcloudA && !!a.candidates?.some(c => c.text.toLowerCase().includes("pixeldrain") || c.href.toLowerCase().includes("pixeldrain"));
       const hasPixeldrainB = isHubcloudB && !!b.candidates?.some(c => c.text.toLowerCase().includes("pixeldrain") || c.href.toLowerCase().includes("pixeldrain"));
@@ -2510,21 +2613,43 @@ export const LinkCheckerModal: React.FC<Props> = ({
       if (isHubcloudA && !isHubcloudB) return 1;
       if (!isHubcloudA && isHubcloudB) return -1;
 
-      // Group by type: ZIP, MKV, Episode, Movie
-      const typeA = a.isFullSeasonZIP ? 1 : a.isFullSeasonMKV ? 2 : (a.season || a.episode) ? 3 : 4;
-      const typeB = b.isFullSeasonZIP ? 1 : b.isFullSeasonMKV ? 2 : (b.season || b.episode) ? 3 : 4;
+      // 3. Group by location / metadata type: ZIP (1), MKV (2), Episodes (3), Movie/Other (4)
+      const typeA = a.isFullSeasonZIP ? 1 : a.isFullSeasonMKV ? 2 : (a.season !== undefined || a.episode !== undefined) ? 3 : 4;
+      const typeB = b.isFullSeasonZIP ? 1 : b.isFullSeasonMKV ? 2 : (b.season !== undefined || b.episode !== undefined) ? 3 : 4;
 
       if (typeA !== typeB) return typeA - typeB;
 
-      if (typeA === 3) { // Episodes
+      // Type 1 (ZIP) or Type 2 (MKV): sort by season if available
+      if (typeA === 1 || typeA === 2) {
+        if (a.season !== undefined && b.season !== undefined && a.season !== b.season) {
+          return (a.season || 0) - (b.season || 0);
+        }
+      }
+
+      // Type 3 (Episodes): sort by season ascending, then episode ascending
+      if (typeA === 3) {
         if (a.season !== b.season) return (a.season || 0) - (b.season || 0);
         if (a.episode !== b.episode) return (a.episode || 0) - (b.episode || 0);
       }
 
-      // If same type (and same season/episode if applicable), sort by size ascending (smallest to largest)
+      // Sort by location tag / name naturally if present (e.g. for non-working links)
+      const locA = itemA.locationTag || a.locationName || "";
+      const locB = itemB.locationTag || b.locationName || "";
+      if (locA && locB && locA !== locB) {
+        const comp = locA.localeCompare(locB, undefined, { numeric: true, sensitivity: 'base' });
+        if (comp !== 0) return comp;
+      } else if (locA && !locB) {
+        return -1;
+      } else if (!locA && locB) {
+        return 1;
+      }
+
+      // 4. Sort by size ascending (smallest to largest)
       return (a.fileSize || 0) - (b.fileSize || 0);
     });
-  }, [results]);
+
+    return items;
+  }, [results, resolveLocationAndMetadata]);
 
   return (
     <AnimatePresence>
@@ -3404,7 +3529,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                   >
                     <Globe className="h-3.5 w-3.5" /> Site Domains
                   </button>
-                  <button onClick={retryFailed} className="inline-flex items-center justify-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-transparent px-3.5 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-1.5 disabled:opacity-50 transition-colors" disabled={loading || !results.some((r) => !r.ok || r.statusLabel === "UNKNOWN" || r.statusLabel === "MISSING_FILENAME" || r.statusLabel === "BROKEN" || r.statusLabel === "UNAVAILABLE")}><RefreshCw className="h-3.5 w-3.5" /> Retry Failed</button>
+                  <button onClick={retryFailed} className="inline-flex items-center justify-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-transparent px-3.5 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-1.5 disabled:opacity-50 transition-colors" disabled={loading || !results.some((r) => !r.ok || r.statusLabel === "UNKNOWN" || r.statusLabel === "MISSING_FILENAME" || r.statusLabel === "BROKEN" || r.statusLabel === "UNAVAILABLE" || isMissingPixeldrain(r))}><RefreshCw className="h-3.5 w-3.5" /> Retry Failed</button>
                   <button onClick={copyResults} className="inline-flex items-center justify-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-transparent px-3.5 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-1.5 disabled:opacity-50 transition-colors" disabled={!results.length}><Copy className="h-3.5 w-3.5" /> Copy Results</button>
                   <button onClick={reset} className="inline-flex items-center justify-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-transparent px-3.5 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-1.5 transition-colors"><Trash2 className="h-3.5 w-3.5" /> Reset</button>
                   
@@ -3451,8 +3576,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                 )}
 
                 <div className="space-y-3 max-h-[500px] overflow-auto pr-1">
-                  {sortedResults.map((rawResult) => {
-                    const { mergedResult: result, tag: locationTag } = resolveLocationAndMetadata(rawResult);
+                  {sortedResults.map(({ result, locationTag }) => {
                     const statusLabel = result.statusLabel || (result.ok ? "WORKING" : "UNKNOWN");
                     const openRow = !!expanded[result.url];
 
@@ -3470,11 +3594,6 @@ export const LinkCheckerModal: React.FC<Props> = ({
                                   <div className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${badgeMap[statusLabel]}`}>{statusLabel}</div>
                                   {result.isDirectDownload ? <div className="inline-flex rounded-full border border-blue-200 dark:border-blue-800 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-600 dark:text-blue-400"><FileDown className="h-3.5 w-3.5 mr-1" /> Direct Download</div> : null}
                                   {(result.mismatchWarnings?.length || 0) > 0 ? <div className="inline-flex rounded-full border border-pink-200 dark:border-pink-800 bg-pink-500/10 px-3 py-1 text-xs font-medium text-pink-600 dark:text-pink-400"><Siren className="h-3.5 w-3.5 mr-1" /> Mismatch</div> : null}
-                                  {result.url.toLowerCase().includes("hubcloud") && !result.candidates?.some(c => c.text.toLowerCase().includes("pixeldrain") || c.href.toLowerCase().includes("pixeldrain")) && (
-                                    <div className="inline-flex rounded-full border border-red-200 dark:border-red-800 bg-red-500/10 px-3 py-1 text-xs font-bold text-red-600 dark:text-red-400 animate-pulse">
-                                      Missing Pixeldrain
-                                    </div>
-                                  )}
                                 </div>
                                 <div className="mt-2 flex flex-wrap gap-2 items-center">
                                   {result.qualityLabel ? <span className="rounded-full border border-fuchsia-200 dark:border-fuchsia-800 bg-fuchsia-500/10 px-2.5 py-1 text-[11px] font-medium text-fuchsia-600 dark:text-fuchsia-300">{result.qualityLabel}</span> : null}
@@ -3514,16 +3633,28 @@ export const LinkCheckerModal: React.FC<Props> = ({
                                             </span>
                                           );
                                         })}
-                                        {result.url.toLowerCase().includes("hubcloud") && !result.candidates.some(c => c.text.toLowerCase().includes("pixeldrain") || c.href.toLowerCase().includes("pixeldrain")) && (
-                                          <span className="rounded-lg border border-red-200 dark:border-red-800 bg-red-500/10 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider text-red-600 dark:text-red-400 animate-pulse">
-                                            Missing Pixeldrain
-                                          </span>
+                                        {isMissingPixeldrain(result) && (
+                                          <button
+                                            onClick={() => handleCheck([result.url], undefined, 0, true)}
+                                            disabled={loading}
+                                            className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 dark:border-red-800 bg-red-500/10 hover:bg-red-500/20 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider text-red-600 dark:text-red-400 animate-pulse cursor-pointer transition-colors"
+                                            title="Retry fetching Pixeldrain download link for this item"
+                                          >
+                                            <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
+                                            Missing Pixeldrain (Retry)
+                                          </button>
                                         )}
                                       </>
                                     ) : (
-                                      <span className="rounded-lg border border-red-200 dark:border-red-800 bg-red-500/10 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider text-red-600 dark:text-red-400 animate-pulse">
-                                        Missing Pixeldrain
-                                      </span>
+                                      <button
+                                        onClick={() => handleCheck([result.url], undefined, 0, true)}
+                                        disabled={loading}
+                                        className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 dark:border-red-800 bg-red-500/10 hover:bg-red-500/20 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider text-red-600 dark:text-red-400 animate-pulse cursor-pointer transition-colors"
+                                        title="Retry fetching Pixeldrain download link for this item"
+                                      >
+                                        <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
+                                        Missing Pixeldrain (Retry)
+                                      </button>
                                     )}
                                   </div>
                                 )}
@@ -3537,7 +3668,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                               </div>
                             </div>
                             <div className="flex gap-2 self-start">
-                              {(!result.ok || result.statusLabel === "UNKNOWN" || result.statusLabel === "MISSING_FILENAME" || result.statusLabel === "BROKEN" || result.statusLabel === "UNAVAILABLE") && (
+                              {(!result.ok || result.statusLabel === "UNKNOWN" || result.statusLabel === "MISSING_FILENAME" || result.statusLabel === "BROKEN" || result.statusLabel === "UNAVAILABLE" || isMissingPixeldrain(result)) && (
                                 <button
                                   onClick={() => handleCheck([result.url], undefined, 0, true)}
                                   disabled={loading}

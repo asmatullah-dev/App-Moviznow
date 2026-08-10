@@ -19,16 +19,17 @@ const shouldFetchMeta = () => {
   return false;
 };
 
-let lastForceFetchTime = 0;
-
 export const getChunkMeta = async (forceRefresh = false) => {
   const nowMs = Date.now();
-  // If forceRefresh is requested but we just fetched within 30 seconds, use memory/local cache
-  const effectiveForceRefresh = forceRefresh && (nowMs - lastForceFetchTime > 30000);
 
-  if (memoryCache && !effectiveForceRefresh) return memoryCache;
+  if (forceRefresh) {
+    chunkMetaPromise = null;
+    memoryCache = null;
+  } else if (memoryCache) {
+    return memoryCache;
+  }
 
-  const requiresFetch = effectiveForceRefresh || shouldFetchMeta();
+  const requiresFetch = forceRefresh || shouldFetchMeta();
   
   if (!requiresFetch) {
     const cachedStr = safeStorage.getItem('cached_chunk_meta_doc');
@@ -40,13 +41,11 @@ export const getChunkMeta = async (forceRefresh = false) => {
     }
   }
 
-  // Reuse inflight promise if it exists to prevent multiple concurrent reads
-  if (chunkMetaPromise) {
+  if (chunkMetaPromise && !forceRefresh) {
      return chunkMetaPromise;
   }
 
-  if (!chunkMetaPromise || effectiveForceRefresh) {
-    if (effectiveForceRefresh) lastForceFetchTime = nowMs;
+  if (!chunkMetaPromise || forceRefresh) {
     chunkMetaPromise = getDoc(doc(db, 'chunk_meta', 'versions'))
       .then(snap => snap.exists() ? snap.data() : {})
       .then(data => {
@@ -59,16 +58,29 @@ export const getChunkMeta = async (forceRefresh = false) => {
         const periodInternal = `${shiftedTimeInternal.getUTCFullYear()}-${shiftedTimeInternal.getUTCMonth() + 1}-${shiftedTimeInternal.getUTCDate()}`;
         safeStorage.setItem('last_chunk_meta_period', periodInternal);
         
-        chunkMetaPromise = null; // Clear the inflight promise
+        chunkMetaPromise = null;
         return data;
       })
       .catch(err => {
         console.error("Error fetching chunk_meta:", err);
         chunkMetaPromise = null;
-        return {};
+        return memoryCache || {};
       });
   }
   return chunkMetaPromise;
+};
+
+export const updateChunkMetaLocalCache = (updates: Record<string, any>) => {
+  if (!memoryCache) {
+    const cachedStr = safeStorage.getItem('cached_chunk_meta_doc');
+    if (cachedStr) {
+      try { memoryCache = JSON.parse(cachedStr); } catch(e) { memoryCache = {}; }
+    } else {
+      memoryCache = {};
+    }
+  }
+  memoryCache = { ...memoryCache, ...updates };
+  safeStorage.setItem('cached_chunk_meta_doc', JSON.stringify(memoryCache));
 };
 
 export const clearChunkMetaCache = () => {

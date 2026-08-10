@@ -688,7 +688,8 @@ async function startServer() {
       const response = await fetch(url, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
+        },
+        signal: AbortSignal.timeout(7000)
       });
       
       if (!response.ok) {
@@ -714,8 +715,8 @@ async function startServer() {
   app.get('/api/filesdl', async (req: express.Request, res: express.Response) => {
     try {
       let { url } = req.query;
-      if (!url || typeof url !== 'string' || (!url.includes('filesdl.in') && !url.includes('filesdl.top'))) {
-        return res.status(400).json({ error: 'Valid filesdl URL required' });
+      if (!url || typeof url !== 'string' || (!url.includes('filesdl') && !url.includes('linkmake'))) {
+        return res.status(400).json({ error: 'Valid filesdl/linkmake URL required' });
       }
 
       if (!url.startsWith('http')) {
@@ -728,7 +729,8 @@ async function startServer() {
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
           'Accept-Language': 'en-US,en;q=0.5',
           'Referer': url
-        }
+        },
+        signal: AbortSignal.timeout(7000)
       });
       
       // Try to read text anyway because Cloudflare might return 403 but the HTML might still contain the link or we can extract it
@@ -777,12 +779,26 @@ async function startServer() {
       const page = urlObj.searchParams.get('page') || '1';
       const isSearchUrl = targetUrl.includes('search.html') || targetUrl.includes('search.php') || Boolean(q) || urlObj.pathname === '/' || urlObj.pathname === '' || urlObj.pathname.endsWith('index.html');
 
+      let effectiveOrigin = urlObj.origin;
+
       // 1. If URL is a search page or contains query parameter 'q' or 's', check search.php first
       if (isSearchUrl && q) {
-        const searchApiUrl = `${urlObj.origin}/search.php?q=${encodeURIComponent(q)}&page=${page}`;
+        let searchApiUrl = `${effectiveOrigin}/search.php?q=${encodeURIComponent(q)}&page=${page}`;
         console.log(`[MoviesDrive] Querying search endpoint: ${searchApiUrl}`);
         try {
-          const sRes = await fetch(searchApiUrl, { headers });
+          let sRes = await fetch(searchApiUrl, { headers, signal: AbortSignal.timeout(7000) });
+          if (sRes.url) {
+            try {
+              const resObj = new URL(sRes.url);
+              if (resObj.origin !== effectiveOrigin || resObj.searchParams.get('q') !== q) {
+                effectiveOrigin = resObj.origin;
+                const fixedSearchUrl = `${effectiveOrigin}/search.php?q=${encodeURIComponent(q)}&page=${page}`;
+                console.log(`[MoviesDrive] Domain redirect or query loss detected, re-querying: ${fixedSearchUrl}`);
+                sRes = await fetch(fixedSearchUrl, { headers, signal: AbortSignal.timeout(7000) });
+              }
+            } catch (e) {}
+          }
+
           if (sRes.ok) {
             const sData = await sRes.json().catch(() => null);
             if (sData && Array.isArray(sData.hits) && sData.hits.length > 0) {
@@ -791,7 +807,7 @@ async function startServer() {
                 const permalink = doc.permalink || doc.url || "";
                 const fullUrl = permalink.startsWith("http")
                   ? permalink
-                  : `${urlObj.origin}${permalink.startsWith("/") ? "" : "/"}${permalink}`;
+                  : `${effectiveOrigin}${permalink.startsWith("/") ? "" : "/"}${permalink}`;
                 const title = (doc.post_title || doc.title || "Untitled")
                   .replace(/&#8211;/g, '-')
                   .replace(/&amp;/g, '&')
@@ -812,8 +828,13 @@ async function startServer() {
       }
 
       // 2. Fetch the HTML page
-      const response = await fetch(targetUrl, { headers });
+      const response = await fetch(targetUrl, { headers, signal: AbortSignal.timeout(7000) });
       if (!response.ok) throw new Error(`MoviesDrive returned ${response.status}`);
+      if (response.url) {
+        try {
+          effectiveOrigin = new URL(response.url).origin;
+        } catch (e) {}
+      }
       const text = await response.text();
 
       // Check if it's a single post containing MDrive links
@@ -868,12 +889,13 @@ async function startServer() {
       $("a[href]").each((_, el) => {
         let href = $(el).attr("href") || "";
         if (!href) return;
-        if (href.startsWith("/")) href = urlObj.origin + href;
+        if (href.startsWith("/")) href = effectiveOrigin + href;
         if (!href.startsWith("http")) return;
 
         try {
           const u = new URL(href);
-          if (u.hostname !== urlObj.hostname) return;
+          const effectiveHost = new URL(effectiveOrigin).hostname;
+          if (u.hostname !== effectiveHost && u.hostname !== urlObj.hostname) return;
           const path = u.pathname;
           if (path === "/" || path.includes("search.html") || path.includes("search.php") || path.includes("/category/") || path.includes("/genre/") || path.includes("/tag/") || path.includes("/page/")) return;
           if (/\.(jpg|jpeg|png|gif|webp|css|js|xml|svg|zip|rar|mkv|mp4)$/i.test(path)) return;
@@ -1201,6 +1223,7 @@ async function startServer() {
             httpsAgent,
             timeout: 10000,
             maxRedirects: 5,
+            validateStatus: (status) => status < 500,
           });
 
           let htmlText = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
@@ -1312,15 +1335,33 @@ async function startServer() {
             index === self.findIndex((c) => c.url === cand.url)
           );
 
-          const subResults = await Promise.all(
-            uniqueCandidates.map((cand) =>
-              resolveFilmyGoLink(cand.url, cand.label, depth + 1)
-            )
-          );
+          if (uniqueCandidates.length > 0) {
+            const subResults = await Promise.all(
+              uniqueCandidates.map((cand) =>
+                resolveFilmyGoLink(cand.url, cand.label, depth + 1)
+              )
+            );
+            const flattened = subResults.flat();
+            if (flattened.length > 0) {
+              return flattened;
+            }
+          }
 
-          return subResults.flat();
+          // Fallback: If no sub-links could be extracted (e.g. 403 Cloudflare challenge or no downstream links),
+          // return the startUrl itself as hit so the link is preserved for the user!
+          return [{
+            file_name: parentLabel || "Download Link",
+            url: startUrl,
+            size: null,
+            is_direct: false,
+          }];
         } catch (e) {
-          return [];
+          return [{
+            file_name: parentLabel || "Download Link",
+            url: startUrl,
+            size: null,
+            is_direct: false,
+          }];
         }
       }
 
@@ -1394,7 +1435,7 @@ async function startServer() {
       const searchParam = urlObj.searchParams.get('search') || urlObj.searchParams.get('q') || urlObj.searchParams.get('s') || '';
       const isSearchUrl = targetUrl.includes('search.php') || Boolean(searchParam) || urlObj.pathname === '/' || urlObj.pathname === '' || urlObj.pathname.endsWith('index.php') || urlObj.pathname.endsWith('index.html');
 
-      const response = await fetch(targetUrl, { headers });
+      const response = await fetch(targetUrl, { headers, signal: AbortSignal.timeout(7000) });
       if (!response.ok) throw new Error(`SkymoviesHD returned ${response.status}`);
       const text = await response.text();
       const $ = cheerio.load(text);
@@ -1402,6 +1443,11 @@ async function startServer() {
       if (isSearchUrl) {
         console.log(`[SkymoviesHD] Search page detected, parsing catalog posts...`);
         const postsMap = new Map<string, { title: string; image?: string }>();
+
+        const isDummyImg = (src?: string) => {
+          if (!src) return true;
+          return /arw\.gif|logo|favicon|icon|blank|default|\.gif$/i.test(src);
+        };
 
         $("a[href]").each((_, el) => {
           let href = $(el).attr("href") || "";
@@ -1440,15 +1486,17 @@ async function startServer() {
             if (!title) {
               title = container.find("h1, h2, h3, h4, .entry-title, .post-title, b, strong").text().trim();
             }
-            if (!image) {
+            if (isDummyImg(image)) {
               image = getImgSrc(container.find("img"));
             }
-            if (!image) {
+            if (isDummyImg(image)) {
               image = getImgSrc($(el).prev("img")) || getImgSrc($(el).next("img")) || getImgSrc($(el).parent().find("img"));
             }
             if (image) {
               try { image = new URL(image, targetUrl).href; } catch(e) {}
             }
+            if (isDummyImg(image)) image = "";
+
             title = title.replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
             if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how to|site search|search|faq|terms|sitemap|report|help)/i.test(title)) return;
 
@@ -1462,7 +1510,34 @@ async function startServer() {
           } catch (e) {}
         });
 
-        const posts = Array.from(postsMap.entries()).map(([postUrl, data]) => ({ title: data.title, url: postUrl, image: data.image })).reverse();
+        const posts = Array.from(postsMap.entries()).map(([postUrl, data]) => ({ title: data.title, url: postUrl, image: data.image }));
+
+        // Fetch real poster images for top 15 posts if image is missing/dummy
+        const needPosterBatch = posts.slice(0, 15).filter(p => !p.image || isDummyImg(p.image));
+        if (needPosterBatch.length > 0) {
+          await Promise.all(needPosterBatch.map(async (p) => {
+            try {
+              const pRes = await fetch(p.url, {
+                headers: { 'User-Agent': headers['User-Agent'] },
+                signal: AbortSignal.timeout(2200)
+              });
+              if (pRes.ok) {
+                const pText = await pRes.text();
+                const p$ = cheerio.load(pText);
+                let foundImg = "";
+                p$("img").each((_, imgEl) => {
+                  let src = p$(imgEl).attr("src") || p$(imgEl).attr("data-src") || p$(imgEl).attr("data-original") || "";
+                  if (src && !isDummyImg(src)) {
+                    try { foundImg = new URL(src, p.url).href; } catch(e) { foundImg = src; }
+                    return false; // break
+                  }
+                });
+                if (foundImg) p.image = foundImg;
+              }
+            } catch(e) {}
+          }));
+        }
+
         if (posts.length > 0) {
           return res.json({ is_search: true, posts, found: posts.length });
         }
@@ -1536,7 +1611,7 @@ async function startServer() {
 
       const results = await Promise.all(Array.from(hbData.keys()).map(async (hbUrl) => {
         try {
-          const hbRes = await fetch(hbUrl, { headers });
+          const hbRes = await fetch(hbUrl, { headers, signal: AbortSignal.timeout(6000) });
           if (!hbRes.ok) return [];
           const hbText = await hbRes.text();
           

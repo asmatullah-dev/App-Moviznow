@@ -4994,18 +4994,141 @@ export default function ContentManagement() {
     setShowMergeConfirm(true);
   };
 
+  const getNormName = (name: string) =>
+    (name || "").toLowerCase().trim().replace(/\s+/g, "");
+
+  const parseJSONLinks = (str: string | undefined): LinkDef[] => {
+    if (!str) return [];
+    try {
+      const parsed = JSON.parse(str);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      return [];
+    }
+  };
+
+  const parseJSONSeasons = (str: string | undefined): Season[] => {
+    if (!str) return [];
+    try {
+      const parsed = JSON.parse(str);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      return [];
+    }
+  };
+
+  // Always use links for newer contents, falling back to previous content links if missing, sorting by size
+  const mergeQualityLinks = (
+    oldLinks: LinkDef[] = [],
+    newLinks: LinkDef[] = []
+  ): LinkDef[] => {
+    const merged: LinkDef[] = [...newLinks];
+
+    for (const oLink of oldLinks) {
+      const oNorm = getNormName(oLink.name);
+      const existingIdx = merged.findIndex(
+        (nLink) => getNormName(nLink.name) === oNorm
+      );
+
+      if (existingIdx === -1) {
+        merged.push(oLink);
+      }
+    }
+
+    const deduped = merged.filter(
+      (l, i, self) => i === self.findIndex((t) => t.url === l.url)
+    );
+
+    return deduped.sort(
+      (a, b) => getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit)
+    );
+  };
+
+  const mergeSeasonsList = (
+    oldSeasons: Season[] = [],
+    newSeasons: Season[] = []
+  ): Season[] => {
+    const merged: Season[] = [...newSeasons];
+
+    for (const oSeason of oldSeasons) {
+      const existingIdx = merged.findIndex(
+        (s) => s.seasonNumber === oSeason.seasonNumber
+      );
+
+      if (existingIdx !== -1) {
+        const nSeason = merged[existingIdx];
+
+        // Merge zipLinks and mkvLinks separately, each sorted by size
+        const mergedZipLinks = mergeQualityLinks(
+          oSeason.zipLinks || [],
+          nSeason.zipLinks || []
+        );
+        const mergedMkvLinks = mergeQualityLinks(
+          oSeason.mkvLinks || [],
+          nSeason.mkvLinks || []
+        );
+
+        // Merge episode links separately, each sorted by size
+        const mergedEpisodes: Episode[] = [...(nSeason.episodes || [])];
+        for (const oEpisode of oSeason.episodes || []) {
+          const epIdx = mergedEpisodes.findIndex(
+            (e) => e.episodeNumber === oEpisode.episodeNumber
+          );
+          if (epIdx !== -1) {
+            const nEpisode = mergedEpisodes[epIdx];
+            mergedEpisodes[epIdx] = {
+              ...nEpisode,
+              links: mergeQualityLinks(
+                oEpisode.links || [],
+                nEpisode.links || []
+              ),
+            };
+          } else {
+            mergedEpisodes.push(oEpisode);
+          }
+        }
+        mergedEpisodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
+
+        merged[existingIdx] = {
+          ...nSeason,
+          zipLinks: mergedZipLinks,
+          mkvLinks: mergedMkvLinks,
+          episodes: mergedEpisodes,
+        };
+      } else {
+        merged.push(oSeason);
+      }
+    }
+
+    merged.sort((a, b) => a.seasonNumber - b.seasonNumber);
+    return merged;
+  };
+
   const handleMerge = async () => {
     setIsMerging(true);
     setShowMergeConfirm(false);
 
     const { items, title: finalTitle, year: finalYear } = mergeData;
-    const targetItem = items[0];
-    const otherItems = items.slice(1);
 
     try {
-      console.log("Merging", items.length, "items into", targetItem.id);
+      // Sort items by order number (smaller = previous/older content, greater = newer content)
+      const sortedItems = [...items].sort((a, b) => {
+        const oA = a.order ?? 0;
+        const oB = b.order ?? 0;
+        if (oA !== oB) return oA - oB;
+        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      });
+
+      const previousContent = sortedItems[0];
+      const newerContent = sortedItems[sortedItems.length - 1];
+      const targetItem = previousContent; // Keep previous content's ID and status
+      const otherItems = items.filter((i) => i.id !== targetItem.id);
+
+      console.log("Merging", items.length, "items into previous content ID", targetItem.id);
       let combinedMovieLinks: LinkDef[] = [];
       let combinedSeasons: Season[] = [];
+      let combinedFullSeasonZip: LinkDef[] = [];
+      let combinedFullSeasonMkv: LinkDef[] = [];
 
       // Metadata accumulation
       const combinedGenres = new Set<string>();
@@ -5014,21 +5137,21 @@ export default function ContentManagement() {
       const combinedTrailers: Trailer[] = [];
       const trailerUrls = new Set<string>();
 
-      let finalPoster = targetItem.posterUrl;
-      let finalImdb = targetItem.imdbLink;
-      let finalTrailer = targetItem.trailerUrl;
-      let finalQuality = targetItem.qualityId;
-      let finalDesc = targetItem.description;
-      let finalCountry = targetItem.country;
-      let finalReleaseDate = targetItem.releaseDate;
-      let finalRuntime = targetItem.runtime;
-      let finalImdbRating = targetItem.imdbRating;
-      let finalTrailerTitle = targetItem.trailerTitle;
-      let finalTrailerYoutubeTitle = targetItem.trailerYoutubeTitle;
-      let finalTrailerSeasonNumber = targetItem.trailerSeasonNumber;
-      let finalSubtitles = targetItem.subtitles;
+      let finalPoster = newerContent.posterUrl || targetItem.posterUrl;
+      let finalImdb = newerContent.imdbLink || targetItem.imdbLink;
+      let finalTrailer = newerContent.trailerUrl || targetItem.trailerUrl;
+      let finalQuality = newerContent.qualityId || targetItem.qualityId;
+      let finalDesc = newerContent.description || targetItem.description;
+      let finalCountry = newerContent.country || targetItem.country;
+      let finalReleaseDate = newerContent.releaseDate || targetItem.releaseDate;
+      let finalRuntime = newerContent.runtime || targetItem.runtime;
+      let finalImdbRating = newerContent.imdbRating || targetItem.imdbRating;
+      let finalTrailerTitle = newerContent.trailerTitle || targetItem.trailerTitle;
+      let finalTrailerYoutubeTitle = newerContent.trailerYoutubeTitle || targetItem.trailerYoutubeTitle;
+      let finalTrailerSeasonNumber = newerContent.trailerSeasonNumber || targetItem.trailerSeasonNumber;
+      let finalSubtitles = newerContent.subtitles !== undefined ? newerContent.subtitles : targetItem.subtitles;
 
-      items.forEach((item) => {
+      sortedItems.forEach((item) => {
         // Collect arrays
         if (item.genreIds && Array.isArray(item.genreIds)) {
           item.genreIds.forEach((g) => combinedGenres.add(g));
@@ -5076,59 +5199,35 @@ export default function ContentManagement() {
           try {
             links =
               typeof item.movieLinks === "string"
-                ? JSON.parse(item.movieLinks)
+                ? parseJSONLinks(item.movieLinks)
                 : item.movieLinks || [];
           } catch (e) {
             links = [];
           }
-          combinedMovieLinks = [...combinedMovieLinks, ...links];
+          combinedMovieLinks = mergeQualityLinks(combinedMovieLinks, links);
         } else {
           let seasons: Season[] = [];
           try {
             seasons =
               typeof item.seasons === "string"
-                ? JSON.parse(item.seasons)
+                ? parseJSONSeasons(item.seasons)
                 : item.seasons || [];
           } catch (e) {
             seasons = [];
           }
+          combinedSeasons = mergeSeasonsList(combinedSeasons, seasons);
 
-          seasons.forEach((s) => {
-            const existingSeason = combinedSeasons.find(
-              (cs) => cs.seasonNumber === s.seasonNumber,
-            );
-            if (existingSeason) {
-              // Merge episodes
-              if (s.episodes) {
-                s.episodes.forEach((ep) => {
-                  const existingEp = existingSeason.episodes.find(
-                    (ce) => ce.episodeNumber === ep.episodeNumber,
-                  );
-                  if (existingEp) {
-                    existingEp.links = [
-                      ...(existingEp.links || []),
-                      ...(ep.links || []),
-                    ];
-                  } else {
-                    existingSeason.episodes.push(ep);
-                  }
-                });
-              }
-              // Merge season-level links
-              if (s.zipLinks)
-                existingSeason.zipLinks = [
-                  ...(existingSeason.zipLinks || []),
-                  ...s.zipLinks,
-                ];
-              if (s.mkvLinks)
-                existingSeason.mkvLinks = [
-                  ...(existingSeason.mkvLinks || []),
-                  ...s.mkvLinks,
-                ];
-            } else {
-              combinedSeasons.push(s);
-            }
-          });
+          let fZip: LinkDef[] = [];
+          try {
+            fZip = typeof item.fullSeasonZip === "string" ? parseJSONLinks(item.fullSeasonZip) : item.fullSeasonZip || [];
+          } catch (e) { fZip = []; }
+          combinedFullSeasonZip = mergeQualityLinks(combinedFullSeasonZip, fZip);
+
+          let fMkv: LinkDef[] = [];
+          try {
+            fMkv = typeof item.fullSeasonMkv === "string" ? parseJSONLinks(item.fullSeasonMkv) : item.fullSeasonMkv || [];
+          } catch (e) { fMkv = []; }
+          combinedFullSeasonMkv = mergeQualityLinks(combinedFullSeasonMkv, fMkv);
         }
       });
 
@@ -5155,15 +5254,24 @@ export default function ContentManagement() {
       });
       combinedSeasons.sort((a, b) => a.seasonNumber - b.seasonNumber);
 
+      const maxOrder = Math.max(0, ...contentList.map((c) => c.order || 0));
+      const selectedLanguages = (newerContent.languageIds && newerContent.languageIds.length > 0)
+        ? newerContent.languageIds
+        : (previousContent.languageIds && previousContent.languageIds.length > 0)
+        ? previousContent.languageIds
+        : Array.from(combinedLanguages);
+
       const updateData = {
-        id: targetItem.id,
+        id: targetItem.id, // previous content ID
         chunkId: targetItem.chunkId,
-        title: finalTitle,
-        year: finalYear,
+        title: finalTitle || newerContent.title || previousContent.title,
+        secondTitle: newerContent.secondTitle || previousContent.secondTitle || "",
+        year: finalYear || newerContent.year || previousContent.year,
         movieLinks: JSON.stringify(combinedMovieLinks),
         seasons: JSON.stringify(combinedSeasons),
         genreIds: Array.from(combinedGenres),
-        languageIds: Array.from(combinedLanguages),
+        languageIds: selectedLanguages,
+        status: previousContent.status, // keep previous content status
         posterUrl: finalPoster || "",
         imdbLink: finalImdb || "",
         trailerUrl: finalTrailer || "",
@@ -5179,7 +5287,8 @@ export default function ContentManagement() {
         releaseDate: finalReleaseDate || "",
         runtime: finalRuntime || "",
         imdbRating: finalImdbRating || "",
-        updatedAt: Date.now(),
+        order: maxOrder + 1,
+        updatedAt: new Date().toISOString(),
       };
 
       await updateContentFields([
@@ -5254,144 +5363,51 @@ export default function ContentManagement() {
       const item1 = content;
       const item2 = duplicates[0];
 
-      // To preserve orders, reviews, and favorites, we ALWAYS keep the older entry and delete the newer entry.
-      const time1 = new Date(item1.createdAt).getTime();
-      const time2 = new Date(item2.createdAt).getTime();
-      let contentToKeep: Content;
-      let contentToDelete: Content;
+      // Previous content = smaller order number; Newer content = greater order number
+      const order1 = item1.order ?? 0;
+      const order2 = item2.order ?? 0;
+      let previousContent: Content;
+      let newerContent: Content;
 
-      if (time1 <= time2) {
-        contentToKeep = item1;
-        contentToDelete = item2;
+      if (order1 !== order2) {
+        if (order1 < order2) {
+          previousContent = item1;
+          newerContent = item2;
+        } else {
+          previousContent = item2;
+          newerContent = item1;
+        }
       } else {
-        contentToKeep = item2;
-        contentToDelete = item1;
+        const time1 = new Date(item1.createdAt).getTime();
+        const time2 = new Date(item2.createdAt).getTime();
+        if (time1 <= time2) {
+          previousContent = item1;
+          newerContent = item2;
+        } else {
+          previousContent = item2;
+          newerContent = item1;
+        }
       }
+
+      // We always keep previous content (ID & status preserved from previous content)
+      const contentToKeep = previousContent;
+      const contentToDelete = newerContent;
 
       setLoading(true);
 
-      const isHubcloud = (url: string) => {
-        const u = (url || "").toLowerCase();
-        return (
-          u.includes("hubcloud") ||
-          u.includes("vcloud") ||
-          u.includes("hubdrive") ||
-          u.includes("pixeldrain")
-        );
+      const maxOrder = Math.max(0, ...contentList.map((c) => c.order || 0));
+      const selectedLanguages = (newerContent.languageIds && newerContent.languageIds.length > 0)
+        ? newerContent.languageIds
+        : (previousContent.languageIds || []);
+
+      const fields: Partial<Content> = {
+        title: newerContent.title || previousContent.title,
+        secondTitle: newerContent.secondTitle || previousContent.secondTitle || "",
+        languageIds: selectedLanguages,
+        status: previousContent.status, // preserve status of previous content
+        order: maxOrder + 1,
+        updatedAt: new Date().toISOString(),
       };
-
-      const getNormName = (name: string) =>
-        (name || "").toLowerCase().trim().replace(/\s+/g, "");
-
-      const parseJSONLinks = (str: string | undefined): LinkDef[] => {
-        if (!str) return [];
-        try {
-          const parsed = JSON.parse(str);
-          return Array.isArray(parsed) ? parsed : [];
-        } catch (e) {
-          return [];
-        }
-      };
-
-      const parseJSONSeasons = (str: string | undefined): Season[] => {
-        if (!str) return [];
-        try {
-          const parsed = JSON.parse(str);
-          return Array.isArray(parsed) ? parsed : [];
-        } catch (e) {
-          return [];
-        }
-      };
-
-      const mergeQualityLinks = (
-        oldLinks: LinkDef[] = [],
-        newLinks: LinkDef[] = []
-      ): LinkDef[] => {
-        const merged: LinkDef[] = [...oldLinks];
-
-        for (const nLink of newLinks) {
-          const nNorm = getNormName(nLink.name);
-          const isNewHub = isHubcloud(nLink.url);
-
-          const existingIdx = merged.findIndex(
-            (oLink) => getNormName(oLink.name) === nNorm
-          );
-
-          if (existingIdx !== -1) {
-            // Only replace the older link if the newer matching link has a Hubcloud/high-priority URL.
-            if (isNewHub) {
-              merged[existingIdx] = nLink;
-            }
-          } else {
-            // Keep both if their names are different or the quality is new.
-            merged.push(nLink);
-          }
-        }
-
-        return merged;
-      };
-
-      const mergeSeasonsList = (
-        oldSeasons: Season[] = [],
-        newSeasons: Season[] = []
-      ): Season[] => {
-        const merged: Season[] = [...oldSeasons];
-
-        for (const nSeason of newSeasons) {
-          const existingIdx = merged.findIndex(
-            (s) => s.seasonNumber === nSeason.seasonNumber
-          );
-
-          if (existingIdx !== -1) {
-            const oSeason = merged[existingIdx];
-
-            // Merge zipLinks and mkvLinks safely
-            const mergedZipLinks = mergeQualityLinks(
-              oSeason.zipLinks || [],
-              nSeason.zipLinks || []
-            );
-            const mergedMkvLinks = mergeQualityLinks(
-              oSeason.mkvLinks || [],
-              nSeason.mkvLinks || []
-            );
-
-            // Merge episodes
-            const mergedEpisodes: Episode[] = [...(oSeason.episodes || [])];
-            for (const nEpisode of nSeason.episodes || []) {
-              const epIdx = mergedEpisodes.findIndex(
-                (e) => e.episodeNumber === nEpisode.episodeNumber
-              );
-              if (epIdx !== -1) {
-                const oEpisode = mergedEpisodes[epIdx];
-                mergedEpisodes[epIdx] = {
-                  ...oEpisode,
-                  links: mergeQualityLinks(
-                    oEpisode.links || [],
-                    nEpisode.links || []
-                  ),
-                };
-              } else {
-                mergedEpisodes.push(nEpisode);
-              }
-            }
-            mergedEpisodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
-
-            merged[existingIdx] = {
-              ...oSeason,
-              zipLinks: mergedZipLinks,
-              mkvLinks: mergedMkvLinks,
-              episodes: mergedEpisodes,
-            };
-          } else {
-            merged.push(nSeason);
-          }
-        }
-
-        merged.sort((a, b) => a.seasonNumber - b.seasonNumber);
-        return merged;
-      };
-
-      const fields: Partial<Content> = {};
       if (contentToKeep.type === "movie") {
         const oldLinks = parseJSONLinks(contentToKeep.movieLinks);
         const newLinks = parseJSONLinks(contentToDelete.movieLinks);

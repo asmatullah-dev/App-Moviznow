@@ -280,13 +280,21 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
 
           if (uidsToFetch.size > 0) {
             const uidsArray = Array.from(uidsToFetch);
+            const chunks: string[][] = [];
             for (let i = 0; i < uidsArray.length; i += 30) {
+               chunks.push(uidsArray.slice(i, i + 30));
+            }
+            const chunkSnapshots = await Promise.all(
+              chunks.map(chunk => {
+                const qMerged = query(collection(db, 'users'), where(documentId(), 'in', chunk));
+                return getDocs(qMerged).then(snap => ({ chunk, snap }));
+              })
+            );
+
+            for (const { chunk, snap } of chunkSnapshots) {
                updatedSomething = true;
-               const chunk = uidsArray.slice(i, i + 30);
-               const qMerged = query(collection(db, 'users'), where(documentId(), 'in', chunk));
-               const snapshotMerged = await getDocs(qMerged);
                const foundUids = new Set<string>();
-               snapshotMerged.docs.forEach(doc => {
+               snap.docs.forEach(doc => {
                   const u = { ...doc.data(), uid: doc.id } as UserProfile;
                   currentUsersMap.set(u.uid, normalizeUserStatusAndExpiry(u));
                   foundUids.add(doc.id);

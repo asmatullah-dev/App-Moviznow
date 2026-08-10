@@ -181,6 +181,7 @@ export default function MovieDetails() {
   const [isTrailerPopupOpen, setIsTrailerPopupOpen] = useState(false);
   const [isTrailerSelectionOpen, setIsTrailerSelectionOpen] = useState(false);
   const [showRatePrompt, setShowRatePrompt] = useState(false);
+  const [showReportConfirm, setShowReportConfirm] = useState(false);
   const [hasUserRated, setHasUserRated] = useState<boolean>(() => safeStorage.getItem('has_rated') === 'true' || !!profile?.reviewRewardClaimed);
   const recommendedScrollRef = useRef<HTMLDivElement>(null);
 
@@ -2055,7 +2056,11 @@ export default function MovieDetails() {
   };
 
   const handleReportLink = async () => {
-    if (!profile || !linkPopup || !mergedContent) return;
+    if (!profile) {
+      setShowLoginPrompt(true);
+      return;
+    }
+    if (!linkPopup || !mergedContent) return;
 
     setIsReporting(true);
     try {
@@ -3877,7 +3882,13 @@ export default function MovieDetails() {
                 ) : null}
 
                 <button
-                  onClick={handleReportLink}
+                  onClick={() => {
+                    if (!profile) {
+                      setShowLoginPrompt(true);
+                      return;
+                    }
+                    setShowReportConfirm(true);
+                  }}
                   disabled={isReporting}
                   className="w-full bg-red-500/10 hover:bg-red-500/20 text-red-500 font-bold py-3 px-6 text-sm rounded-xl transition-colors flex items-center justify-center gap-2 border border-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
@@ -4462,6 +4473,22 @@ export default function MovieDetails() {
         }}
         onCancel={() => {
           setShowRatePrompt(false);
+        }}
+      />
+
+      <ConfirmModal
+        isOpen={showReportConfirm}
+        title={t("Report Broken Link")}
+        message={t("Are you sure you want to report this link as broken or not working? Our team will check and update it.")}
+        confirmText={t("Report Link")}
+        cancelText={t("Cancel")}
+        loading={isReporting}
+        onConfirm={async () => {
+          await handleReportLink();
+          setShowReportConfirm(false);
+        }}
+        onCancel={() => {
+          setShowReportConfirm(false);
         }}
       />
     </div>
