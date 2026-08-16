@@ -838,6 +838,7 @@ export default function ContentManagement() {
   const [subtitles, setSubtitles] = useState(false);
   const [cast, setCast] = useState("");
   const [country, setCountry] = useState("");
+  const [ottPlatform, setOttPlatform] = useState("");
   const [year, setYear] = useState(new Date().getFullYear());
   const [releaseDate, setReleaseDate] = useState("");
   const [runtime, setRuntime] = useState("");
@@ -1357,6 +1358,7 @@ export default function ContentManagement() {
     setSubtitles(false);
     setCast("");
     setCountry("");
+    setOttPlatform("");
     setYear(new Date().getFullYear());
     setReleaseDate("");
     setRuntime("");
@@ -1466,6 +1468,7 @@ export default function ContentManagement() {
     setSubtitles(contentToUse.subtitles || false);
     setCast(Array.isArray(contentToUse.cast) ? contentToUse.cast.join(", ") : (contentToUse.cast || ""));
     setCountry(contentToUse.country || "");
+    setOttPlatform(contentToUse.ottPlatform || "");
     setYear(contentToUse.year || new Date().getFullYear());
     setReleaseDate(contentToUse.releaseDate || "");
     setRuntime(contentToUse.runtime || "");
@@ -1590,6 +1593,7 @@ export default function ContentManagement() {
           .map((c) => c.trim())
           .filter(Boolean),
         country: country || "",
+        ottPlatform: ottPlatform || "",
         year: Number(year) || new Date().getFullYear(),
         releaseDate: releaseDate || "",
         runtime: runtime || "",
@@ -2253,6 +2257,7 @@ export default function ContentManagement() {
     if (data.description) setDescription(data.description);
     if (data.cast) setCast(data.cast);
     if (data.country) setCountry(data.country);
+    if (data.ottPlatform) setOttPlatform(data.ottPlatform);
     if (data.releaseDate) setReleaseDate(data.releaseDate);
     if (data.runtime) setRuntime(data.runtime);
     if (data.imdbLink) setImdbLink(data.imdbLink);
@@ -6173,6 +6178,7 @@ export default function ContentManagement() {
           subtitles,
           cast,
           country,
+          ottPlatform,
           isDescriptionExpanded,
           isCastExpanded,
           isCountryExpanded,
@@ -6206,6 +6212,7 @@ export default function ContentManagement() {
           setYear,
           setReleaseDate,
           setRuntime,
+          setOttPlatform,
           setSelectedGenres,
           setManageModal,
           setSelectedLanguages,

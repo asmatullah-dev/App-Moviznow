@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useModalBehavior } from '../hooks/useModalBehavior';
 import { isRomanized } from '../utils/contentUtils';
 import { saveImdbRatingToStorage } from '../services/imdbRatingService';
+import { normalizeOttPlatformName, extractOttPlatformFromTMDBDetails, fetchMovieDigitalReleaseDate, predictOttPlatformWithAI } from '../services/tmdb';
 
 interface MediaModalProps {
   initialSecondTitle?: string;
@@ -253,7 +254,7 @@ export async function searchTMDBByTitle(searchTitle: string, searchYear: string,
 }
 
 export async function fetchTMDBDetails(tmdbId: string, type: string) {
-  const url = `${TMDB_BASE}/${type}/${tmdbId}?api_key=${TMDB_API_KEY}&append_to_response=credits,external_ids,content_ratings,videos,alternative_titles&include_video_language=hi,en,es,fr,de,it,pt,ru,zh,ja,ko,null`;
+  const url = `${TMDB_BASE}/${type}/${tmdbId}?api_key=${TMDB_API_KEY}&append_to_response=credits,external_ids,content_ratings,videos,alternative_titles,watch/providers&include_video_language=hi,en,es,fr,de,it,pt,ru,zh,ja,ko,null`;
   const res = await fetch(url);
   return await res.json();
 }
@@ -684,6 +685,23 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
         finalSecondTitle = '';
       }
 
+      let detectedOtt = extractOttPlatformFromTMDBDetails(details, type);
+      if (!detectedOtt && details.id && type === 'movie') {
+        const { platformNote } = await fetchMovieDigitalReleaseDate(details.id);
+        if (platformNote) detectedOtt = platformNote;
+      }
+      if (!detectedOtt) {
+        detectedOtt = await predictOttPlatformWithAI(
+          finalTitle,
+          type === 'tv' ? 'tv' : 'movie',
+          (details.release_date || details.first_air_date || '').split('-')[0],
+          details.overview,
+          details.genres?.map((g: any) => g.name),
+          details.original_title || details.original_name,
+          details.production_countries?.map((c: any) => c.name).join(', ')
+        );
+      }
+
       const parsedData: any = {
         title: finalTitle,
         secondTitle: finalSecondTitle,
@@ -694,6 +712,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
         posterUrl: details.poster_path ? `https://image.tmdb.org/t/p/w500${details.poster_path}` : '',
         runtime: details.runtime ? `${details.runtime} min` : (details.episode_run_time && details.episode_run_time.length > 0 ? `${details.episode_run_time[0]} min/episode` : ''),
         country: details.production_countries?.map((c: any) => c.name).join(', ') || (details.origin_country ? details.origin_country.join(', ') : ''),
+        ottPlatform: detectedOtt || '',
         cast: details.credits?.cast?.slice(0, 5).map((a: any) => a.name).join(', ') || '',
         imdbLink: details.external_ids?.imdb_id ? `https://www.imdb.com/title/${details.external_ids.imdb_id}` : '',
         imdbRating: imdbRatingData?.rating && imdbRatingData.rating !== 'N/A' ? `${imdbRatingData.rating}/10` : '',
@@ -1023,6 +1042,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
                     { key: 'releaseDate', label: 'Release Date', value: fetchedData.releaseDate },
                     { key: 'country', label: 'Country', value: fetchedData.country },
                     { key: 'runtime', label: 'Runtime', value: fetchedData.runtime },
+                    { key: 'ottPlatform', label: 'OTT Platform', value: fetchedData.ottPlatform },
                     { key: 'imdbRating', label: 'IMDb Rating', value: fetchedData.imdbRating },
                     { key: 'imdbLink', label: 'IMDb Link', value: fetchedData.imdbLink },
                     { key: 'trailerUrl', label: 'Trailer URL', value: fetchedData.trailerUrl },

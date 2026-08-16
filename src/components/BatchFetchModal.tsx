@@ -4,6 +4,7 @@ import { X, Loader2, CheckCircle2, XCircle, Search, RefreshCw } from 'lucide-rea
 import { useModalBehavior } from '../hooks/useModalBehavior';
 import { LinkCheckResult, performFullLinkScan, guessLinkType } from '../utils/linkScanner';
 import { searchTMDBByTitle, fetchTMDBDetails, fetchSeriesSeasons, fetchIMDbRating, getBestTrailer, searchYouTubeTrailer, fetchKinoCheckTrailer, getBestAlternativeTitle } from './MediaModal';
+import { normalizeOttPlatformName, extractOttPlatformFromTMDBDetails, fetchMovieDigitalReleaseDate, predictOttPlatformWithAI } from '../services/tmdb';
 import { db } from '../firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { useContent } from '../contexts/ContentContext';
@@ -197,6 +198,24 @@ export const BatchFetchModal: React.FC<Props> = ({
             if (fetchFields.cast) updates.cast = details.credits?.cast?.slice(0, 10).map((c: any) => c.name).join(', ') || data.cast;
             if (fetchFields.posterUrl && details.poster_path) updates.posterUrl = `https://image.tmdb.org/t/p/w500${details.poster_path}`;
             if (fetchFields.backdropUrl && details.backdrop_path) updates.backdropUrl = `https://image.tmdb.org/t/p/original${details.backdrop_path}`;
+            
+            let detectedOtt = extractOttPlatformFromTMDBDetails(details, bestMatch.type);
+            if (!detectedOtt && details.id && bestMatch.type === 'movie') {
+              const { platformNote } = await fetchMovieDigitalReleaseDate(details.id);
+              if (platformNote) detectedOtt = platformNote;
+            }
+            if (!detectedOtt) {
+              detectedOtt = await predictOttPlatformWithAI(
+                data.title || bestMatch.item.title || bestMatch.item.name || '',
+                bestMatch.type === 'tv' ? 'tv' : 'movie',
+                (details.release_date || details.first_air_date || '').split('-')[0],
+                details.overview,
+                details.genres?.map((g: any) => g.name),
+                details.original_title || details.original_name,
+                details.production_countries?.map((c: any) => c.name).join(', ')
+              );
+            }
+            if (detectedOtt) updates.ottPlatform = detectedOtt;
             
             const parallelOps: Promise<any>[] = [];
             let imdbPromiseIdx = -1;

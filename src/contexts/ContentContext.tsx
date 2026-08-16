@@ -91,6 +91,7 @@ export function isContentDataEqual(existing: any, updated: any): boolean {
     "runtime",
     "imdbRating",
     "country",
+    "ottPlatform",
     "movieLinks",
     "seasons",
     "fullSeasonZip",

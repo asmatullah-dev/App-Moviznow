@@ -11,6 +11,7 @@ import {
 export function useImdbRating(content?: (Partial<Content> & { id: string }) | null) {
   const contentId = content?.id;
   const initialStaticRating = content?.imdbRating;
+  const initialStaticOtt = content?.ottPlatform || (content as any)?.ott_platform;
 
   const [rating, setRating] = useState<string | null>(() => {
     if (!contentId) return null;
@@ -19,12 +20,20 @@ export function useImdbRating(content?: (Partial<Content> & { id: string }) | nu
     return formatImdbRating(initialStaticRating);
   });
 
+  const [ottPlatform, setOttPlatform] = useState<string | null>(() => {
+    if (!contentId) return initialStaticOtt || null;
+    const cached = getCachedImdbRating(contentId);
+    if (cached?.ottPlatform) return cached.ottPlatform;
+    return initialStaticOtt || null;
+  });
+
   const [isLoading, setIsLoading] = useState(false);
 
   // Synchronize when content or ID changes
   useEffect(() => {
     if (!contentId) {
       setRating(null);
+      setOttPlatform(null);
       return;
     }
 
@@ -32,34 +41,39 @@ export function useImdbRating(content?: (Partial<Content> & { id: string }) | nu
     if (cached?.rating) {
       setRating(cached.rating);
     } else {
-      const fallback = formatImdbRating(content?.imdbRating);
-      setRating(fallback);
-
-      // If no valid cache exists or old data expired (> 5 days), fetch live
-      if (content) {
-        setIsLoading(true);
-        fetchLiveImdbRating(content)
-          .then((res) => {
-            if (res?.rating) {
-              setRating(res.rating);
-            }
-          })
-          .catch(() => {})
-          .finally(() => {
-            setIsLoading(false);
-          });
-      }
+      setRating(formatImdbRating(content?.imdbRating));
     }
-  }, [contentId, content?.imdbRating, content?.imdbLink, content?.title, content?.year]);
+
+    if (cached?.ottPlatform) {
+      setOttPlatform(cached.ottPlatform);
+    } else {
+      setOttPlatform(content?.ottPlatform || (content as any)?.ott_platform || null);
+    }
+
+    // If no valid cache exists or missing rating/OTT, fetch live
+    if (content && (!cached?.rating || !cached?.ottPlatform)) {
+      setIsLoading(true);
+      fetchLiveImdbRating(content)
+        .then((res) => {
+          if (res?.rating) setRating(res.rating);
+          if (res?.ottPlatform) setOttPlatform(res.ottPlatform);
+        })
+        .catch(() => {})
+        .finally(() => {
+          setIsLoading(false);
+        });
+    }
+  }, [contentId, content?.imdbRating, content?.ottPlatform, (content as any)?.ott_platform, content?.imdbLink, content?.title, content?.year]);
 
   // Listen to live update broadcasts across the app
   useEffect(() => {
     if (!contentId) return;
 
     const handleUpdate = (e: Event) => {
-      const customEvent = e as CustomEvent<{ contentId: string; rating: string }>;
+      const customEvent = e as CustomEvent<{ contentId: string; rating?: string; ottPlatform?: string }>;
       if (customEvent.detail && customEvent.detail.contentId === contentId) {
-        setRating(customEvent.detail.rating);
+        if (customEvent.detail.rating) setRating(customEvent.detail.rating);
+        if (customEvent.detail.ottPlatform) setOttPlatform(customEvent.detail.ottPlatform);
       }
     };
 
@@ -75,9 +89,8 @@ export function useImdbRating(content?: (Partial<Content> & { id: string }) | nu
     setIsLoading(true);
     return reloadLiveImdbRating(content)
       .then((res) => {
-        if (res?.rating) {
-          setRating(res.rating);
-        }
+        if (res?.rating) setRating(res.rating);
+        if (res?.ottPlatform) setOttPlatform(res.ottPlatform);
         return res;
       })
       .finally(() => {
@@ -87,6 +100,7 @@ export function useImdbRating(content?: (Partial<Content> & { id: string }) | nu
 
   return {
     rating, // e.g. "8.2"
+    ottPlatform, // e.g. "Netflix"
     isLoading,
     refreshRating: refresh
   };

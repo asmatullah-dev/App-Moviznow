@@ -257,7 +257,7 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
   const {
       isModalOpen, editingId, contentList, profile, type, status, initialStatus, addToTrending, addToNewlyAdded,
       title, secondTitle, order, showTitleSuggestions, disableSuggestions, description, posterUrl, trailerUrl, trailerTitle, trailerYoutubeTitle,
-      trailerSeasonNumber, trailers, sampleUrl, imdbLink, imdbRating, year, releaseDate, runtime, selectedGenres, genres,
+      trailerSeasonNumber, trailers, sampleUrl, imdbLink, imdbRating, year, releaseDate, runtime, ottPlatform, selectedGenres, genres,
       selectedLanguages, languages, selectedQuality, qualities, subtitles, cast, country, isDescriptionExpanded, isCastExpanded,
       isCountryExpanded, movieLinks, seasons, expandedEpisodes, isSaving, titleSuggestions
   } = state;
@@ -265,7 +265,7 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
   const {
       setIsModalOpen, setIsAutoFillModalOpen, setType, setStatus, setTitle, setSecondTitle, setOrder, setShowTitleSuggestions, setDisableSuggestions,
       setDescription, setPosterUrl, handleImageUpload, setTrailerUrl, setTrailerTitle, setTrailerYoutubeTitle, setTrailerSeasonNumber,
-      setTrailers, setSampleUrl, setImdbLink, setImdbRating, setYear, setReleaseDate, setRuntime, setSelectedGenres, setManageModal,
+      setTrailers, setSampleUrl, setImdbLink, setImdbRating, setYear, setReleaseDate, setRuntime, setOttPlatform, setSelectedGenres, setManageModal,
       setSelectedLanguages, setSelectedQuality, setSubtitles, setCast, setCountry, setIsDescriptionExpanded, setIsCastExpanded,
       setIsCountryExpanded, setMovieLinks, setSeasons, setExpandedEpisodes, handleSave, setIsLinkCheckerOpen, setIsMasterFetchModalOpen
   } = actions;
@@ -488,8 +488,8 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                     </div>
                   </div>
 
-                  {/* 4. Release date+Runtime */}
-                  <div className="grid grid-cols-2 gap-4">
+                  {/* 4. Release date+Runtime+OTT Platform */}
+                  <div className="grid grid-cols-3 gap-4">
                     <div>
                       <label className="block text-xs font-medium text-zinc-500 mb-1">Release Date</label>
                       <input type="text" placeholder="DD-MM-YYYY" value={releaseDate} onChange={(e) => setReleaseDate(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" />
@@ -497,6 +497,10 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                     <div>
                       <label className="block text-xs font-medium text-zinc-500 mb-1">Runtime</label>
                       <input type="text" placeholder="e.g. 120 min" value={runtime} onChange={(e) => setRuntime(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-500 mb-1">OTT Platform</label>
+                      <input type="text" placeholder="e.g. Netflix, Prime Video" value={ottPlatform || ''} onChange={(e) => setOttPlatform(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500" />
                     </div>
                   </div>
 

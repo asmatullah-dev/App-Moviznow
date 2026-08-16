@@ -29,6 +29,7 @@ const FIELD_MAP: Record<string, string> = {
   description: 'dsc',
   cast: 'cst',
   country: 'cnt',
+  ottPlatform: 'ott',
   order: 'ord',
   id: 'id'
 };

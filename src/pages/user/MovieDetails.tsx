@@ -68,6 +68,7 @@ import {
   formatRuntime,
   getContrastColor,
   isRomanized,
+  getOttBadgeConfig,
 } from "../../utils/contentUtils";
 import {
   MediaModal,
@@ -86,7 +87,13 @@ import {
   getCachedImdbRating,
   reloadLiveImdbRating
 } from "../../services/imdbRatingService";
-import { fetchTMDBImages } from "../../services/tmdb";
+import { useImdbRating } from "../../hooks/useImdbRating";
+import {
+  fetchTMDBImages,
+  extractOttPlatformFromTMDBDetails,
+  fetchMovieDigitalReleaseDate,
+  predictOttPlatformWithAI
+} from "../../services/tmdb";
 import ContentCard from "../../components/ContentCard";
 
 import { useModalBehavior } from "../../hooks/useModalBehavior";
@@ -553,6 +560,8 @@ export default function MovieDetails() {
     return merged as Content;
   }, [content, cachedMetadata, fullContent, id, contentLoading, isOffline]);
 
+  const { rating: hookRating, ottPlatform: hookOtt } = useImdbRating(mergedContent);
+
   const loadTmdbImagesForGallery = async () => {
     if (!mergedContent || loadingTmdbGallery) {
       return;
@@ -871,10 +880,11 @@ export default function MovieDetails() {
       duration: mergedContent.runtime,
       country: mergedContent.country,
       type: mergedContent.type,
-      rating: liveRating || mergedContent.imdbRating,
-      isFetched: !!(liveRating || mergedContent.imdbRating),
+      rating: liveRating || hookRating || mergedContent.imdbRating,
+      ottPlatform: hookOtt || mergedContent.ottPlatform || (mergedContent as any).ott_platform || "",
+      isFetched: !!(liveRating || hookRating || mergedContent.imdbRating),
     };
-  }, [mergedContent, genres, liveRating]);
+  }, [mergedContent, genres, liveRating, hookRating, hookOtt]);
 
   const recommendedMovies = useMemo(() => {
     if (!mergedContent || contentList.length === 0) return [];
@@ -1150,6 +1160,7 @@ export default function MovieDetails() {
 
     const needsStaticData =
       force ||
+      !mergedContent.ottPlatform ||
       !mergedContent.runtime ||
       !mergedContent.description ||
       !mergedContent.cast ||
@@ -1336,6 +1347,31 @@ export default function MovieDetails() {
           if (ratingData && ratingData.rating && ratingData.rating !== "N/A") {
             updates.imdbRating = `${ratingData.rating}/10`;
             saveImdbRatingToStorage(id, ratingData.rating, imdbId, ratingData.votes);
+            hasUpdates = true;
+          }
+        }
+
+        // Fetch/Extract OTT Platform
+        if (force || !mergedContent.ottPlatform) {
+          let detectedOtt = extractOttPlatformFromTMDBDetails(details, searchForceType);
+          if (!detectedOtt && details.id && searchForceType === "movie") {
+            const { platformNote } = await fetchMovieDigitalReleaseDate(details.id);
+            if (platformNote) detectedOtt = platformNote;
+          }
+          if (!detectedOtt) {
+            detectedOtt = await predictOttPlatformWithAI(
+              mergedContent.title || details.title || details.name || '',
+              searchForceType === "tv" ? "tv" : "movie",
+              (details.release_date || details.first_air_date || "").split("-")[0],
+              details.overview,
+              details.genres?.map((g: any) => g.name),
+              details.original_title || details.original_name,
+              details.production_countries?.map((c: any) => c.name).join(", ")
+            );
+          }
+          if (detectedOtt) {
+            updates.ottPlatform = detectedOtt;
+            saveImdbRatingToStorage(id, undefined, undefined, undefined, detectedOtt);
             hasUpdates = true;
           }
         }
@@ -2674,6 +2710,21 @@ export default function MovieDetails() {
                     referrerPolicy="no-referrer"
                   />
 
+                  {/* OTT Platform Badge on Poster */}
+                  {displayData.ottPlatform && (() => {
+                    const badge = getOttBadgeConfig(displayData.ottPlatform);
+                    return (
+                      <div className="absolute top-2.5 right-2.5 z-10 pointer-events-none">
+                        <span className={clsx(
+                          "px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider shadow-xl border backdrop-blur-md",
+                          badge ? badge.bg : "bg-black/80 text-white border-white/20"
+                        )}>
+                          {badge ? badge.name : displayData.ottPlatform}
+                        </span>
+                      </div>
+                    );
+                  })()}
+
                   {/* Desktop Hover overlay */}
                   <div className="absolute inset-0 bg-black/65 opacity-0 group-hover/poster:opacity-100 transition-opacity duration-300 flex items-center justify-center backdrop-blur-[2px]">
                     <div className="flex flex-col items-center gap-2.5 text-white transform scale-90 group-hover/poster:scale-100 transition-transform duration-300">
@@ -3093,7 +3144,7 @@ export default function MovieDetails() {
                           {displayData.year ? `(${displayData.year})` : ""}
                         </h3>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex items-center gap-2 shrink-0 flex-wrap">
                         {displayData.rating && (
                           <div className="bg-[#f5c518] text-black px-3 py-1.5 rounded-xl flex items-center gap-1.5 font-black text-xs sm:text-sm shadow-[0_0_20px_rgba(245,197,24,0.4)] whitespace-nowrap">
                             <span className="bg-black text-[#f5c518] px-1.5 py-0.5 rounded text-[10px] font-extrabold tracking-tighter">
@@ -3160,6 +3211,26 @@ export default function MovieDetails() {
                             </span>
                           </div>
                         )}
+                      {displayData.ottPlatform && (
+                        <div className="flex items-center gap-2 text-xs sm:text-sm">
+                          <span className="text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider text-[11px] w-20 shrink-0">
+                            OTT
+                          </span>
+                          {(() => {
+                            const badge = getOttBadgeConfig(displayData.ottPlatform);
+                            return (
+                              <span
+                                className={clsx(
+                                  "inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-black uppercase tracking-wider border shadow-sm",
+                                  badge ? badge.bg : "bg-cyan-500/10 text-cyan-600 dark:text-cyan-300 border-cyan-500/20"
+                                )}
+                              >
+                                {badge ? badge.name : displayData.ottPlatform}
+                              </span>
+                            );
+                          })()}
+                        </div>
+                      )}
                       {mergedContent.qualityId && (
                         <div className="flex items-center gap-2 text-xs sm:text-sm">
                           <span className="text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider text-[11px] w-20 shrink-0">

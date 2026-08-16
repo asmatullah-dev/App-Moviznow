@@ -220,6 +220,7 @@ export interface Content {
   imdbRating?: string; // Added imdbRating
   subtitles?: boolean; // Added subtitles
   country?: string; // Added country
+  ottPlatform?: string | null; // Added OTT platform (Netflix, Prime Video, Disney+, etc.)
   order?: number; // Added order for sorting
   chunkId?: string; // Added chunkId for lazy loading
 }

@@ -4,7 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 
 import { Heart, Clock, ShoppingCart, Play, X, Lock, Star } from 'lucide-react';
 import { Content, Quality, Language, Genre } from '../types';
-import { formatContentTitle, getContrastColor } from '../utils/contentUtils';
+import { formatContentTitle, getContrastColor, getOttBadgeConfig } from '../utils/contentUtils';
 import { getOptimizedImageUrl, getImageSrcSet } from '../utils/imageUtils';
 import { clsx } from 'clsx';
 import { useCart } from '../contexts/CartContext';
@@ -44,7 +44,8 @@ const ContentCard = React.memo(({
   const { vibrate } = useHaptics();
   const { t } = useLanguage();
   const navigate = useNavigate();
-  const { rating: imdbRating, refreshRating } = useImdbRating(content);
+  const { rating: imdbRating, ottPlatform: cachedOtt, refreshRating } = useImdbRating(content);
+  const ottBadge = getOttBadgeConfig(content.ottPlatform || (content as any).ott_platform || cachedOtt);
   const [isTrailerSelectionOpen, setIsTrailerSelectionOpen] = React.useState(false);
   const [selectedTrailerUrl, setSelectedTrailerUrl] = React.useState<string | null>(null);
   const [isClicked, setIsClicked] = React.useState(false);
@@ -221,6 +222,19 @@ const ContentCard = React.memo(({
             )}>
               {content.type}
             </div>
+
+            {ottBadge && (
+              <div 
+                className={clsx(
+                  "px-1.5 py-0.5 rounded-md font-black uppercase tracking-wider shadow-md border truncate max-w-[95px] select-none",
+                  ottBadge.bg,
+                  isSmall ? 'text-[6px]' : 'text-[9px]'
+                )}
+                title={ottBadge.name}
+              >
+                {ottBadge.name}
+              </div>
+            )}
             
             {qualityObj && (
               <div 

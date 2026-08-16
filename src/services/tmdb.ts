@@ -57,6 +57,83 @@ export function normalizeOttPlatformName(raw?: string | null): string | null {
   return str.length > 20 ? str.slice(0, 20) : str;
 }
 
+export function extractOttPlatformFromTMDBDetails(details: any, type?: string): string | null {
+  if (!details) return null;
+
+  // 1. Networks array (especially for TV shows)
+  if (details.networks && Array.isArray(details.networks) && details.networks.length > 0) {
+    for (const net of details.networks) {
+      if (net?.name) {
+        const norm = normalizeOttPlatformName(net.name);
+        if (norm) return norm;
+      }
+    }
+  }
+
+  // 2. watch/providers or watch_providers
+  const providersObj = details['watch/providers']?.results || details.watch_providers?.results || details.providers?.results;
+  if (providersObj && typeof providersObj === 'object') {
+    // Priority order for region detection
+    const priorityCountries = ['US', 'IN', 'PK', 'GB', 'CA', 'AU', 'DE', 'FR', 'BR', 'JP', 'KR', 'ES', 'IT'];
+    const allCountries = Array.from(new Set([...priorityCountries, ...Object.keys(providersObj)]));
+
+    for (const countryCode of allCountries) {
+      const cData = providersObj[countryCode];
+      if (!cData) continue;
+
+      // Check flatrate (Subscription streaming)
+      if (Array.isArray(cData.flatrate) && cData.flatrate.length > 0) {
+        for (const p of cData.flatrate) {
+          if (p?.provider_name) {
+            const norm = normalizeOttPlatformName(p.provider_name);
+            if (norm) return norm;
+          }
+        }
+      }
+      // Check free / ads
+      if (Array.isArray(cData.free) && cData.free.length > 0) {
+        for (const p of cData.free) {
+          if (p?.provider_name) {
+            const norm = normalizeOttPlatformName(p.provider_name);
+            if (norm) return norm;
+          }
+        }
+      }
+      if (Array.isArray(cData.ads) && cData.ads.length > 0) {
+        for (const p of cData.ads) {
+          if (p?.provider_name) {
+            const norm = normalizeOttPlatformName(p.provider_name);
+            if (norm) return norm;
+          }
+        }
+      }
+      // Check buy / rent
+      if (Array.isArray(cData.buy) && cData.buy.length > 0) {
+        for (const p of cData.buy) {
+          if (p?.provider_name) {
+            const norm = normalizeOttPlatformName(p.provider_name);
+            if (norm) return norm;
+          }
+        }
+      }
+    }
+  }
+
+  // 3. Production Companies (e.g. "Netflix", "Apple Studios", "Amazon Studios", "Walt Disney Pictures", "HBO Films", "Hulu")
+  if (details.production_companies && Array.isArray(details.production_companies)) {
+    for (const pc of details.production_companies) {
+      if (pc?.name) {
+        const norm = normalizeOttPlatformName(pc.name);
+        if (norm && ['Netflix', 'Amazon Prime', 'Disney+', 'Apple TV+', 'HBO Max', 'Hulu', 'Paramount+', 'Peacock', 'JioCinema', 'Hotstar', 'Zee5', 'SonyLIV', 'Lionsgate Play', 'Rakuten Viki', 'Crunchyroll'].includes(norm)) {
+          return norm;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
 let ottRateLimitCooldownUntil = 0;
 
 /**

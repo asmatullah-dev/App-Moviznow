@@ -165,3 +165,57 @@ export const getContrastColor = (hexColor: string) => {
   
   return luminance > 0.5 ? 'black' : 'white';
 };
+
+export const getOttBadgeConfig = (platform?: string | null) => {
+  if (!platform) return null;
+  const p = platform.trim().toLowerCase();
+  if (!p) return null;
+
+  if (p.includes('netflix')) {
+    return { name: 'Netflix', bg: 'bg-[#E50914] text-white border-[#E50914]' };
+  }
+  if (p.includes('amazon') || p.includes('prime')) {
+    return { name: 'Prime Video', bg: 'bg-[#00A8E1] text-white border-[#00A8E1]' };
+  }
+  if (p.includes('disney')) {
+    return { name: 'Disney+', bg: 'bg-[#113CCF] text-white border-[#113CCF]' };
+  }
+  if (p.includes('apple')) {
+    return { name: 'Apple TV+', bg: 'bg-zinc-900 text-white border-zinc-700' };
+  }
+  if (p.includes('hbo') || p.includes('max')) {
+    return { name: 'HBO Max', bg: 'bg-[#6814d4] text-white border-[#6814d4]' };
+  }
+  if (p.includes('hulu')) {
+    return { name: 'Hulu', bg: 'bg-[#1ce783] text-black border-[#1ce783]' };
+  }
+  if (p.includes('paramount')) {
+    return { name: 'Paramount+', bg: 'bg-[#0064ff] text-white border-[#0064ff]' };
+  }
+  if (p.includes('peacock')) {
+    return { name: 'Peacock', bg: 'bg-[#00c2cb] text-black border-[#00c2cb]' };
+  }
+  if (p.includes('jiocinema') || p.includes('jio')) {
+    return { name: 'JioCinema', bg: 'bg-pink-600 text-white border-pink-500' };
+  }
+  if (p.includes('zee5')) {
+    return { name: 'Zee5', bg: 'bg-purple-700 text-white border-purple-500' };
+  }
+  if (p.includes('sonyliv') || p.includes('sony')) {
+    return { name: 'SonyLIV', bg: 'bg-amber-600 text-white border-amber-500' };
+  }
+  if (p.includes('hotstar')) {
+    return { name: 'Hotstar', bg: 'bg-[#0c2044] text-amber-400 border-amber-500/40' };
+  }
+  if (p.includes('crunchyroll')) {
+    return { name: 'Crunchyroll', bg: 'bg-orange-500 text-white border-orange-400' };
+  }
+  if (p.includes('viki') || p.includes('rakuten')) {
+    return { name: 'Rakuten Viki', bg: 'bg-teal-600 text-white border-teal-500' };
+  }
+  if (p.includes('lionsgate')) {
+    return { name: 'Lionsgate Play', bg: 'bg-yellow-600 text-white border-yellow-500' };
+  }
+
+  return { name: platform, bg: 'bg-zinc-800 text-white border-zinc-700' };
+};

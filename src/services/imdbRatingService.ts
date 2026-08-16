@@ -1,10 +1,12 @@
 import { Content } from '../types';
+import { extractOttPlatformFromTMDBDetails, predictOttPlatformWithAI } from './tmdb';
 
 export interface CachedImdbRating {
   id: string;
   rating: string; // e.g. "8.2" (clean number string)
   rawRating?: string; // e.g. "8.2/10"
   votes?: string;
+  ottPlatform?: string; // e.g. "Netflix", "Prime Video"
   timestamp: number; // Unix timestamp in ms
   imdbId?: string;
 }
@@ -77,7 +79,7 @@ if (typeof window !== 'undefined') {
 }
 
 /**
- * Get cached IMDb rating for a content item from localStorage if valid (< 5 days old).
+ * Get cached IMDb rating & OTT platform for a content item from localStorage if valid (< 5 days old).
  * If expired (> 5 days), deletes the old rating data from localStorage and returns null.
  */
 export function getCachedImdbRating(contentId: string): CachedImdbRating | null {
@@ -88,7 +90,7 @@ export function getCachedImdbRating(contentId: string): CachedImdbRating | null 
     if (!raw) return null;
 
     const data: CachedImdbRating = JSON.parse(raw);
-    if (!data || !data.rating) return null;
+    if (!data || (!data.rating && !data.ottPlatform)) return null;
 
     const now = Date.now();
     // Delete old Ratings data after 5 days
@@ -106,27 +108,32 @@ export function getCachedImdbRating(contentId: string): CachedImdbRating | null 
 }
 
 /**
- * Save an IMDb rating into localStorage with a 5-day expiration timestamp.
+ * Save an IMDb rating & OTT platform into localStorage with a 5-day expiration timestamp.
  * Dispatches a custom window event so all cards and preview components react instantly.
  */
 export function saveImdbRatingToStorage(
   contentId: string,
-  rawRating: string,
+  rawRating?: string | null,
   imdbId?: string,
-  votes?: string
+  votes?: string,
+  ottPlatform?: string | null
 ): CachedImdbRating | null {
   if (!contentId) return null;
 
-  const clean = formatImdbRating(rawRating);
-  if (!clean) return null;
+  const existing = getCachedImdbRating(contentId);
+  const clean = rawRating ? formatImdbRating(rawRating) : existing?.rating || null;
+  const finalOtt = (ottPlatform && ottPlatform.trim()) ? ottPlatform.trim() : existing?.ottPlatform || undefined;
+
+  if (!clean && !finalOtt) return null;
 
   const cachedData: CachedImdbRating = {
     id: contentId,
-    rating: clean,
-    rawRating: rawRating.includes('/10') ? rawRating : `${clean}/10`,
-    votes,
+    rating: clean || existing?.rating || '',
+    rawRating: rawRating ? (rawRating.includes('/10') ? rawRating : `${clean}/10`) : existing?.rawRating,
+    votes: votes || existing?.votes,
+    ottPlatform: finalOtt,
     timestamp: Date.now(),
-    imdbId
+    imdbId: imdbId || existing?.imdbId
   };
 
   try {
@@ -134,9 +141,11 @@ export function saveImdbRatingToStorage(
     localStorage.setItem(key, JSON.stringify(cachedData));
 
     // Also sync to legacy sessionStorage key for MovieDetails
-    try {
-      sessionStorage.setItem(`${LEGACY_STORAGE_PREFIX}${contentId}`, cachedData.rawRating || `${clean}/10`);
-    } catch (e) {}
+    if (cachedData.rawRating) {
+      try {
+        sessionStorage.setItem(`${LEGACY_STORAGE_PREFIX}${contentId}`, cachedData.rawRating);
+      } catch (e) {}
+    }
 
     // Dispatch global event for instant reactive UI updates
     if (typeof window !== 'undefined') {
@@ -144,9 +153,10 @@ export function saveImdbRatingToStorage(
         new CustomEvent('imdb_rating_updated', {
           detail: {
             contentId,
-            rating: clean,
+            rating: cachedData.rating,
             rawRating: cachedData.rawRating,
-            votes,
+            votes: cachedData.votes,
+            ottPlatform: cachedData.ottPlatform,
             timestamp: cachedData.timestamp
           }
         })
@@ -155,13 +165,13 @@ export function saveImdbRatingToStorage(
 
     return cachedData;
   } catch (e) {
-    console.error('Failed to save IMDb rating to localStorage:', e);
+    console.error('Failed to save IMDb rating/OTT to localStorage:', e);
     return cachedData;
   }
 }
 
 /**
- * Fetch live IMDb rating directly using OMDB / TMDB (same logic as MediaModal).
+ * Fetch live IMDb rating and OTT platform directly using OMDB / TMDB / AI.
  * Saves live result to localStorage with the current timestamp.
  */
 export async function fetchLiveImdbRating(
@@ -177,11 +187,17 @@ export async function fetchLiveImdbRating(
   const fetchPromise = (async () => {
     try {
       let imdbId = content.imdbLink?.match(/tt\d+/)?.[0];
+      let detectedOtt = content.ottPlatform || (content as any).ott_platform || null;
+      const searchType = content.type === 'series' ? 'tv' : 'movie';
 
-      // 1. If we don't have imdbId, try to find it via TMDB by Title + Year
-      if (!imdbId && content.title) {
+      let liveRating: string | null = null;
+      let liveVotes: string | undefined = undefined;
+      let tmdbRating: string | null = null;
+      let tmdbVotes: string | undefined = undefined;
+
+      // 1. If we don't have imdbId OR don't have ottPlatform, search TMDB by Title + Year
+      if ((!imdbId || !detectedOtt) && content.title) {
         try {
-          const searchType = content.type === 'series' ? 'tv' : 'movie';
           const yearParam = content.year ? `&year=${content.year}` : '';
           const tmdbSearchUrl = `${TMDB_BASE}/search/${searchType}?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(
             content.title
@@ -193,19 +209,42 @@ export async function fetchLiveImdbRating(
           if (tmdbData.results && tmdbData.results.length > 0) {
             const firstResult = tmdbData.results[0];
             const detailsRes = await fetch(
-              `${TMDB_BASE}/${searchType}/${firstResult.id}?api_key=${TMDB_API_KEY}&append_to_response=external_ids`
+              `${TMDB_BASE}/${searchType}/${firstResult.id}?api_key=${TMDB_API_KEY}&append_to_response=external_ids,watch/providers`
             );
-            const detailsData = await detailsRes.json();
-            if (detailsData.external_ids?.imdb_id) {
-              imdbId = detailsData.external_ids.imdb_id;
+            const tmdbDetails = await detailsRes.json();
+
+            if (tmdbDetails.external_ids?.imdb_id && !imdbId) {
+              imdbId = tmdbDetails.external_ids.imdb_id;
+            }
+            if (!detectedOtt) {
+              detectedOtt = extractOttPlatformFromTMDBDetails(tmdbDetails, searchType);
+            }
+            if (tmdbDetails.vote_average && tmdbDetails.vote_average > 0) {
+              tmdbRating = Number(tmdbDetails.vote_average).toFixed(1);
+              if (tmdbDetails.vote_count) tmdbVotes = String(tmdbDetails.vote_count);
             }
           }
         } catch (e) {
-          // Ignore TMDB search error and proceed to OMDB title search
+          // Ignore TMDB search error
         }
       }
 
-      // 2. Fetch from OMDB using imdbId (fastest & most accurate)
+      // 2. If still no OTT and we have content title, attempt AI prediction as fallback
+      if (!detectedOtt && content.title) {
+        try {
+          detectedOtt = await predictOttPlatformWithAI(
+            content.title,
+            searchType,
+            content.year ? String(content.year) : undefined,
+            content.description,
+            undefined,
+            undefined,
+            content.country
+          );
+        } catch (e) {}
+      }
+
+      // 3. Fetch rating from OMDB using imdbId (fastest & most accurate)
       if (imdbId) {
         try {
           const omdbUrl = `${OMDB_BASE}?i=${imdbId}&apikey=${OMDB_API_KEY}`;
@@ -213,15 +252,16 @@ export async function fetchLiveImdbRating(
           const omdbData = await omdbRes.json();
 
           if (omdbData.Response === 'True' && omdbData.imdbRating && omdbData.imdbRating !== 'N/A') {
-            return saveImdbRatingToStorage(content.id, omdbData.imdbRating, imdbId, omdbData.imdbVotes);
+            liveRating = omdbData.imdbRating;
+            liveVotes = omdbData.imdbVotes;
           }
         } catch (e) {
           console.error('OMDB fetch by IMDb ID failed:', e);
         }
       }
 
-      // 3. Fallback: Fetch from OMDB by Title + Year
-      if (content.title) {
+      // 4. Fallback: Fetch rating from OMDB by Title + Year
+      if (!liveRating && content.title) {
         try {
           const yearParam = content.year ? `&y=${content.year}` : '';
           const typeParam = content.type === 'series' ? '&type=series' : '&type=movie';
@@ -230,21 +270,29 @@ export async function fetchLiveImdbRating(
           const omdbData = await omdbRes.json();
 
           if (omdbData.Response === 'True' && omdbData.imdbRating && omdbData.imdbRating !== 'N/A') {
-            return saveImdbRatingToStorage(content.id, omdbData.imdbRating, omdbData.imdbID, omdbData.imdbVotes);
+            liveRating = omdbData.imdbRating;
+            liveVotes = omdbData.imdbVotes;
+            if (!imdbId && omdbData.imdbID) imdbId = omdbData.imdbID;
           }
         } catch (e) {
           console.error('OMDB fetch by title failed:', e);
         }
       }
 
-      // 4. If no live rating from API, but content already has a static imdbRating from DB, cache that
-      if (content.imdbRating) {
-        return saveImdbRatingToStorage(content.id, content.imdbRating, imdbId);
+      // 5. Fallback rating from TMDB if OMDB failed/rate-limited
+      if (!liveRating && tmdbRating) {
+        liveRating = tmdbRating;
+        if (!liveVotes) liveVotes = tmdbVotes;
       }
 
-      return null;
+      // 5. Fallback rating from static content
+      if (!liveRating && content.imdbRating) {
+        liveRating = content.imdbRating;
+      }
+
+      return saveImdbRatingToStorage(content.id, liveRating, imdbId, liveVotes, detectedOtt);
     } catch (err) {
-      console.error('Failed to fetch live IMDb rating for content:', content.id, err);
+      console.error('Failed to fetch live IMDb rating and OTT for content:', content.id, err);
       return null;
     } finally {
       pendingFetches.delete(content.id);
@@ -256,7 +304,7 @@ export async function fetchLiveImdbRating(
 }
 
 /**
- * Trigger reload of IMDb rating on user action (e.g. Content Clicked or Preview opened).
+ * Trigger reload of IMDb rating & OTT platform on user action (e.g. Content Clicked or Preview opened).
  * Always reloads live from OMDB/TMDB in the background and saves fresh data with new timestamp.
  */
 export function reloadLiveImdbRating(content: Partial<Content> & { id: string }): Promise<CachedImdbRating | null> {
