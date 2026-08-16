@@ -4,6 +4,7 @@ import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useModalBehavior } from '../hooks/useModalBehavior';
 import { isRomanized } from '../utils/contentUtils';
+import { saveImdbRatingToStorage } from '../services/imdbRatingService';
 
 interface MediaModalProps {
   initialSecondTitle?: string;
@@ -106,6 +107,118 @@ export async function findTMDBByImdb(imdbID: string, forceType?: string) {
   return null;
 }
 
+export function scoreTMDBItem(item: any, type: string, searchTitle: string, searchYear?: string, forceType?: string): number {
+  if (!item) return -10000;
+  
+  const normalizeStr = (str: string) => (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const searchNorm = normalizeStr(searchTitle);
+  
+  const rawTitle = item.title || item.name || '';
+  const rawOriginalTitle = item.original_title || item.original_name || '';
+  
+  const titleNorm = normalizeStr(rawTitle);
+  const origTitleNorm = normalizeStr(rawOriginalTitle);
+  
+  let score = 0;
+  
+  // 1. Title Matching
+  const isExact = (titleNorm && titleNorm === searchNorm) || (origTitleNorm && origTitleNorm === searchNorm);
+  if (isExact) {
+    score += 1000;
+  } else if ((titleNorm && searchNorm && titleNorm.startsWith(searchNorm)) || (origTitleNorm && searchNorm && origTitleNorm.startsWith(searchNorm))) {
+    score += 300;
+  } else if (searchNorm && (titleNorm.includes(searchNorm) || searchNorm.includes(titleNorm))) {
+    score += 100;
+  }
+  
+  // 2. Auxiliary / Podcast / Special Penalty
+  const auxKeywords = [
+    'podcast', 'aftershow', 'behind the scenes', 'making of', 'recap', 
+    'unfiltered', 'talk show', 'audiobook', 'fan series', 'discussion', 
+    'soundtrack', 'interview', 'extras', 'companion'
+  ];
+  
+  const searchLower = (searchTitle || '').toLowerCase();
+  const searchHasAux = auxKeywords.some(k => searchLower.includes(k));
+  
+  if (!searchHasAux) {
+    const itemHasAuxInTitle = auxKeywords.some(k => rawTitle.toLowerCase().includes(k) || rawOriginalTitle.toLowerCase().includes(k));
+    const itemHasAuxInOverview = auxKeywords.some(k => (item.overview || '').toLowerCase().includes(k));
+    
+    if (itemHasAuxInTitle) {
+      score -= 2000; // Heavy penalty if item title has podcast/aftershow when user didn't search for it
+    } else if (itemHasAuxInOverview) {
+      score -= 300;
+    }
+  }
+
+  // 3. Type Matching
+  if (forceType && forceType !== 'all') {
+    const normForce = forceType === 'series' ? 'tv' : forceType;
+    const normType = type === 'series' ? 'tv' : type;
+    if (normType === normForce) {
+      score += 200;
+    } else {
+      score -= 100;
+    }
+  }
+
+  // 4. Year Proximity
+  const normForceType = forceType === 'series' ? 'tv' : forceType;
+  const normItemType = type === 'series' ? 'tv' : type;
+  const isSeriesItem = normForceType === 'tv' || normItemType === 'tv' || !!item.first_air_date;
+  const skipYearScore = isSeriesItem && searchYear === '2026';
+
+  if (searchYear && !skipYearScore) {
+    const targetYear = parseInt(searchYear);
+    const itemYearStr = (item.release_date || item.first_air_date || '').split('-')[0];
+    const itemYear = parseInt(itemYearStr);
+    
+    if (!isNaN(targetYear) && !isNaN(itemYear)) {
+      const diff = Math.abs(itemYear - targetYear);
+      if (diff === 0) {
+        score += 500;
+      } else if (diff === 1) {
+        score += 300;
+      } else if (diff <= 3) {
+        score += 100;
+      } else {
+        score -= diff * 20;
+      }
+    }
+  }
+
+  // 5. Popularity & Vote Count Weighting
+  const popularity = typeof item.popularity === 'number' ? item.popularity : 0;
+  const voteCount = typeof item.vote_count === 'number' ? item.vote_count : 0;
+
+  score += Math.min(popularity, 500);
+  score += Math.min(voteCount / 10, 300);
+
+  return score;
+}
+
+export function rankTMDBResults(results: any[], searchTitle: string, searchYear?: string, forceType?: string): any[] {
+  if (!results || !Array.isArray(results)) return [];
+  
+  return [...results].sort((a, b) => {
+    const scoreA = scoreTMDBItem(a.item, a.type, searchTitle, searchYear, forceType);
+    const scoreB = scoreTMDBItem(b.item, b.type, searchTitle, searchYear, forceType);
+    
+    if (scoreA !== scoreB) {
+      return scoreB - scoreA;
+    }
+    
+    const popA = a.item?.popularity || 0;
+    const popB = b.item?.popularity || 0;
+    if (popA !== popB) return popB - popA;
+
+    const votesA = a.item?.vote_count || 0;
+    const votesB = b.item?.vote_count || 0;
+    return votesB - votesA;
+  });
+}
+
 export async function searchTMDBByTitle(searchTitle: string, searchYear: string, forceType?: string) {
   const results: any[] = [];
   
@@ -126,7 +239,9 @@ export async function searchTMDBByTitle(searchTitle: string, searchYear: string,
   
   if (!forceType || forceType === 'series' || forceType === 'tv' || forceType === 'all') {
     let tvUrl = `${TMDB_BASE}/search/tv?api_key=${TMDB_API_KEY}&query=${finalQuery}`;
-    if (searchYear) tvUrl += `&first_air_date_year=${searchYear}`;
+    if (searchYear && searchYear !== '2026') {
+      tvUrl += `&first_air_date_year=${searchYear}`;
+    }
     let tvRes = await fetch(tvUrl);
     let tvData = await tvRes.json();
     if (tvData.results) {
@@ -134,7 +249,7 @@ export async function searchTMDBByTitle(searchTitle: string, searchYear: string,
     }
   }
   
-  return results;
+  return rankTMDBResults(results, searchTitle, searchYear, forceType);
 }
 
 export async function fetchTMDBDetails(tmdbId: string, type: string) {
@@ -490,32 +605,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
       results = results.filter(r => r.type === filterType);
     }
     
-    return results.sort((a, b) => {
-      const normalizeStr = (str: string) => (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      const searchTitleNorm = normalizeStr(title);
-      
-      const titleA = normalizeStr(a.item.title || a.item.name || a.item.original_title || a.item.original_name);
-      const titleB = normalizeStr(b.item.title || b.item.name || b.item.original_title || b.item.original_name);
-      
-      const isExactA = titleA === searchTitleNorm ? 1 : 0;
-      const isExactB = titleB === searchTitleNorm ? 1 : 0;
-      
-      const targetYear = parseInt(year);
-      const yearA = parseInt((a.item.release_date || a.item.first_air_date || '0').split('-')[0]) || 0;
-      const yearB = parseInt((b.item.release_date || b.item.first_air_date || '0').split('-')[0]) || 0;
-
-      const isNearYearA = !isNaN(targetYear) && Math.abs(yearA - targetYear) <= 3 ? 1 : 0;
-      const isNearYearB = !isNaN(targetYear) && Math.abs(yearB - targetYear) <= 3 ? 1 : 0;
-
-      const scoreA = (isExactA * 10) + isNearYearA;
-      const scoreB = (isExactB * 10) + isNearYearB;
-
-      if (scoreA !== scoreB) {
-        return scoreB - scoreA;
-      }
-
-      return yearB - yearA;
-    });
+    return rankTMDBResults(results, title, year, filterType);
   }, [searchResults, filterType, title, year]);
 
   const fetchFullDetails = async (tmdbId: string, type: string, searchTitle?: string) => {
@@ -613,6 +703,15 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
       };
 
       setFetchedData(parsedData);
+
+      if (parsedData.imdbRating) {
+        saveImdbRatingToStorage(
+          initialImdbId || details.external_ids?.imdb_id || parsedData.title,
+          parsedData.imdbRating,
+          details.external_ids?.imdb_id,
+          imdbRatingData?.votes
+        );
+      }
 
       // Search YouTube if TMDB didn't provide a trailer
       if (!parsedData.trailerUrl) {

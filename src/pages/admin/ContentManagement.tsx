@@ -1,6 +1,7 @@
 import React, {
   useState,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   memo,
@@ -1030,6 +1031,26 @@ export default function ContentManagement() {
     showMissing,
     missingThisOneOnly,
   ]);
+
+  const prevVisibleCountCMRef = useRef(visibleCount);
+  useLayoutEffect(() => {
+    if (visibleCount > prevVisibleCountCMRef.current) {
+      const nextItemIndex = prevVisibleCountCMRef.current;
+      const el = document.getElementById(`content-card-${nextItemIndex}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+    prevVisibleCountCMRef.current = visibleCount;
+  }, [visibleCount]);
+
+  const handleLoadMore = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      (e.currentTarget as HTMLElement)?.blur();
+    }
+    setVisibleCount((prev) => prev + 50);
+  };
 
   const [genreSearchTerm, setGenreSearchTerm] = useState("");
   const [languageSearchTerm, setLanguageSearchTerm] = useState("");
@@ -5007,10 +5028,11 @@ export default function ContentManagement() {
     }
   };
 
-  const parseJSONSeasons = (str: string | undefined): Season[] => {
+  const parseJSONSeasons = (str: string | Season[] | undefined): Season[] => {
     if (!str) return [];
+    if (Array.isArray(str)) return str;
     try {
-      const parsed = JSON.parse(str);
+      const parsed = typeof str === "string" ? JSON.parse(str) : str;
       return Array.isArray(parsed) ? parsed : [];
     } catch (e) {
       return [];
@@ -5048,7 +5070,19 @@ export default function ContentManagement() {
     oldSeasons: Season[] = [],
     newSeasons: Season[] = []
   ): Season[] => {
-    const merged: Season[] = [...newSeasons];
+    const getValidString = (val?: string): string | undefined => {
+      if (!val) return undefined;
+      const trimmed = String(val).trim();
+      return trimmed.length > 0 ? trimmed : undefined;
+    };
+
+    const getValidYear = (val: any): number | undefined => {
+      if (val === undefined || val === null || val === '') return undefined;
+      const num = Number(val);
+      return !isNaN(num) && num > 0 ? num : undefined;
+    };
+
+    const merged: Season[] = newSeasons.map((ns) => ({ ...ns }));
 
     for (const oSeason of oldSeasons) {
       const existingIdx = merged.findIndex(
@@ -5068,35 +5102,69 @@ export default function ContentManagement() {
           nSeason.mkvLinks || []
         );
 
-        // Merge episode links separately, each sorted by size
-        const mergedEpisodes: Episode[] = [...(nSeason.episodes || [])];
+        // Merge episode links, titles, durations, descriptions
+        const mergedEpisodes: Episode[] = (nSeason.episodes || []).map((ne) => ({
+          ...ne,
+        }));
         for (const oEpisode of oSeason.episodes || []) {
           const epIdx = mergedEpisodes.findIndex(
             (e) => e.episodeNumber === oEpisode.episodeNumber
           );
           if (epIdx !== -1) {
             const nEpisode = mergedEpisodes[epIdx];
+            const epTitle =
+              getValidString(nEpisode.title) ??
+              getValidString(oEpisode.title) ??
+              (nEpisode.title || oEpisode.title || "");
+            const epDuration =
+              getValidString(nEpisode.duration) ??
+              getValidString(oEpisode.duration) ??
+              (nEpisode.duration || oEpisode.duration || "");
+            const epDescription =
+              getValidString(nEpisode.description) ??
+              getValidString(oEpisode.description) ??
+              (nEpisode.description || oEpisode.description || "");
+
             mergedEpisodes[epIdx] = {
+              ...oEpisode,
               ...nEpisode,
+              title: epTitle,
+              duration: epDuration,
+              description: epDescription,
               links: mergeQualityLinks(
                 oEpisode.links || [],
                 nEpisode.links || []
               ),
             };
           } else {
-            mergedEpisodes.push(oEpisode);
+            mergedEpisodes.push({ ...oEpisode });
           }
         }
         mergedEpisodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
 
+        const seasonYear =
+          getValidYear(nSeason.year) ?? getValidYear(oSeason.year);
+        const seasonTitle =
+          getValidString(nSeason.title) ??
+          getValidString(oSeason.title) ??
+          (nSeason.title || oSeason.title || "");
+        const seasonTrailerUrl =
+          getValidString(nSeason.trailerUrl) ??
+          getValidString(oSeason.trailerUrl) ??
+          (nSeason.trailerUrl || oSeason.trailerUrl || "");
+
         merged[existingIdx] = {
+          ...oSeason,
           ...nSeason,
+          title: seasonTitle,
+          year: seasonYear,
+          trailerUrl: seasonTrailerUrl,
           zipLinks: mergedZipLinks,
           mkvLinks: mergedMkvLinks,
           episodes: mergedEpisodes,
         };
       } else {
-        merged.push(oSeason);
+        merged.push({ ...oSeason });
       }
     }
 
@@ -5403,6 +5471,23 @@ export default function ContentManagement() {
       const fields: Partial<Content> = {
         title: newerContent.title || previousContent.title,
         secondTitle: newerContent.secondTitle || previousContent.secondTitle || "",
+        year: newerContent.year || previousContent.year,
+        description: newerContent.description || previousContent.description || "",
+        posterUrl: newerContent.posterUrl || previousContent.posterUrl || "",
+        imdbLink: newerContent.imdbLink || previousContent.imdbLink || "",
+        trailerUrl: newerContent.trailerUrl || previousContent.trailerUrl || "",
+        trailerTitle: newerContent.trailerTitle || previousContent.trailerTitle || "",
+        trailerYoutubeTitle: newerContent.trailerYoutubeTitle || previousContent.trailerYoutubeTitle || "",
+        trailerSeasonNumber: newerContent.trailerSeasonNumber || previousContent.trailerSeasonNumber || null,
+        trailers: newerContent.trailers || previousContent.trailers || "[]",
+        subtitles: newerContent.subtitles !== undefined ? newerContent.subtitles : previousContent.subtitles,
+        qualityId: newerContent.qualityId || previousContent.qualityId || "",
+        country: newerContent.country || previousContent.country || "",
+        releaseDate: newerContent.releaseDate || previousContent.releaseDate || "",
+        runtime: newerContent.runtime || previousContent.runtime || "",
+        imdbRating: newerContent.imdbRating || previousContent.imdbRating || "",
+        genreIds: Array.from(new Set([...(newerContent.genreIds || []), ...(previousContent.genreIds || [])])),
+        cast: Array.from(new Set([...(newerContent.cast || []), ...(previousContent.cast || [])])),
         languageIds: selectedLanguages,
         status: previousContent.status, // preserve status of previous content
         order: maxOrder + 1,
@@ -6003,43 +6088,44 @@ export default function ContentManagement() {
       ) : (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-6">
-            {filteredContent.slice(0, visibleCount).map((content) => (
-              <ContentCard
-                key={content.id}
-                content={content}
-                profile={profile}
-                qualities={qualities}
-                languages={languages}
-                isSelected={selectedContent.includes(content.id)}
-                anySelected={selectedContent.length > 0}
-                isActiveDropdown={activeDropdownId === content.id}
-                isDuplicate={duplicateIds.has(content.id)}
-                duplicateLinkStatus={duplicateLinkStatusMap.get(content.id)}
-                isShareLoading={loadingShareId === content.id}
-                isWhatsappLoading={loadingWhatsappShareId === content.id}
-                handleSelectContent={handleSelectContent}
-                handleShare={handleShare}
-                handleEdit={handleEdit}
-                handleCopyData={handleCopyData}
-                handleCheckLinks={handleCheckLinks}
-                onTelegramDownload={setTelegramDownloadContent}
-                setDeleteId={setDeleteId}
-                setNotificationModal={setNotificationModal}
-                setEmailModal={setEmailModal}
-                setActiveDropdownId={setActiveDropdownId}
-                dropdownPos={dropdownPos}
-                setDropdownPos={setDropdownPos}
-                getMissingLabels={getMissingLabels}
-                handleAddToSpecialCollection={handleAddToSpecialCollection}
-                handleMerge={setSpecificMergeContent}
-              />
+            {filteredContent.slice(0, visibleCount).map((content, index) => (
+              <div key={content.id} id={`content-card-${index}`} className="scroll-mt-28">
+                <ContentCard
+                  content={content}
+                  profile={profile}
+                  qualities={qualities}
+                  languages={languages}
+                  isSelected={selectedContent.includes(content.id)}
+                  anySelected={selectedContent.length > 0}
+                  isActiveDropdown={activeDropdownId === content.id}
+                  isDuplicate={duplicateIds.has(content.id)}
+                  duplicateLinkStatus={duplicateLinkStatusMap.get(content.id)}
+                  isShareLoading={loadingShareId === content.id}
+                  isWhatsappLoading={loadingWhatsappShareId === content.id}
+                  handleSelectContent={handleSelectContent}
+                  handleShare={handleShare}
+                  handleEdit={handleEdit}
+                  handleCopyData={handleCopyData}
+                  handleCheckLinks={handleCheckLinks}
+                  onTelegramDownload={setTelegramDownloadContent}
+                  setDeleteId={setDeleteId}
+                  setNotificationModal={setNotificationModal}
+                  setEmailModal={setEmailModal}
+                  setActiveDropdownId={setActiveDropdownId}
+                  dropdownPos={dropdownPos}
+                  setDropdownPos={setDropdownPos}
+                  getMissingLabels={getMissingLabels}
+                  handleAddToSpecialCollection={handleAddToSpecialCollection}
+                  handleMerge={setSpecificMergeContent}
+                />
+              </div>
             ))}
           </div>
           {visibleCount < filteredContent.length && (
             <div className="mt-8 flex justify-center">
               <Button
                 variant="secondary"
-                onClick={() => setVisibleCount((prev) => prev + 50)}
+                onClick={handleLoadMore}
                 className="px-8"
               >
                 Load More

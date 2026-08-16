@@ -53,10 +53,13 @@ import {
   ExternalLink,
   Send,
   Gift,
+  Maximize2,
+  Image as ImageIcon,
 } from "lucide-react";
 import { logEvent } from "../../services/analytics";
 import AlertModal from "../../components/AlertModal";
 import ConfirmModal from "../../components/ConfirmModal";
+import SharePreviewModal from "../../components/SharePreviewModal";
 import { clsx } from "clsx";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -78,6 +81,12 @@ import {
   searchYouTubeTrailer,
   fetchSeriesSeasons,
 } from "../../components/MediaModal";
+import {
+  saveImdbRatingToStorage,
+  getCachedImdbRating,
+  reloadLiveImdbRating
+} from "../../services/imdbRatingService";
+import { fetchTMDBImages } from "../../services/tmdb";
 import ContentCard from "../../components/ContentCard";
 
 import { useModalBehavior } from "../../hooks/useModalBehavior";
@@ -178,6 +187,11 @@ export default function MovieDetails() {
     formattedTitle?: string;
   } | null>(null);
   const [isPosterExpanded, setIsPosterExpanded] = useState(false);
+  const [isPosterHintDismissed, setIsPosterHintDismissed] = useState(false);
+  const [tmdbGalleryImages, setTmdbGalleryImages] = useState<{ posters: string[]; backdrops: string[] }>({ posters: [], backdrops: [] });
+  const [loadingTmdbGallery, setLoadingTmdbGallery] = useState(false);
+  const [activeGalleryIndex, setActiveGalleryIndex] = useState(0);
+  const [isLightboxImageLoading, setIsLightboxImageLoading] = useState(true);
   const [isTrailerPopupOpen, setIsTrailerPopupOpen] = useState(false);
   const [isTrailerSelectionOpen, setIsTrailerSelectionOpen] = useState(false);
   const [showRatePrompt, setShowRatePrompt] = useState(false);
@@ -210,10 +224,13 @@ export default function MovieDetails() {
       }
     }).catch(() => {});
   }, [profile?.uid, profile?.email, profile?.displayName, profile?.reviewRewardClaimed]);
-  const [shareResultModal, setShareResultModal] = useState<{
+  const [sharePreviewModal, setSharePreviewModal] = useState<{
     isOpen: boolean;
     text: string;
     title: string;
+    contentTitle?: string;
+    posterUrl?: string | null;
+    shareSubject?: string;
   }>({ isOpen: false, text: "", title: "" });
   const [activeTrailerUrl, setActiveTrailerUrl] = useState<string | null>(null);
   const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
@@ -249,8 +266,8 @@ export default function MovieDetails() {
   useModalBehavior(isTrailerSelectionOpen, () =>
     setIsTrailerSelectionOpen(false),
   );
-  useModalBehavior(shareResultModal.isOpen, () =>
-    setShareResultModal({ ...shareResultModal, isOpen: false }),
+  useModalBehavior(sharePreviewModal.isOpen, () =>
+    setSharePreviewModal({ ...sharePreviewModal, isOpen: false }),
   );
   useModalBehavior(linkPopup?.isOpen || false, () => setLinkPopup(null));
   useModalBehavior(!!deleteId, () => setDeleteId(null));
@@ -313,6 +330,11 @@ export default function MovieDetails() {
     // Clear state synchronously for new ID
     setFullContent(null);
     setCachedMetadata({ id: id || "", data: {} });
+    setTmdbGalleryImages({ posters: [], backdrops: [] });
+    setActiveGalleryIndex(0);
+    setLoadingTmdbGallery(false);
+    setIsPosterExpanded(false);
+    setIsLightboxImageLoading(true);
 
     if (id) {
       // Load full content cache asynchronously
@@ -530,6 +552,139 @@ export default function MovieDetails() {
 
     return merged as Content;
   }, [content, cachedMetadata, fullContent, id, contentLoading, isOffline]);
+
+  const loadTmdbImagesForGallery = async () => {
+    if (!mergedContent || loadingTmdbGallery) {
+      return;
+    }
+    const currentId = mergedContent.id;
+    setLoadingTmdbGallery(true);
+    try {
+      let tmdbId = "";
+      let tmdbType = mergedContent.type === "series" ? "tv" : "movie";
+      const imdbId = mergedContent.imdbLink?.match(/tt\d+/)?.[0] || "";
+
+      if (imdbId) {
+        const found = await findTMDBByImdb(imdbId, tmdbType);
+        if (found) {
+          tmdbId = found.item.id;
+          tmdbType = found.type;
+        }
+      }
+
+      if (!tmdbId && mergedContent.title) {
+        const results = await searchTMDBByTitle(
+          mergedContent.title,
+          mergedContent.year?.toString() || "",
+          tmdbType
+        );
+        if (results && results.length > 0) {
+          tmdbId = results[0].item.id;
+          tmdbType = results[0].type;
+        }
+      }
+
+      if (tmdbId) {
+        const imgs = await fetchTMDBImages(Number(tmdbId), tmdbType as any);
+        if (currentId === id) {
+          setTmdbGalleryImages(imgs);
+        }
+      }
+    } catch (e) {
+      console.error("Error loading gallery images from TMDB:", e);
+    } finally {
+      if (currentId === id) {
+        setLoadingTmdbGallery(false);
+      }
+    }
+  };
+
+  const allGalleryImages = useMemo(() => {
+    const list: { url: string; type: 'poster' | 'backdrop'; label: string }[] = [];
+    const mainPoster = mergedContent?.posterUrl || settings?.defaultAppImage || 'https://picsum.photos/seed/movie/400/600';
+    if (mainPoster) {
+      list.push({ url: mainPoster, type: 'poster', label: 'Main Poster' });
+    }
+    tmdbGalleryImages.posters.forEach((p) => {
+      if (!list.some((item) => item.url === p)) {
+        const count = list.filter((i) => i.type === 'poster').length;
+        list.push({ url: p, type: 'poster', label: `Poster ${count + 1}` });
+      }
+    });
+    tmdbGalleryImages.backdrops.forEach((b) => {
+      if (!list.some((item) => item.url === b)) {
+        const count = list.filter((i) => i.type === 'backdrop').length;
+        list.push({ url: b, type: 'backdrop', label: `Backdrop ${count + 1}` });
+      }
+    });
+    return list;
+  }, [mergedContent?.posterUrl, settings?.defaultAppImage, tmdbGalleryImages]);
+
+  const handleOpenPosterLightbox = () => {
+    setActiveGalleryIndex(0);
+    setIsLightboxImageLoading(true);
+    setIsPosterExpanded(true);
+    loadTmdbImagesForGallery();
+  };
+
+  const handlePrevGalleryImage = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (allGalleryImages.length <= 1) return;
+    setIsLightboxImageLoading(true);
+    setActiveGalleryIndex((prev) => (prev === 0 ? allGalleryImages.length - 1 : prev - 1));
+  };
+
+  const handleNextGalleryImage = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (allGalleryImages.length <= 1) return;
+    setIsLightboxImageLoading(true);
+    setActiveGalleryIndex((prev) => (prev === allGalleryImages.length - 1 ? 0 : prev + 1));
+  };
+
+  // Touch swipe handlers for lightbox
+  const lightboxTouchStartX = useRef<number | null>(null);
+  const lightboxTouchEndX = useRef<number | null>(null);
+
+  const handleLightboxTouchStart = (e: React.TouchEvent) => {
+    if ((e.target as HTMLElement).closest('.no-scrollbar, .overflow-x-auto, button')) {
+      lightboxTouchStartX.current = null;
+      lightboxTouchEndX.current = null;
+      return;
+    }
+    lightboxTouchEndX.current = null;
+    lightboxTouchStartX.current = e.touches[0].clientX;
+  };
+
+  const handleLightboxTouchMove = (e: React.TouchEvent) => {
+    lightboxTouchEndX.current = e.touches[0].clientX;
+  };
+
+  const handleLightboxTouchEnd = () => {
+    if (lightboxTouchStartX.current === null || lightboxTouchEndX.current === null) return;
+    const distance = lightboxTouchStartX.current - lightboxTouchEndX.current;
+    const minSwipeDistance = 40;
+
+    if (distance > minSwipeDistance) {
+      // Swiped Left -> Next Image
+      handleNextGalleryImage();
+    } else if (distance < -minSwipeDistance) {
+      // Swiped Right -> Previous Image
+      handlePrevGalleryImage();
+    }
+    lightboxTouchStartX.current = null;
+    lightboxTouchEndX.current = null;
+  };
+
+  useEffect(() => {
+    if (!isPosterExpanded) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "ArrowLeft") handlePrevGalleryImage();
+      if (e.key === "ArrowRight") handleNextGalleryImage();
+      if (e.key === "Escape") setIsPosterExpanded(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isPosterExpanded, allGalleryImages.length]);
 
   const seasons = useMemo(() => {
     if (
@@ -883,15 +1038,16 @@ export default function MovieDetails() {
       return;
 
     const fetchRating = async () => {
+      const cached = getCachedImdbRating(id);
       const ratingCacheKey = `imdb_rating_${id}`;
-      const hasLiveRating = sessionStorage.getItem(ratingCacheKey);
 
-      // Show cached immediately if available
-      if (hasLiveRating) {
-        setLiveRating(hasLiveRating);
-        if (mergedContent.imdbRating !== hasLiveRating) {
+      // Show cached immediately if available (< 5 days old)
+      if (cached?.rawRating || cached?.rating) {
+        const cachedRating = cached.rawRating || `${cached.rating}/10`;
+        setLiveRating(cachedRating);
+        if (mergedContent.imdbRating !== cachedRating) {
           setCachedMetadata((prev) => {
-            const newCache = { ...prev.data, imdbRating: hasLiveRating };
+            const newCache = { ...prev.data, imdbRating: cachedRating };
             safeStorage.setItem(
               `content_cache_${id}`,
               JSON.stringify(newCache),
@@ -903,8 +1059,13 @@ export default function MovieDetails() {
 
       let imdbId = mergedContent.imdbLink?.match(/tt\d+/)?.[0];
       if (!imdbId) {
-        // If no IMDb ID, we might need to wait for static fetch to find it.
-        // Don't mark as attempted so it can run again when imdbLink is updated.
+        // If no IMDb ID, attempt live reload helper which uses TMDB to discover IMDb ID
+        reloadLiveImdbRating(mergedContent).then((res) => {
+          if (res?.rawRating || res?.rating) {
+            const resRating = res.rawRating || `${res.rating}/10`;
+            setLiveRating(resRating);
+          }
+        }).catch(() => {});
         return;
       }
 
@@ -918,6 +1079,7 @@ export default function MovieDetails() {
         const omdbData = await omdbRes.json();
         if (omdbData.imdbRating && omdbData.imdbRating !== "N/A") {
           const newRating = `${omdbData.imdbRating}/10`;
+          saveImdbRatingToStorage(id, omdbData.imdbRating, imdbId, omdbData.imdbVotes);
           sessionStorage.setItem(ratingCacheKey, newRating);
           setLiveRating(newRating);
 
@@ -1173,6 +1335,7 @@ export default function MovieDetails() {
           const ratingData = await fetchIMDbRating(imdbId);
           if (ratingData && ratingData.rating && ratingData.rating !== "N/A") {
             updates.imdbRating = `${ratingData.rating}/10`;
+            saveImdbRatingToStorage(id, ratingData.rating, imdbId, ratingData.votes);
             hasUpdates = true;
           }
         }
@@ -2409,25 +2572,9 @@ export default function MovieDetails() {
     );
   };
 
-  const handleShare = async () => {
+  const handleShare = () => {
     if (!mergedContent) return;
-    vibrate(50);
-    setIsShareLoading(true);
-
-    let shareUrl = window.location.href;
-
-    // Ensure the share URL uses /series for series and /movie for movies
-    if (mergedContent.type === "series" && shareUrl.includes("/movie/")) {
-      shareUrl = shareUrl.replace("/movie/", "/series/");
-    } else if (
-      mergedContent.type === "movie" &&
-      shareUrl.includes("/series/")
-    ) {
-      shareUrl = shareUrl.replace("/series/", "/movie/");
-    }
-
-    // We no longer use tinyurl for shareUrl
-    // shareUrl = await generateTinyUrl(shareUrl, false);
+    vibrate(30);
 
     const contentQuality =
       qualities.find((q) => q.id === mergedContent.qualityId)?.name || "N/A";
@@ -2437,7 +2584,7 @@ export default function MovieDetails() {
       `🗣️ Language: ${contentLangs || "N/A"}\n` +
       `🎭 Genre: ${contentGenres || "N/A"}\n` +
       `🖨️ Print Quality: ${contentQuality}\n\n` +
-      `🔗 Watch here: MovizNow.com/${mergedContent.id}\n` +
+      `🔗 Watch here: https://MovizNow.com/${mergedContent.id}\n` +
       `📞 WhatsApp: ${(() => {
         let sn = settings?.supportNumber || "3363284466";
         if (sn.startsWith("92")) sn = "0" + sn.substring(2);
@@ -2445,94 +2592,14 @@ export default function MovieDetails() {
         return sn;
       })()}`;
 
-    const textForShare = baseText.trim();
-    const textForClipboard = baseText.trim();
-
-    let files: File[] = [];
-    if (mergedContent.posterUrl) {
-      try {
-        const response = await fetch(mergedContent.posterUrl);
-        const blob = await response.blob();
-        const file = new File([blob], "poster.jpg", {
-          type: blob.type || "image/jpeg",
-        });
-        files = [file];
-      } catch (e) {
-        try {
-          const proxyResponse = await fetch(
-            `/api/image-proxy?url=${encodeURIComponent(mergedContent.posterUrl)}`,
-          );
-          if (proxyResponse.ok) {
-            const blob = await proxyResponse.blob();
-            const file = new File([blob], "poster.jpg", {
-              type: blob.type || "image/jpeg",
-            });
-            files = [file];
-          }
-        } catch (proxyError) {
-          // Fallback silently
-        }
-      }
-    }
-
-    const shareData: any = {
-      title: `${formatContentTitle(mergedContent)} (${mergedContent.year})`,
-      text: textForShare,
-    };
-
-    if (
-      files.length > 0 &&
-      navigator.canShare &&
-      navigator.canShare({ files })
-    ) {
-      shareData.files = files;
-    }
-
-    try {
-      if (navigator.share && navigator.canShare(shareData)) {
-        await navigator.share(shareData);
-      } else {
-        // Fallback to clipboard
-        try {
-          await navigator.clipboard.writeText(textForClipboard);
-          setAlertConfig({
-            isOpen: true,
-            title: "Success",
-            message: "Link and details copied to clipboard!",
-          });
-        } catch (clipErr) {
-          setShareResultModal({
-            isOpen: true,
-            title: "Share Content",
-            text: textForClipboard
-          });
-        }
-      }
-    } catch (err: any) {
-      const isCanceled =
-        err.name === "AbortError" ||
-        (err.message && err.message.toLowerCase().includes("cancel")) ||
-        (typeof err === "string" && err.toLowerCase().includes("cancel"));
-
-      if (!isCanceled) {
-        try {
-          await navigator.clipboard.writeText(textForClipboard);
-          setAlertConfig({
-            isOpen: true,
-            title: "Success",
-            message: "Sharing failed directly, but content was copied to clipboard.",
-          });
-        } catch (e) {
-          setShareResultModal({
-            isOpen: true,
-            title: "Share Content",
-            text: textForClipboard
-          });
-        }
-      }
-    } finally {
-      setIsShareLoading(false);
-    }
+    setSharePreviewModal({
+      isOpen: true,
+      title: "Share Content",
+      contentTitle: `${formatContentTitle(mergedContent)} (${mergedContent.year})`,
+      posterUrl: mergedContent.posterUrl,
+      text: baseText.trim(),
+      shareSubject: `${formatContentTitle(mergedContent)} (${mergedContent.year})`,
+    });
   };
 
   return (
@@ -2587,20 +2654,94 @@ export default function MovieDetails() {
           className="relative z-10 flex items-end justify-center p-4 sm:p-8 pt-28 sm:pt-36 pb-6 w-full"
         >
           <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center md:items-end gap-6 sm:gap-10 text-center md:text-left w-full">
-            <div className="relative group shrink-0">
-              <div className="absolute -inset-1 bg-gradient-to-r from-emerald-500 to-cyan-500 rounded-3xl blur opacity-30 group-hover:opacity-75 transition duration-500"></div>
-              <img
-                key={mergedContent.id + "-poster"}
-                src={
-                  mergedContent.posterUrl ||
-                  settings?.defaultAppImage ||
-                  "https://picsum.photos/seed/movie/400/600"
-                }
-                alt={mergedContent.title}
-                className="relative w-44 sm:w-56 md:w-64 rounded-2xl shadow-2xl cursor-pointer hover:scale-[1.03] transition-all duration-300 border border-white/20 dark:border-zinc-800/80 object-cover aspect-[2/3]"
-                referrerPolicy="no-referrer"
-                onClick={() => setIsPosterExpanded(true)}
-              />
+            <div className="relative group shrink-0 flex flex-col items-center">
+              <div className="relative">
+                <div className="absolute -inset-1 bg-gradient-to-r from-emerald-500 to-cyan-500 rounded-3xl blur opacity-30 group-hover:opacity-75 transition duration-500"></div>
+                <div 
+                  className="relative w-44 sm:w-56 md:w-64 rounded-2xl shadow-2xl cursor-pointer hover:scale-[1.03] transition-all duration-300 border border-white/20 dark:border-zinc-800/80 aspect-[2/3] overflow-hidden group/poster"
+                  onClick={handleOpenPosterLightbox}
+                  title={t('View Full Poster & Gallery')}
+                >
+                  <img
+                    key={mergedContent.id + "-poster"}
+                    src={
+                      mergedContent.posterUrl ||
+                      settings?.defaultAppImage ||
+                      "https://picsum.photos/seed/movie/400/600"
+                    }
+                    alt={mergedContent.title}
+                    className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+
+                  {/* Desktop Hover overlay */}
+                  <div className="absolute inset-0 bg-black/65 opacity-0 group-hover/poster:opacity-100 transition-opacity duration-300 flex items-center justify-center backdrop-blur-[2px]">
+                    <div className="flex flex-col items-center gap-2.5 text-white transform scale-90 group-hover/poster:scale-100 transition-transform duration-300">
+                      <div className="p-3 bg-emerald-500 text-white rounded-full shadow-lg shadow-emerald-500/40">
+                        <Maximize2 className="w-6 h-6" />
+                      </div>
+                      <span className="text-xs font-bold tracking-wider uppercase bg-black/75 px-3.5 py-1 rounded-full border border-white/20 shadow-md">
+                        {t('View Poster & Gallery')}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Floating & Shaking Big Label Popup with Dismiss (X) button */}
+                <AnimatePresence>
+                  {!isPosterHintDismissed && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 15, scale: 0.9 }}
+                      animate={{
+                        opacity: 1,
+                        y: [0, -6, 0, -4, 0, 0, 0],
+                        x: [0, 0, -2, 2, -2, 2, -1, 1, 0, 0],
+                        rotate: [0, 0, -2, 2, -2.5, 2.5, -1, 1, 0, 0],
+                        scale: [1, 1.02, 1, 1.02, 1, 1, 1],
+                      }}
+                      exit={{ opacity: 0, y: 10, scale: 0.9 }}
+                      transition={{
+                        opacity: { duration: 0.3 },
+                        y: { duration: 3.2, repeat: Infinity, ease: "easeInOut" },
+                        x: { duration: 3.2, repeat: Infinity, ease: "easeInOut" },
+                        rotate: { duration: 3.2, repeat: Infinity, ease: "easeInOut" },
+                        scale: { duration: 3.2, repeat: Infinity, ease: "easeInOut" },
+                      }}
+                      className="absolute -bottom-6 inset-x-0 z-20 flex justify-center px-1 pointer-events-none"
+                    >
+                      <div 
+                        onClick={handleOpenPosterLightbox}
+                        className="pointer-events-auto group/hint cursor-pointer bg-zinc-950/95 hover:bg-zinc-900 border-2 border-emerald-400 text-white pl-3.5 pr-2 py-2 rounded-2xl shadow-2xl shadow-emerald-950/80 backdrop-blur-xl flex items-center gap-2.5 transition-all duration-300 hover:scale-[1.04] active:scale-95 ring-4 ring-emerald-500/25 animate-pulse"
+                      >
+                        <div className="relative p-1.5 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shrink-0">
+                          <ImageIcon className="w-4 h-4" />
+                          <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-400 rounded-full animate-ping" />
+                        </div>
+                        <div className="flex flex-col text-left">
+                          <span className="text-xs sm:text-sm font-extrabold text-white tracking-tight flex items-center gap-1.5 whitespace-nowrap">
+                            {t('Open Poster to View More')}
+                            <Maximize2 className="w-3.5 h-3.5 text-emerald-400 opacity-80 group-hover/hint:opacity-100 animate-bounce" />
+                          </span>
+                          <span className="text-[10px] text-zinc-400 font-medium">
+                            {t('Tap to expand HD gallery')}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsPosterHintDismissed(true);
+                          }}
+                          className="ml-1 p-1.5 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800/90 transition-colors border border-transparent hover:border-zinc-700 shrink-0"
+                          title={t('Dismiss')}
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
             </div>
 
             <div className="flex-1 space-y-4">
@@ -3927,48 +4068,118 @@ export default function MovieDetails() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center z-[60] p-4"
+            className="fixed inset-0 bg-black/95 backdrop-blur-md flex flex-col items-center justify-between z-[100] p-4 sm:p-6 select-none"
             onClick={closePosterPopup}
+            onTouchStart={handleLightboxTouchStart}
+            onTouchMove={handleLightboxTouchMove}
+            onTouchEnd={handleLightboxTouchEnd}
           >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.2 }}
-              className="relative max-w-4xl max-h-[90vh] w-full flex justify-center"
-            >
+            {/* Top Bar */}
+            <div className="w-full max-w-5xl flex items-center justify-between z-10 pt-2 pb-2" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center gap-3">
+                <span className="bg-emerald-500/90 text-white text-xs font-black px-3 py-1 rounded-full uppercase tracking-wider shadow-md">
+                  {allGalleryImages[activeGalleryIndex]?.label || 'Poster'}
+                </span>
+                <span className="text-zinc-300 text-sm font-bold">
+                  {activeGalleryIndex + 1} / {allGalleryImages.length}
+                </span>
+                {loadingTmdbGallery && (
+                  <span className="flex items-center gap-1.5 text-xs text-amber-400 font-medium animate-pulse">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> {t('Fetching images...')}
+                  </span>
+                )}
+              </div>
               <button
                 onClick={closePosterPopup}
-                className="absolute -top-12 right-0 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors bg-black/50 p-2 rounded-full"
+                className="text-zinc-400 hover:text-white bg-zinc-900/80 hover:bg-zinc-800 p-2.5 rounded-full transition-all border border-zinc-800"
+                title="Close"
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="24"
-                  height="24"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
+                <X className="w-6 h-6" />
               </button>
-              <img
-                key={mergedContent.id + "-expanded"}
-                src={
-                  mergedContent.posterUrl ||
-                  settings?.defaultAppImage ||
-                  "https://picsum.photos/seed/movie/400/600"
-                }
-                alt={mergedContent.title}
-                className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
-                referrerPolicy="no-referrer"
+            </div>
+
+            {/* Main Stage with Full Size Portrait Image & Navigation */}
+            <div
+              className="relative flex-1 w-full max-w-5xl flex items-center justify-center my-auto min-h-0"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Previous Button */}
+              {allGalleryImages.length > 1 && (
+                <button
+                  onClick={handlePrevGalleryImage}
+                  className="absolute left-1 sm:left-4 z-30 bg-zinc-900/90 hover:bg-emerald-600 text-white p-3 rounded-full border border-zinc-700 shadow-2xl transition-all duration-200 active:scale-90"
+                  title="Previous Image"
+                >
+                  <ChevronLeft className="w-6 h-6" />
+                </button>
+              )}
+
+              {/* Portrait Image Container */}
+              <div className="relative max-h-[75vh] w-full flex items-center justify-center overflow-hidden rounded-2xl shadow-2xl border border-white/10 bg-zinc-950/80 p-2">
+                {/* Loader Overlay */}
+                {isLightboxImageLoading && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950/85 z-20 gap-3 backdrop-blur-sm">
+                    <Loader2 className="w-10 h-10 animate-spin text-emerald-500" />
+                    <span className="text-xs font-semibold text-zinc-300 animate-pulse">{t('Loading image...')}</span>
+                  </div>
+                )}
+
+                <img
+                  src={allGalleryImages[activeGalleryIndex]?.url}
+                  alt={mergedContent?.title || 'Poster'}
+                  className="max-h-[72vh] max-w-full object-contain rounded-xl aspect-[2/3] shadow-2xl transition-all duration-300"
+                  referrerPolicy="no-referrer"
+                  onLoad={() => setIsLightboxImageLoading(false)}
+                  onError={() => setIsLightboxImageLoading(false)}
+                />
+              </div>
+
+              {/* Next Button */}
+              {allGalleryImages.length > 1 && (
+                <button
+                  onClick={handleNextGalleryImage}
+                  className="absolute right-1 sm:right-4 z-30 bg-zinc-900/90 hover:bg-emerald-600 text-white p-3 rounded-full border border-zinc-700 shadow-2xl transition-all duration-200 active:scale-90"
+                  title="Next Image"
+                >
+                  <ChevronRight className="w-6 h-6" />
+                </button>
+              )}
+            </div>
+
+            {/* Bottom Thumbnails Bar */}
+            {allGalleryImages.length > 1 && (
+              <div
+                className="w-full max-w-4xl flex items-center justify-start gap-2 pt-3 pb-1 overflow-x-auto no-scrollbar z-10 px-4"
                 onClick={(e) => e.stopPropagation()}
-              />
-            </motion.div>
+                onTouchStart={(e) => e.stopPropagation()}
+                onTouchMove={(e) => e.stopPropagation()}
+                onTouchEnd={(e) => e.stopPropagation()}
+              >
+                {allGalleryImages.map((img, idx) => (
+                  <button
+                    key={`thumb-${idx}-${img.url}`}
+                    onClick={() => {
+                      if (idx !== activeGalleryIndex) {
+                        setIsLightboxImageLoading(true);
+                        setActiveGalleryIndex(idx);
+                      }
+                    }}
+                    className={`relative shrink-0 rounded-lg overflow-hidden border-2 transition-all duration-200 w-12 h-16 sm:w-14 sm:h-20 cursor-pointer ${
+                      activeGalleryIndex === idx
+                        ? 'border-emerald-400 dark:border-emerald-400 scale-105 shadow-lg shadow-emerald-500/30 opacity-100 ring-2 ring-emerald-500/50'
+                        : 'border-zinc-500 dark:border-zinc-500 opacity-80 hover:opacity-100 hover:border-zinc-300'
+                    }`}
+                  >
+                    <img
+                      src={img.url}
+                      alt={img.label}
+                      className="w-full h-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  </button>
+                ))}
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
@@ -4409,55 +4620,17 @@ export default function MovieDetails() {
         />
       )}
 
-      {/* Share Result Modal */}
-      <Modal
-        isOpen={shareResultModal.isOpen}
-        onClose={() => setShareResultModal({ ...shareResultModal, isOpen: false })}
-        title={shareResultModal.title}
-        maxWidth="max-w-2xl"
-      >
-        <div className="flex flex-col gap-4">
-          <p className="text-zinc-600 dark:text-zinc-400 text-sm">
-            Please copy the content below manually.
-          </p>
-          <textarea
-            readOnly
-            className="w-full h-64 p-3 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-sm font-mono whitespace-pre-wrap outline-none"
-            value={shareResultModal.text}
-          />
-          <div className="flex justify-end gap-3 mt-2">
-            <button
-              onClick={() => setShareResultModal({ ...shareResultModal, isOpen: false })}
-              className="px-4 py-2 rounded-xl text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium transition-colors"
-            >
-              Close
-            </button>
-            <button
-              onClick={() => {
-                const textArea = document.createElement("textarea");
-                textArea.value = shareResultModal.text;
-                textArea.style.top = "0";
-                textArea.style.left = "0";
-                textArea.style.position = "fixed";
-                document.body.appendChild(textArea);
-                textArea.focus();
-                textArea.select();
-                try {
-                  document.execCommand('copy');
-                  setAlertConfig({ isOpen: true, title: "Success", message: "Copied to clipboard!" });
-                } catch (err) {
-                  setAlertConfig({ isOpen: true, title: "Error", message: "Failed to copy." });
-                } finally {
-                  document.body.removeChild(textArea);
-                }
-              }}
-              className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-2 rounded-xl font-bold transition-colors flex items-center gap-2"
-            >
-              <Copy className="w-4 h-4" /> Copy
-            </button>
-          </div>
-        </div>
-      </Modal>
+      {/* Share Preview Modal */}
+      <SharePreviewModal
+        isOpen={sharePreviewModal.isOpen}
+        onClose={() => setSharePreviewModal((prev) => ({ ...prev, isOpen: false }))}
+        title={sharePreviewModal.title}
+        contentTitle={sharePreviewModal.contentTitle}
+        posterUrl={sharePreviewModal.posterUrl}
+        shareText={sharePreviewModal.text}
+        shareSubject={sharePreviewModal.shareSubject}
+        themeColor="cyan"
+      />
 
       <ConfirmModal
         isOpen={showRatePrompt}

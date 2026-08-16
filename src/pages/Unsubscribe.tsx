@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { CheckCircle2, AlertCircle, Loader2, ArrowLeft, Lock, UserX, LogOut } from 'lucide-react';
-import { doc, updateDoc, collection, query, where, getDocs, setDoc } from 'firebase/firestore';
+import { doc, updateDoc, collection, query, where, getDocs, setDoc, limit } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -54,7 +54,7 @@ export default function Unsubscribe() {
 
   const updateFirestoreUser = async (userEmail: string): Promise<boolean> => {
     try {
-      const q = query(collection(db, 'users'), where('email', '==', userEmail.toLowerCase()));
+      const q = query(collection(db, 'users'), where('email', '==', userEmail.toLowerCase()), limit(50));
       const snap = await getDocs(q);
       
       let updated = false;

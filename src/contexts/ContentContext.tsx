@@ -44,6 +44,7 @@ interface ContentContextType {
   finalizeChanges: () => Promise<void>;
   hasPendingChanges: boolean;
   checkForUpdates: (force?: boolean) => Promise<void>;
+  quickRefreshCatalog: () => Promise<{ updated: boolean; message: string; isRelaxed?: boolean }>;
 }
 
 const ContentContext = createContext<ContentContextType | undefined>(undefined);
@@ -931,6 +932,206 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const quickRefreshCatalog = async (): Promise<{ updated: boolean; message: string; isRelaxed?: boolean }> => {
+    const LAST_QUICK_REFRESH_KEY = 'last_catalog_quick_refresh_time';
+    const now = Date.now();
+    const lastQuickRefreshStr = safeStorage.getItem(LAST_QUICK_REFRESH_KEY);
+    const lastQuickRefresh = lastQuickRefreshStr ? parseInt(lastQuickRefreshStr, 10) : 0;
+
+    const FIVE_MINUTES_MS = 5 * 60 * 1000;
+    if (lastQuickRefresh > 0 && now - lastQuickRefresh < FIVE_MINUTES_MS) {
+      return {
+        updated: false,
+        message: 'Data is up to date',
+        isRelaxed: true
+      };
+    }
+
+    if (!navigator.onLine) {
+      return {
+        updated: false,
+        message: 'Data is up to date',
+        isRelaxed: false
+      };
+    }
+
+    let updatedSomething = false;
+
+    try {
+      // 1. Fetch chunk_meta versions doc from Firestore (read-only)
+      const metaDocSnap = await getDoc(doc(db, 'chunk_meta', 'versions'));
+      const versions: Record<string, any> = metaDocSnap.exists() ? metaDocSnap.data() : {};
+
+      safeStorage.setItem('cached_chunk_meta_doc', JSON.stringify(versions));
+      safeStorage.setItem('last_chunk_meta_fetch_time', now.toString());
+
+      const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+      let localMeta: Record<string, any> = {};
+      try { localMeta = JSON.parse(localMetaString); } catch(e) {}
+
+      // 2. Compare content chunks
+      const chunksToFetch: string[] = [];
+      for (const [chunkId, versionMeta] of Object.entries(versions)) {
+        if (['collections', 'notifications', 'lastGlobalUpdate', 'metadata', 'users', 'fcm_tokens', 'settings'].includes(chunkId)) continue;
+        
+        const serverVersion = typeof versionMeta === 'object' ? (versionMeta as any).version : versionMeta;
+        const localV = localMeta[chunkId];
+        const localVersion = typeof localV === 'object' ? localV.version : localV;
+        const hasData = !!safeStorage.getItem('content_chunk_' + chunkId);
+
+        if (!hasData || !localVersion || localVersion < (serverVersion as number)) {
+          chunksToFetch.push(chunkId);
+        }
+      }
+
+      if (chunksToFetch.length > 0) {
+        await Promise.all(chunksToFetch.map(async (chunkId) => {
+          try {
+            const chunkDoc = await getDoc(doc(db, 'content_chunks', chunkId));
+            if (chunkDoc.exists()) {
+              const items = chunkDoc.data().items || {};
+              safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(items));
+              localMeta[chunkId] = typeof versions[chunkId] === 'object'
+                ? versions[chunkId]
+                : { version: versions[chunkId], count: Object.keys(items).length };
+              updatedSomething = true;
+            }
+          } catch(err) {
+            console.error(`Error fetching chunk ${chunkId}:`, err);
+          }
+        }));
+        safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+        refreshContentFromLocal();
+      }
+
+      // 3. Compare metadata version (genres, languages, qualities)
+      const metadataMeta = versions.metadata;
+      const metadataVersion = metadataMeta ? (typeof metadataMeta === 'object' ? metadataMeta.version : metadataMeta) : 0;
+      const localMetaV = localMeta.metadata;
+      const localMetaVersion = typeof localMetaV === 'object' ? localMetaV.version : localMetaV;
+      const genresCacheStr = safeStorage.getItem('genres_cache');
+      const hasMetadata = !!genresCacheStr && genresCacheStr !== '[]';
+
+      if (!hasMetadata || !localMetaVersion || localMetaVersion < metadataVersion) {
+        try {
+          const metaDoc = await getDoc(doc(db, 'content_chunks', 'metadata'));
+          if (metaDoc.exists()) {
+            const data = metaDoc.data();
+            const chunksGenres = data.genres || [];
+            const chunksLanguages = data.languages || [];
+            const chunksQualities = data.qualities || [];
+
+            safeStorage.setItem('genres_cache', JSON.stringify(chunksGenres));
+            safeStorage.setItem('languages_cache', JSON.stringify(chunksLanguages));
+            safeStorage.setItem('qualities_cache', JSON.stringify(chunksQualities));
+            if (metadataVersion) {
+              localMeta.metadata = metadataVersion;
+              safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+            }
+            setGenres([...chunksGenres].sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
+            setLanguages([...chunksLanguages].sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
+            setQualities([...chunksQualities].sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
+            updatedSomething = true;
+          }
+        } catch (e) {
+          console.error("Error fetching metadata chunk:", e);
+        }
+      }
+
+      // 4. Compare collections version
+      const collectionsMeta = versions.collections;
+      const collectionsVersion = (collectionsMeta && typeof collectionsMeta === 'object' ? collectionsMeta.version : collectionsMeta) || 0;
+      const localCollectionsVersion = localMeta.collections || 0;
+      const hasCollectionsCache = !!safeStorage.getItem('collections_cache');
+
+      if (!hasCollectionsCache || localCollectionsVersion < collectionsVersion) {
+        try {
+          const latestCollChunkId = (collectionsMeta && typeof collectionsMeta === 'object' ? collectionsMeta.latestChunkId : null) || 'collection_chunk_0';
+          const matchIndex = latestCollChunkId.match(/(\d+)$/);
+          const maxIndex = matchIndex ? parseInt(matchIndex[1]) : 0;
+          
+          let allCollections: AppCollection[] = [];
+          const collPromises = [];
+          for (let i = 0; i <= maxIndex; i++) {
+            const cid = 'collection_chunk_' + i;
+            collPromises.push(
+              getDoc(doc(db, 'collection_chunks', cid))
+                .then(cDoc => ({ cid, cDoc }))
+                .catch(() => null)
+            );
+          }
+          const collResults = await Promise.all(collPromises);
+          for (const res of collResults) {
+            if (res && res.cDoc && res.cDoc.exists()) {
+              const items = res.cDoc.data().items || {};
+              const chunkList = Object.values(items) as AppCollection[];
+              allCollections = [...allCollections, ...chunkList];
+              safeStorage.setItem('local_collection_chunk_' + res.cid, JSON.stringify(items));
+            }
+          }
+          const sorted = allCollections.sort((a, b) => (b.order || 0) - (a.order || 0));
+          setCollections(sorted);
+          safeStorage.setItem('collections_cache', JSON.stringify(sorted));
+          localMeta.collections = collectionsVersion;
+          safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+          updatedSomething = true;
+        } catch (e) {
+          console.error("Error fetching collection chunks:", e);
+        }
+      }
+
+      // 5. Compare self user version
+      const uid = profile?.uid;
+      if (uid) {
+        const chunkUsersMeta = versions.users || {};
+        const serverUserVer = chunkUsersMeta[uid] || 0;
+        const localUserVer = parseInt(safeStorage.getItem(`profile_version_${uid}`) || '0', 10);
+
+        if (serverUserVer > localUserVer || localUserVer === 0) {
+          try {
+            await refreshProfile(true, 'manual');
+            updatedSomething = true;
+          } catch(e) {
+            console.error("Error refreshing self user profile:", e);
+          }
+        }
+      }
+
+      // 6. Compare settings version
+      const serverSettingsVer = versions.settings || 0;
+      const localSettingsVer = parseInt(localStorage.getItem('cached_settings_version') || '0', 10);
+      if (serverSettingsVer > localSettingsVer || !localStorage.getItem('cached_app_settings')) {
+        try {
+          const settingsDocSnap = await getDoc(doc(db, 'settings', 'app_settings'));
+          if (settingsDocSnap.exists()) {
+            const settingsData = settingsDocSnap.data();
+            localStorage.setItem('cached_app_settings', JSON.stringify(settingsData));
+            localStorage.setItem('cached_settings_version', serverSettingsVer.toString());
+            updatedSomething = true;
+          }
+        } catch (e) {
+          console.error("Error fetching settings in quick refresh:", e);
+        }
+      }
+
+      // Mark the 5-minute relaxation timestamp
+      safeStorage.setItem(LAST_QUICK_REFRESH_KEY, now.toString());
+
+      return {
+        updated: updatedSomething,
+        message: updatedSomething ? 'New content loaded!' : 'Data is up to date',
+        isRelaxed: false
+      };
+    } catch (error) {
+      console.error("Error in quickRefreshCatalog:", error);
+      return {
+        updated: false,
+        message: 'Data is up to date',
+        isRelaxed: false
+      };
+    }
+  };
+
   const saveContentInternal = async (content: Content, localOnly = false) => {
     const isAdminOrEditor = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
 
@@ -1565,7 +1766,8 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         contentList: augmentedContentList, genres, languages, qualities, collections, loading, isOffline, 
         updateOrder, getContent, saveContent, deleteContent, updateContentFields, deleteMultipleContents, 
         updateAuxiliaryCollection, addCollection, updateCollection, deleteCollection, reorderCollections,
-        addAuxiliaryItem, updateAuxiliaryItem, deleteAuxiliaryItem, finalizeChanges, hasPendingChanges, checkForUpdates
+        addAuxiliaryItem, updateAuxiliaryItem, deleteAuxiliaryItem, finalizeChanges, hasPendingChanges, checkForUpdates,
+        quickRefreshCatalog
     }}>
       {children}
     </ContentContext.Provider>

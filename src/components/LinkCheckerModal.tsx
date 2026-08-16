@@ -2863,11 +2863,12 @@ export const LinkCheckerModal: React.FC<Props> = ({
                         return (
                           <div className="flex flex-col gap-3">
                             <div className="grid gap-2 max-h-[50vh] overflow-y-auto custom-scrollbar pr-2">
-                              {moviesdriveDisplayedPosts.map(({ post, originalIndex, avail }) => {
+                              {moviesdriveDisplayedPosts.map(({ post, originalIndex, avail }, idx) => {
                                 const isSelected = moviesdriveSelectedUrls.has(post.url);
                                 return (
                                   <div 
                                     key={post.url || originalIndex}
+                                    id={`skymovies-post-item-${idx}`}
                                     onClick={() => {
                                       setHasUserInteractedSelection(true);
                                       setMoviesdriveSelectedUrls(prev => {
@@ -2961,7 +2962,14 @@ export const LinkCheckerModal: React.FC<Props> = ({
                               <div className="pt-2 flex justify-center">
                                 <button
                                   type="button"
-                                  onClick={() => setSkymoviesVisibleLimit(prev => prev + 50)}
+                                  onClick={() => {
+                                    const nextIdx = skymoviesVisibleLimit;
+                                    setSkymoviesVisibleLimit(prev => prev + 50);
+                                    setTimeout(() => {
+                                      const el = document.getElementById(`skymovies-post-item-${nextIdx}`);
+                                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                    }, 80);
+                                  }}
                                   className="px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-md shadow-purple-600/20 transition flex items-center gap-2"
                                 >
                                   <ChevronDown className="w-4 h-4" />

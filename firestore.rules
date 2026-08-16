@@ -208,7 +208,7 @@ service cloud.firestore {
       allow list: if isAdminOrEditor() || 
                              isUserManager() || 
                              (
-                               request.query.limit <= 50
+                               request.query.limit <= 500
                              );
       allow create: if isAdmin() || (isValidUser(request.resource.data) && (
                        (isUserManager() && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended') ||

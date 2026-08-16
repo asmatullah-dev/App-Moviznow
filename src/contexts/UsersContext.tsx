@@ -55,7 +55,7 @@ interface UsersContextType {
 const UsersContext = createContext<UsersContextType | undefined>(undefined);
 
 export function UsersProvider({ children }: { children: React.ReactNode }) {
-  const { profile } = useAuth();
+  const { profile, user, authLoading } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>(() => {
     const cached = safeStorage.getItem('cached_all_users');
     if (!cached) return [];
@@ -187,6 +187,14 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const fetchUsers = useCallback(async (force = false) => {
+    // DO NOT fetch users if Firebase Auth is not fully loaded, or if there is no authenticated user.
+    // The profile might be restored from local storage synchronously, but Firestore requests
+    // will be unauthenticated until authLoading is false and user is set, causing permission errors.
+    if (authLoading || !user) {
+        setLoading(false);
+        return { users: [], updatedSomething: false };
+    }
+
     const isPrivilegedUser = profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'manager' || profile?.role === 'user_manager';
     if (!isPrivilegedUser) {
         setLoading(false);
@@ -337,20 +345,22 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       
       return { users: locallyCachedUsers, updatedSomething: false };
     }
-  }, [profile]);
+  }, [profile, user, authLoading]);
 
   useEffect(() => {
     // Only fetch users if the current user is an admin, owner, manager, or user_manager
     const isPrivilegedUser = profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'manager' || profile?.role === 'user_manager';
     
-    if (!isPrivilegedUser) {
-      setUsers([]);
-      setLoading(false);
+    if (!isPrivilegedUser || authLoading || !user) {
+      if (!isPrivilegedUser && !authLoading) {
+        setUsers([]);
+        setLoading(false);
+      }
       return;
     }
 
     fetchUsers();
-  }, [profile?.role]);
+  }, [profile?.role, user, authLoading, fetchUsers]);
 
   useEffect(() => {
     const handlePendingChanges = () => {

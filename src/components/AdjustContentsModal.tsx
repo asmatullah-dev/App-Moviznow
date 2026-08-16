@@ -1,4 +1,4 @@
-import React, { useState, useEffect, memo, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, memo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, GripVertical, Save, Loader2, Search } from 'lucide-react';
 import { clsx } from 'clsx';
@@ -45,11 +45,12 @@ const ContentItem = memo(({
     >
       {(provided, snapshot) => (
         <div
+          id={`adjust-content-item-${index}`}
           ref={provided.innerRef}
           {...provided.draggableProps}
           onClick={(e) => onClick(item.id, e)}
           className={clsx(
-            "flex items-center gap-2 p-2 rounded-xl border transition-colors duration-200 cursor-pointer",
+            "flex items-center gap-2 p-2 rounded-xl border transition-colors duration-200 cursor-pointer scroll-mt-6",
             snapshot.isDragging 
               ? 'bg-zinc-100 dark:bg-zinc-800 border-emerald-500 shadow-xl shadow-emerald-500/10 z-50' 
               : isSelected
@@ -144,6 +145,28 @@ export const AdjustContentsModal: React.FC<Props> = ({ isOpen, onClose, contentL
   const [searchTerm, setSearchTerm] = useState('');
   const [saving, setSaving] = useState(false);
   const [visibleCount, setVisibleCount] = useState(50);
+
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const prevScrollTopRef = useRef<number>(0);
+  const prevVisibleCountRef = useRef(visibleCount);
+
+  useLayoutEffect(() => {
+    if (visibleCount > prevVisibleCountRef.current && scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = prevScrollTopRef.current;
+    }
+    prevVisibleCountRef.current = visibleCount;
+  }, [visibleCount]);
+
+  const handleShowMore = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      (e.currentTarget as HTMLElement)?.blur();
+    }
+    if (scrollContainerRef.current) {
+      prevScrollTopRef.current = scrollContainerRef.current.scrollTop;
+    }
+    setVisibleCount(prev => prev + 50);
+  };
 
   const [isRendering, setIsRendering] = useState(false);
 
@@ -429,7 +452,11 @@ export const AdjustContentsModal: React.FC<Props> = ({ isOpen, onClose, contentL
             </div>
 
             {/* Content List */}
-            <div className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-zinc-50/30 dark:bg-zinc-950/30 touch-auto">
+            <div 
+              ref={scrollContainerRef}
+              className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-zinc-50/30 dark:bg-zinc-950/30 touch-auto [overflow-anchor:none]"
+              style={{ overflowAnchor: 'none' }}
+            >
               {isRendering ? (
                 <div className="flex flex-col items-center justify-center h-64 gap-4">
                   <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
@@ -506,7 +533,7 @@ export const AdjustContentsModal: React.FC<Props> = ({ isOpen, onClose, contentL
                   {visibleCount < filteredItems.length && (
                     <div className="flex justify-center mt-6 pb-20">
                       <button
-                        onClick={() => setVisibleCount(prev => prev + 50)}
+                        onClick={handleShowMore}
                         className="px-6 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-full text-sm font-medium transition-colors border border-zinc-200 dark:border-zinc-700 shadow-sm flex items-center gap-2"
                       >
                         Show More

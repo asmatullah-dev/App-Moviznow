@@ -12,6 +12,7 @@ import { useSettings } from '../contexts/SettingsContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useHaptics } from '../hooks/useHaptics';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useImdbRating } from '../hooks/useImdbRating';
 import { Translate } from './Translate';
 
 interface ContentCardProps {
@@ -43,6 +44,7 @@ const ContentCard = React.memo(({
   const { vibrate } = useHaptics();
   const { t } = useLanguage();
   const navigate = useNavigate();
+  const { rating: imdbRating, refreshRating } = useImdbRating(content);
   const [isTrailerSelectionOpen, setIsTrailerSelectionOpen] = React.useState(false);
   const [selectedTrailerUrl, setSelectedTrailerUrl] = React.useState<string | null>(null);
   const [isClicked, setIsClicked] = React.useState(false);
@@ -189,6 +191,7 @@ const ContentCard = React.memo(({
           to={`/${content.type === 'series' ? 'series' : 'movie'}/${content.id}`} 
           onClick={() => {
             setIsClicked(true);
+            refreshRating();
           }}
           className="absolute inset-0 z-10" aria-label={`View details for ${content.title}`} />
         
@@ -245,7 +248,23 @@ const ContentCard = React.memo(({
           </div>
 
           {/* Top Left Badges */}
-          <div className="absolute top-2 left-2 flex flex-col gap-1 z-10">
+          <div className="absolute top-2 left-2 flex flex-col items-start gap-1 z-10 pointer-events-none">
+            {imdbRating && (
+              <div
+                className={clsx(
+                  "font-black tracking-tight bg-black/85 text-yellow-400 border border-yellow-500/40 backdrop-blur-md flex items-center shadow-lg select-none rounded-lg",
+                  isSmall 
+                    ? "px-1.5 py-0.5 text-[9px] gap-0.5" 
+                    : "px-2 py-0.5 sm:px-2.5 sm:py-1 text-xs sm:text-sm gap-1"
+                )}
+                title={`Rating: ${imdbRating}/10`}
+              >
+                <Star className={clsx("fill-yellow-400 text-yellow-400 shrink-0", isSmall ? "w-2.5 h-2.5" : "w-3.5 h-3.5 sm:w-4 sm:h-4")} />
+                <span className={clsx("font-black text-amber-300 dark:text-yellow-400 leading-none", isSmall ? "text-[9px]" : "text-xs sm:text-sm")}>
+                  {imdbRating}
+                </span>
+              </div>
+            )}
             {content.status === 'draft' && canSeeDraft && (
               <div className={clsx(
                 "px-1.5 py-0.5 rounded-md font-bold uppercase tracking-wider bg-amber-500 text-white shadow-sm",

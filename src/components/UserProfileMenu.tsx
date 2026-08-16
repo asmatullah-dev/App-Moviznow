@@ -9,7 +9,7 @@ import { useSettings } from '../contexts/SettingsContext';
 import { useUsers } from '../contexts/UsersContext';
 import { 
   User, Settings, LogOut, Heart, Clock, MessageCircle, 
-  Sun, Moon, Monitor, LayoutDashboard, Film, Users, Plus, Download, RefreshCw, Eye, X, Menu, Home as HomeIcon, PlayCircle, Tv, Gift, Star, Info, Phone, Award
+  Sun, Moon, Monitor, LayoutDashboard, Film, Users, Plus, Download, RefreshCw, Eye, X, Menu, Home as HomeIcon, PlayCircle, Tv, Gift, Star, Info, Phone, Award, CheckCircle2, Sparkles
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { format } from 'date-fns';
@@ -23,7 +23,7 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
   const { theme, setTheme } = useTheme();
   const { language, setLanguage, t } = useLanguage();
   const { isInstallable, installApp } = usePWA();
-  const { checkForUpdates } = useContent();
+  const { checkForUpdates, quickRefreshCatalog } = useContent();
   const { refreshSettings } = useSettings();
   const { refreshUsers } = useUsers();
   const { enabled: isHapticsEnabled, toggleHaptics, vibrate } = useHaptics();
@@ -31,12 +31,23 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const [isOpen, setIsOpen] = useState(false);
+  const [isRefreshingData, setIsRefreshingData] = useState(false);
+  const [syncToast, setSyncToast] = useState<{ message: string; type?: 'info' | 'success' } | null>(null);
+  const syncToastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
   const [newRequest, setNewRequest] = useState({ title: '', type: 'movie' as 'movie' | 'series', year: '' });
   const [submittingRequest, setSubmittingRequest] = useState(false);
   const { updateUserProfileData } = useAuth();
+
+  const showSyncToast = (message: string, type: 'info' | 'success' = 'info') => {
+    if (syncToastTimeoutRef.current) clearTimeout(syncToastTimeoutRef.current);
+    setSyncToast({ message, type });
+    syncToastTimeoutRef.current = setTimeout(() => {
+      setSyncToast(null);
+    }, 2800);
+  };
   
   const handleRequestSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -477,23 +488,45 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
 
                 <div className="pt-2 mt-2 border-t border-zinc-200/80 dark:border-zinc-800/80 space-y-1">
                   <button 
+                    id="user-profile-refresh-app-data-btn"
+                    disabled={isSyncing || isRefreshingData}
                     onClick={async () => {
+                      if (isSyncing || isRefreshingData) return;
                       vibrate(50);
+                      setIsRefreshingData(true);
                       try {
-                        await Promise.all([
-                          checkForUpdates(true),
+                        const [catalogResult] = await Promise.all([
+                          quickRefreshCatalog(),
+                          refreshProfile(true, 'manual'),
                           refreshSettings()
                         ]);
+                        
+                        if (catalogResult?.isRelaxed) {
+                          showSyncToast(t('Data is up to date'), 'info');
+                        } else if (catalogResult?.updated) {
+                          showSyncToast(t('New content loaded!'), 'success');
+                        } else {
+                          showSyncToast(t('Data is up to date'), 'info');
+                        }
+                      } catch (err) {
+                        console.error("Error refreshing app data:", err);
+                        showSyncToast(t('Data is up to date'), 'info');
                       } finally {
+                        setIsRefreshingData(false);
                         setIsOpen(false);
                       }
                     }} 
-                    className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800/60 transition-colors cursor-pointer"
+                    className={clsx(
+                      "w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer",
+                      (isSyncing || isRefreshingData) 
+                        ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 cursor-not-allowed opacity-90"
+                        : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800/60"
+                    )}
                     title="Refresh Content & Account Sync"
                   >
                     <div className="flex items-center gap-2.5">
-                      <RefreshCw className={clsx("w-3.5 h-3.5 text-zinc-400", isSyncing && "animate-spin text-emerald-500")} /> 
-                      <span>{isSyncing ? t("Refreshing...") : t("Refresh App Data")}</span>
+                      <RefreshCw className={clsx("w-3.5 h-3.5", (isSyncing || isRefreshingData) ? "animate-spin text-emerald-500" : "text-zinc-400")} /> 
+                      <span>{(isSyncing || isRefreshingData) ? t("Refreshing...") : t("Refresh App Data")}</span>
                     </div>
                   </button>
 
@@ -628,6 +661,30 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
               </div>
             </motion.div>
           </div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
+
+      {typeof document !== 'undefined' && document.body && createPortal(
+        <AnimatePresence>
+          {syncToast && (
+            <motion.div
+              initial={{ opacity: 0, y: 16, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 16, scale: 0.95 }}
+              transition={{ duration: 0.2 }}
+              className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[150] pointer-events-none"
+            >
+              <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-2xl bg-zinc-900/95 dark:bg-zinc-800/95 text-white shadow-2xl border border-zinc-700/80 backdrop-blur-xl text-xs sm:text-sm font-semibold">
+                {syncToast.type === 'success' ? (
+                  <Sparkles className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                )}
+                <span>{syncToast.message}</span>
+              </div>
+            </motion.div>
           )}
         </AnimatePresence>,
         document.body
