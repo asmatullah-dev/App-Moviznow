@@ -10,6 +10,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
 import ConfirmModal from '../../components/ConfirmModal';
 import { useSettings } from '../../contexts/SettingsContext';
+import { useAuth } from '../../contexts/AuthContext';
 
 import { useUsers } from '../../contexts/UsersContext';
 
@@ -17,6 +18,7 @@ const CACHE_KEY = 'admin_orders_cache';
 const PHONES_CACHE_KEY = 'admin_user_phones_cache';
 
 export default function OrdersManagement() {
+  const { profile } = useAuth();
   const { users: allUsers, updateUserFields } = useUsers();
   const { settings } = useSettings();
   const [orders, setOrders] = useState<Order[]>(() => {
@@ -209,6 +211,18 @@ export default function OrdersManagement() {
       updates.orders = updatedOrders;
 
       updateUserFields(order.userId, updates);
+
+      // Send Order Approved Notification instead of Membership Notification
+      fetch('/api/notifications/notify-order-approved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: order.userId,
+          orderId: order.id,
+          orderType: order.type,
+          newExpiryDate: order.type === 'membership' ? updates.expiryDate : undefined,
+        })
+      }).catch(err => console.warn('Failed to send order approval notification:', err));
 
       // Record in Income Management
       const batch = writeBatch(db);

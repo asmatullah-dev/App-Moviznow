@@ -25,7 +25,7 @@ const MEMBERSHIP_PLANS = [
 ];
 
 export default function TopUp() {
-  const { profile, updateUserProfileData } = useAuth();
+  const { profile, updateUserProfileData, refreshProfile } = useAuth();
   const { language, t } = useLanguage();
   const [whatsappNumber, setWhatsappNumber] = useState(profile?.phone || '');
   const { settings } = useSettings();
@@ -53,6 +53,10 @@ export default function TopUp() {
   }, [location]);
 
   useEffect(() => {
+    refreshProfile(true);
+  }, [refreshProfile]);
+
+  useEffect(() => {
     const checkPendingOrder = async () => {
       if (!profile?.uid) {
         setIsCheckingPendingOrder(false);
@@ -63,6 +67,9 @@ export default function TopUp() {
         setPendingMembershipOrder(pOrder);
         setOrderId(pOrder.id);
         setConfirmed(true);
+      } else {
+        setPendingMembershipOrder(null);
+        setConfirmed(false);
       }
       setIsCheckingPendingOrder(false);
     };

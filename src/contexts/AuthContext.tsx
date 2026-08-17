@@ -576,9 +576,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             orders: (() => {
               const localOrders = localProfile?.orders || [];
               const serverOrders = serverProfile.orders || [];
-              const merged = [...localOrders];
-              serverOrders.forEach((so) => {
-                if (!merged.find((lo) => lo.id === so.id)) merged.push(so);
+              const serverOrderMap = new Map(serverOrders.map((so) => [so.id, so]));
+              const merged = [...serverOrders];
+              localOrders.forEach((lo) => {
+                if (!serverOrderMap.has(lo.id)) {
+                  merged.push(lo);
+                }
               });
               return merged;
             })(),
@@ -1770,12 +1773,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refreshProfile]);
 
   useEffect(() => {
+    let profileUnsub: (() => void) | null = null;
+
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (profileUnsub) {
+        profileUnsub();
+        profileUnsub = null;
+      }
       setUser(currentUser);
       setAuthLoading(false);
 
       if (currentUser) {
         const userRef = doc(db, "users", currentUser.uid);
+
+        profileUnsub = onSnapshot(userRef, (docSnap) => {
+          if (docSnap.exists()) {
+            const serverP = docSnap.data() as UserProfile;
+            const isSyncingPending = safeStorage.getItem("needs_user_sync") === "true";
+            if (!isSyncingPending) {
+              setProfile(serverP);
+              safeStorage.setItem("profile_cache", JSON.stringify(serverP));
+            }
+          }
+        }, (err) => {
+          console.warn("User profile listener error:", err);
+        });
 
         // ALWAYS verify user UID exists in Firestore on auth state change or refresh
         if (navigator.onLine && !justLoggedInRef.current) {
@@ -2145,6 +2167,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       unsubscribe();
+      if (profileUnsub) profileUnsub();
       clearInterval(timeTrackerInterval);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };

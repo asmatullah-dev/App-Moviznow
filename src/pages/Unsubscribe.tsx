@@ -60,26 +60,21 @@ export default function Unsubscribe() {
       let updated = false;
       if (!snap.empty) {
         for (const userDoc of snap.docs) {
+          const userData = userDoc.data();
+          const currentPrefs = userData.notificationPreferences || {};
+          const emailPrefs = currentPrefs.email || {};
+
           await updateDoc(doc(db, 'users', userDoc.id), {
-            emailNotificationsEnabled: false,
-            emailNotificationsDisabled: true,
-            unsubscribed: true,
-            unsubscribedAt: new Date().toISOString()
+            notificationPreferences: {
+              ...currentPrefs,
+              email: {
+                ...emailPrefs,
+                newContent: false
+              }
+            }
           });
           updated = true;
         }
-      }
-
-      // Also update unsubscribed_emails collection directly in Firestore
-      try {
-        const unsubDocRef = doc(db, 'unsubscribed_emails', userEmail.replace(/[^a-zA-Z0-9]/g, '_'));
-        await setDoc(unsubDocRef, {
-          email: userEmail,
-          unsubscribedAt: new Date().toISOString()
-        }, { merge: true });
-        updated = true;
-      } catch (e) {
-        console.warn('unsubscribed_emails setDoc failed:', e);
       }
 
       return updated;

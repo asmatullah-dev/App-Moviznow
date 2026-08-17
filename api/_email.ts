@@ -39,25 +39,13 @@ emailRouter.all("/unsubscribe", async (req, res) => {
     const firestore = getDb();
     if (firestore) {
       try {
-        await firestore.collection("unsubscribed_emails").doc(email.replace(/[^a-zA-Z0-9]/g, "_")).set({
-          email: email,
-          unsubscribedAt: new Date().toISOString()
-        });
-      } catch (e) {
-        console.warn("Error writing to unsubscribed_emails collection:", e);
-      }
-
-      try {
         const usersRef = firestore.collection("users");
         const snap = await usersRef.where("email", "==", email).get();
         if (!snap.empty) {
           const batch = firestore.batch();
           snap.forEach((doc) => {
             batch.update(doc.ref, {
-              emailNotificationsEnabled: false,
-              emailNotificationsDisabled: true,
-              unsubscribed: true,
-              unsubscribedAt: new Date().toISOString(),
+              "notificationPreferences.email.newContent": false,
             });
           });
           await batch.commit();
@@ -80,7 +68,7 @@ emailRouter.all("/unsubscribe", async (req, res) => {
 
 let adminApp: admin.app.App | undefined;
 
-function getDb(): admin.firestore.Firestore | null {
+export function getDb(): admin.firestore.Firestore | null {
   try {
     if (admin.apps.length > 0) {
       adminApp = admin.app();
@@ -97,7 +85,7 @@ function getDb(): admin.firestore.Firestore | null {
 }
 
 // Helper to get email settings (checks client-provided local settings first, falls back to Firestore / env)
-async function getEmailConfig(clientSettings?: any) {
+export async function getEmailConfig(clientSettings?: any) {
   let settings: any = clientSettings || {};
 
   // If client didn't supply full credentials in payload, check Firestore
@@ -198,7 +186,7 @@ async function callResendWithRetry<T>(fn: () => Promise<T>, maxRetries = 3): Pro
 }
 
 // Unified Send Function (Tries Resend API first for inbox delivery, falls back to SMTP)
-async function sendEmailMessage({
+export async function sendEmailMessage({
   config,
   to,
   subject,
@@ -228,10 +216,10 @@ async function sendEmailMessage({
 
       // Determine 'from' address for Resend:
       // If user provided a custom domain senderEmail (not @gmail.com/@yahoo.com), use it.
-      // Otherwise default to Notify@MovizNow.com.
+      // Otherwise default to notify@MovizNow.com.
       let fromAddress = senderEmailOverride || config.senderEmail;
       if (!fromAddress || /@(gmail|yahoo|hotmail|outlook|live)\.com$/i.test(fromAddress)) {
-        fromAddress = "Notify@MovizNow.com";
+        fromAddress = "notify@MovizNow.com";
       }
 
       const from = `"${config.senderName}" <${fromAddress}>`;
@@ -528,7 +516,7 @@ emailRouter.post("/send-movie-notification", async (req, res) => {
       }
     }
 
-    let candidateUsers: Array<{ email: string; lastActive?: string; emailNotificationsDisabled?: boolean; emailNotificationsEnabled?: boolean; unsubscribed?: boolean }> = [];
+    let candidateUsers: Array<{ email: string; lastActive?: string; emailNotificationsDisabled?: boolean; emailNotificationsEnabled?: boolean; unsubscribed?: boolean; notificationPreferences?: any }> = [];
 
     if (Array.isArray(targetEmails)) {
       candidateUsers = targetEmails.filter(e => typeof e === "string" && isValidGmailAddress(e)).map(e => ({ email: e }));
@@ -546,6 +534,7 @@ emailRouter.post("/send-movie-notification", async (req, res) => {
               emailNotificationsDisabled: data.emailNotificationsDisabled,
               emailNotificationsEnabled: data.emailNotificationsEnabled,
               unsubscribed: data.unsubscribed,
+              notificationPreferences: data.notificationPreferences,
             });
           }
         });
@@ -557,13 +546,15 @@ emailRouter.post("/send-movie-notification", async (req, res) => {
     }
 
     // Filter out unsubscribed / disabled users & invalid / non-gmail emails
-    const eligibleUsers = candidateUsers.filter(u => {
+    const eligibleUsers = candidateUsers.filter((u: any) => {
       if (!u.email || !isValidGmailAddress(u.email)) return false;
       const cleanEmail = u.email.toLowerCase().trim();
       if (unsubscribedEmailsSet.has(cleanEmail)) return false;
       if (u.unsubscribed === true) return false;
       if (u.emailNotificationsDisabled === true) return false;
       if (u.emailNotificationsEnabled === false) return false;
+      if (u.notificationPreferences?.email?.newContent === false) return false;
+      if (u.notificationPreferences?.email?.enabled === false) return false;
       return true;
     });
 

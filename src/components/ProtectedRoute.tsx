@@ -29,8 +29,7 @@ export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRout
     return () => clearTimeout(timer);
   }, []);
 
-  const hasCachedUser = !!safeStorage.getItem('profile_cache');
-  const isChecking = (!hasCachedUser && authLoading) || (!maxWaitReached && (
+  const isChecking = authLoading || (!maxWaitReached && (
     (user && !profile && authProfileLoading) || 
     settingsLoading
   ));
@@ -47,10 +46,9 @@ export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRout
     );
   }
 
-  // If we have a cached user but auth is still loading, allow rendering the app
-  // If auth finishes and there is no user, it will redirect to login then.
-  if (!user && !profile && !authLoading) {
-    console.log('ProtectedRoute: No user or profile, redirecting to login');
+  // Strictly require logged in user: redirect guest users to /login with target location
+  if (!user) {
+    console.log('ProtectedRoute: No authenticated user, redirecting to login', location);
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 

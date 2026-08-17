@@ -14,7 +14,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../../firebase";
 import { AppNotification, NotificationTemplate, UserProfile } from "../../types";
-import { Bell, Trash2, Search, Calendar, Loader2, Plus, Send, User, Users, FileText, X, ChevronRight, Edit2, ExternalLink, Info, Check, Clock, Mail, RefreshCw } from "lucide-react";
+import { Bell, Trash2, Search, Calendar, Loader2, Plus, Send, User, Users, FileText, X, ChevronRight, Edit2, ExternalLink, Info, Check, Clock, Mail, RefreshCw, AlertTriangle, ShieldAlert } from "lucide-react";
 import { format, isToday, formatDistanceToNow } from "date-fns";
 import ConfirmModal from "../../components/ConfirmModal";
 import { useModalBehavior } from "../../hooks/useModalBehavior";
@@ -108,11 +108,41 @@ export default function Notifications() {
   const [isSearchingUsers, setIsSearchingUsers] = useState(false);
   const [showUserList, setShowUserList] = useState(false);
 
+  // Expiry Check State
+  const [isExpiryModalOpen, setIsExpiryModalOpen] = useState(false);
+  const [isCheckingExpiry, setIsCheckingExpiry] = useState(false);
+  const [expiryCheckResult, setExpiryCheckResult] = useState<any>(null);
+
   useModalBehavior(!!deleteId, () => setDeleteId(null));
   useModalBehavior(!!deleteTemplateId, () => setDeleteTemplateId(null));
   useModalBehavior(isTemplateModalOpen, () => setIsTemplateModalOpen(false));
   useModalBehavior(isSendModalOpen, () => setIsSendModalOpen(false));
+  useModalBehavior(isExpiryModalOpen, () => setIsExpiryModalOpen(false));
   useModalBehavior(!!selectedNotification, () => setSelectedNotification(null));
+
+  const handleRunExpiryCheck = async () => {
+    setIsCheckingExpiry(true);
+    try {
+      const res = await fetch("/api/notifications/check-expiry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      setExpiryCheckResult(data);
+      setIsExpiryModalOpen(true);
+      await refreshUsers(true);
+    } catch (err: any) {
+      console.error("Error triggering expiry check:", err);
+      setExpiryCheckResult({
+        success: false,
+        errors: [err.message || "Failed to connect to expiry service"],
+      });
+      setIsExpiryModalOpen(true);
+    } finally {
+      setIsCheckingExpiry(false);
+    }
+  };
 
   useEffect(() => {
     if (!notificationsLoading) {
@@ -269,7 +299,7 @@ export default function Notifications() {
           let targetEmails: string[] | undefined;
           const isEligibleUser = (u: any) => {
             if (!u || !isValidGmailAddress(u.email)) return false;
-            if (u.emailNotificationsEnabled === false || u.emailNotificationsDisabled === true || u.unsubscribed === true || u.isEmailUnsubscribed === true) return false;
+            if (u.emailNotificationsEnabled === false || u.emailNotificationsDisabled === true || u.unsubscribed === true || u.isEmailUnsubscribed === true || u.notificationPreferences?.email?.newContent === false || u.notificationPreferences?.email?.enabled === false) return false;
             return true;
           };
 
@@ -438,7 +468,20 @@ export default function Notifications() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            onClick={handleRunExpiryCheck}
+            variant="secondary"
+            disabled={isCheckingExpiry}
+            className="flex items-center gap-2 py-1.5 px-3 text-sm bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30"
+          >
+            {isCheckingExpiry ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <ShieldAlert className="w-3.5 h-3.5" />
+            )}
+            {isCheckingExpiry ? "Scanning..." : "Check Expiry Alerts"}
+          </Button>
           <Button
             onClick={() => setIsSendModalOpen(true)}
             variant="blue"
@@ -1178,6 +1221,101 @@ export default function Notifications() {
             </Button>
           </div>
         )}
+      </Modal>
+
+      {/* Expiry Check Result Modal */}
+      <Modal
+        isOpen={isExpiryModalOpen}
+        onClose={() => setIsExpiryModalOpen(false)}
+        title="Membership Expiry Notification Service"
+      >
+        <div className="space-y-4">
+          <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl flex items-start gap-3">
+            <ShieldAlert className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
+            <div>
+              <div className="text-sm font-bold text-zinc-900 dark:text-white">
+                Automated Expiry Alerts System
+              </div>
+              <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                Background service automatically checks user accounts on their expiry date and sends transactional emails (by <code className="text-rose-500 font-semibold">Alerts@MovizNow.com</code>), FCM push alerts, and in-app notifications with one-click renewal links.
+              </div>
+            </div>
+          </div>
+
+          {expiryCheckResult && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="p-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-center">
+                  <div className="text-xs text-zinc-500">Scanned</div>
+                  <div className="text-lg font-bold text-zinc-900 dark:text-white">
+                    {expiryCheckResult.totalUsersChecked ?? 0}
+                  </div>
+                </div>
+                <div className="p-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-center">
+                  <div className="text-xs text-zinc-500">Expired</div>
+                  <div className="text-lg font-bold text-rose-500">
+                    {expiryCheckResult.expiredUsersFound ?? 0}
+                  </div>
+                </div>
+                <div className="p-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-center">
+                  <div className="text-xs text-zinc-500">Emails Sent</div>
+                  <div className="text-lg font-bold text-emerald-500">
+                    {expiryCheckResult.emailsSent ?? 0}
+                  </div>
+                </div>
+                <div className="p-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-center">
+                  <div className="text-xs text-zinc-500">In-App / FCM</div>
+                  <div className="text-lg font-bold text-blue-500">
+                    {expiryCheckResult.inAppCreated ?? 0}
+                  </div>
+                </div>
+              </div>
+
+              {expiryCheckResult.skippedAlreadyNotified > 0 && (
+                <div className="text-xs text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-900 p-2.5 rounded-xl flex items-center gap-2">
+                  <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                  <span>
+                    <strong>{expiryCheckResult.skippedAlreadyNotified}</strong> already-expired user(s) were previously notified and skipped to avoid spam.
+                  </span>
+                </div>
+              )}
+
+              {expiryCheckResult.errors && expiryCheckResult.errors.length > 0 && (
+                <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-600 dark:text-amber-400 space-y-1">
+                  <div className="font-semibold flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5" /> Notes / Warnings:
+                  </div>
+                  {expiryCheckResult.errors.map((err: string, i: number) => (
+                    <div key={i}>• {err}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-2">
+            <Button
+              onClick={handleRunExpiryCheck}
+              variant="blue"
+              disabled={isCheckingExpiry}
+              className="flex-1"
+            >
+              {isCheckingExpiry ? (
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+              ) : (
+                <RefreshCw className="w-4 h-4 mr-2" />
+              )}
+              Run Expiry Check Now
+            </Button>
+            <Button
+              onClick={() => setIsExpiryModalOpen(false)}
+              variant="secondary"
+              className="px-6"
+            >
+              Done
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

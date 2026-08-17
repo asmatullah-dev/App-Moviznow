@@ -3,7 +3,7 @@ import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
 import { collection, doc, updateDoc, getDoc, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit, deleteField, increment } from 'firebase/firestore';
 import { UserProfile, Role, Status, AnalyticsEvent, Content } from '../../types';
-import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, Bell, RefreshCw, Link2 as LinkIcon, Copy } from 'lucide-react';
+import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, Bell, Mail, RefreshCw, Link2 as LinkIcon, Copy } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -576,7 +576,6 @@ export default function UserManagement() {
         dob: editForm.dob,
         gender: editForm.gender,
         city: editForm.city,
-        emailNotificationsEnabled: editForm.emailNotificationsEnabled !== false,
       };
       
       // Update isUserManager flag to match role
@@ -681,9 +680,22 @@ export default function UserManagement() {
       const newRole = editForm.role;
 
       updateUserFields(currentEditingId, updateData);
-      
-      // Ensure changes are pushed to Firestore immediately for admins
-      await finalizeUserChanges(true);
+
+      // Send membership update notification to enabled services if expiry date changed
+      if (updateData.expiryDate !== undefined && updateData.expiryDate !== selectedUser.expiryDate) {
+        fetch('/api/notifications/notify-membership-update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: currentEditingId,
+            newExpiryDate: updateData.expiryDate || 'Lifetime',
+            previousExpiryDate: selectedUser.expiryDate,
+            role: updateData.role || selectedUser.role,
+            status: updateData.status || selectedUser.status,
+            adminName: profile?.displayName || 'Admin'
+          })
+        }).catch(err => console.warn('Failed to send membership update notification:', err));
+      }
 
       // Handle Manager role changes
       const wasManager = previousRole === 'user_manager' || previousRole === 'manager' || selectedUser.isUserManager;
@@ -1903,21 +1915,6 @@ export default function UserManagement() {
                       />
                     </div>
                   </div>
-
-                  <div className="mt-3 bg-zinc-50 dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
-                    <div>
-                      <label className="block text-xs font-bold text-zinc-900 dark:text-white">Movie Email Notifications</label>
-                      <p className="text-[10px] text-zinc-500 dark:text-zinc-400">Enable or disable movie and series email alerts for this user</p>
-                    </div>
-                    <select
-                      value={editForm.emailNotificationsEnabled !== false ? "enabled" : "disabled"}
-                      onChange={(e) => setEditForm({ ...editForm, emailNotificationsEnabled: e.target.value === "enabled" })}
-                      className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2.5 py-1 text-xs font-bold focus:outline-none text-emerald-500"
-                    >
-                      <option value="enabled">Enabled</option>
-                      <option value="disabled">Disabled</option>
-                    </select>
-                  </div>
                 </div>
               ) : (
                 <div className="p-4 md:p-6 space-y-6">
@@ -2020,50 +2017,211 @@ export default function UserManagement() {
                       </div>
                     </div>
 
-                    {/* Email Notification Toggle for User */}
-                    <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
-                      <div>
-                        <div className="text-zinc-500 text-[10px] uppercase font-bold mb-0.5">Email Notifications</div>
-                        <div className="font-bold text-sm flex items-center gap-1.5">
-                          <span className={selectedUser.emailNotificationsEnabled === false || selectedUser.emailNotificationsDisabled === true || selectedUser.unsubscribed === true ? "text-red-500" : "text-emerald-500"}>
-                            {selectedUser.emailNotificationsEnabled === false || selectedUser.emailNotificationsDisabled === true || selectedUser.unsubscribed === true ? "Disabled" : "Enabled"}
-                          </span>
+                    {/* Notification Services Configuration for Admin */}
+                    {(() => {
+                      const prefs = selectedUser.notificationPreferences || {};
+                      const fcmPref = prefs.fcm || {};
+                      const emailPref = prefs.email || {};
+
+                      const isFcmMasterEnabled = fcmPref.enabled !== false && selectedUser.notification !== 'no' && !selectedUser.isFcmDisabled;
+                      const isEmailMasterEnabled = emailPref.enabled !== false && selectedUser.emailNotificationsEnabled !== false && selectedUser.emailNotificationsDisabled !== true && selectedUser.unsubscribed !== true;
+
+                      const fcmNewContent = fcmPref.newContent !== false;
+                      const fcmMembershipAlerts = fcmPref.membershipAlerts !== false && fcmPref.membershipExpiry !== false;
+
+                      const emailLoginAlerts = emailPref.loginAlerts !== false;
+                      const emailNewContent = emailPref.newContent !== false;
+                      const emailMembershipAlerts = emailPref.membershipAlerts !== false && emailPref.membershipExpiry !== false;
+
+                      const handleUpdateNotificationPrefs = (newPrefs: any, legacyUpdates: any = {}) => {
+                        try {
+                          const mergedPrefs = {
+                            fcm: {
+                              enabled: isFcmMasterEnabled,
+                              newContent: fcmNewContent,
+                              membershipAlerts: fcmMembershipAlerts,
+                              membershipExpiry: fcmMembershipAlerts,
+                              ...(newPrefs.fcm || {})
+                            },
+                            email: {
+                              enabled: isEmailMasterEnabled,
+                              loginAlerts: emailLoginAlerts,
+                              newContent: emailNewContent,
+                              membershipAlerts: emailMembershipAlerts,
+                              membershipExpiry: emailMembershipAlerts,
+                              ...(newPrefs.email || {})
+                            }
+                          };
+
+                          const updateData = {
+                            notificationPreferences: mergedPrefs,
+                            ...legacyUpdates
+                          };
+
+                          // Instant local UI state update
+                          setSelectedUser(prev => prev ? ({ ...prev, ...updateData }) : null);
+
+                          // Save into pending changes buffer (synced when tab switched, exited, or saved)
+                          updateUserFields(selectedUser.uid, updateData);
+                        } catch (err) {
+                          console.error("Failed to update notification preferences:", err);
+                        }
+                      };
+
+                      return (
+                        <div className="bg-white dark:bg-zinc-950 p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 space-y-3">
+                          <div className="flex justify-between items-center border-b border-zinc-100 dark:border-zinc-900 pb-2">
+                            <div className="text-zinc-500 text-[10px] uppercase font-bold tracking-wider">
+                              Notification Services Configured
+                            </div>
+                            <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-500 dark:text-indigo-400">
+                              Admin Editable
+                            </span>
+                          </div>
+
+                          {/* Service 1: FCM Push Notifications */}
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between bg-zinc-50 dark:bg-zinc-900/60 p-2.5 rounded-lg border border-zinc-200/60 dark:border-zinc-800/60">
+                              <div className="flex items-center gap-2">
+                                <Bell className="w-4 h-4 text-purple-500 shrink-0" />
+                                <div>
+                                  <div className="font-bold text-xs text-zinc-900 dark:text-white flex items-center gap-1.5">
+                                    FCM Push Notifications
+                                    <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${isFcmMasterEnabled ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"}`}>
+                                      {isFcmMasterEnabled ? "ACTIVE" : "DISABLED"}
+                                    </span>
+                                  </div>
+                                  <p className="text-[10px] text-zinc-500">Real-time mobile & browser device alerts</p>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => handleUpdateNotificationPrefs(
+                                  { fcm: { enabled: !isFcmMasterEnabled } },
+                                  { notification: !isFcmMasterEnabled ? 'yes' : 'no', isFcmDisabled: isFcmMasterEnabled }
+                                )}
+                                className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-colors ${
+                                  isFcmMasterEnabled
+                                    ? "bg-red-500/10 text-red-500 hover:bg-red-500/20"
+                                    : "bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20"
+                                }`}
+                              >
+                                {isFcmMasterEnabled ? "Disable FCM" : "Enable FCM"}
+                              </button>
+                            </div>
+
+                            {/* FCM Sub-Channels */}
+                            {isFcmMasterEnabled && (
+                              <div className="grid grid-cols-3 gap-2 pl-2 border-l-2 border-purple-500/30 text-xs">
+                                <div className="flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-900/30 p-2 rounded border border-zinc-200/50 dark:border-zinc-800/50">
+                                  <span className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">New Content</span>
+                                  <button
+                                    onClick={() => handleUpdateNotificationPrefs({ fcm: { newContent: !fcmNewContent } })}
+                                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${fcmNewContent ? "bg-emerald-500/20 text-emerald-500" : "bg-zinc-300 dark:bg-zinc-800 text-zinc-500"}`}
+                                  >
+                                    {fcmNewContent ? "ON" : "OFF"}
+                                  </button>
+                                </div>
+                                <div className="flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-900/30 p-2 rounded border border-zinc-200/50 dark:border-zinc-800/50">
+                                  <span className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">Membership Alerts</span>
+                                  <button
+                                    onClick={() => handleUpdateNotificationPrefs({ fcm: { membershipAlerts: !fcmMembershipAlerts, membershipExpiry: !fcmMembershipAlerts } })}
+                                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${fcmMembershipAlerts ? "bg-emerald-500/20 text-emerald-500" : "bg-zinc-300 dark:bg-zinc-800 text-zinc-500"}`}
+                                  >
+                                    {fcmMembershipAlerts ? "ON" : "OFF"}
+                                  </button>
+                                </div>
+                                <div className="flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-900/30 p-2 rounded border border-zinc-200/50 dark:border-zinc-800/50">
+                                  <span className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">Orders</span>
+                                  <button
+                                    onClick={() => handleUpdateNotificationPrefs({ fcm: { orders: !(fcmPref.orders !== false) } })}
+                                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${fcmPref.orders !== false ? "bg-emerald-500/20 text-emerald-500" : "bg-zinc-300 dark:bg-zinc-800 text-zinc-500"}`}
+                                  >
+                                    {fcmPref.orders !== false ? "ON" : "OFF"}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Service 2: Email Notifications */}
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between bg-zinc-50 dark:bg-zinc-900/60 p-2.5 rounded-lg border border-zinc-200/60 dark:border-zinc-800/60">
+                              <div className="flex items-center gap-2">
+                                <Mail className="w-4 h-4 text-blue-500 shrink-0" />
+                                <div>
+                                  <div className="font-bold text-xs text-zinc-900 dark:text-white flex items-center gap-1.5">
+                                    Email Notifications
+                                    <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${isEmailMasterEnabled ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"}`}>
+                                      {isEmailMasterEnabled ? "ACTIVE" : "DISABLED"}
+                                    </span>
+                                  </div>
+                                  <p className="text-[10px] text-zinc-500">Security, release newsletters & membership emails</p>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => handleUpdateNotificationPrefs(
+                                  { email: { enabled: !isEmailMasterEnabled } },
+                                  {
+                                    emailNotificationsEnabled: !isEmailMasterEnabled,
+                                    emailNotificationsDisabled: isEmailMasterEnabled,
+                                    unsubscribed: isEmailMasterEnabled
+                                  }
+                                )}
+                                className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-colors ${
+                                  isEmailMasterEnabled
+                                    ? "bg-red-500/10 text-red-500 hover:bg-red-500/20"
+                                    : "bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20"
+                                }`}
+                              >
+                                {isEmailMasterEnabled ? "Disable Email" : "Enable Email"}
+                              </button>
+                            </div>
+
+                            {/* Email Sub-Channels */}
+                            {isEmailMasterEnabled && (
+                              <div className="grid grid-cols-2 gap-1.5 pl-2 border-l-2 border-blue-500/30 text-xs">
+                                <div className="flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-900/30 p-2 rounded border border-zinc-200/50 dark:border-zinc-800/50">
+                                  <span className="text-[10px] font-semibold text-zinc-700 dark:text-zinc-300 truncate">Login Alerts</span>
+                                  <button
+                                    onClick={() => handleUpdateNotificationPrefs({ email: { loginAlerts: !emailLoginAlerts } })}
+                                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${emailLoginAlerts ? "bg-emerald-500/20 text-emerald-500" : "bg-zinc-300 dark:bg-zinc-800 text-zinc-500"}`}
+                                  >
+                                    {emailLoginAlerts ? "ON" : "OFF"}
+                                  </button>
+                                </div>
+                                <div className="flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-900/30 p-2 rounded border border-zinc-200/50 dark:border-zinc-800/50">
+                                  <span className="text-[10px] font-semibold text-zinc-700 dark:text-zinc-300 truncate">New Content</span>
+                                  <button
+                                    onClick={() => handleUpdateNotificationPrefs({ email: { newContent: !emailNewContent } })}
+                                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${emailNewContent ? "bg-emerald-500/20 text-emerald-500" : "bg-zinc-300 dark:bg-zinc-800 text-zinc-500"}`}
+                                  >
+                                    {emailNewContent ? "ON" : "OFF"}
+                                  </button>
+                                </div>
+                                <div className="flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-900/30 p-2 rounded border border-zinc-200/50 dark:border-zinc-800/50">
+                                  <span className="text-[10px] font-semibold text-zinc-700 dark:text-zinc-300 truncate">Membership</span>
+                                  <button
+                                    onClick={() => handleUpdateNotificationPrefs({ email: { membershipAlerts: !emailMembershipAlerts, membershipExpiry: !emailMembershipAlerts } })}
+                                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${emailMembershipAlerts ? "bg-emerald-500/20 text-emerald-500" : "bg-zinc-300 dark:bg-zinc-800 text-zinc-500"}`}
+                                  >
+                                    {emailMembershipAlerts ? "ON" : "OFF"}
+                                  </button>
+                                </div>
+                                <div className="flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-900/30 p-2 rounded border border-zinc-200/50 dark:border-zinc-800/50">
+                                  <span className="text-[10px] font-semibold text-zinc-700 dark:text-zinc-300 truncate">Orders</span>
+                                  <button
+                                    onClick={() => handleUpdateNotificationPrefs({ email: { orders: !(emailPref.orders !== false) } })}
+                                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${emailPref.orders !== false ? "bg-emerald-500/20 text-emerald-500" : "bg-zinc-300 dark:bg-zinc-800 text-zinc-500"}`}
+                                  >
+                                    {emailPref.orders !== false ? "ON" : "OFF"}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                      <button
-                        onClick={async () => {
-                          const isCurrentlyDisabled = selectedUser.emailNotificationsEnabled === false || selectedUser.emailNotificationsDisabled === true || selectedUser.unsubscribed === true;
-                          const newStatus = isCurrentlyDisabled; // if disabled, toggle to true (enabled)
-                          try {
-                            await updateDoc(doc(db, "users", selectedUser.uid), {
-                              emailNotificationsEnabled: newStatus,
-                              emailNotificationsDisabled: !newStatus,
-                              unsubscribed: !newStatus
-                            });
-                            setSelectedUser(prev => prev ? ({
-                              ...prev,
-                              emailNotificationsEnabled: newStatus,
-                              emailNotificationsDisabled: !newStatus,
-                              unsubscribed: !newStatus
-                            }) : null);
-                            updateUserFields(selectedUser.uid, {
-                              emailNotificationsEnabled: newStatus,
-                              emailNotificationsDisabled: !newStatus,
-                              unsubscribed: !newStatus
-                            });
-                          } catch (err) {
-                            console.error("Failed to update user email notification preference:", err);
-                          }
-                        }}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                          selectedUser.emailNotificationsEnabled === false || selectedUser.emailNotificationsDisabled === true || selectedUser.unsubscribed === true
-                            ? "bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20"
-                            : "bg-red-500/10 text-red-500 hover:bg-red-500/20"
-                        }`}
-                      >
-                        {selectedUser.emailNotificationsEnabled === false || selectedUser.emailNotificationsDisabled === true || selectedUser.unsubscribed === true ? "Enable Email" : "Disable Email"}
-                      </button>
-                    </div>
+                      );
+                    })()}
                     
                     <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
                       <div>

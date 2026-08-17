@@ -561,6 +561,14 @@ const checkGalleryAvailability = (
 const filterFilmygoHits = (hits: any[], pageUrl: string): any[] => {
   if (!hits || hits.length === 0) return [];
 
+  // Exclude gdflix links completely
+  const nonGdflixHits = hits.filter(h => {
+    const u = (h.url || '').toLowerCase();
+    const name = (h.file_name || '').toLowerCase();
+    return !u.includes('gdflix') && !name.includes('gdflix');
+  });
+  if (nonGdflixHits.length === 0) return [];
+
   const parseSizeInGB = (sizeStr?: string | null): number => {
     if (!sizeStr) return 0;
     const match = sizeStr.match(/(\d+(?:\.\d+)?)\s*(GB|MB)/i);
@@ -577,7 +585,7 @@ const filterFilmygoHits = (hits: any[], pageUrl: string): any[] => {
     return /\bhindi\b.*?\bline\b/i.test(name);
   };
 
-  let effectiveHits = hits;
+  let effectiveHits = nonGdflixHits;
   const hasAnyHindiLine = effectiveHits.some(isHindiLineHit);
 
   if (hasAnyHindiLine) {
@@ -1541,7 +1549,11 @@ export const LinkCheckerModal: React.FC<Props> = ({
       const res = await fetch(`/api/mdrive?url=${encodeURIComponent(targetUrl)}`);
       if (!res.ok) throw new Error('Failed to fetch from MDrive');
       const data = await res.json();
-      const hits = data.hits || [];
+      const hits = (data.hits || []).filter((h: any) => {
+        const u = (h.url || '').toLowerCase();
+        const name = (h.file_name || '').toLowerCase();
+        return !u.includes('gdflix') && !name.includes('gdflix');
+      });
       setMdriveResults(hits);
 
       if (hits.length === 1) {
@@ -1882,7 +1894,12 @@ export const LinkCheckerModal: React.FC<Props> = ({
               }
             }
 
-            const hits = res.data?.hits || [];
+            const rawHits = res.data?.hits || [];
+            const hits = rawHits.filter((h: any) => {
+              const u = (h.url || '').toLowerCase();
+              const name = (h.file_name || '').toLowerCase();
+              return !u.includes('gdflix') && !name.includes('gdflix');
+            });
             if (hits.length > 0) {
               if (res.type === 'filmygo') {
                 const autoHits = filterFilmygoHits(hits, res.original);

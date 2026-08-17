@@ -86,6 +86,7 @@ async function getSyncApps(
 
 import { translateRouter } from "./_translate.js";
 import { emailRouter } from "./_email.js";
+import { checkAndSendExpiryNotifications, sendMembershipUpdateNotification, sendOrderApprovedNotification } from "./_expiryService.js";
 
 async function startServer() {
   const app = express();
@@ -1134,10 +1135,10 @@ async function startServer() {
           href.includes("hubdrive") ||
           href.includes("mdrive") ||
           href.includes("fastdl") ||
-          href.includes("gdflix") ||
           href.includes("filepress") ||
           href.includes("drivehub")
         ) {
+          if (href.includes("gdflix")) return;
           let rawLabel = $(el).text().trim() || $(el).attr("title") || "";
           let label = rawLabel.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
 
@@ -1178,9 +1179,10 @@ async function startServer() {
         const parts = text.split('<a ');
         for(let i = 1; i < parts.length; i++) {
           const p = parts[i];
-          const m = p.match(/href=["']([^"']*(?:filesdl|linkmake|hubcloud|vcloud|mdrive|fastdl|gdflix|filepress|drivehub)[^"']*)["']/i);
+          const m = p.match(/href=["']([^"']*(?:filesdl|linkmake|hubcloud|vcloud|mdrive|fastdl|filepress|drivehub)[^"']*)["']/i);
           if (m) {
             let fdlUrl = m[1].trim();
+            if (fdlUrl.includes("gdflix")) continue;
             if (fdlUrl.startsWith("/")) {
               try { fdlUrl = new URL(fdlUrl, targetUrl).href; } catch(e) {}
             }
@@ -1214,7 +1216,7 @@ async function startServer() {
         parentLabel: string,
         depth = 0
       ): Promise<Array<{ file_name: string; url: string; size: string | null; is_direct: boolean }>> {
-        if (depth > 4 || visited.has(startUrl)) return [];
+        if (depth > 4 || visited.has(startUrl) || startUrl.toLowerCase().includes("gdflix")) return [];
         visited.add(startUrl);
 
         try {
@@ -1232,8 +1234,8 @@ async function startServer() {
             visited.add(finalUrl);
           }
 
-          // Direct match for HubCloud / VCloud / HubDrive / Mdrive / FastDL / GDFlix / FilePress
-          const hubMatches = htmlText.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|vcloud|hubdrive|mdrive|fastdl|gdflix|filepress|drivehub)\.[^"'\s<>\[\]]*/gi);
+          // Direct match for HubCloud / VCloud / HubDrive / Mdrive / FastDL / FilePress
+          const hubMatches = htmlText.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|vcloud|hubdrive|mdrive|fastdl|filepress|drivehub)\.[^"'\s<>\[\]]*/gi);
 
           if (hubMatches && hubMatches.length > 0) {
             const sizeMatch = htmlText.match(/Size:<\/span>\s*<span>([^<]+)<\/span>/i) || 
@@ -1248,12 +1250,14 @@ async function startServer() {
               finalName = finalName.replace(/[\[\]()\-_\s]+$/, "").trim();
             }
 
-            return hubMatches.map((hubUrl) => ({
-              file_name: finalName || "HubCloud Link",
-              url: normalizeDomain(hubUrl.replace(/&amp;/g, '&')),
-              size,
-              is_direct: true,
-            }));
+            return hubMatches
+              .filter((hubUrl) => !hubUrl.toLowerCase().includes("gdflix"))
+              .map((hubUrl) => ({
+                file_name: finalName || "HubCloud Link",
+                url: normalizeDomain(hubUrl.replace(/&amp;/g, '&')),
+                size,
+                is_direct: true,
+              }));
           }
 
           // Otherwise, parse HTML with Cheerio to find nested linkmake / filesdl / download links
@@ -1273,6 +1277,8 @@ async function startServer() {
             if (visited.has(href)) return;
 
             const lowerHref = href.toLowerCase();
+            if (lowerHref.includes("gdflix")) return;
+
             const isTargetHost = href.includes("filmygo.");
             
             if (isTargetHost && (href === finalUrl || href.includes("site-search") || href.includes("category") || href.includes("contact"))) {
@@ -1287,7 +1293,6 @@ async function startServer() {
               lowerHref.includes("hubdrive") ||
               lowerHref.includes("mdrive") ||
               lowerHref.includes("fastdl") ||
-              lowerHref.includes("gdflix") ||
               lowerHref.includes("filepress") ||
               lowerHref.includes("drivehub") ||
               lowerHref.includes("page-download") ||
@@ -1322,10 +1327,10 @@ async function startServer() {
 
           // Fallback raw regex
           if (nestedCandidates.length === 0) {
-            const rawMatches = htmlText.match(/https?:\/\/[^"'\s<>\[\]]*(?:filesdl|linkmake|hubcloud|vcloud|hubdrive|mdrive|fastdl|gdflix|filepress)[^"'\s<>\[\]]*/gi) || [];
+            const rawMatches = htmlText.match(/https?:\/\/[^"'\s<>\[\]]*(?:filesdl|linkmake|hubcloud|vcloud|hubdrive|mdrive|fastdl|filepress)[^"'\s<>\[\]]*/gi) || [];
             for (const rawUrl of rawMatches) {
               const cleanUrl = rawUrl.replace(/&amp;/g, '&');
-              if (!visited.has(cleanUrl)) {
+              if (!visited.has(cleanUrl) && !cleanUrl.toLowerCase().includes("gdflix")) {
                 nestedCandidates.push({ url: cleanUrl, label: parentLabel });
               }
             }
@@ -1341,14 +1346,15 @@ async function startServer() {
                 resolveFilmyGoLink(cand.url, cand.label, depth + 1)
               )
             );
-            const flattened = subResults.flat();
+            const flattened = subResults.flat().filter(h => !h.url?.toLowerCase().includes("gdflix"));
             if (flattened.length > 0) {
               return flattened;
             }
           }
 
           // Fallback: If no sub-links could be extracted (e.g. 403 Cloudflare challenge or no downstream links),
-          // return the startUrl itself as hit so the link is preserved for the user!
+          // return the startUrl itself as hit so the link is preserved for the user (unless it is gdflix)!
+          if (startUrl.toLowerCase().includes("gdflix")) return [];
           return [{
             file_name: parentLabel || "Download Link",
             url: startUrl,
@@ -1356,6 +1362,7 @@ async function startServer() {
             is_direct: false,
           }];
         } catch (e) {
+          if (startUrl.toLowerCase().includes("gdflix")) return [];
           return [{
             file_name: parentLabel || "Download Link",
             url: startUrl,
@@ -1372,6 +1379,7 @@ async function startServer() {
       );
 
       let finalHits = rawResults.flat().filter((hit, index, self) => 
+        !hit.url?.toLowerCase().includes("gdflix") &&
         index === self.findIndex((t) => t.url === hit.url)
       );
 
@@ -1729,12 +1737,36 @@ async function startServer() {
 
         try {
           if (Array.isArray(targetUserIds) && targetUserIds.length > 0) {
-            const messages = targetUserIds.map((uid: string) => ({
+            const messages: any[] = targetUserIds.map((uid: string) => ({
+              notification: {
+                title,
+                body,
+                imageUrl: imageUrl || undefined,
+              },
               data: {
                 title,
                 body,
                 imageUrl: imageUrl || "",
                 url: targetUrl,
+                link: targetUrl,
+                click_action: targetUrl,
+              },
+              webpush: {
+                fcmOptions: {
+                  link: targetUrl,
+                },
+                notification: {
+                  title,
+                  body,
+                  icon: imageUrl || "/launcher.svg",
+                  badge: "/launcher.svg",
+                  image: imageUrl || undefined,
+                  data: {
+                    url: targetUrl,
+                    link: targetUrl,
+                    click_action: targetUrl,
+                  },
+                },
               },
               topic: `user_${uid}`,
             }));
@@ -1750,12 +1782,36 @@ async function startServer() {
             }
             res.json({ success: true, successCount, failureCount });
           } else {
-            const message = {
+            const message: any = {
+              notification: {
+                title,
+                body,
+                imageUrl: imageUrl || undefined,
+              },
               data: {
                 title,
                 body,
                 imageUrl: imageUrl || "",
                 url: targetUrl,
+                link: targetUrl,
+                click_action: targetUrl,
+              },
+              webpush: {
+                fcmOptions: {
+                  link: targetUrl,
+                },
+                notification: {
+                  title,
+                  body,
+                  icon: imageUrl || "/launcher.svg",
+                  badge: "/launcher.svg",
+                  image: imageUrl || undefined,
+                  data: {
+                    url: targetUrl,
+                    link: targetUrl,
+                    click_action: targetUrl,
+                  },
+                },
               },
               topic: "all_users",
             };
@@ -1773,6 +1829,70 @@ async function startServer() {
       } catch (error) {
         console.error("Error in send notification endpoint:", error);
         res.status(500).json({ error: "Internal Server Error" });
+      }
+    },
+  );
+
+  // Expiry notifications trigger endpoint (checks all or specific user for expired membership)
+  app.post(
+    ["/api/notifications/check-expiry", "/notifications/check-expiry"],
+    async (req, res) => {
+      try {
+        const { targetUserId } = req.body || {};
+        const uid = targetUserId || req.query.userId?.toString();
+        const result = await checkAndSendExpiryNotifications(uid);
+        res.json({ success: true, ...result });
+      } catch (error: any) {
+        console.error("Error checking expiry notifications:", error);
+        res.status(500).json({ error: error.message || "Failed to check expiry notifications" });
+      }
+    },
+  );
+
+  // Membership update notification endpoint
+  app.post(
+    ["/api/notifications/notify-membership-update", "/notifications/notify-membership-update"],
+    async (req, res) => {
+      try {
+        const { userId, newExpiryDate, previousExpiryDate, role, status, adminName } = req.body || {};
+        if (!userId || !newExpiryDate) {
+          return res.status(400).json({ error: "Missing required fields: userId and newExpiryDate" });
+        }
+        const result = await sendMembershipUpdateNotification({
+          userId,
+          newExpiryDate,
+          previousExpiryDate,
+          role,
+          status,
+          adminName,
+        });
+        res.json(result);
+      } catch (error: any) {
+        console.error("Error sending membership update notification:", error);
+        res.status(500).json({ error: error.message || "Failed to send membership update notification" });
+      }
+    },
+  );
+
+  // Order Approved notification endpoint
+  app.post(
+    ["/api/notifications/notify-order-approved", "/notifications/notify-order-approved"],
+    async (req, res) => {
+      try {
+        const { userId, orderId, orderType, newExpiryDate } = req.body || {};
+        if (!userId || !orderId || !orderType) {
+          return res.status(400).json({ error: "Missing required fields" });
+        }
+        const result = await sendOrderApprovedNotification({
+          userId,
+          orderId,
+          orderType,
+          newExpiryDate,
+        });
+        res.json(result);
+      } catch (error: any) {
+        console.error("Error sending order approved notification:", error);
+        res.status(500).json({ error: error.message || "Failed to send notification" });
       }
     },
   );
@@ -3115,6 +3235,19 @@ async function startServer() {
       }
     });
   }
+
+  // Start automated background expiry notification scheduler (runs every 30 minutes)
+  setTimeout(() => {
+    checkAndSendExpiryNotifications().catch((err) =>
+      console.warn("Initial background expiry check failed:", err)
+    );
+  }, 5000);
+
+  setInterval(() => {
+    checkAndSendExpiryNotifications().catch((err) =>
+      console.warn("Scheduled background expiry check failed:", err)
+    );
+  }, 30 * 60 * 1000);
 
   // Only listen if not running as a Vercel function
   if (!process.env.VERCEL) {

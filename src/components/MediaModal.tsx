@@ -108,11 +108,17 @@ export async function findTMDBByImdb(imdbID: string, forceType?: string) {
   return null;
 }
 
-export function scoreTMDBItem(item: any, type: string, searchTitle: string, searchYear?: string, forceType?: string): number {
+export function scoreTMDBItem(
+  item: any, 
+  type: string, 
+  searchTitle: string, 
+  searchYear?: string, 
+  forceType?: string,
+  searchSecondTitle?: string
+): number {
   if (!item) return -10000;
   
   const normalizeStr = (str: string) => (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const searchNorm = normalizeStr(searchTitle);
   
   const rawTitle = item.title || item.name || '';
   const rawOriginalTitle = item.original_title || item.original_name || '';
@@ -122,15 +128,31 @@ export function scoreTMDBItem(item: any, type: string, searchTitle: string, sear
   
   let score = 0;
   
-  // 1. Title Matching
-  const isExact = (titleNorm && titleNorm === searchNorm) || (origTitleNorm && origTitleNorm === searchNorm);
-  if (isExact) {
-    score += 1000;
-  } else if ((titleNorm && searchNorm && titleNorm.startsWith(searchNorm)) || (origTitleNorm && searchNorm && origTitleNorm.startsWith(searchNorm))) {
-    score += 300;
-  } else if (searchNorm && (titleNorm.includes(searchNorm) || searchNorm.includes(titleNorm))) {
-    score += 100;
-  }
+  // 1. Title Matching against main search title and 2nd title (if provided)
+  const calcTitleScore = (sTitle: string) => {
+    if (!sTitle) return 0;
+    const sNorm = normalizeStr(sTitle);
+    if (!sNorm) return 0;
+
+    const isExact = (titleNorm && titleNorm === sNorm) || (origTitleNorm && origTitleNorm === sNorm);
+    if (isExact) return 1000;
+    if ((titleNorm && titleNorm.startsWith(sNorm)) || (origTitleNorm && origTitleNorm.startsWith(sNorm))) {
+      return 300;
+    }
+    if (titleNorm && sNorm && (titleNorm.includes(sNorm) || sNorm.includes(titleNorm))) {
+      return 100;
+    }
+    if (origTitleNorm && sNorm && (origTitleNorm.includes(sNorm) || sNorm.includes(origTitleNorm))) {
+      return 100;
+    }
+    return 0;
+  };
+
+  const titleScore = Math.max(
+    calcTitleScore(searchTitle),
+    calcTitleScore(searchSecondTitle || '')
+  );
+  score += titleScore;
   
   // 2. Auxiliary / Podcast / Special Penalty
   const auxKeywords = [
@@ -139,7 +161,7 @@ export function scoreTMDBItem(item: any, type: string, searchTitle: string, sear
     'soundtrack', 'interview', 'extras', 'companion'
   ];
   
-  const searchLower = (searchTitle || '').toLowerCase();
+  const searchLower = `${searchTitle || ''} ${searchSecondTitle || ''}`.toLowerCase();
   const searchHasAux = auxKeywords.some(k => searchLower.includes(k));
   
   if (!searchHasAux) {
@@ -199,12 +221,18 @@ export function scoreTMDBItem(item: any, type: string, searchTitle: string, sear
   return score;
 }
 
-export function rankTMDBResults(results: any[], searchTitle: string, searchYear?: string, forceType?: string): any[] {
+export function rankTMDBResults(
+  results: any[], 
+  searchTitle: string, 
+  searchYear?: string, 
+  forceType?: string,
+  searchSecondTitle?: string
+): any[] {
   if (!results || !Array.isArray(results)) return [];
   
   return [...results].sort((a, b) => {
-    const scoreA = scoreTMDBItem(a.item, a.type, searchTitle, searchYear, forceType);
-    const scoreB = scoreTMDBItem(b.item, b.type, searchTitle, searchYear, forceType);
+    const scoreA = scoreTMDBItem(a.item, a.type, searchTitle, searchYear, forceType, searchSecondTitle);
+    const scoreB = scoreTMDBItem(b.item, b.type, searchTitle, searchYear, forceType, searchSecondTitle);
     
     if (scoreA !== scoreB) {
       return scoreB - scoreA;
@@ -220,37 +248,96 @@ export function rankTMDBResults(results: any[], searchTitle: string, searchYear?
   });
 }
 
-export async function searchTMDBByTitle(searchTitle: string, searchYear: string, forceType?: string) {
+export async function searchTMDBByTitle(
+  searchTitle: string, 
+  searchYear: string, 
+  forceType?: string,
+  searchSecondTitle?: string
+) {
+  if (!searchTitle || !searchTitle.trim()) return [];
   const results: any[] = [];
-  
-  // Clean title for URL passing, TMDB often fails if there are hard symbols like dots in strange places
-  // We replace symbols with spaces because TMDB searches best with spaced words
-  const queryStr = searchTitle.replace(/[^a-zA-Z0-9\u00C0-\u024F]/g, ' ').replace(/\s+/g, ' ').trim();
+  const seenIds = new Set<string>();
+
+  const addResult = (item: any, type: string) => {
+    if (!item?.id) return;
+    const key = `${type}_${item.id}`;
+    if (!seenIds.has(key)) {
+      seenIds.add(key);
+      results.push({ item, type });
+    }
+  };
+
+  const queryStr = searchTitle.replace(/[^a-zA-Z0-9\u00C0-\u024F\u0600-\u06FF\u0900-\u097F]/g, ' ').replace(/\s+/g, ' ').trim();
   const finalQuery = encodeURIComponent(queryStr || searchTitle);
-  
+
+  // 1. Movie search
   if (!forceType || forceType === 'movie' || forceType === 'all') {
     let movieUrl = `${TMDB_BASE}/search/movie?api_key=${TMDB_API_KEY}&query=${finalQuery}`;
     if (searchYear) movieUrl += `&year=${searchYear}`;
-    let movieRes = await fetch(movieUrl);
-    let movieData = await movieRes.json();
-    if (movieData.results) {
-      movieData.results.forEach((item: any) => results.push({ item, type: 'movie' }));
-    }
+    try {
+      let movieRes = await fetch(movieUrl);
+      let movieData = await movieRes.json();
+      if (movieData.results) {
+        movieData.results.forEach((item: any) => addResult(item, 'movie'));
+      }
+    } catch (e) {}
   }
-  
+
+  // 2. TV / Series search
   if (!forceType || forceType === 'series' || forceType === 'tv' || forceType === 'all') {
     let tvUrl = `${TMDB_BASE}/search/tv?api_key=${TMDB_API_KEY}&query=${finalQuery}`;
     if (searchYear && searchYear !== '2026') {
       tvUrl += `&first_air_date_year=${searchYear}`;
     }
-    let tvRes = await fetch(tvUrl);
-    let tvData = await tvRes.json();
-    if (tvData.results) {
-      tvData.results.forEach((item: any) => results.push({ item, type: 'tv' }));
+    try {
+      let tvRes = await fetch(tvUrl);
+      let tvData = await tvRes.json();
+      if (tvData.results) {
+        tvData.results.forEach((item: any) => addResult(item, 'tv'));
+      }
+    } catch (e) {}
+  }
+
+  // 3. Fallback: Search without year if year was provided and yielded 0 results
+  if (results.length === 0 && searchYear) {
+    if (!forceType || forceType === 'movie' || forceType === 'all') {
+      try {
+        let movieRes = await fetch(`${TMDB_BASE}/search/movie?api_key=${TMDB_API_KEY}&query=${finalQuery}`);
+        let movieData = await movieRes.json();
+        if (movieData.results) {
+          movieData.results.forEach((item: any) => addResult(item, 'movie'));
+        }
+      } catch (e) {}
+    }
+    if (!forceType || forceType === 'series' || forceType === 'tv' || forceType === 'all') {
+      try {
+        let tvRes = await fetch(`${TMDB_BASE}/search/tv?api_key=${TMDB_API_KEY}&query=${finalQuery}`);
+        let tvData = await tvRes.json();
+        if (tvData.results) {
+          tvData.results.forEach((item: any) => addResult(item, 'tv'));
+        }
+      } catch (e) {}
     }
   }
-  
-  return rankTMDBResults(results, searchTitle, searchYear, forceType);
+
+  // 4. Multi search fallback (matches edge case aliases, alternative names, original names)
+  if (results.length === 0) {
+    try {
+      let multiRes = await fetch(`${TMDB_BASE}/search/multi?api_key=${TMDB_API_KEY}&query=${finalQuery}`);
+      let multiData = await multiRes.json();
+      if (multiData.results) {
+        multiData.results.forEach((item: any) => {
+          if (item.media_type === 'movie' && (!forceType || forceType === 'movie' || forceType === 'all')) {
+            addResult(item, 'movie');
+          } else if (item.media_type === 'tv' && (!forceType || forceType === 'series' || forceType === 'tv' || forceType === 'all')) {
+            addResult(item, 'tv');
+          }
+        });
+      }
+    } catch (e) {}
+  }
+
+  return rankTMDBResults(results, searchTitle, searchYear, forceType, searchSecondTitle);
 }
 
 export async function fetchTMDBDetails(tmdbId: string, type: string) {
@@ -461,6 +548,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
     if (isOpen) {
       setImdbId(initialImdbId);
       setTitle(initialTitle);
+      setSecondTitle(initialSecondTitle);
       setYear(initialYear);
       setFetchedData(null);
       setSearchResults(null);
@@ -470,11 +558,11 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
       setTrailerSource(null);
       setError(null);
       
-      if (initialImdbId || initialTitle) {
-        handleFetchWithParams(initialImdbId, initialTitle, initialYear, initialType);
+      if (initialImdbId || initialTitle || initialSecondTitle) {
+        handleFetchWithParams(initialImdbId, initialTitle, initialSecondTitle, initialYear, initialType);
       }
     }
-  }, [isOpen, initialImdbId, initialTitle, initialYear]);
+  }, [isOpen, initialImdbId, initialTitle, initialSecondTitle, initialYear, initialType]);
 
   const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -494,7 +582,13 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
     return null;
   }
 
-  const handleFetchWithParams = async (searchImdbId: string, searchTitle: string, searchYear: string, searchForceType?: string) => {
+  const handleFetchWithParams = async (
+    searchImdbId: string, 
+    searchTitle: string, 
+    searchSecondTitle: string, 
+    searchYear: string, 
+    searchForceType?: string
+  ) => {
     setLoading(true);
     setError(null);
     setFetchedData(null);
@@ -505,17 +599,60 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
     setFilterType(initialFilter);
 
     const performTitleSearch = async (t: string, t2: string, y: string, ft?: string) => {
-      let res = await searchTMDBByTitle(t.trim(), y.trim(), ft);
-      if ((!res || res.length === 0) && y.trim()) {
-        res = await searchTMDBByTitle(t.trim(), '', ft);
+      const allResultsMap = new Map<string, any>();
+      
+      const addResults = (resList: any[]) => {
+        if (!resList || !Array.isArray(resList)) return;
+        for (const res of resList) {
+          if (res?.item?.id) {
+            const key = `${res.type}_${res.item.id}`;
+            if (!allResultsMap.has(key)) {
+              allResultsMap.set(key, res);
+            }
+          }
+        }
+      };
+
+      // 1. Search with Primary Title if provided
+      if (t && t.trim()) {
+        let res1 = await searchTMDBByTitle(t.trim(), y.trim(), ft, t2.trim());
+        if ((!res1 || res1.length === 0) && y.trim()) {
+          res1 = await searchTMDBByTitle(t.trim(), '', ft, t2.trim());
+        }
+        addResults(res1);
       }
-      if ((!res || res.length === 0) && t2.trim()) {
-        res = await searchTMDBByTitle(t2.trim(), y.trim(), ft);
-        if ((!res || res.length === 0) && y.trim()) {
-          res = await searchTMDBByTitle(t2.trim(), '', ft);
+
+      // 2. Search with 2nd Title if provided
+      if (t2 && t2.trim()) {
+        let res2 = await searchTMDBByTitle(t2.trim(), y.trim(), ft, t.trim());
+        if ((!res2 || res2.length === 0) && y.trim()) {
+          res2 = await searchTMDBByTitle(t2.trim(), '', ft, t.trim());
+        }
+        addResults(res2);
+      }
+
+      // 3. Fallback: If still empty, check if title or 2nd title has punctuation/separators
+      if (allResultsMap.size === 0) {
+        for (const titleCandidate of [t, t2]) {
+          if (!titleCandidate || !titleCandidate.trim()) continue;
+          const trimmed = titleCandidate.trim();
+          const splitParts = trimmed.split(/[:\-\/\(\|\–]/).map(p => p.trim()).filter(p => p.length >= 2);
+          if (splitParts.length > 1) {
+            for (const part of splitParts) {
+              let subRes = await searchTMDBByTitle(part, y.trim(), ft);
+              if ((!subRes || subRes.length === 0) && y.trim()) {
+                subRes = await searchTMDBByTitle(part, '', ft);
+              }
+              addResults(subRes);
+              if (allResultsMap.size > 0) break;
+            }
+          }
+          if (allResultsMap.size > 0) break;
         }
       }
-      return res;
+
+      const mergedResults = Array.from(allResultsMap.values());
+      return rankTMDBResults(mergedResults, t || t2, y, ft, t2);
     };
 
     try {
@@ -529,7 +666,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
             try {
               const movieRes = await fetch(`${TMDB_BASE}/movie/${idStr}?api_key=${TMDB_API_KEY}`);
               if (movieRes.ok) {
-                await fetchFullDetails(idStr, 'movie', searchTitle);
+                await fetchFullDetails(idStr, 'movie', searchTitle, searchSecondTitle);
                 return;
               }
             } catch (e) {}
@@ -539,20 +676,20 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
             try {
               const tvRes = await fetch(`${TMDB_BASE}/tv/${idStr}?api_key=${TMDB_API_KEY}`);
               if (tvRes.ok) {
-                await fetchFullDetails(idStr, 'tv', searchTitle);
+                await fetchFullDetails(idStr, 'tv', searchTitle, searchSecondTitle);
                 return;
               }
             } catch (e) {}
           }
           
-          // If not found by TMDB ID, fall back to title search if title is provided
-          if (searchTitle.trim()) {
-            const results = await performTitleSearch(searchTitle, secondTitle, searchYear, searchForceType);
+          // If not found by TMDB ID, fall back to title or 2nd title search
+          if (searchTitle.trim() || searchSecondTitle.trim()) {
+            const results = await performTitleSearch(searchTitle, searchSecondTitle, searchYear, searchForceType);
             if (results && results.length > 1) {
               setSearchResults(results);
               return;
             } else if (results && results.length === 1) {
-              await fetchFullDetails(results[0].item.id, results[0].type, searchTitle);
+              await fetchFullDetails(results[0].item.id, results[0].type, searchTitle, searchSecondTitle);
               return;
             }
           }
@@ -562,29 +699,29 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
           const imdbID = match ? match[0] : idStr;
           const found = await findTMDBByImdb(imdbID, searchForceType);
           if (found) {
-            await fetchFullDetails(found.item.id, found.type, searchTitle);
+            await fetchFullDetails(found.item.id, found.type, searchTitle, searchSecondTitle);
             return;
           } else {
-            // If not found by IMDb ID, fall back to title search if title is provided
-            if (searchTitle.trim()) {
-              const results = await performTitleSearch(searchTitle, secondTitle, searchYear, searchForceType);
+            // If not found by IMDb ID, fall back to title or 2nd title search
+            if (searchTitle.trim() || searchSecondTitle.trim()) {
+              const results = await performTitleSearch(searchTitle, searchSecondTitle, searchYear, searchForceType);
               if (results && results.length > 1) {
                 setSearchResults(results);
                 return;
               } else if (results && results.length === 1) {
-                await fetchFullDetails(results[0].item.id, results[0].type, searchTitle);
+                await fetchFullDetails(results[0].item.id, results[0].type, searchTitle, searchSecondTitle);
                 return;
               }
             }
             throw new Error(`No TMDB entry found for IMDb ID: ${imdbID}`);
           }
         }
-      } else if (searchTitle.trim()) {
-        const results = await performTitleSearch(searchTitle, secondTitle, searchYear, searchForceType);
+      } else if (searchTitle.trim() || searchSecondTitle.trim()) {
+        const results = await performTitleSearch(searchTitle, searchSecondTitle, searchYear, searchForceType);
         if (results && results.length > 1) {
           setSearchResults(results);
         } else if (results && results.length === 1) {
-          await fetchFullDetails(results[0].item.id, results[0].type, searchTitle);
+          await fetchFullDetails(results[0].item.id, results[0].type, searchTitle, searchSecondTitle);
         } else {
           throw new Error('No movie or series found with that title/year.');
         }
@@ -606,10 +743,10 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
       results = results.filter(r => r.type === filterType);
     }
     
-    return rankTMDBResults(results, title, year, filterType);
-  }, [searchResults, filterType, title, year]);
+    return rankTMDBResults(results, title, year, filterType, secondTitle);
+  }, [searchResults, filterType, title, secondTitle, year]);
 
-  const fetchFullDetails = async (tmdbId: string, type: string, searchTitle?: string) => {
+  const fetchFullDetails = async (tmdbId: string, type: string, searchTitle?: string, searchSecondTitle?: string) => {
     setLoading(true);
     setSearchResults(null);
     setYoutubeTrailerOptions(null);
@@ -650,6 +787,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
       const primaryTitle = details.title || details.name;
       const originalTitle = details.original_title || details.original_name;
       const trimmedInputTitle = searchTitle !== undefined ? searchTitle.trim() : (title ? title.trim() : '');
+      const trimmedInputSecondTitle = searchSecondTitle !== undefined ? searchSecondTitle.trim() : (secondTitle ? secondTitle.trim() : '');
 
       // Words helper
       const getWords = (str: string) => {
@@ -676,6 +814,8 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
         const mediaModalSecondTitle = getBestAlternativeTitle(details);
         if (mediaModalSecondTitle) {
           finalSecondTitle = mediaModalSecondTitle;
+        } else if (trimmedInputSecondTitle && trimmedInputSecondTitle.toLowerCase() !== finalTitle.toLowerCase()) {
+          finalSecondTitle = trimmedInputSecondTitle;
         } else {
           finalSecondTitle = trimmedInputTitle;
         }
@@ -885,7 +1025,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
             <input type="text" value={year} onChange={e => setYear(e.target.value)} placeholder="Year" className="w-20 p-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500 transition-colors duration-300" />
             <div className="flex gap-2">
               <button 
-                onClick={() => handleFetchWithParams(imdbId, title, year, filterType === 'all' ? undefined : filterType)} 
+                onClick={() => handleFetchWithParams(imdbId, title, secondTitle, year, filterType === 'all' ? undefined : filterType)} 
                 disabled={loading}
                 className="bg-emerald-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-emerald-700 flex items-center gap-2 disabled:opacity-50 transition-all active:scale-95 border border-white/20 shadow-lg"
               >
@@ -943,7 +1083,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
                 {sortedAndFilteredResults.map((res, idx) => (
                   <button
                     key={`${res.item.id}-${idx}`}
-                    onClick={() => fetchFullDetails(res.item.id, res.type)}
+                    onClick={() => fetchFullDetails(res.item.id, res.type, title, secondTitle)}
                     className="flex items-center gap-4 p-3 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:border-emerald-500/50 transition-all text-left group"
                   >
                     <div className="w-12 h-18 bg-zinc-200 dark:bg-zinc-700 rounded overflow-hidden shrink-0">

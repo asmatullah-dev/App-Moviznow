@@ -1,6 +1,36 @@
 export type Role = 'owner' | 'admin' | 'user' | 'selected_content' | 'content_manager' | 'trial' | 'user_manager' | 'manager';
 export type Status = 'pending' | 'active' | 'expired' | 'suspended';
 
+export interface FcmNotificationChannelSettings {
+  enabled: boolean;
+  newContent: boolean;
+  membershipAlerts: boolean;
+  membershipExpiry?: boolean;
+  orders?: boolean;
+}
+
+export interface EmailNotificationChannelSettings {
+  enabled: boolean;
+  loginAlerts: boolean;
+  newContent: boolean;
+  membershipAlerts: boolean;
+  membershipExpiry?: boolean;
+  orders?: boolean;
+}
+
+export interface NotificationChannelSettings {
+  enabled: boolean;
+  loginAlerts?: boolean;
+  newContent: boolean;
+  membershipAlerts: boolean;
+  membershipExpiry?: boolean;
+}
+
+export interface UserNotificationPreferences {
+  fcm?: Partial<FcmNotificationChannelSettings>;
+  email?: Partial<EmailNotificationChannelSettings>;
+}
+
 export interface UserProfile {
   uid: string;
   email: string;
@@ -58,9 +88,15 @@ export interface UserProfile {
   notification?: 'yes' | 'no';
   emailNotificationsEnabled?: boolean;
   emailNotificationsDisabled?: boolean;
+  isFcmDisabled?: boolean;
   unsubscribed?: boolean;
   isEmailUnsubscribed?: boolean;
   unsubscribedAt?: string;
+  lastExpiryNoticeFor?: string;
+  lastExpiryNoticeSentAt?: string;
+  expiryNoticeSent?: boolean;
+  expiryNoticeSentDate?: string;
+  notificationPreferences?: UserNotificationPreferences;
 }
 
 export interface AppNotification {

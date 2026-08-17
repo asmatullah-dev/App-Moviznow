@@ -27,14 +27,19 @@ export default function Cart() {
   const [loading, setLoading] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [orderId, setOrderId] = useState<string | null>(null);
+  const [lastCreatedOrder, setLastCreatedOrder] = useState<{
+    id: string;
+    items: any[];
+    amount: number;
+  } | null>(null);
   const [whatsappNumber, setWhatsappNumber] = useState(profile?.phone || '');
   const [alertConfig, setAlertConfig] = useState<{isOpen: boolean; title: string; message: string;}>({ isOpen: false, title: '', message: '' });
 
   React.useEffect(() => {
-    if ((profile?.role === 'user' || profile?.role === 'trial') && profile?.status === 'expired' && cart.length === 0) {
+    if ((profile?.role === 'user' || profile?.role === 'trial') && profile?.status === 'expired' && cart.length === 0 && !confirmed && !lastCreatedOrder) {
       navigate('/');
     }
-  }, [profile, navigate, cart.length]);
+  }, [profile, navigate, cart.length, confirmed, lastCreatedOrder]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(settings?.accountNumber || '03416286423');
@@ -42,7 +47,8 @@ export default function Cart() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleConfirm = async (): Promise<string | null> => { 
+  const handleConfirm = async (): Promise<{ id: string; items: any[]; amount: number } | null> => { 
+    if (lastCreatedOrder) return lastCreatedOrder;
     if (!profile || cart.length === 0) return null; 
     if (!whatsappNumber || whatsappNumber.length < 10) { 
       setAlertConfig({isOpen: true, title: t('Invalid Phone Number'), message: t('Please enter a valid WhatsApp number')}); 
@@ -50,18 +56,34 @@ export default function Cart() {
     } 
     setLoading(true); 
     try { 
+      const currentCart = [...cart];
+      const currentTotal = totalPrice;
       const newOrderId = Math.floor(10000000 + Math.random() * 90000000).toString(); 
-      const orderData = { id: newOrderId, userId: profile.uid, userName: profile.displayName || 'Unknown', userEmail: profile.email, userRole: profile.role, type: 'content', amount: totalPrice, items: cart, status: 'pending', createdAt: new Date().toISOString() }; 
+      const orderData = { 
+        id: newOrderId, 
+        userId: profile.uid, 
+        userName: profile.displayName || 'Unknown', 
+        userEmail: profile.email, 
+        userRole: profile.role, 
+        type: 'content', 
+        amount: currentTotal, 
+        items: currentCart, 
+        status: 'pending', 
+        createdAt: new Date().toISOString() 
+      }; 
       const pendingOrdersStr = safeStorage.getItem('pending_orders_array') || '[]'; 
       const pendingOrders = JSON.parse(pendingOrdersStr); 
       pendingOrders.push(orderData); 
       safeStorage.setItem('pending_orders_array', JSON.stringify(pendingOrders)); 
       safeStorage.setItem('needs_user_sync', 'true'); 
       await updateUserProfileData({ phone: whatsappNumber }, undefined, true); 
+      
+      const created = { id: newOrderId, items: currentCart, amount: currentTotal };
+      setLastCreatedOrder(created);
       setOrderId(newOrderId); 
       setConfirmed(true); 
       clearCart(); 
-      return newOrderId; 
+      return created; 
     } catch (error) { 
       console.error('Error creating order:', error); 
       setAlertConfig({isOpen: true, title: t('Error'), message: t('Failed to create order. Please try again.')}); 
@@ -75,17 +97,64 @@ export default function Cart() {
     if (!profile) return;
     setLoading(true);
     try {
-      let currentOrderId = orderId;
-      if (!confirmed) {
-          currentOrderId = await handleConfirm();
-          if (!currentOrderId) { setLoading(false); return; }
+      let activeOrder = lastCreatedOrder;
+      if (!activeOrder && !confirmed) {
+        activeOrder = await handleConfirm();
+        if (!activeOrder) { setLoading(false); return; }
       }
-      const message = `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${profile?.displayName || t("Unknown")}\n${t("Email")}: ${profile?.email || 'N/A'}\n${t("Phone")}: ${whatsappNumber || profile?.phone || 'N/A'}\n${t("Role & Status")}: ${String(profile?.role || t("Unknown")).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || t("Unknown")).replace(/\b\w/g, c => c.toUpperCase())}\n\n${t("Your message/question:")}\n${t("Please approve my order. Order ID:")} ${currentOrderId}\n${t("Items")}: ${cart?.length || 0}\n${t("Total Amount: Rs")} ${totalPrice}`;
+
+      let finalOrderId = activeOrder?.id || orderId;
+      let finalItems = activeOrder?.items || (cart.length > 0 ? [...cart] : []);
+      let finalAmount = activeOrder ? activeOrder.amount : (totalPrice > 0 ? totalPrice : 0);
+
+      if (!finalOrderId || (finalItems.length === 0 && finalAmount === 0)) {
+        try {
+          const pendingOrdersStr = safeStorage.getItem('pending_orders_array') || '[]';
+          const pendingOrders = JSON.parse(pendingOrdersStr);
+          const matched = (finalOrderId ? pendingOrders.find((o: any) => o.id === finalOrderId) : null) || pendingOrders[pendingOrders.length - 1];
+          if (matched) {
+            finalOrderId = matched.id;
+            finalItems = Array.isArray(matched.items) ? matched.items : [];
+            finalAmount = matched.amount || 0;
+          } else {
+            const userOrders = profile.orders || [];
+            const matchedProfileOrder = (finalOrderId ? userOrders.find((o: any) => o.id === finalOrderId) : null) || userOrders[userOrders.length - 1];
+            if (matchedProfileOrder) {
+              finalOrderId = matchedProfileOrder.id;
+              finalItems = Array.isArray(matchedProfileOrder.items) ? matchedProfileOrder.items : [];
+              finalAmount = matchedProfileOrder.amount || 0;
+            }
+          }
+        } catch (e) {
+          console.error("Error retrieving order for screenshot:", e);
+        }
+      }
+
+      if (!finalOrderId) {
+        setAlertConfig({ isOpen: true, title: t('Error'), message: t('Please add items to cart and confirm your order first.') });
+        return;
+      }
+
+      let itemTitles = '';
+      if (finalItems && finalItems.length > 0) {
+        itemTitles = finalItems.map((item: any) => {
+          if (item.type === 'season') {
+            return `${item.title} (${t('Season')} ${item.seasonNumber})`;
+          }
+          return item.title;
+        }).join(', ');
+      }
+
+      const itemsLine = `${t("Items")}: ${finalItems.length}${itemTitles ? ` (${itemTitles})` : ''}`;
+      const message = `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${profile?.displayName || t("Unknown")}\n${t("Email")}: ${profile?.email || 'N/A'}\n${t("Phone")}: ${whatsappNumber || profile?.phone || 'N/A'}\n${t("Role & Status")}: ${String(profile?.role || t("Unknown")).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || t("Unknown")).replace(/\b\w/g, c => c.toUpperCase())}\n\n${t("Your message/question:")}\n${t("Please approve my order. Order ID:")} ${finalOrderId}\n${itemsLine}\n${t("Total Amount: Rs")} ${finalAmount}`;
+      
       const adminPhone = standardizePhone(settings?.supportNumber || '3363284466').replace('+', '');
       const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
       window.open(whatsappUrl, '_blank');
       navigate('/');
-    } finally { setLoading(false); }
+    } finally { 
+      setLoading(false); 
+    }
   };
 
   return (
@@ -133,7 +202,7 @@ export default function Cart() {
             <div className="px-4 py-2.5 rounded-2xl bg-white/10 backdrop-blur-md border border-white/15 flex items-center gap-2 self-start sm:self-center">
               <Sparkles className="w-4 h-4 text-emerald-200" />
               <span className="text-xs font-extrabold text-white">
-                {cart.length} {cart.length === 1 ? t('Item') : t('Items')}
+                {confirmed && lastCreatedOrder ? lastCreatedOrder.items.length : cart.length} {(confirmed && lastCreatedOrder ? lastCreatedOrder.items.length : cart.length) === 1 ? t('Item') : t('Items')}
               </span>
             </div>
           </div>
@@ -141,7 +210,40 @@ export default function Cart() {
 
         {/* Cart items list */}
         <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 mb-6 border border-zinc-200/80 dark:border-zinc-800/80 shadow-sm">
-          {cart.length > 0 ? (
+          {confirmed && lastCreatedOrder ? (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 p-3 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-2xl border border-emerald-500/20 text-xs font-bold">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>{t('Order Placed Successfully! Order ID:')} #{lastCreatedOrder.id}</span>
+              </div>
+              <div className="space-y-3">
+                {lastCreatedOrder.items.map((item, index) => (
+                  <div 
+                    key={index} 
+                    className="flex items-center justify-between gap-4 p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-950/80 border border-zinc-200/60 dark:border-zinc-800/60 transition-all"
+                  >
+                    <div className="flex items-center gap-3.5 min-w-0">
+                      <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0 font-bold">
+                        {item.type === 'season' ? <Tv className="w-5 h-5" /> : <Film className="w-5 h-5" />}
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="font-extrabold text-sm text-zinc-900 dark:text-white truncate">{item.title}</h3>
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+                          {item.type === 'season' ? `${t('Season')} ${item.seasonNumber}` : t('Movie')}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className="font-extrabold text-sm text-emerald-600 dark:text-emerald-400 px-3 py-1 bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800/80 rounded-xl shadow-2xs">
+                        Rs {item.price}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : cart.length > 0 ? (
             <div className="space-y-3">
               {cart.map((item, index) => (
                 <div 
@@ -196,7 +298,9 @@ export default function Cart() {
           
           <div className="flex justify-between items-center border-t border-zinc-200/80 dark:border-zinc-800/80 pt-4 mt-5">
             <span className="text-sm font-semibold text-zinc-500 dark:text-zinc-400">{t('Total Amount')}</span>
-            <span className="text-2xl font-black text-emerald-600 dark:text-emerald-400">Rs {totalPrice}</span>
+            <span className="text-2xl font-black text-emerald-600 dark:text-emerald-400">
+              Rs {confirmed && lastCreatedOrder ? lastCreatedOrder.amount : totalPrice}
+            </span>
           </div>
         </div>
 

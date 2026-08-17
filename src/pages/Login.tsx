@@ -51,6 +51,28 @@ export default function Login() {
     }
   }, [location.state]);
 
+  // Persist target redirect in sessionStorage so it survives OAuth popups or page refreshes
+  useEffect(() => {
+    const searchParams = new URLSearchParams(location.search);
+    const redirectUrl = searchParams.get('redirect');
+    const fromState = location.state?.from;
+    let target = '';
+    if (fromState) {
+      if (typeof fromState === 'object' && fromState !== null && 'pathname' in fromState) {
+        target = (fromState.pathname || '/') + (fromState.search || '') + (fromState.hash || '');
+      } else if (typeof fromState === 'string') {
+        target = fromState;
+      }
+    } else if (redirectUrl) {
+      target = redirectUrl;
+    }
+    if (target && target !== '/login' && !target.startsWith('/login?') && target !== '/maintenance') {
+      try {
+        sessionStorage.setItem('moviz_auth_redirect', target);
+      } catch (e) {}
+    }
+  }, [location]);
+
   useEffect(() => {
     if (user && profile) {
       // If user is suspended, don't redirect to home, just show error
@@ -69,6 +91,16 @@ export default function Login() {
         const searchParams = new URLSearchParams(location.search);
         let redirectUrl = searchParams.get('redirect');
         let from = location.state?.from;
+
+        if (!from) {
+          try {
+            const storedRedirect = sessionStorage.getItem('moviz_auth_redirect');
+            if (storedRedirect) {
+              from = storedRedirect;
+              sessionStorage.removeItem('moviz_auth_redirect');
+            }
+          } catch (e) {}
+        }
         
         if (!from && redirectUrl) {
           if (redirectUrl.startsWith('http://') || redirectUrl.startsWith('https://')) {
@@ -87,16 +119,26 @@ export default function Login() {
           from = profile.role === 'admin' ? '/admin' : '/';
         }
 
-        if (typeof from === 'string' && (from.startsWith('/http://') || from.startsWith('/https://'))) {
+        let targetPath: any = from;
+        if (typeof from === 'object' && from !== null && 'pathname' in from) {
+          targetPath = (from.pathname || '/') + (from.search || '') + (from.hash || '');
+        }
+
+        if (typeof targetPath === 'string' && (targetPath.startsWith('/http://') || targetPath.startsWith('/https://'))) {
           try {
-            const parsed = new URL(from.substring(1));
-            from = parsed.pathname + parsed.search;
+            const parsed = new URL(targetPath.substring(1));
+            targetPath = parsed.pathname + parsed.search;
           } catch (e) {
-            from = '/';
+            targetPath = '/';
           }
         }
 
-        navigate(from, { replace: true });
+        // Do not redirect to /login
+        if (typeof targetPath === 'string' && (targetPath === '/login' || targetPath.startsWith('/login?'))) {
+          targetPath = profile.role === 'admin' ? '/admin' : '/';
+        }
+
+        navigate(targetPath, { replace: true });
       }
     }
   }, [user, profile, navigate, location, step]);

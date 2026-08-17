@@ -2568,7 +2568,7 @@ export default function ContentManagement() {
 
       const eligibleUsers = candidateUsers.filter((u: any) => {
         if (!u || !isValidGmailAddress(u.email)) return false;
-        if (u.emailNotificationsEnabled === false || u.emailNotificationsDisabled === true || u.unsubscribed === true || u.isEmailUnsubscribed === true) return false;
+        if (u.emailNotificationsEnabled === false || u.emailNotificationsDisabled === true || u.unsubscribed === true || u.isEmailUnsubscribed === true || u.notificationPreferences?.email?.newContent === false || u.notificationPreferences?.email?.enabled === false) return false;
         return true;
       });
 

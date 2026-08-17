@@ -85,7 +85,16 @@ export default function PreviousOrders() {
                         onClick={(e) => {
                           e.stopPropagation();
                           const adminPhone = standardizePhone(settings?.supportNumber || '3363284466').replace('+', '');
-                          const message = `${order.type === 'membership' ? 'Membership Top Up' : 'Add Content'}\nOrder ID: ${order.id}\nAmount: Rs ${order.amount}`;
+                          let itemsCount = 0;
+                          let itemsDetail = '';
+                          if (order.type === 'content' && order.items && Array.isArray(order.items)) {
+                            itemsCount = order.items.length;
+                            itemsDetail = order.items.map((i: any) => i.title + (i.type === 'season' ? ` (Season ${i.seasonNumber})` : '')).join(', ');
+                          }
+                          const itemsLine = order.type === 'content' 
+                            ? `\nItems: ${itemsCount}${itemsDetail ? ` (${itemsDetail})` : ''}` 
+                            : (order.type === 'membership' ? `\nPlan: ${order.planName || 'Membership'}\nDuration: ${order.months || 1} Month(s)` : '');
+                          const message = `Assalam O Alaikum! Admin,\n\nName: ${profile?.displayName || 'Unknown'}\nEmail: ${profile?.email || 'N/A'}\nPhone: ${profile?.phone || 'N/A'}\nRole & Status: ${String(profile?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\nYour message/question:\nPlease approve my order. Order ID: ${order.id}${itemsLine}\nTotal Amount: Rs ${order.amount}`;
                           const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
                           window.open(whatsappUrl, '_blank');
                         }}

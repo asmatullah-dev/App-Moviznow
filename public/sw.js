@@ -27,12 +27,14 @@ if (firebaseConfig.apiKey && firebaseConfig.projectId) {
     
     if (payload.data) {
       const notificationTitle = payload.data.title || 'New Notification';
+      const targetUrl = payload.data.url || payload.data.link || payload.data.click_action || '/';
       const notificationOptions = {
         body: payload.data.body,
-        icon: payload.data.imageUrl || '/logo.svg',
+        icon: payload.data.imageUrl || '/launcher.svg',
         image: payload.data.imageUrl,
+        badge: '/launcher.svg',
         data: Object.assign({}, payload.data, {
-          url: payload.data.url || '/'
+          url: targetUrl
         })
       };
 
@@ -41,6 +43,36 @@ if (firebaseConfig.apiKey && firebaseConfig.projectId) {
   });
 } else {
   console.warn('[sw.js] Missing Firebase config in URL parameters. Push notifications inactive.');
+}
+
+function extractUrlFromNotification(notification) {
+  if (!notification) return '/';
+  const data = notification.data || {};
+  
+  if (typeof data.url === 'string' && data.url) return data.url;
+  if (typeof data.link === 'string' && data.link) return data.link;
+  if (typeof data.click_action === 'string' && data.click_action) return data.click_action;
+
+  if (data.FCM_MSG) {
+    const fcm = data.FCM_MSG;
+    if (fcm.data) {
+      if (typeof fcm.data.url === 'string' && fcm.data.url) return fcm.data.url;
+      if (typeof fcm.data.link === 'string' && fcm.data.link) return fcm.data.link;
+      if (typeof fcm.data.click_action === 'string' && fcm.data.click_action) return fcm.data.click_action;
+    }
+    if (fcm.fcmOptions && typeof fcm.fcmOptions.link === 'string' && fcm.fcmOptions.link) {
+      return fcm.fcmOptions.link;
+    }
+    if (fcm.notification && typeof fcm.notification.click_action === 'string' && fcm.notification.click_action) {
+      return fcm.notification.click_action;
+    }
+  }
+
+  if (data.fcmOptions && typeof data.fcmOptions.link === 'string' && data.fcmOptions.link) {
+    return data.fcmOptions.link;
+  }
+
+  return '/';
 }
 
 const CACHE = "pwabuilder-page-v2.0";
@@ -110,11 +142,29 @@ self.addEventListener('fetch', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   
-  const urlToOpen = (event.notification.data && event.notification.data.url) 
-    ? event.notification.data.url 
-    : '/';
+  const rawUrl = extractUrlFromNotification(event.notification);
+  let targetUrl = '/';
+  try {
+    targetUrl = new URL(rawUrl, self.location.origin).href;
+  } catch (e) {
+    targetUrl = self.location.origin + (rawUrl.startsWith('/') ? rawUrl : '/' + rawUrl);
+  }
 
   event.waitUntil(
-    clients.openWindow(urlToOpen)
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      // 1. If an existing window/tab of our app is already open, focus it and navigate
+      for (const client of windowClients) {
+        if (client.url && 'focus' in client) {
+          if ('navigate' in client && client.url !== targetUrl) {
+            client.navigate(targetUrl);
+          }
+          return client.focus();
+        }
+      }
+      // 2. If no window is open, open a new window
+      if (clients.openWindow) {
+        return clients.openWindow(targetUrl);
+      }
+    })
   );
 });
