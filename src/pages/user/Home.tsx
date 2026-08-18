@@ -1768,7 +1768,7 @@ export default function Home({
 
         <div className="text-center text-xs text-zinc-500 dark:text-zinc-600 font-mono">
           {/* @ts-ignore */}
-          v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.1.0'}
+          v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.0'}
         </div>
       </footer>
 

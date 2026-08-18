@@ -18,9 +18,7 @@ export const customMeasurementId = import.meta.env.VITE_GA_MEASUREMENT_ID || fir
 
 export const app = initializeApp(extendedConfig);
 
-// Use initializeFirestore with experimentalForceLongPolling: true to fix connection issues in sandboxed environments
 export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true,
   localCache: typeof window !== 'undefined' ? persistentLocalCache({ tabManager: persistentMultipleTabManager() }) : undefined
 }, extendedConfig.firestoreDatabaseId);
 
@@ -56,7 +54,7 @@ export const analyticsPromise = typeof window !== 'undefined'
         if (yes) {
           try {
             analyticsInstance = getAnalytics(app);
-            const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.5.0';
+            const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.0';
             setUserProperties(analyticsInstance, { 
                app_version: currentVersion,
                version: currentVersion,
@@ -85,7 +83,7 @@ export const analyticsPromise = typeof window !== 'undefined'
           // @ts-ignore
           window.gtag('js', new Date());
           
-          const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.5.0';
+          const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.0';
           
           // @ts-ignore
           window.gtag('set', {
