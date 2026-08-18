@@ -1,5 +1,6 @@
 import { Content } from '../types';
 import { extractOttPlatformFromTMDBDetails, predictOttPlatformWithAI } from './tmdb';
+import { touchImdbOttUsage } from './cacheManager';
 
 export interface CachedImdbRating {
   id: string;
@@ -101,6 +102,7 @@ export function getCachedImdbRating(contentId: string): CachedImdbRating | null 
       return null;
     }
 
+    touchImdbOttUsage(contentId);
     return data;
   } catch (e) {
     return null;

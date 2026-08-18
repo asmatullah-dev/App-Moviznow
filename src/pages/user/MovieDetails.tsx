@@ -57,6 +57,7 @@ import {
   Image as ImageIcon,
 } from "lucide-react";
 import { logEvent } from "../../services/analytics";
+import { touchMetadataUsage } from "../../services/cacheManager";
 import AlertModal from "../../components/AlertModal";
 import ConfirmModal from "../../components/ConfirmModal";
 import SharePreviewModal from "../../components/SharePreviewModal";
@@ -70,6 +71,7 @@ import {
   isRomanized,
   getOttBadgeConfig,
 } from "../../utils/contentUtils";
+import { OttBadge } from "../../components/OttBadge";
 import {
   MediaModal,
   findTMDBByImdb,
@@ -344,6 +346,7 @@ export default function MovieDetails() {
     setIsLightboxImageLoading(true);
 
     if (id) {
+      touchMetadataUsage(id);
       // Load full content cache asynchronously
       safeStorage.getItemAsync(`movie_details_${id}`).then((cachedFull) => {
         if (activeId !== id) return; // Prevent state updates from stale closures
@@ -971,6 +974,7 @@ export default function MovieDetails() {
           recent = recent.filter((c) => c.id !== mergedContent.id);
 
           // Save full content to local storage for offline access
+          touchMetadataUsage(mergedContent.id);
           safeStorage.setItem(
             `movie_details_${mergedContent.id}`,
             JSON.stringify(mergedContent),
@@ -1880,25 +1884,20 @@ export default function MovieDetails() {
       : false;
     const isVcloud = isVcloudHost || isVcloudName;
 
-    if (
-      targetUrl.includes("hubcloud") ||
-      targetUrl.includes("hubcould") ||
-      targetUrl.includes("hubdrive") ||
-      isVcloud
-    ) {
+    const isHubcloudRawLink = (u: string) => {
+      if (!u) return false;
+      const l = u.toLowerCase();
+      return (
+        l.includes("hubcloud") ||
+        l.includes("hubcould") ||
+        l.includes("hubdrive") ||
+        l.includes("vcloud")
+      );
+    };
+
+    if (isHubcloudRawLink(targetUrl) || isVcloud) {
       const clickId = targetUrl;
       setExtractingLinkId(clickId);
-      // Immediately open the popup with a temporary "extracting" state, so user gets feedback
-      setLinkPopup({
-        isOpen: true,
-        url: targetUrl,
-        originalUrl: targetUrl,
-        name: linkName || "Unknown Link",
-        id: linkId || "unknown",
-        isZip,
-        tinyUrl,
-        formattedTitle,
-      });
 
       let shouldExtract = true;
       const now = Date.now();
@@ -1926,16 +1925,16 @@ export default function MovieDetails() {
             );
           }
 
-          if (prunedObj[url]) {
-            cachedLocal = prunedObj[url];
+          if (prunedObj[url] || prunedObj[targetUrl]) {
+            cachedLocal = prunedObj[url] || prunedObj[targetUrl];
           }
         }
       } catch (e) {}
 
-      const cached = hubcloudCacheRef.current[targetUrl] || cachedLocal;
+      const cached = hubcloudCacheRef.current[targetUrl] || hubcloudCacheRef.current[url] || cachedLocal;
 
-      // If we have a cached link within 10 minutes (600,000 ms), use it directly
-      if (cached && now - cached.timestamp < 600000) {
+      // If we have a valid cached link within 10 minutes (600,000 ms), use it directly
+      if (cached && now - cached.timestamp < 600000 && cached.url && !isHubcloudRawLink(cached.url)) {
         shouldExtract = false;
         finalUrl = cached.url;
         finalTinyUrl = undefined;
@@ -1944,7 +1943,7 @@ export default function MovieDetails() {
         hubcloudCacheRef.current[targetUrl] = cached; // Update memory cache
       }
 
-      let isCloudflareBlocked = false;
+      let extractionFailed = false;
 
       if (shouldExtract) {
         try {
@@ -1955,7 +1954,7 @@ export default function MovieDetails() {
           });
           if (res.ok) {
             const data = await res.json();
-            if (data.url && data.url !== targetUrl) {
+            if (data.url && data.url !== targetUrl && !isHubcloudRawLink(data.url)) {
               finalUrl = data.url;
               finalTinyUrl = undefined; // Drop the old tinyurl since url changed!
               finalCandidates = data.candidates;
@@ -1980,39 +1979,42 @@ export default function MovieDetails() {
                   JSON.stringify(cacheObj),
                 );
               } catch (e) {}
-            } else if (data.isCloudflare) {
-              finalUrl = targetUrl;
-              finalTinyUrl = tinyUrl;
-              finalSize = "Cloudflare Blocked";
-              isCloudflareBlocked = true;
-              // We do NOT cache failed extractions
+            } else {
+              extractionFailed = true;
             }
+          } else {
+            extractionFailed = true;
           }
         } catch (e) {
           console.error("Failed to resolve link", e);
+          extractionFailed = true;
         }
       }
 
       setExtractingLinkId((prev) => (prev === clickId ? null : prev));
-      setLinkPopup((prev) => {
-        // Only update the popup final URL if they haven't clicked a DIFFERENT link
-        // We know it's the same popup content if the original 'url' or 'id' matches what we opened
-        if (prev && prev.url === targetUrl) {
-          return {
-            ...prev,
-            url: finalUrl,
-            originalUrl: targetUrl,
-            name: linkName || "Unknown Link",
-            id: linkId || "unknown",
-            isZip,
-            tinyUrl: finalTinyUrl,
-            candidates: finalCandidates,
-            size: finalSize,
-            isCloudflare: isCloudflareBlocked,
-            formattedTitle,
-          };
-        }
-        return prev;
+
+      const isStillHubcloud = !finalUrl || finalUrl === targetUrl || isHubcloudRawLink(finalUrl);
+
+      if (extractionFailed || isStillHubcloud) {
+        setAlertConfig({
+          isOpen: true,
+          title: t("Extraction Error"),
+          message: t("Error in extracting links, please try again"),
+        });
+        return;
+      }
+
+      setLinkPopup({
+        isOpen: true,
+        url: finalUrl,
+        originalUrl: targetUrl,
+        name: linkName || "Unknown Link",
+        id: linkId || "unknown",
+        isZip,
+        tinyUrl: finalTinyUrl,
+        candidates: finalCandidates,
+        size: finalSize,
+        formattedTitle,
       });
       return;
     }
@@ -2096,6 +2098,22 @@ export default function MovieDetails() {
     trackStreamAndCheckRate();
 
     let urlToPlay = linkPopup.url;
+
+    const lowerUrl = urlToPlay.toLowerCase();
+    if (
+      lowerUrl.includes("hubcloud") ||
+      lowerUrl.includes("hubcould") ||
+      lowerUrl.includes("hubdrive") ||
+      lowerUrl.includes("vcloud")
+    ) {
+      setAlertConfig({
+        isOpen: true,
+        title: t("Extraction Error"),
+        message: t("Error in extracting links, please try again"),
+      });
+      closeLinkPopup();
+      return;
+    }
 
     if (!urlToPlay.startsWith("http")) {
       urlToPlay = "https://" + urlToPlay;
@@ -2360,6 +2378,22 @@ export default function MovieDetails() {
 
     let url = linkPopup.url;
 
+    const lowerUrl = url.toLowerCase();
+    if (
+      lowerUrl.includes("hubcloud") ||
+      lowerUrl.includes("hubcould") ||
+      lowerUrl.includes("hubdrive") ||
+      lowerUrl.includes("vcloud")
+    ) {
+      setAlertConfig({
+        isOpen: true,
+        title: t("Extraction Error"),
+        message: t("Error in extracting links, please try again"),
+      });
+      closeLinkPopup();
+      return;
+    }
+
     if (!url.startsWith("http")) {
       url = "https://" + url;
     }
@@ -2482,6 +2516,22 @@ export default function MovieDetails() {
           };
           const formattedTitle = getFormattedTitle(link);
 
+          const normalizedTargetUrl = (() => {
+            try {
+              const u = new URL(link.url);
+              const host = u.hostname.toLowerCase();
+              if (host.includes('hubcould') || host.includes('hubcloud') || host.includes('vcloud')) {
+                u.hostname = 'hubcloud.cx';
+                return u.toString();
+              } else if (host.includes('hubdrive')) {
+                u.hostname = 'hubdrive.space';
+                return u.toString();
+              }
+            } catch (e) {}
+            return link.url;
+          })();
+          const isExtracting = extractingLinkId === link.url || extractingLinkId === normalizedTargetUrl;
+
           return (
             <div
               key={linkKey}
@@ -2498,6 +2548,7 @@ export default function MovieDetails() {
 
               <div className="flex items-center gap-2">
                 <button
+                  disabled={isExtracting}
                   onClick={() =>
                     handlePlayClick(
                       link.url,
@@ -2510,18 +2561,21 @@ export default function MovieDetails() {
                       formattedTitle,
                     )
                   }
-                  className="flex-1 flex items-center justify-center gap-1.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 active:scale-95 text-white py-2.5 px-3 rounded-xl text-xs sm:text-sm font-extrabold shadow-lg shadow-emerald-500/20 border border-emerald-400/30 transition-all cursor-pointer"
-                  title={isLocked ? "Locked" : "Play"}
+                  className="flex-1 flex items-center justify-center gap-1.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 active:scale-95 text-white py-2.5 px-3 rounded-xl text-xs sm:text-sm font-extrabold shadow-lg shadow-emerald-500/20 border border-emerald-400/30 transition-all cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed"
+                  title={isExtracting ? t("Extracting...") : isLocked ? "Locked" : "Play"}
                 >
-                  {isLocked ? (
+                  {isExtracting ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : isLocked ? (
                     <Lock className="w-4 h-4 text-amber-200" />
                   ) : (
                     <Play className="w-4 h-4 fill-current" />
                   )}
-                  <span>{isLocked ? "Locked" : "Play"}</span>
+                  <span>{isExtracting ? t("Extracting...") : isLocked ? "Locked" : "Play"}</span>
                 </button>
 
                 <button
+                  disabled={isExtracting}
                   onClick={() =>
                     handlePlayClick(
                       link.url,
@@ -2534,15 +2588,17 @@ export default function MovieDetails() {
                       formattedTitle,
                     )
                   }
-                  className="flex-1 flex items-center justify-center gap-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 active:scale-95 text-white py-2.5 px-3 rounded-xl text-xs sm:text-sm font-extrabold shadow-lg shadow-cyan-600/20 border border-cyan-400/30 transition-all cursor-pointer"
-                  title={isLocked ? "Locked" : "Download"}
+                  className="flex-1 flex items-center justify-center gap-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 active:scale-95 text-white py-2.5 px-3 rounded-xl text-xs sm:text-sm font-extrabold shadow-lg shadow-cyan-600/20 border border-cyan-400/30 transition-all cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed"
+                  title={isExtracting ? t("Extracting...") : isLocked ? "Locked" : "Download"}
                 >
-                  {isLocked ? (
+                  {isExtracting ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : isLocked ? (
                     <Lock className="w-4 h-4 text-amber-200" />
                   ) : (
                     <Download className="w-4 h-4" />
                   )}
-                  <span>{isLocked ? "Locked" : "Download"}</span>
+                  <span>{isExtracting ? t("Extracting...") : isLocked ? "Locked" : "Download"}</span>
                 </button>
 
                 {link.url &&
@@ -2709,21 +2765,6 @@ export default function MovieDetails() {
                     className="w-full h-full object-cover"
                     referrerPolicy="no-referrer"
                   />
-
-                  {/* OTT Platform Badge on Poster */}
-                  {displayData.ottPlatform && (() => {
-                    const badge = getOttBadgeConfig(displayData.ottPlatform);
-                    return (
-                      <div className="absolute top-2.5 right-2.5 z-10 pointer-events-none">
-                        <span className={clsx(
-                          "px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider shadow-xl border backdrop-blur-md",
-                          badge ? badge.bg : "bg-black/80 text-white border-white/20"
-                        )}>
-                          {badge ? badge.name : displayData.ottPlatform}
-                        </span>
-                      </div>
-                    );
-                  })()}
 
                   {/* Desktop Hover overlay */}
                   <div className="absolute inset-0 bg-black/65 opacity-0 group-hover/poster:opacity-100 transition-opacity duration-300 flex items-center justify-center backdrop-blur-[2px]">
@@ -3216,19 +3257,7 @@ export default function MovieDetails() {
                           <span className="text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider text-[11px] w-20 shrink-0">
                             OTT
                           </span>
-                          {(() => {
-                            const badge = getOttBadgeConfig(displayData.ottPlatform);
-                            return (
-                              <span
-                                className={clsx(
-                                  "inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-black uppercase tracking-wider border shadow-sm",
-                                  badge ? badge.bg : "bg-cyan-500/10 text-cyan-600 dark:text-cyan-300 border-cyan-500/20"
-                                )}
-                              >
-                                {badge ? badge.name : displayData.ottPlatform}
-                              </span>
-                            );
-                          })()}
+                          <OttBadge platform={displayData.ottPlatform} className="px-2.5 py-1 text-xs" />
                         </div>
                       )}
                       {mergedContent.qualityId && (
@@ -4658,7 +4687,7 @@ export default function MovieDetails() {
                 );
               }
 
-              // Update cachedMetadata with the new data to prevent flickering before onSnapshot fires
+              // Update cachedMetadata with the new data to update UI instantly without network roundtrip
               setCachedMetadata((prev) => {
                 const newCache = { ...prev.data, ...updateData };
                 safeStorage.setItem(

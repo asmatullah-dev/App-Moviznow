@@ -597,6 +597,7 @@ const translations: Record<string, Record<Language, string>> = {
   'Refresh Catalog': { en: 'Refresh Catalog', 'ur-roman': 'Catalog Refresh Karein', ur: 'کیٹلاگ ریفریش کریں' },
   'Catalog refreshed successfully!': { en: 'Catalog refreshed successfully!', 'ur-roman': 'Catalog refresh ho gaya!', ur: 'کیٹلاگ ریفریش ہو گیا!' },
   'New content loaded!': { en: 'New content loaded!', 'ur-roman': 'Naya content load ho gaya!', ur: 'نیا مواد لوڈ ہو گیا!' },
+  'content updated': { en: 'content updated', 'ur-roman': 'content update ho gaya', ur: 'مواد اپ ڈیٹ ہو گیا' },
   'Recently Added': { en: 'Recently Added', 'ur-roman': 'Naya Shamil Shuda', ur: 'نیا شامل شدہ' },
   'Collapse Recently Viewed': { en: 'Collapse Recently Viewed', 'ur-roman': 'Recently Viewed chupayein', ur: 'حالیہ دیکھا گیا بند کریں' },
   'Expand Recently Viewed': { en: 'Expand Recently Viewed', 'ur-roman': 'Recently Viewed kholein', ur: 'حالیہ دیکھا گیا کھولیں' },

@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { getAuth, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, getDoc, updateDoc, setDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
@@ -25,6 +25,11 @@ export const db = initializeFirestore(app, {
 }, extendedConfig.firestoreDatabaseId);
 
 export const auth = getAuth(app);
+if (typeof window !== 'undefined') {
+  setPersistence(auth, browserLocalPersistence).catch((err) => {
+    console.warn('Could not set auth persistence:', err);
+  });
+}
 export const storage = getStorage(app);
 export const messaging = typeof window !== 'undefined' ? getMessaging(app) : null;
 
@@ -115,40 +120,37 @@ export const requestNotificationPermission = async (force: boolean = false) => {
   try {
     const permission = await Notification.requestPermission();
     if (permission === 'granted') {
-      let isForced = force;
-      // Auto-migrate users once to the new FCM token system in the background
-      const MIGRATION_KEY = 'fcm_v10_migrated_auto_v1';
-      if (!force && !localStorage.getItem(MIGRATION_KEY)) {
-        isForced = true;
-        localStorage.setItem(MIGRATION_KEY, 'true');
-      }
+      const CACHE_KEY = `fcm_token_v3_last_update_${auth.currentUser?.uid || 'anon'}`;
+      const lastUpdate = localStorage.getItem(CACHE_KEY);
+      const now = Date.now();
+      const ONE_DAY = 24 * 60 * 60 * 1000;
+      const currentUserId = auth.currentUser?.uid || 'anonymous';
 
-      // Register service worker explicitly to ensure it's the right one
-      let registration;
+      let parsedCache: any = null;
+      try {
+        if (lastUpdate) parsedCache = JSON.parse(lastUpdate);
+      } catch(e) {}
+
+      // Register service worker
+      let registration: ServiceWorkerRegistration | undefined;
       if ('serviceWorker' in navigator) {
-        if (isForced) {
+        if (force) {
           try {
             const registrations = await navigator.serviceWorker.getRegistrations();
             for (let reg of registrations) {
               await reg.unregister();
             }
-            console.log("Unregistered old service workers.");
           } catch(e) {}
         }
-        // Pass Firebase config via query parameters to the service worker so it dynamically updates on remix
         const configParams = new URLSearchParams(firebaseConfig as any).toString();
         registration = await navigator.serviceWorker.register(`/sw.js?${configParams}`);
       }
 
-      if (isForced) {
+      if (force) {
         try {
-          // Import deleteToken at the top or use it directly
           const { deleteToken } = await import('firebase/messaging');
           await deleteToken(messaging);
-          console.log("Deleted old FCM token to force new registration.");
-        } catch (e) {
-          console.warn("Could not delete old token", e);
-        }
+        } catch (e) {}
       }
 
       const vapidKey = import.meta.env.VITE_FCM_VAPID_KEY;
@@ -163,122 +165,104 @@ export const requestNotificationPermission = async (force: boolean = false) => {
       });
       
       if (token) {
-        // Optimized: Only store token in Firestore if it changed or hasn't been updated in 24 hours
-        const CACHE_KEY = `fcm_token_v3_last_update_${auth.currentUser?.uid || 'anon'}`;
-        const lastUpdate = localStorage.getItem(CACHE_KEY);
-        const now = Date.now();
-        const thirtyDays = 30 * 24 * 60 * 60 * 1000;
-        const currentUserId = auth.currentUser?.uid || 'anonymous';
+        // Fast path: If token is unchanged and was synced within 24 hours, skip all Firestore writes
+        const tokenSyncedRecently = parsedCache && 
+          parsedCache.token === token && 
+          parsedCache.userId === currentUserId && 
+          (now - parsedCache.timestamp < ONE_DAY);
 
-        let parsedCache: any = null;
+        if (!force && tokenSyncedRecently) {
+          return token;
+        }
+
         try {
-          if (lastUpdate) parsedCache = JSON.parse(lastUpdate);
-        } catch(e) {}
-
-        const needsUpdate = isForced || !parsedCache || 
-                            parsedCache.token !== token || 
-                            parsedCache.userId !== currentUserId ||
-                            (now - parsedCache.timestamp > thirtyDays);
-
-        if (needsUpdate) {
-          try {
-            // 1. Get the current chunk ID from meta
-            const metaRef = doc(db, 'chunk_meta', 'versions');
-            const metaDoc = await getDoc(metaRef);
-            let latestChunkId = 'fcm_chunk_0';
-            
-            if (metaDoc.exists()) {
-              const metaData = metaDoc.data();
-              if (metaData.fcm_tokens && metaData.fcm_tokens.latestChunkId) {
-                latestChunkId = metaData.fcm_tokens.latestChunkId;
-              }
+          // 1. Get current chunk ID from meta
+          const metaRef = doc(db, 'chunk_meta', 'versions');
+          const metaDoc = await getDoc(metaRef);
+          let latestChunkId = 'fcm_chunk_0';
+          
+          if (metaDoc.exists()) {
+            const metaData = metaDoc.data();
+            if (metaData.fcm_tokens && metaData.fcm_tokens.latestChunkId) {
+              latestChunkId = metaData.fcm_tokens.latestChunkId;
             }
+          }
 
-            const chunkRef = doc(db, 'fcm_tokens', latestChunkId);
-            const chunkDoc = await getDoc(chunkRef);
-            
-            let targetChunkId = latestChunkId;
-            const tokenData = {
-              token,
-              updatedAt: new Date().toISOString(),
-              userId: auth.currentUser?.uid || 'anonymous'
-            };
+          const chunkRef = doc(db, 'fcm_tokens', latestChunkId);
+          const chunkDoc = await getDoc(chunkRef);
+          
+          let targetChunkId = latestChunkId;
+          const tokenData = {
+            token,
+            updatedAt: new Date().toISOString(),
+            userId: auth.currentUser?.uid || 'anonymous'
+          };
 
-            if (chunkDoc.exists()) {
-              const items = chunkDoc.data() || {};
-              // Limit of 2000 tokens per document as requested
-              if (Object.keys(items).length >= 2000 && !items[token]) {
-                const match = latestChunkId.match(/(\d+)$/);
-                const nextIndex = match ? parseInt(match[1]) + 1 : 1;
-                targetChunkId = 'fcm_chunk_' + nextIndex;
-                
-                // Create new chunk
-                await setDoc(doc(db, 'fcm_tokens', targetChunkId), {
-                  [token]: tokenData
-                });
-                
-                // Update meta
-                await updateDoc(metaRef, {
-                  'fcm_tokens.latestChunkId': targetChunkId,
-                  'fcm_tokens.version': Date.now(),
-                  'lastGlobalUpdate': serverTimestamp()
-                });
-              } else {
-                // Use setDoc with merge to treat the token key as a literal string, avoiding dot-path issues
-                await setDoc(chunkRef, {
-                   [token]: tokenData
-                }, { merge: true });
-              }
+          if (chunkDoc.exists()) {
+            const items = chunkDoc.data() || {};
+            if (Object.keys(items).length >= 2000 && !items[token]) {
+              const match = latestChunkId.match(/(\d+)$/);
+              const nextIndex = match ? parseInt(match[1]) + 1 : 1;
+              targetChunkId = 'fcm_chunk_' + nextIndex;
+              
+              await setDoc(doc(db, 'fcm_tokens', targetChunkId), {
+                [token]: tokenData
+              });
+              
+              await updateDoc(metaRef, {
+                'fcm_tokens.latestChunkId': targetChunkId,
+                'fcm_tokens.version': Date.now(),
+                'lastGlobalUpdate': serverTimestamp()
+              });
             } else {
-              // Create first chunk
-              await setDoc(chunkRef, { [token]: tokenData });
-              await setDoc(metaRef, {
-                fcm_tokens: {
-                  latestChunkId: targetChunkId,
-                  version: Date.now()
-                }
+              await setDoc(chunkRef, {
+                 [token]: tokenData
               }, { merge: true });
             }
-
-            if (auth.currentUser) {
-              try {
-                 const uid = auth.currentUser.uid;
-                 const pendingStr = safeStorage.getItem('pending_user_updates') || '{}';
-                 let pendingAll = JSON.parse(pendingStr);
-                 pendingAll[uid] = pendingAll[uid] || {};
-                 pendingAll[uid].notification = 'yes';
-                 safeStorage.setItem('pending_user_updates', JSON.stringify(pendingAll));
-                 safeStorage.setItem('needs_user_sync', 'true');
-                 
-                 // Also update profile cache
-                 const cachedStr = safeStorage.getItem('profile_cache');
-                 if (cachedStr) {
-                   try {
-                      const profileCache = JSON.parse(cachedStr);
-                      profileCache.notification = 'yes';
-                      safeStorage.setItem('profile_cache', JSON.stringify(profileCache));
-                      // Dispatch a generic auth update to refresh context if needed
-                      window.dispatchEvent(new Event('profile_cache_updated'));
-                   } catch(e){}
-                 }
-
-                 window.dispatchEvent(new Event('pending_user_updates_changed'));
-              } catch (e) {
-                 console.log("Failed to update user profile with notification status");
+          } else {
+            await setDoc(chunkRef, { [token]: tokenData });
+            await setDoc(metaRef, {
+              fcm_tokens: {
+                latestChunkId: targetChunkId,
+                version: Date.now()
               }
-            }
-
-            localStorage.setItem(CACHE_KEY, JSON.stringify({ token, timestamp: now, userId: currentUserId }));
-            
-            // Also register with server for topic subscription
-            await fetch('/api/notifications/subscribe', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ token, userId: auth.currentUser?.uid })
-            });
-          } catch (e) {
-            console.warn('Error saving FCM token:', e);
+            }, { merge: true });
           }
+
+          if (auth.currentUser) {
+            try {
+               const uid = auth.currentUser.uid;
+               const pendingStr = safeStorage.getItem('pending_user_updates') || '{}';
+               let pendingAll = JSON.parse(pendingStr);
+               pendingAll[uid] = pendingAll[uid] || {};
+               pendingAll[uid].notification = 'yes';
+               safeStorage.setItem('pending_user_updates', JSON.stringify(pendingAll));
+               
+               const cachedStr = safeStorage.getItem('profile_cache');
+               if (cachedStr) {
+                 try {
+                    const profileCache = JSON.parse(cachedStr);
+                    profileCache.notification = 'yes';
+                    safeStorage.setItem('profile_cache', JSON.stringify(profileCache));
+                    window.dispatchEvent(new Event('profile_cache_updated'));
+                 } catch(e){}
+               }
+
+               window.dispatchEvent(new Event('pending_user_updates_changed'));
+            } catch (e) {
+               console.log("Failed to update user profile with notification status");
+            }
+          }
+
+          localStorage.setItem(CACHE_KEY, JSON.stringify({ token, timestamp: now, userId: currentUserId }));
+          
+          await fetch('/api/notifications/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token, userId: auth.currentUser?.uid })
+          }).catch(() => {});
+        } catch (e) {
+          console.warn('Error saving FCM token:', e);
         }
         
         return token;

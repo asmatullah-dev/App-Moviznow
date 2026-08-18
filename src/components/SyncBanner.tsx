@@ -5,16 +5,30 @@ import { useLanguage } from '../contexts/LanguageContext';
 export function SyncBanner() {
   const { t } = useLanguage();
   const [syncStatus, setSyncStatus] = useState<'syncing' | 'up-to-date' | 'success' | null>(null);
+  const [updatedCount, setUpdatedCount] = useState<number | undefined>(undefined);
 
   useEffect(() => {
     const handleSyncStatus = (e: Event) => {
       const customEvent = e as CustomEvent;
-      setSyncStatus(customEvent.detail);
+      const detail = customEvent.detail;
+      let status: 'syncing' | 'up-to-date' | 'success' | null = null;
+      let count: number | undefined = undefined;
 
-      if (customEvent.detail === 'success' || customEvent.detail === 'up-to-date') {
+      if (typeof detail === 'string') {
+        status = detail as any;
+      } else if (detail && typeof detail === 'object') {
+        status = detail.status;
+        count = detail.updatedContentCount;
+      }
+
+      setSyncStatus(status);
+      setUpdatedCount(count);
+
+      if (status === 'success' || status === 'up-to-date') {
         setTimeout(() => {
           setSyncStatus(null);
-        }, 3000);
+          setUpdatedCount(undefined);
+        }, 3200);
       }
     };
 
@@ -30,10 +44,15 @@ export function SyncBanner() {
     success: 'bg-emerald-500'
   };
 
-  const text = {
-    syncing: t('Updating data...'),
-    'up-to-date': t('Data is up to date'),
-    success: t('Data updated successfully')
+  const getMessageText = () => {
+    if (syncStatus === 'syncing') return t('Updating data...');
+    if (syncStatus === 'success') {
+      if (updatedCount && updatedCount > 0) {
+        return `${updatedCount} ${t('content updated')}`;
+      }
+      return t('Data updated successfully');
+    }
+    return t('Data is up to date');
   };
 
   return (
@@ -43,7 +62,7 @@ export function SyncBanner() {
       ) : (
         <CheckCircle2 className="w-4 h-4" />
       )}
-      <span>{text[syncStatus]}</span>
+      <span>{getMessageText()}</span>
     </div>
   );
 }

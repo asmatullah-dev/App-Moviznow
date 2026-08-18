@@ -48,6 +48,7 @@
     "react-virtuoso": "^4.18.3",
     "recharts": "^3.9.2",
     "resend": "^6.18.1",
+    "simple-icons": "^16.28.0",
     "tailwind-merge": "^3.5.0",
     "ua-parser-js": "^2.0.10"
   },

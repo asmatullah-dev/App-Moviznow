@@ -103,11 +103,11 @@ export default function TopUp() {
         userName: profile.displayName || 'Unknown',
         userEmail: profile.email,
         userRole: profile.role,
-        type: 'membership',
+        type: 'membership' as const,
         amount: activePlan.price,
         months: activePlan.months,
         planName: activePlan.name,
-        status: 'pending',
+        status: 'pending' as const,
         createdAt: new Date().toISOString(),
       };
 
@@ -118,7 +118,10 @@ export default function TopUp() {
       safeStorage.setItem("pending_orders_array", JSON.stringify(pendingOrders));
       safeStorage.setItem("needs_user_sync", "true");
 
-      await updateUserProfileData({ phone: whatsappNumber }, undefined, true);
+      await updateUserProfileData({ 
+        phone: whatsappNumber,
+        orders: [...(profile.orders || []), orderData]
+      }, undefined, true);
 
       setOrderId(newOrderId);
       setConfirmed(true);

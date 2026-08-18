@@ -503,8 +503,8 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                         
                         if (catalogResult?.isRelaxed) {
                           showSyncToast(t('Data is up to date'), 'info');
-                        } else if (catalogResult?.updated) {
-                          showSyncToast(t('New content loaded!'), 'success');
+                        } else if (catalogResult?.updatedCount && catalogResult.updatedCount > 0) {
+                          showSyncToast(`${catalogResult.updatedCount} ${t('content updated')}`, 'success');
                         } else {
                           showSyncToast(t('Data is up to date'), 'info');
                         }

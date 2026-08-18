@@ -65,10 +65,10 @@ export default function Cart() {
         userName: profile.displayName || 'Unknown', 
         userEmail: profile.email, 
         userRole: profile.role, 
-        type: 'content', 
+        type: 'content' as const, 
         amount: currentTotal, 
         items: currentCart, 
-        status: 'pending', 
+        status: 'pending' as const, 
         createdAt: new Date().toISOString() 
       }; 
       const pendingOrdersStr = safeStorage.getItem('pending_orders_array') || '[]'; 
@@ -76,7 +76,10 @@ export default function Cart() {
       pendingOrders.push(orderData); 
       safeStorage.setItem('pending_orders_array', JSON.stringify(pendingOrders)); 
       safeStorage.setItem('needs_user_sync', 'true'); 
-      await updateUserProfileData({ phone: whatsappNumber }, undefined, true); 
+      await updateUserProfileData({ 
+        phone: whatsappNumber,
+        orders: [...(profile.orders || []), orderData]
+      }, undefined, true); 
       
       const created = { id: newOrderId, items: currentCart, amount: currentTotal };
       setLastCreatedOrder(created);

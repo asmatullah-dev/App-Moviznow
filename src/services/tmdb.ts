@@ -1,3 +1,5 @@
+import { touchImdbOttUsage, IMDB_OTT_TTL_MS } from './cacheManager';
+
 export interface TMDBUpcomingItem {
   id: number;
   title: string;
@@ -155,9 +157,35 @@ export async function predictOttPlatformWithAI(
 
   try {
     const cacheKey = `ai_ott_${type}_${title.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+    const ottId = `${type}_${title.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
     try {
       const cached = localStorage.getItem(cacheKey) || sessionStorage.getItem(cacheKey);
-      if (cached) return cached === 'null' ? null : cached;
+      if (cached) {
+        let platformValue: string | null = null;
+        let isExpired = false;
+        try {
+          const parsed = JSON.parse(cached);
+          if (parsed && typeof parsed === 'object' && 'platform' in parsed) {
+            if (parsed.timestamp && (Date.now() - parsed.timestamp >= IMDB_OTT_TTL_MS)) {
+              isExpired = true;
+            } else {
+              platformValue = parsed.platform;
+            }
+          } else {
+            platformValue = cached;
+          }
+        } catch (e) {
+          platformValue = cached;
+        }
+
+        if (isExpired) {
+          localStorage.removeItem(cacheKey);
+          sessionStorage.removeItem(cacheKey);
+        } else if (platformValue) {
+          touchImdbOttUsage(ottId);
+          return platformValue === 'null' ? null : platformValue;
+        }
+      }
     } catch (e) {}
 
     const res = await fetch('/api/predict-ott', {
@@ -176,8 +204,13 @@ export async function predictOttPlatformWithAI(
     const platform = normalizeOttPlatformName(data.platform);
 
     try {
-      localStorage.setItem(cacheKey, platform || 'null');
-      sessionStorage.setItem(cacheKey, platform || 'null');
+      const cacheObj = JSON.stringify({
+        platform: platform || 'null',
+        timestamp: Date.now()
+      });
+      localStorage.setItem(cacheKey, cacheObj);
+      sessionStorage.setItem(cacheKey, cacheObj);
+      touchImdbOttUsage(ottId);
     } catch (e) {}
 
     return platform;

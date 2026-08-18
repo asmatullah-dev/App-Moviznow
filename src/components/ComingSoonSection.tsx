@@ -25,6 +25,7 @@ import {
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ScrollableRow } from './ScrollableRow';
+import { OttBadge } from './OttBadge';
 import { safeStorage } from '../utils/safeStorage';
 import {
   fetchUpcomingCombined,
@@ -39,6 +40,7 @@ import { useContent } from '../contexts/ContentContext';
 import { useHaptics } from '../hooks/useHaptics';
 import { useModalBehavior } from '../hooks/useModalBehavior';
 import { getOptimizedImageUrl } from '../utils/imageUtils';
+import { getOttBadgeConfig } from '../utils/contentUtils';
 import SharePreviewModal from './SharePreviewModal';
 
 interface ComingSoonSectionProps {
@@ -489,53 +491,6 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className 
     return url;
   };
 
-  const getOttBadgeConfig = (platform?: string | null) => {
-    if (!platform) return null;
-    const p = platform.toLowerCase();
-
-    if (p.includes('netflix')) {
-      return { name: 'Netflix', bg: 'bg-[#E50914] text-white border-[#E50914]' };
-    }
-    if (p.includes('amazon') || p.includes('prime')) {
-      return { name: 'Prime Video', bg: 'bg-[#00A8E1] text-white border-[#00A8E1]' };
-    }
-    if (p.includes('disney')) {
-      return { name: 'Disney+', bg: 'bg-[#113CCF] text-white border-[#113CCF]' };
-    }
-    if (p.includes('apple')) {
-      return { name: 'Apple TV+', bg: 'bg-zinc-900 text-white border-zinc-700' };
-    }
-    if (p.includes('hbo') || p.includes('max')) {
-      return { name: 'HBO Max', bg: 'bg-[#6814d4] text-white border-[#6814d4]' };
-    }
-    if (p.includes('hulu')) {
-      return { name: 'Hulu', bg: 'bg-[#1ce783] text-black border-[#1ce783]' };
-    }
-    if (p.includes('paramount')) {
-      return { name: 'Paramount+', bg: 'bg-[#0064ff] text-white border-[#0064ff]' };
-    }
-    if (p.includes('peacock')) {
-      return { name: 'Peacock', bg: 'bg-[#00c2cb] text-black border-[#00c2cb]' };
-    }
-    if (p.includes('jiocinema') || p.includes('jio')) {
-      return { name: 'JioCinema', bg: 'bg-pink-600 text-white border-pink-500' };
-    }
-    if (p.includes('zee5')) {
-      return { name: 'Zee5', bg: 'bg-purple-700 text-white border-purple-500' };
-    }
-    if (p.includes('sonyliv') || p.includes('sony')) {
-      return { name: 'SonyLIV', bg: 'bg-amber-600 text-white border-amber-500' };
-    }
-    if (p.includes('hotstar')) {
-      return { name: 'Hotstar', bg: 'bg-[#0c2044] text-amber-400 border-amber-500/40' };
-    }
-    if (p.includes('crunchyroll')) {
-      return { name: 'Crunchyroll', bg: 'bg-orange-500 text-white border-orange-400' };
-    }
-
-    return { name: platform, bg: 'bg-zinc-800 text-white border-zinc-700' };
-  };
-
   const handleShare = (e: React.MouseEvent, item: TMDBUpcomingItem) => {
     e.stopPropagation();
     vibrate(30);
@@ -772,15 +727,8 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className 
                       </span>
 
                       {/* Actual OTT Platform Brand Badge */}
-                      {ottBadge ? (
-                        <span
-                          className={clsx(
-                            "px-2 py-0.5 rounded-md text-[9px] sm:text-[10px] font-black uppercase tracking-wider shadow-md border truncate max-w-[105px]",
-                            ottBadge.bg
-                          )}
-                        >
-                          {ottBadge.name}
-                        </span>
+                      {item.ottPlatform ? (
+                        <OttBadge platform={item.ottPlatform} />
                       ) : (
                         <span className="px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-black/75 text-amber-400 border border-amber-500/30 backdrop-blur-md flex items-center gap-1">
                           <Tv2 className="w-2.5 h-2.5" />
@@ -964,20 +912,7 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className 
 
                   {/* Actual OTT Platform Brand with AI Prediction Indicator */}
                   {selectedItem.ottPlatform ? (
-                    (() => {
-                      const badge = getOttBadgeConfig(selectedItem.ottPlatform);
-                      return (
-                        <span
-                          className={clsx(
-                            "px-2.5 py-1 rounded-lg text-[11px] font-black uppercase tracking-wider border shadow-md flex items-center gap-1.5",
-                            badge ? badge.bg : 'bg-zinc-800 text-white border-zinc-700'
-                          )}
-                        >
-                          <Tv2 className="w-3.5 h-3.5" />
-                          <span>{badge ? badge.name : selectedItem.ottPlatform}</span>
-                        </span>
-                      );
-                    })()
+                    <OttBadge platform={selectedItem.ottPlatform} className="px-2.5 py-1 text-[11px]" />
                   ) : (
                     <span className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-zinc-100 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800 flex items-center gap-1.5">
                       <Sparkles className="w-3.5 h-3.5 text-amber-500 animate-pulse" />

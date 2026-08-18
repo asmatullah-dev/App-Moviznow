@@ -8,16 +8,22 @@ export function useSystemNotifications(profile: UserProfile | null) {
   const isFirstLoad = useRef(true);
   const shownNotificationIds = useRef<Set<string>>(new Set());
 
-  useEffect(() => {
-    if (!profile || notifications.length === 0) return;
+  const tokenRequestedRef = useRef(false);
 
-    // Check if browser supports notifications
+  useEffect(() => {
+    if (!profile) return;
     if (!("Notification" in window)) return;
 
-    // Request permission and get FCM token
-    if (Notification.permission === "default" || Notification.permission === "granted") {
+    // Request permission / register FCM token once per session
+    if (!tokenRequestedRef.current && (Notification.permission === "default" || Notification.permission === "granted")) {
+      tokenRequestedRef.current = true;
       requestNotificationPermission().catch(console.error);
     }
+  }, [profile?.uid]);
+
+  useEffect(() => {
+    if (!profile || notifications.length === 0) return;
+    if (!("Notification" in window)) return;
 
     const latestNotification = notifications[0];
 

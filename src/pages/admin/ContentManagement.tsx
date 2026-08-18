@@ -21,7 +21,6 @@ import {
   deleteDoc,
   doc,
   updateDoc,
-  onSnapshot,
   writeBatch,
   getDocs,
   query,
@@ -106,12 +105,14 @@ import { AdjustContentsModal } from "../../components/AdjustContentsModal";
 import Modal from "../../components/Modal";
 import ManageModal from "../../components/ManageModal";
 import { Button } from "../../components/Button";
+import { OttBadge } from "../../components/OttBadge";
 import {
   formatContentTitle,
   formatReleaseDate,
   formatRuntime,
   formatDateToMonthDDYYYY,
   getContrastColor,
+  getOttBadgeConfig,
   isRomanized,
 } from "../../utils/contentUtils";
 import { smartSearch } from "../../utils/searchUtils";
@@ -410,6 +411,7 @@ const ContentCard = memo(
               }
               return null;
             })()}
+            <OttBadge platform={content.ottPlatform || (content as any).ott_platform} />
             {content.status === "draft" && (
               <div className="bg-yellow-500/90 text-black backdrop-blur-md px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
                 <EyeOff className="w-3 h-3" />

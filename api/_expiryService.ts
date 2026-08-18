@@ -346,12 +346,14 @@ export interface ExpiryCheckResult {
   errors: string[];
 }
 
+let lastFullExpiryRunTimestamp = 0;
+
 /**
  * Main Background Expiry Service
- * Checks all users in Firestore and sends Email (via Alerts@MovizNow.com), FCM push, and in-app notifications
+ * Checks users in Firestore once every 24 hours and sends Email (via Alerts@MovizNow.com), FCM push, and in-app notifications
  * for accounts on the date of expired.
  */
-export async function checkAndSendExpiryNotifications(targetUserId?: string): Promise<ExpiryCheckResult> {
+export async function checkAndSendExpiryNotifications(targetUserId?: string, force = false): Promise<ExpiryCheckResult> {
   const result: ExpiryCheckResult = {
     totalUsersChecked: 0,
     expiredUsersFound: 0,
@@ -364,10 +366,45 @@ export async function checkAndSendExpiryNotifications(targetUserId?: string): Pr
     errors: [],
   };
 
+  const nowMs = Date.now();
+  const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+
   const firestore = getDb();
   if (!firestore) {
     result.errors.push("Firestore database not initialized");
     return result;
+  }
+
+  // Persistent daily rate limit check across server instances and restarts (Once a day after 6 AM PKT / 1 AM UTC)
+  if (!targetUserId && !force) {
+    try {
+      const metaRef = firestore.collection("system_meta").doc("expiry_service");
+      const metaSnap = await metaRef.get();
+      const lastRun = metaSnap.exists ? metaSnap.data()?.lastFullRun || 0 : lastFullExpiryRunTimestamp;
+
+      const now = new Date(nowMs);
+      const currentThreshold = new Date(now.getTime());
+      currentThreshold.setUTCHours(1, 0, 0, 0); // 1 AM UTC is 6 AM PKT
+      
+      if (now.getUTCHours() < 1) {
+        currentThreshold.setUTCDate(currentThreshold.getUTCDate() - 1);
+      }
+      
+      const thresholdMs = currentThreshold.getTime();
+
+      if (lastRun >= thresholdMs) {
+        console.log(`[Expiry Service] Skipping full check: already ran for the current cycle (since 6 AM PKT). Last run was ${((nowMs - lastRun) / 1000 / 60 / 60).toFixed(2)} hours ago.`);
+        return result;
+      }
+
+      lastFullExpiryRunTimestamp = nowMs;
+      await metaRef.set(
+        { lastFullRun: nowMs, updatedAt: new Date().toISOString() },
+        { merge: true }
+      );
+    } catch (metaErr) {
+      console.warn("[Expiry Service] System meta rate-limit check notice:", metaErr);
+    }
   }
 
   try {
@@ -437,8 +474,6 @@ async function processUserDocs(
     const expiryMonth = parseInt(parts[1], 10) - 1;
     const expiryDay = parseInt(parts[2], 10);
 
-    // Expiry occurs on the date of expired (i.e. at or after the expiry date)
-    const expiryDateObj = new Date(expiryYear, expiryMonth, expiryDay, 23, 59, 59);
     const isExpiredOrToday = now >= new Date(expiryYear, expiryMonth, expiryDay, 0, 0, 0) || todayStr >= expiryDateStr;
 
     if (!isExpiredOrToday) {
@@ -448,17 +483,74 @@ async function processUserDocs(
 
     result.expiredUsersFound++;
 
-    // Check if expiry notice was ALREADY sent for this exact expiryDate
+    // Normalize date strings for safe comparison
+    const targetNormalized = expiryDateStr;
+    const lastNoticeNormalized = typeof data.lastExpiryNoticeFor === "string" ? data.lastExpiryNoticeFor.split("T")[0] : "";
+    const noticeSentDateNormalized = typeof data.expiryNoticeSentDate === "string" ? data.expiryNoticeSentDate.split("T")[0] : "";
+
+    // Quick initial check before running transaction
     if (
-      data.lastExpiryNoticeFor === expiryDate ||
-      data.expiryNoticeSentDate === expiryDateStr ||
-      (data.expiryNoticeSent === true && data.lastExpiryNoticeFor === expiryDate)
+      lastNoticeNormalized === targetNormalized ||
+      noticeSentDateNormalized === targetNormalized ||
+      (data.expiryNoticeSent === true && lastNoticeNormalized === targetNormalized)
     ) {
       result.skippedAlreadyNotified++;
       continue;
     }
 
-    console.log(`[Expiry Notification] Processing expiration notice for user ${uid} (${email}), expired on ${expiryDateStr}`);
+    // CRITICAL ATOMIC TRANSACTION: Claim lock BEFORE sending email to prevent double emails from concurrent runs
+    const userRef = firestore.collection("users").doc(uid);
+    let claimed = false;
+
+    try {
+      await firestore.runTransaction(async (transaction) => {
+        const freshSnap = await transaction.get(userRef);
+        if (!freshSnap.exists) return;
+        const freshData = freshSnap.data() || {};
+
+        const freshExpiryDate = freshData.expiryDate;
+        if (!freshExpiryDate || freshExpiryDate === "Lifetime" || freshExpiryDate === "null" || freshExpiryDate === "") {
+          return;
+        }
+
+        const freshExpiryStr = typeof freshExpiryDate === "string" ? freshExpiryDate.split("T")[0] : "";
+        const freshLastNotice = typeof freshData.lastExpiryNoticeFor === "string" ? freshData.lastExpiryNoticeFor.split("T")[0] : "";
+        const freshSentDate = typeof freshData.expiryNoticeSentDate === "string" ? freshData.expiryNoticeSentDate.split("T")[0] : "";
+
+        if (
+          freshLastNotice === freshExpiryStr ||
+          freshSentDate === freshExpiryStr ||
+          (freshData.expiryNoticeSent === true && freshLastNotice === freshExpiryStr)
+        ) {
+          // Already claimed/notified by another concurrent process
+          claimed = false;
+          return;
+        }
+
+        // Atomically mark user as processing/notified for this expiry date
+        transaction.update(userRef, {
+          status: "expired",
+          lastExpiryNoticeFor: freshExpiryDate,
+          lastExpiryNoticeSentAt: new Date().toISOString(),
+          expiryNoticeSent: true,
+          expiryNoticeSentDate: freshExpiryStr,
+          updatedAt: new Date().toISOString(),
+        });
+
+        claimed = true;
+      });
+    } catch (txErr: any) {
+      console.warn(`[Expiry Claim Lock Failed for user ${uid}]:`, txErr.message);
+      claimed = false;
+    }
+
+    if (!claimed) {
+      console.log(`[Expiry Notification] User ${uid} was already claimed/notified by another concurrent process. Skipping.`);
+      result.skippedAlreadyNotified++;
+      continue;
+    }
+
+    console.log(`[Expiry Notification] Claimed lock. Processing expiration notice for user ${uid} (${email}), expired on ${expiryDateStr}`);
 
     let emailSuccess = false;
     let fcmSuccess = false;
@@ -530,23 +622,8 @@ async function processUserDocs(
       result.inAppCreated++;
     }
 
-    // 4. Update User Document in Firestore
-    try {
-      await doc.ref.update({
-        status: "expired",
-        lastExpiryNoticeFor: expiryDate,
-        lastExpiryNoticeSentAt: new Date().toISOString(),
-        expiryNoticeSent: true,
-        expiryNoticeSentDate: expiryDateStr,
-        updatedAt: new Date().toISOString(),
-      });
-
-      result.notificationsSent++;
-      result.processedUserIds.push(uid);
-    } catch (updateErr: any) {
-      console.error(`[Expiry Update Failed for ${uid}]:`, updateErr);
-      result.errors.push(`Firestore update error for ${uid}: ${updateErr.message}`);
-    }
+    result.notificationsSent++;
+    result.processedUserIds.push(uid);
   }
 
   console.log(`[Expiry Service Completed] Checked: ${result.totalUsersChecked}, Expired: ${result.expiredUsersFound}, Notifications Sent: ${result.notificationsSent}, Emails: ${result.emailsSent}, In-App: ${result.inAppCreated}, Skipped (Already Notified): ${result.skippedAlreadyNotified}`);
@@ -767,6 +844,17 @@ export async function sendMembershipUpdateNotification(params: MembershipUpdateP
 
     // 3. Create In-App Notification
     inAppCreated = await saveInAppMembershipUpdateNotification(firestore, userId, displayName, email, newExpiryDate);
+
+    // If membership is being set to expired, mark expiryNoticeSent flags to prevent duplicate automated expiry emails
+    if (userStatus === "expired" && newExpiryDate) {
+      const expStr = typeof newExpiryDate === "string" ? newExpiryDate.split("T")[0] : newExpiryDate;
+      await firestore.collection("users").doc(userId).set({
+        lastExpiryNoticeFor: newExpiryDate,
+        expiryNoticeSent: true,
+        expiryNoticeSentDate: expStr,
+        lastExpiryNoticeSentAt: new Date().toISOString(),
+      }, { merge: true }).catch(() => {});
+    }
 
     return {
       success: true,

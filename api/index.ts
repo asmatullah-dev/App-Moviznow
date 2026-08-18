@@ -97,6 +97,9 @@ async function startServer() {
   app.use("/api/email", emailRouter);
 
   // Background Scan Endpoint
+  // In-memory background scan storage to avoid Firestore writes
+  const inMemoryScanStore: Record<string, any> = {};
+
   app.post(
     ["/api/start-background-scan", "/start-background-scan"],
     async (req, res) => {
@@ -108,28 +111,19 @@ async function startServer() {
         return res.status(400).json({ error: "Links array required" });
       }
 
-      // Start background process
+      // Start in-memory background process
       const scanId = "background";
-      const scanDocRef = db.collection("scans").doc(scanId);
+      inMemoryScanStore[scanId] = {
+        id: scanId,
+        status: "scanning",
+        scannedCount: 0,
+        totalLinks: links.length,
+        errorLinks: [],
+        startedAt: new Date().toISOString(),
+        lastUpdated: new Date().toISOString(),
+      };
 
-      try {
-        await scanDocRef.set({
-          id: scanId,
-          status: "scanning",
-          scannedCount: 0,
-          totalLinks: links.length,
-          errorLinks: [],
-          startedAt: admin.firestore.FieldValue.serverTimestamp(),
-          lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-        });
-      } catch (error) {
-        console.error("Error setting scan document:", error);
-        return res
-          .status(500)
-          .json({ error: "Failed to initialize scan document" });
-      }
-
-      res.json({ message: "Background scan started", scanId });
+      res.json({ message: "Background scan started (in-memory)", scanId });
 
       // Run the scan in the background
       (async () => {
@@ -224,12 +218,10 @@ async function startServer() {
             }
 
             scannedCount++;
-            if (scannedCount % 10 === 0 || scannedCount === links.length) {
-              await scanDocRef.update({
-                scannedCount,
-                errorLinks: foundErrors,
-                lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-              });
+            if (inMemoryScanStore[scanId]) {
+              inMemoryScanStore[scanId].scannedCount = scannedCount;
+              inMemoryScanStore[scanId].errorLinks = foundErrors;
+              inMemoryScanStore[scanId].lastUpdated = new Date().toISOString();
             }
           } catch (e) {
             console.error("Background scan error for link:", item.url, e);
@@ -244,18 +236,26 @@ async function startServer() {
         );
         await Promise.all(workers);
 
-        await scanDocRef.update({
-          status: "completed",
-          lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-        });
+        if (inMemoryScanStore[scanId]) {
+          inMemoryScanStore[scanId].status = "completed";
+          inMemoryScanStore[scanId].lastUpdated = new Date().toISOString();
+        }
       })().catch((err) => {
         console.error("Background scan fatal error:", err);
-        scanDocRef.update({
-          status: "error",
-          lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-        });
+        if (inMemoryScanStore[scanId]) {
+          inMemoryScanStore[scanId].status = "error";
+          inMemoryScanStore[scanId].lastUpdated = new Date().toISOString();
+        }
       });
     },
+  );
+
+  app.get(
+    ["/api/background-scan-status", "/background-scan-status"],
+    (req, res) => {
+      const scanId = (req.query.scanId as string) || "background";
+      res.json(inMemoryScanStore[scanId] || { status: "not_found" });
+    }
   );
 
   // IMDb Fetch Proxy
@@ -3204,7 +3204,12 @@ async function startServer() {
     });
     app.get("/sw.js", (req, res) => {
       res.sendFile(path.join(distPath, "sw.js"), {
-        headers: { "Content-Type": "application/javascript" },
+        headers: {
+          "Content-Type": "application/javascript",
+          "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0, s-maxage=0",
+          "Pragma": "no-cache",
+          "Expires": "0"
+        },
       });
     });
 
@@ -3228,7 +3233,12 @@ async function startServer() {
         const ogTags = await getOgTags(req);
         const html = template.replace("</head>", `${ogTags}</head>`);
 
-        res.status(200).set({ "Content-Type": "text/html" }).send(html);
+        res.status(200).set({
+          "Content-Type": "text/html",
+          "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0, s-maxage=0",
+          "Pragma": "no-cache",
+          "Expires": "0"
+        }).send(html);
       } catch (e) {
         console.error("Production Error:", e);
         res.status(500).end((e as Error).message);
@@ -3236,18 +3246,18 @@ async function startServer() {
     });
   }
 
-  // Start automated background expiry notification scheduler (runs every 30 minutes)
+  // Start automated background expiry notification scheduler (runs once every 24 hours)
   setTimeout(() => {
     checkAndSendExpiryNotifications().catch((err) =>
       console.warn("Initial background expiry check failed:", err)
     );
-  }, 5000);
+  }, 10000);
 
   setInterval(() => {
     checkAndSendExpiryNotifications().catch((err) =>
       console.warn("Scheduled background expiry check failed:", err)
     );
-  }, 30 * 60 * 1000);
+  }, 24 * 60 * 60 * 1000);
 
   // Only listen if not running as a Vercel function
   if (!process.env.VERCEL) {

@@ -110,7 +110,8 @@ export const logEvent = async (
             
             pendingAll[userId].clickHistory = clickHistory;
             safeStorage.setItem('pending_user_updates', JSON.stringify(pendingAll));
-            safeStorage.setItem('needs_user_sync', 'true');
+            // Do NOT mark needs_user_sync = 'true' on every click to prevent excessive Firestore writes.
+            // Clicks remain in local pending storage and sync once in 24 hours during daily sync.
         } catch (e) {
              console.error("Failed to update click history", e);
         }

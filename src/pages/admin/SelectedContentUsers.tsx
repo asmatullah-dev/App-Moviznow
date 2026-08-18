@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { db } from '../../firebase';
-import { collection, doc, updateDoc, onSnapshot, query } from 'firebase/firestore';
+import { collection, doc, updateDoc, query } from 'firebase/firestore';
 import { UserProfile, Content, Role, Status } from '../../types';
 import { Settings, X, Check, Search } from 'lucide-react';
 import AlertModal from '../../components/AlertModal';

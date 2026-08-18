@@ -43,8 +43,8 @@ interface ContentContextType {
   deleteAuxiliaryItem: (type: 'genre' | 'language' | 'quality', id: string) => Promise<void>;
   finalizeChanges: () => Promise<void>;
   hasPendingChanges: boolean;
-  checkForUpdates: (force?: boolean) => Promise<void>;
-  quickRefreshCatalog: () => Promise<{ updated: boolean; message: string; isRelaxed?: boolean }>;
+  checkForUpdates: (force?: boolean) => Promise<{ updated: boolean; updatedContentCount: number }>;
+  quickRefreshCatalog: () => Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean }>;
 }
 
 const ContentContext = createContext<ContentContextType | undefined>(undefined);
@@ -506,11 +506,12 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     return sorted;
   };
 
-  const syncWithServer = async (force: boolean = false): Promise<boolean> => {
+  const syncWithServer = async (force: boolean = false): Promise<{ updatedSomething: boolean; updatedContentCount: number }> => {
     let updatedSomething = false;
+    let updatedContentCount = 0;
     if (!navigator.onLine) {
         setLoading(false);
-        return false;
+        return { updatedSomething: false, updatedContentCount: 0 };
     }
     const isAdmin = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
 
@@ -586,7 +587,17 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
                 if (chunkDoc.exists()) {
                     let items = chunkDoc.data().items || {};
                     const localChunkStr = safeStorage.getItem('content_chunk_' + chunkId);
-                    const localItems = localChunkStr ? JSON.parse(localChunkStr) : {};
+                    const localItems: Record<string, any> = localChunkStr ? JSON.parse(localChunkStr) : {};
+
+                    // Count updated content items (added or modified). DO NOT count deleted contents!
+                    for (const [id, incomingItem] of Object.entries(items)) {
+                        const localItem = localItems[id];
+                        if (!localItem) {
+                            updatedContentCount++;
+                        } else if (!isContentDataEqual(localItem, incomingItem)) {
+                            updatedContentCount++;
+                        }
+                    }
                     
                     if (pendingChunkIds.has(chunkId)) {
                         const itemIds = pendingItemsMap[chunkId];
@@ -805,7 +816,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     } catch(e) {}
     
     setLoading(false);
-    return updatedSomething;
+    return { updatedSomething, updatedContentCount };
   };
 
   useEffect(() => {
@@ -818,10 +829,10 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     checkForUpdates(false);
   }, [profile?.role, profile?.phone, authProfileLoading]);
 
-  const checkForUpdates = async (force: boolean = false) => {
+  const checkForUpdates = async (force: boolean = false): Promise<{ updated: boolean; updatedContentCount: number }> => {
     if (authProfileLoading || !profile) {
         if (!authProfileLoading && !profile) setLoading(false);
-        return;
+        return { updated: false, updatedContentCount: 0 };
     }
 
     const now = Date.now();
@@ -873,7 +884,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     if (!force && lastCheckPeriod === checkPeriod && !noLocalData) {
         // Already checked for this period (the 7AM cycle)
         setLoading(false);
-        return;
+        return { updated: false, updatedContentCount: 0 };
     }
     
     // Proceed with sync
@@ -882,6 +893,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     }
 
     let updatedSomething = false;
+    let serverUpdatedCount = 0;
 
     const tasks: Promise<boolean>[] = [];
 
@@ -911,7 +923,10 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     // Sync content with server
     tasks.push(
       syncWithServer(force)
-        .then(res => Boolean(res))
+        .then(res => {
+          serverUpdatedCount = res.updatedContentCount;
+          return Boolean(res.updatedSomething);
+        })
         .catch(err => {
           console.error("Sync with server error:", err);
           return false;
@@ -929,11 +944,23 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     safeStorage.setItem('has_completed_initial_sync', 'true');
 
     if (force || noLocalData || lastCheckPeriod !== checkPeriod) {
-        window.dispatchEvent(new CustomEvent('sync_status', { detail: updatedSomething ? 'success' : 'up-to-date' }));
+        if (serverUpdatedCount > 0) {
+            window.dispatchEvent(new CustomEvent('sync_status', {
+              detail: {
+                status: 'success',
+                updatedContentCount: serverUpdatedCount,
+                message: `${serverUpdatedCount} content updated`
+              }
+            }));
+        } else {
+            window.dispatchEvent(new CustomEvent('sync_status', { detail: updatedSomething ? 'success' : 'up-to-date' }));
+        }
     }
+
+    return { updated: updatedSomething, updatedContentCount: serverUpdatedCount };
   };
 
-  const quickRefreshCatalog = async (): Promise<{ updated: boolean; message: string; isRelaxed?: boolean }> => {
+  const quickRefreshCatalog = async (): Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean }> => {
     const LAST_QUICK_REFRESH_KEY = 'last_catalog_quick_refresh_time';
     const now = Date.now();
     const lastQuickRefreshStr = safeStorage.getItem(LAST_QUICK_REFRESH_KEY);
@@ -943,6 +970,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     if (lastQuickRefresh > 0 && now - lastQuickRefresh < FIVE_MINUTES_MS) {
       return {
         updated: false,
+        updatedCount: 0,
         message: 'Data is up to date',
         isRelaxed: true
       };
@@ -951,12 +979,14 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     if (!navigator.onLine) {
       return {
         updated: false,
+        updatedCount: 0,
         message: 'Data is up to date',
         isRelaxed: false
       };
     }
 
     let updatedSomething = false;
+    let totalUpdatedContentCount = 0;
 
     try {
       // 1. Fetch chunk_meta versions doc from Firestore (read-only)
@@ -991,6 +1021,22 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
             const chunkDoc = await getDoc(doc(db, 'content_chunks', chunkId));
             if (chunkDoc.exists()) {
               const items = chunkDoc.data().items || {};
+              const localChunkStr = safeStorage.getItem('content_chunk_' + chunkId);
+              let localItems: Record<string, any> = {};
+              if (localChunkStr) {
+                try { localItems = JSON.parse(localChunkStr); } catch(e) {}
+              }
+
+              // Count added or modified content items (do not count deleted)
+              for (const [id, incomingItem] of Object.entries(items)) {
+                const localItem = localItems[id];
+                if (!localItem) {
+                  totalUpdatedContentCount++;
+                } else if (!isContentDataEqual(localItem, incomingItem)) {
+                  totalUpdatedContentCount++;
+                }
+              }
+
               safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(items));
               localMeta[chunkId] = typeof versions[chunkId] === 'object'
                 ? versions[chunkId]
@@ -1118,15 +1164,27 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       // Mark the 5-minute relaxation timestamp
       safeStorage.setItem(LAST_QUICK_REFRESH_KEY, now.toString());
 
+      if (totalUpdatedContentCount > 0) {
+        window.dispatchEvent(new CustomEvent('sync_status', {
+          detail: {
+            status: 'success',
+            updatedContentCount: totalUpdatedContentCount,
+            message: `${totalUpdatedContentCount} content updated`
+          }
+        }));
+      }
+
       return {
         updated: updatedSomething,
-        message: updatedSomething ? 'New content loaded!' : 'Data is up to date',
+        updatedCount: totalUpdatedContentCount,
+        message: totalUpdatedContentCount > 0 ? `${totalUpdatedContentCount} content updated` : 'Data is up to date',
         isRelaxed: false
       };
     } catch (error) {
       console.error("Error in quickRefreshCatalog:", error);
       return {
         updated: false,
+        updatedCount: 0,
         message: 'Data is up to date',
         isRelaxed: false
       };

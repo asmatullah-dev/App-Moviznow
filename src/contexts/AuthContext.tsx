@@ -29,7 +29,6 @@ import {
   doc,
   getDoc,
   setDoc,
-  onSnapshot,
   updateDoc,
   query,
   collection,
@@ -876,6 +875,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               const pendWL = safeStorage.getItem("pending_watch_later_array");
               if (pendWL) updatesToPush.watchLater = JSON.parse(pendWL);
 
+              // Merge pending orders if any
+              const pendOrdersStr = safeStorage.getItem("pending_orders_array");
+              if (pendOrdersStr) {
+                try {
+                  const pendingOrders = JSON.parse(pendOrdersStr);
+                  if (Array.isArray(pendingOrders) && pendingOrders.length > 0) {
+                    const existingOrders = serverProfile?.orders || localProfile?.orders || [];
+                    const orderMap = new Map();
+                    existingOrders.forEach((o: any) => o && o.id && orderMap.set(o.id, o));
+                    pendingOrders.forEach((o: any) => o && o.id && orderMap.set(o.id, o));
+                    updatesToPush.orders = Array.from(orderMap.values());
+                  }
+                } catch(e) {}
+              }
+
               // Sync any deferred string/boolean/array profile fields
               const syncableKeys = [
                 "phone",
@@ -931,16 +945,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
             if (Object.keys(updatesToPush).length > 0) {
               batch.set(userRef, updatesToPush, { merge: true });
-              if (updatesToPush.referralCode) {
-                batch.set(doc(db, "referral", "all"), {
-                  codes: {
-                    [currentUser.uid]: updatesToPush.referralCode
-                  },
-                  codeToUid: {
-                    [updatesToPush.referralCode]: currentUser.uid
-                  }
-                }, { merge: true });
-              }
             }
             await batch.commit();
 
@@ -948,6 +952,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             safeStorage.setItem("needs_user_sync", "false");
             safeStorage.removeItem("pending_favorites_array");
             safeStorage.removeItem("pending_watch_later_array");
+            safeStorage.removeItem("pending_orders_array");
             safeStorage.removeItem("pending_content_clicks");
             safeStorage.removeItem("pending_link_clicks");
             safeStorage.setItem(localVersionKey, newVersion.toString());
@@ -1773,55 +1778,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refreshProfile]);
 
   useEffect(() => {
-    let profileUnsub: (() => void) | null = null;
-
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (profileUnsub) {
-        profileUnsub();
-        profileUnsub = null;
-      }
       setUser(currentUser);
       setAuthLoading(false);
 
       if (currentUser) {
         const userRef = doc(db, "users", currentUser.uid);
 
-        profileUnsub = onSnapshot(userRef, (docSnap) => {
-          if (docSnap.exists()) {
-            const serverP = docSnap.data() as UserProfile;
-            const isSyncingPending = safeStorage.getItem("needs_user_sync") === "true";
-            if (!isSyncingPending) {
-              setProfile(serverP);
-              safeStorage.setItem("profile_cache", JSON.stringify(serverP));
-            }
-          }
-        }, (err) => {
-          console.warn("User profile listener error:", err);
-        });
-
-        // ALWAYS verify user UID exists in Firestore on auth state change or refresh
-        if (navigator.onLine && !justLoggedInRef.current) {
-          try {
-            const docSnap = await getDoc(userRef);
-            if (!docSnap.exists()) {
-              console.warn(`User UID ${currentUser.uid} not found in Firestore. Routing to login.`);
-              safeStorage.removeItem("profile_cache");
-              safeStorage.removeItem("profile_doc_snap");
-              safeStorage.removeItem(`profile_version_${currentUser.uid}`);
-              safeStorage.removeItem("cached_all_users");
-              localStorage.removeItem("session_started");
-              setProfile(null);
-              setUser(null);
-              setLoading(false);
-              await signOut(auth).catch(() => {});
-              return;
-            }
-          } catch (e) {
-            console.error("Error verifying UID in Firestore:", e);
-          }
-        }
-
+        // Load profile immediately from local cache
         const cachedProfileStr = safeStorage.getItem("profile_cache");
+        let hasValidCachedProfile = false;
         if (cachedProfileStr) {
           try {
             const cachedP = JSON.parse(cachedProfileStr);
@@ -1831,6 +1797,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               safeStorage.removeItem("profile_doc_snap");
               safeStorage.removeItem(`profile_version_${currentUser.uid}`);
               safeStorage.removeItem("cached_all_users");
+            } else if (cachedP && cachedP.uid === currentUser.uid) {
+              setProfile(cachedP);
+              hasValidCachedProfile = true;
             }
           } catch (e) {}
         }
@@ -1844,6 +1813,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const pktDate = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
 
         const isDailySync = lastSyncDateStr !== pktDate;
+
+        // If user has no local cache or daily sync is due, fetch via getDoc once
+        if (!hasValidCachedProfile || isDailySync) {
+          refreshProfile(false, "auto").catch((err) => {
+            console.warn("Initial daily profile sync failed:", err);
+          });
+        }
 
         const twelveHours = 12 * 60 * 60 * 1000;
 
@@ -2167,7 +2143,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       unsubscribe();
-      if (profileUnsub) profileUnsub();
       clearInterval(timeTrackerInterval);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../firebase';
-import { collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, getDocs } from 'firebase/firestore';
+import { collection, addDoc, deleteDoc, doc, query, orderBy, getDocs } from 'firebase/firestore';
 import { Income } from '../../types';
 import { Plus, Trash2, DollarSign, Calendar, TrendingUp, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';

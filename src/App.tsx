@@ -252,6 +252,7 @@ function SyncErrorOverlay() {
 }
 
 import { ScrollToTopOrRestore } from "./components/ScrollToTopOrRestore";
+import { runPeriodicCacheCleanup } from "./services/cacheManager";
 
 export default function App() {
   const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
@@ -265,33 +266,16 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    // Cleanup old legacy thumbnails from the IndexedDB cache
-    try {
-      const request = indexedDB.open('moviznow_cache_db', 2);
-      request.onsuccess = () => {
-        const db = request.result;
-        if (!db.objectStoreNames.contains('cache')) return;
-        
-        try {
-          const tx = db.transaction('cache', 'readwrite');
-          const store = tx.objectStore('cache');
-          const getAllKeysReq = store.getAllKeys();
-          
-          getAllKeysReq.onsuccess = () => {
-             const keys = getAllKeysReq.result;
-             keys.forEach((key: any) => {
-               if (typeof key === 'string' && key.startsWith('thumbnail_')) {
-                 store.delete(key);
-               }
-             });
-          };
-        } catch (e) {
-          console.error("Failed to clean up legacy thumbnails", e);
-        }
-      };
-    } catch (e) {
-      console.warn("Could not initiate thumbnail cleanup", e);
-    }
+    // Run automated cache cleanup (evicts metadata/posters unused for > 3 days, IMDb/OTT unused for > 5 days; keeps chunk data)
+    runPeriodicCacheCleanup().catch((err) =>
+      console.warn("Automated cache cleanup failed:", err)
+    );
+
+    const interval = setInterval(() => {
+      runPeriodicCacheCleanup().catch(() => {});
+    }, 6 * 60 * 60 * 1000); // Check every 6 hours
+
+    return () => clearInterval(interval);
   }, []);
 
   useModalBehavior(isMediaModalOpen, () => setIsMediaModalOpen(false));

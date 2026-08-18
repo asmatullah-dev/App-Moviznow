@@ -153,8 +153,8 @@ export default function Home({
       const result = await quickRefreshCatalog();
       if (result.isRelaxed) {
         showCatalogToast(t('Data is up to date'), 'info');
-      } else if (result.updated) {
-        showCatalogToast(t('New content loaded!'), 'success');
+      } else if (result.updatedCount && result.updatedCount > 0) {
+        showCatalogToast(`${result.updatedCount} ${t('content updated')}`, 'success');
       } else {
         showCatalogToast(t('Data is up to date'), 'info');
       }

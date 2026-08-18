@@ -140,7 +140,6 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         
         let writeData: any = { ...pending[uid] };
         writeData.uid = uid;
-        writeData.lastActive = nowIso;
         writeData.updatedAt = nowIso;
 
         for (const key in writeData) {
