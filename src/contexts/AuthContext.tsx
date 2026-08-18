@@ -6,7 +6,7 @@ import React, {
   useRef,
   useCallback,
 } from "react";
-import { auth, db } from "../firebase";
+import { auth, db, runWithNetwork } from "../firebase";
 import { safeStorage } from "../utils/safeStorage";
 import { isValidGmailAddress } from "../utils/emailValidation";
 import {
@@ -499,7 +499,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // 7. Always verify user UID in Firestore when online
         if (navigator.onLine) {
           try {
-            docSnap = await getDoc(userRef);
+            docSnap = await runWithNetwork(() => getDoc(userRef));
             if (docSnap.exists()) {
               serverProfile = docSnap.data() as UserProfile;
               updatedSomething = true;

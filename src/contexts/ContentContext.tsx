@@ -11,7 +11,7 @@ import {
   serverTimestamp,
   deleteField
 } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, runWithNetwork } from '../firebase';
 import { safeStorage } from '../utils/safeStorage';
 import { expandContent } from '../utils/chunkUtils';
 import { useAuth } from './AuthContext';
@@ -990,7 +990,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
     try {
       // 1. Fetch chunk_meta versions doc from Firestore (read-only)
-      const metaDocSnap = await getDoc(doc(db, 'chunk_meta', 'versions'));
+      const metaDocSnap = await runWithNetwork(() => getDoc(doc(db, 'chunk_meta', 'versions')));
       const versions: Record<string, any> = metaDocSnap.exists() ? metaDocSnap.data() : {};
 
       safeStorage.setItem('cached_chunk_meta_doc', JSON.stringify(versions));
@@ -1018,7 +1018,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       if (chunksToFetch.length > 0) {
         await Promise.all(chunksToFetch.map(async (chunkId) => {
           try {
-            const chunkDoc = await getDoc(doc(db, 'content_chunks', chunkId));
+            const chunkDoc = await runWithNetwork(() => getDoc(doc(db, 'content_chunks', chunkId)));
             if (chunkDoc.exists()) {
               const items = chunkDoc.data().items || {};
               const localChunkStr = safeStorage.getItem('content_chunk_' + chunkId);

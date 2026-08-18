@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, runWithNetwork } from '../firebase';
 import { getChunkMeta } from '../utils/chunkMeta';
 
 import { AppSettings } from '../types';
@@ -34,7 +34,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       if (force || !localStorage.getItem('cached_app_settings') || serverVersion > localVersion) {
         const docRef = doc(db, 'settings', 'app_settings');
-        const docSnap = await getDoc(docRef);
+        const docSnap = await runWithNetwork(() => getDoc(docRef));
         
         if (docSnap.exists()) {
           const data = docSnap.data() as AppSettings;

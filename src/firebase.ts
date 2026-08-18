@@ -1,6 +1,18 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, setPersistence, browserLocalPersistence } from 'firebase/auth';
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, getDoc, updateDoc, setDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { 
+  initializeFirestore, 
+  persistentLocalCache, 
+  persistentSingleTabManager, 
+  disableNetwork, 
+  enableNetwork, 
+  doc, 
+  getDoc, 
+  updateDoc, 
+  setDoc, 
+  collection, 
+  serverTimestamp 
+} from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 import { getAnalytics, isSupported, setUserProperties } from 'firebase/analytics';
@@ -17,8 +29,28 @@ const appConfig = {
 export const app = initializeApp(appConfig);
 
 export const db = initializeFirestore(app, {
-  localCache: typeof window !== 'undefined' ? persistentLocalCache({ tabManager: persistentMultipleTabManager() }) : undefined
+  localCache: typeof window !== 'undefined' ? persistentLocalCache({ tabManager: persistentSingleTabManager() }) : undefined
 }, appConfig.firestoreDatabaseId);
+
+// Immediately disable background Firestore Listen long-polling channel on client startup
+if (typeof window !== 'undefined') {
+  disableNetwork(db).catch(() => {});
+}
+
+/**
+ * Utility to run a Firestore operation with network enabled, then immediately
+ * re-disable network to prevent Firestore from keeping a background Listen/channel connection open.
+ */
+export async function runWithNetwork<T>(fn: () => Promise<T>): Promise<T> {
+  if (typeof window === 'undefined') return fn();
+  try {
+    await enableNetwork(db);
+    return await fn();
+  } finally {
+    // Immediately terminate any background long-polling Listen channel
+    disableNetwork(db).catch(() => {});
+  }
+}
 
 export const auth = getAuth(app);
 if (typeof window !== 'undefined') {

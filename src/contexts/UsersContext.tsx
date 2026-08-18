@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { collection, query, getDocs, doc, getDoc, setDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, runWithNetwork } from '../firebase';
 import { UserProfile } from '../types';
 import { useAuth } from './AuthContext';
 import { safeStorage } from '../utils/safeStorage';
@@ -233,7 +233,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         try {
           updatedSomething = true;
           const q = query(collection(db, 'users'));
-          const snapshot = await getDocs(q);
+          const snapshot = await runWithNetwork(() => getDocs(q));
           const rawFetched = snapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id })) as UserProfile[];
           const uMap = new Map<string, UserProfile>();
           rawFetched.forEach(u => {
@@ -253,7 +253,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           const bufferTime = 60 * 60 * 1000;
           const sinceIso = new Date(Math.max(0, lastFetchTime - bufferTime)).toISOString();
           const q = query(collection(db, 'users'), where('lastActive', '>=', sinceIso));
-          const snapshot = await getDocs(q);
+          const snapshot = await runWithNetwork(() => getDocs(q));
           
           if (!snapshot.empty) {
             updatedSomething = true;

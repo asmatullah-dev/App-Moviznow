@@ -10,7 +10,7 @@ import {
   writeBatch,
   serverTimestamp
 } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, runWithNetwork } from '../firebase';
 import { useAuth } from './AuthContext';
 import { AppNotification } from '../types';
 import { safeStorage } from '../utils/safeStorage';
@@ -90,7 +90,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       
       // 1. Fetch specifically from notification_chunk_0 first via getDoc (once per 24 hours)
       try {
-        const chunk0Doc = await getDoc(doc(db, 'notification_chunks', 'notification_chunk_0'));
+        const chunk0Doc = await runWithNetwork(() => getDoc(doc(db, 'notification_chunks', 'notification_chunk_0')));
         if (chunk0Doc.exists()) {
           const items = chunk0Doc.data().items || {};
           Object.values(items).forEach((item: any) => {
@@ -106,7 +106,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       // 2. If latest chunk is different, get that chunk as well
       if (latestChunkId && latestChunkId !== 'notification_chunk_0') {
         try {
-          const latestDoc = await getDoc(doc(db, 'notification_chunks', latestChunkId));
+          const latestDoc = await runWithNetwork(() => getDoc(doc(db, 'notification_chunks', latestChunkId)));
           if (latestDoc.exists()) {
             const items = latestDoc.data().items || {};
             Object.values(items).forEach((item: any) => {

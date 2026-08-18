@@ -1,5 +1,5 @@
 import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, runWithNetwork } from '../firebase';
 import { safeStorage } from './safeStorage';
 
 let chunkMetaPromise: Promise<Record<string, any>> | null = null;
@@ -46,7 +46,7 @@ export const getChunkMeta = async (forceRefresh = false) => {
   }
 
   if (!chunkMetaPromise || forceRefresh) {
-    chunkMetaPromise = getDoc(doc(db, 'chunk_meta', 'versions'))
+    chunkMetaPromise = runWithNetwork(() => getDoc(doc(db, 'chunk_meta', 'versions')))
       .then(snap => snap.exists() ? snap.data() : {})
       .then(data => {
         memoryCache = data;
