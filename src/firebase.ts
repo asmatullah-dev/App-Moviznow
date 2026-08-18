@@ -23,7 +23,7 @@ export const customMeasurementId = import.meta.env.VITE_GA_MEASUREMENT_ID || fir
 
 const appConfig = {
   ...firebaseConfig,
-  measurementId: customMeasurementId || firebaseConfig.measurementId
+  measurementId: customMeasurementId
 };
 
 export const app = initializeApp(appConfig);
