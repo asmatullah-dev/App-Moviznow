@@ -4,10 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useModalBehavior } from '../hooks/useModalBehavior';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useHaptics } from '../hooks/useHaptics';
+import { fetchTmdb } from '../services/tmdbClient';
 import clsx from 'clsx';
-
-const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || 'f71c2391161526fa9d19bd0b2759efaf';
-const TMDB_BASE = 'https://api.themoviedb.org/3';
 
 interface SharePreviewModalProps {
   isOpen: boolean;
@@ -73,8 +71,7 @@ export default function SharePreviewModal({
     vibrate(20);
     try {
       const cleanQ = rawQuery.trim();
-      const searchUrl = `${TMDB_BASE}/search/multi?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(cleanQ)}&include_adult=false`;
-      const res = await fetch(searchUrl);
+      const res = await fetchTmdb('search/multi', { query: cleanQ, include_adult: 'false' });
       const data = await res.json();
 
       const posterSet = new Set<string>();
@@ -98,7 +95,7 @@ export default function SharePreviewModal({
         const imagePromises = topResults.slice(0, 4).map(async (item: any) => {
           const type = item.media_type === 'tv' ? 'tv' : 'movie';
           try {
-            const imgRes = await fetch(`${TMDB_BASE}/${type}/${item.id}/images?api_key=${TMDB_API_KEY}&include_image_language=en,hi,null,te,ta,ur,ar,es`);
+            const imgRes = await fetchTmdb(`${type}/${item.id}/images`, { include_image_language: 'en,hi,null,te,ta,ur,ar,es' });
             if (imgRes.ok) {
               const imgData = await imgRes.json();
               if (imgData.posters && Array.isArray(imgData.posters)) {

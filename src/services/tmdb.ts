@@ -25,9 +25,9 @@ export interface TMDBImagesResult {
   backdrops: string[];
 }
 
-const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || 'f71c2391161526fa9d19bd0b2759efaf';
+import { fetchTmdb } from './tmdbClient';
+
 const YOUTUBE_API_KEY = import.meta.env.VITE_YOUTUBE_API_KEY || '';
-const TMDB_BASE = 'https://api.themoviedb.org/3';
 
 export function normalizeOttPlatformName(raw?: string | null): string | null {
   if (!raw) return null;
@@ -225,8 +225,7 @@ export async function predictOttPlatformWithAI(
  */
 export async function fetchTMDBImages(id: number, type: 'movie' | 'tv'): Promise<TMDBImagesResult> {
   try {
-    const url = `${TMDB_BASE}/${type}/${id}/images?api_key=${TMDB_API_KEY}&include_image_language=en,hi,null`;
-    const res = await fetch(url);
+    const res = await fetchTmdb(`${type}/${id}/images`, { include_image_language: 'en,hi,null' });
     if (!res.ok) return { posters: [], backdrops: [] };
     const data = await res.json();
     
@@ -295,8 +294,7 @@ function getTodayString(): string {
 export async function fetchMovieDigitalReleaseDate(movieId: number): Promise<{ ottDate: string | null; platformNote: string | null }> {
   try {
     const today = getTodayString();
-    const url = `${TMDB_BASE}/movie/${movieId}?api_key=${TMDB_API_KEY}&append_to_response=release_dates,watch/providers`;
-    const res = await fetch(url);
+    const res = await fetchTmdb(`movie/${movieId}`, { append_to_response: 'release_dates,watch/providers' });
     if (!res.ok) return { ottDate: null, platformNote: null };
     const data = await res.json();
     
@@ -361,8 +359,15 @@ export async function fetchUpcomingMovies(page: number = 1): Promise<TMDBUpcomin
   try {
     const today = getTodayString();
     // 1. Discover movies with digital releases (type 4) on or after today
-    const digitalDiscoverUrl = `${TMDB_BASE}/discover/movie?api_key=${TMDB_API_KEY}&language=en-US&sort_by=popularity.desc&include_adult=false&include_video=false&page=${page}&with_release_type=4&release_date.gte=${today}`;
-    const res = await fetch(digitalDiscoverUrl);
+    const res = await fetchTmdb('discover/movie', {
+      language: 'en-US',
+      sort_by: 'popularity.desc',
+      include_adult: 'false',
+      include_video: 'false',
+      page,
+      with_release_type: '4',
+      'release_date.gte': today
+    });
     
     let rawMovies: any[] = [];
     if (res.ok) {
@@ -373,7 +378,7 @@ export async function fetchUpcomingMovies(page: number = 1): Promise<TMDBUpcomin
     // If digital discover returned few results, also fetch /movie/upcoming to inspect for digital dates
     if (rawMovies.length < 10) {
       try {
-        const upRes = await fetch(`${TMDB_BASE}/movie/upcoming?api_key=${TMDB_API_KEY}&language=en-US&page=${page}`);
+        const upRes = await fetchTmdb('movie/upcoming', { language: 'en-US', page });
         if (upRes.ok) {
           const upData = await upRes.json();
           const existingIds = new Set(rawMovies.map(m => m.id));
@@ -436,8 +441,13 @@ export async function fetchUpcomingMovies(page: number = 1): Promise<TMDBUpcomin
 export async function fetchUpcomingTV(page: number = 1): Promise<TMDBUpcomingItem[]> {
   try {
     const today = getTodayString();
-    const url = `${TMDB_BASE}/discover/tv?api_key=${TMDB_API_KEY}&language=en-US&sort_by=popularity.desc&include_null_first_air_dates=false&page=${page}&first_air_date.gte=${today}`;
-    const res = await fetch(url);
+    const res = await fetchTmdb('discover/tv', {
+      language: 'en-US',
+      sort_by: 'popularity.desc',
+      include_null_first_air_dates: 'false',
+      page,
+      'first_air_date.gte': today
+    });
     
     let rawShows: any[] = [];
     if (res.ok) {
@@ -447,7 +457,7 @@ export async function fetchUpcomingTV(page: number = 1): Promise<TMDBUpcomingIte
 
     if (rawShows.length < 8 && page === 1) {
       try {
-        const onAirRes = await fetch(`${TMDB_BASE}/tv/on_the_air?api_key=${TMDB_API_KEY}&language=en-US&page=1`);
+        const onAirRes = await fetchTmdb('tv/on_the_air', { language: 'en-US', page: 1 });
         if (onAirRes.ok) {
           const onAirData = await onAirRes.json();
           const existingIds = new Set(rawShows.map(s => s.id));
@@ -470,7 +480,7 @@ export async function fetchUpcomingTV(page: number = 1): Promise<TMDBUpcomingIte
         let detectedNetwork: string | null = null;
         
         try {
-          const detailRes = await fetch(`${TMDB_BASE}/tv/${item.id}?api_key=${TMDB_API_KEY}&append_to_response=watch/providers`);
+          const detailRes = await fetchTmdb(`tv/${item.id}`, { append_to_response: 'watch/providers' });
           if (detailRes.ok) {
             const detailData = await detailRes.json();
             const primaryNetwork = detailData.networks?.[0]?.name;
@@ -620,8 +630,7 @@ export async function searchYouTubeTrailer(title: string, type: 'movie' | 'tv'):
 export async function fetchTMDBTrailer(id: number, type: 'movie' | 'tv', title?: string): Promise<string | null> {
   try {
     // 1. TMDB videos with multi-language
-    const url = `${TMDB_BASE}/${type}/${id}/videos?api_key=${TMDB_API_KEY}&include_video_language=hi,en,es,fr,de,ja,ko,null`;
-    const res = await fetch(url);
+    const res = await fetchTmdb(`${type}/${id}/videos`, { include_video_language: 'hi,en,es,fr,de,ja,ko,null' });
     if (res.ok) {
       const data = await res.json();
       const tmdbTrailer = getBestTrailerFromVideos(data.results || []);

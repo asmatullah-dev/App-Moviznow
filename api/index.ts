@@ -86,6 +86,7 @@ async function getSyncApps(
 
 import { translateRouter } from "./_translate.js";
 import { emailRouter } from "./_email.js";
+import { tmdbRouter } from "./_tmdb.js";
 import { checkAndSendExpiryNotifications, sendMembershipUpdateNotification, sendOrderApprovedNotification } from "./_expiryService.js";
 
 async function startServer() {
@@ -95,6 +96,7 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use("/api", translateRouter);
   app.use("/api/email", emailRouter);
+  app.use("/api", tmdbRouter);
 
   // Background Scan Endpoint
   // In-memory background scan storage to avoid Firestore writes

@@ -1,6 +1,7 @@
 import { Content } from '../types';
 import { extractOttPlatformFromTMDBDetails, predictOttPlatformWithAI } from './tmdb';
 import { touchImdbOttUsage } from './cacheManager';
+import { fetchTmdb } from './tmdbClient';
 
 export interface CachedImdbRating {
   id: string;
@@ -17,9 +18,7 @@ const LEGACY_STORAGE_PREFIX = 'imdb_rating_';
 export const RATING_CACHE_TTL_MS = 5 * 24 * 60 * 60 * 1000; // 5 days in milliseconds
 
 const OMDB_API_KEY = import.meta.env.VITE_OMDB_API_KEY || '19daa310';
-const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || 'f71c2391161526fa9d19bd0b2759efaf';
 const OMDB_BASE = 'https://www.omdbapi.com/';
-const TMDB_BASE = 'https://api.themoviedb.org/3';
 
 // In-flight fetch deduplication map
 const pendingFetches = new Map<string, Promise<CachedImdbRating | null>>();
@@ -200,19 +199,17 @@ export async function fetchLiveImdbRating(
       // 1. If we don't have imdbId OR don't have ottPlatform, search TMDB by Title + Year
       if ((!imdbId || !detectedOtt) && content.title) {
         try {
-          const yearParam = content.year ? `&year=${content.year}` : '';
-          const tmdbSearchUrl = `${TMDB_BASE}/search/${searchType}?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(
-            content.title
-          )}${yearParam}`;
-
-          const tmdbRes = await fetch(tmdbSearchUrl);
+          const tmdbRes = await fetchTmdb(`search/${searchType}`, {
+            query: content.title,
+            year: content.year || undefined
+          });
           const tmdbData = await tmdbRes.json();
 
           if (tmdbData.results && tmdbData.results.length > 0) {
             const firstResult = tmdbData.results[0];
-            const detailsRes = await fetch(
-              `${TMDB_BASE}/${searchType}/${firstResult.id}?api_key=${TMDB_API_KEY}&append_to_response=external_ids,watch/providers`
-            );
+            const detailsRes = await fetchTmdb(`${searchType}/${firstResult.id}`, {
+              append_to_response: 'external_ids,watch/providers'
+            });
             const tmdbDetails = await detailsRes.json();
 
             if (tmdbDetails.external_ids?.imdb_id && !imdbId) {
@@ -249,8 +246,10 @@ export async function fetchLiveImdbRating(
       // 3. Fetch rating from OMDB using imdbId (fastest & most accurate)
       if (imdbId) {
         try {
-          const omdbUrl = `${OMDB_BASE}?i=${imdbId}&apikey=${OMDB_API_KEY}`;
-          const omdbRes = await fetch(omdbUrl);
+          let omdbRes = await fetch(`/api/omdb?i=${imdbId}`);
+          if (!omdbRes.ok) {
+            omdbRes = await fetch(`${OMDB_BASE}?i=${imdbId}&apikey=${OMDB_API_KEY}`);
+          }
           const omdbData = await omdbRes.json();
 
           if (omdbData.Response === 'True' && omdbData.imdbRating && omdbData.imdbRating !== 'N/A') {
@@ -267,8 +266,10 @@ export async function fetchLiveImdbRating(
         try {
           const yearParam = content.year ? `&y=${content.year}` : '';
           const typeParam = content.type === 'series' ? '&type=series' : '&type=movie';
-          const omdbUrl = `${OMDB_BASE}?t=${encodeURIComponent(content.title)}${yearParam}${typeParam}&apikey=${OMDB_API_KEY}`;
-          const omdbRes = await fetch(omdbUrl);
+          let omdbRes = await fetch(`/api/omdb?t=${encodeURIComponent(content.title)}${yearParam}${typeParam}`);
+          if (!omdbRes.ok) {
+            omdbRes = await fetch(`${OMDB_BASE}?t=${encodeURIComponent(content.title)}${yearParam}${typeParam}&apikey=${OMDB_API_KEY}`);
+          }
           const omdbData = await omdbRes.json();
 
           if (omdbData.Response === 'True' && omdbData.imdbRating && omdbData.imdbRating !== 'N/A') {

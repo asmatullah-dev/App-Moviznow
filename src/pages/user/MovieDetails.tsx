@@ -1086,10 +1086,11 @@ export default function MovieDetails() {
       hasAttemptedRatingFetch.current[id] = true;
       setFetchingImdb(true);
       try {
-        const OMDB_API_KEY = import.meta.env.VITE_OMDB_API_KEY || "19daa310";
-        const omdbRes = await fetch(
-          `https://www.omdbapi.com/?i=${imdbId}&apikey=${OMDB_API_KEY}`,
-        );
+        let omdbRes = await fetch(`/api/omdb?i=${imdbId}`);
+        if (!omdbRes.ok) {
+          const OMDB_API_KEY = import.meta.env.VITE_OMDB_API_KEY || "19daa310";
+          omdbRes = await fetch(`https://www.omdbapi.com/?i=${imdbId}&apikey=${OMDB_API_KEY}`);
+        }
         const omdbData = await omdbRes.json();
         if (omdbData.imdbRating && omdbData.imdbRating !== "N/A") {
           const newRating = `${omdbData.imdbRating}/10`;

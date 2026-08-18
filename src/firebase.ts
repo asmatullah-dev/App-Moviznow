@@ -54,7 +54,7 @@ export const analyticsPromise = typeof window !== 'undefined'
         if (yes) {
           try {
             analyticsInstance = getAnalytics(app);
-            const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.0';
+            const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.1';
             setUserProperties(analyticsInstance, { 
                app_version: currentVersion,
                version: currentVersion,
@@ -83,7 +83,7 @@ export const analyticsPromise = typeof window !== 'undefined'
           // @ts-ignore
           window.gtag('js', new Date());
           
-          const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.0';
+          const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.1';
           
           // @ts-ignore
           window.gtag('set', {

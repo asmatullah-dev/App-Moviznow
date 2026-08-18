@@ -19,10 +19,10 @@ interface MediaModalProps {
   onApply?: (data: any) => void;
 }
 
-const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || 'f71c2391161526fa9d19bd0b2759efaf';
+import { fetchTmdb } from '../services/tmdbClient';
+
 const OMDB_API_KEY = import.meta.env.VITE_OMDB_API_KEY || '19daa310';
 const YOUTUBE_API_KEY = import.meta.env.VITE_YOUTUBE_API_KEY || '';
-const TMDB_BASE = 'https://api.themoviedb.org/3';
 const OMDB_BASE = 'https://www.omdbapi.com/';
 
 export async function searchYouTubeTrailer(title: string, type: string) {
@@ -93,8 +93,7 @@ export async function fetchKinoCheckTrailer(tmdbId: string, type: string) {
 }
 
 export async function findTMDBByImdb(imdbID: string, forceType?: string) {
-  const url = `${TMDB_BASE}/find/${imdbID}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
-  const res = await fetch(url);
+  const res = await fetchTmdb(`find/${imdbID}`, { external_source: 'imdb_id' });
   const data = await res.json();
   
   if ((!forceType || forceType === 'movie') && data.movie_results && data.movie_results.length > 0) {
@@ -268,15 +267,16 @@ export async function searchTMDBByTitle(
   };
 
   const queryStr = searchTitle.replace(/[^a-zA-Z0-9\u00C0-\u024F\u0600-\u06FF\u0900-\u097F]/g, ' ').replace(/\s+/g, ' ').trim();
-  const finalQuery = encodeURIComponent(queryStr || searchTitle);
+  const finalQuery = queryStr || searchTitle;
 
   // 1. Movie search
   if (!forceType || forceType === 'movie' || forceType === 'all') {
-    let movieUrl = `${TMDB_BASE}/search/movie?api_key=${TMDB_API_KEY}&query=${finalQuery}`;
-    if (searchYear) movieUrl += `&year=${searchYear}`;
     try {
-      let movieRes = await fetch(movieUrl);
-      let movieData = await movieRes.json();
+      const movieRes = await fetchTmdb('search/movie', {
+        query: finalQuery,
+        year: searchYear || undefined
+      });
+      const movieData = await movieRes.json();
       if (movieData.results) {
         movieData.results.forEach((item: any) => addResult(item, 'movie'));
       }
@@ -285,13 +285,12 @@ export async function searchTMDBByTitle(
 
   // 2. TV / Series search
   if (!forceType || forceType === 'series' || forceType === 'tv' || forceType === 'all') {
-    let tvUrl = `${TMDB_BASE}/search/tv?api_key=${TMDB_API_KEY}&query=${finalQuery}`;
-    if (searchYear && searchYear !== '2026') {
-      tvUrl += `&first_air_date_year=${searchYear}`;
-    }
     try {
-      let tvRes = await fetch(tvUrl);
-      let tvData = await tvRes.json();
+      const tvRes = await fetchTmdb('search/tv', {
+        query: finalQuery,
+        first_air_date_year: (searchYear && searchYear !== '2026') ? searchYear : undefined
+      });
+      const tvData = await tvRes.json();
       if (tvData.results) {
         tvData.results.forEach((item: any) => addResult(item, 'tv'));
       }
@@ -302,8 +301,8 @@ export async function searchTMDBByTitle(
   if (results.length === 0 && searchYear) {
     if (!forceType || forceType === 'movie' || forceType === 'all') {
       try {
-        let movieRes = await fetch(`${TMDB_BASE}/search/movie?api_key=${TMDB_API_KEY}&query=${finalQuery}`);
-        let movieData = await movieRes.json();
+        const movieRes = await fetchTmdb('search/movie', { query: finalQuery });
+        const movieData = await movieRes.json();
         if (movieData.results) {
           movieData.results.forEach((item: any) => addResult(item, 'movie'));
         }
@@ -311,8 +310,8 @@ export async function searchTMDBByTitle(
     }
     if (!forceType || forceType === 'series' || forceType === 'tv' || forceType === 'all') {
       try {
-        let tvRes = await fetch(`${TMDB_BASE}/search/tv?api_key=${TMDB_API_KEY}&query=${finalQuery}`);
-        let tvData = await tvRes.json();
+        const tvRes = await fetchTmdb('search/tv', { query: finalQuery });
+        const tvData = await tvRes.json();
         if (tvData.results) {
           tvData.results.forEach((item: any) => addResult(item, 'tv'));
         }
@@ -323,8 +322,8 @@ export async function searchTMDBByTitle(
   // 4. Multi search fallback (matches edge case aliases, alternative names, original names)
   if (results.length === 0) {
     try {
-      let multiRes = await fetch(`${TMDB_BASE}/search/multi?api_key=${TMDB_API_KEY}&query=${finalQuery}`);
-      let multiData = await multiRes.json();
+      const multiRes = await fetchTmdb('search/multi', { query: finalQuery });
+      const multiData = await multiRes.json();
       if (multiData.results) {
         multiData.results.forEach((item: any) => {
           if (item.media_type === 'movie' && (!forceType || forceType === 'movie' || forceType === 'all')) {
@@ -341,8 +340,10 @@ export async function searchTMDBByTitle(
 }
 
 export async function fetchTMDBDetails(tmdbId: string, type: string) {
-  const url = `${TMDB_BASE}/${type}/${tmdbId}?api_key=${TMDB_API_KEY}&append_to_response=credits,external_ids,content_ratings,videos,alternative_titles,watch/providers&include_video_language=hi,en,es,fr,de,it,pt,ru,zh,ja,ko,null`;
-  const res = await fetch(url);
+  const res = await fetchTmdb(`${type}/${tmdbId}`, {
+    append_to_response: 'credits,external_ids,content_ratings,videos,alternative_titles,watch/providers',
+    include_video_language: 'hi,en,es,fr,de,it,pt,ru,zh,ja,ko,null'
+  });
   return await res.json();
 }
 
@@ -421,8 +422,7 @@ export function getBestAlternativeTitle(details: any): string {
 export async function fetchSeriesSeasons(tmdbId: string, knownSeasons?: any[]) {
   let seasonsDataList = knownSeasons;
   if (!seasonsDataList) {
-    const url = `${TMDB_BASE}/tv/${tmdbId}?api_key=${TMDB_API_KEY}`;
-    const res = await fetch(url);
+    const res = await fetchTmdb(`tv/${tmdbId}`);
     const data = await res.json();
     if (!data.seasons) return [];
     seasonsDataList = data.seasons;
@@ -430,8 +430,10 @@ export async function fetchSeriesSeasons(tmdbId: string, knownSeasons?: any[]) {
 
   const validSeasons = seasonsDataList.filter((s: any) => s.season_number !== 0);
   const seasonPromises = validSeasons.map(async (season: any) => {
-    const seasonUrl = `${TMDB_BASE}/tv/${tmdbId}/season/${season.season_number}?api_key=${TMDB_API_KEY}&append_to_response=videos&include_video_language=hi,en,es,fr,de,it,pt,ru,zh,ja,ko,null`;
-    const seasonRes = await fetch(seasonUrl);
+    const seasonRes = await fetchTmdb(`tv/${tmdbId}/season/${season.season_number}`, {
+      append_to_response: 'videos',
+      include_video_language: 'hi,en,es,fr,de,it,pt,ru,zh,ja,ko,null'
+    });
     const seasonData = await seasonRes.json();
     return {
       season: season.season_number,
@@ -567,8 +569,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
   const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
   async function findTMDBByImdb(imdbID: string, forceType?: string) {
-    const url = `${TMDB_BASE}/find/${imdbID}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
-    const res = await fetch(url);
+    const res = await fetchTmdb(`find/${imdbID}`, { external_source: 'imdb_id' });
     const data = await res.json();
     
     if ((!forceType || forceType === 'movie') && data.movie_results && data.movie_results.length > 0) {
@@ -664,7 +665,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
           // If searching by TMDB ID, we should still respect the type if provided
           if (!searchForceType || searchForceType === 'movie' || searchForceType === 'all') {
             try {
-              const movieRes = await fetch(`${TMDB_BASE}/movie/${idStr}?api_key=${TMDB_API_KEY}`);
+              const movieRes = await fetchTmdb(`movie/${idStr}`);
               if (movieRes.ok) {
                 await fetchFullDetails(idStr, 'movie', searchTitle, searchSecondTitle);
                 return;
@@ -674,7 +675,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
           
           if (!searchForceType || searchForceType === 'series' || searchForceType === 'tv' || searchForceType === 'all') {
             try {
-              const tvRes = await fetch(`${TMDB_BASE}/tv/${idStr}?api_key=${TMDB_API_KEY}`);
+              const tvRes = await fetchTmdb(`tv/${idStr}`);
               if (tvRes.ok) {
                 await fetchFullDetails(idStr, 'tv', searchTitle, searchSecondTitle);
                 return;
