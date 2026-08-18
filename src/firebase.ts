@@ -7,20 +7,18 @@ import { getAnalytics, isSupported, setUserProperties } from 'firebase/analytics
 import firebaseConfig from '../firebase-applet-config.json';
 import { safeStorage } from './utils/safeStorage';
 
-// Base config without injecting measurementId to avoid Firebase SDK mismatch warnings
-const { measurementId: _omittedMeasurementId, ...restConfig } = firebaseConfig;
-const extendedConfig = {
-  ...restConfig
-};
-
-// Use VITE_GA_MEASUREMENT_ID or fallback to config
 export const customMeasurementId = import.meta.env.VITE_GA_MEASUREMENT_ID || firebaseConfig.measurementId || "";
 
-export const app = initializeApp(extendedConfig);
+const appConfig = {
+  ...firebaseConfig,
+  measurementId: customMeasurementId || firebaseConfig.measurementId
+};
+
+export const app = initializeApp(appConfig);
 
 export const db = initializeFirestore(app, {
   localCache: typeof window !== 'undefined' ? persistentLocalCache({ tabManager: persistentMultipleTabManager() }) : undefined
-}, extendedConfig.firestoreDatabaseId);
+}, appConfig.firestoreDatabaseId);
 
 export const auth = getAuth(app);
 if (typeof window !== 'undefined') {
@@ -47,7 +45,7 @@ export const analyticsPromise = typeof window !== 'undefined'
 
         if (isOwner) {
            console.log("Analytics disabled for owner.");
-           return null; // Do not initialize GA or standalone gtag for owners
+           return null;
         }
 
         let analyticsInstance = null;
@@ -63,41 +61,6 @@ export const analyticsPromise = typeof window !== 'undefined'
           } catch(e) {
             console.warn("Could not initialize Firebase Analytics:", e);
           }
-        }
-        
-        // Ensure standalone gtag is always initialized with the correct ID
-        if (customMeasurementId && !document.querySelector(`script[src*="${customMeasurementId}"]`)) {
-          console.log("Initializing Standalone GA with Measurement ID:", customMeasurementId);
-          const script = document.createElement('script');
-          script.async = true;
-          script.src = `https://www.googletagmanager.com/gtag/js?id=${customMeasurementId}`;
-          document.head.appendChild(script);
-          
-          // @ts-ignore
-          window.dataLayer = window.dataLayer || [];
-          // @ts-ignore
-          window.gtag = function() { 
-            // @ts-ignore
-            window.dataLayer.push(arguments); 
-          };
-          // @ts-ignore
-          window.gtag('js', new Date());
-          
-          const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.1';
-          
-          // @ts-ignore
-          window.gtag('set', {
-            app_version: currentVersion,
-            version: currentVersion,
-            app_name: 'MovizNow'
-          });
-
-          // @ts-ignore
-          window.gtag('config', customMeasurementId, { 
-            send_page_view: true,
-            app_version: currentVersion,
-            app_name: 'MovizNow'
-          });
         }
         
         return analyticsInstance;

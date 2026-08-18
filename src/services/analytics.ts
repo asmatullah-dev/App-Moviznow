@@ -119,7 +119,7 @@ export const logEvent = async (
   }
 
   try {
-    // Log to Google Analytics if initialized
+    // Log to Firebase Analytics if initialized
     const gaInstance = analytics || await analyticsPromise;
     const appVer = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.1';
     
@@ -133,16 +133,6 @@ export const logEvent = async (
       } catch (e) {
         // ignore
       }
-    }
-    
-    // Always log to standalone gtag if available (more reliable)
-    if (typeof window !== 'undefined' && 'gtag' in window) {
-      // @ts-ignore
-      window.gtag('event', type, {
-        user_id: userId,
-        app_version: appVer,
-        ...data
-      });
     }
   } catch (error) {
     console.error('Error logging analytics event:', error);

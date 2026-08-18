@@ -1,25 +1,11 @@
 import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { logEvent as firebaseLogEvent, setUserId, setUserProperties } from 'firebase/analytics';
-import { analytics, analyticsPromise, customMeasurementId } from '../firebase';
+import { analytics, analyticsPromise } from '../firebase';
 import { safeStorage } from '../utils/safeStorage';
 
 export function AnalyticsTracker() {
   const location = useLocation();
-
-  useEffect(() => {
-    // Set up global gtag property on initialization after analytics promise resolves
-    analyticsPromise.then(() => {
-      const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.4.0';
-      if (typeof window !== 'undefined' && 'gtag' in window && customMeasurementId) {
-        // @ts-ignore
-        window.gtag('config', customMeasurementId, {
-          send_page_view: false,
-          app_version: currentVersion
-        });
-      }
-    });
-  }, []);
 
   useEffect(() => {
     const trackPage = async () => {
@@ -37,7 +23,7 @@ export function AnalyticsTracker() {
         // Ignore parse error
       }
 
-      const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.4.0';
+      const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.1';
 
       try {
         const searchParams = new URLSearchParams(location.search);
@@ -88,26 +74,15 @@ export function AnalyticsTracker() {
               }
               
               setUserProperties(gaInstance, userProps);
-
-              if (typeof window !== 'undefined' && 'gtag' in window && customMeasurementId) {
-                // @ts-ignore
-                window.gtag('set', 'user_properties', userProps);
-                // @ts-ignore
-                window.gtag('config', customMeasurementId, { user_id: profile.uid });
-              }
             }
 
             if (Object.keys(utmParams).length > 0) {
                firebaseLogEvent(gaInstance, 'campaign_details', utmParams);
             }
             firebaseLogEvent(gaInstance, 'page_view', pageViewData);
-          } catch (e) {}
-        }
-        
-        // Always log to standalone gtag if available (more reliable)
-        if (typeof window !== 'undefined' && 'gtag' in window) {
-          // @ts-ignore
-          window.gtag('event', 'page_view', pageViewData);
+          } catch (e) {
+            console.warn('Firebase analytics page_view failed:', e);
+          }
         }
       } catch (error) {
         console.error('Error tracking page view:', error);

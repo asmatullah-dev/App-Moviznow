@@ -217,8 +217,6 @@ function ReferralTracker() {
 }
 
 import { usePWA } from './contexts/PWAContext';
-import { collection, query, where, getDocs, limit } from 'firebase/firestore';
-import { db } from './firebase';
 
 function RewardsManager() {
   return null;
