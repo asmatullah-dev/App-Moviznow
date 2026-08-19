@@ -57,7 +57,7 @@ export const ScrollableRow = React.forwardRef<HTMLDivElement, ScrollableRowProps
         el.removeEventListener('scroll', checkScrollButtons);
         window.removeEventListener('resize', checkScrollButtons);
       };
-    }, [checkScrollButtons, children]);
+    }, [checkScrollButtons]);
 
     const scroll = (direction: 'left' | 'right') => {
       const el = containerRef.current;

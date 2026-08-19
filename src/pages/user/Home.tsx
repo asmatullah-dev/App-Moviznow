@@ -169,9 +169,6 @@ export default function Home({
   const [hasUserRated, setHasUserRated] = useState<boolean>(() => safeStorage.getItem('has_rated') === 'true');
 
   useEffect(() => {
-    if (safeStorage.getItem('has_rated') === 'true') {
-      setHasUserRated(true);
-    }
     const loadReviews = async () => {
       try {
         const cachedData = safeStorage.getItem('cached_reviews_data');
@@ -1380,7 +1377,7 @@ export default function Home({
                                   srcSet={getImageSrcSet(posterUrl)}
                                   sizes="(max-width: 640px) 150px, 190px"
                                   alt={collection.title}
-                                  loading="eager"
+                                  loading="lazy"
                                   decoding="async"
                                   className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
                                 />

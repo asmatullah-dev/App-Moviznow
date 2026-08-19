@@ -38,25 +38,19 @@ export function useImdbRating(content?: (Partial<Content> & { id: string }) | nu
     }
 
     const cached = getCachedImdbRating(contentId);
-    if (cached?.rating) {
-      setRating(cached.rating);
-    } else {
-      setRating(formatImdbRating(content?.imdbRating));
-    }
+    const targetRating = cached?.rating || formatImdbRating(content?.imdbRating);
+    const targetOtt = cached?.ottPlatform || content?.ottPlatform || (content as any)?.ott_platform || null;
 
-    if (cached?.ottPlatform) {
-      setOttPlatform(cached.ottPlatform);
-    } else {
-      setOttPlatform(content?.ottPlatform || (content as any)?.ott_platform || null);
-    }
+    setRating(prev => (prev !== targetRating ? targetRating : prev));
+    setOttPlatform(prev => (prev !== targetOtt ? targetOtt : prev));
 
     // If no valid cache exists or missing rating/OTT, fetch live (unless skipLiveFetch is requested)
     if (content && (!cached?.rating || !cached?.ottPlatform) && !options?.skipLiveFetch) {
       setIsLoading(true);
       fetchLiveImdbRating(content)
         .then((res) => {
-          if (res?.rating) setRating(res.rating);
-          if (res?.ottPlatform) setOttPlatform(res.ottPlatform);
+          if (res?.rating) setRating(prev => (prev !== res.rating ? res.rating : prev));
+          if (res?.ottPlatform) setOttPlatform(prev => (prev !== res.ottPlatform ? res.ottPlatform : prev));
         })
         .catch(() => {})
         .finally(() => {

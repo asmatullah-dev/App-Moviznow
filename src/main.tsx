@@ -6,9 +6,8 @@ import ErrorBoundary from './components/ErrorBoundary.tsx';
 import './index.css';
 import 'react-lazy-load-image-component/src/effects/blur.css';
 
-// Build identification to match client version against /api/version
-const CURRENT_BUILD_ID = typeof __BUILD_ID__ !== 'undefined' ? __BUILD_ID__ : 'unknown';
-console.log('[Auto-Update] Client running on build ID:', CURRENT_BUILD_ID);
+// Build identification
+const CURRENT_BUILD_ID = typeof __BUILD_ID__ !== 'undefined' ? __BUILD_ID__ : '3.2.1';
 
 // Safe reload helper to prevent repeated/rapid reloads (guards with 30s cooldown)
 const triggerAppReload = (reason: string) => {
@@ -22,90 +21,29 @@ const triggerAppReload = (reason: string) => {
   }
 };
 
-// Check version endpoint on backend
-let isCheckingDeployment = false;
-const checkDeploymentVersion = async () => {
-  if (import.meta.env.DEV) return;
-  if (isCheckingDeployment) return;
-  if (!CURRENT_BUILD_ID || CURRENT_BUILD_ID === 'unknown') return;
-  
-  isCheckingDeployment = true;
-  try {
-    const res = await fetch(`/api/version?_t=${Date.now()}`, { cache: 'no-store' });
-    if (res.ok) {
-      const data = await res.json();
-      if (data && data.version && data.version !== 'unknown' && data.version !== CURRENT_BUILD_ID) {
-        console.log('[Auto-Update] Version mismatch! Server:', data.version, 'vs Client:', CURRENT_BUILD_ID);
-        triggerAppReload('Deployment updated');
-      }
-    }
-  } catch (err) {
-    console.warn('[Auto-Update] Version check error:', err);
-  } finally {
-    isCheckingDeployment = false;
-  }
-};
-
-// Check version periodically and on tab visibility resume
-if (typeof window !== 'undefined') {
-  setInterval(checkDeploymentVersion, 5 * 60 * 1000);
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      checkDeploymentVersion();
-    }
-  });
-}
-
-// Service Worker registration with safe controller change handling
+// Service Worker registration (silent background updates without forced page reload on open)
 if ('serviceWorker' in navigator) {
-  const hadInitialController = !!navigator.serviceWorker.controller;
-
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js')
       .then((registration) => {
-        console.log('Service Worker registered with scope:', registration.scope);
-
-        // Check for updates periodically
+        // Check for updates periodically in background
         setInterval(() => {
           registration.update().catch(() => {});
-        }, 5 * 60 * 1000);
-
-        registration.onupdatefound = () => {
-          const installingWorker = registration.installing;
-          if (installingWorker) {
-            installingWorker.onstatechange = () => {
-              if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                console.log('[SW] New version found. Activating immediately.');
-                if (registration.waiting) {
-                  registration.waiting.postMessage({ type: 'SKIP_WAITING' });
-                }
-              }
-            };
-          }
-        };
+        }, 30 * 60 * 1000);
       })
       .catch((err) => {
         console.error('Service Worker registration failed:', err);
       });
-
-    // Only reload if a controller ALREADY existed when the page opened (meaning an update occurred while user was active)
-    let isRefreshing = false;
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (hadInitialController && !isRefreshing) {
-        isRefreshing = true;
-        triggerAppReload('Service worker controller updated');
-      }
-    });
   });
 }
 
 // Handle Vite preload errors (dynamic import failures when a new deployment updates JS chunks)
 window.addEventListener('vite:preloadError', (event) => {
-  console.warn('Vite preload error (new build deployed):', event);
+  console.warn('Vite preload error (stale chunks):', event);
   triggerAppReload('Vite preload error (stale chunks)');
 });
 
-// Auto-reload on unhandled chunk loading rejections (stale JS chunks missing on server)
+// Auto-reload only on genuine chunk loading network failures
 window.addEventListener('unhandledrejection', (event) => {
   const reason = event.reason?.message || String(event.reason || '');
   if (
@@ -113,7 +51,7 @@ window.addEventListener('unhandledrejection', (event) => {
     reason.includes('Importing a module script failed') ||
     reason.includes('Loading chunk')
   ) {
-    console.warn('Stale JS bundle detected after new deployment. Auto-refreshing...');
+    console.warn('Stale JS bundle detected after new deployment. Refreshing...');
     triggerAppReload('Stale JS chunk load error');
   }
 });

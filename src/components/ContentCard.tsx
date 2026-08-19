@@ -208,7 +208,7 @@ const ContentCard = React.memo(({
           <img
             src={optimizedPoster}
             alt={content.title}
-            loading="eager"
+            loading="lazy"
             decoding="async"
             className="w-full h-full object-cover transition-transform duration-200 ease-out group-hover:scale-105"
             referrerPolicy="no-referrer"
