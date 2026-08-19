@@ -6,6 +6,9 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
+  const buildId = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID || Date.now().toString();
+  const buildTime = new Date().toISOString();
+
   return {
     plugins: [
       react(), 
@@ -14,10 +17,21 @@ export default defineConfig(({mode}) => {
         registerType: 'autoUpdate',
         injectRegister: 'auto',
         workbox: {
-          globPatterns: ['**/*.{js,css,html,ico,png,svg,json}'],
+          globPatterns: ['**/*.{js,css,ico,png,svg,json}'],
           cleanupOutdatedCaches: true,
           skipWaiting: true,
           clientsClaim: true,
+          navigateFallback: null,
+          runtimeCaching: [
+            {
+              urlPattern: ({ request }) => request.mode === 'navigate',
+              handler: 'NetworkOnly',
+            },
+            {
+              urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
+              handler: 'NetworkOnly',
+            }
+          ],
           importScripts: ['/firebase-messaging-sw.js'],
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024
         },
@@ -45,8 +59,9 @@ export default defineConfig(({mode}) => {
     ],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-      '__APP_VERSION__': JSON.stringify(process.env.npm_package_version || '3.2.3'),
-      '__BUILD_TIME__': JSON.stringify(Date.now().toString()),
+      '__APP_VERSION__': JSON.stringify(process.env.npm_package_version || '3.2.1'),
+      '__BUILD_ID__': JSON.stringify(buildId),
+      '__BUILD_TIME__': JSON.stringify(buildTime),
     },
     resolve: {
       alias: {
@@ -55,7 +70,7 @@ export default defineConfig(({mode}) => {
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
+      // Do not modify
       hmr: process.env.DISABLE_HMR !== 'true',
     },
   };

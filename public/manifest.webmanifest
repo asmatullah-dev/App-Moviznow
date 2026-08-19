@@ -2,7 +2,7 @@
   "name": "MovizNow",
   "short_name": "MovizNow",
   "description": "Your premium movie and series streaming platform",
-  "start_url": "/?utm_source=pwa",
+  "start_url": "/",
   "display": "standalone",
   "background_color": "#000000",
   "theme_color": "#000000",

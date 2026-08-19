@@ -23,25 +23,10 @@ export default class ErrorBoundary extends React.Component<Props, State> {
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('Uncaught error:', error, errorInfo);
     
-    const msg = error?.message || String(error || '');
-    if (
-      msg.includes('Failed to fetch dynamically imported module') ||
-      msg.includes('Importing a module script failed') ||
-      msg.includes('Loading chunk') ||
-      msg.includes('CSS_CHUNK_LOAD_FAILED') ||
-      msg.includes('Unexpected token')
-    ) {
-      console.log('Stale build bundle detected in ErrorBoundary. Purging cache and reloading...');
-      const lastChunkReload = parseInt(sessionStorage.getItem('last_chunk_error_reload') || '0', 10);
-      if (Date.now() - lastChunkReload > 10000) {
-        sessionStorage.setItem('last_chunk_error_reload', String(Date.now()));
-        if ('caches' in window) {
-          try {
-            caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
-          } catch (e) {}
-        }
-        window.location.href = window.location.pathname + '?_v=' + Date.now();
-      }
+    // Auto-reload on dynamic import failures (common after new deployments)
+    if (error.message?.includes('Failed to fetch dynamically imported module')) {
+      console.log('Dynamic import failure detected, reloading page...');
+      window.location.reload();
     }
   }
 

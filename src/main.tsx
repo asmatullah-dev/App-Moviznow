@@ -3,118 +3,87 @@ import {createRoot} from 'react-dom/client';
 import {HelmetProvider} from 'react-helmet-async';
 import App from './App.tsx';
 import ErrorBoundary from './components/ErrorBoundary.tsx';
-import { safeStorage, safeSessionStorage } from './utils/safeStorage';
 import './index.css';
 import 'react-lazy-load-image-component/src/effects/blur.css';
 
-declare const __APP_VERSION__: string;
-declare const __BUILD_TIME__: string;
+// Build identification to match client version against /api/version
+const CURRENT_BUILD_ID = typeof __BUILD_ID__ !== 'undefined' ? __BUILD_ID__ : 'unknown';
+console.log('[Auto-Update] Client running on build ID:', CURRENT_BUILD_ID);
 
-const currentAppVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.3';
-const currentBuildTime = typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : Date.now().toString();
-
-// Clean up cache-busting parameter from URL if present
-if (typeof window !== 'undefined' && window.location.search.includes('_v=')) {
-  try {
-    const url = new URL(window.location.href);
-    url.searchParams.delete('_v');
-    window.history.replaceState({}, '', url.pathname + (url.search ? url.search : '') + url.hash);
-  } catch (e) {}
-}
-
-// Single-refresh update helper (uses persistent localStorage cooldown to strictly prevent loops)
-const forceUpdateNewDeployment = async (reason: string) => {
-  if (import.meta.env.DEV) {
-    console.log(`[Deployment] ${reason} detected (Dev mode: auto-reload suppressed).`);
-    return;
-  }
-
+// Safe reload helper to prevent infinite refresh loops (guards with 5s cooldown)
+const triggerAppReload = (reason: string) => {
   const now = Date.now();
-  const lastReload = parseInt(safeStorage.getItem('last_deployment_reload') || '0', 10);
-
-  // Strict 60-second cooldown per device/browser to prevent reload loops
-  if (now - lastReload < 60000) {
-    console.log(`[Deployment] ${reason} - Suppressed reload (cooldown active).`);
-    return;
-  }
-  safeStorage.setItem('last_deployment_reload', String(now));
-
-  console.log(`[Deployment] ${reason} - Clearing caches and reloading fresh build...`);
-
-  try {
-    // 1. Tell active Service Worker to skip waiting
-    if (navigator.serviceWorker?.controller) {
-      navigator.serviceWorker.controller.postMessage({ type: 'SKIP_WAITING' });
-    }
-
-    // 2. Unregister old service workers so new version installs cleanly
+  const lastReload = parseInt(sessionStorage.getItem('last_auto_reload_timestamp') || '0', 10);
+  
+  if (now - lastReload > 5000) {
+    sessionStorage.setItem('last_auto_reload_timestamp', String(now));
+    console.log(`[Auto-Update] New deployment version detected! Triggering app reload due to: ${reason}`);
+    
+    // Unregister service worker and reload to ensure we fetch clean fresh bundle files from Vercel
     if ('serviceWorker' in navigator) {
-      const registrations = await navigator.serviceWorker.getRegistrations();
-      for (const reg of registrations) {
-        await reg.unregister();
-      }
+      navigator.serviceWorker.getRegistrations()
+        .then((registrations) => {
+          for (const registration of registrations) {
+            registration.unregister();
+          }
+          window.location.reload();
+        })
+        .catch(() => {
+          window.location.reload();
+        });
+    } else {
+      window.location.reload();
     }
-
-    // 3. Clear all Web Cache API caches (Workbox / PWA caches)
-    if ('caches' in window) {
-      const keys = await caches.keys();
-      await Promise.all(keys.map(k => caches.delete(k)));
-    }
-  } catch (e) {
-    console.warn('[Deployment] Cache purge warning:', e);
   }
-
-  // 4. Single hard refresh with cache-busting timestamp
-  window.location.replace(window.location.pathname + '?_v=' + Date.now());
 };
 
-// Check for build changes on load: detects new Vercel deployments even if version number is not changed!
-const storedBuildTime = safeStorage.getItem('app_installed_build_time');
-const storedVersion = safeStorage.getItem('app_installed_version');
+// Check version endpoint on Vercel backend
+let isCheckingDeployment = false;
+const checkVercelDeployment = async () => {
+  if (import.meta.env.DEV) return;
+  if (isCheckingDeployment) return;
+  
+  isCheckingDeployment = true;
+  try {
+    const res = await fetch(`/api/version?_t=${Date.now()}`, { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.version && data.version !== CURRENT_BUILD_ID) {
+        console.log('[Auto-Update] Version mismatch! Server:', data.version, 'vs Client:', CURRENT_BUILD_ID);
+        triggerAppReload('Vercel deployment updated');
+      }
+    }
+  } catch (err) {
+    console.warn('[Auto-Update] Version check error:', err);
+  } finally {
+    isCheckingDeployment = false;
+  }
+};
 
-if ((storedBuildTime && storedBuildTime !== currentBuildTime) || (storedVersion && storedVersion !== currentAppVersion)) {
-  console.log(`[DeploymentUpdate] Build/Version change detected: build=${storedBuildTime}->${currentBuildTime}, ver=${storedVersion}->${currentAppVersion}`);
-  safeStorage.setItem('app_installed_build_time', currentBuildTime);
-  safeStorage.setItem('app_installed_version', currentAppVersion);
-  forceUpdateNewDeployment(`New deployment build (${currentBuildTime}) detected`);
-} else if (!storedBuildTime) {
-  safeStorage.setItem('app_installed_build_time', currentBuildTime);
-  safeStorage.setItem('app_installed_version', currentAppVersion);
+// Start aggressive 15-second polling of Vercel deployment status
+setInterval(checkVercelDeployment, 15000);
+
+// Check version on window focus or visibility change immediately
+if (typeof window !== 'undefined') {
+  window.addEventListener('focus', checkVercelDeployment);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      checkVercelDeployment();
+    }
+  });
 }
 
-// Vercel deployment update detection via index header checks
-let currentEtag: string | null = safeSessionStorage.getItem('app_build_etag');
-const checkForVercelDeployment = async () => {
-  if (import.meta.env.DEV) return;
-  try {
-    const res = await fetch(`/?_t=${Date.now()}`, { method: 'HEAD', cache: 'no-store' });
-    const etag = res.headers.get('Etag') || res.headers.get('Last-Modified');
-    if (etag) {
-      if (!currentEtag) {
-        currentEtag = etag;
-        safeSessionStorage.setItem('app_build_etag', etag);
-      } else if (currentEtag !== etag) {
-        safeSessionStorage.setItem('app_build_etag', etag);
-        await forceUpdateNewDeployment('Vercel deployment etag changed');
-      }
-    }
-  } catch (err) {}
-};
-
-// Check for Vercel deployment periodically every 10 minutes
-setInterval(checkForVercelDeployment, 10 * 60 * 1000);
-
-// Register service worker for PWA and FCM with unique build timestamp and version parameters
+// Register service worker with instant skip-waiting & active update polling
 if ('serviceWorker' in navigator) {
-  const registerSW = () => {
-    const swUrl = `/sw.js?b=${encodeURIComponent(currentBuildTime)}&v=${encodeURIComponent(currentAppVersion)}`;
-    navigator.serviceWorker.register(swUrl)
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
       .then((registration) => {
         console.log('Service Worker registered with scope:', registration.scope);
 
+        // Actively check for Service Worker / workbox updates every 20 seconds
         setInterval(() => {
           registration.update().catch(() => {});
-        }, 15 * 60 * 1000);
+        }, 20000);
 
         window.addEventListener('focus', () => {
           registration.update().catch(() => {});
@@ -125,7 +94,10 @@ if ('serviceWorker' in navigator) {
           if (installingWorker) {
             installingWorker.onstatechange = () => {
               if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                forceUpdateNewDeployment('Service Worker installed new assets');
+                console.log('[SW] New version found. Activating immediately.');
+                if (registration.waiting) {
+                  registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+                }
               }
             };
           }
@@ -135,29 +107,24 @@ if ('serviceWorker' in navigator) {
         console.error('Service Worker registration failed:', err);
       });
 
-    let hasExistingController = !!navigator.serviceWorker.controller;
+    // Automatically refresh on controller update (when new Service Worker takes control)
+    let isRefreshing = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (hasExistingController) {
-        hasExistingController = false;
-        forceUpdateNewDeployment('Service Worker controller changed');
+      if (!isRefreshing) {
+        isRefreshing = true;
+        triggerAppReload('Service worker controller changed');
       }
     });
-  };
-
-  if (document.readyState === 'complete') {
-    registerSW();
-  } else {
-    window.addEventListener('load', registerSW);
-  }
+  });
 }
 
 // Handle Vite preload errors (dynamic import failures when a new deployment updates JS chunks)
 window.addEventListener('vite:preloadError', (event) => {
   console.warn('Vite preload error (new build deployed):', event);
-  forceUpdateNewDeployment('Vite chunk preload error');
+  triggerAppReload('Vite preload error (stale chunks)');
 });
 
-// Auto-reload on unhandled chunk loading rejections (e.g., stale JS chunks missing on server)
+// Auto-reload on unhandled chunk loading rejections (stale JS chunks missing on server)
 window.addEventListener('unhandledrejection', (event) => {
   const reason = event.reason?.message || String(event.reason || '');
   if (
@@ -165,8 +132,8 @@ window.addEventListener('unhandledrejection', (event) => {
     reason.includes('Importing a module script failed') ||
     reason.includes('Loading chunk')
   ) {
-    console.warn('Stale JS bundle detected after new deployment.');
-    forceUpdateNewDeployment('Unhandled chunk loading error');
+    console.warn('Stale JS bundle detected after new deployment. Auto-refreshing...');
+    triggerAppReload('Stale JS chunk load error');
   }
 });
 

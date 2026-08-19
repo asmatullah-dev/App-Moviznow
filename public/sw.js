@@ -75,8 +75,7 @@ function extractUrlFromNotification(notification) {
   return '/';
 }
 
-const swBuildId = urlParams.get('b') || urlParams.get('v') || '3.2.3';
-const CACHE = "moviznow-cache-" + swBuildId;
+const CACHE = "pwabuilder-page-v2.0";
 const offlineFallbackPage = "offline.html";
 
 self.addEventListener("message", (event) => {
@@ -85,7 +84,7 @@ self.addEventListener("message", (event) => {
   }
 });
 
-self.addEventListener('install', (event) => {
+self.addEventListener('install', async (event) => {
   self.skipWaiting(); // Force update so mobile users don't need to close all tabs
   event.waitUntil(
     caches.open(CACHE)
@@ -94,25 +93,14 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE && cacheName !== 'image-cache') {
-            console.log('[sw.js] Deleting obsolete cache:', cacheName);
-            return caches.delete(cacheName);
-          }
-        })
-      );
-    }).then(() => self.clients.claim())
-  );
+  event.waitUntil(self.clients.claim()); // Take control of all open pages immediately
 });
 
 if (workbox.navigationPreload.isSupported()) {
   workbox.navigationPreload.enable();
 }
 
-// Image caching strategy for 14 days with strict max entry limit
+// Image caching strategy for 30 days
 workbox.routing.registerRoute(
   ({ request }) => request.destination === 'image',
   new workbox.strategies.CacheFirst({
@@ -122,8 +110,8 @@ workbox.routing.registerRoute(
         statuses: [0, 200],
       }),
       new workbox.expiration.ExpirationPlugin({
-        maxAgeSeconds: 14 * 24 * 60 * 60, // 14 Days
-        maxEntries: 250,
+        maxAgeSeconds: 30 * 24 * 60 * 60, // 30 Days
+        maxEntries: 1000,
         purgeOnQuotaError: true,
       }),
     ],
@@ -131,53 +119,23 @@ workbox.routing.registerRoute(
 );
 
 self.addEventListener('fetch', (event) => {
-  // Navigation requests (page loads & Home Screen PWA / WebAPK launches)
+  // Basic fetch handler to satisfy PWA requirements
   if (event.request.mode === 'navigate') {
     event.respondWith((async () => {
       try {
-        // 1. Check navigation preload response if valid
         const preloadResp = await event.preloadResponse;
-        if (preloadResp && preloadResp.ok) {
+        if (preloadResp) {
           return preloadResp;
         }
-
-        // 2. Fetch with a 3.5 second timeout so PWA startup never hangs on slow networks
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3500);
-
-        try {
-          const networkResp = await fetch(event.request, { signal: controller.signal });
-          clearTimeout(timeoutId);
-          if (networkResp && networkResp.ok) {
-            return networkResp;
-          }
-        } catch (fetchErr) {
-          clearTimeout(timeoutId);
-        }
+        return await fetch(event.request);
       } catch (error) {
-        console.warn('[SW] Navigation fetch error:', error);
-      }
-
-      // 3. Serve cached HTML if network fetch fails or times out
-      try {
         const cache = await caches.open(CACHE);
-        const cached = (await cache.match(offlineFallbackPage)) || (await cache.match('/')) || (await cache.match('/index.html'));
-        if (cached) return cached;
-      } catch (e) {}
-
-      // 4. Guaranteed HTML fallback to prevent blank/black screens in Chrome WebAPK
-      return new Response(
-        '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MovizNow</title></head><body style="background:#000000;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-family:sans-serif;"><div style="text-align:center;"><p>Loading MovizNow...</p><script>setTimeout(function(){window.location.reload();},800);</script></div></body></html>',
-        { headers: { 'Content-Type': 'text/html' } }
-      );
+        return await cache.match(offlineFallbackPage);
+      }
     })());
   } else {
-    // Non-navigation asset requests with safe cache fallback
-    event.respondWith(
-      fetch(event.request).catch(() => {
-        return caches.match(event.request);
-      })
-    );
+    // For non-navigation requests, just fetch from network
+    event.respondWith(fetch(event.request));
   }
 });
 

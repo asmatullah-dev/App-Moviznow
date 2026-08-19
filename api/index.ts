@@ -98,6 +98,23 @@ async function startServer() {
   app.use("/api/email", emailRouter);
   app.use("/api", tmdbRouter);
 
+  // Dynamic build info generated on Vercel or locally
+  const SERVER_BUILD_TIME = new Date().toISOString();
+  const SERVER_BUILD_ID = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID || SERVER_BUILD_TIME;
+
+  app.get(["/api/version", "/version"], (req, res) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0, s-maxage=0");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.json({
+      version: SERVER_BUILD_ID,
+      buildTime: SERVER_BUILD_TIME,
+      commit: process.env.VERCEL_GIT_COMMIT_SHA || null,
+      deploymentId: process.env.VERCEL_DEPLOYMENT_ID || null,
+      timestamp: Date.now()
+    });
+  });
+
   // Background Scan Endpoint
   // In-memory background scan storage to avoid Firestore writes
   const inMemoryScanStore: Record<string, any> = {};
@@ -3136,19 +3153,7 @@ async function startServer() {
     if (!fs.existsSync(distPath)) {
       distPath = path.join(process.cwd(), "dist");
     }
-    app.use(
-      express.static(distPath, {
-        index: false,
-        maxAge: '1y',
-        setHeaders: (res, filePath) => {
-          if (filePath.endsWith('.html') || filePath.endsWith('sw.js') || filePath.endsWith('manifest.webmanifest')) {
-            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
-          } else if (filePath.includes('/assets/')) {
-            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-          }
-        },
-      })
-    );
+    app.use(express.static(distPath, { index: false })); // Disable default index.html serving
 
     // Explicitly serve PWA files with correct MIME types
     app.get("/moviznow_share_banner.jpg", (req, res) => {

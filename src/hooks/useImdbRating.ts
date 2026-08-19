@@ -50,8 +50,8 @@ export function useImdbRating(content?: (Partial<Content> & { id: string }) | nu
       setOttPlatform(content?.ottPlatform || (content as any)?.ott_platform || null);
     }
 
-    // If no valid cache exists AND item lacks both static rating and OTT platform, fetch live
-    if (content && (!cached?.rating && !initialStaticRating) && (!cached?.ottPlatform && !initialStaticOtt)) {
+    // If no valid cache exists or missing rating/OTT, fetch live
+    if (content && (!cached?.rating || !cached?.ottPlatform)) {
       setIsLoading(true);
       fetchLiveImdbRating(content)
         .then((res) => {
