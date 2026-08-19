@@ -18,12 +18,10 @@ import { getAnalytics, isSupported, setUserProperties } from 'firebase/analytics
 import firebaseConfig from '../firebase-applet-config.json';
 import { safeStorage } from './utils/safeStorage';
 
-export const customMeasurementId = import.meta.env.VITE_GA_MEASUREMENT_ID || firebaseConfig.measurementId || "";
-
 const appConfig = {
-  ...firebaseConfig,
-  measurementId: customMeasurementId
+  ...firebaseConfig
 };
+delete (appConfig as any).measurementId;
 
 export const app = initializeApp(appConfig);
 
