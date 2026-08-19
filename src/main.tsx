@@ -6,24 +6,52 @@ import ErrorBoundary from './components/ErrorBoundary.tsx';
 import './index.css';
 import 'react-lazy-load-image-component/src/effects/blur.css';
 
-// Safe reload helper to prevent infinite refresh loops (suppressed in dev mode, max once per 30 mins in prod)
-const safeReloadForSWUpdate = () => {
+// Clean up cache-busting parameter from URL if present
+if (typeof window !== 'undefined' && window.location.search.includes('_v=')) {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('_v');
+    window.history.replaceState({}, '', url.pathname + (url.search ? url.search : '') + url.hash);
+  } catch (e) {}
+}
+
+// Force update helper to ensure new Vercel deployments bypass browser & SW caches completely
+const forceUpdateNewDeployment = async (reason: string) => {
   if (import.meta.env.DEV) {
-    console.log('[SW] Service Worker update detected (Dev mode: auto-reload suppressed to prevent loop).');
+    console.log(`[Deployment] ${reason} detected (Dev mode: auto-reload suppressed).`);
     return;
   }
+
   const now = Date.now();
-  const lastReload = parseInt(sessionStorage.getItem('last_sw_auto_reload') || '0', 10);
-  // Only auto-reload if not already reloaded in the last 30 minutes
-  if (now - lastReload > 30 * 60 * 1000) {
-    sessionStorage.setItem('last_sw_auto_reload', String(now));
-    console.log('[SW] New version detected! Auto-reloading app...');
-    window.location.reload();
+  const lastReload = parseInt(sessionStorage.getItem('last_deployment_reload') || '0', 10);
+
+  // Prevent infinite loop if reload happened in the last 10 seconds
+  if (now - lastReload < 10000) return;
+  sessionStorage.setItem('last_deployment_reload', String(now));
+
+  console.log(`[Deployment] ${reason} - Clearing caches and reloading fresh build...`);
+
+  try {
+    // 1. Tell active Service Worker to skip waiting
+    if (navigator.serviceWorker?.controller) {
+      navigator.serviceWorker.controller.postMessage({ type: 'SKIP_WAITING' });
+    }
+
+    // 2. Clear all Web Cache API caches (Workbox / PWA caches)
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+  } catch (e) {
+    console.warn('[Deployment] Cache purge warning:', e);
   }
+
+  // 3. Force hard refresh with cache-busting timestamp to fetch new build from Vercel
+  window.location.href = window.location.pathname + '?_v=' + Date.now();
 };
 
 // Vercel deployment update detection via index header checks
-let currentEtag: string | null = null;
+let currentEtag: string | null = sessionStorage.getItem('app_build_etag');
 const checkForVercelDeployment = async () => {
   if (import.meta.env.DEV) return;
   try {
@@ -32,20 +60,18 @@ const checkForVercelDeployment = async () => {
     if (etag) {
       if (!currentEtag) {
         currentEtag = etag;
+        sessionStorage.setItem('app_build_etag', etag);
       } else if (currentEtag !== etag) {
-        console.log('[Vercel] New deployment detected via header change. Auto-reloading app...');
-        const now = Date.now();
-        const lastReload = parseInt(sessionStorage.getItem('last_vercel_reload') || '0', 10);
-        if (now - lastReload > 30 * 60 * 1000) { // Limit auto-reloads to once per 30 mins
-          sessionStorage.setItem('last_vercel_reload', String(now));
-          window.location.reload();
-        }
+        sessionStorage.setItem('app_build_etag', etag);
+        await forceUpdateNewDeployment('Vercel new deployment build etag change');
       }
     }
   } catch (err) {}
 };
 
-setInterval(checkForVercelDeployment, 15 * 60 * 1000);
+// Check for Vercel deployment on startup and periodically every 5 minutes
+checkForVercelDeployment();
+setInterval(checkForVercelDeployment, 5 * 60 * 1000);
 
 // Register service worker for PWA and FCM with safe auto-update checks on production deployment
 if ('serviceWorker' in navigator) {
@@ -54,10 +80,10 @@ if ('serviceWorker' in navigator) {
       .then((registration) => {
         console.log('Service Worker registered with scope:', registration.scope);
 
-        // Check for new Service Worker / deployment every 30 minutes
+        // Check for new Service Worker / deployment every 10 minutes
         setInterval(() => {
           registration.update().catch(() => {});
-        }, 30 * 60 * 1000);
+        }, 10 * 60 * 1000);
 
         // Check for updates when user opens/focuses the app in a new session or tab
         window.addEventListener('focus', () => {
@@ -70,7 +96,7 @@ if ('serviceWorker' in navigator) {
           if (installingWorker) {
             installingWorker.onstatechange = () => {
               if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                safeReloadForSWUpdate();
+                forceUpdateNewDeployment('Service Worker installed new assets');
               }
             };
           }
@@ -80,12 +106,12 @@ if ('serviceWorker' in navigator) {
         console.error('Service Worker registration failed:', err);
       });
 
-    // Handle controllerchange (when new Service Worker activates)
-    let isRefreshing = false;
+    // Handle controllerchange (only reload if an existing active Service Worker was replaced)
+    let hasExistingController = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (!isRefreshing) {
-        isRefreshing = true;
-        safeReloadForSWUpdate();
+      if (hasExistingController) {
+        hasExistingController = false;
+        forceUpdateNewDeployment('Service Worker controller changed');
       }
     });
   });
@@ -94,11 +120,7 @@ if ('serviceWorker' in navigator) {
 // Handle Vite preload errors (dynamic import failures when a new deployment updates JS chunks)
 window.addEventListener('vite:preloadError', (event) => {
   console.warn('Vite preload error (new build deployed):', event);
-  const lastChunkReload = parseInt(sessionStorage.getItem('last_chunk_error_reload') || '0', 10);
-  if (Date.now() - lastChunkReload > 60 * 1000) {
-    sessionStorage.setItem('last_chunk_error_reload', String(Date.now()));
-    window.location.reload();
-  }
+  forceUpdateNewDeployment('Vite chunk preload error');
 });
 
 // Auto-reload on unhandled chunk loading rejections (e.g., stale JS chunks missing on server)
@@ -109,12 +131,8 @@ window.addEventListener('unhandledrejection', (event) => {
     reason.includes('Importing a module script failed') ||
     reason.includes('Loading chunk')
   ) {
-    const lastChunkReload = parseInt(sessionStorage.getItem('last_chunk_error_reload') || '0', 10);
-    if (Date.now() - lastChunkReload > 60 * 1000) {
-      sessionStorage.setItem('last_chunk_error_reload', String(Date.now()));
-      console.warn('Stale JS bundle detected after new deployment. Auto-refreshing app...');
-      window.location.reload();
-    }
+    console.warn('Stale JS bundle detected after new deployment.');
+    forceUpdateNewDeployment('Unhandled chunk loading error');
   }
 });
 

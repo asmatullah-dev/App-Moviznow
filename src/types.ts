@@ -114,6 +114,7 @@ export interface AppNotification {
   buttonLabel?: string;
   buttonUrl?: string;
   sendFcm?: boolean;
+  sendEmail?: boolean;
   isFcmDisabled?: boolean;
 }
 
