@@ -1130,39 +1130,39 @@ export default function Home({
             <AnimatePresence initial={false}>
               {isRecentVisible && (
                 <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: "auto", opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.3 }}
-                  className="overflow-hidden"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2 }}
                 >
                   <div className="relative group pt-1">
                     <ScrollableRow
-                scrollKey="scroll_recently_viewed"
-                className="flex overflow-x-auto gap-4 pb-4 snap-x snap-mandatory flex-nowrap hide-scrollbar"
-                style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
-              >
-                {recentlyViewed
-                  .slice(0, settings?.recentViewLimit || 10)
-                  .map((content) => (
-                    <div
-                      key={content.id}
-                      className="w-[110px] sm:w-[140px] shrink-0 snap-start"
+                      scrollKey="scroll_recently_viewed"
+                      className="flex overflow-x-auto gap-4 pb-4 snap-x snap-mandatory flex-nowrap hide-scrollbar"
+                      style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
                     >
-                      <ContentCard
-                        content={content}
-                        profile={profile}
-                        qualities={qualities}
-                        languages={languages}
-                        genres={genres}
-                        onToggleFavorite={toggleFavorite}
-                        onToggleWatchLater={toggleWatchLater}
-                        isSmall={true}
-                      />
-                    </div>
-                  ))}
-              </ScrollableRow>
-            </div>
+                      {recentlyViewed
+                        .slice(0, settings?.recentViewLimit || 10)
+                        .map((content) => (
+                          <div
+                            key={content.id}
+                            className="w-[110px] sm:w-[140px] shrink-0 snap-start"
+                          >
+                            <ContentCard
+                              content={content}
+                              profile={profile}
+                              qualities={qualities}
+                              languages={languages}
+                              genres={genres}
+                              onToggleFavorite={toggleFavorite}
+                              onToggleWatchLater={toggleWatchLater}
+                              isSmall={true}
+                              skipLiveRatingFetch={true}
+                            />
+                          </div>
+                        ))}
+                    </ScrollableRow>
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -1199,11 +1199,10 @@ export default function Home({
             <AnimatePresence initial={false}>
               {isTrendingRowVisible && (
                 <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: "auto", opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.3 }}
-                  className="overflow-hidden"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2 }}
                 >
                   <div className="relative group pt-1">
                     <ScrollableRow
@@ -1213,31 +1212,31 @@ export default function Home({
                     >
                       {trendingCollection.contentIds
                         .map((id) => permittedContentList.find((c) => c.id === id))
-                        .filter(Boolean)
+                        .filter((c): c is Content => !!c)
                         .sort((a, b) => {
                           const aCanPlay = getCanPlay(a) ? 1 : 0;
                           const bCanPlay = getCanPlay(b) ? 1 : 0;
                           return bCanPlay - aCanPlay;
                         })
                         .map((content) => {
-                          if (!content) return null;
                           return (
                             <div
                               key={content.id}
                               className="w-[140px] sm:w-[180px] shrink-0 snap-start"
                             >
-                            <ContentCard
-                              content={content}
-                              profile={profile}
-                              qualities={qualities}
-                              languages={languages}
-                              genres={genres}
-                              onToggleFavorite={toggleFavorite}
-                              onToggleWatchLater={toggleWatchLater}
-                            />
-                          </div>
-                        );
-                      })}
+                              <ContentCard
+                                content={content}
+                                profile={profile}
+                                qualities={qualities}
+                                languages={languages}
+                                genres={genres}
+                                onToggleFavorite={toggleFavorite}
+                                onToggleWatchLater={toggleWatchLater}
+                                skipLiveRatingFetch={true}
+                              />
+                            </div>
+                          );
+                        })}
                     </ScrollableRow>
                   </div>
                 </motion.div>
@@ -1276,11 +1275,10 @@ export default function Home({
             <AnimatePresence initial={false}>
               {isNewlyAddedVisible && (
                 <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: "auto", opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.3 }}
-                  className="overflow-hidden"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2 }}
                 >
                   <div className="relative group pt-1">
                     <ScrollableRow
@@ -1290,31 +1288,31 @@ export default function Home({
                     >
                       {newlyAddedCollection.contentIds
                         .map((id) => permittedContentList.find((c) => c.id === id))
-                        .filter(Boolean)
+                        .filter((c): c is Content => !!c)
                         .sort((a, b) => {
                           const aCanPlay = getCanPlay(a) ? 1 : 0;
                           const bCanPlay = getCanPlay(b) ? 1 : 0;
                           return bCanPlay - aCanPlay;
                         })
                         .map((content) => {
-                          if (!content) return null;
                           return (
                             <div
                               key={content.id}
                               className="w-[140px] sm:w-[180px] shrink-0 snap-start"
                             >
-                            <ContentCard
-                              content={content}
-                              profile={profile}
-                              qualities={qualities}
-                              languages={languages}
-                              genres={genres}
-                              onToggleFavorite={toggleFavorite}
-                              onToggleWatchLater={toggleWatchLater}
-                            />
-                          </div>
-                        );
-                      })}
+                              <ContentCard
+                                content={content}
+                                profile={profile}
+                                qualities={qualities}
+                                languages={languages}
+                                genres={genres}
+                                onToggleFavorite={toggleFavorite}
+                                onToggleWatchLater={toggleWatchLater}
+                                skipLiveRatingFetch={true}
+                              />
+                            </div>
+                          );
+                        })}
                     </ScrollableRow>
                   </div>
                 </motion.div>
@@ -1347,11 +1345,10 @@ export default function Home({
             <AnimatePresence initial={false}>
               {isCollectionsVisible && (
                 <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: "auto", opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.3 }}
-                  className="overflow-hidden"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2 }}
                 >
                   <div className="relative group pt-1">
                     <ScrollableRow
@@ -1600,6 +1597,7 @@ export default function Home({
                   onToggleFavorite={toggleFavorite}
                   onToggleWatchLater={toggleWatchLater}
                   selectedYear={selectedYear}
+                  skipLiveRatingFetch={true}
                 />
               ))}
             </div>
@@ -1870,6 +1868,7 @@ export default function Home({
                         genres={genres}
                         onToggleFavorite={toggleFavorite}
                         onToggleWatchLater={toggleWatchLater}
+                        skipLiveRatingFetch={true}
                       />
                     ));
                   })()}

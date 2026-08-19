@@ -26,6 +26,7 @@ interface ContentCardProps {
   onToggleWatchLater: (id: string) => void;
   selectedYear?: string;
   isSmall?: boolean;
+  skipLiveRatingFetch?: boolean;
 }
 
 const ContentCard = React.memo(({ 
@@ -37,7 +38,8 @@ const ContentCard = React.memo(({
   onToggleFavorite, 
   onToggleWatchLater,
   selectedYear,
-  isSmall
+  isSmall,
+  skipLiveRatingFetch = false
 }: ContentCardProps) => {
   const { addToCart, cart } = useCart();
   const { profile: sysProfile } = useAuth();
@@ -45,7 +47,11 @@ const ContentCard = React.memo(({
   const { vibrate } = useHaptics();
   const { t } = useLanguage();
   const navigate = useNavigate();
-  const { rating: imdbRating, ottPlatform: cachedOtt, refreshRating } = useImdbRating(content);
+  const [hovered, setHovered] = React.useState(false);
+  const { rating: imdbRating, ottPlatform: cachedOtt, refreshRating } = useImdbRating(
+    content,
+    { skipLiveFetch: skipLiveRatingFetch && !hovered }
+  );
   const ottBadge = getOttBadgeConfig(content.ottPlatform || (content as any).ott_platform || cachedOtt);
   const [isTrailerSelectionOpen, setIsTrailerSelectionOpen] = React.useState(false);
   const [selectedTrailerUrl, setSelectedTrailerUrl] = React.useState<string | null>(null);
@@ -183,6 +189,7 @@ const ContentCard = React.memo(({
 
   return (
     <div 
+      onMouseEnter={() => setHovered(true)}
       className={clsx("group relative flex flex-col h-full transition-transform duration-200 hover:-translate-y-1 active:scale-[0.98]", {
         "scale-105 z-30": isClicked
       })}

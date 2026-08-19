@@ -8,7 +8,7 @@ import {
   CachedImdbRating
 } from '../services/imdbRatingService';
 
-export function useImdbRating(content?: (Partial<Content> & { id: string }) | null) {
+export function useImdbRating(content?: (Partial<Content> & { id: string }) | null, options?: { skipLiveFetch?: boolean }) {
   const contentId = content?.id;
   const initialStaticRating = content?.imdbRating;
   const initialStaticOtt = content?.ottPlatform || (content as any)?.ott_platform;
@@ -50,8 +50,8 @@ export function useImdbRating(content?: (Partial<Content> & { id: string }) | nu
       setOttPlatform(content?.ottPlatform || (content as any)?.ott_platform || null);
     }
 
-    // If no valid cache exists or missing rating/OTT, fetch live
-    if (content && (!cached?.rating || !cached?.ottPlatform)) {
+    // If no valid cache exists or missing rating/OTT, fetch live (unless skipLiveFetch is requested)
+    if (content && (!cached?.rating || !cached?.ottPlatform) && !options?.skipLiveFetch) {
       setIsLoading(true);
       fetchLiveImdbRating(content)
         .then((res) => {
@@ -63,7 +63,7 @@ export function useImdbRating(content?: (Partial<Content> & { id: string }) | nu
           setIsLoading(false);
         });
     }
-  }, [contentId, content?.imdbRating, content?.ottPlatform, (content as any)?.ott_platform, content?.imdbLink, content?.title, content?.year]);
+  }, [contentId, content?.imdbRating, content?.ottPlatform, (content as any)?.ott_platform, content?.imdbLink, content?.title, content?.year, options?.skipLiveFetch]);
 
   // Listen to live update broadcasts across the app
   useEffect(() => {
