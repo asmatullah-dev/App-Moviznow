@@ -3,9 +3,12 @@ import {createRoot} from 'react-dom/client';
 import {HelmetProvider} from 'react-helmet-async';
 import App from './App.tsx';
 import ErrorBoundary from './components/ErrorBoundary.tsx';
-import { safeSessionStorage } from './utils/safeStorage';
+import { safeStorage, safeSessionStorage } from './utils/safeStorage';
 import './index.css';
 import 'react-lazy-load-image-component/src/effects/blur.css';
+
+declare const __APP_VERSION__: string;
+const currentAppVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.2';
 
 // Clean up cache-busting parameter from URL if present
 if (typeof window !== 'undefined' && window.location.search.includes('_v=')) {
@@ -16,7 +19,7 @@ if (typeof window !== 'undefined' && window.location.search.includes('_v=')) {
   } catch (e) {}
 }
 
-// Force update helper to ensure new Vercel deployments bypass browser & SW caches completely
+// Single-refresh update helper (uses persistent localStorage cooldown to strictly prevent loops)
 const forceUpdateNewDeployment = async (reason: string) => {
   if (import.meta.env.DEV) {
     console.log(`[Deployment] ${reason} detected (Dev mode: auto-reload suppressed).`);
@@ -24,11 +27,14 @@ const forceUpdateNewDeployment = async (reason: string) => {
   }
 
   const now = Date.now();
-  const lastReload = parseInt(safeSessionStorage.getItem('last_deployment_reload') || '0', 10);
+  const lastReload = parseInt(safeStorage.getItem('last_deployment_reload') || '0', 10);
 
-  // Prevent infinite loop if reload happened in the last 10 seconds
-  if (now - lastReload < 10000) return;
-  safeSessionStorage.setItem('last_deployment_reload', String(now));
+  // Strict 60-second cooldown per device/browser to prevent reload loops
+  if (now - lastReload < 60000) {
+    console.log(`[Deployment] ${reason} - Suppressed reload (cooldown active).`);
+    return;
+  }
+  safeStorage.setItem('last_deployment_reload', String(now));
 
   console.log(`[Deployment] ${reason} - Clearing caches and reloading fresh build...`);
 
@@ -38,7 +44,15 @@ const forceUpdateNewDeployment = async (reason: string) => {
       navigator.serviceWorker.controller.postMessage({ type: 'SKIP_WAITING' });
     }
 
-    // 2. Clear all Web Cache API caches (Workbox / PWA caches)
+    // 2. Unregister old service workers so new version installs cleanly
+    if ('serviceWorker' in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      for (const reg of registrations) {
+        await reg.unregister();
+      }
+    }
+
+    // 3. Clear all Web Cache API caches (Workbox / PWA caches)
     if ('caches' in window) {
       const keys = await caches.keys();
       await Promise.all(keys.map(k => caches.delete(k)));
@@ -47,9 +61,19 @@ const forceUpdateNewDeployment = async (reason: string) => {
     console.warn('[Deployment] Cache purge warning:', e);
   }
 
-  // 3. Force hard refresh with cache-busting timestamp to fetch new build from Vercel
-  window.location.href = window.location.pathname + '?_v=' + Date.now();
+  // 4. Single hard refresh with cache-busting timestamp
+  window.location.replace(window.location.pathname + '?_v=' + Date.now());
 };
+
+// Check version change on load: if package version changed, update stored version FIRST then perform 1 clean refresh
+const storedVersion = safeStorage.getItem('app_installed_version');
+if (storedVersion && storedVersion !== currentAppVersion) {
+  console.log(`[VersionUpdate] App version changed: ${storedVersion} -> ${currentAppVersion}`);
+  safeStorage.setItem('app_installed_version', currentAppVersion);
+  forceUpdateNewDeployment(`Version updated to ${currentAppVersion}`);
+} else if (!storedVersion) {
+  safeStorage.setItem('app_installed_version', currentAppVersion);
+}
 
 // Vercel deployment update detection via index header checks
 let currentEtag: string | null = safeSessionStorage.getItem('app_build_etag');
@@ -64,30 +88,28 @@ const checkForVercelDeployment = async () => {
         safeSessionStorage.setItem('app_build_etag', etag);
       } else if (currentEtag !== etag) {
         safeSessionStorage.setItem('app_build_etag', etag);
-        await forceUpdateNewDeployment('Vercel new deployment build etag change');
+        await forceUpdateNewDeployment('Vercel deployment etag changed');
       }
     }
   } catch (err) {}
 };
 
-// Check for Vercel deployment on startup and periodically every 5 minutes
-checkForVercelDeployment();
-setInterval(checkForVercelDeployment, 5 * 60 * 1000);
+// Check for Vercel deployment periodically every 10 minutes
+setInterval(checkForVercelDeployment, 10 * 60 * 1000);
 
-// Register service worker for PWA and FCM with safe auto-update checks
+// Register service worker for PWA and FCM with version query parameter
 if ('serviceWorker' in navigator) {
   const registerSW = () => {
-    navigator.serviceWorker.register('/sw.js')
+    navigator.serviceWorker.register(`/sw.js?v=${encodeURIComponent(currentAppVersion)}`)
       .then((registration) => {
         console.log('Service Worker registered with scope:', registration.scope);
 
         setInterval(() => {
           registration.update().catch(() => {});
-        }, 10 * 60 * 1000);
+        }, 15 * 60 * 1000);
 
         window.addEventListener('focus', () => {
           registration.update().catch(() => {});
-          checkForVercelDeployment();
         });
 
         registration.onupdatefound = () => {

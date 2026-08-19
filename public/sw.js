@@ -75,7 +75,8 @@ function extractUrlFromNotification(notification) {
   return '/';
 }
 
-const CACHE = "pwabuilder-page-v2.0";
+const swVersion = urlParams.get('v') || '3.2.2';
+const CACHE = "moviznow-cache-" + swVersion;
 const offlineFallbackPage = "offline.html";
 
 self.addEventListener("message", (event) => {
@@ -84,7 +85,7 @@ self.addEventListener("message", (event) => {
   }
 });
 
-self.addEventListener('install', async (event) => {
+self.addEventListener('install', (event) => {
   self.skipWaiting(); // Force update so mobile users don't need to close all tabs
   event.waitUntil(
     caches.open(CACHE)
@@ -93,7 +94,18 @@ self.addEventListener('install', async (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim()); // Take control of all open pages immediately
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames.map((cacheName) => {
+          if (cacheName !== CACHE && cacheName !== 'image-cache') {
+            console.log('[sw.js] Deleting obsolete cache:', cacheName);
+            return caches.delete(cacheName);
+          }
+        })
+      );
+    }).then(() => self.clients.claim())
+  );
 });
 
 if (workbox.navigationPreload.isSupported()) {
