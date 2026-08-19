@@ -70,18 +70,13 @@ const ContentCard = React.memo(({
 
   const isInCart = cart.some(item => item.contentId === content.id);
 
-  const seasons = React.useMemo(() => {
-    if (content.type === 'series' && content.seasons) {
-      try {
-        return Array.isArray(content.seasons) ? content.seasons : JSON.parse(content.seasons || '[]');
-      } catch (e) {
-        return [];
-      }
-    }
-    return [];
-  }, [content.seasons, content.type]);
+  const hasTrailer = Boolean(
+    content.trailerUrl || 
+    content.trailers || 
+    (content.type === 'series' && content.seasons)
+  );
 
-  const allTrailers = React.useMemo(() => {
+  const getAllTrailers = React.useCallback(() => {
     const list: any[] = [];
     if (content.trailerUrl) {
       list.push({ id: 'main', url: content.trailerUrl, title: 'Main Trailer' });
@@ -92,13 +87,18 @@ const ContentCard = React.memo(({
         list.push(...additional);
       } catch (e) {}
     }
-    seasons.forEach((s: any) => {
-      if (s.trailerUrl && !list.some(t => t.url === s.trailerUrl)) {
-        list.push({ id: `season-${s.seasonNumber}`, url: s.trailerUrl, title: `Season ${s.seasonNumber} Trailer`, seasonNumber: s.seasonNumber });
-      }
-    });
+    if (content.type === 'series' && content.seasons) {
+      try {
+        const parsedSeasons = Array.isArray(content.seasons) ? content.seasons : JSON.parse(content.seasons || '[]');
+        parsedSeasons.forEach((s: any) => {
+          if (s.trailerUrl && !list.some(t => t.url === s.trailerUrl)) {
+            list.push({ id: `season-${s.seasonNumber}`, url: s.trailerUrl, title: `Season ${s.seasonNumber} Trailer`, seasonNumber: s.seasonNumber });
+          }
+        });
+      } catch (e) {}
+    }
     return list;
-  }, [content, seasons]);
+  }, [content]);
 
   const getCanPlay = (c: any) => {
     const isContentAssigned = profile?.assignedContent?.some((id: string) => id === c.id || id.startsWith(`${c.id}:`));
@@ -115,9 +115,9 @@ const ContentCard = React.memo(({
   const isLocked = !getCanPlay(content);
   const isPending = profile?.status === 'pending';
   
-  const qualityObj = qualities.find(q => q.id === content.qualityId);
-  const contentLangs = languages.filter(l => content.languageIds?.includes(l.id)).map(l => l.name).join(', ');
-  const contentGenres = genres.filter(g => content.genreIds?.includes(g.id)).map(g => g.name).join(', ');
+  const qualityObj = React.useMemo(() => qualities.find(q => q.id === content.qualityId), [qualities, content.qualityId]);
+  const contentLangs = React.useMemo(() => languages.filter(l => content.languageIds?.includes(l.id)).map(l => l.name).join(', '), [languages, content.languageIds]);
+  const contentGenres = React.useMemo(() => genres.filter(g => content.genreIds?.includes(g.id)).map(g => g.name).join(', '), [genres, content.genreIds]);
 
   const isFavorite = profile?.favorites?.includes(content.id);
   const isWatchLater = profile?.watchLater?.includes(content.id);
@@ -125,22 +125,28 @@ const ContentCard = React.memo(({
   const canSeeDraft = ['owner', 'admin', 'manager', 'content_manager'].includes(profile?.role);
   
   const matchingSeason = React.useMemo(() => {
-    if (!selectedYear || content.type !== 'series') return null;
-    return seasons.find((s: any) => s.year?.toString() === selectedYear);
-  }, [seasons, selectedYear, content.type]);
+    if (!selectedYear || content.type !== 'series' || !content.seasons) return null;
+    try {
+      const parsedSeasons = Array.isArray(content.seasons) ? content.seasons : JSON.parse(content.seasons || '[]');
+      return parsedSeasons.find((s: any) => s.year?.toString() === selectedYear);
+    } catch (e) {
+      return null;
+    }
+  }, [content.seasons, selectedYear, content.type]);
 
   const handleWatchTrailer = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     
-    if (allTrailers.length > 1) {
+    const trailers = getAllTrailers();
+    if (trailers.length > 1) {
       setIsTrailerSelectionOpen(true);
-    } else if (allTrailers.length === 1) {
-      const embedUrl = getYouTubeEmbedUrl(allTrailers[0].url);
+    } else if (trailers.length === 1) {
+      const embedUrl = getYouTubeEmbedUrl(trailers[0].url);
       if (embedUrl) {
         setSelectedTrailerUrl(embedUrl);
       } else {
-        window.open(allTrailers[0].url, '_blank');
+        window.open(trailers[0].url, '_blank');
       }
     }
   };
@@ -159,8 +165,15 @@ const ContentCard = React.memo(({
       });
     } else {
       let firstSeason = matchingSeason ? matchingSeason.seasonNumber : 1;
-      if (!matchingSeason && seasons.length > 0) {
-        firstSeason = seasons[0].seasonNumber;
+      let firstSeasonId = matchingSeason ? matchingSeason.id : undefined;
+      if (!matchingSeason && content.seasons) {
+        try {
+          const parsed = Array.isArray(content.seasons) ? content.seasons : JSON.parse(content.seasons || '[]');
+          if (parsed.length > 0) {
+            firstSeason = parsed[0].seasonNumber || 1;
+            firstSeasonId = parsed[0].id;
+          }
+        } catch (e) {}
       }
       
       const basePrice = settings?.seasonFee || 100;
@@ -170,7 +183,7 @@ const ContentCard = React.memo(({
         title: `${content.title} - Season ${firstSeason}`,
         type: 'season',
         seasonNumber: firstSeason,
-        seasonId: matchingSeason ? matchingSeason.id : (seasons[0]?.id || `s${firstSeason}`),
+        seasonId: firstSeasonId || `s${firstSeason}`,
         price: finalPrice
       });
     }
@@ -307,7 +320,7 @@ const ContentCard = React.memo(({
 
         {/* Action Buttons - High Z-index to be clickable over the Link overlay */}
         <div className="absolute bottom-[88px] right-2 flex flex-col gap-2 z-20 opacity-0 lg:group-hover:opacity-100 transition-opacity pointer-events-none lg:group-hover:pointer-events-auto hidden lg:flex">
-          {(allTrailers.length > 0) && (
+          {hasTrailer && (
             <button
               onClick={handleWatchTrailer}
               className="p-2 rounded-full transition-transform hover:scale-110 shadow-lg bg-red-600 text-white pointer-events-auto cursor-pointer"
@@ -433,7 +446,7 @@ const ContentCard = React.memo(({
             </button>
             <h3 className="text-xl font-bold mb-4">{t('Select Trailer')}</h3>
             <div className="flex flex-col gap-3">
-              {allTrailers.map((trailer) => (
+              {getAllTrailers().map((trailer) => (
                 <button
                   key={trailer.id}
                   onClick={() => {
