@@ -100,21 +100,7 @@ async function startServer() {
 
   // Dynamic build info generated on Vercel or locally
   const SERVER_BUILD_TIME = new Date().toISOString();
-  let SERVER_BUILD_ID = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID;
-  if (!SERVER_BUILD_ID) {
-    try {
-      const buildIdPath = path.resolve(process.cwd(), "build_id.json");
-      if (fs.existsSync(buildIdPath)) {
-        const buildInfo = JSON.parse(fs.readFileSync(buildIdPath, "utf-8"));
-        SERVER_BUILD_ID = buildInfo.buildId;
-      }
-    } catch (e) {
-      console.warn("Failed to load build_id.json:", e);
-    }
-  }
-  if (!SERVER_BUILD_ID) {
-    SERVER_BUILD_ID = SERVER_BUILD_TIME;
-  }
+  const SERVER_BUILD_ID = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID || SERVER_BUILD_TIME;
 
   app.get(["/api/version", "/version"], (req, res) => {
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0, s-maxage=0");

@@ -235,15 +235,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(auth.currentUser);
   const [profile, setProfile] = useState<UserProfile | null>(() => {
     const cached = safeStorage.getItem("profile_cache");
-    if (cached) {
-      try {
+    const timestampStr = safeStorage.getItem("profile_cache_timestamp");
+    if (cached && timestampStr) {
+      const timestamp = parseInt(timestampStr, 10);
+      const now = Date.now();
+      if (now - timestamp <= 30 * 60 * 60 * 1000) {
         return JSON.parse(cached);
-      } catch (e) {}
+      }
     }
     return null;
   });
   const [loading, setLoading] = useState(() => {
-    return !safeStorage.getItem("profile_cache");
+    const cached = safeStorage.getItem("profile_cache");
+    const timestampStr = safeStorage.getItem("profile_cache_timestamp");
+    if (cached && timestampStr) {
+      const timestamp = parseInt(timestampStr, 10);
+      const now = Date.now();
+      if (now - timestamp <= 30 * 60 * 60 * 1000) {
+        return false;
+      }
+    }
+    return true;
   });
   const [authLoading, setAuthLoading] = useState(!auth.currentUser);
   const [error, setError] = useState<string | null>(null);
