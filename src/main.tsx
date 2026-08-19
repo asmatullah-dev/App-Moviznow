@@ -10,47 +10,33 @@ import 'react-lazy-load-image-component/src/effects/blur.css';
 const CURRENT_BUILD_ID = typeof __BUILD_ID__ !== 'undefined' ? __BUILD_ID__ : 'unknown';
 console.log('[Auto-Update] Client running on build ID:', CURRENT_BUILD_ID);
 
-// Safe reload helper to prevent infinite refresh loops (guards with 5s cooldown)
+// Safe reload helper to prevent repeated/rapid reloads (guards with 30s cooldown)
 const triggerAppReload = (reason: string) => {
   const now = Date.now();
   const lastReload = parseInt(sessionStorage.getItem('last_auto_reload_timestamp') || '0', 10);
   
-  if (now - lastReload > 5000) {
+  if (now - lastReload > 30000) {
     sessionStorage.setItem('last_auto_reload_timestamp', String(now));
-    console.log(`[Auto-Update] New deployment version detected! Triggering app reload due to: ${reason}`);
-    
-    // Unregister service worker and reload to ensure we fetch clean fresh bundle files from Vercel
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations()
-        .then((registrations) => {
-          for (const registration of registrations) {
-            registration.unregister();
-          }
-          window.location.reload();
-        })
-        .catch(() => {
-          window.location.reload();
-        });
-    } else {
-      window.location.reload();
-    }
+    console.log(`[Auto-Update] Update triggered due to: ${reason}`);
+    window.location.reload();
   }
 };
 
-// Check version endpoint on Vercel backend
+// Check version endpoint on backend
 let isCheckingDeployment = false;
-const checkVercelDeployment = async () => {
+const checkDeploymentVersion = async () => {
   if (import.meta.env.DEV) return;
   if (isCheckingDeployment) return;
+  if (!CURRENT_BUILD_ID || CURRENT_BUILD_ID === 'unknown') return;
   
   isCheckingDeployment = true;
   try {
     const res = await fetch(`/api/version?_t=${Date.now()}`, { cache: 'no-store' });
     if (res.ok) {
       const data = await res.json();
-      if (data && data.version && data.version !== CURRENT_BUILD_ID) {
+      if (data && data.version && data.version !== 'unknown' && data.version !== CURRENT_BUILD_ID) {
         console.log('[Auto-Update] Version mismatch! Server:', data.version, 'vs Client:', CURRENT_BUILD_ID);
-        triggerAppReload('Vercel deployment updated');
+        triggerAppReload('Deployment updated');
       }
     }
   } catch (err) {
@@ -60,34 +46,29 @@ const checkVercelDeployment = async () => {
   }
 };
 
-// Start aggressive 15-second polling of Vercel deployment status
-setInterval(checkVercelDeployment, 15000);
-
-// Check version on window focus or visibility change immediately
+// Check version periodically and on tab visibility resume
 if (typeof window !== 'undefined') {
-  window.addEventListener('focus', checkVercelDeployment);
+  setInterval(checkDeploymentVersion, 5 * 60 * 1000);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-      checkVercelDeployment();
+      checkDeploymentVersion();
     }
   });
 }
 
-// Register service worker with instant skip-waiting & active update polling
+// Service Worker registration with safe controller change handling
 if ('serviceWorker' in navigator) {
+  const hadInitialController = !!navigator.serviceWorker.controller;
+
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js')
       .then((registration) => {
         console.log('Service Worker registered with scope:', registration.scope);
 
-        // Actively check for Service Worker / workbox updates every 20 seconds
+        // Check for updates periodically
         setInterval(() => {
           registration.update().catch(() => {});
-        }, 20000);
-
-        window.addEventListener('focus', () => {
-          registration.update().catch(() => {});
-        });
+        }, 5 * 60 * 1000);
 
         registration.onupdatefound = () => {
           const installingWorker = registration.installing;
@@ -107,12 +88,12 @@ if ('serviceWorker' in navigator) {
         console.error('Service Worker registration failed:', err);
       });
 
-    // Automatically refresh on controller update (when new Service Worker takes control)
+    // Only reload if a controller ALREADY existed when the page opened (meaning an update occurred while user was active)
     let isRefreshing = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (!isRefreshing) {
+      if (hadInitialController && !isRefreshing) {
         isRefreshing = true;
-        triggerAppReload('Service worker controller changed');
+        triggerAppReload('Service worker controller updated');
       }
     });
   });

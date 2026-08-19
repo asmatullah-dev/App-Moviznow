@@ -100,7 +100,7 @@ async function startServer() {
 
   // Dynamic build info generated on Vercel or locally
   const SERVER_BUILD_TIME = new Date().toISOString();
-  const SERVER_BUILD_ID = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID || SERVER_BUILD_TIME;
+  const SERVER_BUILD_ID = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID || process.env.npm_package_version || '3.2.1';
 
   app.get(["/api/version", "/version"], (req, res) => {
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0, s-maxage=0");
