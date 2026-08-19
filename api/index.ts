@@ -94,6 +94,33 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // Block automated bot scans & probes early to save CPU/memory and stop scanner spam
+  app.use((req, res, next) => {
+    const url = req.path.toLowerCase();
+    if (
+      url.endsWith('.php') ||
+      url.endsWith('.asp') ||
+      url.endsWith('.aspx') ||
+      url.endsWith('.jsp') ||
+      url.endsWith('.cgi') ||
+      url.endsWith('.env') ||
+      url.endsWith('.sql') ||
+      url.endsWith('.bak') ||
+      url.startsWith('/wp-') ||
+      url.startsWith('/wordpress') ||
+      url.startsWith('/xmlrpc') ||
+      url.startsWith('/phpmyadmin') ||
+      url.startsWith('/pma') ||
+      url.startsWith('/cgi-bin') ||
+      url.startsWith('/.env') ||
+      url.startsWith('/.git')
+    ) {
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      return res.status(404).send('Not Found');
+    }
+    next();
+  });
+
   app.use(express.json({ limit: "50mb" }));
   app.use("/api", translateRouter);
   app.use("/api/email", emailRouter);
@@ -101,7 +128,7 @@ async function startServer() {
 
   // Dynamic build info generated on Vercel or locally
   const SERVER_BUILD_TIME = new Date().toISOString();
-  const SERVER_BUILD_ID = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID || process.env.npm_package_version || pkg.version || '3.2.2';
+  const SERVER_BUILD_ID = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID || process.env.npm_package_version || pkg.version || '3.2.3';
 
   app.get(["/api/version", "/version"], (req, res) => {
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0, s-maxage=0");

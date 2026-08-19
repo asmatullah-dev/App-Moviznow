@@ -48,7 +48,7 @@
       "destination": "/api/index.ts"
     },
     {
-      "source": "/((?!.*\\.(?:png|jpg|jpeg|gif|svg|ico|js|css|webmanifest|xml|json|txt)).*)",
+      "source": "/((?!.*\\.(?:png|jpg|jpeg|gif|svg|ico|js|css|webmanifest|xml|json|txt|php|asp|aspx|jsp|cgi|env|sql|bak)).*)",
       "destination": "/api/index.ts"
     }
   ]
