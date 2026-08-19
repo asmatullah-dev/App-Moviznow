@@ -6,8 +6,13 @@ import ErrorBoundary from './components/ErrorBoundary.tsx';
 import './index.css';
 import 'react-lazy-load-image-component/src/effects/blur.css';
 
-// Build identification
+// Build identification to match client version against /api/version
+declare const __BUILD_ID__: string;
+declare const __APP_VERSION__: string;
+declare const __BUILD_TIME__: string;
+
 const CURRENT_BUILD_ID = typeof __BUILD_ID__ !== 'undefined' ? __BUILD_ID__ : '3.2.1';
+console.log('[Auto-Update] Client running on build ID:', CURRENT_BUILD_ID);
 
 // Safe reload helper to prevent repeated/rapid reloads (guards with 30s cooldown)
 const triggerAppReload = (reason: string) => {
@@ -20,6 +25,70 @@ const triggerAppReload = (reason: string) => {
     window.location.reload();
   }
 };
+
+// Check version endpoint on backend
+let isCheckingDeployment = false;
+let initialBaselineEstablished = false;
+let knownServerVersion: string | null = null;
+const pageLoadTimestamp = Date.now();
+
+const checkDeploymentVersion = async () => {
+  if (import.meta.env.DEV) return;
+  if (isCheckingDeployment) return;
+  
+  isCheckingDeployment = true;
+  try {
+    const res = await fetch(`/api/version?_t=${Date.now()}`, { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      const serverVersion = data?.version;
+      
+      if (serverVersion && serverVersion !== 'unknown') {
+        if (!initialBaselineEstablished) {
+          initialBaselineEstablished = true;
+          knownServerVersion = serverVersion;
+          console.log('[Auto-Update] Initial version baseline established:', {
+            client: CURRENT_BUILD_ID,
+            server: serverVersion
+          });
+        } else if (knownServerVersion && serverVersion !== knownServerVersion) {
+          // A new deployment occurred while the app was running
+          console.log('[Auto-Update] New deployment detected! Old:', knownServerVersion, 'New:', serverVersion);
+          knownServerVersion = serverVersion;
+          triggerAppReload('New deployment version detected');
+        } else if (
+          CURRENT_BUILD_ID !== 'unknown' &&
+          serverVersion !== CURRENT_BUILD_ID &&
+          Date.now() - pageLoadTimestamp > 60000
+        ) {
+          // Stale client version after 1 minute of active use
+          console.log('[Auto-Update] Stale client build detected. Refreshing to latest version...');
+          triggerAppReload('Stale client version');
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[Auto-Update] Version check error:', err);
+  } finally {
+    isCheckingDeployment = false;
+  }
+};
+
+// Check version on launch and periodically / on resume
+if (typeof window !== 'undefined') {
+  // Initial check after page is settled
+  setTimeout(checkDeploymentVersion, 3000);
+  
+  // Periodic check every 5 minutes
+  setInterval(checkDeploymentVersion, 5 * 60 * 1000);
+  
+  // Check when user resumes the tab
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      checkDeploymentVersion();
+    }
+  });
+}
 
 // Service Worker registration (silent background updates without forced page reload on open)
 if ('serviceWorker' in navigator) {
