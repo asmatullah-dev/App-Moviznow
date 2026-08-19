@@ -1,6 +1,7 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import fs from 'fs';
 import {defineConfig, loadEnv} from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
@@ -8,6 +9,13 @@ export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   const buildId = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID || Date.now().toString();
   const buildTime = new Date().toISOString();
+
+  // Save the build ID so the server can read it
+  try {
+    fs.writeFileSync(path.resolve(__dirname, 'build_id.json'), JSON.stringify({ buildId, buildTime }, null, 2));
+  } catch (e) {
+    console.error('Failed to write build_id.json:', e);
+  }
 
   return {
     plugins: [
