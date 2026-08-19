@@ -203,9 +203,10 @@ const ContentCard = React.memo(({
       className={clsx("group relative flex flex-col h-full transition-transform duration-200 hover:-translate-y-1 active:scale-[0.98]", {
         "scale-105 z-30": isClicked
       })}
+      style={{ contentVisibility: 'auto', containIntrinsicSize: '200px 300px' }}
     >
       {/* Modern Sleek Card Container */}
-      <div className="relative flex flex-col h-full bg-white dark:bg-zinc-900/90 rounded-2xl overflow-hidden border border-zinc-200/80 dark:border-zinc-800/80 hover:border-emerald-500/50 dark:hover:border-emerald-500/50 shadow-md hover:shadow-xl hover:shadow-emerald-500/10 transition-shadow duration-200">
+      <div className="relative flex flex-col h-full bg-white dark:bg-zinc-900/90 rounded-2xl overflow-hidden border border-zinc-200/80 dark:border-zinc-800/80 hover:border-emerald-500/50 dark:hover:border-emerald-500/50 shadow-md hover:shadow-xl hover:shadow-emerald-500/10 transition-shadow duration-200 transform-gpu backface-hidden">
         <Link 
           to={`/${content.type === 'series' ? 'series' : 'movie'}/${content.id}`} 
           onClick={() => {
