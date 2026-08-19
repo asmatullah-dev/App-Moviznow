@@ -226,7 +226,13 @@ export default function Home({
     if (!profile) return true;
     const status = String(profile.status || "");
     if (status === "pending" || status === "expired") return true;
-    if (profile.expiryDate && new Date(profile.expiryDate) < new Date() && status !== "active") return true;
+    if (profile.expiryDate && profile.expiryDate !== "Lifetime" && status !== "active") {
+      const parts = profile.expiryDate.split("T")[0].split("-");
+      if (parts.length === 3) {
+        const expiryBoundary = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]) + 1);
+        if (new Date() >= expiryBoundary) return true;
+      }
+    }
     return false;
   }, [profile]);
 
@@ -412,7 +418,12 @@ export default function Home({
     return new Map(permittedContentList.map((c) => [c.id, c]));
   }, [permittedContentList]);
 
-  // Visibility States
+  const enrichedRecentlyViewed = useMemo(() => {
+    return recentlyViewed.map((item) => {
+      const full = contentMap.get(item.id);
+      return full ? { ...item, ...full } : item;
+    });
+  }, [recentlyViewed, contentMap]);
   const [isRecentVisible, setIsRecentVisible] = useState(() => safeStorage.getItem("home_recent_visible") !== "false");
   const [isTrendingRowVisible, setIsTrendingRowVisible] = useState(() => safeStorage.getItem("home_trending_row_visible") !== "false");
   const [isNewlyAddedVisible, setIsNewlyAddedVisible] = useState(() => safeStorage.getItem("home_newly_added_visible") !== "false");
@@ -960,7 +971,7 @@ export default function Home({
           {/* Recently Viewed Section */}
           {!hideScrollingTabs && (
             <RecentlyViewedSection
-              recentlyViewed={recentlyViewed}
+              recentlyViewed={enrichedRecentlyViewed}
               isVisible={isRecentVisible}
               onToggleVisibility={toggleRecentVisibility}
               limit={settings?.recentViewLimit || 10}

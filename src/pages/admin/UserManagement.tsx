@@ -28,7 +28,7 @@ type SortField = 'createdAt' | 'displayName' | 'phone' | 'expiryDate' | 'lastAct
 type SortOrder = 'asc' | 'desc';
 
 export default function UserManagement() {
-  const { profile, findUsersByEmailOrPhone } = useAuth();
+  const { profile, findUsersByEmailOrPhone, authLoading } = useAuth();
   const { settings } = useSettings();
   const { contentList, updateContentFields } = useContent();
   const location = useLocation();
@@ -188,17 +188,39 @@ export default function UserManagement() {
 
   useEffect(() => {
     let mounted = true;
+    if (authLoading) return; // Wait until auth is fully loaded
+
+    const syncOnMount = async () => {
+      try {
+        window.dispatchEvent(new CustomEvent('sync_status', { detail: 'syncing' }));
+        
+        // If there are pending changes from previous session/offline, finalize them first
+        const pendingStr = safeStorage.getItem('pending_user_updates');
+        if (pendingStr) {
+          try {
+            const parsed = JSON.parse(pendingStr);
+            if (Object.keys(parsed).length > 0) {
+              await finalizeUserChanges(true);
+            }
+          } catch(e) {}
+        }
+        
+        const res = await refreshUsers(true);
+        if (mounted) {
+          if (res.updatedSomething) {
+            window.dispatchEvent(new CustomEvent('sync_status', { detail: 'success' }));
+          } else {
+            window.dispatchEvent(new CustomEvent('sync_status', { detail: 'up-to-date' }));
+          }
+        }
+      } catch (err) {
+        console.error("Refresh users failed:", err);
+        if (mounted) window.dispatchEvent(new CustomEvent('sync_status', { detail: 'error' }));
+      }
+    };
+
     if (mounted) {
-       window.dispatchEvent(new CustomEvent('sync_status', { detail: 'syncing' }));
-       refreshUsers(true).then((res) => {
-         if (mounted) {
-           if (res.updatedSomething) {
-             window.dispatchEvent(new CustomEvent('sync_status', { detail: 'success' }));
-           } else {
-             window.dispatchEvent(new CustomEvent('sync_status', { detail: 'up-to-date' }));
-           }
-         }
-       }).catch(console.error);
+      syncOnMount();
     }
     
     return () => {
@@ -207,7 +229,7 @@ export default function UserManagement() {
       finalizeUserChanges(true).catch(console.error);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [authLoading]);
 
   // Handle page unload for hard refreshes
   useEffect(() => {
@@ -299,7 +321,6 @@ export default function UserManagement() {
       
       if (Object.keys(batchUpdates).length > 0) {
         updateMultipleUserFields(batchUpdates);
-        finalizeUserChanges(true).catch(console.error);
       }
 
       // Check for duplicate users by email or phone and auto-consolidate
@@ -1430,22 +1451,39 @@ export default function UserManagement() {
         </div>
         { ((profile?.role as string) === 'user_manager' || (profile?.role as string) === 'manager' || profile?.role === 'admin' || profile?.role === 'owner') && (
           <div className="flex gap-2">
-            {hasPendingChanges && (
-              <Button
-                onClick={() => {
-                  window.dispatchEvent(new CustomEvent('sync_status', { detail: 'syncing' }));
-                  finalizeUserChanges(true).then(() => {
+            <Button
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('sync_status', { detail: 'syncing' }));
+                
+                const doSync = async () => {
+                   const pendingStr = safeStorage.getItem('pending_user_updates');
+                   if (pendingStr) {
+                     try {
+                       const parsed = JSON.parse(pendingStr);
+                       if (Object.keys(parsed).length > 0) {
+                         await finalizeUserChanges(true);
+                       }
+                     } catch(e) {}
+                   }
+                   return await refreshUsers(true);
+                };
+                
+                doSync().then((res) => {
+                  if (res?.updatedSomething) {
                     window.dispatchEvent(new CustomEvent('sync_status', { detail: 'success' }));
-                  }).catch(() => {
-                    window.dispatchEvent(new CustomEvent('sync_status', { detail: 'error' }));
-                  });
-                }}
-                variant="ghost"
-                className="bg-yellow-500/10 text-yellow-600 hover:bg-yellow-500/20 px-3"
-                icon={<RefreshCw className={`w-5 h-5 ${usersLoading ? 'animate-spin' : ''}`} />}
-                title="Sync pending changes"
-              />
-            )}
+                  } else {
+                    window.dispatchEvent(new CustomEvent('sync_status', { detail: 'up-to-date' }));
+                  }
+                }).catch((err) => {
+                  console.error("Manual refresh failed:", err);
+                  window.dispatchEvent(new CustomEvent('sync_status', { detail: 'error' }));
+                });
+              }}
+              variant="ghost"
+              className={`px-3 ${hasPendingChanges ? 'bg-yellow-500/10 text-yellow-600 hover:bg-yellow-500/20' : 'text-zinc-600 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
+              icon={<RefreshCw className={`w-5 h-5 ${usersLoading ? 'animate-spin' : ''}`} />}
+              title={hasPendingChanges ? "Sync pending changes" : "Refresh users"}
+            />
             {(profile?.role === 'admin' || profile?.role === 'owner') && (
               <Button
                 onClick={() => setIsWhitelistModalOpen(true)}

@@ -17,7 +17,7 @@ service cloud.firestore {
 
     function getUserRole() {
       return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) 
-        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role 
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'none') 
         : 'none';
     }
 
@@ -26,19 +26,28 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      let email = (('email' in request.auth.token) && (request.auth.token.email is string)) ? request.auth.token.email.toLower() : '';
-      let uid = request.auth.uid;
+      let tokenEmail = (request.auth != null && ('email' in request.auth.token) && (request.auth.token.email is string)) ? request.auth.token.email.toLower() : '';
+      let userDoc = (request.auth != null && exists(/databases/$(database)/documents/users/$(request.auth.uid))) ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data : {};
+      let docEmail = userDoc.get('email', '').toLower();
+      let docRole = userDoc.get('role', 'none');
+      let uid = request.auth != null ? request.auth.uid : '';
       
       return isAuthenticated() &&
         (
-          (email in [
+          (tokenEmail in [
+            "asmatn628@gmail.com",
+            "asmatullah9327@gmail.com",
+            "kabirahmaddev@gmail.com",
+            "wamoviesstation@gmail.com"
+          ]) ||
+          (docEmail in [
             "asmatn628@gmail.com",
             "asmatullah9327@gmail.com",
             "kabirahmaddev@gmail.com",
             "wamoviesstation@gmail.com"
           ]) ||
           (uid in ["fbG4L3d6gMPVcCcDwWUqbAEGs7E2", "2CvmzHixVQbqdZXycFyvfBxiTkJ3"]) ||
-          hasAnyRole(['admin', 'owner'])
+          docRole in ['admin', 'owner']
         );
     }
 
@@ -191,29 +200,24 @@ service cloud.firestore {
       allow write: if isAuthenticated();
     }
     match /users/{userId} {
-      // 1. Owner Access: Basic CRUD with field restrictions
-      allow get: if isOwner(userId) || (resource != null && isIdentityMatch(resource.data));
-      allow create: if (isOwner(userId) || isPendingOwner(userId, request.resource.data)) && isValidUser(request.resource.data) &&
-                       (isAdmin() || request.resource.data.get('role', 'user') in ['user', 'trial', 'selected_content', 'temporary']);
+      allow get: if isOwner(userId) || isAdminOrEditor() || isUserManager() || isManager() || (resource != null && (isIdentityMatch(resource.data) || resource.data.get('referredBy', '') == request.auth.uid));
+      allow list: if isAdminOrEditor() || isUserManager() || isManager() || (request.query.limit <= 500);
       
-      allow update: if (isOwner(userId) || (resource != null && isIdentityMatch(resource.data))) && isValidUser(request.resource.data) && 
-                       (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'status', 'expiryDate', 'trialActivated', 'managedBy', 'permissions', 'assignedContent'])
-                       || protectedUserFieldsUnchanged() || isTrialActivation(userId) || isRewardClaim(userId)) ||
-                       (isAdminOrEditor() && isValidUser(request.resource.data)) ||
-                       (isUserManager() && resource.data.get('managedBy', null) == request.auth.uid && request.resource.data.get('managedBy', null) == request.auth.uid && isValidUser(request.resource.data));
-
-
-      // 2. Admin/Manager/Identity/Referral Access
-      allow get: if isOwner(userId) || isAdminOrEditor() || isUserManager() || (resource != null && (isIdentityMatch(resource.data) || resource.data.referredBy == request.auth.uid));
-      allow list: if isAdminOrEditor() || 
-                             isUserManager() || 
-                             (
-                               request.query.limit <= 500
-                             );
       allow create: if isAdmin() || (isValidUser(request.resource.data) && (
-                       (isUserManager() && request.resource.data.managedBy == request.auth.uid && request.resource.data.role in ['user', 'trial', 'selected_content'] && request.resource.data.status != 'suspended') ||
-                       (isAdminOrEditor() && request.resource.data.get('role', 'user') in ['user', 'trial', 'selected_content'])
+                       isOwner(userId) ||
+                       isPendingOwner(userId, request.resource.data) ||
+                       isAdminOrEditor() ||
+                       (isUserManager() && request.resource.data.get('managedBy', '') == request.auth.uid) ||
+                       (isManager() && request.resource.data.get('managedBy', '') == request.auth.uid)
                     ));
+      
+      allow update: if isAdmin() ||
+                       (isAdminOrEditor() && isValidUser(request.resource.data)) ||
+                       ((isOwner(userId) || (resource != null && isIdentityMatch(resource.data))) && isValidUser(request.resource.data) && 
+                        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'status', 'expiryDate', 'trialActivated', 'managedBy', 'permissions', 'assignedContent'])
+                        || protectedUserFieldsUnchanged() || isTrialActivation(userId) || isRewardClaim(userId))) ||
+                       ((isUserManager() || isManager()) && resource.data.get('managedBy', null) == request.auth.uid && request.resource.data.get('managedBy', null) == request.auth.uid && isValidUser(request.resource.data));
+
       allow delete: if isAdmin() || isAdminOrEditor() || isPendingOwner(userId, resource.data) || isIdentityMatch(resource.data) || (isAuthenticated() && (userId.startsWith('pending_') || userId == request.auth.uid));
     }
 
@@ -303,10 +307,7 @@ service cloud.firestore {
     }
 
     match /fcm_tokens/{chunkId} {
-      allow read: if true;
-      allow create: if isAuthenticated() || isAdmin();
-      allow update: if isAuthenticated() || isAdmin();
-      allow delete: if isAdmin();
+      allow read, write: if true;
     }
 
     match /settings/{docId} {
@@ -349,19 +350,7 @@ service cloud.firestore {
     }
 
     match /chunk_meta/{docId} {
-      allow read: if true;
-      allow write: if isAdminOrEditor() || (
-        isAuthenticated() &&
-        docId == 'versions' &&
-        (
-          // Allow creation of the versions document if it doesn't exist
-          !exists(/databases/$(database)/documents/chunk_meta/versions) ||
-          // Allow updating ONLY the current user's version entry in the 'users' map OR the reviews version
-          (
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['users', 'reviews'])
-          )
-        )
-      );
+      allow read, write: if true;
     }
 
     match /search_index_chunks/{chunkId} {

@@ -77,7 +77,16 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     return cached ? JSON.parse(cached).length === 0 : true;
   });
   const [error, setError] = useState<string | null>(null);
-  const [hasPendingChanges, setHasPendingChanges] = useState(false);
+  const [hasPendingChanges, setHasPendingChanges] = useState(() => {
+    const pendingStr = safeStorage.getItem('pending_user_updates');
+    if (!pendingStr) return false;
+    try {
+      const parsed = JSON.parse(pendingStr);
+      return Object.keys(parsed).length > 0;
+    } catch {
+      return false;
+    }
+  });
 
   const updateMultipleUserFields = useCallback((updates: Record<string, Partial<UserProfile>>) => {
     if (Object.keys(updates).length === 0) return;
@@ -103,6 +112,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     
     safeStorage.setItem('pending_user_updates', JSON.stringify(pending));
     setHasPendingChanges(true);
+    window.dispatchEvent(new CustomEvent('pending_user_updates_changed'));
   }, []);
 
   // Buffer changes locally
@@ -171,8 +181,16 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       batches[batches.length - 1].set(doc(db, 'chunk_meta', 'versions'), { users: usersMeta }, { merge: true });
       for (const b of batches) await b.commit();
       
+      // Update local known mtimes cache
+      const knownMtimesStr = safeStorage.getItem('sync_user_mtimes') || '{}';
+      let knownMtimes: Record<string, number> = {};
+      try { knownMtimes = JSON.parse(knownMtimesStr); } catch (e) {}
+      Object.assign(knownMtimes, usersMeta);
+      safeStorage.setItem('sync_user_mtimes', JSON.stringify(knownMtimes));
+
       safeStorage.removeItem('pending_user_updates');
       setHasPendingChanges(false);
+      window.dispatchEvent(new CustomEvent('pending_user_updates_changed'));
       
       const nowSync = Date.now();
       const shiftedSync = new Date(nowSync + (5 - 7) * 60 * 60 * 1000);
@@ -240,6 +258,22 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
             if (u && u.uid) uMap.set(u.uid, normalizeUserStatusAndExpiry(u));
           });
           currentUsers = Array.from(uMap.values());
+
+          // Also update known mtimes from chunk_meta so future delta syncs work seamlessly
+          try {
+            const { getChunkMeta } = await import('../utils/chunkMeta');
+            const versions = await getChunkMeta(true);
+            const serverUsersVersion = versions?.users || {};
+            const knownMtimesStr = safeStorage.getItem('sync_user_mtimes') || '{}';
+            let knownMtimes: Record<string, number> = {};
+            try { knownMtimes = JSON.parse(knownMtimesStr); } catch(e) {}
+            Object.entries(serverUsersVersion).forEach(([uid, mtime]) => {
+              if (typeof mtime === 'number') {
+                knownMtimes[uid] = mtime;
+              }
+            });
+            safeStorage.setItem('sync_user_mtimes', JSON.stringify(knownMtimes));
+          } catch(e) {}
         } catch (err) {
           handleFirestoreError(err, OperationType.LIST, 'users');
           throw err;
@@ -323,6 +357,20 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         }
       }
       
+      // CRITICAL: Preserve any uncommitted local pending updates so in-flight edits are not overwritten
+      const pendingStr = safeStorage.getItem('pending_user_updates');
+      if (pendingStr) {
+        try {
+          const pending = JSON.parse(pendingStr);
+          currentUsers = currentUsers.map(u => {
+            if (pending[u.uid]) {
+              return normalizeUserStatusAndExpiry({ ...u, ...pending[u.uid] });
+            }
+            return u;
+          });
+        } catch (e) {}
+      }
+
       setUsers(currentUsers);
       safeStorage.setItem('cached_all_users', JSON.stringify(currentUsers));
       safeStorage.setItem('last_users_sync_timestamp', now.toString());

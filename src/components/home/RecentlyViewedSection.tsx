@@ -71,13 +71,13 @@ export const RecentlyViewedSection: React.FC<RecentlyViewedSectionProps> = React
             <div className="relative group pt-1">
               <ScrollableRow
                 scrollKey="scroll_recently_viewed"
-                className="flex overflow-x-auto gap-4 pb-4 snap-x snap-mandatory flex-nowrap hide-scrollbar"
+                className="flex items-start overflow-x-auto gap-3.5 pb-3 snap-x snap-mandatory flex-nowrap hide-scrollbar"
                 style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
               >
                 {recentlyViewed.slice(0, limit).map((content) => (
                   <div
                     key={content.id}
-                    className="w-[110px] sm:w-[140px] shrink-0 snap-start"
+                    className="w-[115px] sm:w-[140px] shrink-0 snap-start"
                   >
                     <ContentCard
                       content={content}

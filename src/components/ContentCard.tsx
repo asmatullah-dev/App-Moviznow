@@ -195,18 +195,18 @@ const ContentCard = React.memo(({
     return (match && match[2].length === 11) ? `https://www.youtube.com/embed/${match[2]}` : null;
   };
 
-  const rawPoster = content.posterUrl || settings?.defaultAppImage || 'https://picsum.photos/seed/movie/400/600';
-  const optimizedPoster = getOptimizedImageUrl(rawPoster, isSmall ? 185 : 342);
+  const defaultFallbackImage = settings?.defaultAppImage || 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=400&auto=format&fit=crop&q=80';
+  const rawPoster = content.posterUrl?.trim() || defaultFallbackImage;
+  const optimizedPoster = getOptimizedImageUrl(rawPoster, isSmall ? 185 : 342) || rawPoster;
 
   return (
     <div 
-      className={clsx("group relative flex flex-col h-full transition-transform duration-200 hover:-translate-y-1 active:scale-[0.98]", {
+      className={clsx("group relative flex flex-col transition-transform duration-200 hover:-translate-y-1 active:scale-[0.98]", {
         "scale-105 z-30": isClicked
       })}
-      style={{ contentVisibility: 'auto', containIntrinsicSize: '200px 300px' }}
     >
       {/* Modern Sleek Card Container */}
-      <div className="relative flex flex-col h-full bg-white dark:bg-zinc-900/90 rounded-2xl overflow-hidden border border-zinc-200/80 dark:border-zinc-800/80 hover:border-emerald-500/50 dark:hover:border-emerald-500/50 shadow-md hover:shadow-xl hover:shadow-emerald-500/10 transition-shadow duration-200 transform-gpu backface-hidden">
+      <div className="relative flex flex-col bg-white dark:bg-zinc-900/90 rounded-2xl overflow-hidden border border-zinc-200/80 dark:border-zinc-800/80 hover:border-emerald-500/50 dark:hover:border-emerald-500/50 shadow-md hover:shadow-xl hover:shadow-emerald-500/10 transition-shadow duration-200 transform-gpu backface-hidden">
         <Link 
           to={`/${content.type === 'series' ? 'series' : 'movie'}/${content.id}`} 
           onClick={() => {
@@ -223,6 +223,12 @@ const ContentCard = React.memo(({
             decoding="async"
             className="w-full h-full object-cover transition-transform duration-200 ease-out group-hover:scale-105"
             referrerPolicy="no-referrer"
+            onError={(e) => {
+              const target = e.currentTarget as HTMLImageElement;
+              if (target.src !== defaultFallbackImage) {
+                target.src = defaultFallbackImage;
+              }
+            }}
           />
           
           {/* Subtle Dark Vignette & Play Indicator on hover */}

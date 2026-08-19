@@ -191,8 +191,14 @@ export default function OrdersManagement() {
         const months = order.months || 1;
         
         let newExpiryDate = new Date();
-        if (userData.expiryDate && new Date(userData.expiryDate) > new Date()) {
-          newExpiryDate = new Date(userData.expiryDate);
+        if (userData.expiryDate && userData.expiryDate !== 'Lifetime') {
+          const parts = userData.expiryDate.split('T')[0].split('-');
+          if (parts.length === 3) {
+            const expiryBoundary = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]) + 1);
+            if (expiryBoundary > new Date()) {
+              newExpiryDate = new Date(userData.expiryDate);
+            }
+          }
         }
         newExpiryDate.setMonth(newExpiryDate.getMonth() + months);
 
