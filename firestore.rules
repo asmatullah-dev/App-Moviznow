@@ -311,9 +311,7 @@ service cloud.firestore {
 
     match /settings/{docId} {
       allow read: if true;
-      allow write: if isAuthenticated() && 
-                      exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-                      get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'owner';
+      allow write: if isAdmin();
     }
 
     match /whitelisted_phones/{phoneId} {

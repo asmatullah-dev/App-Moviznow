@@ -26,7 +26,6 @@ interface NotificationContextType {
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
 const CHUNK_SIZE = 1000;
-const CHUNK_PREFIX = 'notification_chunk_';
 const NOTIFICATION_FETCH_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
 
 export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -42,7 +41,6 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     return [];
   });
   const [loading, setLoading] = useState(notifications.length === 0);
-  const latestChunkIdRef = useRef<string>('notification_chunk_0');
 
   const fetchNotifications = useCallback(async (force = false) => {
     try {
@@ -73,50 +71,45 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
       setLoading(true);
 
-      let latestChunkId = 'notification_chunk_0';
+      const chunksToFetch = new Set<string>([
+        'app_chunk_0',
+        'push_chunk_0',
+        'Email_chunk_0',
+        'notification_chunk_0'
+      ]);
       let serverVersion = '0';
+
       try {
         const { getChunkMeta } = await import('../utils/chunkMeta');
         const meta = await getChunkMeta();
         if (meta && meta.notifications) {
-            if (meta.notifications.latestChunkId) latestChunkId = meta.notifications.latestChunkId;
-            if (meta.notifications.version) serverVersion = meta.notifications.version.toString();
+          if (meta.notifications.latestAppChunkId) chunksToFetch.add(meta.notifications.latestAppChunkId);
+          if (meta.notifications.latestPushChunkId) chunksToFetch.add(meta.notifications.latestPushChunkId);
+          if (meta.notifications.latestEmailChunkId) chunksToFetch.add(meta.notifications.latestEmailChunkId);
+          if (meta.notifications.latestChunkId) chunksToFetch.add(meta.notifications.latestChunkId);
+          if (meta.notifications.version) serverVersion = meta.notifications.version.toString();
         }
       } catch (err) { }
       
-      latestChunkIdRef.current = latestChunkId || 'notification_chunk_0';
-      
       const notifMap = new Map<string, AppNotification>();
       
-      // 1. Fetch specifically from notification_chunk_0 first via getDoc (once per 24 hours)
-      try {
-        const chunk0Doc = await runWithNetwork(() => getDoc(doc(db, 'notification_chunks', 'notification_chunk_0')));
-        if (chunk0Doc.exists()) {
-          const items = chunk0Doc.data().items || {};
-          Object.values(items).forEach((item: any) => {
-            if (item && item.id && item.title) {
-              notifMap.set(item.id, item as AppNotification);
+      await Promise.all(
+        Array.from(chunksToFetch).map(async (chunkId) => {
+          try {
+            const chunkDoc = await runWithNetwork(() => getDoc(doc(db, 'notification_chunks', chunkId)));
+            if (chunkDoc.exists()) {
+              const items = chunkDoc.data().items || {};
+              Object.values(items).forEach((item: any) => {
+                if (item && item.id && item.title) {
+                  notifMap.set(item.id, item as AppNotification);
+                }
+              });
             }
-          });
-        }
-      } catch (err) {
-        console.error("Error reading notification_chunk_0:", err);
-      }
-
-      // 2. If latest chunk is different, get that chunk as well
-      if (latestChunkId && latestChunkId !== 'notification_chunk_0') {
-        try {
-          const latestDoc = await runWithNetwork(() => getDoc(doc(db, 'notification_chunks', latestChunkId)));
-          if (latestDoc.exists()) {
-            const items = latestDoc.data().items || {};
-            Object.values(items).forEach((item: any) => {
-              if (item && item.id && item.title) {
-                notifMap.set(item.id, item as AppNotification);
-              }
-            });
+          } catch (err) {
+            console.error(`Error reading ${chunkId}:`, err);
           }
-        } catch (err) {}
-      }
+        })
+      );
 
       const allNotifs = Array.from(notifMap.values());
       
@@ -159,6 +152,36 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     await fetchNotifications(true);
   }, [fetchNotifications]);
 
+  const saveToChunk = async (
+    batch: any,
+    prefix: 'app_chunk_' | 'push_chunk_' | 'Email_chunk_',
+    notifId: string,
+    newNotif: AppNotification,
+    notifMeta: any
+  ) => {
+    const metaKey = prefix === 'app_chunk_' ? 'latestAppChunkId' : prefix === 'push_chunk_' ? 'latestPushChunkId' : 'latestEmailChunkId';
+    let cid = notifMeta[metaKey] || (prefix + '0');
+
+    const chunkDoc = await getDoc(doc(db, 'notification_chunks', cid));
+    let chunkItems = chunkDoc.exists() ? chunkDoc.data().items || {} : {};
+
+    if (Object.keys(chunkItems).length >= CHUNK_SIZE) {
+      const match = cid.match(/(\d+)$/);
+      const nextIndex = match ? parseInt(match[1]) + 1 : 1;
+      cid = prefix + nextIndex;
+      chunkItems = {};
+    }
+
+    const newChunkItems = { [notifId]: newNotif, ...chunkItems };
+    batch.set(doc(db, 'notification_chunks', cid), {
+      items: newChunkItems,
+      updatedAt: serverTimestamp()
+    });
+
+    notifMeta[metaKey] = cid;
+    notifMeta.latestChunkId = cid;
+  };
+
   const sendNotification = async (notifData: Omit<AppNotification, 'id' | 'createdAt'>) => {
     const id = Math.random().toString(36).substring(2, 15);
     const newNotif: AppNotification = {
@@ -175,47 +198,42 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
 
     try {
-        let cid = latestChunkIdRef.current;
-        const chunkDoc = await getDoc(doc(db, 'notification_chunks', cid));
-        let chunkItems = chunkDoc.exists() ? chunkDoc.data().items || {} : {};
+      const { getChunkMeta } = await import('../utils/chunkMeta');
+      const meta = await getChunkMeta();
+      const notifMeta = (meta && meta.notifications) ? { ...meta.notifications } : {};
 
-        if (Object.keys(chunkItems).length >= CHUNK_SIZE) {
-            const match = cid.match(/(\d+)$/);
-            const nextIndex = match ? parseInt(match[1]) + 1 : 1;
-            cid = CHUNK_PREFIX + nextIndex;
-            latestChunkIdRef.current = cid;
-            chunkItems = {};
-        }
+      const batch = writeBatch(db);
 
-        const newChunkItems = { [id]: newNotif, ...chunkItems };
-        const batch = writeBatch(db);
-        
-        // Update chunk
-        batch.set(doc(db, 'notification_chunks', cid), {
-            items: newChunkItems,
-            updatedAt: serverTimestamp()
-        });
+      // Save to app_chunk_
+      await saveToChunk(batch, 'app_chunk_', id, newNotif, notifMeta);
 
-        // Update meta
-        batch.set(doc(db, 'chunk_meta', 'versions'), { 
-            notifications: {
-                version: Date.now(),
-                latestChunkId: cid,
-                updatedAt: serverTimestamp()
-            },
-            lastGlobalUpdate: serverTimestamp()
-        }, { merge: true });
+      // Save to push_chunk_ if sendFcm is enabled
+      if (notifData.sendFcm) {
+        await saveToChunk(batch, 'push_chunk_', id, newNotif, notifMeta);
+      }
 
-        await batch.commit();
-        
-        // Clear cached notifications version so fresh list is fetched on next load
-        safeStorage.removeItem('cached_notifications_version');
-        safeStorage.removeItem('cached_notifications_data');
-        safeStorage.setItem('local_notif_chunk_' + cid, JSON.stringify(newChunkItems));
-        
+      // Save to Email_chunk_ if sendEmail is enabled
+      if (notifData.sendEmail) {
+        await saveToChunk(batch, 'Email_chunk_', id, newNotif, notifMeta);
+      }
+
+      // Update chunk_meta
+      batch.set(doc(db, 'chunk_meta', 'versions'), { 
+        notifications: {
+          ...notifMeta,
+          version: Date.now(),
+          updatedAt: serverTimestamp()
+        },
+        lastGlobalUpdate: serverTimestamp()
+      }, { merge: true });
+
+      await batch.commit();
+      
+      safeStorage.removeItem('cached_notifications_version');
+      safeStorage.removeItem('cached_notifications_data');
     } catch (e) {
-        console.error("Failed to send notification:", e);
-        throw e;
+      console.error("Failed to send notification:", e);
+      throw e;
     }
   };
 
@@ -223,56 +241,60 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setNotifications(prev => prev.filter(n => n.id !== id));
     
     try {
-        let foundChunkId: string | null = null;
-        let chunkItems: any = null;
+      const { getChunkMeta } = await import('../utils/chunkMeta');
+      const versionsData = await getChunkMeta();
+      const notifMeta = (versionsData && versionsData.notifications) ? { ...versionsData.notifications } : {};
 
-        const { getChunkMeta } = await import('../utils/chunkMeta');
-        const versionsData = await getChunkMeta();
+      const prefixes = ['app_chunk_', 'push_chunk_', 'Email_chunk_', 'notification_chunk_'];
+      const batch = writeBatch(db);
+      let foundAny = false;
+
+      for (const prefix of prefixes) {
         let latestIndex = 0;
-        if (versionsData) {
-            const latestId = (versionsData.notifications && versionsData.notifications.latestChunkId) || 'notification_chunk_0';
-            const match = latestId.match(/(\d+)$/);
-            if (match) latestIndex = parseInt(match[1]);
-        }
+        const metaKey = prefix === 'app_chunk_' ? 'latestAppChunkId' : prefix === 'push_chunk_' ? 'latestPushChunkId' : prefix === 'Email_chunk_' ? 'latestEmailChunkId' : 'latestChunkId';
+        const latestId = notifMeta[metaKey] || (prefix + '0');
+        const match = latestId.match(/(\d+)$/);
+        if (match) latestIndex = parseInt(match[1]);
 
         for (let i = latestIndex; i >= 0; i--) {
-            const cid = CHUNK_PREFIX + i;
-            const cDoc = await getDoc(doc(db, 'notification_chunks', cid));
-            if (cDoc.exists()) {
-                const items = cDoc.data().items || {};
-                if (items[id]) {
-                    delete items[id];
-                    foundChunkId = cid;
-                    chunkItems = items;
-                    break;
-                }
-            }
-        }
-
-        if (foundChunkId && chunkItems) {
-            const batch = writeBatch(db);
-            batch.set(doc(db, 'notification_chunks', foundChunkId), {
-                items: chunkItems,
+          const cid = prefix + i;
+          const cDoc = await getDoc(doc(db, 'notification_chunks', cid));
+          if (cDoc.exists()) {
+            const items = cDoc.data().items || {};
+            if (items[id]) {
+              delete items[id];
+              batch.set(doc(db, 'notification_chunks', cid), {
+                items,
                 updatedAt: serverTimestamp()
-            });
-            batch.set(doc(db, 'chunk_meta', 'versions'), { 
-                notifications: {
-                    version: Date.now(),
-                    updatedAt: serverTimestamp()
-                },
-                lastGlobalUpdate: serverTimestamp()
-            }, { merge: true });
-
-            await batch.commit();
-            safeStorage.setItem('local_notif_chunk_' + foundChunkId, JSON.stringify(chunkItems));
-        } else {
-            try {
-                await deleteDoc(doc(db, 'notifications', id));
-            } catch (e) {}
+              });
+              foundAny = true;
+              break;
+            }
+          }
         }
+      }
+
+      if (foundAny) {
+        batch.set(doc(db, 'chunk_meta', 'versions'), { 
+          notifications: {
+            ...notifMeta,
+            version: Date.now(),
+            updatedAt: serverTimestamp()
+          },
+          lastGlobalUpdate: serverTimestamp()
+        }, { merge: true });
+
+        await batch.commit();
+        safeStorage.removeItem('cached_notifications_version');
+        safeStorage.removeItem('cached_notifications_data');
+      } else {
+        try {
+          await deleteDoc(doc(db, 'notifications', id));
+        } catch (e) {}
+      }
     } catch (e) {
-        console.error("Failed to delete notification:", e);
-        throw e;
+      console.error("Failed to delete notification:", e);
+      throw e;
     }
   };
 

@@ -170,6 +170,31 @@ export default function AdminSettings() {
     setError(null);
     setSuccess(false);
 
+    // Validate JSON formatting for service account keys if provided
+    if (settings.serviceAccounts?.sourceKey?.trim()) {
+      try {
+        JSON.parse(settings.serviceAccounts.sourceKey.trim());
+      } catch (err: any) {
+        setError('Source Account Key JSON format is invalid: ' + err.message);
+        setSaving(false);
+        return;
+      }
+    }
+
+    if (settings.serviceAccounts?.targets) {
+      for (const t of settings.serviceAccounts.targets) {
+        if (t.key?.trim()) {
+          try {
+            JSON.parse(t.key.trim());
+          } catch (err: any) {
+            setError(`Target Key JSON for "${t.title || t.id}" is invalid: ` + err.message);
+            setSaving(false);
+            return;
+          }
+        }
+      }
+    }
+
     try {
       localStorage.setItem('cached_app_settings', JSON.stringify(settings));
 
@@ -183,9 +208,9 @@ export default function AdminSettings() {
 
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error saving settings:', err);
-      setError('Failed to save settings.');
+      setError('Failed to save settings: ' + (err?.message || String(err)));
     } finally {
       setSaving(false);
     }

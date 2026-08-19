@@ -1306,16 +1306,23 @@ export default function MovieDetails() {
         }
 
         if (
-          (force ||
-            !mergedContent.cast ||
-            (Array.isArray(mergedContent.cast) &&
-              mergedContent.cast.length === 0)) &&
-          details.credits?.cast
+          force ||
+          !mergedContent.cast ||
+          (Array.isArray(mergedContent.cast) &&
+            mergedContent.cast.length === 0 &&
+            details.credits?.cast &&
+            details.credits.cast.length > 0)
         ) {
-          updates.cast = details.credits.cast
-            .slice(0, 5)
-            .map((a: any) => a.name);
-          hasUpdates = true;
+          if (details.credits?.cast && details.credits.cast.length > 0) {
+            updates.cast = details.credits.cast
+              .slice(0, 5)
+              .map((a: any) => a.name);
+            hasUpdates = true;
+          } else if (!mergedContent.cast) {
+            // Only set to empty array once if it's completely missing
+            updates.cast = [];
+            hasUpdates = true;
+          }
         }
 
         if (

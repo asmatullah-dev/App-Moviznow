@@ -2691,38 +2691,20 @@ async function startServer() {
         `Comparing source DB (${firebaseConfig.firestoreDatabaseId}) with target DB (${targetDbId || "default"})`,
       );
 
-      const collections = syncAllData
-        ? [
-            "genres",
-            "languages",
-            "qualities",
-            "users",
-            "admin_settings",
-            "notifications",
-            "notification_templates",
-            "orders",
-            "movie_requests",
-            "reported_links",
-            "error_links",
-            "whitelisted_phones",
-            "fcm_tokens",
-            "income",
-            "content_chunks",
-            "chunk_meta",
-            "collections",
-            "settings",
-            "notification_chunks",
-            "collection_chunks"
-          ]
-        : [
-            "genres",
-            "languages",
-            "qualities",
-            "content_chunks",
-            "chunk_meta",
-            "collections",
-            "collection_chunks"
-          ];
+      let collections = [
+        "genres",
+        "languages",
+        "qualities",
+        "content_chunks",
+        "chunk_meta",
+        "collections",
+        "collection_chunks"
+      ];
+      if (syncAllData) {
+        const sourceCols = (await sourceDb.listCollections()).map(c => c.id);
+        const targetCols = (await targetDb.listCollections()).map(c => c.id);
+        collections = Array.from(new Set([...sourceCols, ...targetCols]));
+      }
       const results: any = {};
 
       for (const colName of collections) {
@@ -2828,38 +2810,20 @@ async function startServer() {
         `Starting push: source (${firebaseConfig.firestoreDatabaseId}) -> target (${tDbId || "default"}), mode: ${mode}, specificIds: ${specificIds ? Object.keys(specificIds).length : "none"}, syncAllData: ${syncAllData}`,
       );
 
-      const collections = syncAllData
-        ? [
-            "genres",
-            "languages",
-            "qualities",
-            "users",
-            "admin_settings",
-            "notifications",
-            "notification_templates",
-            "orders",
-            "movie_requests",
-            "reported_links",
-            "error_links",
-            "whitelisted_phones",
-            "fcm_tokens",
-            "income",
-            "content_chunks",
-            "chunk_meta",
-            "collections",
-            "settings",
-            "notification_chunks",
-            "collection_chunks"
-          ]
-        : [
-            "genres",
-            "languages",
-            "qualities",
-            "content_chunks",
-            "chunk_meta",
-            "collections",
-            "collection_chunks"
-          ];
+      let collections = [
+        "genres",
+        "languages",
+        "qualities",
+        "content_chunks",
+        "chunk_meta",
+        "collections",
+        "collection_chunks"
+      ];
+      if (syncAllData) {
+        const sourceCols = (await sourceDb.listCollections()).map(c => c.id);
+        const targetCols = (await targetDb.listCollections()).map(c => c.id);
+        collections = Array.from(new Set([...sourceCols, ...targetCols]));
+      }
       const logs: string[] = [];
 
       for (const colName of collections) {
@@ -3020,38 +2984,20 @@ async function startServer() {
         `Starting pull: target (${tDbId || "default"}) -> source (${firebaseConfig.firestoreDatabaseId}), mode: ${mode}, specificIds: ${specificIds ? Object.keys(specificIds).length : "none"}, syncAllData: ${syncAllData}`,
       );
 
-      const collections = syncAllData
-        ? [
-            "genres",
-            "languages",
-            "qualities",
-            "users",
-            "admin_settings",
-            "notifications",
-            "notification_templates",
-            "orders",
-            "movie_requests",
-            "reported_links",
-            "error_links",
-            "whitelisted_phones",
-            "fcm_tokens",
-            "income",
-            "content_chunks",
-            "chunk_meta",
-            "collections",
-            "settings",
-            "notification_chunks",
-            "collection_chunks"
-          ]
-        : [
-            "genres",
-            "languages",
-            "qualities",
-            "content_chunks",
-            "chunk_meta",
-            "collections",
-            "collection_chunks"
-          ];
+      let collections = [
+        "genres",
+        "languages",
+        "qualities",
+        "content_chunks",
+        "chunk_meta",
+        "collections",
+        "collection_chunks"
+      ];
+      if (syncAllData) {
+        const sourceCols = (await sourceDb.listCollections()).map(c => c.id);
+        const targetCols = (await targetDb.listCollections()).map(c => c.id);
+        collections = Array.from(new Set([...sourceCols, ...targetCols]));
+      }
       const logs: string[] = [];
 
       for (const colName of collections) {

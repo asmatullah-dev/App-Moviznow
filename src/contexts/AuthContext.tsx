@@ -379,7 +379,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (isAdminUser) {
         const { doc, getDoc, serverTimestamp, writeBatch } = await import("firebase/firestore");
-        const cid = "notification_chunk_0";
+        const cid = "app_chunk_0";
         const chunkRef = doc(db, 'notification_chunks', cid);
         const chunkSnap = await getDoc(chunkRef);
         const chunkItems = chunkSnap.exists() ? chunkSnap.data()?.items || {} : {};
@@ -387,7 +387,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const batch = writeBatch(db);
         batch.set(chunkRef, { items: newChunkItems, updatedAt: serverTimestamp() }, { merge: true });
-        batch.set(doc(db, 'chunk_meta', 'versions'), { notifications: { version: Date.now(), latestChunkId: cid } }, { merge: true });
+        batch.set(doc(db, 'chunk_meta', 'versions'), { notifications: { version: Date.now(), latestAppChunkId: cid, latestChunkId: cid } }, { merge: true });
         await batch.commit();
 
         safeStorage.removeItem('cached_notifications_version');

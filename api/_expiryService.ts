@@ -234,8 +234,8 @@ async function saveInAppExpiryNotification(
   };
 
   try {
-    // 1. Write to notification_chunk_0
-    const chunkRef = firestore.collection("notification_chunks").doc("notification_chunk_0");
+    // 1. Write to app_chunk_0
+    const chunkRef = firestore.collection("notification_chunks").doc("app_chunk_0");
     const chunkSnap = await chunkRef.get();
     const existingItems = chunkSnap.exists ? chunkSnap.data()?.items || {} : {};
 
@@ -261,7 +261,8 @@ async function saveInAppExpiryNotification(
       {
         notifications: {
           version: Date.now(),
-          latestChunkId: "notification_chunk_0",
+          latestAppChunkId: "app_chunk_0",
+          latestChunkId: "app_chunk_0",
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
         lastGlobalUpdate: admin.firestore.FieldValue.serverTimestamp(),
@@ -279,6 +280,71 @@ async function saveInAppExpiryNotification(
   } catch (err) {
     console.error(`[Expiry Notification] Failed to write in-app notification for ${userId}:`, err);
     return false;
+  }
+}
+
+// Save sent email notifications into Email_chunk_0 without deleting or overwriting previous entries
+async function saveEmailExpiryNotificationChunk(
+  firestore: admin.firestore.Firestore,
+  userId: string,
+  userDisplayName: string,
+  userEmail: string,
+  subject: string,
+  bodyText: string
+) {
+  try {
+    const notifId = `email_expiry_${userId}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const emailNotifPayload = {
+      id: notifId,
+      title: subject || "⚠️ Membership Expiry Notice (Email)",
+      body: bodyText || `Email notice sent to ${userEmail}`,
+      type: "email_notice",
+      targetUserId: userId,
+      targetUserIds: [userId],
+      targetUserNames: [userDisplayName || userEmail],
+      sendEmail: true,
+      createdBy: "System",
+      createdAt: new Date().toISOString(),
+    };
+
+    const emailChunkRef = firestore.collection("notification_chunks").doc("Email_chunk_0");
+    const emailChunkSnap = await emailChunkRef.get();
+    const existingItems = emailChunkSnap.exists ? emailChunkSnap.data()?.items || {} : {};
+
+    // Preserve all existing items in Email_chunk_0 by spreading existingItems
+    const updatedItems = {
+      [notifId]: emailNotifPayload,
+      ...existingItems,
+    };
+
+    const batch = firestore.batch();
+    batch.set(
+      emailChunkRef,
+      {
+        items: updatedItems,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    const metaRef = firestore.collection("chunk_meta").doc("versions");
+    batch.set(
+      metaRef,
+      {
+        notifications: {
+          version: Date.now(),
+          latestEmailChunkId: "Email_chunk_0",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        lastGlobalUpdate: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    await batch.commit();
+    console.log(`[Expiry Email Chunk] Saved email notice for ${userEmail} in Email_chunk_0 without deleting previous items.`);
+  } catch (err: any) {
+    console.error(`[Expiry Email Chunk Save Failed]:`, err?.message || err);
   }
 }
 
@@ -597,6 +663,14 @@ async function processUserDocs(
           emailSuccess = true;
           result.emailsSent++;
           console.log(`[Expiry Email] Sent to ${email} via ${emailResult.provider} from Alerts@MovizNow.com`);
+          await saveEmailExpiryNotificationChunk(
+            firestore,
+            uid,
+            displayName,
+            email,
+            subject,
+            `Your MovizNow membership has expired on ${formatDateDisplay(expiryDateStr)}. Email notice sent to ${email}.`
+          );
         }
       } catch (emailErr: any) {
         console.warn(`[Expiry Email Failed for ${email}]:`, emailErr.message);
@@ -658,7 +732,7 @@ async function saveInAppMembershipUpdateNotification(
       createdAt,
     };
 
-    const chunkRef = firestore.collection("notification_chunks").doc("notification_chunk_0");
+    const chunkRef = firestore.collection("notification_chunks").doc("app_chunk_0");
     const chunkSnap = await chunkRef.get();
     const existingItems = chunkSnap.exists ? chunkSnap.data()?.items || {} : {};
 
@@ -683,7 +757,8 @@ async function saveInAppMembershipUpdateNotification(
       {
         notifications: {
           version: Date.now(),
-          latestChunkId: "notification_chunk_0",
+          latestAppChunkId: "app_chunk_0",
+          latestChunkId: "app_chunk_0",
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
         lastGlobalUpdate: admin.firestore.FieldValue.serverTimestamp(),
@@ -834,6 +909,14 @@ export async function sendMembershipUpdateNotification(params: MembershipUpdateP
         if (emailResult) {
           emailSent = true;
           console.log(`[Membership Update Email] Sent to ${email} via ${emailResult.provider}`);
+          await saveEmailExpiryNotificationChunk(
+            firestore,
+            userId,
+            displayName,
+            email,
+            subject,
+            `Your MovizNow membership was updated to ${formattedDate}. Email notice sent to ${email}.`
+          );
         }
       } catch (emailErr: any) {
         console.warn(`[Membership Update Email failed for ${email}]:`, emailErr.message);
