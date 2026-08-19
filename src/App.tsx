@@ -21,10 +21,12 @@ import { OfflineBanner } from './components/OfflineBanner';
 import { SyncBanner } from './components/SyncBanner';
 import { AnalyticsTracker } from './components/AnalyticsTracker';
 
-// Lazy Loaded Pages
+// Eager Loaded Core Pages for Instant Initial Render
+import Home from './pages/user/Home';
+import Login from './pages/Login';
+
+// Lazy Loaded Secondary & Admin Pages
 const MaintenancePage = lazy(() => import('./pages/MaintenancePage'));
-const Login = lazy(() => import('./pages/Login'));
-const Home = lazy(() => import('./pages/user/Home'));
 const FreeMovies = lazy(() => import('./pages/user/FreeMovies'));
 const Membership = lazy(() => import('./pages/user/Membership'));
 const Reviews = lazy(() => import('./pages/user/Reviews'));

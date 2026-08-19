@@ -22,17 +22,17 @@ export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRout
   const [isSavingWhatsapp, setIsSavingWhatsapp] = useState(false);
 
   React.useEffect(() => {
-    // Safety cap: never show the initial logo loading screen for more than 800ms if we have cached data
+    // Ultra-fast safety cap: max 120ms wait for fresh/uncached auth resolution
     const timer = setTimeout(() => {
       setMaxWaitReached(true);
-    }, 800);
+    }, 120);
     return () => clearTimeout(timer);
   }, []);
 
-  const isChecking = authLoading || (!maxWaitReached && (
-    (user && !profile && authProfileLoading) || 
-    settingsLoading
-  ));
+  const hasCachedUser = !!user || !!profile || !!safeStorage.getItem('profile_cache');
+
+  // Only show loading screen if we have no cached user and auth is still initializing within the fast safety window
+  const isChecking = !hasCachedUser && authLoading && !maxWaitReached;
 
   if (isChecking) {
     return (
@@ -47,7 +47,7 @@ export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRout
   }
 
   // Strictly require logged in user: redirect guest users to /login with target location
-  if (!user) {
+  if (!user && !profile) {
     console.log('ProtectedRoute: No authenticated user, redirecting to login', location);
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
