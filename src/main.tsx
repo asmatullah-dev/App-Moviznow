@@ -11,7 +11,7 @@ declare const __BUILD_ID__: string;
 declare const __APP_VERSION__: string;
 declare const __BUILD_TIME__: string;
 
-const CURRENT_BUILD_ID = typeof __BUILD_ID__ !== 'undefined' ? __BUILD_ID__ : '3.2.1';
+const CURRENT_BUILD_ID = typeof __BUILD_ID__ !== 'undefined' ? __BUILD_ID__ : '3.2.2';
 console.log('[Auto-Update] Client running on build ID:', CURRENT_BUILD_ID);
 
 // Safe reload helper to prevent repeated/rapid reloads (guards with 30s cooldown)

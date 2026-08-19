@@ -8,7 +8,10 @@ import {
   CachedImdbRating
 } from '../services/imdbRatingService';
 
-export function useImdbRating(content?: (Partial<Content> & { id: string }) | null, options?: { skipLiveFetch?: boolean }) {
+export function useImdbRating(
+  content?: (Partial<Content> & { id: string }) | null,
+  options?: { enableLiveFetch?: boolean; skipLiveFetch?: boolean }
+) {
   const contentId = content?.id;
   const initialStaticRating = content?.imdbRating;
   const initialStaticOtt = content?.ottPlatform || (content as any)?.ott_platform;
@@ -44,8 +47,9 @@ export function useImdbRating(content?: (Partial<Content> & { id: string }) | nu
     setRating(prev => (prev !== targetRating ? targetRating : prev));
     setOttPlatform(prev => (prev !== targetOtt ? targetOtt : prev));
 
-    // If no valid cache exists or missing rating/OTT, fetch live (unless skipLiveFetch is requested)
-    if (content && (!cached?.rating || !cached?.ottPlatform) && !options?.skipLiveFetch) {
+    // ONLY fetch live if explicitly enabled via options.enableLiveFetch AND not skipped
+    // Cards on home page/lists will NOT make live network requests!
+    if (options?.enableLiveFetch && !options?.skipLiveFetch && content && (!cached?.rating || !cached?.ottPlatform)) {
       setIsLoading(true);
       fetchLiveImdbRating(content)
         .then((res) => {
@@ -57,7 +61,14 @@ export function useImdbRating(content?: (Partial<Content> & { id: string }) | nu
           setIsLoading(false);
         });
     }
-  }, [contentId, content?.imdbRating, content?.ottPlatform, (content as any)?.ott_platform, content?.imdbLink, content?.title, content?.year, options?.skipLiveFetch]);
+  }, [
+    contentId,
+    content?.imdbRating,
+    content?.ottPlatform,
+    (content as any)?.ott_platform,
+    options?.enableLiveFetch,
+    options?.skipLiveFetch
+  ]);
 
   // Listen to live update broadcasts across the app
   useEffect(() => {

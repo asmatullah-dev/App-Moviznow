@@ -47,10 +47,9 @@ const ContentCard = React.memo(({
   const { vibrate } = useHaptics();
   const { t } = useLanguage();
   const navigate = useNavigate();
-  const [hovered, setHovered] = React.useState(false);
   const { rating: imdbRating, ottPlatform: cachedOtt, refreshRating } = useImdbRating(
     content,
-    { skipLiveFetch: skipLiveRatingFetch && !hovered }
+    { enableLiveFetch: false, skipLiveFetch: true }
   );
   const ottBadge = getOttBadgeConfig(content.ottPlatform || (content as any).ott_platform || cachedOtt);
   const [isTrailerSelectionOpen, setIsTrailerSelectionOpen] = React.useState(false);
@@ -198,11 +197,9 @@ const ContentCard = React.memo(({
 
   const rawPoster = content.posterUrl || settings?.defaultAppImage || 'https://picsum.photos/seed/movie/400/600';
   const optimizedPoster = getOptimizedImageUrl(rawPoster, isSmall ? 185 : 342);
-  const posterSrcSet = getImageSrcSet(rawPoster);
 
   return (
     <div 
-      onMouseEnter={() => setHovered(true)}
       className={clsx("group relative flex flex-col h-full transition-transform duration-200 hover:-translate-y-1 active:scale-[0.98]", {
         "scale-105 z-30": isClicked
       })}

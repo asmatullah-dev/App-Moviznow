@@ -3,7 +3,7 @@ import { Sparkles, ChevronUp, ChevronDown } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Collection as AppCollection, Content } from "../../types";
 import { ScrollableRow } from "../ScrollableRow";
-import { getOptimizedImageUrl, getImageSrcSet } from "../../utils/imageUtils";
+import { getOptimizedImageUrl } from "../../utils/imageUtils";
 import { useHaptics } from "../../hooks/useHaptics";
 import { useLanguage } from "../../contexts/LanguageContext";
 
@@ -81,8 +81,6 @@ export const CuratedCollectionsOverview: React.FC<CuratedCollectionsOverviewProp
                         <div className="absolute inset-0">
                           <img
                             src={getOptimizedImageUrl(posterUrl, 342)}
-                            srcSet={getImageSrcSet(posterUrl)}
-                            sizes="(max-width: 640px) 150px, 190px"
                             alt={collection.title}
                             loading="lazy"
                             decoding="async"

@@ -351,6 +351,10 @@ export async function fetchMovieDigitalReleaseDate(movieId: number): Promise<{ o
   }
 }
 
+const UPCOMING_CACHE_PREFIX = 'tmdb_upcoming_cache_v3_';
+const UPCOMING_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 hours
+const upcomingMemoryCache = new Map<string, { data: TMDBUpcomingItem[]; timestamp: number }>();
+
 /**
  * Fetches upcoming movies with digital/OTT releases starting from today onwards.
  * Strictly avoids showing theatrical release dates.
@@ -358,7 +362,7 @@ export async function fetchMovieDigitalReleaseDate(movieId: number): Promise<{ o
 export async function fetchUpcomingMovies(page: number = 1): Promise<TMDBUpcomingItem[]> {
   try {
     const today = getTodayString();
-    // 1. Discover movies with digital releases (type 4) on or after today
+    // Discover movies with digital releases (type 4) on or after today
     const res = await fetchTmdb('discover/movie', {
       language: 'en-US',
       sort_by: 'popularity.desc',
@@ -375,8 +379,7 @@ export async function fetchUpcomingMovies(page: number = 1): Promise<TMDBUpcomin
       rawMovies = data.results || [];
     }
 
-    // If digital discover returned few results, also fetch /movie/upcoming to inspect for digital dates
-    if (rawMovies.length < 10) {
+    if (rawMovies.length < 8) {
       try {
         const upRes = await fetchTmdb('movie/upcoming', { language: 'en-US', page });
         if (upRes.ok) {
@@ -391,36 +394,29 @@ export async function fetchUpcomingMovies(page: number = 1): Promise<TMDBUpcomin
       } catch (e) {}
     }
 
-    // Fetch exact digital OTT release dates for each movie
-    const formattedMovies = await Promise.all(
-      rawMovies.slice(0, 20).map(async (item: any) => {
-        const { ottDate, platformNote } = await fetchMovieDigitalReleaseDate(item.id);
+    // Format movies directly from discover/upcoming without spamming individual sub-requests
+    const formattedMovies: TMDBUpcomingItem[] = rawMovies.slice(0, 15).map((item: any) => {
+      const releaseDate = item.release_date || null;
+      return {
+        id: item.id,
+        title: item.title || item.original_title || 'Untitled',
+        originalTitle: item.original_title,
+        type: 'movie' as const,
+        posterPath: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null,
+        backdropPath: item.backdrop_path ? `https://image.tmdb.org/t/p/original${item.backdrop_path}` : null,
+        overview: item.overview || '',
+        releaseDate: releaseDate,
+        ottReleaseDate: releaseDate,
+        hasOttDate: !!releaseDate,
+        ottPlatform: null,
+        voteAverage: item.vote_average || 0,
+        voteCount: item.vote_count || 0,
+        popularity: item.popularity || 0,
+        genreIds: item.genre_ids || [],
+        genres: getTMDBGenreNames(item.genre_ids),
+      };
+    });
 
-        return {
-          id: item.id,
-          title: item.title || item.original_title || 'Untitled',
-          originalTitle: item.original_title,
-          type: 'movie' as const,
-          posterPath: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null,
-          backdropPath: item.backdrop_path ? `https://image.tmdb.org/t/p/original${item.backdrop_path}` : null,
-          overview: item.overview || '',
-          // Strictly show OTT release date; never fallback to theatrical release dates
-          releaseDate: ottDate,
-          ottReleaseDate: ottDate,
-          hasOttDate: !!ottDate,
-          ottPlatform: platformNote,
-          voteAverage: item.vote_average || 0,
-          voteCount: item.vote_count || 0,
-          popularity: item.popularity || 0,
-          genreIds: item.genre_ids || [],
-          genres: getTMDBGenreNames(item.genre_ids),
-        };
-      })
-    );
-
-    // Filter to upcoming contents:
-    // Only return movies that have a confirmed upcoming OTT date (>= today)
-    // or are genuinely in upcoming pipeline without showing theatrical dates
     return formattedMovies.sort((a, b) => {
       if (a.hasOttDate && b.hasOttDate && a.ottReleaseDate && b.ottReleaseDate) {
         return a.ottReleaseDate.localeCompare(b.ottReleaseDate);
@@ -474,41 +470,27 @@ export async function fetchUpcomingTV(page: number = 1): Promise<TMDBUpcomingIte
       return item.first_air_date && item.first_air_date >= today;
     });
 
-    const formattedShows: TMDBUpcomingItem[] = await Promise.all(
-      filteredShows.slice(0, 20).map(async (item: any) => {
-        const airDate = item.first_air_date || null;
-        let detectedNetwork: string | null = null;
-        
-        try {
-          const detailRes = await fetchTmdb(`tv/${item.id}`, { append_to_response: 'watch/providers' });
-          if (detailRes.ok) {
-            const detailData = await detailRes.json();
-            const primaryNetwork = detailData.networks?.[0]?.name;
-            const providers = detailData['watch/providers']?.results?.US?.flatrate?.[0]?.provider_name || detailData['watch/providers']?.results?.IN?.flatrate?.[0]?.provider_name;
-            detectedNetwork = normalizeOttPlatformName(primaryNetwork || providers);
-          }
-        } catch (e) {}
-
-        return {
-          id: item.id,
-          title: item.name || item.original_name || 'Untitled',
-          originalTitle: item.original_name,
-          type: 'tv' as const,
-          posterPath: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null,
-          backdropPath: item.backdrop_path ? `https://image.tmdb.org/t/p/original${item.backdrop_path}` : null,
-          overview: item.overview || '',
-          releaseDate: airDate,
-          ottReleaseDate: airDate,
-          hasOttDate: !!airDate,
-          ottPlatform: detectedNetwork,
-          voteAverage: item.vote_average || 0,
-          voteCount: item.vote_count || 0,
-          popularity: item.popularity || 0,
-          genreIds: item.genre_ids || [],
-          genres: getTMDBGenreNames(item.genre_ids),
-        };
-      })
-    );
+    const formattedShows: TMDBUpcomingItem[] = filteredShows.slice(0, 15).map((item: any) => {
+      const airDate = item.first_air_date || null;
+      return {
+        id: item.id,
+        title: item.name || item.original_name || 'Untitled',
+        originalTitle: item.original_name,
+        type: 'tv' as const,
+        posterPath: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null,
+        backdropPath: item.backdrop_path ? `https://image.tmdb.org/t/p/original${item.backdrop_path}` : null,
+        overview: item.overview || '',
+        releaseDate: airDate,
+        ottReleaseDate: airDate,
+        hasOttDate: !!airDate,
+        ottPlatform: null,
+        voteAverage: item.vote_average || 0,
+        voteCount: item.vote_count || 0,
+        popularity: item.popularity || 0,
+        genreIds: item.genre_ids || [],
+        genres: getTMDBGenreNames(item.genre_ids),
+      };
+    });
 
     // Sort chronologically (closest air date first)
     return formattedShows.sort((a, b) => {
@@ -525,31 +507,65 @@ export async function fetchUpcomingTV(page: number = 1): Promise<TMDBUpcomingIte
 
 /**
  * Fetches combined upcoming movies & series sorted chronologically by upcoming release date.
+ * Caches results in memory & localStorage for 6 hours to minimize network traffic.
  */
-export async function fetchUpcomingCombined(filter: 'all' | 'movie' | 'tv' = 'all'): Promise<TMDBUpcomingItem[]> {
-  if (filter === 'movie') {
-    return await fetchUpcomingMovies(1);
-  }
-  if (filter === 'tv') {
-    return await fetchUpcomingTV(1);
-  }
+export async function fetchUpcomingCombined(filter: 'all' | 'movie' | 'tv' = 'all', forceRefresh: boolean = false): Promise<TMDBUpcomingItem[]> {
+  const cacheKey = `${UPCOMING_CACHE_PREFIX}${filter}`;
+  const now = Date.now();
 
-  const [movies, tvShows] = await Promise.all([
-    fetchUpcomingMovies(1),
-    fetchUpcomingTV(1)
-  ]);
-
-  const combined = [...movies, ...tvShows];
-  
-  // Sort chronologically by earliest confirmed upcoming date, then by popularity
-  return combined.sort((a, b) => {
-    if (a.hasOttDate && b.hasOttDate && a.releaseDate && b.releaseDate) {
-      return a.releaseDate.localeCompare(b.releaseDate);
+  if (!forceRefresh) {
+    // Check memory cache
+    const mem = upcomingMemoryCache.get(cacheKey);
+    if (mem && now - mem.timestamp < UPCOMING_CACHE_TTL && mem.data.length > 0) {
+      return mem.data;
     }
-    if (a.hasOttDate) return -1;
-    if (b.hasOttDate) return 1;
-    return (b.popularity || 0) - (a.popularity || 0);
-  });
+
+    // Check localStorage cache
+    try {
+      const local = localStorage.getItem(cacheKey);
+      if (local) {
+        const parsed = JSON.parse(local);
+        if (parsed.timestamp && now - parsed.timestamp < UPCOMING_CACHE_TTL && Array.isArray(parsed.data) && parsed.data.length > 0) {
+          upcomingMemoryCache.set(cacheKey, { data: parsed.data, timestamp: parsed.timestamp });
+          return parsed.data;
+        }
+      }
+    } catch (e) {}
+  }
+
+  let result: TMDBUpcomingItem[] = [];
+
+  if (filter === 'movie') {
+    result = await fetchUpcomingMovies(1);
+  } else if (filter === 'tv') {
+    result = await fetchUpcomingTV(1);
+  } else {
+    const [movies, tvShows] = await Promise.all([
+      fetchUpcomingMovies(1),
+      fetchUpcomingTV(1)
+    ]);
+
+    const combined = [...movies, ...tvShows];
+    
+    // Sort chronologically by earliest confirmed upcoming date, then by popularity
+    result = combined.sort((a, b) => {
+      if (a.hasOttDate && b.hasOttDate && a.releaseDate && b.releaseDate) {
+        return a.releaseDate.localeCompare(b.releaseDate);
+      }
+      if (a.hasOttDate) return -1;
+      if (b.hasOttDate) return 1;
+      return (b.popularity || 0) - (a.popularity || 0);
+    });
+  }
+
+  if (result.length > 0) {
+    upcomingMemoryCache.set(cacheKey, { data: result, timestamp: now });
+    try {
+      localStorage.setItem(cacheKey, JSON.stringify({ data: result, timestamp: now }));
+    } catch (e) {}
+  }
+
+  return result;
 }
 
 /**

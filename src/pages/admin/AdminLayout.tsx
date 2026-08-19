@@ -227,7 +227,7 @@ export default function AdminLayout() {
             <LogOut className="w-5 h-5" />
           </button>
         </div>
-        <p className="text-[10px] text-zinc-500 font-mono tracking-tighter opacity-50 text-center pb-2">v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.1'}</p>
+        <p className="text-[10px] text-zinc-500 font-mono tracking-tighter opacity-50 text-center pb-2">v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.2'}</p>
       </aside>
 
       {/* Overlay for mobile */}

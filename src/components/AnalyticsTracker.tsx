@@ -23,7 +23,7 @@ export function AnalyticsTracker() {
         // Ignore parse error
       }
 
-      const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.1';
+      const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.2';
 
       try {
         const searchParams = new URLSearchParams(location.search);

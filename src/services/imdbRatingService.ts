@@ -22,6 +22,8 @@ const OMDB_BASE = 'https://www.omdbapi.com/';
 
 // In-flight fetch deduplication map
 const pendingFetches = new Map<string, Promise<CachedImdbRating | null>>();
+// In-memory hot cache to avoid repeated localStorage.getItem / JSON.parse operations
+const inMemoryRatingCache = new Map<string, CachedImdbRating | null>();
 
 /**
  * Format & clean raw IMDb rating string into clean format (e.g. "8.2/10" -> "8.2")
@@ -79,18 +81,32 @@ if (typeof window !== 'undefined') {
 }
 
 /**
- * Get cached IMDb rating & OTT platform for a content item from localStorage if valid (< 5 days old).
+ * Get cached IMDb rating & OTT platform for a content item from memory/localStorage if valid (< 5 days old).
  * If expired (> 5 days), deletes the old rating data from localStorage and returns null.
  */
 export function getCachedImdbRating(contentId: string): CachedImdbRating | null {
   if (!contentId) return null;
+
+  if (inMemoryRatingCache.has(contentId)) {
+    const mem = inMemoryRatingCache.get(contentId);
+    if (mem && (!mem.timestamp || Date.now() - mem.timestamp < RATING_CACHE_TTL_MS)) {
+      return mem;
+    }
+  }
+
   try {
     const key = `${IMDB_STORAGE_PREFIX}${contentId}`;
     const raw = localStorage.getItem(key);
-    if (!raw) return null;
+    if (!raw) {
+      inMemoryRatingCache.set(contentId, null);
+      return null;
+    }
 
     const data: CachedImdbRating = JSON.parse(raw);
-    if (!data || (!data.rating && !data.ottPlatform)) return null;
+    if (!data || (!data.rating && !data.ottPlatform)) {
+      inMemoryRatingCache.set(contentId, null);
+      return null;
+    }
 
     const now = Date.now();
     // Delete old Ratings data after 5 days
@@ -98,10 +114,12 @@ export function getCachedImdbRating(contentId: string): CachedImdbRating | null 
       try {
         localStorage.removeItem(key);
       } catch (e) {}
+      inMemoryRatingCache.set(contentId, null);
       return null;
     }
 
     touchImdbOttUsage(contentId);
+    inMemoryRatingCache.set(contentId, data);
     return data;
   } catch (e) {
     return null;
@@ -125,7 +143,10 @@ export function saveImdbRatingToStorage(
   const clean = rawRating ? formatImdbRating(rawRating) : existing?.rating || null;
   const finalOtt = (ottPlatform && ottPlatform.trim()) ? ottPlatform.trim() : existing?.ottPlatform || undefined;
 
-  if (!clean && !finalOtt) return null;
+  if (!clean && !finalOtt) {
+    inMemoryRatingCache.set(contentId, null);
+    return null;
+  }
 
   const cachedData: CachedImdbRating = {
     id: contentId,
@@ -136,6 +157,8 @@ export function saveImdbRatingToStorage(
     timestamp: Date.now(),
     imdbId: imdbId || existing?.imdbId
   };
+
+  inMemoryRatingCache.set(contentId, cachedData);
 
   try {
     const key = `${IMDB_STORAGE_PREFIX}${contentId}`;

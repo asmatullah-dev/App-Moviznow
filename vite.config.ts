@@ -6,7 +6,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
-  const buildId = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID || process.env.npm_package_version || '3.2.1';
+  const buildId = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID || process.env.npm_package_version || '3.2.2';
   const buildTime = new Date().toISOString();
 
   return {
@@ -59,7 +59,7 @@ export default defineConfig(({mode}) => {
     ],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-      '__APP_VERSION__': JSON.stringify(process.env.npm_package_version || '3.2.1'),
+      '__APP_VERSION__': JSON.stringify(process.env.npm_package_version || '3.2.2'),
       '__BUILD_ID__': JSON.stringify(buildId),
       '__BUILD_TIME__': JSON.stringify(buildTime),
     },

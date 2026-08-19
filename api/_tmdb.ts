@@ -40,7 +40,7 @@ tmdbRouter.get('/tmdb/*', async (req, res) => {
       timeout: 8000,
       headers: {
         'Accept': 'application/json',
-        'User-Agent': 'MovizNow/3.2.1'
+        'User-Agent': 'MovizNow/3.2.2'
       }
     });
 

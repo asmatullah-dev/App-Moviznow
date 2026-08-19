@@ -163,31 +163,12 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className 
 
   const loadData = useCallback(async (forcedFilter?: 'all' | 'movie' | 'tv', isRefresh = false) => {
     const currentFilter = forcedFilter || filter;
-    const cacheKey = `tmdb_coming_soon_ott_${currentFilter}`;
-
-    if (!isRefresh) {
-      try {
-        const cached = sessionStorage.getItem(cacheKey);
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setItems(parsed);
-            setLoading(false);
-            return;
-          }
-        }
-      } catch (e) {}
-    }
-
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchUpcomingCombined(currentFilter);
+      const data = await fetchUpcomingCombined(currentFilter, isRefresh);
       if (data && data.length > 0) {
         setItems(data);
-        try {
-          sessionStorage.setItem(cacheKey, JSON.stringify(data));
-        } catch (e) {}
       } else {
         setError(t('No upcoming releases found at this moment.'));
       }
@@ -201,57 +182,6 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className 
   useEffect(() => {
     loadData(filter);
   }, [filter, loadData]);
-
-  // AI-powered missing OTT platform resolution (Strictly max 2 attempts)
-  const ottAttemptsRef = useRef<number>(0);
-
-  useEffect(() => {
-    // Reset attempts counter when filter changes
-    ottAttemptsRef.current = 0;
-  }, [filter]);
-
-  useEffect(() => {
-    if (!items || items.length === 0) return;
-    if (ottAttemptsRef.current >= 2) return; // Strictly stop trying after 2 attempts
-
-    const missingItems = items.filter(item => !item.ottPlatform);
-    if (missingItems.length === 0) return;
-
-    let isMounted = true;
-    const fillMissingOtt = async () => {
-      const remainingAllowed = 2 - ottAttemptsRef.current;
-      if (remainingAllowed <= 0) return;
-
-      const targetItems = missingItems.slice(0, remainingAllowed);
-      for (const item of targetItems) {
-        if (!isMounted || ottAttemptsRef.current >= 2) break;
-        ottAttemptsRef.current += 1;
-
-        try {
-          const predicted = await predictOttPlatformWithAI(
-            item.title,
-            item.type,
-            item.releaseDate ? item.releaseDate.split('-')[0] : undefined,
-            item.overview,
-            item.genres,
-            item.originalTitle
-          );
-          if (predicted && isMounted) {
-            setItems(prev => prev.map(p => p.id === item.id && p.type === item.type ? { ...p, ottPlatform: predicted } : p));
-          } else if (!predicted) {
-            // Stop trying if prediction unavailable or error
-            break;
-          }
-          await new Promise(r => setTimeout(r, 1500));
-        } catch (e) {
-          break;
-        }
-      }
-    };
-
-    fillMissingOtt();
-    return () => { isMounted = false; };
-  }, [items]);
 
   // Filter out items that are already present in library with an HD print (WEB-DL, HDRip, BluRay, WEBRip, BRRip)
   const visibleItems = useMemo(() => {
