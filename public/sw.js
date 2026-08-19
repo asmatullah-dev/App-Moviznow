@@ -119,23 +119,53 @@ workbox.routing.registerRoute(
 );
 
 self.addEventListener('fetch', (event) => {
-  // Basic fetch handler to satisfy PWA requirements
+  // Navigation requests (page loads & Home Screen PWA / WebAPK launches)
   if (event.request.mode === 'navigate') {
     event.respondWith((async () => {
       try {
+        // 1. Check navigation preload response if valid
         const preloadResp = await event.preloadResponse;
-        if (preloadResp) {
+        if (preloadResp && preloadResp.ok) {
           return preloadResp;
         }
-        return await fetch(event.request);
+
+        // 2. Fetch with a 3.5 second timeout so PWA startup never hangs on slow networks
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3500);
+
+        try {
+          const networkResp = await fetch(event.request, { signal: controller.signal });
+          clearTimeout(timeoutId);
+          if (networkResp && networkResp.ok) {
+            return networkResp;
+          }
+        } catch (fetchErr) {
+          clearTimeout(timeoutId);
+        }
       } catch (error) {
-        const cache = await caches.open(CACHE);
-        return await cache.match(offlineFallbackPage);
+        console.warn('[SW] Navigation fetch error:', error);
       }
+
+      // 3. Serve cached HTML if network fetch fails or times out
+      try {
+        const cache = await caches.open(CACHE);
+        const cached = (await cache.match(offlineFallbackPage)) || (await cache.match('/')) || (await cache.match('/index.html'));
+        if (cached) return cached;
+      } catch (e) {}
+
+      // 4. Guaranteed HTML fallback to prevent blank/black screens in Chrome WebAPK
+      return new Response(
+        '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MovizNow</title></head><body style="background:#000000;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-family:sans-serif;"><div style="text-align:center;"><p>Loading MovizNow...</p><script>setTimeout(function(){window.location.reload();},800);</script></div></body></html>',
+        { headers: { 'Content-Type': 'text/html' } }
+      );
     })());
   } else {
-    // For non-navigation requests, just fetch from network
-    event.respondWith(fetch(event.request));
+    // Non-navigation asset requests with safe cache fallback
+    event.respondWith(
+      fetch(event.request).catch(() => {
+        return caches.match(event.request);
+      })
+    );
   }
 });
 

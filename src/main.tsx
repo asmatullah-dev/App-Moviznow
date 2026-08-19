@@ -3,6 +3,7 @@ import {createRoot} from 'react-dom/client';
 import {HelmetProvider} from 'react-helmet-async';
 import App from './App.tsx';
 import ErrorBoundary from './components/ErrorBoundary.tsx';
+import { safeSessionStorage } from './utils/safeStorage';
 import './index.css';
 import 'react-lazy-load-image-component/src/effects/blur.css';
 
@@ -23,11 +24,11 @@ const forceUpdateNewDeployment = async (reason: string) => {
   }
 
   const now = Date.now();
-  const lastReload = parseInt(sessionStorage.getItem('last_deployment_reload') || '0', 10);
+  const lastReload = parseInt(safeSessionStorage.getItem('last_deployment_reload') || '0', 10);
 
   // Prevent infinite loop if reload happened in the last 10 seconds
   if (now - lastReload < 10000) return;
-  sessionStorage.setItem('last_deployment_reload', String(now));
+  safeSessionStorage.setItem('last_deployment_reload', String(now));
 
   console.log(`[Deployment] ${reason} - Clearing caches and reloading fresh build...`);
 
@@ -51,7 +52,7 @@ const forceUpdateNewDeployment = async (reason: string) => {
 };
 
 // Vercel deployment update detection via index header checks
-let currentEtag: string | null = sessionStorage.getItem('app_build_etag');
+let currentEtag: string | null = safeSessionStorage.getItem('app_build_etag');
 const checkForVercelDeployment = async () => {
   if (import.meta.env.DEV) return;
   try {
@@ -60,9 +61,9 @@ const checkForVercelDeployment = async () => {
     if (etag) {
       if (!currentEtag) {
         currentEtag = etag;
-        sessionStorage.setItem('app_build_etag', etag);
+        safeSessionStorage.setItem('app_build_etag', etag);
       } else if (currentEtag !== etag) {
-        sessionStorage.setItem('app_build_etag', etag);
+        safeSessionStorage.setItem('app_build_etag', etag);
         await forceUpdateNewDeployment('Vercel new deployment build etag change');
       }
     }
@@ -73,19 +74,17 @@ const checkForVercelDeployment = async () => {
 checkForVercelDeployment();
 setInterval(checkForVercelDeployment, 5 * 60 * 1000);
 
-// Register service worker for PWA and FCM with safe auto-update checks on production deployment
+// Register service worker for PWA and FCM with safe auto-update checks
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
+  const registerSW = () => {
     navigator.serviceWorker.register('/sw.js')
       .then((registration) => {
         console.log('Service Worker registered with scope:', registration.scope);
 
-        // Check for new Service Worker / deployment every 10 minutes
         setInterval(() => {
           registration.update().catch(() => {});
         }, 10 * 60 * 1000);
 
-        // Check for updates when user opens/focuses the app in a new session or tab
         window.addEventListener('focus', () => {
           registration.update().catch(() => {});
           checkForVercelDeployment();
@@ -106,7 +105,6 @@ if ('serviceWorker' in navigator) {
         console.error('Service Worker registration failed:', err);
       });
 
-    // Handle controllerchange (only reload if an existing active Service Worker was replaced)
     let hasExistingController = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (hasExistingController) {
@@ -114,7 +112,13 @@ if ('serviceWorker' in navigator) {
         forceUpdateNewDeployment('Service Worker controller changed');
       }
     });
-  });
+  };
+
+  if (document.readyState === 'complete') {
+    registerSW();
+  } else {
+    window.addEventListener('load', registerSW);
+  }
 }
 
 // Handle Vite preload errors (dynamic import failures when a new deployment updates JS chunks)

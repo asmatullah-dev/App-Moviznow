@@ -147,4 +147,56 @@ class SafeStorage {
   }
 }
 
+class SafeSessionStorage {
+  private memoryStorage: Map<string, string> = new Map();
+  public isAvailable: boolean;
+
+  constructor() {
+    this.isAvailable = this.checkAvailability();
+  }
+
+  private checkAvailability(): boolean {
+    try {
+      const testKey = '__session_test__';
+      window.sessionStorage.setItem(testKey, testKey);
+      window.sessionStorage.removeItem(testKey);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  getItem(key: string): string | null {
+    if (this.isAvailable) {
+      try {
+        return window.sessionStorage.getItem(key);
+      } catch (e) {
+        return this.memoryStorage.get(key) || null;
+      }
+    }
+    return this.memoryStorage.get(key) || null;
+  }
+
+  setItem(key: string, value: string): void {
+    if (this.isAvailable) {
+      try {
+        window.sessionStorage.setItem(key, value);
+        return;
+      } catch (e) {}
+    }
+    this.memoryStorage.set(key, value);
+  }
+
+  removeItem(key: string): void {
+    if (this.isAvailable) {
+      try {
+        window.sessionStorage.removeItem(key);
+        return;
+      } catch (e) {}
+    }
+    this.memoryStorage.delete(key);
+  }
+}
+
 export const safeStorage = new SafeStorage();
+export const safeSessionStorage = new SafeSessionStorage();
