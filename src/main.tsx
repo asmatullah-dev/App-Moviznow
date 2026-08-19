@@ -5,14 +5,10 @@ import App from './App.tsx';
 import ErrorBoundary from './components/ErrorBoundary.tsx';
 import './index.css';
 import 'react-lazy-load-image-component/src/effects/blur.css';
+import { BUILD_ID, APP_VERSION } from './version';
 
-// Build identification to match client version against /api/version
-declare const __BUILD_ID__: string;
-declare const __APP_VERSION__: string;
-declare const __BUILD_TIME__: string;
-
-const CURRENT_BUILD_ID = typeof __BUILD_ID__ !== 'undefined' ? __BUILD_ID__ : '3.2.2';
-console.log('[Auto-Update] Client running on build ID:', CURRENT_BUILD_ID);
+const CURRENT_BUILD_ID = BUILD_ID;
+console.log('[Auto-Update] Client running on build ID:', CURRENT_BUILD_ID, 'version:', APP_VERSION);
 
 // Safe reload helper to prevent repeated/rapid reloads (guards with 30s cooldown)
 const triggerAppReload = (reason: string) => {

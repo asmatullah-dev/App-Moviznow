@@ -50,6 +50,7 @@ import { CollectionRow } from "../../components/home/CollectionRow";
 import { CuratedCollectionsOverview } from "../../components/home/CuratedCollectionsOverview";
 import { HomeCategoryChips } from "../../components/home/HomeCategoryChips";
 import { CollectionModal } from "../../components/home/CollectionModal";
+import { APP_VERSION } from "../../version";
 
 export default function Home({
   onOpenMediaModal,
@@ -1363,8 +1364,7 @@ export default function Home({
         </Link>
 
         <div className="text-center text-xs text-zinc-500 dark:text-zinc-600 font-mono">
-          {/* @ts-ignore */}
-          v{typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "3.2.2"}
+          v{APP_VERSION}
         </div>
       </footer>
 

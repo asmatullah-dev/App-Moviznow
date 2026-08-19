@@ -17,6 +17,7 @@ import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 import { getAnalytics, isSupported, setUserProperties } from 'firebase/analytics';
 import firebaseConfig from '../firebase-applet-config.json';
 import { safeStorage } from './utils/safeStorage';
+import { APP_VERSION, APP_NAME } from './version';
 
 const appConfig = {
   ...firebaseConfig
@@ -73,11 +74,10 @@ export const analyticsPromise = typeof window !== 'undefined'
         if (yes) {
           try {
             analyticsInstance = getAnalytics(app);
-            const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.2';
             setUserProperties(analyticsInstance, { 
-               app_version: currentVersion,
-               version: currentVersion,
-               app_name: 'MovizNow'
+               app_version: APP_VERSION,
+               version: APP_VERSION,
+               app_name: APP_NAME
             });
           } catch(e) {
             console.warn("Could not initialize Firebase Analytics:", e);

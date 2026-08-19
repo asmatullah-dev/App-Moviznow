@@ -3,10 +3,12 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig, loadEnv} from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
+import pkg from './package.json' with { type: 'json' };
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
-  const buildId = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID || process.env.npm_package_version || '3.2.2';
+  const appVersion = pkg.version || '3.2.2';
+  const buildId = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID || process.env.npm_package_version || appVersion;
   const buildTime = new Date().toISOString();
 
   return {
@@ -59,7 +61,7 @@ export default defineConfig(({mode}) => {
     ],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-      '__APP_VERSION__': JSON.stringify(process.env.npm_package_version || '3.2.2'),
+      '__APP_VERSION__': JSON.stringify(appVersion),
       '__BUILD_ID__': JSON.stringify(buildId),
       '__BUILD_TIME__': JSON.stringify(buildTime),
     },

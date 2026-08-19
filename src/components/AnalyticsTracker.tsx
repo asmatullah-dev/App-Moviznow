@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { logEvent as firebaseLogEvent, setUserId, setUserProperties } from 'firebase/analytics';
 import { analytics, analyticsPromise } from '../firebase';
 import { safeStorage } from '../utils/safeStorage';
+import { APP_VERSION } from '../version';
 
 export function AnalyticsTracker() {
   const location = useLocation();
@@ -22,8 +23,6 @@ export function AnalyticsTracker() {
       } catch (e) {
         // Ignore parse error
       }
-
-      const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.2';
 
       try {
         const searchParams = new URLSearchParams(location.search);
@@ -48,7 +47,7 @@ export function AnalyticsTracker() {
           page_path: location.pathname + location.search,
           page_title: document.title,
           page_location: window.location.href,
-          app_version: currentVersion,
+          app_version: APP_VERSION,
           ...utmParams
         };
 
@@ -62,7 +61,7 @@ export function AnalyticsTracker() {
                 user_name: profile.displayName || profile.uid,
                 email: profile.email || '',
                 role: profile.role || '',
-                app_version: currentVersion
+                app_version: APP_VERSION
               };
 
               if (profile.age !== undefined) userProps.age = String(profile.age);

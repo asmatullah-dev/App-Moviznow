@@ -8,6 +8,7 @@ import { clsx } from 'clsx';
 import ConfirmModal from '../../components/ConfirmModal';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
 import { motion, AnimatePresence } from 'framer-motion';
+import { APP_VERSION } from '../../version';
 
 export default function AdminLayout() {
   const { logout, profile } = useAuth();
@@ -227,7 +228,7 @@ export default function AdminLayout() {
             <LogOut className="w-5 h-5" />
           </button>
         </div>
-        <p className="text-[10px] text-zinc-500 font-mono tracking-tighter opacity-50 text-center pb-2">v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.2'}</p>
+        <p className="text-[10px] text-zinc-500 font-mono tracking-tighter opacity-50 text-center pb-2">v{APP_VERSION}</p>
       </aside>
 
       {/* Overlay for mobile */}

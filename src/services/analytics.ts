@@ -1,6 +1,7 @@
 import { logEvent as firebaseLogEvent } from 'firebase/analytics';
 import { analytics, analyticsPromise } from '../firebase';
 import { safeStorage } from '../utils/safeStorage';
+import { APP_VERSION } from '../version';
 
 export const logEvent = async (
   type: 'session_start' | 'content_click' | 'link_click' | 'time_spent',
@@ -121,13 +122,11 @@ export const logEvent = async (
   try {
     // Log to Firebase Analytics if initialized
     const gaInstance = analytics || await analyticsPromise;
-    const appVer = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.2';
-    
     if (gaInstance) {
       try {
         firebaseLogEvent(gaInstance, type, {
           user_id: userId,
-          app_version: appVer,
+          app_version: APP_VERSION,
           ...data
         });
       } catch (e) {
