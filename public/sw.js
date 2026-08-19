@@ -75,8 +75,8 @@ function extractUrlFromNotification(notification) {
   return '/';
 }
 
-const swVersion = urlParams.get('v') || '3.2.2';
-const CACHE = "moviznow-cache-" + swVersion;
+const swBuildId = urlParams.get('b') || urlParams.get('v') || '3.2.3';
+const CACHE = "moviznow-cache-" + swBuildId;
 const offlineFallbackPage = "offline.html";
 
 self.addEventListener("message", (event) => {

@@ -8,7 +8,10 @@ import './index.css';
 import 'react-lazy-load-image-component/src/effects/blur.css';
 
 declare const __APP_VERSION__: string;
-const currentAppVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.2';
+declare const __BUILD_TIME__: string;
+
+const currentAppVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.3';
+const currentBuildTime = typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : Date.now().toString();
 
 // Clean up cache-busting parameter from URL if present
 if (typeof window !== 'undefined' && window.location.search.includes('_v=')) {
@@ -65,13 +68,17 @@ const forceUpdateNewDeployment = async (reason: string) => {
   window.location.replace(window.location.pathname + '?_v=' + Date.now());
 };
 
-// Check version change on load: if package version changed, update stored version FIRST then perform 1 clean refresh
+// Check for build changes on load: detects new Vercel deployments even if version number is not changed!
+const storedBuildTime = safeStorage.getItem('app_installed_build_time');
 const storedVersion = safeStorage.getItem('app_installed_version');
-if (storedVersion && storedVersion !== currentAppVersion) {
-  console.log(`[VersionUpdate] App version changed: ${storedVersion} -> ${currentAppVersion}`);
+
+if ((storedBuildTime && storedBuildTime !== currentBuildTime) || (storedVersion && storedVersion !== currentAppVersion)) {
+  console.log(`[DeploymentUpdate] Build/Version change detected: build=${storedBuildTime}->${currentBuildTime}, ver=${storedVersion}->${currentAppVersion}`);
+  safeStorage.setItem('app_installed_build_time', currentBuildTime);
   safeStorage.setItem('app_installed_version', currentAppVersion);
-  forceUpdateNewDeployment(`Version updated to ${currentAppVersion}`);
-} else if (!storedVersion) {
+  forceUpdateNewDeployment(`New deployment build (${currentBuildTime}) detected`);
+} else if (!storedBuildTime) {
+  safeStorage.setItem('app_installed_build_time', currentBuildTime);
   safeStorage.setItem('app_installed_version', currentAppVersion);
 }
 
@@ -97,10 +104,11 @@ const checkForVercelDeployment = async () => {
 // Check for Vercel deployment periodically every 10 minutes
 setInterval(checkForVercelDeployment, 10 * 60 * 1000);
 
-// Register service worker for PWA and FCM with version query parameter
+// Register service worker for PWA and FCM with unique build timestamp and version parameters
 if ('serviceWorker' in navigator) {
   const registerSW = () => {
-    navigator.serviceWorker.register(`/sw.js?v=${encodeURIComponent(currentAppVersion)}`)
+    const swUrl = `/sw.js?b=${encodeURIComponent(currentBuildTime)}&v=${encodeURIComponent(currentAppVersion)}`;
+    navigator.serviceWorker.register(swUrl)
       .then((registration) => {
         console.log('Service Worker registered with scope:', registration.scope);
 

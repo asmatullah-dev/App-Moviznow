@@ -22,17 +22,21 @@ export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRout
   const [isSavingWhatsapp, setIsSavingWhatsapp] = useState(false);
 
   React.useEffect(() => {
-    // Safety cap: never show the initial logo loading screen for more than 800ms if we have cached data
+    // Ultra-fast safety cap: never show initial splash screen for more than 200ms
     const timer = setTimeout(() => {
       setMaxWaitReached(true);
-    }, 800);
+    }, 200);
     return () => clearTimeout(timer);
   }, []);
 
-  const isChecking = authLoading || (!maxWaitReached && (
+  // If local user session or profile cache exists, render Home instantly without blocking on background network calls
+  const hasLocalSession = !!auth.currentUser || !!user || !!profile || !!safeStorage.getItem('profile_cache');
+
+  const isChecking = !maxWaitReached && !hasLocalSession && (
+    authLoading ||
     (user && !profile && authProfileLoading) || 
     settingsLoading
-  ));
+  );
 
   if (isChecking) {
     return (

@@ -26,6 +26,12 @@ import { lazyWithRetry } from './utils/lazyWithRetry';
 const MaintenancePage = lazyWithRetry(() => import('./pages/MaintenancePage'));
 const Login = lazyWithRetry(() => import('./pages/Login'));
 const Home = lazyWithRetry(() => import('./pages/user/Home'));
+
+// Eagerly preload critical initial route chunks in parallel so initial load never waits on Suspense
+if (typeof window !== 'undefined') {
+  import('./pages/user/Home').catch(() => {});
+  import('./pages/Login').catch(() => {});
+}
 const FreeMovies = lazyWithRetry(() => import('./pages/user/FreeMovies'));
 const Membership = lazyWithRetry(() => import('./pages/user/Membership'));
 const Reviews = lazyWithRetry(() => import('./pages/user/Reviews'));
