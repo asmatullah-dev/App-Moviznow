@@ -100,7 +100,7 @@ if (workbox.navigationPreload.isSupported()) {
   workbox.navigationPreload.enable();
 }
 
-// Image caching strategy for 30 days
+// Image caching strategy for 14 days with strict max entry limit
 workbox.routing.registerRoute(
   ({ request }) => request.destination === 'image',
   new workbox.strategies.CacheFirst({
@@ -110,8 +110,8 @@ workbox.routing.registerRoute(
         statuses: [0, 200],
       }),
       new workbox.expiration.ExpirationPlugin({
-        maxAgeSeconds: 30 * 24 * 60 * 60, // 30 Days
-        maxEntries: 1000,
+        maxAgeSeconds: 14 * 24 * 60 * 60, // 14 Days
+        maxEntries: 250,
         purgeOnQuotaError: true,
       }),
     ],

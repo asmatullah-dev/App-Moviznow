@@ -3136,7 +3136,19 @@ async function startServer() {
     if (!fs.existsSync(distPath)) {
       distPath = path.join(process.cwd(), "dist");
     }
-    app.use(express.static(distPath, { index: false })); // Disable default index.html serving
+    app.use(
+      express.static(distPath, {
+        index: false,
+        maxAge: '1y',
+        setHeaders: (res, filePath) => {
+          if (filePath.endsWith('.html') || filePath.endsWith('sw.js') || filePath.endsWith('manifest.webmanifest')) {
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+          } else if (filePath.includes('/assets/')) {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          }
+        },
+      })
+    );
 
     // Explicitly serve PWA files with correct MIME types
     app.get("/moviznow_share_banner.jpg", (req, res) => {
