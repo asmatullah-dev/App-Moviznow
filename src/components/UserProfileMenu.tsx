@@ -32,22 +32,12 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
   const [searchParams] = useSearchParams();
   const [isOpen, setIsOpen] = useState(false);
   const [isRefreshingData, setIsRefreshingData] = useState(false);
-  const [syncToast, setSyncToast] = useState<{ message: string; type?: 'info' | 'success' } | null>(null);
-  const syncToastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
   const [newRequest, setNewRequest] = useState({ title: '', type: 'movie' as 'movie' | 'series', year: '' });
   const [submittingRequest, setSubmittingRequest] = useState(false);
   const { updateUserProfileData } = useAuth();
-
-  const showSyncToast = (message: string, type: 'info' | 'success' = 'info') => {
-    if (syncToastTimeoutRef.current) clearTimeout(syncToastTimeoutRef.current);
-    setSyncToast({ message, type });
-    syncToastTimeoutRef.current = setTimeout(() => {
-      setSyncToast(null);
-    }, 2800);
-  };
   
   const handleRequestSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -542,22 +532,13 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                       vibrate(50);
                       setIsRefreshingData(true);
                       try {
-                        const [catalogResult] = await Promise.all([
+                        await Promise.all([
                           quickRefreshCatalog(true),
                           refreshProfile(true, 'manual'),
                           refreshSettings()
                         ]);
-                        
-                        if (catalogResult?.isRelaxed) {
-                          showSyncToast(t('Data is up to date'), 'info');
-                        } else if (catalogResult?.updatedCount && catalogResult.updatedCount > 0) {
-                          showSyncToast(`${catalogResult.updatedCount} ${t('content updated')}`, 'success');
-                        } else {
-                          showSyncToast(t('Data is up to date'), 'info');
-                        }
                       } catch (err) {
                         console.error("Error refreshing app data:", err);
-                        showSyncToast(t('Data is up to date'), 'info');
                       } finally {
                         setIsRefreshingData(false);
                         setIsOpen(false);
@@ -721,30 +702,6 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
               </div>
             </motion.div>
           </div>
-          )}
-        </AnimatePresence>,
-        document.body
-      )}
-
-      {typeof document !== 'undefined' && document.body && createPortal(
-        <AnimatePresence>
-          {syncToast && (
-            <motion.div
-              initial={{ opacity: 0, y: 16, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 16, scale: 0.95 }}
-              transition={{ duration: 0.2 }}
-              className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[150] pointer-events-none"
-            >
-              <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-2xl bg-zinc-900/95 dark:bg-zinc-800/95 text-white shadow-2xl border border-zinc-700/80 backdrop-blur-xl text-xs sm:text-sm font-semibold">
-                {syncToast.type === 'success' ? (
-                  <Sparkles className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                ) : (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                )}
-                <span>{syncToast.message}</span>
-              </div>
-            </motion.div>
           )}
         </AnimatePresence>,
         document.body

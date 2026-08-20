@@ -43,11 +43,13 @@ const CACHE_KEY = 'cached_reviews_data';
 
 export default function Reviews() {
   const { t, language } = useLanguage();
-  const { profile, updateUserProfileData } = useAuth();
+  const { user, profile, loading: authProfileLoading, authLoading, updateUserProfileData } = useAuth();
   const [city, setCity] = useState('');
   const { settings } = useSettings();
   const appName = settings?.headerText || 'MovizNow';
   const navigate = useNavigate();
+  
+  const isLoggedIn = Boolean(user || profile?.uid);
   
   const [reviews, setReviews] = useState<Review[]>([]);
   const [rating, setRating] = useState(5);
@@ -278,7 +280,7 @@ export default function Reviews() {
                 {profile && !profile.reviewRewardClaimed && (
                   <div className="inline-flex items-center gap-2 mt-2 px-3 py-1.5 rounded-xl bg-gradient-to-r from-rose-500/15 via-amber-500/15 to-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-bold animate-pulse">
                     <Gift className="w-4 h-4 text-amber-400" />
-                    <span>🎁 {t("Submit a Review (+5 Days)")} - {t("Get 5 Days Free VIP Access!")}</span>
+                    <span>🎁 {t("Submit a Review (+5 Days)")} - {t("Get 5 Days Free Basic Access!")}</span>
                   </div>
                 )}
               </div>
@@ -330,7 +332,7 @@ export default function Reviews() {
           </div>
 
           {/* Not Logged In Banner */}
-          {!profile && (
+          {!isLoggedIn && !authLoading && !authProfileLoading && (
             <div className="bg-gradient-to-r from-rose-950/60 via-purple-950/50 to-amber-950/60 border border-rose-500/30 rounded-2xl p-5 sm:p-6 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
               <div className="space-y-1 text-center sm:text-left" dir={language === 'ur' ? 'rtl' : 'ltr'}>
                 <div className="flex items-center justify-center sm:justify-start gap-2">
@@ -373,12 +375,12 @@ export default function Reviews() {
                     <span>{t("Write a Review")}</span>
                   </h3>
                   <p className="text-xs text-zinc-400 mt-0.5">
-                    {t("Share your honest experience and earn 5 days of free VIP access!")}
+                    {t("Share your honest experience and earn 5 days of free Basic access!")}
                   </p>
                 </div>
                 {!profile.reviewRewardClaimed && (
                   <span className="px-3 py-1 rounded-full text-xs font-black bg-gradient-to-r from-amber-500 to-rose-500 text-white shadow-md animate-bounce">
-                    +5 {t('Days')} VIP
+                    +5 {t('Days')} Basic
                   </span>
                 )}
               </div>

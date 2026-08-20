@@ -115,6 +115,181 @@ export default function Membership() {
             </div>
           </motion.div>
 
+          {/* Basic User Plans (With Ads) - FIRST SECTION */}
+          <div className="space-y-6">
+            <div className="text-center space-y-2 max-w-2xl mx-auto">
+              <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider bg-sky-500/10 border border-sky-500/30 text-sky-400 shadow-sm">
+                <Zap className="w-3.5 h-3.5 fill-current" />
+                <span>{t("Basic User (With Ads)")}</span>
+              </div>
+              <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
+                {t("Basic User Plans")}
+              </h2>
+              <p className="text-xs sm:text-sm text-zinc-300">
+                {t("Full access to our entire catalog of HD movies and web series with occasional ads at super budget-friendly prices.")}
+              </p>
+            </div>
+
+            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {/* Basic 1 Month */}
+              <motion.div 
+                whileHover={{ y: -6 }}
+                className="bg-gradient-to-b from-sky-950/40 via-zinc-900/90 to-zinc-950/95 border border-sky-500/30 hover:border-sky-400 rounded-3xl p-6 flex flex-col justify-between shadow-xl backdrop-blur-xl relative"
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30">
+                      {t("Entry Level")}
+                    </span>
+                    <span className="text-[10px] font-bold text-zinc-400">{t("With Ads")}</span>
+                  </div>
+                  <h3 className="text-xl font-extrabold text-white mb-1">{t("1 Month")}</h3>
+                  <div className="text-3xl font-black text-sky-400 mb-1">{t("PKR 50")}</div>
+                  <p className="text-zinc-500 mb-4 text-xs font-bold">{t("≈ PKR 50/month")}</p>
+                  <p className="text-xs font-bold text-zinc-400 mb-5 min-h-[32px]">{t("Monthly starter plan")}</p>
+                  
+                  <ul className="space-y-3 mb-6 text-xs text-zinc-300">
+                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("All movies & web series")}</span></li>
+                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("Full HD 1080p quality")}</span></li>
+                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("Supported by ads")}</span></li>
+                  </ul>
+                </div>
+
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => handleSelectPlan('basic_1m')}
+                  className="w-full bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white py-3.5 rounded-2xl font-black transition-all text-xs shadow-md shadow-sky-500/25 tracking-wide uppercase cursor-pointer"
+                >
+                  {t("Join Basic Plan")}
+                </motion.button>
+              </motion.div>
+
+              {/* Basic 3 Months */}
+              <motion.div 
+                whileHover={{ y: -6 }}
+                className="bg-gradient-to-b from-sky-950/40 via-zinc-900/90 to-zinc-950/95 border border-sky-500/30 hover:border-sky-400 rounded-3xl p-6 flex flex-col justify-between shadow-xl backdrop-blur-xl relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 bg-sky-500 text-white text-[10px] font-black uppercase px-3.5 py-1 rounded-bl-xl shadow-md">
+                  {t("Save 7%")}
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30">
+                      {t("Quarterly")}
+                    </span>
+                    <span className="text-[10px] font-bold text-zinc-400">{t("With Ads")}</span>
+                  </div>
+                  <h3 className="text-xl font-extrabold text-white mb-1">{t("3 Months")}</h3>
+                  <div className="text-3xl font-black text-sky-400 mb-1">{t("PKR 140")}</div>
+                  <p className="text-zinc-500 mb-4 text-xs font-bold">{t("≈ PKR 46/month")}</p>
+                  <p className="text-xs font-bold text-zinc-300 mb-5 min-h-[32px]">
+                    <span className="line-through text-zinc-500">{t("PKR 150")}</span> <span className="text-sky-400 font-bold">{t("Save PKR 10")}</span>
+                  </p>
+                  
+                  <ul className="space-y-3 mb-6 text-xs text-zinc-300">
+                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("All movies & web series")}</span></li>
+                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("Full HD 1080p quality")}</span></li>
+                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("Supported by ads")}</span></li>
+                  </ul>
+                </div>
+
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => handleSelectPlan('basic_3m')}
+                  className="w-full bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white py-3.5 rounded-2xl font-black transition-all text-xs shadow-md shadow-sky-500/25 tracking-wide uppercase cursor-pointer"
+                >
+                  {t("Join Basic Plan")}
+                </motion.button>
+              </motion.div>
+
+              {/* Basic 6 Months */}
+              <motion.div 
+                whileHover={{ y: -6 }}
+                className="bg-gradient-to-b from-sky-950/40 via-zinc-900/90 to-zinc-950/95 border border-sky-500/30 hover:border-sky-400 rounded-3xl p-6 flex flex-col justify-between shadow-xl backdrop-blur-xl relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 bg-sky-500 text-white text-[10px] font-black uppercase px-3.5 py-1 rounded-bl-xl shadow-md">
+                  {t("Save 13%")}
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30">
+                      {t("Semi-Annual")}
+                    </span>
+                    <span className="text-[10px] font-bold text-zinc-400">{t("With Ads")}</span>
+                  </div>
+                  <h3 className="text-xl font-extrabold text-white mb-1">{t("6 Months")}</h3>
+                  <div className="text-3xl font-black text-sky-400 mb-1">{t("PKR 260")}</div>
+                  <p className="text-zinc-500 mb-4 text-xs font-bold">{t("≈ PKR 43/month")}</p>
+                  <p className="text-xs font-bold text-zinc-300 mb-5 min-h-[32px]">
+                    <span className="line-through text-zinc-500">{t("PKR 300")}</span> <span className="text-sky-400 font-bold">{t("Save PKR 40")}</span>
+                  </p>
+                  
+                  <ul className="space-y-3 mb-6 text-xs text-zinc-300">
+                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("All movies & web series")}</span></li>
+                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("Full HD 1080p quality")}</span></li>
+                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("Supported by ads")}</span></li>
+                  </ul>
+                </div>
+
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => handleSelectPlan('basic_6m')}
+                  className="w-full bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white py-3.5 rounded-2xl font-black transition-all text-xs shadow-md shadow-sky-500/25 tracking-wide uppercase cursor-pointer"
+                >
+                  {t("Join Basic Plan")}
+                </motion.button>
+              </motion.div>
+
+              {/* Basic 1 Year - FEATURED BEST VALUE */}
+              <motion.div 
+                whileHover={{ y: -6 }}
+                className="bg-gradient-to-b from-sky-950/60 via-zinc-900/90 to-zinc-950/95 border-2 border-sky-400 rounded-3xl p-6 flex flex-col justify-between shadow-2xl shadow-sky-500/20 backdrop-blur-xl relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 bg-gradient-to-r from-sky-500 to-blue-600 text-white text-[10px] font-black uppercase px-3.5 py-1 rounded-bl-xl shadow-md">
+                  🔥 {t("Best Value • Save 17%")}
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30">
+                      {t("Annual Pass")}
+                    </span>
+                    <span className="text-[10px] font-bold text-zinc-400">{t("With Ads")}</span>
+                  </div>
+                  <h3 className="text-xl font-black text-white mb-1 flex items-center gap-1.5">
+                    <span>{t("1 Year Basic")}</span>
+                    <Zap className="w-4 h-4 text-sky-400 fill-current" />
+                  </h3>
+                  <div className="text-3xl font-black text-sky-400 mb-1">{t("PKR 500")}</div>
+                  <p className="text-zinc-400 mb-4 text-xs font-bold">{t("≈ PKR 41/month")}</p>
+                  <p className="text-xs font-bold text-zinc-300 mb-5 min-h-[32px]">
+                    <span className="line-through text-zinc-500">{t("PKR 600")}</span> <span className="text-sky-300 font-bold bg-sky-500/20 px-2 py-0.5 rounded border border-sky-500/30">{t("Save PKR 100")}</span>
+                  </p>
+                  
+                  <ul className="space-y-3 mb-6 text-xs text-zinc-200 font-medium">
+                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("All movies & web series")}</span></li>
+                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("Full HD 1080p quality")}</span></li>
+                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("Supported by ads")}</span></li>
+                  </ul>
+                </div>
+
+                <motion.button
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={() => handleSelectPlan('basic_1y')}
+                  className="w-full bg-gradient-to-r from-sky-400 to-blue-600 hover:from-sky-300 hover:to-blue-500 text-white py-4 rounded-2xl font-black transition-all text-xs shadow-xl shadow-sky-500/30 tracking-wide uppercase cursor-pointer"
+                >
+                  {t("Join 1-Year Basic")}
+                </motion.button>
+              </motion.div>
+            </div>
+          </div>
+
           {/* Pay Per Title Section */}
           <div className="space-y-6">
             <div className="flex items-center gap-3 border-b border-zinc-800 pb-3">
@@ -392,44 +567,6 @@ export default function Membership() {
                 </motion.button>
               </div>
             </motion.div>
-          </div>
-
-          {/* Basic User Plan */}
-          <div className="pt-8">
-            <div className="bg-gradient-to-r from-sky-950 via-blue-950/60 to-sky-950 border border-sky-500/30 hover:border-sky-400/50 rounded-3xl p-6 sm:p-10 max-w-4xl mx-auto shadow-2xl shadow-sky-900/20 backdrop-blur-xl relative overflow-hidden">
-              <div className="absolute top-0 left-0 bg-sky-500/20 text-sky-400 text-[10px] sm:text-xs font-black uppercase px-4 py-1.5 rounded-br-xl shadow-lg tracking-wider flex items-center gap-1.5 border-b border-r border-sky-500/30">
-                <Zap className="w-3.5 h-3.5 fill-current" />
-                <span>{t("Entry Level")}</span>
-              </div>
-
-              <div className="flex flex-col md:flex-row items-center justify-between gap-6 mt-4 md:mt-0">
-                <div className="space-y-3 text-center md:text-left flex-1">
-                  <h3 className="text-2xl sm:text-3xl font-black text-white flex items-center justify-center md:justify-start gap-2">
-                    <span className="bg-gradient-to-r from-white to-sky-200 bg-clip-text text-transparent">{t("Basic User")}</span>
-                  </h3>
-                  <div className="flex items-baseline justify-center md:justify-start gap-2">
-                    <span className="text-3xl sm:text-4xl font-black text-sky-400">{t("PKR 50")}</span>
-                    <span className="text-xs text-zinc-400 font-bold">{t("/month")}</span>
-                  </div>
-                  
-                  <ul className="text-xs sm:text-sm text-zinc-300 font-medium space-y-2 text-left mx-auto md:mx-0 w-fit">
-                    <li className="flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t('Unlock access to all premium movies and series')}</span></li>
-                    <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t('Supported by occasional advertisements')}</span></li>
-                    <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t('Earn free VIP access through daily tasks & rewards')}</span></li>
-                    <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t('Extremely affordable pricing at Rs 50/month')}</span></li>
-                  </ul>
-                </div>
-
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => handleSelectPlan('basic_1m')}
-                  className="bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white px-8 py-4 rounded-2xl font-black transition-all shadow-xl shadow-sky-600/30 text-xs sm:text-sm shrink-0 w-full md:w-auto tracking-wider uppercase"
-                >
-                  {t("Join Basic Plan")}
-                </motion.button>
-              </div>
-            </div>
           </div>
 
           {/* Feature Badges Grid */}

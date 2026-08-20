@@ -345,7 +345,7 @@ export default function Rewards() {
       if (!userHasReviewed) {
         safeStorage.removeItem('has_rated');
         setHasRatedState(false);
-        alert(t('You have not submitted a review yet. Please write a review first to get +10 Days free VIP access!'));
+        alert(t('You have not submitted a review yet. Please write a review first to get +10 Days free Basic access!'));
         navigate('/reviews');
         return;
       }
@@ -500,7 +500,7 @@ export default function Rewards() {
       try {
         await navigator.share({
           title: t('Join MovizNow'),
-          text: t('Get 5 days of premium membership for free on MovizNow!'),
+          text: t('Get 10 days of free Basic membership on MovizNow!'),
           url: currentLink,
         });
       } catch (err) {
@@ -547,7 +547,7 @@ export default function Rewards() {
     const code = await ensureReferralCode();
     const currentLink = code ? `${window.location.origin}/?ref=${code}` : referralLink;
     trackShareClick('whatsapp');
-    const text = encodeURIComponent(`${t('Get 5 days of premium membership for free on MovizNow!')}\n${currentLink}`);
+    const text = encodeURIComponent(`${t('Get 10 days of free Basic membership on MovizNow!')}\n${currentLink}`);
     window.open(`https://wa.me/?text=${text}`, '_blank');
   };
 
@@ -555,7 +555,7 @@ export default function Rewards() {
     const code = await ensureReferralCode();
     const currentLink = code ? `${window.location.origin}/?ref=${code}` : referralLink;
     trackShareClick('telegram');
-    const text = encodeURIComponent(t('Get 5 days of premium membership for free on MovizNow!'));
+    const text = encodeURIComponent(t('Get 10 days of free Basic membership on MovizNow!'));
     window.open(`https://t.me/share/url?url=${encodeURIComponent(currentLink)}&text=${text}`, '_blank');
   };
 
@@ -667,13 +667,13 @@ export default function Rewards() {
             <div className="space-y-2">
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider bg-rose-500/20 border border-rose-500/30 text-rose-300">
                 <Zap className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
-                <span>+10 {t('Days')} VIP {t('Per Friend')}</span>
+                <span>+10 {t('Days')} Basic {t('Per Friend')}</span>
               </div>
               <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
                 {t('Refer & Earn')}
               </h2>
               <p className="text-zinc-200 text-xs sm:text-sm leading-relaxed max-w-lg">
-                {t('Invite friends to MovizNow and unlock 10 days of premium access for both of you!')}
+                {t('Invite friends to MovizNow and unlock 10 days of free Basic access for both of you!')}
               </p>
             </div>
             
@@ -770,7 +770,7 @@ export default function Rewards() {
               <span>{t('One-Time Rewards')}</span>
             </h3>
             <span className="text-xs font-bold text-amber-400/90 bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/20">
-              🎁 Bonus VIP Days
+              🎁 Bonus Basic Days
             </span>
           </div>
           
@@ -785,7 +785,7 @@ export default function Rewards() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <h4 className="font-bold text-sm text-white">{t('Submit a Review')}</h4>
                     <span className="text-[10px] font-extrabold text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded-full border border-amber-500/30">
-                      +10 {t('Days')} VIP
+                      +10 {t('Days')} Basic
                     </span>
                   </div>
                   <p className="text-xs text-zinc-400">{t('Rate our app & share feedback')}</p>
@@ -833,7 +833,7 @@ export default function Rewards() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <h4 className="font-bold text-sm text-white">{t('Enable Notifications')}</h4>
                     <span className="text-[10px] font-extrabold text-purple-300 bg-purple-500/20 px-2 py-0.5 rounded-full border border-purple-500/30">
-                      +6 {t('Days')} VIP
+                      +6 {t('Days')} Basic
                     </span>
                   </div>
                   <p className="text-xs text-zinc-400">{t('Stay updated with latest content')}</p>
@@ -875,7 +875,7 @@ export default function Rewards() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <h4 className="font-bold text-sm text-white">{t('Install App')}</h4>
                     <span className="text-[10px] font-extrabold text-rose-300 bg-rose-500/20 px-2 py-0.5 rounded-full border border-rose-500/30">
-                      +6 {t('Days')} VIP
+                      +6 {t('Days')} Basic
                     </span>
                   </div>
                   <p className="text-xs text-zinc-400">{t('Better experience on home screen')}</p>

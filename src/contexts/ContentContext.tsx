@@ -43,8 +43,8 @@ interface ContentContextType {
   deleteAuxiliaryItem: (type: 'genre' | 'language' | 'quality', id: string) => Promise<void>;
   finalizeChanges: () => Promise<void>;
   hasPendingChanges: boolean;
-  checkForUpdates: (force?: boolean) => Promise<{ updated: boolean; updatedContentCount: number }>;
-  quickRefreshCatalog: (manual?: boolean) => Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean }>;
+  checkForUpdates: (force?: boolean) => Promise<{ updated: boolean; updatedContentCount: number; isInitialLoad?: boolean }>;
+  quickRefreshCatalog: (manual?: boolean) => Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean; isInitialLoad?: boolean }>;
 }
 
 const ContentContext = createContext<ContentContextType | undefined>(undefined);
@@ -506,14 +506,24 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     return sorted;
   };
 
-  const syncWithServer = async (force: boolean = false): Promise<{ updatedSomething: boolean; updatedContentCount: number }> => {
+  const syncWithServer = async (force: boolean = false): Promise<{ updatedSomething: boolean; updatedContentCount: number; isInitialLoad?: boolean }> => {
     let updatedSomething = false;
     let updatedContentCount = 0;
     if (!navigator.onLine) {
         setLoading(false);
-        return { updatedSomething: false, updatedContentCount: 0 };
+        return { updatedSomething: false, updatedContentCount: 0, isInitialLoad: false };
     }
     const isAdmin = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
+
+    const localContentBeforeSync = safeStorage.getItem('content_cache');
+    let localItemCountBeforeSync = 0;
+    try {
+        const parsed = JSON.parse(localContentBeforeSync || '[]');
+        localItemCountBeforeSync = Array.isArray(parsed) ? parsed.length : 0;
+    } catch(e) {
+        localItemCountBeforeSync = 0;
+    }
+    const isLibraryEmptyInitially = localItemCountBeforeSync === 0;
 
     let versions: Record<string, any> = {};
     try {
@@ -816,7 +826,11 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     } catch(e) {}
     
     setLoading(false);
-    return { updatedSomething, updatedContentCount };
+    return { 
+      updatedSomething, 
+      updatedContentCount: isLibraryEmptyInitially ? 0 : updatedContentCount,
+      isInitialLoad: isLibraryEmptyInitially && updatedSomething
+    };
   };
 
   useEffect(() => {
@@ -829,10 +843,10 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     checkForUpdates(false);
   }, [profile?.role, profile?.phone, authProfileLoading]);
 
-  const checkForUpdates = async (force: boolean = false): Promise<{ updated: boolean; updatedContentCount: number }> => {
+  const checkForUpdates = async (force: boolean = false): Promise<{ updated: boolean; updatedContentCount: number; isInitialLoad?: boolean }> => {
     if (authProfileLoading || !profile) {
         if (!authProfileLoading && !profile) setLoading(false);
-        return { updated: false, updatedContentCount: 0 };
+        return { updated: false, updatedContentCount: 0, isInitialLoad: false };
     }
 
     const now = Date.now();
@@ -857,13 +871,13 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
     if (!navigator.onLine) {
         setLoading(false);
-        return;
+        return { updated: false, updatedContentCount: 0, isInitialLoad: false };
     }
     
     // Strict check: don't load data if Whatsapp number is missing
     if (!profile.phone && profile.role !== 'admin' && profile.role !== 'owner') {
         setLoading(false);
-        return;
+        return { updated: false, updatedContentCount: 0, isInitialLoad: false };
     }
     
     const isAdmin = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
@@ -878,13 +892,20 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     // Always refresh if first login / never successfully synced
     const hasCompletedSync = safeStorage.getItem('has_completed_initial_sync');
     const localContent = safeStorage.getItem('content_cache');
-    const isLibraryEmpty = !localContent || localContent === '[]';
+    let localItemCount = 0;
+    try {
+        const parsed = JSON.parse(localContent || '[]');
+        localItemCount = Array.isArray(parsed) ? parsed.length : 0;
+    } catch (e) {
+        localItemCount = 0;
+    }
+    const isLibraryEmpty = localItemCount === 0;
     const noLocalData = !hasCompletedSync || isLibraryEmpty;
 
     if (!force && lastCheckPeriod === checkPeriod && !noLocalData) {
         // Already checked for this period (the 7AM cycle)
         setLoading(false);
-        return { updated: false, updatedContentCount: 0 };
+        return { updated: false, updatedContentCount: 0, isInitialLoad: false };
     }
     
     // Proceed with sync - only show 'syncing' toast on manual force checks
@@ -894,6 +915,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
     let updatedSomething = false;
     let serverUpdatedCount = 0;
+    let isInitialLoadDone = false;
 
     const tasks: Promise<boolean>[] = [];
 
@@ -925,6 +947,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       syncWithServer(force)
         .then(res => {
           serverUpdatedCount = res.updatedContentCount;
+          if (res.isInitialLoad) isInitialLoadDone = true;
           return Boolean(res.updatedSomething);
         })
         .catch(err => {
@@ -943,46 +966,87 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     safeStorage.setItem('last_successful_meta_check', Date.now().toString());
     safeStorage.setItem('has_completed_initial_sync', 'true');
 
-    if (serverUpdatedCount > 0) {
+    if (isInitialLoadDone || (isLibraryEmpty && updatedSomething)) {
         window.dispatchEvent(new CustomEvent('sync_status', {
           detail: {
             status: 'success',
+            isInitialLoad: true,
+            updatedContentCount: 0,
+            message: 'Loaded All Contents Successfully'
+          }
+        }));
+    } else if (serverUpdatedCount > 0) {
+        window.dispatchEvent(new CustomEvent('sync_status', {
+          detail: {
+            status: 'success',
+            isInitialLoad: false,
             updatedContentCount: serverUpdatedCount,
             message: `${serverUpdatedCount} content updated`
           }
         }));
     } else if (force) {
-        window.dispatchEvent(new CustomEvent('sync_status', { detail: updatedSomething ? 'success' : 'up-to-date' }));
+        window.dispatchEvent(new CustomEvent('sync_status', {
+          detail: {
+            status: updatedSomething ? 'success' : 'up-to-date',
+            isInitialLoad: false,
+            updatedContentCount: 0,
+            message: updatedSomething ? 'Data updated successfully' : 'Data is up to date'
+          }
+        }));
     }
 
-    return { updated: updatedSomething, updatedContentCount: serverUpdatedCount };
+    return { 
+      updated: updatedSomething, 
+      updatedContentCount: isInitialLoadDone ? 0 : serverUpdatedCount,
+      isInitialLoad: isInitialLoadDone || (isLibraryEmpty && updatedSomething)
+    };
   };
 
-  const quickRefreshCatalog = async (manual: boolean = false): Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean }> => {
+  const quickRefreshCatalog = async (manual: boolean = false): Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean; isInitialLoad?: boolean }> => {
     const LAST_QUICK_REFRESH_KEY = 'last_catalog_quick_refresh_time';
     const now = Date.now();
+
+    // Check if library is currently empty
+    const localContentBefore = safeStorage.getItem('content_cache');
+    let localCountBefore = 0;
+    try {
+      const parsed = JSON.parse(localContentBefore || '[]');
+      localCountBefore = Array.isArray(parsed) ? parsed.length : 0;
+    } catch(e) {
+      localCountBefore = 0;
+    }
+    const isLibraryEmpty = localCountBefore === 0;
 
     // Check relaxation interval for automatic checks (e.g. 5 minutes)
     const lastCheckStr = safeStorage.getItem(LAST_QUICK_REFRESH_KEY);
     const lastCheck = lastCheckStr ? parseInt(lastCheckStr, 10) : 0;
-    if (!manual && lastCheck && (now - lastCheck < 5 * 60 * 1000)) {
+    if (!manual && !isLibraryEmpty && lastCheck && (now - lastCheck < 5 * 60 * 1000)) {
       return {
         updated: false,
         updatedCount: 0,
         message: 'Data is up to date',
-        isRelaxed: true
+        isRelaxed: true,
+        isInitialLoad: false
       };
     }
 
     if (!navigator.onLine) {
       if (manual) {
-        window.dispatchEvent(new CustomEvent('sync_status', { detail: 'up-to-date' }));
+        window.dispatchEvent(new CustomEvent('sync_status', { 
+          detail: {
+            status: 'up-to-date',
+            isInitialLoad: false,
+            updatedContentCount: 0,
+            message: 'Data is up to date'
+          } 
+        }));
       }
       return {
         updated: false,
         updatedCount: 0,
         message: 'Data is up to date',
-        isRelaxed: false
+        isRelaxed: false,
+        isInitialLoad: false
       };
     }
 
@@ -1034,12 +1098,14 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
               }
 
               // Count added or modified content items (do not count deleted)
-              for (const [id, incomingItem] of Object.entries(items)) {
-                const localItem = localItems[id];
-                if (!localItem) {
-                  totalUpdatedContentCount++;
-                } else if (!isContentDataEqual(localItem, incomingItem)) {
-                  totalUpdatedContentCount++;
+              if (!isLibraryEmpty) {
+                for (const [id, incomingItem] of Object.entries(items)) {
+                  const localItem = localItems[id];
+                  if (!localItem) {
+                    totalUpdatedContentCount++;
+                  } else if (!isContentDataEqual(localItem, incomingItem)) {
+                    totalUpdatedContentCount++;
+                  }
                 }
               }
 
@@ -1170,10 +1236,20 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       // Mark the 5-minute relaxation timestamp
       safeStorage.setItem(LAST_QUICK_REFRESH_KEY, now.toString());
 
-      if (totalUpdatedContentCount > 0) {
+      if (isLibraryEmpty && updatedSomething) {
         window.dispatchEvent(new CustomEvent('sync_status', {
           detail: {
             status: 'success',
+            isInitialLoad: true,
+            updatedContentCount: 0,
+            message: 'Loaded All Contents Successfully'
+          }
+        }));
+      } else if (totalUpdatedContentCount > 0) {
+        window.dispatchEvent(new CustomEvent('sync_status', {
+          detail: {
+            status: 'success',
+            isInitialLoad: false,
             updatedContentCount: totalUpdatedContentCount,
             message: `${totalUpdatedContentCount} content updated`
           }
@@ -1182,6 +1258,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         window.dispatchEvent(new CustomEvent('sync_status', {
           detail: {
             status: 'up-to-date',
+            isInitialLoad: false,
             updatedContentCount: 0,
             message: 'Data is up to date'
           }
@@ -1190,17 +1267,33 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
       return {
         updated: updatedSomething,
-        updatedCount: totalUpdatedContentCount,
-        message: totalUpdatedContentCount > 0 ? `${totalUpdatedContentCount} content updated` : 'Data is up to date',
+        updatedCount: isLibraryEmpty ? 0 : totalUpdatedContentCount,
+        isInitialLoad: isLibraryEmpty && updatedSomething,
+        message: (isLibraryEmpty && updatedSomething)
+          ? 'Loaded All Contents Successfully'
+          : totalUpdatedContentCount > 0
+            ? `${totalUpdatedContentCount} content updated`
+            : 'Data is up to date',
         isRelaxed: false
       };
     } catch (error) {
       console.error("Error in quickRefreshCatalog:", error);
+      if (manual) {
+        window.dispatchEvent(new CustomEvent('sync_status', {
+          detail: {
+            status: 'up-to-date',
+            isInitialLoad: false,
+            updatedContentCount: 0,
+            message: 'Data is up to date'
+          }
+        }));
+      }
       return {
         updated: false,
         updatedCount: 0,
         message: 'Data is up to date',
-        isRelaxed: false
+        isRelaxed: false,
+        isInitialLoad: false
       };
     }
   };

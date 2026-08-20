@@ -1421,7 +1421,9 @@ export default function MovieDetails() {
           }
         }
 
-        const allowAdvancedFinding = profile && !(profile.role === 'user' && profile.status === 'pending');
+        // Allow AI logo prediction and trailer fetch for Basic User, VIP, Admin; restrict new pending User (role === 'user')
+        const isRestrictedUser = profile?.role === 'user';
+        const allowAdvancedFinding = !isRestrictedUser;
 
         // Fetch/Extract OTT Platform
         if (force || !mergedContent.ottPlatform) {
