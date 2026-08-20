@@ -8,6 +8,8 @@ export function SyncBanner() {
   const [updatedCount, setUpdatedCount] = useState<number | undefined>(undefined);
 
   useEffect(() => {
+    let timeoutId: NodeJS.Timeout | null = null;
+
     const handleSyncStatus = (e: Event) => {
       const customEvent = e as CustomEvent;
       const detail = customEvent.detail;
@@ -18,22 +20,26 @@ export function SyncBanner() {
         status = detail as any;
       } else if (detail && typeof detail === 'object') {
         status = detail.status;
-        count = detail.updatedContentCount;
+        count = detail.updatedContentCount !== undefined ? detail.updatedContentCount : detail.updatedCount;
       }
 
+      if (timeoutId) clearTimeout(timeoutId);
       setSyncStatus(status);
       setUpdatedCount(count);
 
       if (status === 'success' || status === 'up-to-date' || status === 'error') {
-        setTimeout(() => {
+        timeoutId = setTimeout(() => {
           setSyncStatus(null);
           setUpdatedCount(undefined);
-        }, 3200);
+        }, 3500);
       }
     };
 
     window.addEventListener('sync_status', handleSyncStatus);
-    return () => window.removeEventListener('sync_status', handleSyncStatus);
+    return () => {
+      window.removeEventListener('sync_status', handleSyncStatus);
+      if (timeoutId) clearTimeout(timeoutId);
+    };
   }, []);
 
   if (!syncStatus) return null;

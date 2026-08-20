@@ -132,12 +132,22 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
   const getRoleColor = (r: string) => {
     switch(r) {
       case 'admin': return 'bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/30';
+      case 'owner': return 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30';
+      case 'vip': return 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30';
+      case 'basic': return 'bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/30';
       case 'manager': return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30';
       case 'content_manager': return 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/30';
-      case 'selected_content': return 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30';
+      case 'selected_content': return 'bg-pink-500/10 text-pink-700 dark:text-pink-400 border-pink-500/30';
       case 'trial': return 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/30';
       default: return 'bg-zinc-500/10 text-zinc-700 dark:text-zinc-400 border-zinc-500/30';
     }
+  };
+
+  const getRoleDisplayLabel = (r: string) => {
+    if (r === 'vip') return 'VIP User';
+    if (r === 'basic') return 'Basic User';
+    if (r === 'user') return 'User';
+    return r.replace('_', ' ');
   };
 
   const getStatusColor = (status: string) => {
@@ -214,7 +224,7 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
               
               <div className="flex flex-wrap items-center gap-1.5 mt-2">
                 <span className={clsx("text-[10px] font-extrabold tracking-wider px-2.5 py-0.5 rounded-lg border uppercase shadow-2xs", getRoleColor(role))}>
-                  {role.replace('_', ' ')}
+                  {getRoleDisplayLabel(role)}
                 </span>
                 {role !== 'owner' && (
                   <span className={clsx("text-[10px] font-extrabold tracking-wider px-2.5 py-0.5 rounded-lg border uppercase shadow-2xs", getStatusColor(status))}>

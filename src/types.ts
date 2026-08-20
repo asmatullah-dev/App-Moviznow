@@ -1,4 +1,4 @@
-export type Role = 'owner' | 'admin' | 'user' | 'selected_content' | 'content_manager' | 'trial' | 'user_manager' | 'manager';
+export type Role = 'owner' | 'admin' | 'vip' | 'basic' | 'user' | 'selected_content' | 'content_manager' | 'trial' | 'user_manager' | 'manager';
 export type Status = 'pending' | 'active' | 'expired' | 'suspended';
 
 export interface FcmNotificationChannelSettings {
@@ -283,6 +283,7 @@ export interface Order {
   createdAt: string;
   months?: number; // For membership
   planName?: string; // For membership payment plan name
+  planRole?: Role; // Target role for membership plan ('basic' or 'vip')
   items?: CartItem[]; // For content
 }
 
@@ -328,6 +329,7 @@ export interface AppSettings {
   adminTabsOrder: string[];
   hiddenAdminTabs?: string[];
   isTrialEnabled?: boolean;
+  isVipTrialEnabled?: boolean;
   isPhoneLoginEnabled?: boolean;
   isAdminContactEnabled?: boolean;
   isPaymentEnabled?: boolean;
@@ -346,6 +348,16 @@ export interface AppSettings {
       databaseId: string;
     }[];
   };
+  adProvider?: 'disabled' | 'google_adsense' | 'interstitial_only' | 'both';
+  adSenseClientId?: string;
+  adSenseSlotId?: string;
+  adBannerTitle?: string;
+  adBannerDescription?: string;
+  adBannerCtaText?: string;
+  adBannerLink?: string;
+  adSkipTimer?: number;
+  adVideoUrl?: string;
+  adRedirectUrl?: string;
 }
 
 export interface ErrorLinkInfo {

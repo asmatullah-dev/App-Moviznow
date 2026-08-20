@@ -963,20 +963,9 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
   const quickRefreshCatalog = async (): Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean }> => {
     const LAST_QUICK_REFRESH_KEY = 'last_catalog_quick_refresh_time';
     const now = Date.now();
-    const lastQuickRefreshStr = safeStorage.getItem(LAST_QUICK_REFRESH_KEY);
-    const lastQuickRefresh = lastQuickRefreshStr ? parseInt(lastQuickRefreshStr, 10) : 0;
-
-    const FIVE_MINUTES_MS = 5 * 60 * 1000;
-    if (lastQuickRefresh > 0 && now - lastQuickRefresh < FIVE_MINUTES_MS) {
-      return {
-        updated: false,
-        updatedCount: 0,
-        message: 'Data is up to date',
-        isRelaxed: true
-      };
-    }
 
     if (!navigator.onLine) {
+      window.dispatchEvent(new CustomEvent('sync_status', { detail: 'up-to-date' }));
       return {
         updated: false,
         updatedCount: 0,
@@ -984,6 +973,9 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         isRelaxed: false
       };
     }
+
+    // Always dispatch 'syncing' status when quick refresh starts so the toast displays "Updating data..."
+    window.dispatchEvent(new CustomEvent('sync_status', { detail: 'syncing' }));
 
     let updatedSomething = false;
     let totalUpdatedContentCount = 0;
@@ -1170,6 +1162,14 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
             status: 'success',
             updatedContentCount: totalUpdatedContentCount,
             message: `${totalUpdatedContentCount} content updated`
+          }
+        }));
+      } else {
+        window.dispatchEvent(new CustomEvent('sync_status', {
+          detail: {
+            status: 'up-to-date',
+            updatedContentCount: 0,
+            message: 'Data is up to date'
           }
         }));
       }

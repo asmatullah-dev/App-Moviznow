@@ -10,6 +10,7 @@ import {
 } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 
+import { AdBanner } from "../../components/AdBanner";
 import { Content, QualityLinks, Season, Trailer } from "../../types";
 import { Translate } from "../../components/Translate";
 import { useAuth } from "../../contexts/AuthContext";
@@ -55,6 +56,8 @@ import {
   Gift,
   Maximize2,
   Image as ImageIcon,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import { logEvent } from "../../services/analytics";
 import { touchMetadataUsage } from "../../services/cacheManager";
@@ -207,6 +210,60 @@ export default function MovieDetails() {
   const [showReportConfirm, setShowReportConfirm] = useState(false);
   const [hasUserRated, setHasUserRated] = useState<boolean>(() => safeStorage.getItem('has_rated') === 'true' || !!profile?.reviewRewardClaimed);
   const recommendedScrollRef = useRef<HTMLDivElement>(null);
+
+  const [adState, setAdState] = useState<{
+    isPlaying: boolean;
+    timeLeft: number;
+    canSkip: boolean;
+    isMuted: boolean;
+    hasCompleted: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    let timer: any;
+    if (adState && adState.isPlaying && adState.timeLeft > 0) {
+      timer = setTimeout(() => {
+        setAdState((prev) => {
+          if (!prev) return null;
+          const nextTime = prev.timeLeft - 1;
+          return {
+            ...prev,
+            timeLeft: nextTime,
+            canSkip: nextTime <= 0,
+          };
+        });
+      }, 1000);
+    }
+    return () => clearTimeout(timer);
+  }, [adState]);
+
+  useEffect(() => {
+    if (linkPopup?.isOpen) {
+      const isBasicUser = profile?.role === "basic" || profile?.role === "trial" || !profile;
+      const provider = settings?.adProvider || 'both';
+      const isAdsActive = settings && provider !== "disabled" && provider !== "google_adsense";
+      
+      if (isBasicUser && isAdsActive) {
+        setAdState({
+          isPlaying: true,
+          timeLeft: settings?.adSkipTimer ?? 5,
+          canSkip: false,
+          isMuted: false,
+          hasCompleted: false,
+        });
+      } else {
+        setAdState({
+          isPlaying: false,
+          timeLeft: 0,
+          canSkip: true,
+          isMuted: false,
+          hasCompleted: true,
+        });
+      }
+    } else {
+      setAdState(null);
+    }
+  }, [linkPopup?.isOpen, profile?.role, settings?.adProvider, settings?.adSkipTimer]);
 
   const scrollRecommended = (direction: 'left' | 'right') => {
     if (recommendedScrollRef.current) {
@@ -1675,27 +1732,31 @@ export default function MovieDetails() {
     (id) => id === mergedContent.id || id.startsWith(`${mergedContent.id}:`),
   );
   const canPlay =
-    profile?.role === "admin" ||
-    profile?.role === "owner" ||
-    profile?.role === "content_manager" ||
-    profile?.role === "manager" ||
-    isAssigned ||
-    (profile?.status === "active" &&
-      !(isSelectedContent || mergedContent.status === "selected_content"));
+    profile?.role !== "user" && (
+      profile?.role === "admin" ||
+      profile?.role === "owner" ||
+      profile?.role === "content_manager" ||
+      profile?.role === "manager" ||
+      isAssigned ||
+      (profile?.status === "active" &&
+        !(isSelectedContent || mergedContent.status === "selected_content"))
+    );
 
   const allowedSeasons =
     profile?.assignedContent
       ?.filter((id) => id.startsWith(`${mergedContent.id}:`))
       .map((id) => id.split(":")[1]) || [];
   const hasFullAccess =
-    profile?.role === "admin" ||
-    profile?.role === "owner" ||
-    profile?.role === "content_manager" ||
-    profile?.role === "manager" ||
-    profile?.assignedContent?.includes(mergedContent.id) ||
-    (profile &&
-      profile.status === "active" &&
-      !(isSelectedContent || mergedContent.status === "selected_content"));
+    profile?.role !== "user" && (
+      profile?.role === "admin" ||
+      profile?.role === "owner" ||
+      profile?.role === "content_manager" ||
+      profile?.role === "manager" ||
+      profile?.assignedContent?.includes(mergedContent.id) ||
+      (profile &&
+        profile.status === "active" &&
+        !(isSelectedContent || mergedContent.status === "selected_content"))
+    );
 
   const toggleWatchLater = async () => {
     if (!profile) return;
@@ -3569,6 +3630,9 @@ export default function MovieDetails() {
               )}
             </section>
 
+            {/* Ad Banner for Basic Users */}
+            <AdBanner className="my-6" />
+
             {/* Links Section */}
             <section className="space-y-6">
               <div className="flex items-center gap-3">
@@ -4008,6 +4072,78 @@ export default function MovieDetails() {
               className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 max-w-md w-full relative shadow-2xl overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
+              {adState?.isPlaying ? (
+                <div className="absolute inset-0 bg-zinc-950 flex flex-col justify-between z-30 p-6 text-white animate-fade-in">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-[10px] font-extrabold uppercase bg-amber-500 text-black px-2 py-0.5 rounded-md tracking-wider">
+                      Sponsor Video Ad
+                    </span>
+                    <span className="text-xs text-zinc-400 font-medium">
+                      {adState.timeLeft > 0 ? `Skip in ${adState.timeLeft}s` : 'Ad Ready to Skip'}
+                    </span>
+                  </div>
+
+                  {/* Video Player */}
+                  <div className="relative flex-1 flex items-center justify-center bg-black rounded-xl overflow-hidden border border-zinc-800 my-2">
+                    <video
+                      src={settings?.adVideoUrl || 'https://assets.mixkit.co/videos/preview/mixkit-popcorn-machine-in-action-close-up-42289-large.mp4'}
+                      autoPlay
+                      playsInline
+                      muted={adState.isMuted}
+                      className="w-full h-full object-cover"
+                      onEnded={() => setAdState(prev => prev ? { ...prev, timeLeft: 0, canSkip: true } : null)}
+                    />
+                    
+                    {/* Sound Control Icon */}
+                    <button
+                      type="button"
+                      onClick={() => setAdState(prev => prev ? { ...prev, isMuted: !prev.isMuted } : null)}
+                      className="absolute bottom-3 right-3 p-2 bg-black/60 rounded-full hover:bg-black/80 transition-colors border border-white/10"
+                    >
+                      {adState.isMuted ? <VolumeX className="w-4 h-4 text-white" /> : <Volume2 className="w-4 h-4 text-white" />}
+                    </button>
+                  </div>
+
+                  {/* Promotion Description and CTA */}
+                  <div className="mt-3 space-y-4">
+                    <div>
+                      <h4 className="font-extrabold text-sm text-white line-clamp-1">
+                        {settings?.adBannerTitle || 'MovizNow Premium Sponsor'}
+                      </h4>
+                      <p className="text-xs text-zinc-400 mt-0.5 line-clamp-2 leading-relaxed">
+                        {settings?.adBannerDescription || 'Enjoy high quality premium streaming on MovizNow.'}
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 pt-1">
+                      <a
+                        href={settings?.adRedirectUrl || 'https://moviznow.app/premium'}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-white hover:bg-zinc-100 text-black font-extrabold text-xs tracking-wide shadow-md transition-all active:scale-95 text-center"
+                      >
+                        Visit Sponsor
+                        <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                      </a>
+
+                      <button
+                        type="button"
+                        onClick={() => setAdState(prev => prev ? { ...prev, isPlaying: false, hasCompleted: true } : null)}
+                        disabled={!adState.canSkip}
+                        className={clsx(
+                          "px-4 py-2.5 rounded-xl font-extrabold text-xs tracking-wide transition-all shadow-md text-center flex items-center justify-center",
+                          adState.canSkip 
+                            ? "bg-emerald-500 hover:bg-emerald-600 text-white cursor-pointer active:scale-95" 
+                            : "bg-zinc-800 text-zinc-500 cursor-not-allowed border border-zinc-700/50"
+                        )}
+                      >
+                        {adState.canSkip ? 'Skip Ad' : `Skip in ${adState.timeLeft}s`}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
               <button
                 onClick={closeLinkPopup}
                 className="absolute top-5 right-5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors p-1 rounded-full hover:bg-zinc-200 dark:hover:bg-zinc-800"

@@ -6,7 +6,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { Loader2, CheckCircle, AlertCircle, Home, MessageCircle, Phone } from 'lucide-react';
 import { Helmet } from 'react-helmet-async';
 
-export default function Trial() {
+export default function VipTrial() {
   const { t } = useLanguage();
   const { user, profile, loading, authLoading, updateUserProfileData, refreshProfile } = useAuth();
   const { settings } = useSettings();
@@ -24,14 +24,14 @@ export default function Trial() {
 
     if (!user || !profile) {
       if (!authLoading) {
-        navigate('/login', { state: { from: '/trial' }, replace: true });
+        navigate('/login', { state: { from: '/vip-trial' }, replace: true });
       }
       return;
     }
 
     if (hasActivatedRef.current) return;
 
-    if (settings.isTrialEnabled === false) {
+    if (settings.isVipTrialEnabled === false) {
       setStatus('disabled');
       setMessage(t('Sorry we are not giving Trial on direct link. Please contact admin.'));
       
@@ -48,7 +48,7 @@ export default function Trial() {
       return () => clearInterval(timer);
     }
 
-    if (profile.role === 'trial') {
+    if (profile.trialActivated === true) {
       setStatus('error');
       setMessage(t('You already have an active trial.'));
       setTimeout(() => navigate('/'), 3000);
@@ -87,15 +87,15 @@ export default function Trial() {
       // If after 6 PM (18:00), don't count today. Add 3 days total.
       // If before 6 PM, count today. Add 2 days total.
       if (now.getHours() >= 18) {
-        expiry.setDate(expiry.getDate() + 5);
+        expiry.setDate(expiry.getDate() + 3);
       } else {
-        expiry.setDate(expiry.getDate() + 4);
+        expiry.setDate(expiry.getDate() + 2);
       }
 
       const dateStr = expiry.toISOString().split('T')[0];
       // Use standard update profile function to ensure chunk_meta and local cache are updated
       await updateUserProfileData({
-        role: 'trial',
+        role: 'vip',
         status: 'active',
         trialActivated: true,
         expiryDate: `${dateStr}T23:59:59.999Z`
@@ -105,7 +105,7 @@ export default function Trial() {
       await refreshProfile(true);
 
       setStatus('success');
-      setMessage(t('Trial activated successfully! Enjoy 4 days of access.'));
+      setMessage(t('Trial activated successfully! Enjoy 48 hours of access.'));
       setTimeout(() => navigate('/'), 3000);
     } catch (error) {
       console.error('Error activating trial:', error);

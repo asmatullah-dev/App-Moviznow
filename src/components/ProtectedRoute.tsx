@@ -146,7 +146,7 @@ export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRout
   }
 
   const isStaff = ['owner', 'admin', 'content_manager', 'user_manager', 'manager'].includes(profile?.role || '');
-  const isActiveMember = ['user', 'selected_content'].includes(profile?.role || '') && profile?.status === 'active';
+  const isActiveMember = ['user', 'vip', 'basic', 'selected_content'].includes(profile?.role || '') && profile?.status === 'active';
   const isAllowedInMaintenance = isStaff || isActiveMember;
 
   const isMaintenanceActive = settings?.isMaintenanceModeEnabled && 

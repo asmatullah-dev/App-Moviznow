@@ -36,6 +36,7 @@ const MovieDetails = lazy(() => import('./pages/user/MovieDetails'));
 const WatchLater = lazy(() => import('./pages/user/WatchLater'));
 const Favorites = lazy(() => import('./pages/user/Favorites'));
 const Trial = lazy(() => import('./pages/user/Trial'));
+const VipTrial = lazy(() => import('./pages/user/VipTrial'));
 const TopUp = lazy(() => import('./pages/user/TopUp'));
 const Cart = lazy(() => import('./pages/user/Cart'));
 const Settings = lazy(() => import('./pages/user/Settings'));
@@ -318,6 +319,7 @@ export default function App() {
                         <Route path="/watch-later" element={<ProtectedRoute><WatchLater /></ProtectedRoute>} />
                         <Route path="/favorites" element={<ProtectedRoute><Favorites /></ProtectedRoute>} />
                         <Route path="/trial" element={<ProtectedRoute><Trial /></ProtectedRoute>} />
+                        <Route path="/vip-trial" element={<ProtectedRoute><VipTrial /></ProtectedRoute>} />
                         <Route path="/top-up" element={<ProtectedRoute><TopUp /></ProtectedRoute>} />
                         <Route path="/cart" element={<ProtectedRoute><Cart /></ProtectedRoute>} />
                         <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />

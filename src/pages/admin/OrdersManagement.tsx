@@ -200,7 +200,8 @@ export default function OrdersManagement() {
         baseDate.setMonth(baseDate.getMonth() + months);
         const dateStr = baseDate.toISOString().split('T')[0];
 
-        updates.role = 'user';
+        const targetRole = order.planRole || (order.planName?.toLowerCase().includes('basic') ? 'basic' : 'vip');
+        updates.role = targetRole;
         updates.status = 'active';
         updates.expiryDate = `${dateStr}T23:59:59.999Z`;
       } else if (order.type === 'content' && order.items) {
@@ -209,6 +210,12 @@ export default function OrdersManagement() {
         );
 
         updates.assignedContent = Array.from(new Set([...(userData.assignedContent || []), ...contentIds]));
+        
+        // As per requirements: content orders grant VIP role, but status stays unchanged
+        // so pending/expired VIPs can still access their assigned contents
+        if (['user', 'trial', 'basic', 'selected_content', ''].includes(userData.role || '')) {
+          updates.role = 'vip';
+        }
       }
 
       const updatedOrders = userData.orders?.map(o => o.id === order.id ? { ...o, status: 'approved' } : o) || [];

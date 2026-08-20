@@ -697,7 +697,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   mergedProfile.signupRewardClaimed = true;
                   mergedProfile.hasReceivedReferralReward = true;
                   
-                  // Give the newly referred user 5 days and make them active
+                  // Give the newly referred user 10 days and make them active and role basic
                   const userUpdatesToPush: any = {
                     referredBy: foundInviterUid,
                     signupRewardClaimed: true,
@@ -710,16 +710,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                       const currentExp = new Date(mergedProfile.expiryDate);
                       if (currentExp > baseDate) baseDate = currentExp;
                     }
-                    baseDate.setDate(baseDate.getDate() + 5);
+                    baseDate.setDate(baseDate.getDate() + 10);
                     mergedProfile.expiryDate = baseDate.toISOString();
                     userUpdatesToPush.expiryDate = mergedProfile.expiryDate;
                     
                     mergedProfile.status = "active";
-                      userUpdatesToPush.status = "active";
+                    userUpdatesToPush.status = "active";
+                  }
+
+                  if (['user', 'trial', 'selected_content', ''].includes(mergedProfile.role || '')) {
+                    mergedProfile.role = 'basic';
+                    userUpdatesToPush.role = 'basic';
                   }
                   
                   localStorage.removeItem("referral_code");
-                  localStorage.setItem("referral_credit_message", "Your account is credited with 5 Days membership with referral code " + storedRefCode);
+                  localStorage.setItem("referral_credit_message", "Your account is credited with 10 Days membership with referral code " + storedRefCode);
                   
                   // Write these updates to Firestore immediately
                   const batch = writeBatch(db);
@@ -781,22 +786,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const updates: any = {};
             let extensionDays = 0;
 
-            // Tier 1: Signup Reward (5 days)
-            // Given immediately when the referred user joins (they are active for 5 days by default)
+            // Tier 1: Signup Reward (10 days)
+            // Given immediately when the referred user joins (they are active for 10 days by default)
             if (!mergedProfile.signupRewardClaimed) {
-              extensionDays += 5;
+              extensionDays += 10;
               updates.signupRewardClaimed = true;
             }
 
-            // Tier 2: Activation Reward (5 days)
+            // Tier 2: Activation Reward (10 days)
             // Given if the user is active AND has at least one order
             const hasBoughtMembership = (mergedProfile.orders && mergedProfile.orders.length > 0);
             if (hasBoughtMembership && !mergedProfile.activationRewardClaimed) {
-              extensionDays += 5;
+              extensionDays += 10;
               updates.activationRewardClaimed = true;
             }
 
             if (extensionDays > 0) {
+              let baseDate = new Date();
+              if (mergedProfile.expiryDate && mergedProfile.expiryDate !== 'Lifetime') {
+                const currentExp = new Date(mergedProfile.expiryDate);
+                if (currentExp > baseDate) {
+                  baseDate = currentExp;
+                }
+              }
+              baseDate.setDate(baseDate.getDate() + extensionDays);
+              updates.expiryDate = baseDate.toISOString();
+              updates.status = "active";
+
+              if (['user', 'trial', 'selected_content', ''].includes(mergedProfile.role || '')) {
+                updates.role = 'basic';
+              }
+
               const { writeBatch } = await import("firebase/firestore");
               const batch = writeBatch(db);
               batch.set(userRef, updates, { merge: true });
@@ -1577,7 +1597,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               : isAdmin
                 ? "admin"
                 : isNewlyReferred
-                  ? "user"
+                  ? "basic"
                   : mergedOldData.role || defaultRoleToSet,
             status:
               isOwner || isAdmin
@@ -1594,7 +1614,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                       const currentExp = new Date(mergedOldData.expiryDate);
                       if (currentExp > baseDate) baseDate = currentExp;
                     }
-                    baseDate.setDate(baseDate.getDate() + 5);
+                    baseDate.setDate(baseDate.getDate() + 10);
                     return baseDate.toISOString();
                   })()
                 : mergedOldData.expiryDate || null,

@@ -205,13 +205,17 @@ export default function Rewards() {
           baseDate = currentExp;
         }
       }
-      baseDate.setDate(baseDate.getDate() + 5);
+      baseDate.setDate(baseDate.getDate() + 10);
       const newExpiryStr = baseDate.toISOString();
       
       const userUpdates: any = {
         expiryDate: newExpiryStr,
         status: 'active'
       };
+
+      if (['user', 'trial', 'selected_content', ''].includes(profile.role || '')) {
+        userUpdates.role = 'basic';
+      }
       
       batch.update(doc(db, 'users', profile.uid), userUpdates);
       
@@ -320,7 +324,7 @@ export default function Rewards() {
       if (!userHasReviewed) {
         safeStorage.removeItem('has_rated');
         setHasRatedState(false);
-        alert(t('You have not submitted a review yet. Please write a review first to get +5 Days free VIP access!'));
+        alert(t('You have not submitted a review yet. Please write a review first to get +10 Days free VIP access!'));
         navigate('/reviews');
         return;
       }
@@ -332,12 +336,15 @@ export default function Rewards() {
           baseDate = currentExp;
         }
       }
-      baseDate.setDate(baseDate.getDate() + 5);
+      baseDate.setDate(baseDate.getDate() + 10);
       const updates: any = {
         reviewRewardClaimed: true,
         expiryDate: baseDate.toISOString(),
         status: 'active'
       };
+      if (['user', 'trial', 'selected_content', ''].includes(profile.role || '')) {
+        updates.role = 'basic';
+      }
       await updateUserProfileData(updates);
       sessionStorage.setItem('reviewRewardClaimed', 'true');
       safeStorage.setItem('has_rated', 'true');
@@ -385,13 +392,16 @@ export default function Rewards() {
         const currentExp = new Date(profile.expiryDate);
         if (currentExp > baseDate) baseDate = currentExp;
       }
-      baseDate.setDate(baseDate.getDate() + 3);
+      baseDate.setDate(baseDate.getDate() + 6);
       const updates: any = {
         notificationRewardClaimed: true,
         expiryDate: baseDate.toISOString()
       };
       if (profile.status !== 'suspended') {
         updates.status = 'active';
+      }
+      if (['user', 'trial', 'selected_content', ''].includes(profile.role || '')) {
+        updates.role = 'basic';
       }
       await updateUserProfileData(updates);
       sessionStorage.setItem('notificationRewardClaimed', 'true');
@@ -416,13 +426,16 @@ export default function Rewards() {
         const currentExp = new Date(profile.expiryDate);
         if (currentExp > baseDate) baseDate = currentExp;
       }
-      baseDate.setDate(baseDate.getDate() + 3);
+      baseDate.setDate(baseDate.getDate() + 6);
       const updates: any = {
         pwaRewardClaimed: true,
         expiryDate: baseDate.toISOString()
       };
       if (profile.status !== 'suspended') {
         updates.status = 'active';
+      }
+      if (['user', 'trial', 'selected_content', ''].includes(profile.role || '')) {
+        updates.role = 'basic';
       }
       await updateUserProfileData(updates);
       triggerConfetti();
@@ -542,7 +555,7 @@ export default function Rewards() {
     },
     {
       label: t('Total Days'),
-      value: (referredCount * 5) + (activatedCount * 5) + (profile?.pwaRewardClaimed ? 3 : 0) + (profile?.notificationRewardClaimed ? 3 : 0) + (profile?.reviewRewardClaimed ? 5 : 0),
+      value: (referredCount * 10) + (activatedCount * 10) + (profile?.pwaRewardClaimed ? 6 : 0) + (profile?.notificationRewardClaimed ? 6 : 0) + (profile?.reviewRewardClaimed ? 10 : 0),
       icon: Clock,
       color: 'text-rose-400',
       bg: 'bg-rose-500/10 border-rose-500/20'
@@ -632,13 +645,13 @@ export default function Rewards() {
             <div className="space-y-2">
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider bg-rose-500/20 border border-rose-500/30 text-rose-300">
                 <Zap className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
-                <span>+5 {t('Days')} VIP {t('Per Friend')}</span>
+                <span>+10 {t('Days')} VIP {t('Per Friend')}</span>
               </div>
               <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
                 {t('Refer & Earn')}
               </h2>
               <p className="text-zinc-200 text-xs sm:text-sm leading-relaxed max-w-lg">
-                {t('Invite friends to MovizNow and unlock 5 days of premium access for both of you!')}
+                {t('Invite friends to MovizNow and unlock 10 days of premium access for both of you!')}
               </p>
             </div>
             
@@ -697,7 +710,7 @@ export default function Rewards() {
                 className="w-full bg-gradient-to-r from-rose-600 via-purple-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-extrabold py-3.5 sm:py-4 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-xl shadow-rose-600/30 text-sm sm:text-base active:scale-95 mt-1"
               >
                 <Share2 className="w-5 h-5" />
-                <span>{t('Invite & Earn 5 Days Free')}</span>
+                <span>{t('Invite & Earn 10 Days Free')}</span>
               </button>
             </div>
           </div>
@@ -750,7 +763,7 @@ export default function Rewards() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <h4 className="font-bold text-sm text-white">{t('Submit a Review')}</h4>
                     <span className="text-[10px] font-extrabold text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded-full border border-amber-500/30">
-                      +5 {t('Days')} VIP
+                      +10 {t('Days')} VIP
                     </span>
                   </div>
                   <p className="text-xs text-zinc-400">{t('Rate our app & share feedback')}</p>
@@ -759,7 +772,7 @@ export default function Rewards() {
               {profile?.reviewRewardClaimed ? (
                 <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/20 self-start sm:self-auto">
                   <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  {t('Claimed (+5 Days)')}
+                  {t('Claimed (+10 Days)')}
                 </span>
               ) : (
                 <button 
@@ -780,7 +793,7 @@ export default function Rewards() {
                     </>
                   ) : (
                     <>
-                      <span>{hasRatedState ? t('Claim Reward (+5 Days)') : t('Write Review (+5 Days)')}</span>
+                      <span>{hasRatedState ? t('Claim Reward (+10 Days)') : t('Write Review (+10 Days)')}</span>
                       <ArrowRight className="w-4 h-4" />
                     </>
                   )}
@@ -798,7 +811,7 @@ export default function Rewards() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <h4 className="font-bold text-sm text-white">{t('Enable Notifications')}</h4>
                     <span className="text-[10px] font-extrabold text-purple-300 bg-purple-500/20 px-2 py-0.5 rounded-full border border-purple-500/30">
-                      +3 {t('Days')} VIP
+                      +6 {t('Days')} VIP
                     </span>
                   </div>
                   <p className="text-xs text-zinc-400">{t('Stay updated with latest content')}</p>
@@ -807,7 +820,7 @@ export default function Rewards() {
               {profile?.notificationRewardClaimed ? (
                 <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/20 self-start sm:self-auto">
                   <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  {t('Claimed (+3 Days)')}
+                  {t('Claimed (+6 Days)')}
                 </span>
               ) : (
                 <button 
@@ -822,7 +835,7 @@ export default function Rewards() {
                     </>
                   ) : (
                     <>
-                      <span>{'Notification' in window && Notification.permission === 'granted' ? t('Claim Reward (+3 Days)') : t('Enable (+3 Days)')}</span>
+                      <span>{'Notification' in window && Notification.permission === 'granted' ? t('Claim Reward (+6 Days)') : t('Enable (+6 Days)')}</span>
                       <ArrowRight className="w-4 h-4" />
                     </>
                   )}
@@ -840,7 +853,7 @@ export default function Rewards() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <h4 className="font-bold text-sm text-white">{t('Install App')}</h4>
                     <span className="text-[10px] font-extrabold text-rose-300 bg-rose-500/20 px-2 py-0.5 rounded-full border border-rose-500/30">
-                      +3 {t('Days')} VIP
+                      +6 {t('Days')} VIP
                     </span>
                   </div>
                   <p className="text-xs text-zinc-400">{t('Better experience on home screen')}</p>
@@ -849,14 +862,14 @@ export default function Rewards() {
               {profile?.pwaRewardClaimed ? (
                 <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/20 self-start sm:self-auto">
                   <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  {t('Claimed (+3 Days)')}
+                  {t('Claimed (+6 Days)')}
                 </span>
               ) : (
                 <button 
                   onClick={handleClaimPWA}
                   className="bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-md shadow-rose-600/20 active:scale-95 self-stretch sm:self-auto"
                 >
-                  <span>{isInstalled ? t('Claim Reward (+3 Days)') : t('Install (+3 Days)')}</span>
+                  <span>{isInstalled ? t('Claim Reward (+6 Days)') : t('Install (+6 Days)')}</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
               )}
@@ -918,12 +931,12 @@ export default function Rewards() {
                             className="bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-extrabold text-xs px-3 py-1.5 rounded-lg shadow-md active:scale-95 transition-all flex items-center gap-1.5"
                           >
                             <Gift className="w-3.5 h-3.5" />
-                            <span>{t('Claim Signup (+5 Days)')}</span>
+                            <span>{t('Claim Signup (+10 Days)')}</span>
                           </button>
                         ) : (
                           <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-400 bg-emerald-950/40 px-2.5 py-1 rounded-md border border-emerald-800/40">
                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                            <span>{t('Signup Claimed (+5)')}</span>
+                            <span>{t('Signup Claimed (+10)')}</span>
                           </span>
                         )}
                       </div>
@@ -937,17 +950,17 @@ export default function Rewards() {
                               className="bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 text-white font-extrabold text-xs px-3 py-1.5 rounded-lg shadow-md active:scale-95 transition-all flex items-center gap-1.5"
                             >
                               <Crown className="w-3.5 h-3.5 text-amber-300" />
-                              <span>{t('Claim Activation (+5 Days)')}</span>
+                              <span>{t('Claim Activation (+10 Days)')}</span>
                             </button>
                           ) : (
                             <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-300 bg-amber-950/40 px-2.5 py-1 rounded-md border border-amber-800/40">
                               <CheckCircle2 className="w-3.5 h-3.5 text-amber-400" />
-                              <span>{t('Activation Claimed (+5)')}</span>
+                              <span>{t('Activation Claimed (+10)')}</span>
                             </span>
                           )
                         ) : (
                           <span className="text-[10px] text-zinc-400 italic bg-zinc-800/80 px-2 py-1 rounded-md border border-zinc-700/50">
-                            {t('Pending activation for +5 days')}
+                            {t('Pending activation for +10 days')}
                           </span>
                         )}
                       </div>
@@ -968,28 +981,28 @@ export default function Rewards() {
           <ul className="space-y-2.5" dir={language === 'ur' ? 'rtl' : 'ltr'}>
             <li className="text-xs text-zinc-300 flex items-start gap-2">
               <span className="text-amber-400 font-bold">•</span>
-              <span><strong className="text-white">{t('Referral Signup (+5 Days)')}:</strong> {t('Share your link/code with friends to get 5 days extension for every friend who joins.')}</span>
+              <span><strong className="text-white">{t('Referral Signup (+10 Days)')}:</strong> {t('Share your link/code with friends to get 5 days extension for every friend who joins.')}</span>
             </li>
             <li className="text-xs text-zinc-300 flex items-start gap-2">
               <span className="text-amber-400 font-bold">•</span>
-              <span><strong className="text-white">{t('Referral Activation (+5 Days)')}:</strong> {t('Get an extra 5 days extension when your referred friend purchases a membership.')}</span>
+              <span><strong className="text-white">{t('Referral Activation (+10 Days)')}:</strong> {t('Get an extra 5 days extension when your referred friend purchases a membership.')}</span>
             </li>
             {showInstallTask && (
               <li className="text-xs text-zinc-300 flex items-start gap-2">
                 <span className="text-rose-400 font-bold">•</span>
-                <span><strong className="text-white">{t('Install App (+3 Days)')}:</strong> {t('Install our PWA app on your home screen for a 3 days membership extension.')}</span>
+                <span><strong className="text-white">{t('Install App (+6 Days)')}:</strong> {t('Install our PWA app on your home screen for a 3 days membership extension.')}</span>
               </li>
             )}
             {showNotificationTask && (
               <li className="text-xs text-zinc-300 flex items-start gap-2">
                 <span className="text-purple-400 font-bold">•</span>
-                <span><strong className="text-white">{t('Enable Notifications (+3 Days)')}:</strong> {t('Enable push notifications to stay updated and get a 3 days membership extension.')}</span>
+                <span><strong className="text-white">{t('Enable Notifications (+6 Days)')}:</strong> {t('Enable push notifications to stay updated and get a 3 days membership extension.')}</span>
               </li>
             )}
             {showReviewTask && (
               <li className="text-xs text-zinc-300 flex items-start gap-2">
                 <span className="text-amber-400 font-bold">•</span>
-                <span><strong className="text-white">{t('Submit a Review (+5 Days)')}:</strong> {t('Write a review and rate our app to get a free 5 days membership extension.')}</span>
+                <span><strong className="text-white">{t('Submit a Review (+10 Days)')}:</strong> {t('Write a review and rate our app to get a free 5 days membership extension.')}</span>
               </li>
             )}
           </ul>

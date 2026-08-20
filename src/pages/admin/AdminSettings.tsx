@@ -5,7 +5,7 @@ import { db, storage, auth, requestNotificationPermission } from '../../firebase
 import { useAuth } from '../../contexts/AuthContext';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useContent } from '../../contexts/ContentContext';
-import { Save, AlertCircle, GripVertical, Plus, Trash2, Layout, Wallet, Phone, Image as ImageIcon, Settings as SettingsIcon, RefreshCw, ShieldCheck, X, Eye, EyeOff, Database, Rocket, Loader2, Bell, BellOff, Info, Mail, Check } from 'lucide-react';
+import { Save, AlertCircle, GripVertical, Plus, Trash2, Layout, Wallet, Phone, Image as ImageIcon, Settings as SettingsIcon, RefreshCw, ShieldCheck, X, Eye, EyeOff, Database, Rocket, Loader2, Bell, BellOff, Info, Mail, Check, Megaphone } from 'lucide-react';
 import { clsx } from 'clsx';
 import { Navigate } from 'react-router-dom';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
@@ -442,6 +442,28 @@ export default function AdminSettings() {
 
               <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700">
                 <div>
+                  <h3 className="font-medium text-zinc-900 dark:text-white">Enable VIP Trial</h3>
+                  <p className="text-sm text-zinc-500">Allow direct link VIP trial activation.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSettings({ ...settings, isVipTrialEnabled: !settings.isVipTrialEnabled })}
+                  className={clsx(
+                    "relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0",
+                    settings.isVipTrialEnabled !== false ? "bg-emerald-500" : "bg-zinc-300 dark:bg-zinc-600"
+                  )}
+                >
+                  <span
+                    className={clsx(
+                      "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                      settings.isVipTrialEnabled !== false ? "translate-x-6" : "translate-x-1"
+                    )}
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700">
+                <div>
                   <h3 className="font-medium text-zinc-900 dark:text-white">Enable Phone Login</h3>
                   <p className="text-sm text-zinc-500">Show phone login option on login page.</p>
                 </div>
@@ -609,6 +631,160 @@ export default function AdminSettings() {
                 className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
               />
             </div>
+          </div>
+        </div>
+
+        {/* Ad & Monetization Settings */}
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+          <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Megaphone className="w-5 h-5 text-zinc-400" />
+              <h2 className="text-lg font-semibold">Ad & Monetization Settings</h2>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={clsx(
+                "px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border",
+                (settings.adProvider || 'both') !== 'disabled' 
+                  ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                  : "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400 border-zinc-500/20"
+              )}>
+                {(settings.adProvider || 'both') !== 'disabled' ? 'Enabled' : 'Disabled'}
+              </span>
+            </div>
+          </div>
+          <div className="p-6 space-y-6">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Ad Monetization Provider</label>
+              <select
+                value={settings.adProvider || 'both'}
+                onChange={(e) => setSettings({ ...settings, adProvider: e.target.value as any })}
+                className="w-full px-4 py-2.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none cursor-pointer text-sm"
+              >
+                <option value="both">Enable Both (AdSense Banners & Full Video Interstitial Ads)</option>
+                <option value="google_adsense">Google AdSense Banners Only</option>
+                <option value="interstitial_only">Interactive Video Interstitial Ads Only</option>
+                <option value="disabled">Disable All Advertising (100% Ad-Free Platform)</option>
+              </select>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                Configure your display & video networks. Ads are shown exclusively to <strong>Basic Users</strong>, <strong>Trial Users</strong>, and unauthenticated guests. VIP users remain 100% ad-free.
+              </p>
+            </div>
+
+            {((settings.adProvider || 'both') === 'google_adsense' || (settings.adProvider || 'both') === 'both') && (
+              <div className="p-5 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-200 dark:border-zinc-800/80 space-y-4">
+                <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider">Google AdSense Integration</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">AdSense Client ID (Publisher ID)</label>
+                    <input
+                      type="text"
+                      placeholder="ca-pub-XXXXXXXXXXXXXXXX"
+                      value={settings.adSenseClientId || ''}
+                      onChange={(e) => setSettings({ ...settings, adSenseClientId: e.target.value })}
+                      className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Banner Ad Slot ID</label>
+                    <input
+                      type="text"
+                      placeholder="XXXXXXXXXX"
+                      value={settings.adSenseSlotId || ''}
+                      onChange={(e) => setSettings({ ...settings, adSenseSlotId: e.target.value })}
+                      className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {((settings.adProvider || 'both') === 'interstitial_only' || (settings.adProvider || 'both') === 'both') && (
+              <div className="p-5 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-200 dark:border-zinc-800/80 space-y-4">
+                <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider">Interactive Video Interstitial Ads</h3>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Runs a fully interactive video ad overlay with a countdown timer before basic or trial users can unlock their stream links.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Ad Skip Timer (Seconds)</label>
+                    <input
+                      type="number"
+                      min="3"
+                      max="60"
+                      value={settings.adSkipTimer ?? 5}
+                      onChange={(e) => setSettings({ ...settings, adSkipTimer: parseInt(e.target.value) || 5 })}
+                      className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Sponsor/Ad Destination Link (Redirect on Click)</label>
+                    <input
+                      type="text"
+                      value={settings.adRedirectUrl || ''}
+                      onChange={(e) => setSettings({ ...settings, adRedirectUrl: e.target.value })}
+                      placeholder="e.g. https://sponsor-site.com"
+                      className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Sponsor Video File URL (.mp4 direct stream link)</label>
+                  <input
+                    type="text"
+                    value={settings.adVideoUrl || ''}
+                    onChange={(e) => setSettings({ ...settings, adVideoUrl: e.target.value })}
+                    placeholder="e.g. https://assets.mixkit.co/.../video.mp4"
+                    className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
+                  />
+                </div>
+              </div>
+            )}
+
+            {((settings.adProvider || 'both') !== 'disabled') && (
+              <div className="p-5 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-200 dark:border-zinc-800/80 space-y-4">
+                <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider">Custom Sponsor Banner Display</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Sponsor Title</label>
+                    <input
+                      type="text"
+                      value={settings.adBannerTitle || ''}
+                      onChange={(e) => setSettings({ ...settings, adBannerTitle: e.target.value })}
+                      className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">CTA Button Text</label>
+                    <input
+                      type="text"
+                      value={settings.adBannerCtaText || ''}
+                      onChange={(e) => setSettings({ ...settings, adBannerCtaText: e.target.value })}
+                      className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">CTA Button Destination Route/Link</label>
+                    <input
+                      type="text"
+                      value={settings.adBannerLink || ''}
+                      onChange={(e) => setSettings({ ...settings, adBannerLink: e.target.value })}
+                      className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Sponsor Description/Subtext</label>
+                    <textarea
+                      value={settings.adBannerDescription || ''}
+                      onChange={(e) => setSettings({ ...settings, adBannerDescription: e.target.value })}
+                      rows={2}
+                      className="w-full px-4 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm resize-none"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

@@ -87,7 +87,7 @@ service cloud.firestore {
       let refCodeValid = refCode == null || (refCode is string && refCode.size() < 50);
       
       // Only validate 'role' and 'status' if they exist in the update payload
-      let roleValid = !('role' in data) || (data.role in ['admin', 'owner', 'manager', 'user_manager', 'content_manager', 'user', 'trial', 'selected_content', 'editor', 'temporary']);
+      let roleValid = !('role' in data) || (data.role in ['admin', 'owner', 'manager', 'user_manager', 'content_manager', 'user', 'trial', 'selected_content', 'editor', 'temporary', 'basic', 'vip']);
       let statusValid = !('status' in data) || (data.status in ['active', 'pending', 'suspended', 'expired']);
       
       return emailValid && phoneValid && nameValid && roleValid && statusValid && refCodeValid;
@@ -125,8 +125,8 @@ service cloud.firestore {
                        r.get('status', 'none') == 'pending' &&
                        r.get('trialActivated', false) == false;
       
-      // Required changes: Role -> Trial, Status -> Active, trialActivated -> true, expiryDate -> string
-      let roleValid = d.get('role', '') == 'trial';
+      // Required changes: Role -> Trial or VIP, Status -> Active, trialActivated -> true, expiryDate -> string
+      let roleValid = d.get('role', '') in ['trial', 'vip'];
       let statusValid = d.get('status', '') == 'active';
       let activationValid = d.get('trialActivated', false) == true;
       let expiryValid = d.get('expiryDate', '') is string && d.get('expiryDate', '').size() > 10;

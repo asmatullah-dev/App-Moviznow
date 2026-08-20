@@ -16,13 +16,24 @@ import PaymentMethods from '../../components/PaymentMethods';
 
 import { useSettings } from '../../contexts/SettingsContext';
 
-const MEMBERSHIP_PLANS = [
-  { id: '1m', name: '1 Month', months: 1, price: 300, perMonth: 300, headerBadge: '', saveBadge: '', popular: false, icon: Zap },
-  { id: '3m', name: '3 Months', months: 3, price: 750, perMonth: 250, headerBadge: '', saveBadge: 'Save 17%', popular: false, icon: Sparkles },
-  { id: '6m', name: '6 Months', months: 6, price: 1400, perMonth: 233, headerBadge: '', saveBadge: 'Save 22%', popular: false, icon: ShieldCheck },
-  { id: '1y', name: '1 Year', months: 12, price: 2600, perMonth: 216, headerBadge: '🔥 Most Popular', saveBadge: 'Save 28%', popular: true, icon: Crown },
-  { id: '2y', name: '2 Years', months: 24, price: 4000, perMonth: 166, headerBadge: '👑 Mega VIP', saveBadge: 'Save 44%', popular: false, icon: Gem },
+import { Role } from '../../types';
+
+const VIP_PLANS = [
+  { id: '1m', name: '1 Month (VIP Ad-Free)', months: 1, price: 300, perMonth: 300, planRole: 'vip' as Role, headerBadge: '', saveBadge: '', popular: false, icon: Zap },
+  { id: '3m', name: '3 Months (VIP Ad-Free)', months: 3, price: 750, perMonth: 250, planRole: 'vip' as Role, headerBadge: '', saveBadge: 'Save 17%', popular: false, icon: Sparkles },
+  { id: '6m', name: '6 Months (VIP Ad-Free)', months: 6, price: 1400, perMonth: 233, planRole: 'vip' as Role, headerBadge: '', saveBadge: 'Save 22%', popular: false, icon: ShieldCheck },
+  { id: '1y', name: '1 Year (VIP Ad-Free)', months: 12, price: 2600, perMonth: 216, planRole: 'vip' as Role, headerBadge: '🔥 Most Popular', saveBadge: 'Save 28%', popular: true, icon: Crown },
+  { id: '2y', name: '2 Years (VIP Ad-Free)', months: 24, price: 4000, perMonth: 166, planRole: 'vip' as Role, headerBadge: '👑 Mega VIP', saveBadge: 'Save 44%', popular: false, icon: Gem },
 ];
+
+const BASIC_PLANS = [
+  { id: 'basic_1m', name: '1 Month (Basic With Ads)', months: 1, price: 50, perMonth: 50, planRole: 'basic' as Role, headerBadge: '📺 Rs 50/mo', saveBadge: 'With Ads', popular: true, icon: Zap },
+  { id: 'basic_3m', name: '3 Months (Basic With Ads)', months: 3, price: 140, perMonth: 46, planRole: 'basic' as Role, headerBadge: '', saveBadge: 'Save 7%', popular: false, icon: Sparkles },
+  { id: 'basic_6m', name: '6 Months (Basic With Ads)', months: 6, price: 260, perMonth: 43, planRole: 'basic' as Role, headerBadge: '', saveBadge: 'Save 13%', popular: false, icon: ShieldCheck },
+  { id: 'basic_1y', name: '1 Year (Basic With Ads)', months: 12, price: 500, perMonth: 41, planRole: 'basic' as Role, headerBadge: '🔥 Best Value', saveBadge: 'Save 17%', popular: false, icon: Crown },
+];
+
+const ALL_MEMBERSHIP_PLANS = [...VIP_PLANS, ...BASIC_PLANS];
 
 export default function TopUp() {
   const { profile, updateUserProfileData, refreshProfile } = useAuth();
@@ -31,6 +42,7 @@ export default function TopUp() {
   const { settings } = useSettings();
   const navigate = useNavigate();
   const location = useLocation();
+  const [selectedTier, setSelectedTier] = useState<'vip' | 'basic'>('vip');
   const [selectedPlanId, setSelectedPlanId] = useState('1m');
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -40,15 +52,21 @@ export default function TopUp() {
   const [isCheckingPendingOrder, setIsCheckingPendingOrder] = useState(true);
   const [alertConfig, setAlertConfig] = useState<{isOpen: boolean; title: string; message: string;}>({ isOpen: false, title: '', message: '' });
 
-  const activePlan = MEMBERSHIP_PLANS.find(p => p.id === selectedPlanId) || MEMBERSHIP_PLANS[0];
+  const currentPlans = selectedTier === 'vip' ? VIP_PLANS : BASIC_PLANS;
+  const activePlan = ALL_MEMBERSHIP_PLANS.find(p => p.id === selectedPlanId) || currentPlans[0];
 
   useEffect(() => {
     const statePlan = location.state?.planId;
     const searchParams = new URLSearchParams(location.search);
     const queryPlan = searchParams.get('plan');
     const targetPlan = statePlan || queryPlan;
-    if (targetPlan && MEMBERSHIP_PLANS.some(p => p.id === targetPlan)) {
+    if (targetPlan && ALL_MEMBERSHIP_PLANS.some(p => p.id === targetPlan)) {
       setSelectedPlanId(targetPlan);
+      if (BASIC_PLANS.some(p => p.id === targetPlan)) {
+        setSelectedTier('basic');
+      } else {
+        setSelectedTier('vip');
+      }
     }
   }, [location]);
 
@@ -103,6 +121,7 @@ export default function TopUp() {
         userName: profile.displayName || 'Unknown',
         userEmail: profile.email,
         userRole: profile.role,
+        planRole: activePlan.planRole,
         type: 'membership' as const,
         amount: activePlan.price,
         months: activePlan.months,
@@ -224,7 +243,7 @@ export default function TopUp() {
           </div>
         ) : (
           <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 mb-6 border border-zinc-200/80 dark:border-zinc-800/80 shadow-sm">
-            <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center justify-between mb-4">
               <h2 className="text-base font-black flex items-center gap-2 text-zinc-900 dark:text-white">
                 <Crown className="w-5 h-5 text-amber-500 fill-amber-500/20" />
                 <span>{t('Membership Plans')}</span>
@@ -234,8 +253,46 @@ export default function TopUp() {
               </span>
             </div>
 
+            {/* Plan Tier Switcher: VIP Ad-Free vs Basic With Ads */}
+            <div className="grid grid-cols-2 gap-2 p-1.5 bg-zinc-100/80 dark:bg-zinc-950/80 rounded-2xl mb-5 border border-zinc-200/80 dark:border-zinc-800/80">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedTier('vip');
+                  if (!VIP_PLANS.some(p => p.id === selectedPlanId)) {
+                    setSelectedPlanId('1m');
+                  }
+                }}
+                className={`flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl font-black text-xs sm:text-sm transition-all cursor-pointer ${
+                  selectedTier === 'vip'
+                    ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md'
+                    : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+                }`}
+              >
+                <Crown className="w-4 h-4" />
+                <span>VIP User (Ad-Free)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedTier('basic');
+                  if (!BASIC_PLANS.some(p => p.id === selectedPlanId)) {
+                    setSelectedPlanId('basic_1m');
+                  }
+                }}
+                className={`flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl font-black text-xs sm:text-sm transition-all cursor-pointer ${
+                  selectedTier === 'basic'
+                    ? 'bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-md'
+                    : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+                }`}
+              >
+                <Zap className="w-4 h-4" />
+                <span>Basic User (Rs 50/mo)</span>
+              </button>
+            </div>
+
             <div className="space-y-3.5 mb-6">
-              {MEMBERSHIP_PLANS.map((plan) => {
+              {currentPlans.map((plan) => {
                 const isSelected = selectedPlanId === plan.id;
                 const PlanIcon = plan.icon;
                 const is1Y = plan.id === '1y';

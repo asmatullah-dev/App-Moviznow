@@ -101,13 +101,15 @@ const ContentCard = React.memo(({
 
   const getCanPlay = (c: any) => {
     const isContentAssigned = profile?.assignedContent?.some((id: string) => id === c.id || id.startsWith(`${c.id}:`));
-    return profile?.role === 'admin' ||
+    return profile?.role !== 'user' && (
+      profile?.role === 'admin' ||
       profile?.role === 'owner' ||
       profile?.role === 'manager' ||
       profile?.role === 'content_manager' ||
       isContentAssigned ||
       (profile?.status === 'active' &&
-        !(profile?.role === "selected_content" || c.status === "selected_content"));
+        !(profile?.role === "selected_content" || c.status === "selected_content"))
+    );
   };
 
   const isAssigned = profile?.role === 'selected_content' && profile.assignedContent?.some((id: string) => id === content.id || id.startsWith(`${content.id}:`));
@@ -353,7 +355,7 @@ const ContentCard = React.memo(({
               </button>
             )
           )}
-          {isLocked && (profile?.role === 'trial' || profile?.role === 'user') && (
+          {isLocked && (profile?.role === 'trial' || profile?.role === 'user' || profile?.role === 'basic' || profile?.role === 'vip') && (
             <Link
               to="/top-up"
               onClick={(e) => e.stopPropagation()}

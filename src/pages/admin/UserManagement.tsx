@@ -670,13 +670,18 @@ export default function UserManagement() {
                     baseDate = currentExp;
                   }
                 }
-                baseDate.setDate(baseDate.getDate() + 5);
+                baseDate.setDate(baseDate.getDate() + 10);
                 const newInviterExpiryStr = baseDate.toISOString();
                 
-                batch.update(inviterRef, {
+                const inviterUpdate: any = {
                   expiryDate: newInviterExpiryStr,
                   status: 'active'
-                });
+                };
+                if (['user', 'trial', 'selected_content', ''].includes(inviterData.role || '')) {
+                  inviterUpdate.role = 'basic';
+                }
+                
+                batch.update(inviterRef, inviterUpdate);
               }
               
               // Set the activationClaimed and status = 'paid' on the join record in /referral/all
@@ -1205,6 +1210,34 @@ export default function UserManagement() {
     }
   };
 
+  const handleBulkRoleChange = async (role: Role) => {
+    if (!window.confirm(`Are you sure you want to change the role of ${selectedUsers.length} users to ${role}?`)) return;
+    
+    setProcessing(prev => ({ ...prev, bulk: true }));
+    const currentSelected = [...selectedUsers];
+    setSelectedUsers([]);
+    
+    try {
+      const batchUpdates: Record<string, Partial<UserProfile>> = {};
+      currentSelected.forEach(uid => {
+        const user = users.find(u => u.uid === uid);
+        if (user?.role !== 'owner' && uid !== profile?.uid) {
+          batchUpdates[uid] = { role };
+        }
+      });
+      if (Object.keys(batchUpdates).length > 0) {
+        updateMultipleUserFields(batchUpdates);
+      }
+    } catch (error) {
+      console.error('Error updating user roles:', error);
+      setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to update user roles' });
+      setProcessing(prev => ({ ...prev, bulk: false }));
+      handleFirestoreError(error, OperationType.UPDATE, 'users/bulk');
+    } finally {
+      setProcessing(prev => ({ ...prev, bulk: false }));
+    }
+  };
+
   const SortIcon = ({ field }: { field: SortField }) => {
     if (sortField !== field) return null;
     return sortOrder === 'asc' ? <ArrowUp className="w-4 h-4 inline ml-1" /> : <ArrowDown className="w-4 h-4 inline ml-1" />;
@@ -1564,6 +1597,9 @@ export default function UserManagement() {
                     if (e.target.value) {
                       if (e.target.value === 'merge') {
                         handleMergeUsers();
+                      } else if (e.target.value.startsWith('role_')) {
+                        const targetRole = e.target.value.substring(5) as Role;
+                        handleBulkRoleChange(targetRole);
                       } else {
                         handleBulkStatusChange(e.target.value as any);
                       }
@@ -1573,14 +1609,33 @@ export default function UserManagement() {
                   className="bg-transparent border-none text-xs focus:outline-none text-emerald-500 font-medium cursor-pointer"
                 >
                   <option value="">Bulk Actions</option>
-                  <option value="active">Set Active</option>
-                  <option value="pending">Set Pending</option>
-                  <option value="expired">Set Expired</option>
-                  {(profile?.role === 'admin' || profile?.role === 'owner') && (
-                    <option value="suspended">Suspend</option>
-                  )}
+                  <optgroup label="Change Status" className="text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900">
+                    <option value="active">Set Active</option>
+                    <option value="pending">Set Pending</option>
+                    <option value="expired">Set Expired</option>
+                    {(profile?.role === 'admin' || profile?.role === 'owner') && (
+                      <option value="suspended">Suspend</option>
+                    )}
+                  </optgroup>
+                  <optgroup label="Change Role" className="text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900">
+                    <option value="role_user">Set Role: User</option>
+                    <option value="role_basic">Set Role: Basic (With Ads)</option>
+                    <option value="role_vip">Set Role: VIP (Ad-Free)</option>
+                    <option value="role_trial">Set Role: Trial</option>
+                    <option value="role_selected_content">Set Role: Selected Content</option>
+                    {(profile?.role === 'admin' || profile?.role === 'owner') && (
+                      <>
+                        <option value="role_admin">Set Role: Admin</option>
+                        <option value="role_manager">Set Role: Manager</option>
+                        <option value="role_user_manager">Set Role: User Manager</option>
+                        <option value="role_content_manager">Set Role: Content Manager</option>
+                      </>
+                    )}
+                  </optgroup>
                   {selectedUsers.length === 2 && (profile?.role === 'admin' || profile?.role === 'owner') && (
-                    <option value="merge">Merge Users</option>
+                    <optgroup label="Others" className="text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900">
+                      <option value="merge">Merge Users</option>
+                    </optgroup>
                   )}
                 </select>
               </div>
@@ -1610,6 +1665,8 @@ export default function UserManagement() {
               >
                 <option value="all">All Roles</option>
                 <option value="user">User</option>
+                <option value="basic">Basic User (With Ads)</option>
+                <option value="vip">VIP User (Ad-Free)</option>
                 <option value="trial">Trial</option>
                 <option value="selected_content">Selected Content</option>
                 {(profile?.role === 'admin' || profile?.role === 'owner') && (
@@ -1738,6 +1795,8 @@ export default function UserManagement() {
                     <div className="flex flex-col gap-1 items-start">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize
                         ${user.role === 'admin' ? 'bg-purple-500/10 text-purple-500' : 
+                          user.role === 'vip' ? 'bg-amber-500/10 text-amber-500 font-bold' :
+                          user.role === 'basic' ? 'bg-sky-500/10 text-sky-500 font-bold' :
                           user.role === 'content_manager' ? 'bg-indigo-500/10 text-indigo-500' :
                           user.role === 'user_manager' ? 'bg-blue-500/10 text-blue-500' :
                           user.role === 'manager' ? 'bg-emerald-500/10 text-emerald-500' :
@@ -1745,7 +1804,9 @@ export default function UserManagement() {
                           user.role === 'trial' ? 'bg-yellow-500/10 text-yellow-500' :
                           'bg-zinc-500/10 text-zinc-500'}`}
                       >
-                        {user.role === 'selected_content' ? 'Selected Content' : 
+                        {user.role === 'vip' ? 'VIP User' :
+                         user.role === 'basic' ? 'Basic User' :
+                         user.role === 'selected_content' ? 'Selected Content' : 
                          user.role === 'content_manager' ? 'Content Manager' :
                          user.role === 'user_manager' ? 'User Manager' :
                          user.role === 'manager' ? 'Manager' :
@@ -1923,7 +1984,9 @@ export default function UserManagement() {
                         disabled={selectedUser.uid === profile?.uid}
                         className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500 disabled:opacity-50"
                       >
-                        <option value="user">User</option>
+                        <option value="user">User (Pending/New)</option>
+                        <option value="basic">Basic User (With Ads)</option>
+                        <option value="vip">VIP User (Ad-Free)</option>
                         <option value="trial">Trial</option>
                         <option value="selected_content">Selected Content</option>
                         {(profile?.role === 'admin' || profile?.role === 'owner') && (
@@ -2062,11 +2125,13 @@ export default function UserManagement() {
                       <div>
                         <div className="text-zinc-500 text-[10px] uppercase font-bold mb-0.5">Role</div>
                         <div className="font-bold text-emerald-400 text-sm">
-                          {selectedUser.role === 'selected_content' ? 'Selected Content' : 
+                          {selectedUser.role === 'vip' ? 'VIP User' :
+                           selectedUser.role === 'basic' ? 'Basic User' :
+                           selectedUser.role === 'selected_content' ? 'Selected Content' : 
                            selectedUser.role === 'content_manager' ? 'Content Manager' :
                            selectedUser.role === 'user_manager' ? 'User Manager' :
                            selectedUser.role === 'manager' ? 'Manager' :
-                          selectedUser.role === 'user' ? 'User' :
+                           selectedUser.role === 'user' ? 'User' :
                            selectedUser.role ? selectedUser.role.charAt(0).toUpperCase() + selectedUser.role.slice(1).replace('_', ' ') : 'User'}
                         </div>
                       </div>
@@ -3053,7 +3118,9 @@ export default function UserManagement() {
                         onChange={(e) => setNewUserForm({ ...newUserForm, role: e.target.value as Role })}
                         className="w-full p-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent"
                       >
-                        <option value="user">User</option>
+                        <option value="user">User (Pending/New)</option>
+                        <option value="basic">Basic User (With Ads)</option>
+                        <option value="vip">VIP User (Ad-Free)</option>
                         <option value="trial">Trial</option>
                         <option value="selected_content">Selected Content</option>
                         {(profile?.role === 'admin' || profile?.role === 'owner') && (

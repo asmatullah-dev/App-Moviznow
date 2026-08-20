@@ -33,6 +33,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   accountTitle: 'Asmat Ullah',
   accountNumber: '03416286423',
   isTrialEnabled: true,
+  isVipTrialEnabled: true,
   isPhoneLoginEnabled: true,
   isAdminContactEnabled: true,
   isPaymentEnabled: true,
@@ -46,7 +47,17 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     'Dashboard', 'Analytics', 'Orders', 'Content', 'Users', 
     'UserManagers', 'SelectedContent', 
     'Income', 'ErrorLinks', 'ReportedLinks', 'Notifications', 'Requests'
-  ]
+  ],
+  adProvider: 'both',
+  adSenseClientId: 'ca-pub-3128773545517669',
+  adSenseSlotId: '1035133642',
+  adBannerTitle: 'MovizNow Premium Sponsor',
+  adBannerDescription: 'Enjoy high quality streaming on Basic Plan. Upgrade to VIP to remove all ads!',
+  adBannerCtaText: 'Remove Ads (Go VIP)',
+  adBannerLink: '/top-up',
+  adSkipTimer: 5,
+  adVideoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-popcorn-machine-in-action-close-up-42289-large.mp4',
+  adRedirectUrl: 'https://moviznow.app/premium',
 };
 
 export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {

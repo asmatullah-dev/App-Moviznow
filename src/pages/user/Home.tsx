@@ -22,6 +22,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 
+import { AdBanner } from "../../components/AdBanner";
 import { Content, Collection as AppCollection } from "../../types";
 import { isUserExpired } from "../../contexts/UsersContext";
 import { fetchReviewsFromChunks } from "../../utils/chunkUtils";
@@ -175,11 +176,11 @@ export default function Home({
 
   const autoRefreshAttempted = useRef(false);
   useEffect(() => {
-    if (!loading && contentList.length === 0 && !autoRefreshAttempted.current) {
+    if (!loading && !autoRefreshAttempted.current) {
       autoRefreshAttempted.current = true;
-      checkForUpdates(true).catch(console.error);
+      quickRefreshCatalog().catch(console.error);
     }
-  }, [loading, contentList.length, checkForUpdates]);
+  }, [loading, quickRefreshCatalog]);
 
   const [sort, setSort] = useState<"default" | "newest" | "year" | "az">(
     () => (sessionStorage.getItem("home_sort") as any) || "default",
@@ -503,12 +504,14 @@ export default function Home({
   const getCanPlay = useCallback(
     (c: any) => {
       if (canPlayBase) return true;
+      if (profile?.role === "user") return false;
+
       const isContentAssigned = assignedContentSet.has(c.id);
       if (isContentAssigned) return true;
 
       return isProfileActive && !isSelectedContentRole && c.status !== "selected_content";
     },
-    [canPlayBase, assignedContentSet, isProfileActive, isSelectedContentRole],
+    [canPlayBase, profile?.role, assignedContentSet, isProfileActive, isSelectedContentRole],
   );
 
   // Precomputed canPlay map for instant sorting lookups
@@ -1047,6 +1050,9 @@ export default function Home({
           {currentPage === 1 && !hideScrollingTabs && (
             <ComingSoonSection className="mb-8" />
           )}
+
+          {/* Ad Banner for Basic Users */}
+          <AdBanner className="mb-6" />
 
           {/* Grid Title */}
           <div className="flex items-center justify-between mb-6 pb-2 border-b border-zinc-200/80 dark:border-zinc-800/80 mt-10">
