@@ -333,24 +333,24 @@ export default function TopUp() {
                   badgeStyle = 'bg-gradient-to-r from-amber-500 to-orange-500 text-white font-black border-0 shadow-sm shadow-amber-500/25';
                 }
 
-                return (
+                  return (
                   <button
                     key={plan.id}
                     type="button"
                     onClick={() => setSelectedPlanId(plan.id)}
                     className={`relative w-full text-left p-3.5 sm:p-4 rounded-2xl border transition-all active:scale-[0.99] cursor-pointer ${cardStyle}`}
                   >
-                    <div className="flex items-center justify-between gap-2.5 sm:gap-3">
-                      <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
-                        {/* Icon Box */}
-                        <div className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shrink-0 transition-all ${iconBoxStyle}`}>
-                          <PlanIcon className="w-5 h-5" />
-                        </div>
+                    <div className="flex items-center gap-2.5 sm:gap-3">
+                      {/* Icon Box */}
+                      <div className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shrink-0 transition-all ${iconBoxStyle}`}>
+                        <PlanIcon className="w-5 h-5" />
+                      </div>
 
-                        <div className="min-w-0 flex-1">
-                          {/* Row 1: Plan Title + Header Tag (Most Popular / Mega VIP next to 1 Year / 2 Years) */}
-                          <div className="flex items-center gap-1.5 min-w-0 flex-nowrap">
-                            <span className="font-black text-sm sm:text-base text-zinc-900 dark:text-white whitespace-nowrap">
+                      <div className="min-w-0 flex-1">
+                        {/* Line 1: Plan Title + Header Tag + Price */}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                            <span className="font-black text-sm sm:text-base text-zinc-900 dark:text-white">
                               {plan.name}
                             </span>
                             {plan.headerBadge && (
@@ -364,16 +364,7 @@ export default function TopUp() {
                             )}
                           </div>
 
-                          {/* Row 2: Subtext: Per month price */}
-                          <p className="text-xs font-bold text-zinc-500 dark:text-zinc-400 mt-0.5">
-                            Rs. {plan.perMonth} <span className="text-[10px] font-normal">/ {t('month')}</span>
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2.5 sm:gap-3 shrink-0 ml-auto">
-                        <div className="text-right flex flex-col items-end">
-                          <span className={`text-sm sm:text-base font-black block whitespace-nowrap ${
+                          <span className={`text-sm sm:text-base font-black shrink-0 whitespace-nowrap ${
                             is2Y
                               ? 'text-purple-600 dark:text-purple-300'
                               : is1Y
@@ -384,8 +375,15 @@ export default function TopUp() {
                           }`}>
                             Rs. {plan.price.toLocaleString()}
                           </span>
+                        </div>
+
+                        {/* Line 2: Per month price + Save % badge on the second line */}
+                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                          <p className="text-xs font-bold text-zinc-500 dark:text-zinc-400">
+                            Rs. {plan.perMonth} <span className="text-[10px] font-normal">/ {t('month')}</span>
+                          </p>
                           {plan.saveBadge && (
-                            <span className={`text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded border whitespace-nowrap mt-0.5 inline-block ${
+                            <span className={`text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded border whitespace-nowrap inline-flex items-center ${
                               is2Y
                                 ? 'bg-purple-500/15 text-purple-600 dark:text-purple-300 border-purple-500/30'
                                 : is1Y

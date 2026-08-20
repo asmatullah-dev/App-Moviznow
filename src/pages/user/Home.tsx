@@ -144,7 +144,7 @@ export default function Home({
     vibrate(30);
     setIsRefreshingCatalog(true);
     try {
-      const result = await quickRefreshCatalog();
+      const result = await quickRefreshCatalog(true);
       if (result.isRelaxed) {
         showCatalogToast(t("Data is up to date"), "info");
       } else if (result.updatedCount && result.updatedCount > 0) {
@@ -277,7 +277,7 @@ export default function Home({
     e.stopPropagation();
     const shareData = {
       title: "MovizNow",
-      text: t("Get 5 days of premium membership for free on MovizNow!"),
+      text: t("Get 10 days of premium membership for free on MovizNow!"),
       url: referralLink,
     };
     if (navigator.share) {
@@ -798,14 +798,14 @@ export default function Home({
                       </span>
                       <span className="px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold bg-amber-500/20 border border-amber-500/30 text-amber-300 flex items-center gap-1">
                         <Zap className="w-3 h-3 text-amber-400 fill-amber-400" />
-                        <span>{t("+5 Days VIP")}</span>
+                        <span>{t("+10 Days VIP")}</span>
                       </span>
                     </div>
                     <h3 className="font-extrabold text-base sm:text-xl text-white tracking-tight leading-snug">
-                      {t("Get 5 Days Free VIP Access!")}
+                      {t("Get 10 Days Free VIP Access!")}
                     </h3>
                     <p className="text-zinc-300 text-xs sm:text-sm leading-relaxed max-w-2xl">
-                      {t("Invite friends to MovizNow and unlock 5 days of premium access for both of you!")}
+                      {t("Invite friends to MovizNow and unlock 10 days of premium access for both of you!")}
                     </p>
                   </div>
                 </div>

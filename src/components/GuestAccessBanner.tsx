@@ -19,7 +19,7 @@ export const GuestAccessBanner: React.FC<GuestAccessBannerProps> = ({
   customTitle,
   customMessage
 }) => {
-  const { user, profile } = useAuth();
+  const { user, profile, loading } = useAuth();
   const { t } = useLanguage();
   const location = useLocation();
   const [isDismissed, setIsDismissed] = useState(false);
@@ -35,7 +35,7 @@ export const GuestAccessBanner: React.FC<GuestAccessBannerProps> = ({
     }
   }, [variant]);
 
-  if (!isGuestOrPending || isDismissed) {
+  if (loading || !isGuestOrPending || isDismissed) {
     return null;
   }
 

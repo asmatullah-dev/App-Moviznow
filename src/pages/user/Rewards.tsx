@@ -24,7 +24,12 @@ import {
   Crown,
   Zap,
   Sparkles,
-  Loader2
+  Loader2,
+  Calendar,
+  CalendarDays,
+  ShieldCheck,
+  X,
+  Sliders
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, query, where, getDocs, limit, doc, getDoc, writeBatch, increment } from 'firebase/firestore';
@@ -62,6 +67,21 @@ export default function Rewards() {
   const showNotificationTask = !profile?.notificationRewardClaimed && ('Notification' in window ? Notification.permission !== 'granted' : true);
   const showInstallTask = !profile?.pwaRewardClaimed && !isInstalled && isInstallable;
   const showReviewTask = !profile?.reviewRewardClaimed && !hasRatedState;
+
+  // Unclaimed calculation
+  const unclaimedSignups = referredUsersList.filter(u => !u.signupClaimed);
+  const unclaimedActivations = referredUsersList.filter(u => u.isActivated && !u.activationClaimed);
+  const unclaimedReview = !profile?.reviewRewardClaimed;
+  const unclaimedNotification = !profile?.notificationRewardClaimed;
+  const unclaimedPWA = !profile?.pwaRewardClaimed;
+
+  const totalUnclaimedDays = (unclaimedSignups.length * 10) + 
+    (unclaimedActivations.length * 10) + 
+    (unclaimedReview ? 10 : 0) + 
+    (unclaimedNotification ? 6 : 0) + 
+    (unclaimedPWA ? 6 : 0);
+
+  const hasUnclaimedRewards = totalUnclaimedDays > 0;
 
   const getBadge = (count: number) => {
     if (count >= 50) return { name: t('Diamond Referrer'), icon: Crown, color: 'text-cyan-400', bg: 'bg-cyan-500/20 border-cyan-500/40', next: null };
@@ -237,6 +257,7 @@ export default function Rewards() {
       console.error("Failed to claim reward:", e);
     }
   };
+
 
   useEffect(() => {
     safeStorage.removeItem('referral_stats_count');
@@ -635,6 +656,7 @@ export default function Rewards() {
           ))}
         </div>
 
+
         {/* Main Hero Referral Card */}
         <section className="relative overflow-hidden bg-gradient-to-br from-rose-950/80 via-purple-950/70 to-amber-950/80 border border-rose-500/40 rounded-3xl p-6 sm:p-8 text-white shadow-2xl shadow-rose-950/50 backdrop-blur-xl">
           {/* Ambient Glow Effects inside Card */}
@@ -981,28 +1003,28 @@ export default function Rewards() {
           <ul className="space-y-2.5" dir={language === 'ur' ? 'rtl' : 'ltr'}>
             <li className="text-xs text-zinc-300 flex items-start gap-2">
               <span className="text-amber-400 font-bold">•</span>
-              <span><strong className="text-white">{t('Referral Signup (+10 Days)')}:</strong> {t('Share your link/code with friends to get 5 days extension for every friend who joins.')}</span>
+              <span><strong className="text-white">{t('Referral Signup (+10 Days)')}:</strong> {t('Share your link/code with friends to get 10 days extension for every friend who joins.')}</span>
             </li>
             <li className="text-xs text-zinc-300 flex items-start gap-2">
               <span className="text-amber-400 font-bold">•</span>
-              <span><strong className="text-white">{t('Referral Activation (+10 Days)')}:</strong> {t('Get an extra 5 days extension when your referred friend purchases a membership.')}</span>
+              <span><strong className="text-white">{t('Referral Activation (+10 Days)')}:</strong> {t('Get an extra 10 days extension when your referred friend purchases a membership.')}</span>
             </li>
             {showInstallTask && (
               <li className="text-xs text-zinc-300 flex items-start gap-2">
                 <span className="text-rose-400 font-bold">•</span>
-                <span><strong className="text-white">{t('Install App (+6 Days)')}:</strong> {t('Install our PWA app on your home screen for a 3 days membership extension.')}</span>
+                <span><strong className="text-white">{t('Install App (+6 Days)')}:</strong> {t('Install our PWA app on your home screen for a 6 days membership extension.')}</span>
               </li>
             )}
             {showNotificationTask && (
               <li className="text-xs text-zinc-300 flex items-start gap-2">
                 <span className="text-purple-400 font-bold">•</span>
-                <span><strong className="text-white">{t('Enable Notifications (+6 Days)')}:</strong> {t('Enable push notifications to stay updated and get a 3 days membership extension.')}</span>
+                <span><strong className="text-white">{t('Enable Notifications (+6 Days)')}:</strong> {t('Enable push notifications to stay updated and get a 6 days membership extension.')}</span>
               </li>
             )}
             {showReviewTask && (
               <li className="text-xs text-zinc-300 flex items-start gap-2">
                 <span className="text-amber-400 font-bold">•</span>
-                <span><strong className="text-white">{t('Submit a Review (+10 Days)')}:</strong> {t('Write a review and rate our app to get a free 5 days membership extension.')}</span>
+                <span><strong className="text-white">{t('Submit a Review (+10 Days)')}:</strong> {t('Write a review and rate our app to get a free 10 days membership extension.')}</span>
               </li>
             )}
           </ul>

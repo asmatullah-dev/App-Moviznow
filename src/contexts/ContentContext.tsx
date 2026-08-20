@@ -44,7 +44,7 @@ interface ContentContextType {
   finalizeChanges: () => Promise<void>;
   hasPendingChanges: boolean;
   checkForUpdates: (force?: boolean) => Promise<{ updated: boolean; updatedContentCount: number }>;
-  quickRefreshCatalog: () => Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean }>;
+  quickRefreshCatalog: (manual?: boolean) => Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean }>;
 }
 
 const ContentContext = createContext<ContentContextType | undefined>(undefined);
@@ -887,8 +887,8 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         return { updated: false, updatedContentCount: 0 };
     }
     
-    // Proceed with sync
-    if (force || noLocalData || lastCheckPeriod !== checkPeriod) {
+    // Proceed with sync - only show 'syncing' toast on manual force checks
+    if (force) {
         window.dispatchEvent(new CustomEvent('sync_status', { detail: 'syncing' }));
     }
 
@@ -943,29 +943,41 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     safeStorage.setItem('last_successful_meta_check', Date.now().toString());
     safeStorage.setItem('has_completed_initial_sync', 'true');
 
-    if (force || noLocalData || lastCheckPeriod !== checkPeriod) {
-        if (serverUpdatedCount > 0) {
-            window.dispatchEvent(new CustomEvent('sync_status', {
-              detail: {
-                status: 'success',
-                updatedContentCount: serverUpdatedCount,
-                message: `${serverUpdatedCount} content updated`
-              }
-            }));
-        } else {
-            window.dispatchEvent(new CustomEvent('sync_status', { detail: updatedSomething ? 'success' : 'up-to-date' }));
-        }
+    if (serverUpdatedCount > 0) {
+        window.dispatchEvent(new CustomEvent('sync_status', {
+          detail: {
+            status: 'success',
+            updatedContentCount: serverUpdatedCount,
+            message: `${serverUpdatedCount} content updated`
+          }
+        }));
+    } else if (force) {
+        window.dispatchEvent(new CustomEvent('sync_status', { detail: updatedSomething ? 'success' : 'up-to-date' }));
     }
 
     return { updated: updatedSomething, updatedContentCount: serverUpdatedCount };
   };
 
-  const quickRefreshCatalog = async (): Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean }> => {
+  const quickRefreshCatalog = async (manual: boolean = false): Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean }> => {
     const LAST_QUICK_REFRESH_KEY = 'last_catalog_quick_refresh_time';
     const now = Date.now();
 
+    // Check relaxation interval for automatic checks (e.g. 5 minutes)
+    const lastCheckStr = safeStorage.getItem(LAST_QUICK_REFRESH_KEY);
+    const lastCheck = lastCheckStr ? parseInt(lastCheckStr, 10) : 0;
+    if (!manual && lastCheck && (now - lastCheck < 5 * 60 * 1000)) {
+      return {
+        updated: false,
+        updatedCount: 0,
+        message: 'Data is up to date',
+        isRelaxed: true
+      };
+    }
+
     if (!navigator.onLine) {
-      window.dispatchEvent(new CustomEvent('sync_status', { detail: 'up-to-date' }));
+      if (manual) {
+        window.dispatchEvent(new CustomEvent('sync_status', { detail: 'up-to-date' }));
+      }
       return {
         updated: false,
         updatedCount: 0,
@@ -974,8 +986,10 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       };
     }
 
-    // Always dispatch 'syncing' status when quick refresh starts so the toast displays "Updating data..."
-    window.dispatchEvent(new CustomEvent('sync_status', { detail: 'syncing' }));
+    // Only dispatch 'syncing' status when manually triggered by the user
+    if (manual) {
+      window.dispatchEvent(new CustomEvent('sync_status', { detail: 'syncing' }));
+    }
 
     let updatedSomething = false;
     let totalUpdatedContentCount = 0;
@@ -1164,7 +1178,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
             message: `${totalUpdatedContentCount} content updated`
           }
         }));
-      } else {
+      } else if (manual) {
         window.dispatchEvent(new CustomEvent('sync_status', {
           detail: {
             status: 'up-to-date',

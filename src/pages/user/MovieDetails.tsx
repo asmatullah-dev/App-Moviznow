@@ -1421,6 +1421,8 @@ export default function MovieDetails() {
           }
         }
 
+        const allowAdvancedFinding = profile && !(profile.role === 'user' && profile.status === 'pending');
+
         // Fetch/Extract OTT Platform
         if (force || !mergedContent.ottPlatform) {
           let detectedOtt = extractOttPlatformFromTMDBDetails(details, searchForceType);
@@ -1428,7 +1430,8 @@ export default function MovieDetails() {
             const { platformNote } = await fetchMovieDigitalReleaseDate(details.id);
             if (platformNote) detectedOtt = platformNote;
           }
-          if (!detectedOtt) {
+          
+          if (!detectedOtt && allowAdvancedFinding) {
             detectedOtt = await predictOttPlatformWithAI(
               mergedContent.title || details.title || details.name || '',
               searchForceType === "tv" ? "tv" : "movie",
@@ -1452,7 +1455,7 @@ export default function MovieDetails() {
           if (!trailerUrl) {
             trailerUrl = (await fetchKinoCheckTrailer(tmdbId, tmdbType)) || "";
           }
-          if (!trailerUrl) {
+          if (!trailerUrl && allowAdvancedFinding) {
             const ytResults = await searchYouTubeTrailer(
               mergedContent.title || details.name || details.title,
               tmdbType,
@@ -3001,12 +3004,12 @@ export default function MovieDetails() {
                   </a>
                 )}
                 
-                {((profile?.status === 'pending' || profile?.status === 'expired') || !(hasUserRated || safeStorage.getItem('has_rated') === 'true' || profile?.reviewRewardClaimed)) && (
+                {((!profile || profile?.status === 'pending' || profile?.status === 'expired') || !(hasUserRated || safeStorage.getItem('has_rated') === 'true' || profile?.reviewRewardClaimed)) && (
                   <Link
                     to="/reviews"
                     className="bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 px-5 py-3.5 text-sm sm:text-base rounded-2xl font-bold flex items-center gap-2 transition-all hover:opacity-90 active:scale-95 shadow-lg"
                   >
-                    <MessageCircle className="w-5 h-5" /> <span>{profile?.status === 'pending' || profile?.status === 'expired' ? t('Check Reviews') : t('Rate our app')}</span>
+                    <MessageCircle className="w-5 h-5" /> <span>{!profile || profile?.status === 'pending' || profile?.status === 'expired' ? t('Check Reviews') : t('Rate our app')}</span>
                   </Link>
                 )}
 

@@ -385,6 +385,19 @@ export default function Login() {
                 Continue with WhatsApp Number
               </button>
             )}
+
+            <div className="relative flex items-center py-2">
+              <div className="flex-grow border-t border-zinc-200 dark:border-zinc-800"></div>
+              <span className="flex-shrink-0 mx-4 text-zinc-400 text-xs font-medium uppercase tracking-wider">or</span>
+              <div className="flex-grow border-t border-zinc-200 dark:border-zinc-800"></div>
+            </div>
+
+            <button
+              onClick={() => navigate('/')}
+              className="w-full bg-zinc-100 dark:bg-zinc-800/50 text-zinc-600 dark:text-zinc-300 font-semibold py-3 px-4 rounded-xl hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors flex items-center justify-center gap-3"
+            >
+              Explore as Guest
+            </button>
           </div>
         )}
 

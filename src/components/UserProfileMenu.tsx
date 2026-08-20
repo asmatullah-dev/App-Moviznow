@@ -543,7 +543,7 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                       setIsRefreshingData(true);
                       try {
                         const [catalogResult] = await Promise.all([
-                          quickRefreshCatalog(),
+                          quickRefreshCatalog(true),
                           refreshProfile(true, 'manual'),
                           refreshSettings()
                         ]);
