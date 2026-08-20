@@ -11,6 +11,7 @@ import {
 import { Helmet } from "react-helmet-async";
 
 import { AdBanner } from "../../components/AdBanner";
+import { GuestAccessBanner } from "../../components/GuestAccessBanner";
 import { Content, QualityLinks, Season, Trailer } from "../../types";
 import { Translate } from "../../components/Translate";
 import { useAuth } from "../../contexts/AuthContext";
@@ -1759,7 +1760,10 @@ export default function MovieDetails() {
     );
 
   const toggleWatchLater = async () => {
-    if (!profile) return;
+    if (!profile) {
+      setShowLoginPrompt(true);
+      return;
+    }
     vibrate(50);
     setIsWatchLaterLoading(true);
     try {
@@ -1772,7 +1776,10 @@ export default function MovieDetails() {
   };
 
   const toggleFavorite = async () => {
-    if (!profile) return;
+    if (!profile) {
+      setShowLoginPrompt(true);
+      return;
+    }
     vibrate(50);
     setIsFavoriteLoading(true);
     try {
@@ -3629,6 +3636,9 @@ export default function MovieDetails() {
                 </div>
               )}
             </section>
+
+            {/* Guest / Pending Access Banner */}
+            <GuestAccessBanner className="my-6" />
 
             {/* Ad Banner for Basic Users */}
             <AdBanner className="my-6" />

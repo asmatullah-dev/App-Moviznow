@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams, useNavigate, useLocation } from "react-router-dom";
 import { Helmet } from "react-helmet";
 import { motion, AnimatePresence } from "framer-motion";
 import { clsx } from "clsx";
@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 
 import { AdBanner } from "../../components/AdBanner";
+import { GuestAccessBanner } from "../../components/GuestAccessBanner";
 import { Content, Collection as AppCollection } from "../../types";
 import { isUserExpired } from "../../contexts/UsersContext";
 import { fetchReviewsFromChunks } from "../../utils/chunkUtils";
@@ -79,6 +80,25 @@ export default function Home({
   const { t, language } = useLanguage();
   const { settings } = useSettings();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [showLoginPrompt, setShowLoginPrompt] = useState(false);
+
+  const handleToggleFavorite = useCallback(async (id: string) => {
+    if (!profile) {
+      setShowLoginPrompt(true);
+      return;
+    }
+    await toggleFavorite(id);
+  }, [profile, toggleFavorite]);
+
+  const handleToggleWatchLater = useCallback(async (id: string) => {
+    if (!profile) {
+      setShowLoginPrompt(true);
+      return;
+    }
+    await toggleWatchLater(id);
+  }, [profile, toggleWatchLater]);
 
   // Search parameters sync
   useEffect(() => {
@@ -746,6 +766,9 @@ export default function Home({
             )}
           </AnimatePresence>
 
+          {/* Guest Access & Pending Status Banner */}
+          <GuestAccessBanner className="mb-6" />
+
           {/* Referral Banner for Pending & Expired Users */}
           {isPendingOrExpiredUser && !isReferralBannerDismissed && (
             <div className="relative overflow-hidden bg-gradient-to-r from-rose-950 via-purple-950 to-amber-950 border border-rose-500/30 dark:border-rose-500/40 shadow-xl rounded-2xl sm:rounded-3xl p-4 sm:p-6 mb-8 text-white transition-all">
@@ -983,8 +1006,8 @@ export default function Home({
               qualities={qualities}
               languages={languages}
               genres={genres}
-              toggleFavorite={toggleFavorite}
-              toggleWatchLater={toggleWatchLater}
+              toggleFavorite={handleToggleFavorite}
+              toggleWatchLater={handleToggleWatchLater}
             />
           )}
 
@@ -1006,8 +1029,8 @@ export default function Home({
               qualities={qualities}
               languages={languages}
               genres={genres}
-              toggleFavorite={toggleFavorite}
-              toggleWatchLater={toggleWatchLater}
+              toggleFavorite={handleToggleFavorite}
+              toggleWatchLater={handleToggleWatchLater}
             />
           )}
 
@@ -1029,8 +1052,8 @@ export default function Home({
               qualities={qualities}
               languages={languages}
               genres={genres}
-              toggleFavorite={toggleFavorite}
-              toggleWatchLater={toggleWatchLater}
+              toggleFavorite={handleToggleFavorite}
+              toggleWatchLater={handleToggleWatchLater}
             />
           )}
 
@@ -1206,8 +1229,8 @@ export default function Home({
                     qualities={qualities}
                     languages={languages}
                     genres={genres}
-                    onToggleFavorite={toggleFavorite}
-                    onToggleWatchLater={toggleWatchLater}
+                    onToggleFavorite={handleToggleFavorite}
+                    onToggleWatchLater={handleToggleWatchLater}
                     selectedYear={selectedYear}
                     skipLiveRatingFetch={true}
                   />
@@ -1395,6 +1418,19 @@ export default function Home({
         onCancel={() => setIsLogoutModalOpen(false)}
       />
 
+      <ConfirmModal
+        isOpen={showLoginPrompt}
+        title={t("Sign In Required")}
+        message={t("Please sign in or create an account to save movies to your favorites and watchlist.")}
+        confirmText={t("Sign In / Register")}
+        cancelText={t("Cancel")}
+        onConfirm={() => {
+          setShowLoginPrompt(false);
+          navigate("/login", { state: { from: location } });
+        }}
+        onCancel={() => setShowLoginPrompt(false)}
+      />
+
       {/* Collection Modal */}
       <CollectionModal
         collection={selectedCollection}
@@ -1411,8 +1447,8 @@ export default function Home({
         qualities={qualities}
         languages={languages}
         genres={genres}
-        toggleFavorite={toggleFavorite}
-        toggleWatchLater={toggleWatchLater}
+        toggleFavorite={handleToggleFavorite}
+        toggleWatchLater={handleToggleWatchLater}
       />
     </div>
   );

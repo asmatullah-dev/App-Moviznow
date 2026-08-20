@@ -9,7 +9,7 @@ import { useSettings } from '../contexts/SettingsContext';
 import { useUsers } from '../contexts/UsersContext';
 import { 
   User, Settings, LogOut, Heart, Clock, MessageCircle, 
-  Sun, Moon, Monitor, LayoutDashboard, Film, Users, Plus, Download, RefreshCw, Eye, X, Menu, Home as HomeIcon, PlayCircle, Tv, Gift, Star, Info, Phone, Award, CheckCircle2, Sparkles
+  Sun, Moon, Monitor, LayoutDashboard, Film, Users, Plus, Download, RefreshCw, Eye, X, Menu, Home as HomeIcon, PlayCircle, Tv, Gift, Star, Info, Phone, Award, CheckCircle2, Sparkles, LogIn, ShieldAlert
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { format } from 'date-fns';
@@ -224,14 +224,38 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
               
               <div className="flex flex-wrap items-center gap-1.5 mt-2">
                 <span className={clsx("text-[10px] font-extrabold tracking-wider px-2.5 py-0.5 rounded-lg border uppercase shadow-2xs", getRoleColor(role))}>
-                  {getRoleDisplayLabel(role)}
+                  {!profile ? t('Guest') : getRoleDisplayLabel(role)}
                 </span>
                 {role !== 'owner' && (
                   <span className={clsx("text-[10px] font-extrabold tracking-wider px-2.5 py-0.5 rounded-lg border uppercase shadow-2xs", getStatusColor(status))}>
-                    {status}
+                    {!profile ? t('Pending') : status}
                   </span>
                 )}
               </div>
+
+              {!profile && (
+                <div className="mt-3 p-3 rounded-xl bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-transparent border border-emerald-500/30">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <ShieldAlert className="w-4 h-4 text-emerald-500 shrink-0" />
+                    <span className="font-extrabold text-xs text-zinc-900 dark:text-white">
+                      {t("Login to Access All Features")}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-zinc-600 dark:text-zinc-400 mb-2 leading-relaxed">
+                    {t("Sign in to unlock full movies, requests, and sync favorites across devices.")}
+                  </p>
+                  <button
+                    onClick={() => {
+                      setIsOpen(false);
+                      navigate('/login', { state: { from: location } });
+                    }}
+                    className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-black dark:text-zinc-950 font-black text-xs shadow-md shadow-emerald-500/20 active:scale-95 transition-all cursor-pointer"
+                  >
+                    <LogIn className="w-3.5 h-3.5" />
+                    <span>{t("Sign In / Register")}</span>
+                  </button>
+                </div>
+              )}
 
               {role !== 'owner' && profile?.expiryDate && (
                 <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-2.5 pt-2 border-t border-zinc-200/60 dark:border-zinc-800/60 flex items-center justify-between">
@@ -553,13 +577,26 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                     </div>
                   </button>
 
-                  <button 
-                    onClick={handleLogout} 
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-bold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
-                  >
-                    <LogOut className="w-3.5 h-3.5" /> 
-                    <span>{t('Sign Out')}</span>
-                  </button>
+                  {!profile ? (
+                    <button
+                      onClick={() => {
+                        setIsOpen(false);
+                        navigate('/login', { state: { from: location } });
+                      }}
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-black text-black bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 shadow-md shadow-emerald-500/20 active:scale-95 transition-all cursor-pointer"
+                    >
+                      <LogIn className="w-4 h-4" />
+                      <span>{t('Sign In / Register')}</span>
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={handleLogout} 
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-bold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
+                    >
+                      <LogOut className="w-3.5 h-3.5" /> 
+                      <span>{t('Sign Out')}</span>
+                    </button>
+                  )}
                 </div>
             </div>
           </motion.div>

@@ -9,9 +9,10 @@ import { safeStorage } from '../utils/safeStorage';
 interface ProtectedRouteProps {
   children: React.ReactNode;
   requireAdmin?: boolean;
+  requireAuth?: boolean;
 }
 
-export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRouteProps) {
+export function ProtectedRoute({ children, requireAdmin = false, requireAuth = false }: ProtectedRouteProps) {
   const { user, profile, loading: authProfileLoading, isSyncing, authLoading, updateUserProfileData, refreshProfile } = useAuth();
   const { settings, loading: settingsLoading } = useSettings();
   const location = useLocation();
@@ -31,8 +32,8 @@ export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRout
 
   const hasCachedUser = !!user || !!profile || !!safeStorage.getItem('profile_cache');
 
-  // Only show loading screen if we have no cached user and auth is still initializing within the fast safety window
-  const isChecking = !hasCachedUser && authLoading && !maxWaitReached;
+  // Only show loading screen if requireAuth or requireAdmin is requested and auth is still initializing within the fast safety window
+  const isChecking = (requireAuth || requireAdmin) && !hasCachedUser && authLoading && !maxWaitReached;
 
   if (isChecking) {
     return (
@@ -46,9 +47,9 @@ export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRout
     );
   }
 
-  // Strictly require logged in user: redirect guest users to /login with target location
-  if (!user && !profile) {
-    console.log('ProtectedRoute: No authenticated user, redirecting to login', location);
+  // If this route strictly requires an authenticated user or admin
+  if ((requireAuth || requireAdmin) && !user && !profile) {
+    console.log('ProtectedRoute: Protected route requires authentication, redirecting to login', location);
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 

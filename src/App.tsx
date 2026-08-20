@@ -316,16 +316,16 @@ export default function App() {
                         <Route path="/:id" element={<ProtectedRoute><MovieDetails /></ProtectedRoute>} />
                         <Route path="/movie/:id" element={<ProtectedRoute><MovieDetails /></ProtectedRoute>} />
                         <Route path="/series/:id" element={<ProtectedRoute><MovieDetails /></ProtectedRoute>} />
-                        <Route path="/watch-later" element={<ProtectedRoute><WatchLater /></ProtectedRoute>} />
-                        <Route path="/favorites" element={<ProtectedRoute><Favorites /></ProtectedRoute>} />
+                        <Route path="/watch-later" element={<ProtectedRoute requireAuth><WatchLater /></ProtectedRoute>} />
+                        <Route path="/favorites" element={<ProtectedRoute requireAuth><Favorites /></ProtectedRoute>} />
                         <Route path="/trial" element={<ProtectedRoute><Trial /></ProtectedRoute>} />
                         <Route path="/vip-trial" element={<ProtectedRoute><VipTrial /></ProtectedRoute>} />
-                        <Route path="/top-up" element={<ProtectedRoute><TopUp /></ProtectedRoute>} />
-                        <Route path="/cart" element={<ProtectedRoute><Cart /></ProtectedRoute>} />
-                        <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+                        <Route path="/top-up" element={<ProtectedRoute requireAuth><TopUp /></ProtectedRoute>} />
+                        <Route path="/cart" element={<ProtectedRoute requireAuth><Cart /></ProtectedRoute>} />
+                        <Route path="/settings" element={<ProtectedRoute requireAuth><Settings /></ProtectedRoute>} />
                         <Route path="/freemovies" element={<ProtectedRoute><FreeMovies /></ProtectedRoute>} />
                         <Route path="/membership" element={<ProtectedRoute><Membership /></ProtectedRoute>} />
-                        <Route path="/rewards" element={<ProtectedRoute><Rewards /></ProtectedRoute>} />
+                        <Route path="/rewards" element={<ProtectedRoute requireAuth><Rewards /></ProtectedRoute>} />
                         <Route path="/reviews" element={<ProtectedRoute><Reviews /></ProtectedRoute>} />
                         <Route path="/about" element={<ProtectedRoute><About /></ProtectedRoute>} />
                         <Route path="/contact" element={<ProtectedRoute><Contact /></ProtectedRoute>} />
