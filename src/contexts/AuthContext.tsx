@@ -9,7 +9,7 @@ import React, {
 import { auth, db, runWithNetwork } from "../firebase";
 import { safeStorage } from "../utils/safeStorage";
 import { isValidGmailAddress } from "../utils/emailValidation";
-import { isUserExpired } from "./UsersContext";
+import { isUserExpired, normalizeUserStatusAndExpiry } from "./UsersContext";
 import {
   onAuthStateChanged,
   User,
@@ -1026,19 +1026,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
-          // Auto-expire logic
+          // Auto-expire & active restoration logic
           const expiryNow = new Date();
-          if (
-            (data.status === "active" || !data.status) &&
-            data.role !== "owner" &&
-            data.role !== "admin"
-          ) {
+          if (data.role !== "owner" && data.role !== "admin") {
             if (!data.expiryDate || data.expiryDate === "null" || data.expiryDate === "") {
-              // Active status without an expiry date is invalid for regular users — mark as expired!
-              updates.status = "expired";
-              data.status = "expired";
-              if (mergedProfile) {
-                mergedProfile.status = "expired";
+              if (data.status !== "suspended" && data.status !== "pending") {
+                updates.status = "expired";
+                data.status = "expired";
+                if (mergedProfile) {
+                  mergedProfile.status = "expired";
+                }
               }
             } else if (data.expiryDate !== "Lifetime") {
               if (isUserExpired(data.expiryDate)) {
@@ -1050,7 +1047,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                       const freshData = freshSnap.data() as UserProfile;
                       serverProfile = freshData;
                       if (freshData.expiryDate) {
-                        if (!isUserExpired(freshData.expiryDate) || freshData.status !== "active") {
+                        if (!isUserExpired(freshData.expiryDate)) {
                           isReallyExpired = false;
                           data.expiryDate = freshData.expiryDate;
                           data.status = freshData.status;
@@ -1066,7 +1063,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   }
                 }
 
-                if (isReallyExpired) {
+                if (isReallyExpired && data.status !== "suspended") {
                   updates.status = "expired";
                   data.status = "expired";
                   if (mergedProfile) {
@@ -1074,8 +1071,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   }
                 }
               } else {
+                // Today is on or before expiry date — user MUST be active!
                 if (data.status !== "suspended" && data.status !== "pending") {
-                  if (data.status === "expired") {
+                  if (data.status === "expired" || !data.status) {
                     updates.status = "active";
                     data.status = "active";
                     if (mergedProfile) {
@@ -1772,7 +1770,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (currentUser) {
         const userRef = doc(db, "users", currentUser.uid);
-
         // Load profile immediately from local cache
         const cachedProfileStr = safeStorage.getItem("profile_cache");
         let hasValidCachedProfile = false;

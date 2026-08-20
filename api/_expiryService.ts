@@ -540,9 +540,13 @@ async function processUserDocs(
     const expiryMonth = parseInt(parts[1], 10) - 1;
     const expiryDay = parseInt(parts[2], 10);
 
-    const isExpiredOrToday = now >= new Date(expiryYear, expiryMonth, expiryDay, 0, 0, 0) || todayStr >= expiryDateStr;
+    // Expiry boundary is midnight starting the day AFTER the expiry date (expiryDay + 1).
+    // E.g., for "2026-08-20", boundary is 2026-08-21 00:00:00.
+    // The user remains ACTIVE for the ENTIRE duration of August 20th.
+    const expiryBoundary = new Date(Date.UTC(expiryYear, expiryMonth, expiryDay + 1, 0, 0, 0, 0));
+    const isExpired = now >= expiryBoundary || todayStr > expiryDateStr;
 
-    if (!isExpiredOrToday) {
+    if (!isExpired) {
       // Not yet expired
       continue;
     }
