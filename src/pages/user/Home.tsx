@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 
 import { Content, Collection as AppCollection } from "../../types";
+import { isUserExpired } from "../../contexts/UsersContext";
 import { fetchReviewsFromChunks } from "../../utils/chunkUtils";
 import { safeStorage } from "../../utils/safeStorage";
 import { smartSearch } from "../../utils/searchUtils";
@@ -225,13 +226,13 @@ export default function Home({
   const isPendingOrExpiredUser = useMemo(() => {
     if (!profile) return true;
     const status = String(profile.status || "");
-    if (status === "pending" || status === "expired") return true;
-    if (profile.expiryDate && profile.expiryDate !== "Lifetime" && status !== "active") {
-      const parts = profile.expiryDate.split("T")[0].split("-");
-      if (parts.length === 3) {
-        const expiryBoundary = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]) + 1);
-        if (new Date() >= expiryBoundary) return true;
-      }
+    if (status === "pending") return true;
+    if (status === "expired" && profile.expiryDate && !isUserExpired(profile.expiryDate)) {
+      return false;
+    }
+    if (status === "expired") return true;
+    if (profile.expiryDate && profile.expiryDate !== "Lifetime") {
+      if (isUserExpired(profile.expiryDate)) return true;
     }
     return false;
   }, [profile]);

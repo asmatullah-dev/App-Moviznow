@@ -165,15 +165,17 @@ export default function Reviews() {
         try {
           let baseDate = new Date();
           if (profile.expiryDate && profile.expiryDate !== 'Lifetime') {
-            const currentExp = new Date(profile.expiryDate);
-            if (currentExp > baseDate) {
-              baseDate = currentExp;
+            const parts = profile.expiryDate.split('T')[0].split('-');
+            if (parts.length === 3) {
+              const expDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]), 23, 59, 59, 999);
+              if (expDate > baseDate) baseDate = expDate;
             }
           }
           baseDate.setDate(baseDate.getDate() + 5);
+          const dateStr = baseDate.toISOString().split('T')[0];
           const updates: any = {
             reviewRewardClaimed: true,
-            expiryDate: baseDate.toISOString()
+            expiryDate: `${dateStr}T23:59:59.999Z`
           };
           if (profile.expiryDate !== 'Lifetime') {
             updates.status = 'active';

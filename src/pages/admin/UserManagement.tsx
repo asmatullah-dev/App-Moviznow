@@ -21,7 +21,7 @@ import { PhoneWhitelistManager } from '../../components/PhoneWhitelistManager';
 
 import { useLocation, useNavigate } from 'react-router-dom';
 
-import { useUsers } from '../../contexts/UsersContext';
+import { useUsers, isUserExpired } from '../../contexts/UsersContext';
 import { fetchReviewsFromChunks } from '../../utils/chunkUtils';
 
 type SortField = 'createdAt' | 'displayName' | 'phone' | 'expiryDate' | 'lastActive';
@@ -286,17 +286,14 @@ export default function UserManagement() {
               needsUpdate = true;
             }
           } else if (user.expiryDate !== 'Lifetime') {
-            const expiryDateStr = user.expiryDate.split('T')[0];
-            const parts = expiryDateStr.split('-');
-            if (parts.length === 3) {
-              const expiryBoundary = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]) + 1);
-              if (now >= expiryBoundary) {
-                if (user.status !== 'expired' && user.status !== 'suspended') {
-                  updates.status = 'expired';
-                  needsUpdate = true;
-                }
-              } else {
-                if (user.status === 'expired' || !user.status) {
+            if (isUserExpired(user.expiryDate)) {
+              if (user.status !== 'expired' && user.status !== 'suspended') {
+                updates.status = 'expired';
+                needsUpdate = true;
+              }
+            } else {
+              if (user.status === 'expired' || !user.status) {
+                if (user.status !== 'suspended' && user.status !== 'pending') {
                   updates.status = 'active';
                   needsUpdate = true;
                 }
@@ -603,13 +600,17 @@ export default function UserManagement() {
       const isNowManager = editForm.role === 'user_manager' || editForm.role === 'manager';
       updateData.isUserManager = isNowManager;
       
-      if (editForm.expiryDate) {
-        updateData.expiryDate = new Date(editForm.expiryDate).toISOString();
+      if (editForm.expiryDate && editForm.expiryDate !== 'Lifetime') {
+        const dateStr = editForm.expiryDate.split('T')[0];
+        updateData.expiryDate = `${dateStr}T23:59:59.999Z`;
+      } else if (editForm.expiryDate === 'Lifetime') {
+        updateData.expiryDate = 'Lifetime';
       } else if (editForm.status === 'active' && (editForm.role as string) !== 'owner' && (editForm.role as string) !== 'admin' && (selectedUser as any).role !== 'owner' && (selectedUser as any).role !== 'admin') {
         // Active status requires an expiry date — default to 30 days if left empty
         const defaultExp = new Date();
         defaultExp.setDate(defaultExp.getDate() + 30);
-        updateData.expiryDate = defaultExp.toISOString();
+        const dateStr = defaultExp.toISOString().split('T')[0];
+        updateData.expiryDate = `${dateStr}T23:59:59.999Z`;
       } else {
         updateData.expiryDate = null;
       }
@@ -1380,12 +1381,16 @@ export default function UserManagement() {
           
           const newUserId = `pending_${Date.now()}`;
           let defaultExpiryDate: string | null = null;
-          if (newUserForm.expiryDate) {
-            defaultExpiryDate = new Date(newUserForm.expiryDate).toISOString();
+          if (newUserForm.expiryDate && newUserForm.expiryDate !== 'Lifetime') {
+            const dateStr = newUserForm.expiryDate.split('T')[0];
+            defaultExpiryDate = `${dateStr}T23:59:59.999Z`;
+          } else if (newUserForm.expiryDate === 'Lifetime') {
+            defaultExpiryDate = 'Lifetime';
           } else if (newUserForm.status === 'active' && newUserForm.role !== 'owner' && newUserForm.role !== 'admin') {
             const defaultExp = new Date();
             defaultExp.setDate(defaultExp.getDate() + 30);
-            defaultExpiryDate = defaultExp.toISOString();
+            const dateStr = defaultExp.toISOString().split('T')[0];
+            defaultExpiryDate = `${dateStr}T23:59:59.999Z`;
           }
 
           const newUserData: any = {

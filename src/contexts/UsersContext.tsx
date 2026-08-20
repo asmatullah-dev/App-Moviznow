@@ -6,35 +6,53 @@ import { useAuth } from './AuthContext';
 import { safeStorage } from '../utils/safeStorage';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
 
+export function isUserExpired(expiryDate?: string | null): boolean {
+  if (!expiryDate || expiryDate === 'Lifetime' || expiryDate === 'null' || expiryDate === '') return false;
+  const cleanDateStr = expiryDate.split('T')[0];
+  const parts = cleanDateStr.split('-');
+  if (parts.length !== 3) return false;
+
+  const year = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10) - 1;
+  const day = parseInt(parts[2], 10);
+
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return false;
+
+  // Expiry boundary is midnight starting the day AFTER parts[2]
+  // E.g. for "2026-08-19", boundary is 2026-08-20 00:00:00.
+  // The user remains ACTIVE for the ENTIRE duration of August 19th.
+  const localBoundary = new Date(year, month, day + 1, 0, 0, 0, 0);
+  const utcBoundary = new Date(Date.UTC(year, month, day + 1, 0, 0, 0, 0));
+  
+  // Use the later boundary so timezone differences never prematurely expire a user during their valid date
+  const effectiveBoundary = localBoundary > utcBoundary ? localBoundary : utcBoundary;
+  
+  return new Date() >= effectiveBoundary;
+}
+
 export function normalizeUserStatusAndExpiry(u: UserProfile): UserProfile {
   if (!u || !u.uid) return u;
-  const now = new Date();
 
   if (u.role === 'owner' || u.role === 'admin') {
     return { ...u, status: 'active', expiryDate: u.expiryDate || 'Lifetime' };
   }
 
-  // Check if expiryDate exists and is valid
-  if (u.expiryDate && u.expiryDate !== 'Lifetime') {
-    const expiryDateStr = u.expiryDate.split('T')[0];
-    const parts = expiryDateStr.split('-');
-    if (parts.length === 3) {
-      const expiryBoundary = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]) + 1);
-      if (now < expiryBoundary) {
-        // Expiry date is in the future -> User is ACTIVE (unless manually suspended)
-        if (u.status !== 'suspended') {
-          return { ...u, status: 'active' };
-        }
-      } else {
-        // Expiry date has passed -> User is EXPIRED (unless manually suspended)
-        if (u.status !== 'suspended') {
-          return { ...u, status: 'expired' };
-        }
-      }
-    }
-  } else if (!u.expiryDate || u.expiryDate === 'null' || u.expiryDate === '') {
+  if (!u.expiryDate || u.expiryDate === 'null' || u.expiryDate === '') {
     if (u.status !== 'suspended' && u.status !== 'pending') {
       return { ...u, status: 'expired' };
+    }
+    return u;
+  }
+
+  if (u.expiryDate !== 'Lifetime') {
+    if (isUserExpired(u.expiryDate)) {
+      if (u.status !== 'suspended') {
+        return { ...u, status: 'expired' };
+      }
+    } else {
+      if (u.status !== 'suspended' && u.status !== 'pending') {
+        return { ...u, status: 'active' };
+      }
     }
   }
 

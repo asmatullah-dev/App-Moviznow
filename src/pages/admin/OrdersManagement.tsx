@@ -12,7 +12,7 @@ import ConfirmModal from '../../components/ConfirmModal';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useAuth } from '../../contexts/AuthContext';
 
-import { useUsers } from '../../contexts/UsersContext';
+import { useUsers, isUserExpired } from '../../contexts/UsersContext';
 
 const CACHE_KEY = 'admin_orders_cache';
 const PHONES_CACHE_KEY = 'admin_user_phones_cache';
@@ -190,21 +190,19 @@ export default function OrdersManagement() {
       if (order.type === 'membership') {
         const months = order.months || 1;
         
-        let newExpiryDate = new Date();
-        if (userData.expiryDate && userData.expiryDate !== 'Lifetime') {
+        let baseDate = new Date();
+        if (userData.expiryDate && userData.expiryDate !== 'Lifetime' && !isUserExpired(userData.expiryDate)) {
           const parts = userData.expiryDate.split('T')[0].split('-');
           if (parts.length === 3) {
-            const expiryBoundary = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]) + 1);
-            if (expiryBoundary > new Date()) {
-              newExpiryDate = new Date(userData.expiryDate);
-            }
+            baseDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]), 23, 59, 59, 999);
           }
         }
-        newExpiryDate.setMonth(newExpiryDate.getMonth() + months);
+        baseDate.setMonth(baseDate.getMonth() + months);
+        const dateStr = baseDate.toISOString().split('T')[0];
 
         updates.role = 'user';
         updates.status = 'active';
-        updates.expiryDate = newExpiryDate.toISOString();
+        updates.expiryDate = `${dateStr}T23:59:59.999Z`;
       } else if (order.type === 'content' && order.items) {
         const contentIds = order.items.map(item => 
           item.type === 'season' ? `${item.contentId}:${item.seasonId}` : item.contentId

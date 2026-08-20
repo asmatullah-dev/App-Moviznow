@@ -92,12 +92,13 @@ export default function Trial() {
         expiry.setDate(expiry.getDate() + 2);
       }
 
+      const dateStr = expiry.toISOString().split('T')[0];
       // Use standard update profile function to ensure chunk_meta and local cache are updated
       await updateUserProfileData({
         role: 'trial',
         status: 'active',
         trialActivated: true,
-        expiryDate: expiry.toISOString()
+        expiryDate: `${dateStr}T23:59:59.999Z`
       }, undefined, true);
 
       // Force a full refresh to be absolutely sure

@@ -9,6 +9,7 @@ import React, {
 import { auth, db, runWithNetwork } from "../firebase";
 import { safeStorage } from "../utils/safeStorage";
 import { isValidGmailAddress } from "../utils/emailValidation";
+import { isUserExpired } from "./UsersContext";
 import {
   onAuthStateChanged,
   User,
@@ -1040,58 +1041,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 mergedProfile.status = "expired";
               }
             } else if (data.expiryDate !== "Lifetime") {
-              // Parse expiry date by YYYY-MM-DD to avoid timezone shifting
-              const expiryDateStr = data.expiryDate.split("T")[0];
-              const parts = expiryDateStr.split("-");
-              if (parts.length === 3) {
-                // Create expiration boundary at 00:00:00 local time on the day AFTER the expiry date
-                const expiryBoundary = new Date(
-                  parseInt(parts[0]),
-                  parseInt(parts[1]) - 1,
-                  parseInt(parts[2]) + 1,
-                );
-                if (expiryNow >= expiryBoundary) {
-                  let isReallyExpired = true;
-                  if (!serverProfile && navigator.onLine) {
-                    try {
-                      const freshSnap = await getDoc(userRef);
-                      if (freshSnap.exists()) {
-                        const freshData = freshSnap.data() as UserProfile;
-                        serverProfile = freshData;
-                        if (freshData.expiryDate) {
-                          const fExpStr = freshData.expiryDate.split("T")[0];
-                          const fParts = fExpStr.split("-");
-                          if (fParts.length === 3) {
-                            const freshBoundary = new Date(
-                              parseInt(fParts[0]),
-                              parseInt(fParts[1]) - 1,
-                              parseInt(fParts[2]) + 1,
-                            );
-                            if (
-                              expiryNow < freshBoundary ||
-                              freshData.status !== "active"
-                            ) {
-                              isReallyExpired = false;
-                              data.expiryDate = freshData.expiryDate;
-                              data.status = freshData.status;
-                              if (mergedProfile) {
-                                mergedProfile.expiryDate = freshData.expiryDate;
-                                mergedProfile.status = freshData.status;
-                              }
-                            }
+              if (isUserExpired(data.expiryDate)) {
+                let isReallyExpired = true;
+                if (!serverProfile && navigator.onLine) {
+                  try {
+                    const freshSnap = await getDoc(userRef);
+                    if (freshSnap.exists()) {
+                      const freshData = freshSnap.data() as UserProfile;
+                      serverProfile = freshData;
+                      if (freshData.expiryDate) {
+                        if (!isUserExpired(freshData.expiryDate) || freshData.status !== "active") {
+                          isReallyExpired = false;
+                          data.expiryDate = freshData.expiryDate;
+                          data.status = freshData.status;
+                          if (mergedProfile) {
+                            mergedProfile.expiryDate = freshData.expiryDate;
+                            mergedProfile.status = freshData.status;
                           }
                         }
                       }
-                    } catch (e) {
-                      console.error("Failed to fresh fetch for expiry check", e);
                     }
+                  } catch (e) {
+                    console.error("Failed to fresh fetch for expiry check", e);
                   }
+                }
 
-                  if (isReallyExpired) {
-                    updates.status = "expired";
-                    data.status = "expired";
+                if (isReallyExpired) {
+                  updates.status = "expired";
+                  data.status = "expired";
+                  if (mergedProfile) {
+                    mergedProfile.status = "expired";
+                  }
+                }
+              } else {
+                if (data.status !== "suspended" && data.status !== "pending") {
+                  if (data.status === "expired") {
+                    updates.status = "active";
+                    data.status = "active";
                     if (mergedProfile) {
-                      mergedProfile.status = "expired";
+                      mergedProfile.status = "active";
                     }
                   }
                 }
@@ -2726,12 +2714,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       data.updatedAt = nowIso;
 
       if (data.expiryDate && data.expiryDate !== "Lifetime") {
-        const parts = data.expiryDate.split("T")[0].split("-");
-        if (parts.length === 3) {
-          const boundary = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]) + 1);
-          if (new Date() < boundary && data.status !== "suspended") {
-            data.status = "active";
-          }
+        if (!isUserExpired(data.expiryDate) && data.status !== "suspended" && data.status !== "pending") {
+          data.status = "active";
+        } else if (isUserExpired(data.expiryDate) && data.status !== "suspended") {
+          data.status = "expired";
         }
       }
 
