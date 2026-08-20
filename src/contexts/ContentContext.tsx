@@ -910,7 +910,13 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     
     // Proceed with sync - show 'syncing' toast on manual force checks or initial load/empty library
     if (force || noLocalData || isLibraryEmpty) {
-        window.dispatchEvent(new CustomEvent('sync_status', { detail: 'syncing' }));
+        window.dispatchEvent(new CustomEvent('sync_status', {
+          detail: {
+            status: 'syncing',
+            isInitialLoad: noLocalData || isLibraryEmpty,
+            message: (noLocalData || isLibraryEmpty) ? 'Loading Data...' : 'Updating data...'
+          }
+        }));
     }
 
     let updatedSomething = false;
@@ -1052,7 +1058,13 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
     // Dispatch 'syncing' status when manually triggered or when library is empty/initial load
     if (manual || isLibraryEmpty) {
-      window.dispatchEvent(new CustomEvent('sync_status', { detail: 'syncing' }));
+      window.dispatchEvent(new CustomEvent('sync_status', {
+        detail: {
+          status: 'syncing',
+          isInitialLoad: isLibraryEmpty,
+          message: isLibraryEmpty ? 'Loading Data...' : 'Updating data...'
+        }
+      }));
     }
 
     let updatedSomething = false;

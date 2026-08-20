@@ -39,12 +39,7 @@ export function SyncBanner() {
       setIsInitialLoad(initialLoad);
 
       if (status === 'syncing') {
-        syncingSafetyTimeout = setTimeout(() => {
-          setSyncStatus(null);
-          setUpdatedCount(undefined);
-          setCustomMessage(undefined);
-          setIsInitialLoad(false);
-        }, 12000);
+        // Do not auto-dismiss while actively syncing/loading data; let the sync completion event set the success/error state
       } else if (status === 'success' || status === 'up-to-date' || status === 'error') {
         timeoutId = setTimeout(() => {
           setSyncStatus(null);
@@ -73,7 +68,12 @@ export function SyncBanner() {
   };
 
   const getMessageText = () => {
-    if (syncStatus === 'syncing') return t('Updating data...');
+    if (syncStatus === 'syncing') {
+      if (isInitialLoad || customMessage === 'Loading Data...') {
+        return t('Loading Data...');
+      }
+      return t('Updating data...');
+    }
     if (syncStatus === 'error') return t('Sync failed. Will retry automatically.');
     if (syncStatus === 'success') {
       if (isInitialLoad || customMessage === 'Loaded All Contents Successfully') {
