@@ -3345,6 +3345,11 @@ async function startServer() {
     });
 
     app.get("*", async (req, res) => {
+      // Return 404 for missing static assets instead of serving index.html
+      if (req.path.startsWith("/assets/") || /\.(js|css|json|png|jpg|jpeg|gif|ico|svg|woff2?|ttf|eot)$/i.test(req.path)) {
+        return res.status(404).send("Asset not found");
+      }
+
       try {
         let templatePath = path.join(distPath, "app.html");
         if (!fs.existsSync(templatePath)) {

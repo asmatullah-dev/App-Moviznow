@@ -162,13 +162,13 @@ export const requestNotificationPermission = async (force: boolean = false) => {
           // 0. Clean up any previous tokens for this user across all chunks (ensures 1 active device per user)
           if (currentUserId && currentUserId !== 'anonymous') {
             try {
-              const metaDocTmp = await getDoc(doc(db, 'chunk_meta', 'versions'));
+              const { getChunkMeta } = await import('./utils/chunkMeta');
+              const metaData = await getChunkMeta();
               let maxIdx = 0;
-              if (metaDocTmp.exists()) {
-                const latest = metaDocTmp.data()?.fcm_tokens?.latestChunkId || 'fcm_chunk_0';
-                const matchIdx = latest.match(/(\d+)$/);
-                if (matchIdx) maxIdx = parseInt(matchIdx[1], 10);
-              }
+              const latest = metaData?.fcm_tokens?.latestChunkId || 'fcm_chunk_0';
+              const matchIdx = latest.match(/(\d+)$/);
+              if (matchIdx) maxIdx = parseInt(matchIdx[1], 10);
+
               for (let i = 0; i <= maxIdx; i++) {
                 const cid = 'fcm_chunk_' + i;
                 const cRef = doc(db, 'fcm_tokens', cid);
@@ -194,16 +194,10 @@ export const requestNotificationPermission = async (force: boolean = false) => {
           }
 
           // 1. Get current chunk ID from meta
+          const { getChunkMeta } = await import('./utils/chunkMeta');
           const metaRef = doc(db, 'chunk_meta', 'versions');
-          const metaDoc = await getDoc(metaRef);
-          let latestChunkId = 'fcm_chunk_0';
-          
-          if (metaDoc.exists()) {
-            const metaData = metaDoc.data();
-            if (metaData.fcm_tokens && metaData.fcm_tokens.latestChunkId) {
-              latestChunkId = metaData.fcm_tokens.latestChunkId;
-            }
-          }
+          const metaData = await getChunkMeta();
+          let latestChunkId = metaData?.fcm_tokens?.latestChunkId || 'fcm_chunk_0';
 
           const chunkRef = doc(db, 'fcm_tokens', latestChunkId);
           const chunkDoc = await getDoc(chunkRef);
