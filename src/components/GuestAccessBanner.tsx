@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Sparkles, LogIn, X } from 'lucide-react';
+import { Film, LogIn, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { clsx } from 'clsx';
@@ -67,7 +67,7 @@ export const GuestAccessBanner: React.FC<GuestAccessBannerProps> = ({
         <div className="relative p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="flex items-start gap-3.5 max-w-2xl">
             <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-md bg-gradient-to-tr from-emerald-500 to-teal-400 text-black shadow-emerald-500/30">
-              <Sparkles className="w-5 h-5" />
+              <Film className="w-5 h-5" />
             </div>
             
             <div className="space-y-1">

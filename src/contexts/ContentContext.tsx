@@ -908,8 +908,8 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         return { updated: false, updatedContentCount: 0, isInitialLoad: false };
     }
     
-    // Proceed with sync - only show 'syncing' toast on manual force checks
-    if (force) {
+    // Proceed with sync - show 'syncing' toast on manual force checks or initial load/empty library
+    if (force || noLocalData || isLibraryEmpty) {
         window.dispatchEvent(new CustomEvent('sync_status', { detail: 'syncing' }));
     }
 
@@ -1050,8 +1050,8 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       };
     }
 
-    // Only dispatch 'syncing' status when manually triggered by the user
-    if (manual) {
+    // Dispatch 'syncing' status when manually triggered or when library is empty/initial load
+    if (manual || isLibraryEmpty) {
       window.dispatchEvent(new CustomEvent('sync_status', { detail: 'syncing' }));
     }
 
@@ -1236,7 +1236,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       // Mark the 5-minute relaxation timestamp
       safeStorage.setItem(LAST_QUICK_REFRESH_KEY, now.toString());
 
-      if (isLibraryEmpty && updatedSomething) {
+      if (isLibraryEmpty) {
         window.dispatchEvent(new CustomEvent('sync_status', {
           detail: {
             status: 'success',

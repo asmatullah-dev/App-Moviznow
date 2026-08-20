@@ -379,34 +379,49 @@ export default function Membership() {
             </div>
           </div>
 
-          {/* Membership Group VIP Plans */}
+          {/* Membership Group VIP Plans (100% Ad-Free) */}
           <div className="space-y-6 pt-4">
             <div className="text-center space-y-2">
               <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider bg-rose-500/10 border border-rose-500/30 text-rose-400 shadow-sm">
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>{t("Save up to 44% with VIP Passes")}</span>
+                <span>{t("100% Ad-Free • Save up to 44% with VIP Passes")}</span>
               </div>
-              <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
-                {t("Membership Group")}
+              <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight flex items-center justify-center gap-2">
+                <span>{t("VIP Membership (Without Ads)")}</span>
+                <Crown className="w-7 h-7 text-amber-400 fill-amber-400/20 shrink-0" />
               </h2>
               <p className="text-xs sm:text-sm text-zinc-300 max-w-xl mx-auto">
-                {t("Daily 6–7 HD movies")} & web series delivered inside the WhatsApp group. Longer plans unlock bigger discounts.
+                {t("Enjoy 100% ad-free streaming plus daily 6–7 HD movies & web series delivered inside the WhatsApp group. Longer plans unlock bigger discounts.")}
               </p>
+
+              {/* Explicit VIP Without Ads Guarantee Callout */}
+              <div className="bg-gradient-to-r from-emerald-500/10 via-amber-500/15 to-emerald-500/10 border border-emerald-500/40 rounded-2xl p-4 text-center max-w-2xl mx-auto shadow-lg backdrop-blur-md">
+                <p className="text-xs sm:text-sm font-extrabold text-emerald-300 flex items-center justify-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
+                  <span>{t("VIP Guarantee: 100% Ad-Free Streaming (No Ads, No Interstitials, No Banners)")}</span>
+                </p>
+              </div>
             </div>
 
             <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {/* 1 Month */}
+              {/* 1 Month VIP */}
               <motion.div 
                 whileHover={{ y: -6 }}
                 className="bg-gradient-to-b from-zinc-900/90 to-zinc-950/95 border border-zinc-800 hover:border-emerald-500/40 rounded-3xl p-6 flex flex-col justify-between shadow-xl backdrop-blur-xl relative"
               >
                 <div>
-                  <h3 className="text-xl font-extrabold text-white mb-1">{t("1 Month")}</h3>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-xl font-extrabold text-white">{t("1 Month VIP")}</h3>
+                    <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      {t("Without Ads")}
+                    </span>
+                  </div>
                   <div className="text-3xl font-black text-emerald-400 mb-1">{t("PKR 300")}</div>
                   <p className="text-zinc-500 mb-4 text-xs font-bold">{t("≈ PKR 300/month")}</p>
-                  <p className="text-xs font-bold text-zinc-400 mb-5 min-h-[32px]">{t("Base monthly rate")}</p>
+                  <p className="text-xs font-bold text-zinc-400 mb-5 min-h-[32px]">{t("Base monthly VIP rate")}</p>
                   
                   <ul className="space-y-3 mb-6 text-xs text-zinc-300">
+                    <li className="flex items-center gap-2.5 font-bold text-emerald-400"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("100% Ad-Free (Without Ads)")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("Daily 6–7 HD movies")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("Latest web series")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("Priority WhatsApp support")}</span></li>
@@ -419,11 +434,11 @@ export default function Membership() {
                   onClick={() => handleSelectPlan('1m')}
                   className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white py-3.5 rounded-2xl font-black transition-all text-xs shadow-md"
                 >
-                  {t("Join Now")}
+                  {t("Join VIP Now")}
                 </motion.button>
               </motion.div>
 
-              {/* 3 Months */}
+              {/* 3 Months VIP */}
               <motion.div 
                 whileHover={{ y: -6 }}
                 className="bg-gradient-to-b from-zinc-900/90 to-zinc-950/95 border border-zinc-800 hover:border-emerald-500/40 rounded-3xl p-6 flex flex-col justify-between shadow-xl backdrop-blur-xl relative overflow-hidden"
@@ -433,7 +448,12 @@ export default function Membership() {
                 </div>
 
                 <div>
-                  <h3 className="text-xl font-extrabold text-white mb-1">{t("3 Months")}</h3>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-xl font-extrabold text-white">{t("3 Months VIP")}</h3>
+                    <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      {t("Without Ads")}
+                    </span>
+                  </div>
                   <div className="text-3xl font-black text-emerald-400 mb-1">{t("PKR 750")}</div>
                   <p className="text-zinc-500 mb-4 text-xs font-bold">{t("≈ PKR 250/month")}</p>
                   <p className="text-xs font-bold text-zinc-300 mb-5 min-h-[32px]">
@@ -441,6 +461,7 @@ export default function Membership() {
                   </p>
                   
                   <ul className="space-y-3 mb-6 text-xs text-zinc-300">
+                    <li className="flex items-center gap-2.5 font-bold text-emerald-400"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("100% Ad-Free (Without Ads)")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("Daily 6–7 HD movies")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("Latest web series")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("Priority WhatsApp support")}</span></li>
@@ -453,11 +474,11 @@ export default function Membership() {
                   onClick={() => handleSelectPlan('3m')}
                   className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white py-3.5 rounded-2xl font-black transition-all text-xs shadow-md"
                 >
-                  {t("Join Now")}
+                  {t("Join VIP Now")}
                 </motion.button>
               </motion.div>
 
-              {/* 6 Months - FEATURED HIGHLIGHT */}
+              {/* 6 Months VIP - FEATURED HIGHLIGHT */}
               <motion.div 
                 whileHover={{ y: -8 }}
                 className="bg-gradient-to-b from-emerald-950/50 via-zinc-900/95 to-zinc-950/95 border-2 border-emerald-500 rounded-3xl p-6 flex flex-col justify-between shadow-2xl shadow-emerald-950/50 backdrop-blur-xl relative overflow-hidden transform lg:-translate-y-3"
@@ -468,7 +489,12 @@ export default function Membership() {
                 </div>
 
                 <div>
-                  <h3 className="text-xl font-black text-white mb-1 mt-4">{t("6 Months")}</h3>
+                  <div className="flex items-center justify-between mb-2 mt-4">
+                    <h3 className="text-xl font-black text-white">{t("6 Months VIP")}</h3>
+                    <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      {t("Without Ads")}
+                    </span>
+                  </div>
                   <div className="text-3xl font-black text-emerald-400 mb-1">{t("PKR 1,400")}</div>
                   <p className="text-zinc-400 mb-4 text-xs font-bold">{t("≈ PKR 233/month")}</p>
                   <p className="text-xs font-bold text-zinc-300 mb-5 min-h-[32px]">
@@ -476,6 +502,7 @@ export default function Membership() {
                   </p>
                   
                   <ul className="space-y-3 mb-6 text-xs text-zinc-100 font-medium">
+                    <li className="flex items-center gap-2.5 font-bold text-emerald-400"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("100% Ad-Free (Without Ads)")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("Daily 6–7 HD movies")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("Latest web series")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("Priority WhatsApp support")}</span></li>
@@ -488,11 +515,11 @@ export default function Membership() {
                   onClick={() => handleSelectPlan('6m')}
                   className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white py-4 rounded-2xl font-black transition-all text-xs shadow-xl shadow-emerald-500/30"
                 >
-                  {t("Join Now")}
+                  {t("Join VIP Now")}
                 </motion.button>
               </motion.div>
 
-              {/* 1 Year */}
+              {/* 1 Year VIP */}
               <motion.div 
                 whileHover={{ y: -6 }}
                 className="bg-gradient-to-b from-amber-950/20 via-zinc-900/90 to-zinc-950/95 border-2 border-amber-500/50 hover:border-amber-400 rounded-3xl p-6 flex flex-col justify-between shadow-2xl shadow-amber-500/10 backdrop-blur-xl relative overflow-hidden"
@@ -502,10 +529,15 @@ export default function Membership() {
                 </div>
 
                 <div>
-                  <h3 className="text-xl font-black text-white mb-1 flex items-center gap-2">
-                    <span>{t("1 Year Pass")}</span>
-                    <Crown className="w-5 h-5 text-amber-400 fill-amber-400/20" />
-                  </h3>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-xl font-black text-white flex items-center gap-2">
+                      <span>{t("1 Year VIP")}</span>
+                      <Crown className="w-5 h-5 text-amber-400 fill-amber-400/20" />
+                    </h3>
+                    <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      {t("Without Ads")}
+                    </span>
+                  </div>
                   <div className="text-3xl font-black text-amber-400 mb-1">{t("PKR 2,600")}</div>
                   <p className="text-zinc-400 mb-4 text-xs font-bold">{t("≈ PKR 217/month")}</p>
                   <p className="text-xs font-bold text-zinc-300 mb-5 min-h-[32px] flex items-center gap-2">
@@ -514,6 +546,7 @@ export default function Membership() {
                   </p>
                   
                   <ul className="space-y-3 mb-6 text-xs text-zinc-300">
+                    <li className="flex items-center gap-2.5 font-bold text-amber-400"><CheckCircle className="w-4 h-4 text-amber-400 shrink-0" /> <span>{t("100% Ad-Free (Without Ads)")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-amber-400 shrink-0" /> <span>{t("Daily 6–7 HD movies")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-amber-400 shrink-0" /> <span>{t("Latest web series")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-amber-400 shrink-0" /> <span>{t("Priority WhatsApp support")}</span></li>
@@ -526,7 +559,7 @@ export default function Membership() {
                   onClick={() => handleSelectPlan('1y')}
                   className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white py-3.5 rounded-2xl font-black transition-all text-xs shadow-lg shadow-amber-500/25 tracking-wide"
                 >
-                  {t("Join 1-Year Pass")}
+                  {t("Join 1-Year VIP")}
                 </motion.button>
               </motion.div>
             </div>
@@ -543,6 +576,11 @@ export default function Membership() {
 
               <div className="flex flex-col md:flex-row items-center justify-between gap-6">
                 <div className="space-y-2 text-center md:text-left">
+                  <div className="flex items-center justify-center md:justify-start gap-2">
+                    <span className="text-[10px] font-black uppercase px-3 py-1 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                      ✨ {t("100% Ad-Free (Without Ads)")}
+                    </span>
+                  </div>
                   <h3 className="text-2xl sm:text-3xl font-black text-white flex items-center justify-center md:justify-start gap-2">
                     <span className="bg-gradient-to-r from-white via-purple-200 to-amber-200 bg-clip-text text-transparent">{t("2 Years VIP Pass")}</span>
                     <Sparkles className="w-6 h-6 text-amber-400 fill-amber-400/30" />

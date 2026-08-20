@@ -471,6 +471,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setLoading(false); // Unblock immediately if we have cached data
         }
 
+        // Fast Local Storage Reload: If not forced, daily sync is not due, and local profile exists,
+        // do not check Firestore on reload. Use local storage data directly.
+        if (!force && !isDailySync && localProfile && localProfile.uid === currentUser.uid) {
+          setProfile(localProfile);
+          setLoading(false);
+          setIsSyncing(false);
+          return false;
+        }
+
         // 1. Firstly read chunk_meta
         let serverVersion = localVersion;
         let isVersionMissing = false;

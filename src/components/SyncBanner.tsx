@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { RefreshCw, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react';
+import { RefreshCw, CheckCircle2, AlertCircle, Film } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 
 export function SyncBanner() {
@@ -103,7 +103,7 @@ export function SyncBanner() {
       ) : syncStatus === 'error' ? (
         <AlertCircle className="w-4 h-4 text-rose-200" />
       ) : isInitialLoad ? (
-        <Sparkles className="w-4 h-4 text-emerald-200" />
+        <CheckCircle2 className="w-4 h-4 text-emerald-200" />
       ) : (
         <CheckCircle2 className="w-4 h-4 text-emerald-200" />
       )}
