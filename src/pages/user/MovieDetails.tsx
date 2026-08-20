@@ -1621,27 +1621,26 @@ export default function MovieDetails() {
     };
   }, []);
 
+  const isLibraryEmpty = contentList.length === 0;
+
   useEffect(() => {
-    if (
-      !contentLoading &&
-      !mergedContent &&
-      fetchFailed &&
-      !hasAttemptedGlobalRefresh
-    ) {
+    if (isOffline) return;
+
+    // When movie details page is opened and library is empty, load content automatically and show toast
+    if (isLibraryEmpty && !hasAttemptedGlobalRefresh) {
       setHasAttemptedGlobalRefresh(true);
-      if (!isOffline) {
-        checkForUpdates(false).catch((e) =>
-          console.error("Error refreshing content:", e),
-        );
-        refreshProfile(false).catch((e) =>
-          console.error("Error refreshing user:", e),
-        );
-      }
+      checkForUpdates(true).catch((e) =>
+        console.error("Error auto-loading catalog on empty library:", e)
+      );
+      refreshProfile(false).catch((e) =>
+        console.error("Error refreshing profile:", e)
+      );
+      return;
     }
+
+    // If library is NOT empty and link content is not found, do NOT auto update
   }, [
-    contentLoading,
-    mergedContent,
-    fetchFailed,
+    isLibraryEmpty,
     hasAttemptedGlobalRefresh,
     isOffline,
     checkForUpdates,
