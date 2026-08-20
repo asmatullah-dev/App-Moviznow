@@ -228,7 +228,20 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                   <div className="flex items-center gap-1.5">
                     <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">{t('Expiry')}:</span>
                     <span className="font-extrabold text-xs text-zinc-900 dark:text-white bg-zinc-100 dark:bg-zinc-800/90 border border-zinc-200/50 dark:border-zinc-700/50 px-2 py-0.5 rounded-md shadow-2xs">
-                      {profile.expiryDate === 'Lifetime' ? t('Lifetime') : format(new Date(profile.expiryDate), 'MMM dd, yyyy')}
+                      {(() => {
+                        if (profile.expiryDate === 'Lifetime') return t('Lifetime');
+                        const cleanStr = profile.expiryDate.split('T')[0];
+                        const parts = cleanStr.split('-');
+                        if (parts.length === 3 && parts[0].length === 4) {
+                          const year = parseInt(parts[0], 10);
+                          const month = parseInt(parts[1], 10) - 1;
+                          const day = parseInt(parts[2], 10);
+                          if (!isNaN(year) && !isNaN(month) && !isNaN(day)) {
+                            return format(new Date(year, month, day), 'MMM dd, yyyy');
+                          }
+                        }
+                        return format(new Date(profile.expiryDate), 'MMM dd, yyyy');
+                      })()}
                     </span>
                   </div>
                   <button 

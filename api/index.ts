@@ -1733,7 +1733,112 @@ async function startServer() {
     }
   });
 
-  // Subscribe to FCM topic
+  // Helper to purge old FCM tokens for a user so that only 1 active device receives push notifications
+  async function cleanupOldUserFcmTokens(
+    firestore: admin.firestore.Firestore,
+    userId: string,
+    currentToken: string
+  ) {
+    if (!userId || userId === "anonymous") return [];
+
+    const oldTokens: string[] = [];
+
+    try {
+      // 1. Get version metadata to know max chunk
+      const metaRef = firestore.collection("chunk_meta").doc("versions");
+      const metaDoc = await metaRef.get();
+      let maxChunkIndex = 0;
+
+      if (metaDoc.exists) {
+        const metaData = metaDoc.data() || {};
+        const latestChunkId = metaData.fcm_tokens?.latestChunkId || "fcm_chunk_0";
+        const match = latestChunkId.match(/(\d+)$/);
+        if (match) maxChunkIndex = parseInt(match[1], 10);
+      }
+
+      // 2. Iterate through all chunks fcm_chunk_0 ... fcm_chunk_N
+      for (let i = 0; i <= maxChunkIndex; i++) {
+        const cid = `fcm_chunk_${i}`;
+        const chunkRef = firestore.collection("fcm_tokens").doc(cid);
+        const chunkDoc = await chunkRef.get();
+
+        if (chunkDoc.exists) {
+          const data = chunkDoc.data() || {};
+          const updates: Record<string, any> = {};
+          let needsUpdate = false;
+
+          for (const [tokenKey, item] of Object.entries(data)) {
+            const itemUserId = (item as any)?.userId;
+            if (itemUserId === userId && tokenKey !== currentToken) {
+              oldTokens.push(tokenKey);
+              updates[tokenKey] = admin.firestore.FieldValue.delete();
+              needsUpdate = true;
+            }
+          }
+
+          if (needsUpdate) {
+            await chunkRef.update(updates).catch(() => {});
+          }
+        }
+      }
+
+      // 3. Check legacy non-chunked documents in fcm_tokens collection
+      const snapshot = await firestore
+        .collection("fcm_tokens")
+        .where("userId", "==", userId)
+        .get()
+        .catch(() => null);
+
+      if (snapshot && !snapshot.empty) {
+        const batch = firestore.batch();
+        let hasBatchDeletes = false;
+        snapshot.docs.forEach((d) => {
+          if (!d.id.startsWith("fcm_chunk_") && d.id !== currentToken) {
+            oldTokens.push(d.id);
+            batch.delete(d.ref);
+            hasBatchDeletes = true;
+          }
+        });
+        if (hasBatchDeletes) {
+          await batch.commit().catch(() => {});
+        }
+      }
+
+      // 4. Unsubscribe all old tokens from FCM topics
+      if (oldTokens.length > 0 && admin.apps.length > 0) {
+        for (const oldToken of oldTokens) {
+          try {
+            await admin.messaging().unsubscribeFromTopic(oldToken, "all_users");
+          } catch (e) {}
+          try {
+            await admin.messaging().unsubscribeFromTopic(oldToken, `user_${userId}`);
+          } catch (e) {}
+        }
+        console.log(`[FCM Cleanup] Unsubscribed and deleted ${oldTokens.length} old token(s) for user ${userId}`);
+      }
+
+      // 5. Update user document in Firestore with single active fcmToken
+      if (currentToken !== "DUMMY_NONE") {
+        await firestore
+          .collection("users")
+          .doc(userId)
+          .set(
+            {
+              fcmToken: currentToken,
+              fcmTokenUpdatedAt: new Date().toISOString(),
+            },
+            { merge: true }
+          )
+          .catch(() => {});
+      }
+    } catch (err) {
+      console.warn(`[FCM Token Cleanup Error] user ${userId}:`, err);
+    }
+
+    return oldTokens;
+  }
+
+  // Subscribe to FCM topic & enforce single device token per user
   app.post(
     ["/api/notifications/subscribe", "/notifications/subscribe"],
     async (req, res) => {
@@ -1746,6 +1851,12 @@ async function startServer() {
           if (admin.apps.length === 0) {
             throw new Error("Firebase Admin not initialized");
           }
+
+          // Cleanup previous tokens for this user to ensure only 1 active device receives notifications
+          if (userId && db) {
+            await cleanupOldUserFcmTokens(db, userId, token);
+          }
+
           await admin.messaging().subscribeToTopic(token, "all_users");
           
           if (userId) {
@@ -1769,6 +1880,33 @@ async function startServer() {
         }
       } catch (error) {
         console.error("Error in subscribe endpoint:", error);
+        res.status(500).json({ error: "Internal Server Error" });
+      }
+    },
+  );
+
+  // Unsubscribe FCM token / remove tokens on logout or user deletion
+  app.post(
+    ["/api/notifications/unsubscribe", "/notifications/unsubscribe"],
+    async (req, res) => {
+      try {
+        const { token, userId } = req.body;
+        if (!token && !userId) return res.status(400).json({ error: "Token or userId required" });
+
+        if (admin.apps.length > 0) {
+          if (token) {
+            try { await admin.messaging().unsubscribeFromTopic(token, "all_users"); } catch (e) {}
+            if (userId) {
+              try { await admin.messaging().unsubscribeFromTopic(token, `user_${userId}`); } catch (e) {}
+            }
+          }
+          if (userId && db) {
+            await cleanupOldUserFcmTokens(db, userId, "DUMMY_NONE");
+          }
+        }
+        res.json({ success: true });
+      } catch (error) {
+        console.error("Error in unsubscribe endpoint:", error);
         res.status(500).json({ error: "Internal Server Error" });
       }
     },

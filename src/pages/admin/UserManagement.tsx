@@ -121,6 +121,18 @@ export default function UserManagement() {
 
   const safeFormat = (dateStr: string | null | undefined, fmt: string) => {
     if (!dateStr) return 'N/A';
+    if (dateStr === 'Lifetime') return 'Lifetime';
+    const cleanDateStr = dateStr.split('T')[0];
+    const parts = cleanDateStr.split('-');
+    if (parts.length === 3 && parts[0].length === 4) {
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+      if (!isNaN(year) && !isNaN(month) && !isNaN(day)) {
+        const d = new Date(year, month, day);
+        return isNaN(d.getTime()) ? 'Invalid Date' : format(d, fmt);
+      }
+    }
     const d = new Date(dateStr);
     return isNaN(d.getTime()) ? 'Invalid Date' : format(d, fmt);
   };
@@ -831,6 +843,13 @@ export default function UserManagement() {
 
       await batch.commit();
 
+      // Trigger backend unsubscribe to remove topic subscriptions for deleted user
+      fetch('/api/notifications/unsubscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: currentDeleteConfirm })
+      }).catch(() => {});
+
       // Immediately remove from local storage cache so UI updates synchronously
       const cachedStr = safeStorage.getItem('cached_all_users');
       if (cachedStr) {
@@ -1327,7 +1346,12 @@ export default function UserManagement() {
         };
         
         if (newUserForm.expiryDate) {
-          updateData.expiryDate = new Date(newUserForm.expiryDate).toISOString();
+          if (newUserForm.expiryDate === 'Lifetime') {
+            updateData.expiryDate = 'Lifetime';
+          } else {
+            const dateStr = newUserForm.expiryDate.split('T')[0];
+            updateData.expiryDate = `${dateStr}T23:59:59.999Z`;
+          }
         }
         
         updateUserFields((foundUser as any).id, updateData);
@@ -1356,11 +1380,17 @@ export default function UserManagement() {
           if (existingUser) {
             let defaultExpiryDate: string | null = existingUser.expiryDate || null;
             if (newUserForm.expiryDate) {
-              defaultExpiryDate = new Date(newUserForm.expiryDate).toISOString();
+              if (newUserForm.expiryDate === 'Lifetime') {
+                defaultExpiryDate = 'Lifetime';
+              } else {
+                const dateStr = newUserForm.expiryDate.split('T')[0];
+                defaultExpiryDate = `${dateStr}T23:59:59.999Z`;
+              }
             } else if (newUserForm.status === 'active' && (newUserForm.role as string) !== 'owner' && (newUserForm.role as string) !== 'admin') {
               const defaultExp = new Date();
               defaultExp.setDate(defaultExp.getDate() + 30);
-              defaultExpiryDate = defaultExp.toISOString();
+              const dateStr = defaultExp.toISOString().split('T')[0];
+              defaultExpiryDate = `${dateStr}T23:59:59.999Z`;
             }
 
             const updateData: any = {
