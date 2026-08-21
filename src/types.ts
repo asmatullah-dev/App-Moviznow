@@ -285,6 +285,21 @@ export interface Order {
   planName?: string; // For membership payment plan name
   planRole?: Role; // Target role for membership plan ('basic' or 'vip')
   items?: CartItem[]; // For content
+  trxId?: string; // Transaction ID
+  accountTitle?: string; // Account Title / Sender Name
+  accountNumberLast4?: string; // Last 4 digits of sender account
+  paymentDateTime?: string; // Exact Time & Date of transaction
+  paymentScreenshotUrl?: string; // Payment Screenshot (URL or data)
+  senderBank?: string; // Sender Bank / Wallet
+  matchedEmailId?: string; // Matched bank notification email ID (Admin only)
+  matchedEmailSubject?: string; // Matched bank email subject (Admin only)
+  matchedEmailSnippet?: string; // Matched bank email snippet (Admin only)
+  matchedEmailDate?: string; // Matched bank email date (Admin only)
+  verifiedBy?: string; // 'AI Gemini Auto-Approval' | 'Admin'
+  verifiedAt?: string; // Timestamp of verification
+  aiVerificationAttempted?: boolean;
+  aiVerificationReason?: string;
+  aiConfidence?: string;
 }
 
 export interface BankAccount {

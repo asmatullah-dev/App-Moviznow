@@ -67,9 +67,11 @@ emailRouter.all("/unsubscribe", async (req, res) => {
 });
 
 let adminApp: admin.app.App | undefined;
+let firestoreInstance: admin.firestore.Firestore | null = null;
 
 export function getDb(): admin.firestore.Firestore | null {
   try {
+    if (firestoreInstance) return firestoreInstance;
     if (admin.apps.length > 0) {
       adminApp = admin.app();
     } else {
@@ -77,7 +79,11 @@ export function getDb(): admin.firestore.Firestore | null {
         projectId: firebaseConfig.projectId,
       });
     }
-    return getFirestore(adminApp, firebaseConfig.firestoreDatabaseId);
+    firestoreInstance = getFirestore(adminApp, (firebaseConfig as any).firestoreDatabaseId);
+    try {
+      firestoreInstance.settings({ ignoreUndefinedProperties: true });
+    } catch {}
+    return firestoreInstance;
   } catch (e) {
     console.warn("Firebase Admin not ready in email router:", e);
     return null;

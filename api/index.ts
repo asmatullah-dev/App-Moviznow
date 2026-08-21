@@ -33,7 +33,10 @@ try {
       projectId: firebaseConfig.projectId,
     });
   }
-  db = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
+  db = getFirestore(admin.app(), (firebaseConfig as any).firestoreDatabaseId);
+  try {
+    db.settings({ ignoreUndefinedProperties: true });
+  } catch {}
 } catch (error) {
   console.warn("Failed to initialize Firebase Admin. Firebase services will be unavailable.", error);
 }
@@ -88,6 +91,7 @@ async function getSyncApps(
 import { translateRouter } from "./_translate.js";
 import { emailRouter } from "./_email.js";
 import { tmdbRouter } from "./_tmdb.js";
+import { ordersRouter } from "./_orders.js";
 import { checkAndSendExpiryNotifications, sendMembershipUpdateNotification, sendOrderApprovedNotification } from "./_expiryService.js";
 
 async function startServer() {
@@ -121,10 +125,23 @@ async function startServer() {
     next();
   });
 
+  app.get("/ads.txt", (req, res) => {
+    res.setHeader("Content-Type", "text/plain");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.send("google.com, pub-3128773545517669, DIRECT, f08c47fec0942fa0\n");
+  });
+
+  app.get("/robots.txt", (req, res) => {
+    res.setHeader("Content-Type", "text/plain");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.send("User-agent: *\nAllow: /\nSitemap: https://moviznow.com/sitemap.xml\n");
+  });
+
   app.use(express.json({ limit: "50mb" }));
   app.use("/api", translateRouter);
   app.use("/api/email", emailRouter);
   app.use("/api", tmdbRouter);
+  app.use("/api/orders", ordersRouter);
 
   // Dynamic build info generated on Vercel or locally
   const SERVER_BUILD_TIME = new Date().toISOString();
@@ -2866,12 +2883,12 @@ async function startServer() {
 
       const sourceDb = getFirestore(
         sourceApp,
-        firebaseConfig.firestoreDatabaseId,
+        (firebaseConfig as any).firestoreDatabaseId,
       );
       const targetDb = getFirestore(targetApp, tDbId || "(default)");
 
       console.log(
-        `Comparing source DB (${firebaseConfig.firestoreDatabaseId}) with target DB (${targetDbId || "default"})`,
+        `Comparing source DB (${(firebaseConfig as any).firestoreDatabaseId}) with target DB (${targetDbId || "default"})`,
       );
 
       let collections = [
@@ -2985,12 +3002,12 @@ async function startServer() {
 
       const sourceDb = getFirestore(
         sourceApp,
-        firebaseConfig.firestoreDatabaseId,
+        (firebaseConfig as any).firestoreDatabaseId,
       );
       const targetDb = getFirestore(targetApp, tDbId || "(default)");
 
       console.log(
-        `Starting push: source (${firebaseConfig.firestoreDatabaseId}) -> target (${tDbId || "default"}), mode: ${mode}, specificIds: ${specificIds ? Object.keys(specificIds).length : "none"}, syncAllData: ${syncAllData}`,
+        `Starting push: source (${(firebaseConfig as any).firestoreDatabaseId}) -> target (${tDbId || "default"}), mode: ${mode}, specificIds: ${specificIds ? Object.keys(specificIds).length : "none"}, syncAllData: ${syncAllData}`,
       );
 
       let collections = [
@@ -3159,12 +3176,12 @@ async function startServer() {
 
       const sourceDb = getFirestore(
         sourceApp,
-        firebaseConfig.firestoreDatabaseId,
+        (firebaseConfig as any).firestoreDatabaseId,
       );
       const targetDb = getFirestore(targetApp, tDbId || "(default)");
 
       console.log(
-        `Starting pull: target (${tDbId || "default"}) -> source (${firebaseConfig.firestoreDatabaseId}), mode: ${mode}, specificIds: ${specificIds ? Object.keys(specificIds).length : "none"}, syncAllData: ${syncAllData}`,
+        `Starting pull: target (${tDbId || "default"}) -> source (${(firebaseConfig as any).firestoreDatabaseId}), mode: ${mode}, specificIds: ${specificIds ? Object.keys(specificIds).length : "none"}, syncAllData: ${syncAllData}`,
       );
 
       let collections = [

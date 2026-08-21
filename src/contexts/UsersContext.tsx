@@ -246,9 +246,9 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     const lastFetchTimeStr = safeStorage.getItem('last_users_sync_timestamp');
     const lastFetchTime = lastFetchTimeStr ? parseInt(lastFetchTimeStr, 10) : 0;
 
-    // Period check & 10-minute throttle to avoid redundant fetches
+    // Throttle checks to avoid redundant fetches on every reload/navigation
     const lastCheckPeriod = safeStorage.getItem('last_chunk_users_check_period');
-    const isRecentFetch = (now - lastFetchTime) < 10 * 60 * 1000;
+    const isRecentFetch = (now - lastFetchTime) < 30 * 60 * 1000;
     if (!force && locallyCachedUsers.length > 0 && (lastCheckPeriod === checkPeriod || isRecentFetch)) {
         setLoading(false);
         return { users: locallyCachedUsers, updatedSomething: false };

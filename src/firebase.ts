@@ -29,7 +29,7 @@ export const app = initializeApp(appConfig);
 
 export const db = initializeFirestore(app, {
   localCache: typeof window !== 'undefined' ? persistentLocalCache({ tabManager: persistentMultipleTabManager() }) : undefined
-}, appConfig.firestoreDatabaseId);
+}, (appConfig as any).firestoreDatabaseId);
 
 if (typeof window !== 'undefined') {
   // Ensure the client recovers from any previously persisted offline state

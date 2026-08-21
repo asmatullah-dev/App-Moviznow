@@ -1,15 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth, standardizePhone } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { ArrowLeft, Copy, Check, Send, Loader2, Wallet, Smartphone, CreditCard, Banknote, Sparkles, CheckCircle2, Plus, Minus, Clock, Zap, Crown, Gem, ShieldCheck, Flame } from 'lucide-react';
+import { ArrowLeft, Copy, Check, Send, Loader2, Wallet, Smartphone, CreditCard, Banknote, Sparkles, CheckCircle2, Plus, Minus, Clock, Zap, Crown, Gem, ShieldCheck, Flame, PartyPopper } from 'lucide-react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import AlertModal from '../../components/AlertModal';
 import { NotificationMenu } from '../../components/NotificationMenu';
 import { UserProfileMenu } from '../../components/UserProfileMenu';
 import { CartButton } from '../../components/CartButton';
 import { AdminButtons } from '../../components/AdminButtons';
+import PaymentVerificationForm from '../../components/PaymentVerificationForm';
 
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import PreviousOrders from '../../components/PreviousOrders';
 
 import PaymentMethods from '../../components/PaymentMethods';
@@ -48,6 +49,8 @@ export default function TopUp() {
   const [loading, setLoading] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [orderId, setOrderId] = useState<string | null>(null);
+  const [completedOrder, setCompletedOrder] = useState<any>(null);
+  const [wasAutoApproved, setWasAutoApproved] = useState(false);
   const [pendingMembershipOrder, setPendingMembershipOrder] = useState<any>(null);
   const [isCheckingPendingOrder, setIsCheckingPendingOrder] = useState(true);
   const [alertConfig, setAlertConfig] = useState<{isOpen: boolean; title: string; message: string;}>({ isOpen: false, title: '', message: '' });
@@ -99,88 +102,13 @@ export default function TopUp() {
 
   const actionText = isExtend ? 'Extend' : (isExpired && profile?.role === 'user' ? 'Renew' : 'Get');
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(settings?.accountNumber || '03416286423');
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-    const handleConfirm = async (): Promise<string | null> => {
-    if (!profile) return null;
-    if (!whatsappNumber || whatsappNumber.length < 10) {
-      setAlertConfig({isOpen: true, title: t('Invalid Phone Number'), message: t('Please enter a valid WhatsApp number')});
-      return null;
-    }
-    setLoading(true);
-    try {
-      const newOrderId = Math.floor(10000000 + Math.random() * 90000000).toString();
-
-      const orderData = {
-        id: newOrderId,
-        userId: profile.uid,
-        userName: profile.displayName || 'Unknown',
-        userEmail: profile.email,
-        userRole: profile.role,
-        planRole: activePlan.planRole,
-        type: 'membership' as const,
-        amount: activePlan.price,
-        months: activePlan.months,
-        planName: activePlan.name,
-        status: 'pending' as const,
-        createdAt: new Date().toISOString(),
-      };
-
-      const { safeStorage } = await import('../../utils/safeStorage');
-      const pendingOrdersStr = safeStorage.getItem("pending_orders_array") || "[]";
-      const pendingOrders = JSON.parse(pendingOrdersStr);
-      pendingOrders.push(orderData);
-      safeStorage.setItem("pending_orders_array", JSON.stringify(pendingOrders));
-      safeStorage.setItem("needs_user_sync", "true");
-
-      await updateUserProfileData({ 
-        phone: whatsappNumber,
-        orders: [...(profile.orders || []), orderData]
-      }, undefined, true);
-
-      setOrderId(newOrderId);
-      setConfirmed(true);
-      return newOrderId;
-    } catch (error) {
-      console.error('Error creating order:', error);
-      setAlertConfig({isOpen: true, title: t('Error'), message: t('Failed to create order. Please try again.')});
-      return null;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-    const handleSendPaymentScreenshot = async () => {
-    if (!profile) return;
-    
-    setLoading(true);
-    try {
-      let currentOrderId = orderId;
-      if (!confirmed) {
-          currentOrderId = await handleConfirm();
-          if (!currentOrderId) { setLoading(false); return; }
-      }
-      
-      const orders = profile.orders || [];
-      const lastOrder = orders.length > 0 ? [...orders].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] : null;
-
-      const planLabel = lastOrder?.planName || activePlan.name;
-      const planMonths = lastOrder?.months || activePlan.months;
-      const planAmount = lastOrder?.amount || activePlan.price;
-
-      const message = `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${profile?.displayName || t("Unknown")}\n${t("Email")}: ${profile?.email || "N/A"}\n${t("Phone")}: ${whatsappNumber || profile?.phone || "N/A"}\n${t("Role & Status")}: ${String(profile?.role || t("Unknown")).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || t("Unknown")).replace(/\b\w/g, c => c.toUpperCase())}\n\n${t("Your message/question:")}\n${t("Please approve my membership top-up. Order ID:")} ${currentOrderId}\n${t("Plan:")} ${planLabel}\n${t("Duration:")} ${planMonths} ${t("Months")}\n${t("Amount: Rs")} ${planAmount}`;
-      
-      const adminPhone = standardizePhone(settings?.supportNumber || '3363284466').replace('+', '');
-      const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
-      
-      window.open(whatsappUrl, '_blank');
-      navigate('/');
-    } finally {
-      setLoading(false);
+  const handleOrderFinished = (order: any, isAutoApproved: boolean) => {
+    setCompletedOrder(order);
+    setWasAutoApproved(isAutoApproved);
+    setOrderId(order.id);
+    setConfirmed(true);
+    if (!isAutoApproved) {
+      setPendingMembershipOrder(order);
     }
   };
 
@@ -222,249 +150,199 @@ export default function TopUp() {
             </div>
             <h2 className="text-2xl font-black tracking-tight">{actionText} {t('Your Subscription')}</h2>
             <p className="text-emerald-100/90 text-xs sm:text-sm mt-1 max-w-md font-medium">
-              {t('Select your plan duration, send payment, and submit for instant verification.')}
+              {t('Select your plan duration, send payment, and submit for instant AI auto-approval.')}
             </p>
           </div>
         </div>
+
+        {/* Completion Celebration Card */}
+        {completedOrder && wasAutoApproved && (
+          <div className="bg-emerald-500/10 border-2 border-emerald-500/40 p-6 rounded-3xl mb-6 text-center space-y-4 shadow-xl">
+            <div className="w-16 h-16 rounded-full bg-emerald-500 text-white flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/30">
+              <CheckCircle2 className="w-8 h-8" />
+            </div>
+            <div>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-extrabold text-xs uppercase tracking-wider mb-2">
+                ⚡ AI Auto-Approved
+              </span>
+              <h3 className="text-2xl font-black text-zinc-900 dark:text-white">
+                🎉 Order Approved Instantly!
+              </h3>
+              <p className="text-sm text-zinc-600 dark:text-zinc-300 mt-1 max-w-md mx-auto">
+                Your payment was verified against bank notifications. Your {activePlan.name} membership is now active!
+              </p>
+            </div>
+            <div className="p-3 bg-white/80 dark:bg-black/40 rounded-2xl border border-zinc-200 dark:border-zinc-800 text-xs font-mono text-zinc-600 dark:text-zinc-300 flex items-center justify-between">
+              <span>Order #{completedOrder.id}</span>
+              <span className="font-bold text-emerald-600 dark:text-emerald-400">Rs. {completedOrder.amount}</span>
+            </div>
+            <button
+              onClick={() => navigate('/')}
+              className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-extrabold py-3.5 rounded-2xl shadow-lg shadow-emerald-500/20 text-sm cursor-pointer"
+            >
+              Start Watching Now 🍿
+            </button>
+          </div>
+        )}
 
         {isCheckingPendingOrder ? (
           <div className="flex justify-center items-center h-40 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200/80 dark:border-zinc-800/80">
             <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
           </div>
-        ) : pendingMembershipOrder ? (
+        ) : pendingMembershipOrder && !wasAutoApproved ? (
           <div className="bg-amber-500/10 border border-amber-500/20 p-5 rounded-3xl mb-6 flex items-start gap-3">
             <Clock className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
             <div>
               <h4 className="font-extrabold text-sm text-amber-700 dark:text-amber-300">{t('Pending Order Active')}</h4>
               <p className="text-amber-800/90 dark:text-amber-200/90 text-xs mt-0.5 font-medium leading-relaxed">
-                {t('You already have a Pending Membership Order. Send payment screenshot or cancel it to place a new order.')}
+                Order #{pendingMembershipOrder.id} ({pendingMembershipOrder.planName || 'Membership'}) is pending admin review.
               </p>
             </div>
           </div>
-        ) : (
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 mb-6 border border-zinc-200/80 dark:border-zinc-800/80 shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-black flex items-center gap-2 text-zinc-900 dark:text-white">
-                <Crown className="w-5 h-5 text-amber-500 fill-amber-500/20" />
-                <span>{t('Membership Plans')}</span>
-              </h2>
-              <span className="text-xs font-extrabold px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                {activePlan.name}
-              </span>
-            </div>
+        ) : !wasAutoApproved && (
+          <>
+            <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 mb-6 border border-zinc-200/80 dark:border-zinc-800/80 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-base font-black flex items-center gap-2 text-zinc-900 dark:text-white">
+                  <Crown className="w-5 h-5 text-amber-500 fill-amber-500/20" />
+                  <span>{t('Membership Plans')}</span>
+                </h2>
+                <span className="text-xs font-extrabold px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                  {activePlan.name}
+                </span>
+              </div>
 
-            {/* Plan Tier Switcher: VIP Ad-Free vs Basic With Ads */}
-            <div className="grid grid-cols-2 gap-2 p-1.5 bg-zinc-100/80 dark:bg-zinc-950/80 rounded-2xl mb-5 border border-zinc-200/80 dark:border-zinc-800/80">
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedTier('vip');
-                  if (!VIP_PLANS.some(p => p.id === selectedPlanId)) {
-                    setSelectedPlanId('1m');
-                  }
-                }}
-                className={`flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl font-black text-xs sm:text-sm transition-all cursor-pointer ${
-                  selectedTier === 'vip'
-                    ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md'
-                    : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
-                }`}
-              >
-                <Crown className="w-4 h-4" />
-                <span>VIP User (Ad-Free)</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedTier('basic');
-                  if (!BASIC_PLANS.some(p => p.id === selectedPlanId)) {
-                    setSelectedPlanId('basic_1m');
-                  }
-                }}
-                className={`flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl font-black text-xs sm:text-sm transition-all cursor-pointer ${
-                  selectedTier === 'basic'
-                    ? 'bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-md'
-                    : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
-                }`}
-              >
-                <Zap className="w-4 h-4" />
-                <span>Basic User (Rs 50/mo)</span>
-              </button>
-            </div>
+              {/* Plan Tier Switcher: VIP Ad-Free vs Basic With Ads */}
+              <div className="grid grid-cols-2 gap-2 p-1.5 bg-zinc-100/80 dark:bg-zinc-950/80 rounded-2xl mb-5 border border-zinc-200/80 dark:border-zinc-800/80">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedTier('vip');
+                    if (!VIP_PLANS.some(p => p.id === selectedPlanId)) {
+                      setSelectedPlanId('1m');
+                    }
+                  }}
+                  className={`flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl font-black text-xs sm:text-sm transition-all cursor-pointer ${
+                    selectedTier === 'vip'
+                      ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md'
+                      : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+                  }`}
+                >
+                  <Crown className="w-4 h-4" />
+                  <span>VIP User (Ad-Free)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedTier('basic');
+                    if (!BASIC_PLANS.some(p => p.id === selectedPlanId)) {
+                      setSelectedPlanId('basic_1m');
+                    }
+                  }}
+                  className={`flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl font-black text-xs sm:text-sm transition-all cursor-pointer ${
+                    selectedTier === 'basic'
+                      ? 'bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-md'
+                      : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+                  }`}
+                >
+                  <Zap className="w-4 h-4" />
+                  <span>Basic User (Rs 50/mo)</span>
+                </button>
+              </div>
 
-            <div className="space-y-3.5 mb-6">
-              {currentPlans.map((plan) => {
-                const isSelected = selectedPlanId === plan.id;
-                const PlanIcon = plan.icon;
-                const is1Y = plan.id === '1y';
-                const is2Y = plan.id === '2y';
+              <div className="space-y-3.5 mb-6">
+                {currentPlans.map((plan) => {
+                  const isSelected = selectedPlanId === plan.id;
+                  const PlanIcon = plan.icon;
+                  const is1Y = plan.id === '1y';
+                  const is2Y = plan.id === '2y';
 
-                let cardStyle = 'bg-zinc-50/80 dark:bg-zinc-950/60 border-zinc-200/80 dark:border-zinc-800/80 hover:border-zinc-300 dark:hover:border-zinc-700';
-                if (isSelected) {
-                  if (is2Y) {
-                    cardStyle = 'bg-gradient-to-r from-rose-950/50 via-purple-950/60 to-amber-950/40 border-purple-500 ring-2 ring-purple-500/40 shadow-xl shadow-purple-500/20';
-                  } else if (is1Y) {
-                    cardStyle = 'bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-amber-500/15 dark:from-amber-950/50 dark:via-orange-950/40 dark:to-amber-950/30 border-amber-500 ring-2 ring-amber-500/40 shadow-lg shadow-amber-500/20';
-                  } else {
-                    cardStyle = 'bg-gradient-to-r from-emerald-50 via-teal-50/50 to-emerald-50/20 dark:from-emerald-950/40 dark:via-teal-950/30 dark:to-emerald-950/20 border-emerald-500 ring-2 ring-emerald-500/30 shadow-md shadow-emerald-500/10';
+                  let cardStyle = 'bg-zinc-50/80 dark:bg-zinc-950/60 border-zinc-200/80 dark:border-zinc-800/80 hover:border-zinc-300 dark:hover:border-zinc-700';
+                  if (isSelected) {
+                    if (is2Y) {
+                      cardStyle = 'bg-gradient-to-r from-rose-950/50 via-purple-950/60 to-amber-950/40 border-purple-500 ring-2 ring-purple-500/40 shadow-xl shadow-purple-500/20';
+                    } else if (is1Y) {
+                      cardStyle = 'bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-amber-500/15 dark:from-amber-950/50 dark:via-orange-950/40 dark:to-amber-950/30 border-amber-500 ring-2 ring-amber-500/40 shadow-lg shadow-amber-500/20';
+                    } else {
+                      cardStyle = 'bg-gradient-to-r from-emerald-50 via-teal-50/50 to-emerald-50/20 dark:from-emerald-950/40 dark:via-teal-950/30 dark:to-emerald-950/20 border-emerald-500 ring-2 ring-emerald-500/30 shadow-md shadow-emerald-500/10';
+                    }
                   }
-                } else {
-                  if (is2Y) {
-                    cardStyle = 'bg-gradient-to-r from-rose-500/5 via-purple-500/10 to-amber-500/5 dark:bg-purple-950/20 border-transparent shadow-sm';
-                  } else if (is1Y) {
-                    cardStyle = 'bg-amber-500/5 dark:bg-amber-950/20 border-transparent shadow-sm';
-                  }
-                }
 
-                let iconBoxStyle = 'bg-zinc-200/70 dark:bg-zinc-800/70 text-zinc-500 dark:text-zinc-400';
-                if (isSelected || is1Y || is2Y) {
-                  if (is2Y) {
-                    iconBoxStyle = 'bg-gradient-to-tr from-rose-600 via-purple-600 to-amber-500 text-white shadow-md shadow-purple-500/30';
-                  } else if (is1Y) {
-                    iconBoxStyle = 'bg-gradient-to-tr from-amber-500 to-orange-500 text-white shadow-md shadow-amber-500/30';
-                  } else {
-                    iconBoxStyle = 'bg-gradient-to-tr from-emerald-500 to-teal-500 text-white shadow-md shadow-emerald-500/25';
+                  let iconBoxStyle = 'bg-zinc-200/70 dark:bg-zinc-800/70 text-zinc-500 dark:text-zinc-400';
+                  if (isSelected || is1Y || is2Y) {
+                    if (is2Y) {
+                      iconBoxStyle = 'bg-gradient-to-tr from-rose-600 via-purple-600 to-amber-500 text-white shadow-md shadow-purple-500/30';
+                    } else if (is1Y) {
+                      iconBoxStyle = 'bg-gradient-to-tr from-amber-500 to-orange-500 text-white shadow-md shadow-amber-500/30';
+                    } else {
+                      iconBoxStyle = 'bg-gradient-to-tr from-emerald-500 to-teal-500 text-white shadow-md shadow-emerald-500/25';
+                    }
                   }
-                }
-
-                let badgeStyle = 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20';
-                if (is2Y) {
-                  badgeStyle = 'bg-gradient-to-r from-rose-600 via-purple-600 to-amber-500 text-white font-black border-0 shadow-md shadow-purple-500/25';
-                } else if (is1Y) {
-                  badgeStyle = 'bg-gradient-to-r from-amber-500 to-orange-500 text-white font-black border-0 shadow-sm shadow-amber-500/25';
-                }
 
                   return (
-                  <button
-                    key={plan.id}
-                    type="button"
-                    onClick={() => setSelectedPlanId(plan.id)}
-                    className={`relative w-full text-left p-3.5 sm:p-4 rounded-2xl border transition-all active:scale-[0.99] cursor-pointer ${cardStyle}`}
-                  >
-                    <div className="flex items-center gap-2.5 sm:gap-3">
-                      {/* Icon Box */}
-                      <div className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shrink-0 transition-all ${iconBoxStyle}`}>
-                        <PlanIcon className="w-5 h-5" />
-                      </div>
+                    <button
+                      key={plan.id}
+                      type="button"
+                      onClick={() => setSelectedPlanId(plan.id)}
+                      className={`relative w-full text-left p-3.5 sm:p-4 rounded-2xl border transition-all active:scale-[0.99] cursor-pointer ${cardStyle}`}
+                    >
+                      <div className="flex items-center gap-2.5 sm:gap-3">
+                        <div className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shrink-0 transition-all ${iconBoxStyle}`}>
+                          <PlanIcon className="w-5 h-5" />
+                        </div>
 
-                      <div className="min-w-0 flex-1">
-                        {/* Line 1: Plan Title + Header Tag + Price */}
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-                            <span className="font-black text-sm sm:text-base text-zinc-900 dark:text-white">
-                              {plan.name}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                              <span className="font-black text-sm sm:text-base text-zinc-900 dark:text-white">
+                                {plan.name}
+                              </span>
+                              {plan.headerBadge && (
+                                <span className="text-[9px] sm:text-[10px] font-black px-2 py-0.5 rounded-full inline-flex items-center uppercase tracking-wider shrink-0 shadow-sm bg-gradient-to-r from-amber-500 to-orange-500 text-white">
+                                  {plan.headerBadge}
+                                </span>
+                              )}
+                            </div>
+
+                            <span className="text-sm sm:text-base font-black shrink-0 whitespace-nowrap text-emerald-600 dark:text-emerald-400">
+                              Rs. {plan.price.toLocaleString()}
                             </span>
-                            {plan.headerBadge && (
-                              <span className={`text-[9px] sm:text-[10px] font-black px-2 py-0.5 rounded-full inline-flex items-center uppercase tracking-wider shrink-0 shadow-sm ${
-                                is2Y
-                                  ? 'bg-gradient-to-r from-rose-600 via-purple-600 to-amber-500 text-white'
-                                  : 'bg-gradient-to-r from-amber-500 to-orange-500 text-white'
-                              }`}>
-                                {plan.headerBadge}
+                          </div>
+
+                          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                            <p className="text-xs font-bold text-zinc-500 dark:text-zinc-400">
+                              Rs. {plan.perMonth} <span className="text-[10px] font-normal">/ {t('month')}</span>
+                            </p>
+                            {plan.saveBadge && (
+                              <span className="text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded border whitespace-nowrap inline-flex items-center bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20">
+                                {plan.saveBadge}
                               </span>
                             )}
                           </div>
-
-                          <span className={`text-sm sm:text-base font-black shrink-0 whitespace-nowrap ${
-                            is2Y
-                              ? 'text-purple-600 dark:text-purple-300'
-                              : is1Y
-                              ? 'text-amber-600 dark:text-amber-400'
-                              : isSelected
-                              ? 'text-emerald-600 dark:text-emerald-400'
-                              : 'text-zinc-900 dark:text-white'
-                          }`}>
-                            Rs. {plan.price.toLocaleString()}
-                          </span>
-                        </div>
-
-                        {/* Line 2: Per month price + Save % badge on the second line */}
-                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                          <p className="text-xs font-bold text-zinc-500 dark:text-zinc-400">
-                            Rs. {plan.perMonth} <span className="text-[10px] font-normal">/ {t('month')}</span>
-                          </p>
-                          {plan.saveBadge && (
-                            <span className={`text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded border whitespace-nowrap inline-flex items-center ${
-                              is2Y
-                                ? 'bg-purple-500/15 text-purple-600 dark:text-purple-300 border-purple-500/30'
-                                : is1Y
-                                ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30'
-                                : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                            }`}>
-                              {plan.saveBadge}
-                            </span>
-                          )}
                         </div>
                       </div>
-                    </div>
-                  </button>
-                );
-              })}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex justify-between items-center border-t border-zinc-200/80 dark:border-zinc-800/80 pt-4">
+                <span className="text-sm font-semibold text-zinc-500 dark:text-zinc-400">{t('Total Amount')}</span>
+                <span className="text-2xl font-black text-emerald-600 dark:text-emerald-400">Rs. {activePlan.price.toLocaleString()}</span>
+              </div>
             </div>
 
-            <div className="flex justify-between items-center border-t border-zinc-200/80 dark:border-zinc-800/80 pt-4">
-              <span className="text-sm font-semibold text-zinc-500 dark:text-zinc-400">{t('Total Amount')}</span>
-              <span className="text-2xl font-black text-emerald-600 dark:text-emerald-400">Rs. {activePlan.price.toLocaleString()}</span>
-            </div>
-          </div>
-        )}
-
-        {!profile?.phone && (
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 mb-6 border border-zinc-200/80 dark:border-zinc-800/80 shadow-sm">
-            <h2 className="text-base font-extrabold mb-3 flex items-center gap-2 text-zinc-900 dark:text-white">
-              <Smartphone className="w-4 h-4 text-emerald-500" />
-              {t('WhatsApp Number')}
-            </h2>
-            <input
-              type="tel"
-              value={whatsappNumber}
-              onChange={(e) => setWhatsappNumber(e.target.value)}
-              placeholder="e.g. 03001234567"
-              className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all outline-none"
+            {/* Payment & Verification Form with Gemini AI Auto-Approval */}
+            <PaymentVerificationForm
+              orderType="membership"
+              amount={activePlan.price}
+              planName={activePlan.name}
+              planRole={activePlan.planRole}
+              months={activePlan.months}
+              onOrderCompleted={handleOrderFinished}
             />
-          </div>
+          </>
         )}
-
-        {settings?.isPaymentEnabled !== false && (
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 mb-6 border border-zinc-200/80 dark:border-zinc-800/80 shadow-sm">
-            <h2 className="text-base font-extrabold mb-2 flex items-center gap-2 text-zinc-900 dark:text-white">
-              <Wallet className="w-4 h-4 text-emerald-500" />
-              {t('Payment Details')}
-            </h2>
-            <p className="text-zinc-500 dark:text-zinc-400 mb-5 text-xs font-medium">
-              {t('Please send the payment to the following account via any of these methods:')}
-            </p>
-            
-            <PaymentMethods copied={copied} onCopy={handleCopy} />
-          </div>
-        )}
-
-        <div className="text-center mb-6">
-          <p className="text-zinc-500 dark:text-zinc-400 text-xs font-medium">
-            {settings?.isPaymentEnabled !== false ? t('After Payment Send Screenshot for Approval') : t('Submit your request for approval')}
-          </p>
-        </div>
-
-        <div className="space-y-3 mb-8">
-          <button
-            onClick={handleConfirm}
-            disabled={loading || confirmed || !!pendingMembershipOrder}
-            className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-extrabold py-3.5 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-98 disabled:opacity-50 shadow-lg shadow-blue-500/20 text-sm cursor-pointer"
-          >
-            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : confirmed ? <CheckCircle2 className="w-5 h-5" /> : null}
-            <span>{loading ? t('Processing...') : confirmed ? t('Order Confirmed') : t('Confirm Order')}</span>
-          </button>
-
-          {settings?.isAdminContactEnabled !== false && (
-            <button
-              onClick={handleSendPaymentScreenshot}
-              disabled={loading}
-              className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-extrabold py-3.5 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-98 disabled:opacity-50 shadow-lg shadow-emerald-500/20 text-sm cursor-pointer"
-            >
-              {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-              <span>{loading ? t('Processing...') : (settings?.isPaymentEnabled !== false ? t('Send Payment Screenshot') : t('Contact Admin'))}</span>
-            </button>
-          )}
-        </div>
 
         <PreviousOrders />
       </main>

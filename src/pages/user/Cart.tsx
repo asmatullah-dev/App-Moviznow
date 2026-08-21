@@ -10,6 +10,7 @@ import { NotificationMenu } from '../../components/NotificationMenu';
 import { UserProfileMenu } from '../../components/UserProfileMenu';
 import { CartButton } from '../../components/CartButton';
 import { AdminButtons } from '../../components/AdminButtons';
+import PaymentVerificationForm from '../../components/PaymentVerificationForm';
 
 import { motion } from 'framer-motion';
 import PreviousOrders from '../../components/PreviousOrders';
@@ -23,8 +24,8 @@ export default function Cart() {
   const { language, t } = useLanguage();
   const { settings } = useSettings();
   const navigate = useNavigate();
-  const [copied, setCopied] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [completedOrder, setCompletedOrder] = useState<any>(null);
+  const [wasAutoApproved, setWasAutoApproved] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [lastCreatedOrder, setLastCreatedOrder] = useState<{
@@ -32,132 +33,25 @@ export default function Cart() {
     items: any[];
     amount: number;
   } | null>(null);
-  const [whatsappNumber, setWhatsappNumber] = useState(profile?.phone || '');
   const [alertConfig, setAlertConfig] = useState<{isOpen: boolean; title: string; message: string;}>({ isOpen: false, title: '', message: '' });
 
   React.useEffect(() => {
-    if ((profile?.role === 'user' || profile?.role === 'trial') && profile?.status === 'expired' && cart.length === 0 && !confirmed && !lastCreatedOrder) {
+    if ((profile?.role === 'user' || profile?.role === 'trial') && profile?.status === 'expired' && cart.length === 0 && !confirmed && !lastCreatedOrder && !completedOrder) {
       navigate('/');
     }
-  }, [profile, navigate, cart.length, confirmed, lastCreatedOrder]);
+  }, [profile, navigate, cart.length, confirmed, lastCreatedOrder, completedOrder]);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(settings?.accountNumber || '03416286423');
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleConfirm = async (): Promise<{ id: string; items: any[]; amount: number } | null> => { 
-    if (lastCreatedOrder) return lastCreatedOrder;
-    if (!profile || cart.length === 0) return null; 
-    if (!whatsappNumber || whatsappNumber.length < 10) { 
-      setAlertConfig({isOpen: true, title: t('Invalid Phone Number'), message: t('Please enter a valid WhatsApp number')}); 
-      return null; 
-    } 
-    setLoading(true); 
-    try { 
-      const currentCart = [...cart];
-      const currentTotal = totalPrice;
-      const newOrderId = Math.floor(10000000 + Math.random() * 90000000).toString(); 
-      const orderData = { 
-        id: newOrderId, 
-        userId: profile.uid, 
-        userName: profile.displayName || 'Unknown', 
-        userEmail: profile.email, 
-        userRole: profile.role, 
-        type: 'content' as const, 
-        amount: currentTotal, 
-        items: currentCart, 
-        status: 'pending' as const, 
-        createdAt: new Date().toISOString() 
-      }; 
-      const pendingOrdersStr = safeStorage.getItem('pending_orders_array') || '[]'; 
-      const pendingOrders = JSON.parse(pendingOrdersStr); 
-      pendingOrders.push(orderData); 
-      safeStorage.setItem('pending_orders_array', JSON.stringify(pendingOrders)); 
-      safeStorage.setItem('needs_user_sync', 'true'); 
-      await updateUserProfileData({ 
-        phone: whatsappNumber,
-        orders: [...(profile.orders || []), orderData]
-      }, undefined, true); 
-      
-      const created = { id: newOrderId, items: currentCart, amount: currentTotal };
-      setLastCreatedOrder(created);
-      setOrderId(newOrderId); 
-      setConfirmed(true); 
-      clearCart(); 
-      return created; 
-    } catch (error) { 
-      console.error('Error creating order:', error); 
-      setAlertConfig({isOpen: true, title: t('Error'), message: t('Failed to create order. Please try again.')}); 
-      return null; 
-    } finally { 
-      setLoading(false); 
-    } 
-  };
-
-  const handleSendPaymentScreenshot = async () => {
-    if (!profile) return;
-    setLoading(true);
-    try {
-      let activeOrder = lastCreatedOrder;
-      if (!activeOrder && !confirmed) {
-        activeOrder = await handleConfirm();
-        if (!activeOrder) { setLoading(false); return; }
-      }
-
-      let finalOrderId = activeOrder?.id || orderId;
-      let finalItems = activeOrder?.items || (cart.length > 0 ? [...cart] : []);
-      let finalAmount = activeOrder ? activeOrder.amount : (totalPrice > 0 ? totalPrice : 0);
-
-      if (!finalOrderId || (finalItems.length === 0 && finalAmount === 0)) {
-        try {
-          const pendingOrdersStr = safeStorage.getItem('pending_orders_array') || '[]';
-          const pendingOrders = JSON.parse(pendingOrdersStr);
-          const matched = (finalOrderId ? pendingOrders.find((o: any) => o.id === finalOrderId) : null) || pendingOrders[pendingOrders.length - 1];
-          if (matched) {
-            finalOrderId = matched.id;
-            finalItems = Array.isArray(matched.items) ? matched.items : [];
-            finalAmount = matched.amount || 0;
-          } else {
-            const userOrders = profile.orders || [];
-            const matchedProfileOrder = (finalOrderId ? userOrders.find((o: any) => o.id === finalOrderId) : null) || userOrders[userOrders.length - 1];
-            if (matchedProfileOrder) {
-              finalOrderId = matchedProfileOrder.id;
-              finalItems = Array.isArray(matchedProfileOrder.items) ? matchedProfileOrder.items : [];
-              finalAmount = matchedProfileOrder.amount || 0;
-            }
-          }
-        } catch (e) {
-          console.error("Error retrieving order for screenshot:", e);
-        }
-      }
-
-      if (!finalOrderId) {
-        setAlertConfig({ isOpen: true, title: t('Error'), message: t('Please add items to cart and confirm your order first.') });
-        return;
-      }
-
-      let itemTitles = '';
-      if (finalItems && finalItems.length > 0) {
-        itemTitles = finalItems.map((item: any) => {
-          if (item.type === 'season') {
-            return `${item.title} (${t('Season')} ${item.seasonNumber})`;
-          }
-          return item.title;
-        }).join(', ');
-      }
-
-      const itemsLine = `${t("Items")}: ${finalItems.length}${itemTitles ? ` (${itemTitles})` : ''}`;
-      const message = `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${profile?.displayName || t("Unknown")}\n${t("Email")}: ${profile?.email || 'N/A'}\n${t("Phone")}: ${whatsappNumber || profile?.phone || 'N/A'}\n${t("Role & Status")}: ${String(profile?.role || t("Unknown")).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(profile?.status || t("Unknown")).replace(/\b\w/g, c => c.toUpperCase())}\n\n${t("Your message/question:")}\n${t("Please approve my order. Order ID:")} ${finalOrderId}\n${itemsLine}\n${t("Total Amount: Rs")} ${finalAmount}`;
-      
-      const adminPhone = standardizePhone(settings?.supportNumber || '3363284466').replace('+', '');
-      const whatsappUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
-      window.open(whatsappUrl, '_blank');
-      navigate('/');
-    } finally { 
-      setLoading(false); 
-    }
+  const handleOrderFinished = (order: any, isAutoApproved: boolean) => {
+    setCompletedOrder(order);
+    setWasAutoApproved(isAutoApproved);
+    setOrderId(order.id);
+    setConfirmed(true);
+    setLastCreatedOrder({
+      id: order.id,
+      items: order.items || cart,
+      amount: order.amount || totalPrice,
+    });
+    clearCart();
   };
 
   return (
@@ -307,63 +201,45 @@ export default function Cart() {
           </div>
         </div>
 
-        {!profile?.phone && (
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 mb-6 border border-zinc-200/80 dark:border-zinc-800/80 shadow-sm">
-            <h2 className="text-base font-extrabold mb-3 flex items-center gap-2 text-zinc-900 dark:text-white">
-              <Smartphone className="w-4 h-4 text-emerald-500" />
-              {t('WhatsApp Number')}
-            </h2>
-            <input
-              type="tel"
-              value={whatsappNumber}
-              onChange={(e) => setWhatsappNumber(e.target.value)}
-              placeholder="e.g. 03001234567"
-              className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all outline-none"
-            />
-          </div>
-        )}
-
-        {settings?.isPaymentEnabled !== false && (
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 mb-6 border border-zinc-200/80 dark:border-zinc-800/80 shadow-sm">
-            <h2 className="text-base font-extrabold mb-2 flex items-center gap-2 text-zinc-900 dark:text-white">
-              <Wallet className="w-4 h-4 text-emerald-500" />
-              {t('Payment Details')}
-            </h2>
-            <p className="text-zinc-500 dark:text-zinc-400 mb-5 text-xs font-medium">
-              {t('Please send the payment to the following account via any of these methods:')}
-            </p>
-            
-            <PaymentMethods copied={copied} onCopy={handleCopy} />
-          </div>
-        )}
-
-        <div className="text-center mb-6">
-          <p className="text-zinc-500 dark:text-zinc-400 text-xs font-medium">
-            {settings?.isPaymentEnabled !== false ? t('After Payment Send Screenshot for Approval') : t('Submit your request for approval')}
-          </p>
-        </div>
-
-        <div className="space-y-3 mb-8">
-          <button
-            onClick={handleConfirm}
-            disabled={loading || confirmed || cart.length === 0}
-            className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-extrabold py-3.5 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-98 disabled:opacity-50 shadow-lg shadow-blue-500/20 text-sm cursor-pointer"
-          >
-            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : confirmed ? <CheckCircle2 className="w-5 h-5" /> : null}
-            <span>{loading ? t('Processing...') : confirmed ? t('Order Confirmed') : t('Confirm Order')}</span>
-          </button>
-
-          {settings?.isAdminContactEnabled !== false && (
+        {/* Completion Celebration Card */}
+        {completedOrder && wasAutoApproved && (
+          <div className="bg-emerald-500/10 border-2 border-emerald-500/40 p-6 rounded-3xl mb-6 text-center space-y-4 shadow-xl">
+            <div className="w-16 h-16 rounded-full bg-emerald-500 text-white flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/30">
+              <CheckCircle2 className="w-8 h-8" />
+            </div>
+            <div>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-extrabold text-xs uppercase tracking-wider mb-2">
+                ⚡ AI Auto-Approved
+              </span>
+              <h3 className="text-2xl font-black text-zinc-900 dark:text-white">
+                🎉 Order Approved Instantly!
+              </h3>
+              <p className="text-sm text-zinc-600 dark:text-zinc-300 mt-1 max-w-md mx-auto">
+                Your payment was verified against bank notifications. Your content has been unlocked for streaming and download!
+              </p>
+            </div>
+            <div className="p-3 bg-white/80 dark:bg-black/40 rounded-2xl border border-zinc-200 dark:border-zinc-800 text-xs font-mono text-zinc-600 dark:text-zinc-300 flex items-center justify-between">
+              <span>Order #{completedOrder.id}</span>
+              <span className="font-bold text-emerald-600 dark:text-emerald-400">Rs. {completedOrder.amount}</span>
+            </div>
             <button
-              onClick={handleSendPaymentScreenshot}
-              disabled={loading}
-              className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-extrabold py-3.5 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-98 disabled:opacity-50 shadow-lg shadow-emerald-500/20 text-sm cursor-pointer"
+              onClick={() => navigate('/')}
+              className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-extrabold py-3.5 rounded-2xl shadow-lg shadow-emerald-500/20 text-sm cursor-pointer"
             >
-              {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-              <span>{loading ? t('Processing...') : (settings?.isPaymentEnabled !== false ? t('Send Payment Screenshot') : t('Contact Admin For Order'))}</span>
+              Start Watching Now 🍿
             </button>
-          )}
-        </div>
+          </div>
+        )}
+
+        {/* If cart has items and not completed, show PaymentVerificationForm */}
+        {cart.length > 0 && !wasAutoApproved && (
+          <PaymentVerificationForm
+            orderType="content"
+            amount={totalPrice}
+            items={cart}
+            onOrderCompleted={handleOrderFinished}
+          />
+        )}
 
         <PreviousOrders />
       </main>

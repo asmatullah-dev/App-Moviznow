@@ -177,14 +177,6 @@ export default function Home({
     loadReviews();
   }, [profile?.uid, profile?.email]);
 
-  const autoRefreshAttempted = useRef(false);
-  useEffect(() => {
-    if (!loading && !autoRefreshAttempted.current) {
-      autoRefreshAttempted.current = true;
-      quickRefreshCatalog().catch(console.error);
-    }
-  }, [loading, quickRefreshCatalog]);
-
   const [sort, setSort] = useState<"default" | "newest" | "year" | "az">(
     () => (sessionStorage.getItem("home_sort") as any) || "default",
   );
@@ -799,7 +791,7 @@ export default function Home({
                     className="flex-1 md:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 sm:px-5 sm:py-3 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold rounded-xl text-xs sm:text-sm transition-all shadow-lg shadow-rose-600/25 active:scale-95 text-center"
                   >
                     <Gift className="w-4 h-4" />
-                    <span>{t("Invite & Earn 5 Days Free")}</span>
+                    <span>{t("Invite & Earn 10 Days Free")}</span>
                   </Link>
                   <button
                     onClick={handleShareReferral}
@@ -833,7 +825,7 @@ export default function Home({
                 className="inline-flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-rose-500/10 via-amber-500/10 to-rose-500/10 border border-rose-500/20 hover:border-rose-500/40 text-rose-400 dark:text-rose-300 rounded-full text-xs font-semibold transition-all shadow-sm hover:scale-105 active:scale-95"
               >
                 <Gift className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-                <span>🎁 {t("Get 5 Days Free Basic Access!")}</span>
+                <span>🎁 {t("Get 10 Days Free Basic Access!")}</span>
               </button>
             </div>
           )}
