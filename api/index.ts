@@ -3284,6 +3284,14 @@ async function startServer() {
     }
   });
 
+  // Explicit route to serve Google AdSense ads.txt
+  app.get("/ads.txt", (_req, res) => {
+    const adsTxtContent = "google.com, pub-3128773545517669, DIRECT, f08c47fec0942fa0\n";
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.send(adsTxtContent);
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const { createServer: createViteServer } = await import("vite");

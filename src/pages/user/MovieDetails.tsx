@@ -1624,7 +1624,7 @@ export default function MovieDetails() {
   const isLibraryEmpty = contentList.length === 0;
 
   useEffect(() => {
-    if (isOffline) return;
+    if (isOffline || contentLoading) return;
 
     // When movie details page is opened and library is empty, load content automatically and show toast
     if (isLibraryEmpty && !hasAttemptedGlobalRefresh) {
@@ -1635,11 +1635,12 @@ export default function MovieDetails() {
       refreshProfile(false).catch((e) =>
         console.error("Error refreshing profile:", e)
       );
-      return;
+    } else if (!isLibraryEmpty && !hasAttemptedGlobalRefresh) {
+      // Library is NOT empty: mark as attempted so we don't auto update or show global search loader
+      setHasAttemptedGlobalRefresh(true);
     }
-
-    // If library is NOT empty and link content is not found, do NOT auto update
   }, [
+    contentLoading,
     isLibraryEmpty,
     hasAttemptedGlobalRefresh,
     isOffline,
@@ -1673,59 +1674,50 @@ export default function MovieDetails() {
   if (!mergedContent || !isAuthorized) {
     return (
       <div className="min-h-screen bg-white dark:bg-zinc-950 flex flex-col items-center justify-center text-zinc-900 dark:text-white p-4">
-        {!contentLoading && fetchFailed && !hasAttemptedGlobalRefresh ? (
-          <div className="flex flex-col items-center gap-4">
-            <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
+        <div className="text-center space-y-6 max-w-md">
+          <div className="space-y-4">
+            <h2 className="text-xl font-bold">
+              {t('Content not found or unavailable')}
+            </h2>
             <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              {t('Search global library...')}
+              {t('This content may have been removed or you don\'t have access to it.')}
             </p>
           </div>
-        ) : (
-          <div className="text-center space-y-6 max-w-md">
-            <div className="space-y-4">
-              <h2 className="text-xl font-bold">
-                {t('Content not found or unavailable')}
-              </h2>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                {t('This content may have been removed or you don\'t have access to it.')}
-              </p>
-            </div>
+          
+          <div className="pt-4 flex flex-col gap-3">
+            <button
+              onClick={async () => {
+                vibrate(50);
+                setIsManualRefreshing(true);
+                try {
+                  await Promise.all([
+                    checkForUpdates(true),
+                    refreshProfile(true, 'manual'),
+                    refreshSettings(true)
+                  ]);
+                  // Give a small delay for state to propagate
+                  await new Promise(resolve => setTimeout(resolve, 800));
+                } catch (e) {
+                  console.error("Manual refresh failed", e);
+                } finally {
+                  setIsManualRefreshing(false);
+                }
+              }}
+              disabled={isSyncing || isManualRefreshing}
+              className="flex items-center justify-center gap-2 w-full px-6 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-600 disabled:bg-zinc-200 dark:disabled:bg-zinc-800 disabled:text-zinc-400 text-white font-semibold transition-all active:scale-95 shadow-lg shadow-emerald-500/20"
+            >
+              <RefreshCw className={clsx("w-5 h-5", (isSyncing || isManualRefreshing) && "animate-spin")} />
+              {(isSyncing || isManualRefreshing) ? t("Refreshing...") : t("Refresh App Data")}
+            </button>
             
-            <div className="pt-4 flex flex-col gap-3">
-              <button
-                onClick={async () => {
-                  vibrate(50);
-                  setIsManualRefreshing(true);
-                  try {
-                    await Promise.all([
-                      checkForUpdates(true),
-                      refreshProfile(true, 'manual'),
-                      refreshSettings(true)
-                    ]);
-                    // Give a small delay for state to propagate
-                    await new Promise(resolve => setTimeout(resolve, 800));
-                  } catch (e) {
-                    console.error("Manual refresh failed", e);
-                  } finally {
-                    setIsManualRefreshing(false);
-                  }
-                }}
-                disabled={isSyncing || isManualRefreshing}
-                className="flex items-center justify-center gap-2 w-full px-6 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-600 disabled:bg-zinc-200 dark:disabled:bg-zinc-800 disabled:text-zinc-400 text-white font-semibold transition-all active:scale-95 shadow-lg shadow-emerald-500/20"
-              >
-                <RefreshCw className={clsx("w-5 h-5", (isSyncing || isManualRefreshing) && "animate-spin")} />
-                {(isSyncing || isManualRefreshing) ? t("Refreshing...") : t("Refresh App Data")}
-              </button>
-              
-              <Link
-                to="/"
-                className="text-sm font-medium text-zinc-500 hover:text-emerald-500 transition-colors"
-              >
-                {t('Go back to Home')}
-              </Link>
-            </div>
+            <Link
+              to="/"
+              className="text-sm font-medium text-zinc-500 hover:text-emerald-500 transition-colors"
+            >
+              {t('Go back to Home')}
+            </Link>
           </div>
-        )}
+        </div>
       </div>
     );
   }
