@@ -169,7 +169,7 @@ export default function TopUp() {
                 🎉 Order Approved Instantly!
               </h3>
               <p className="text-sm text-zinc-600 dark:text-zinc-300 mt-1 max-w-md mx-auto">
-                Your payment was verified against bank notifications. Your {activePlan.name} membership is now active!
+                Your payment was verified securely with the bank. Your {activePlan.name} membership is now active!
               </p>
             </div>
             <div className="p-3 bg-white/80 dark:bg-black/40 rounded-2xl border border-zinc-200 dark:border-zinc-800 text-xs font-mono text-zinc-600 dark:text-zinc-300 flex items-center justify-between">

@@ -80,11 +80,55 @@ export default function PaymentVerificationForm({
   // Verification & Submission State
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [verificationStep, setVerificationStep] = useState<'idle' | 'ocr' | 'gmail_match' | 'finalizing'>('idle');
+  const [verificationAttempt, setVerificationAttempt] = useState(1);
   const [alertConfig, setAlertConfig] = useState<{ isOpen: boolean; title: string; message: string }>({
     isOpen: false,
     title: '',
     message: '',
   });
+
+  // Helper to optimize large images before sending for OCR
+  const processImageForOCR = (file: File): Promise<{ base64: string; mimeType: string }> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const maxDim = 1600;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            const optimizedBase64 = canvas.toDataURL('image/jpeg', 0.85);
+            resolve({ base64: optimizedBase64, mimeType: 'image/jpeg' });
+          } else {
+            resolve({ base64: e.target?.result as string, mimeType: file.type || 'image/jpeg' });
+          }
+        };
+        img.onerror = () => {
+          resolve({ base64: e.target?.result as string, mimeType: file.type || 'image/jpeg' });
+        };
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
 
   // Handle image upload & AI OCR with Gemini
   const handleImageSelected = async (file: File) => {
@@ -99,55 +143,76 @@ export default function PaymentVerificationForm({
       return;
     }
 
-    // Convert to Base64
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const base64String = reader.result as string;
-      setScreenshotData(base64String);
-      setIsScanningScreenshot(true);
-      setOcrSuccess(false);
-      setOcrMessage('');
+    setIsScanningScreenshot(true);
+    setOcrSuccess(false);
+    setOcrMessage('');
 
-      try {
-        const response = await fetch('/api/orders/ocr-payment-receipt', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            imageBase64: base64String,
-            mimeType: file.type,
-          }),
-        });
+    try {
+      const { base64, mimeType } = await processImageForOCR(file);
+      setScreenshotData(base64);
 
-        const data = await response.json();
-        if (data.success && data.extracted) {
-          const ext = data.extracted;
-          if (ext.trxId) setTrxId(ext.trxId);
-          if (ext.accountTitle) setAccountTitle(ext.accountTitle);
-          if (ext.accountNumberLast4) setAccountNumberLast4(ext.accountNumberLast4);
-          if (ext.date) setPaymentDate(ext.date);
-          if (ext.time) setPaymentTime(ext.time);
-          if (!ext.date && ext.dateTime) {
-            const dtMatch = ext.dateTime.match(/(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2})/);
-            if (dtMatch) {
-              setPaymentDate(dtMatch[1]);
-              setPaymentTime(dtMatch[2]);
-            }
+      const response = await fetch('/api/orders/ocr-payment-receipt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: base64,
+          mimeType,
+        }),
+      });
+
+      const data = await response.json();
+      if (data.success && data.extracted) {
+        const ext = data.extracted;
+        let detectedAny = false;
+
+        if (ext.trxId) {
+          setTrxId(ext.trxId);
+          detectedAny = true;
+        }
+        if (ext.accountTitle) {
+          setAccountTitle(ext.accountTitle);
+          detectedAny = true;
+        }
+        if (ext.accountNumberLast4) {
+          setAccountNumberLast4(ext.accountNumberLast4);
+          detectedAny = true;
+        }
+        if (ext.date) {
+          setPaymentDate(ext.date);
+          detectedAny = true;
+        }
+        if (ext.time) {
+          setPaymentTime(ext.time);
+          detectedAny = true;
+        }
+        if (!ext.date && ext.dateTime) {
+          const dtMatch = ext.dateTime.match(/(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2})/);
+          if (dtMatch) {
+            setPaymentDate(dtMatch[1]);
+            setPaymentTime(dtMatch[2]);
+            detectedAny = true;
           }
-          if (ext.senderBank) setSenderBank(ext.senderBank);
+        }
+        if (ext.senderBank) {
+          setSenderBank(ext.senderBank);
+          detectedAny = true;
+        }
 
+        if (detectedAny) {
           setOcrSuccess(true);
-          setOcrMessage(t('Payment details recognized automatically by AI Gemini!'));
+          setOcrMessage(t('Payment details recognized automatically by AI!'));
         } else {
           setOcrMessage(t('Could not extract all details automatically. Please verify or fill in manually.'));
         }
-      } catch (err) {
-        console.error('Failed to run Gemini OCR:', err);
-        setOcrMessage(t('Image attached. Please fill or check the payment fields.'));
-      } finally {
-        setIsScanningScreenshot(false);
+      } else {
+        setOcrMessage(t('Could not extract all details automatically. Please verify or fill in manually.'));
       }
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      console.error('Failed to run Gemini OCR:', err);
+      setOcrMessage(t('Image attached. Please fill or check the payment fields.'));
+    } finally {
+      setIsScanningScreenshot(false);
+    }
   };
 
   const handlePaste = (e: React.ClipboardEvent) => {
@@ -173,7 +238,7 @@ export default function PaymentVerificationForm({
     }
   };
 
-  // Submit Order & Run AI Gemini Gmail Auto-Approval
+  // Submit Order & Run AI Gmail Auto-Approval
   const handleSubmitAndVerify = async () => {
     if (!profile) {
       setAlertConfig({
@@ -215,11 +280,6 @@ export default function PaymentVerificationForm({
     setVerificationStep('gmail_match');
 
     try {
-      // If user provided a new phone, update it
-      if (whatsappNumber && whatsappNumber !== profile.phone) {
-        updateUserProfileData({ phone: whatsappNumber }).catch(() => {});
-      }
-
       // Check if admin gmail token is cached in local/session
       const cachedGmailToken = sessionStorage.getItem('admin_gmail_oauth_token') || undefined;
 
@@ -228,6 +288,8 @@ export default function PaymentVerificationForm({
         userName: profile.displayName || accountTitle || 'Member',
         userEmail: profile.email || '',
         userRole: profile.role || 'user',
+        phone: whatsappNumber !== profile.phone ? whatsappNumber : undefined,
+        verificationAttempt,
         type: orderType,
         planRole,
         amount: Number(amount) || 0,
@@ -252,6 +314,15 @@ export default function PaymentVerificationForm({
       const result = await response.json();
 
       if (!result.success) {
+        if (result.needsRetry) {
+          setVerificationAttempt(prev => prev + 1);
+          setAlertConfig({
+            isOpen: true,
+            title: t('Verification Failed'),
+            message: result.reason + ' ' + t('Please check your details and try again.'),
+          });
+          return;
+        }
         throw new Error(result.error || 'Failed to verify order');
       }
 
@@ -312,7 +383,7 @@ export default function PaymentVerificationForm({
           </span>
         </div>
         <p className="text-zinc-500 dark:text-zinc-400 text-xs mb-4">
-          {t('Upload or paste your transfer receipt. AI Gemini will automatically scan and fill all details.')}
+          {t('Upload or paste your transfer receipt. AI will automatically scan and fill all details.')}
         </p>
 
         <input
@@ -362,7 +433,7 @@ export default function PaymentVerificationForm({
             {isScanningScreenshot && (
               <div className="mt-2 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-2 text-xs font-bold text-emerald-600 dark:text-emerald-400">
                 <Loader2 className="w-4 h-4 animate-spin text-emerald-500" />
-                <span>AI Gemini is extracting Transaction ID, Account Name & Timestamp...</span>
+                <span>AI is extracting Transaction ID, Account Name & Timestamp...</span>
               </div>
             )}
 
@@ -503,20 +574,20 @@ export default function PaymentVerificationForm({
               <Loader2 className="w-5 h-5 animate-spin" />
               <span>
                 {verificationStep === 'gmail_match' 
-                  ? 'AI Gemini Matching Against Bank Notifications...' 
+                  ? 'AI verifying transaction securely with bank...' 
                   : 'Processing Order...'}
               </span>
             </>
           ) : (
             <>
               <Zap className="w-5 h-5 text-amber-300 fill-amber-300" />
-              <span>{t('Confirm Order & Verify with AI')}</span>
+              <span>{verificationAttempt >= 3 ? t('Submit for Manual Verification') : t('Confirm Order & Verify with AI')}</span>
             </>
           )}
         </button>
 
         <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
-          ⚡ {t('Orders matching bank receipts are approved immediately by AI Gemini.')}
+          ⚡ {t('Orders matching bank receipts are approved immediately by AI.')}
         </p>
       </div>
 

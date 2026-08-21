@@ -133,7 +133,7 @@ Rules:
 
 Respond with ONLY the exact name of the streaming platform. If you cannot determine with confidence, respond with "Unknown". No explanations, markdown, or surrounding quotes.`;
 
-    const modelsToTry = ["gemini-2.5-flash", "gemini-1.5-flash"];
+    const modelsToTry = ["gemini-3.1-flash-lite", "gemini-3.7-flash"];
     let platform = "";
     let isRateLimited = false;
 

@@ -76,6 +76,149 @@ export default function AdminSettings() {
   const [testingSmtp, setTestingSmtp] = useState(false);
   const [smtpResult, setSmtpResult] = useState<{ success?: boolean; message?: string } | null>(null);
 
+  // Gmail AI Verification state
+  const [gmailStatus, setGmailStatus] = useState<{
+    connected: boolean;
+    isValid: boolean;
+    targetEmail?: string;
+    connectedEmail?: string;
+    messagesTotal?: number | null;
+    lastUpdated?: string | null;
+    errorDetail?: string | null;
+  } | null>(null);
+  const [loadingGmailStatus, setLoadingGmailStatus] = useState(false);
+  const [connectingGmail, setConnectingGmail] = useState(false);
+  const [testingGmailBank, setTestingGmailBank] = useState(false);
+  const [bankTestResult, setBankTestResult] = useState<{ success: boolean; count?: number; emails?: any[]; error?: string } | null>(null);
+  const [manualTokenInput, setManualTokenInput] = useState('');
+  const [showManualInput, setShowManualInput] = useState(false);
+
+  const fetchGmailStatus = async () => {
+    setLoadingGmailStatus(true);
+    try {
+      const res = await fetch('/api/orders/gmail-status');
+      if (res.ok) {
+        const data = await res.json();
+        setGmailStatus(data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch Gmail status:', err);
+    } finally {
+      setLoadingGmailStatus(false);
+    }
+  };
+
+  const syncGmailTokenToServer = async (token: string, email?: string) => {
+    setConnectingGmail(true);
+    try {
+      const res = await fetch('/api/orders/sync-gmail-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, email })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setAlertConfig({
+          isOpen: true,
+          title: 'Gmail Connected Successfully!',
+          message: `Successfully connected ${data.email || 'bank Gmail account'}. Automated Gemini payment matching is now fully active!`
+        });
+        setManualTokenInput('');
+        setShowManualInput(false);
+        await fetchGmailStatus();
+      } else {
+        setError(data.error || data.details || 'Failed to authenticate Gmail token on server.');
+      }
+    } catch (err: any) {
+      setError('Connection to server failed: ' + err.message);
+    } finally {
+      setConnectingGmail(false);
+    }
+  };
+
+  const handleConnectGmail = async () => {
+    setConnectingGmail(true);
+    setError(null);
+    try {
+      // 1. Try Google Identity Services (GSI) Token Client first
+      if (typeof window !== 'undefined' && (window as any).google?.accounts?.oauth2) {
+        const client = (window as any).google.accounts.oauth2.initTokenClient({
+          client_id: '460140141169-nlm0no0uhcaaaot9037sp4g31r36i808.apps.googleusercontent.com',
+          scope: 'https://www.googleapis.com/auth/gmail.readonly',
+          callback: async (tokenResponse: any) => {
+            if (tokenResponse?.access_token) {
+              await syncGmailTokenToServer(tokenResponse.access_token);
+            } else if (tokenResponse?.error) {
+              setError('Google Authorization error: ' + tokenResponse.error);
+              setConnectingGmail(false);
+            }
+          },
+          error_callback: (err: any) => {
+            console.error('Google GSI error:', err);
+            setError('Google authorization cancelled or blocked.');
+            setConnectingGmail(false);
+          }
+        });
+        client.requestAccessToken({ prompt: 'select_account' });
+        return;
+      }
+
+      // 2. Fallback: Firebase Auth with GoogleAuthProvider
+      const { signInWithPopup, GoogleAuthProvider } = await import('firebase/auth');
+      const { auth } = await import('../../firebase');
+      const provider = new GoogleAuthProvider();
+      provider.addScope('https://www.googleapis.com/auth/gmail.readonly');
+      provider.setCustomParameters({ prompt: 'select_account' });
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (credential?.accessToken) {
+        await syncGmailTokenToServer(credential.accessToken, result.user.email || undefined);
+      } else {
+        setError('Could not retrieve access token from Google popup.');
+        setConnectingGmail(false);
+      }
+    } catch (err: any) {
+      console.error('Gmail connect error:', err);
+      setError('Gmail Connection Error: ' + (err.message || 'Please check popup settings'));
+      setConnectingGmail(false);
+    }
+  };
+
+  const handleTestBankSearch = async () => {
+    setTestingGmailBank(true);
+    setBankTestResult(null);
+    try {
+      const res = await fetch('/api/orders/test-bank-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      setBankTestResult(data);
+    } catch (err: any) {
+      setBankTestResult({ success: false, error: err.message || 'Network error' });
+    } finally {
+      setTestingGmailBank(false);
+    }
+  };
+
+  const handleDisconnectGmail = async () => {
+    if (!window.confirm('Are you sure you want to disconnect the Gmail integration? AI bank auto-verification will pause until reconnected.')) return;
+    try {
+      const res = await fetch('/api/orders/disconnect-gmail', { method: 'POST' });
+      if (res.ok) {
+        setGmailStatus({ connected: false, isValid: false });
+        setBankTestResult(null);
+        setAlertConfig({
+          isOpen: true,
+          title: 'Gmail Disconnected',
+          message: 'Gmail integration has been disconnected successfully.'
+        });
+      }
+    } catch (err: any) {
+      setError('Failed to disconnect: ' + err.message);
+    }
+  };
+
   const handleTestSmtp = async () => {
     setTestingSmtp(true);
     setSmtpResult(null);
@@ -162,6 +305,7 @@ export default function AdminSettings() {
       }
     };
     fetchSettings();
+    fetchGmailStatus();
   }, []);
 
   const handleSave = async (e: React.FormEvent) => {
@@ -1205,53 +1349,197 @@ export default function AdminSettings() {
         </div>
 
         {/* Gmail AI Verification Integration */}
-        <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
-          <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2">
-            <Mail className="w-5 h-5 text-purple-500" />
-            <h2 className="text-lg font-semibold text-zinc-900 dark:text-white">Gmail Integration for AI Verification</h2>
+        <div id="gmail-integration-card" className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-sm">
+          <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-purple-500/10 dark:bg-purple-500/20 flex items-center justify-center text-purple-600 dark:text-purple-400">
+                <Mail className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-zinc-900 dark:text-white">Gmail Integration for AI Verification</h2>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">Auto-match payment receipts against live bank email notifications</p>
+              </div>
+            </div>
+
+            {/* Live Status Badge */}
+            <div className="flex items-center gap-2">
+              {loadingGmailStatus ? (
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Checking status...
+                </div>
+              ) : gmailStatus?.isValid ? (
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  Active & Verified
+                </div>
+              ) : gmailStatus?.connected ? (
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                  <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                  Token Needs Refresh
+                </div>
+              ) : (
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
+                  <span className="w-2 h-2 rounded-full bg-zinc-400"></span>
+                  Not Connected
+                </div>
+              )}
+            </div>
           </div>
-          <div className="p-6 space-y-4">
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              Connect your bank's Gmail account (asmatullah9327@gmail.com) so Gemini AI can automatically read bank notifications to verify payments instantly.
-            </p>
-            <button
-              type="button"
-              onClick={async () => {
-                try {
-                  const { signInWithPopup, GoogleAuthProvider } = await import('firebase/auth');
-                  const { auth } = await import('../../firebase');
-                  const provider = new GoogleAuthProvider();
-                  provider.addScope('https://www.googleapis.com/auth/gmail.readonly');
-                  const result = await signInWithPopup(auth, provider);
-                  const credential = GoogleAuthProvider.credentialFromResult(result);
-                  if (credential?.accessToken) {
-                    const res = await fetch('/api/orders/sync-gmail-token', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ token: credential.accessToken })
-                    });
-                    if (res.ok) {
-                      alert('Gmail account connected successfully! AI auto-verification is now active.');
-                    } else {
-                      alert('Failed to sync token to server.');
-                    }
-                  }
-                } catch (error: any) {
-                  console.error('Gmail sync error:', error);
-                  alert('Error syncing Gmail: ' + error.message);
-                }
-              }}
-              className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-2"
-            >
-              <svg viewBox="0 0 48 48" className="w-5 h-5 bg-white rounded-full p-1">
-                <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
-                <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
-                <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
-                <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
-                <path fill="none" d="M0 0h48v48H0z"></path>
-              </svg>
-              Connect with Google
-            </button>
+
+          <div className="p-6 space-y-5">
+            {/* Account Details Banner */}
+            <div className="p-4 rounded-xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200/80 dark:border-zinc-700/80 space-y-2">
+              <div className="flex items-center justify-between flex-wrap gap-2 text-sm">
+                <span className="text-zinc-500 dark:text-zinc-400">Target Bank Account:</span>
+                <span className="font-semibold text-zinc-900 dark:text-white">asmatullah9327@gmail.com</span>
+              </div>
+              {gmailStatus?.connectedEmail && (
+                <div className="flex items-center justify-between flex-wrap gap-2 text-sm">
+                  <span className="text-zinc-500 dark:text-zinc-400">Currently Connected Account:</span>
+                  <span className="font-medium text-purple-600 dark:text-purple-400">{gmailStatus.connectedEmail}</span>
+                </div>
+              )}
+              {gmailStatus?.lastUpdated && (
+                <div className="flex items-center justify-between flex-wrap gap-2 text-xs text-zinc-400">
+                  <span>Last Synchronized:</span>
+                  <span>{new Date(gmailStatus.lastUpdated).toLocaleString()}</span>
+                </div>
+              )}
+              {gmailStatus?.errorDetail && !gmailStatus.isValid && (
+                <div className="mt-2 p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-600 dark:text-red-400 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{gmailStatus.errorDetail}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center flex-wrap gap-3">
+              <button
+                type="button"
+                id="connect-gmail-btn"
+                disabled={connectingGmail}
+                onClick={handleConnectGmail}
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-sm font-medium transition-all shadow-sm flex items-center gap-2.5"
+              >
+                {connectingGmail ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <svg viewBox="0 0 48 48" className="w-4 h-4 bg-white rounded-full p-0.5">
+                    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
+                    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
+                    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
+                    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
+                    <path fill="none" d="M0 0h48v48H0z"></path>
+                  </svg>
+                )}
+                <span>{gmailStatus?.isValid ? "Reconnect / Switch Account" : "Connect with Google"}</span>
+              </button>
+
+              <button
+                type="button"
+                id="refresh-gmail-status-btn"
+                disabled={loadingGmailStatus}
+                onClick={fetchGmailStatus}
+                className="px-4 py-2.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 rounded-xl text-sm font-medium transition-colors flex items-center gap-2"
+              >
+                <RefreshCw className={clsx("w-4 h-4", loadingGmailStatus && "animate-spin")} />
+                <span>Check Status</span>
+              </button>
+
+              {gmailStatus?.isValid && (
+                <button
+                  type="button"
+                  id="test-bank-search-btn"
+                  disabled={testingGmailBank}
+                  onClick={handleTestBankSearch}
+                  className="px-4 py-2.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-2"
+                >
+                  {testingGmailBank ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                  <span>Test Bank Search</span>
+                </button>
+              )}
+
+              {gmailStatus?.connected && (
+                <button
+                  type="button"
+                  id="disconnect-gmail-btn"
+                  onClick={handleDisconnectGmail}
+                  className="px-4 py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 rounded-xl text-sm font-medium transition-colors flex items-center gap-2"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>Disconnect</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setShowManualInput(!showManualInput)}
+                className="px-3 py-2 text-xs text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 font-medium ml-auto"
+              >
+                {showManualInput ? "Hide Manual Sync" : "Manual Token Sync"}
+              </button>
+            </div>
+
+            {/* Manual Token Input (Fallback / Testing) */}
+            {showManualInput && (
+              <div className="p-4 rounded-xl bg-zinc-50 dark:bg-zinc-800/40 border border-dashed border-zinc-300 dark:border-zinc-700 space-y-3">
+                <div className="flex items-center gap-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                  <Info className="w-4 h-4 text-blue-500" />
+                  <span>Manual Google Access Token Sync</span>
+                </div>
+                <p className="text-xs text-zinc-500">
+                  If your browser blocks popup authentication, you can paste a valid Google OAuth access token below:
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="password"
+                    value={manualTokenInput}
+                    onChange={(e) => setManualTokenInput(e.target.value)}
+                    placeholder="ya29.a0AfH6S..."
+                    className="flex-1 px-3 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-xs font-mono text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button
+                    type="button"
+                    disabled={connectingGmail || !manualTokenInput.trim()}
+                    onClick={() => syncGmailTokenToServer(manualTokenInput.trim())}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors"
+                  >
+                    {connectingGmail ? "Syncing..." : "Sync Token"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Test Bank Search Results Preview */}
+            {bankTestResult && (
+              <div className="p-4 rounded-xl bg-zinc-50 dark:bg-zinc-800/70 border border-zinc-200 dark:border-zinc-700 space-y-2">
+                <div className="flex items-center justify-between text-xs font-semibold">
+                  <span className={bankTestResult.success ? "text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5" : "text-red-500 flex items-center gap-1.5"}>
+                    {bankTestResult.success ? <Check className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                    {bankTestResult.success ? `Bank Search Test Passed: Found ${bankTestResult.count || 0} recent bank notifications` : `Search Failed: ${bankTestResult.error}`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setBankTestResult(null)}
+                    className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                {bankTestResult.emails && bankTestResult.emails.length > 0 && (
+                  <div className="space-y-1.5 mt-2 max-h-40 overflow-y-auto pr-1">
+                    {bankTestResult.emails.map((em: any, idx: number) => (
+                      <div key={idx} className="p-2 bg-white dark:bg-zinc-900 rounded border border-zinc-200/60 dark:border-zinc-800 text-xs">
+                        <div className="font-medium text-zinc-900 dark:text-zinc-100 truncate">{em.subject || "No Subject"}</div>
+                        <div className="text-zinc-400 text-[11px] truncate">{em.from} • {em.date}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

@@ -25,6 +25,10 @@ function getGenAI() {
   });
 }
 
+function generate9DigitOrderId(): string {
+  return Math.floor(100000000 + Math.random() * 900000000).toString();
+}
+
 // Retrieve stored Gmail Token from Firestore or memory
 async function getActiveGmailToken(providedToken?: string): Promise<string | null> {
   // If the admin is passing a token directly to test/use, use it for this request, but DO NOT overwrite the global token memory cache
@@ -58,7 +62,7 @@ async function getActiveGmailToken(providedToken?: string): Promise<string | nul
   return null;
 }
 
-// 1. OCR endpoint: Recognize payment details from payment screenshot using Gemini 2.5 Flash
+// 1. OCR endpoint: Recognize payment details from payment screenshot using Gemini AI
 ordersRouter.post("/ocr-payment-receipt", async (req, res) => {
   try {
     const { imageBase64, mimeType = "image/jpeg" } = req.body;
@@ -67,13 +71,14 @@ ordersRouter.post("/ocr-payment-receipt", async (req, res) => {
     }
 
     const cleanBase64 = imageBase64.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, "").trim();
+    const cleanMimeType = (mimeType && mimeType.startsWith("image/")) ? mimeType : "image/jpeg";
     const ai = getGenAI();
 
-    const prompt = `Analyze this bank transfer / mobile wallet payment receipt screenshot (e.g. EasyPaisa, JazzCash, SadaPay, NayaPay, Meezan Bank, HBL, Bank Alfalah, UBL, MCB, Allied Bank, etc.).
-Extract the following payment fields with high accuracy:
-1. "trxId": The Transaction ID, TID, Reference Number, Trx ID, or Receipt Number (digits or alphanumeric string).
-2. "accountTitle": The sender / payer account title or sender name (e.g. "Asmat Ullah", "Muhammad Ali", etc.).
-3. "accountNumberLast4": The last 4 digits of the sender's account number, IBAN, or mobile wallet number.
+    const prompt = `You are an expert financial OCR parser. Analyze this bank transfer / mobile wallet payment receipt screenshot (e.g. EasyPaisa, JazzCash, SadaPay, NayaPay, Meezan Bank, HBL, Bank Alfalah, UBL, MCB, Allied Bank, Askari, Faysal, Raast, 1Link, etc.).
+Extract the following payment fields accurately:
+1. "trxId": The Transaction ID, TID, Reference Number (Ref No / Ref ID), Trx ID, or Receipt Number (numeric or alphanumeric).
+2. "accountTitle": The sender / payer account title, sender name, or customer name (e.g. "Asmat Ullah", "Muhammad Ali", etc.).
+3. "accountNumberLast4": The last 4 digits of the sender's account number, mobile wallet number, or IBAN.
 4. "date": The transaction date formatted as YYYY-MM-DD if possible (e.g. "2026-08-21").
 5. "time": The transaction time formatted as HH:MM in 24-hour format if possible (e.g. "14:35").
 6. "dateTime": The exact date and time string from receipt (e.g. "2026-08-21 14:35" or "21 Aug 2026, 02:35 PM").
@@ -83,45 +88,61 @@ Extract the following payment fields with high accuracy:
 
 Return ONLY a valid JSON object matching the requested schema.`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: [
-        {
-          role: "user",
-          parts: [
+    const modelsToTry = ["gemini-3.1-flash-lite", "gemini-3.7-flash", "gemini-3.6-flash"];
+    let lastError: any = null;
+    let resultText = "";
+
+    for (const modelName of modelsToTry) {
+      try {
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: [
             {
-              inlineData: {
-                data: cleanBase64,
-                mimeType: mimeType || "image/jpeg",
-              },
-            },
-            {
-              text: prompt,
+              role: "user",
+              parts: [
+                {
+                  inlineData: {
+                    data: cleanBase64,
+                    mimeType: cleanMimeType,
+                  },
+                },
+                {
+                  text: prompt,
+                },
+              ],
             },
           ],
-        },
-      ],
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            trxId: { type: Type.STRING, description: "Transaction ID / Reference Number" },
-            accountTitle: { type: Type.STRING, description: "Sender / Payer Account Title" },
-            accountNumberLast4: { type: Type.STRING, description: "Last 4 digits of sender account / wallet" },
-            date: { type: Type.STRING, description: "Date in YYYY-MM-DD format" },
-            time: { type: Type.STRING, description: "Time in HH:MM format" },
-            dateTime: { type: Type.STRING, description: "Exact date and time from receipt" },
-            amount: { type: Type.NUMBER, description: "Numeric amount paid in PKR" },
-            senderBank: { type: Type.STRING, description: "Bank or wallet name" },
-            receiverAccount: { type: Type.STRING, description: "Recipient account details" },
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                trxId: { type: Type.STRING, description: "Transaction ID / Reference Number" },
+                accountTitle: { type: Type.STRING, description: "Sender / Payer Account Title" },
+                accountNumberLast4: { type: Type.STRING, description: "Last 4 digits of sender account / wallet" },
+                date: { type: Type.STRING, description: "Date in YYYY-MM-DD format" },
+                time: { type: Type.STRING, description: "Time in HH:MM format" },
+                dateTime: { type: Type.STRING, description: "Exact date and time from receipt" },
+                amount: { type: Type.NUMBER, description: "Numeric amount paid in PKR" },
+                senderBank: { type: Type.STRING, description: "Bank or wallet name" },
+                receiverAccount: { type: Type.STRING, description: "Recipient account details" },
+              },
+            },
           },
-          required: ["trxId"],
-        },
-      },
-    });
+        });
 
-    const resultText = response.text || "{}";
+        resultText = response.text || "";
+        if (resultText) break;
+      } catch (err: any) {
+        console.warn(`OCR attempt with model ${modelName} failed:`, err?.message || err);
+        lastError = err;
+      }
+    }
+
+    if (!resultText) {
+      throw lastError || new Error("Failed to extract text from payment screenshot");
+    }
+
     let parsed: any = {};
     try {
       parsed = JSON.parse(resultText);
@@ -158,27 +179,54 @@ Return ONLY a valid JSON object matching the requested schema.`;
 ordersRouter.post("/sync-gmail-token", async (req, res) => {
   try {
     const { token, email } = req.body;
-    if (!token) {
-      return res.status(400).json({ error: "Missing token in request body" });
+    if (!token || typeof token !== "string" || !token.trim()) {
+      return res.status(400).json({ error: "Missing or invalid token in request body" });
     }
 
-    storedGmailToken = token;
+    const cleanToken = token.trim();
+
+    // Verify token validity with Gmail API directly
+    let detectedEmail = email || "asmatullah9327@gmail.com";
+    let profileData: any = null;
+    try {
+      const profileRes = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", {
+        headers: { Authorization: `Bearer ${cleanToken}` },
+      });
+      if (profileRes.ok) {
+        profileData = await profileRes.json();
+        if (profileData?.emailAddress) {
+          detectedEmail = profileData.emailAddress;
+        }
+      } else {
+        const errText = await profileRes.text();
+        console.warn("Gmail profile test failed during sync:", profileRes.status, errText);
+        return res.status(400).json({
+          error: "Google returned an authentication error. Please verify the Gmail permission was granted.",
+          details: errText,
+        });
+      }
+    } catch (verErr: any) {
+      console.warn("Error contacting Gmail API during token sync:", verErr);
+    }
+
+    storedGmailToken = cleanToken;
     lastGmailTokenUpdate = new Date().toISOString();
 
     const firestore = getDb();
     if (firestore) {
       await firestore.collection("system_meta").doc("gmail_auth").set({
-        token,
-        email: email || "asmatullah9327@gmail.com",
+        token: cleanToken,
+        email: detectedEmail,
         updatedAt: lastGmailTokenUpdate,
       }, { merge: true });
     }
 
     return res.json({
       success: true,
-      message: "Gmail OAuth token synchronized successfully",
-      email: email || "asmatullah9327@gmail.com",
+      message: `Gmail connected successfully for ${detectedEmail}!`,
+      email: detectedEmail,
       updatedAt: lastGmailTokenUpdate,
+      profile: profileData,
     });
   } catch (error: any) {
     console.error("Failed to sync Gmail token:", error);
@@ -186,12 +234,32 @@ ordersRouter.post("/sync-gmail-token", async (req, res) => {
   }
 });
 
-// 3. Gmail Status endpoint
+// 3. Disconnect Gmail endpoint
+ordersRouter.post("/disconnect-gmail", async (req, res) => {
+  try {
+    storedGmailToken = null;
+    lastGmailTokenUpdate = null;
+
+    const firestore = getDb();
+    if (firestore) {
+      await firestore.collection("system_meta").doc("gmail_auth").delete();
+    }
+
+    return res.json({ success: true, message: "Gmail integration disconnected." });
+  } catch (error: any) {
+    console.error("Failed to disconnect Gmail:", error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// 4. Gmail Status endpoint
 ordersRouter.get("/gmail-status", async (req, res) => {
   try {
     const token = await getActiveGmailToken();
     let isLiveValid = false;
     let errorDetail = null;
+    let connectedEmail = null;
+    let messagesTotal = null;
 
     if (token) {
       try {
@@ -200,6 +268,9 @@ ordersRouter.get("/gmail-status", async (req, res) => {
         });
         if (testRes.ok) {
           isLiveValid = true;
+          const prof = await testRes.json();
+          connectedEmail = prof.emailAddress;
+          messagesTotal = prof.messagesTotal;
         } else {
           errorDetail = await testRes.text();
         }
@@ -212,11 +283,42 @@ ordersRouter.get("/gmail-status", async (req, res) => {
       connected: !!token,
       isValid: isLiveValid,
       targetEmail: "asmatullah9327@gmail.com",
+      connectedEmail: connectedEmail || (token ? "asmatullah9327@gmail.com" : null),
+      messagesTotal,
       lastUpdated: lastGmailTokenUpdate,
       errorDetail: isLiveValid ? null : errorDetail,
     });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
+  }
+});
+
+// 5. Test Live Bank Email Search endpoint
+ordersRouter.post("/test-bank-search", async (req, res) => {
+  try {
+    const token = await getActiveGmailToken();
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        error: "Gmail is not connected. Please connect your Gmail account first.",
+      });
+    }
+
+    const emails = await fetchRecentBankEmails(token);
+    return res.json({
+      success: true,
+      count: emails.length,
+      emails: emails.slice(0, 5).map(e => ({
+        id: e.id,
+        subject: e.subject,
+        from: e.from,
+        date: e.date,
+        snippet: e.snippet?.slice(0, 150),
+      })),
+    });
+  } catch (error: any) {
+    console.error("Test bank search failed:", error);
+    return res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -288,7 +390,7 @@ async function fetchRecentBankEmails(token: string) {
   }
 }
 
-// Helper: AI Reconciliation using Gemini 2.5 Flash with strict 2-tier matching
+// Helper: AI Reconciliation using Gemini 2.5 Pro with strict 2-tier matching
 async function matchOrderWithGmailEmails(
   orderDetails: {
     trxId: string;
@@ -304,7 +406,7 @@ async function matchOrderWithGmailEmails(
       matched: false,
       confidence: "none",
       matchTier: "none",
-      reason: "No recent bank notification emails found in Gmail mailbox",
+      reason: "No recent bank notifications found in our payment gateway",
     };
   }
 
@@ -329,17 +431,16 @@ async function matchOrderWithGmailEmails(
           matchedEmailSnippet: email.snippet || "",
           detectedBankName: email.from || "Bank Notification",
           verifiedTrxId: rawTrxId,
-          reason: `Matched via Transaction ID (TID: ${rawTrxId}) in email notification.`,
+          reason: `Matched via Transaction ID (TID: ${rawTrxId}) in bank notifications.`,
         };
       }
     }
   }
 
-  // 2. Pass to Gemini 2.5 Flash for Comprehensive 2-Tier Reasoning
+  // 2. Pass to Gemini 2.5 Pro for Comprehensive 2-Tier Reasoning
   const ai = getGenAI();
-
   const prompt = `You are an automated bank transaction verification AI for an e-commerce / streaming service.
-Your task is to match user-submitted payment details against a list of recent bank / mobile wallet notification emails received in Gmail.
+Your task is to match user-submitted payment details against a list of recent bank / mobile wallet notifications.
 
 USER-SUBMITTED ORDER PAYMENT DETAILS:
 - Transaction ID / TID: "${orderDetails.trxId || "N/A"}"
@@ -348,54 +449,67 @@ USER-SUBMITTED ORDER PAYMENT DETAILS:
 - Payment Date & Time: "${orderDetails.paymentDateTime || "N/A"}"
 - Expected Amount (PKR): ${orderDetails.amount}
 
-RECENT BANK NOTIFICATION EMAILS FROM GMAIL (asmatullah9327@gmail.com):
+RECENT BANK NOTIFICATIONS:
 ${JSON.stringify(emails, null, 2)}
 
 HIERARCHICAL MATCHING RULES (FOLLOW STRICTLY IN THIS EXACT ORDER):
 
 TIER 1 (HIGHEST PRIORITY - TRANSACTION ID MATCH):
-- First, check if the Transaction ID (TID / Trx ID / Ref ID) matches anywhere in the email subject, snippet, or body.
+- First, check if the Transaction ID (TID / Trx ID / Ref ID) matches anywhere in the notification.
 - If the TID matches, set matched: true, confidence: "high", matchTier: "tier1_trx_id", and cite the matching TID.
 
 TIER 2 (FALLBACK FOR OTHER BANK / IBFT / RAAST METHODS):
 - If the Transaction ID is NOT matched (because inter-bank transfers or third-party apps like 1Link / Raast often generate a sender-side reference number that differs from the receiver's bank notification TID):
 - Then check if an incoming credit / payment notification matches:
   1. EXACT PAYMENT AMOUNT: The amount received in PKR / Rs must match ${orderDetails.amount}.
-  2. ACCOUNT TITLE / SENDER NAME: The sender name or account title in the email matches or closely resembles "${orderDetails.accountTitle}" (fuzzy / case-insensitive, e.g. "Asmat Ullah", "Muhammad Ali", etc.) OR the sender account digits match.
+  2. ACCOUNT TITLE / SENDER NAME: The sender name or account title in the notification matches or closely resembles "${orderDetails.accountTitle}" (fuzzy / case-insensitive, e.g. "Asmat Ullah", "Muhammad Ali", etc.) OR the sender account digits match.
   3. EXACT TIME AND DATE: The notification timestamp aligns with "${orderDetails.paymentDateTime}" (same date or within a reasonable time window of a few hours).
 - If Amount + Account Title + Date/Time align, set matched: true, confidence: "high", matchTier: "tier2_fallback_details", and state: "Matched via other bank method: Amount (Rs ${orderDetails.amount}), Account Title (${orderDetails.accountTitle}), and Date/Time alignment."
 
 TIER 3 (NO MATCH):
-- If neither Tier 1 nor Tier 2 criteria are satisfied, set matched: false, confidence: "none", matchTier: "none", and explain specifically what did not match.
+- If neither Tier 1 nor Tier 2 criteria are satisfied, set matched: false, confidence: "none", matchTier: "none", and explain specifically what did not match. Ensure you act as a direct bank connection, DO NOT mention the words "email", "mailbox", or "Gmail".
 
 Return ONLY valid JSON matching the schema.`;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
-    contents: prompt,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          matched: { type: Type.BOOLEAN, description: "Whether a matching payment notification email was found" },
-          confidence: { type: Type.STRING, enum: ["high", "medium", "low", "none"] },
-          matchTier: { type: Type.STRING, enum: ["tier1_trx_id", "tier2_fallback_details", "none"] },
-          matchedMessageId: { type: Type.STRING },
-          matchedEmailSubject: { type: Type.STRING },
-          matchedEmailDate: { type: Type.STRING },
-          matchedEmailSnippet: { type: Type.STRING },
-          detectedBankName: { type: Type.STRING },
-          verifiedTrxId: { type: Type.STRING },
-          reason: { type: Type.STRING },
+  const modelsToTry = ["gemini-3.1-flash-lite", "gemini-3.7-flash", "gemini-3.6-flash"];
+  let raw = "{}";
+  let lastError: any = null;
+
+  for (const modelName of modelsToTry) {
+    try {
+      const response = await ai.models.generateContent({
+        model: modelName,
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              matched: { type: Type.BOOLEAN, description: "Whether a matching payment notification was found" },
+              confidence: { type: Type.STRING, enum: ["high", "medium", "low", "none"] },
+              matchTier: { type: Type.STRING, enum: ["tier1_trx_id", "tier2_fallback_details", "none"] },
+              matchedMessageId: { type: Type.STRING },
+              matchedEmailSubject: { type: Type.STRING },
+              matchedEmailDate: { type: Type.STRING },
+              matchedEmailSnippet: { type: Type.STRING },
+              detectedBankName: { type: Type.STRING },
+              verifiedTrxId: { type: Type.STRING },
+              reason: { type: Type.STRING },
+            },
+            required: ["matched", "confidence", "reason"],
+          },
         },
-        required: ["matched", "confidence", "reason"],
-      },
-    },
-  });
+      });
+
+      raw = response.text || "{}";
+      if (raw && raw !== "{}") break;
+    } catch (err: any) {
+      console.warn(`Bank matching attempt with model ${modelName} failed:`, err?.message || err);
+      lastError = err;
+    }
+  }
 
   try {
-    const raw = response.text || "{}";
     return JSON.parse(raw);
   } catch (err) {
     console.error("Failed to parse Gemini matching response:", err);
@@ -444,7 +558,7 @@ async function checkAndClaimPayment(firestore: any, trxId: string, matchedMessag
     const results = await Promise.all(checks);
     for (const doc of results) {
       if (doc.exists && doc.data()?.orderId !== orderId) {
-        return { isClaimed: true, duplicateReason: "Duplicate detected: This payment/email has already been claimed by another order." };
+        return { isClaimed: true, duplicateReason: "Duplicate detected: This transaction has already been claimed by another order." };
       }
     }
   }
@@ -485,13 +599,15 @@ ordersRouter.post("/verify-and-confirm", async (req, res) => {
       userName = "",
       userRole = "user",
       gmailToken: clientGmailToken,
+      phone = "",
+      verificationAttempt = 1,
     } = req.body;
 
     if (!userId) {
       return res.status(400).json({ error: "Missing required field: userId" });
     }
 
-    const orderId = providedOrderId || Math.random().toString(36).substring(2, 9).toUpperCase();
+    const orderId = providedOrderId || generate9DigitOrderId();
     const firestore = getDb();
     if (!firestore) {
       return res.status(500).json({ error: "Database not available" });
@@ -509,7 +625,7 @@ ordersRouter.post("/verify-and-confirm", async (req, res) => {
     let aiVerdict: any = {
       matched: false,
       confidence: "none",
-      reason: activeToken ? "No matching bank notification found" : "Gmail verification service connecting",
+      reason: activeToken ? "No matching transaction found in bank records" : "Bank verification service connecting",
     };
 
     if (bankEmails.length > 0) {
@@ -536,6 +652,15 @@ ordersRouter.post("/verify-and-confirm", async (req, res) => {
         aiVerdict.confidence = "none";
         aiVerdict.reason = claimResult.duplicateReason;
       }
+    }
+
+    if (!isAutoApproved && verificationAttempt < 3) {
+      return res.json({
+        success: false,
+        autoApproved: false,
+        needsRetry: true,
+        reason: aiVerdict.reason || "We couldn't verify your transaction.",
+      });
     }
 
     const orderStatus = isAutoApproved ? "approved" : "pending";
@@ -588,7 +713,7 @@ ordersRouter.post("/verify-and-confirm", async (req, res) => {
 
     // If auto-approved, store verified metadata for admin
     if (isAutoApproved) {
-      newOrder.verifiedBy = "AI Gemini Auto-Approval";
+      newOrder.verifiedBy = "AI Auto-Approval";
       newOrder.verifiedAt = nowIso;
       newOrder.matchedEmailId = aiVerdict.matchedMessageId || "";
       newOrder.matchedEmailSubject = aiVerdict.matchedEmailSubject || "";
@@ -604,6 +729,9 @@ ordersRouter.post("/verify-and-confirm", async (req, res) => {
       orders: updatedOrders,
       lastActive: nowIso,
     };
+    if (phone) {
+      userUpdates.phone = phone;
+    }
 
     if (isAutoApproved) {
       if (type === "membership") {
@@ -640,7 +768,7 @@ ordersRouter.post("/verify-and-confirm", async (req, res) => {
           senderBank: newOrder.senderBank || "Bank Transfer",
           date: nowIso,
           createdAt: nowIso,
-          verifiedBy: "AI Gemini Auto-Approval",
+          verifiedBy: "AI Auto-Approval",
         }));
       } catch (incomeErr) {
         console.warn("Failed to record income document:", incomeErr);
@@ -741,7 +869,7 @@ ordersRouter.post("/admin-verify-order", async (req, res) => {
       return res.json({
         success: true,
         matched: false,
-        reason: "No recent bank emails found in mailbox",
+        reason: "No recent bank notifications found in gateway",
       });
     }
 
@@ -787,7 +915,7 @@ ordersRouter.post("/admin-verify-order", async (req, res) => {
       const updatedOrder = {
         ...targetOrder,
         status: "approved",
-        verifiedBy: "AI Gemini Auto-Approval",
+        verifiedBy: "AI Auto-Approval",
         verifiedAt: nowIso,
         matchedEmailId: aiVerdict.matchedMessageId,
         matchedEmailSubject: aiVerdict.matchedEmailSubject,
@@ -833,7 +961,7 @@ ordersRouter.post("/admin-verify-order", async (req, res) => {
           senderBank: updatedOrder.senderBank || "Bank Transfer",
           date: nowIso,
           createdAt: nowIso,
-          verifiedBy: "AI Gemini Auto-Approval",
+          verifiedBy: "AI Auto-Approval",
         }));
       } catch (e) {}
 
