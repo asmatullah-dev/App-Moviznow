@@ -27,10 +27,11 @@ function getGenAI() {
 
 // Retrieve stored Gmail Token from Firestore or memory
 async function getActiveGmailToken(providedToken?: string): Promise<string | null> {
+  // If the admin is passing a token directly to test/use, use it for this request, but DO NOT overwrite the global token memory cache
+  // This prevents random users from poisoning the token pool.
+  
   if (providedToken && providedToken.trim()) {
-    storedGmailToken = providedToken.trim();
-    lastGmailTokenUpdate = new Date().toISOString();
-    return storedGmailToken;
+    return providedToken.trim();
   }
 
   if (storedGmailToken) {
@@ -427,6 +428,41 @@ function sanitizeForFirestore<T>(data: T): T {
   return data;
 }
 
+// Helper to check and claim transaction/email
+async function checkAndClaimPayment(firestore: any, trxId: string, matchedMessageId: string, orderId: string, userId: string) {
+  const claimedRef = firestore.collection("claimed_payments");
+  const checks = [];
+  
+  // Safe document ID string replacing slashes to prevent subcollection paths
+  const safeTrxId = trxId ? String(trxId).replace(/\//g, "-").trim() : "";
+  const safeMsgId = matchedMessageId ? String(matchedMessageId).replace(/\//g, "-").trim() : "";
+
+  if (safeTrxId) checks.push(claimedRef.doc(safeTrxId).get());
+  if (safeMsgId) checks.push(claimedRef.doc(safeMsgId).get());
+  
+  if (checks.length > 0) {
+    const results = await Promise.all(checks);
+    for (const doc of results) {
+      if (doc.exists && doc.data()?.orderId !== orderId) {
+        return { isClaimed: true, duplicateReason: "Duplicate detected: This payment/email has already been claimed by another order." };
+      }
+    }
+  }
+
+  // If not claimed, claim them
+  const batch = firestore.batch();
+  const nowIso = new Date().toISOString();
+  if (safeTrxId) {
+    batch.set(claimedRef.doc(safeTrxId), { orderId, userId, claimedAt: nowIso }, { merge: true });
+  }
+  if (safeMsgId && safeMsgId !== safeTrxId) {
+    batch.set(claimedRef.doc(safeMsgId), { orderId, userId, claimedAt: nowIso }, { merge: true });
+  }
+  await batch.commit();
+
+  return { isClaimed: false };
+}
+
 // 4. Submit, Verify & Auto-Approve Order Endpoint
 ordersRouter.post("/verify-and-confirm", async (req, res) => {
   try {
@@ -462,7 +498,8 @@ ordersRouter.post("/verify-and-confirm", async (req, res) => {
     }
 
     // Step A: Check Gmail Token & Fetch Bank Notification Emails
-    const activeToken = await getActiveGmailToken(clientGmailToken);
+    // ALWAYS use the server's securely stored admin token, NEVER accept from the client request
+    const activeToken = await getActiveGmailToken();
     let bankEmails: any[] = [];
     if (activeToken) {
       bankEmails = await fetchRecentBankEmails(activeToken);
@@ -488,7 +525,19 @@ ordersRouter.post("/verify-and-confirm", async (req, res) => {
       );
     }
 
-    const isAutoApproved = aiVerdict.matched && (aiVerdict.confidence === "high" || aiVerdict.confidence === "medium");
+    let isAutoApproved = aiVerdict.matched && (aiVerdict.confidence === "high" || aiVerdict.confidence === "medium");
+    
+    // Check for duplicates
+    if (isAutoApproved) {
+      const claimResult = await checkAndClaimPayment(firestore, trxId.trim(), aiVerdict.matchedMessageId, orderId, userId);
+      if (claimResult.isClaimed) {
+        isAutoApproved = false;
+        aiVerdict.matched = false;
+        aiVerdict.confidence = "none";
+        aiVerdict.reason = claimResult.duplicateReason;
+      }
+    }
+
     const orderStatus = isAutoApproved ? "approved" : "pending";
     const nowIso = new Date().toISOString();
 
@@ -655,7 +704,7 @@ ordersRouter.post("/verify-and-confirm", async (req, res) => {
 // 5. Admin Re-Verify Pending Order with AI Gemini & Gmail
 ordersRouter.post("/admin-verify-order", async (req, res) => {
   try {
-    const { orderId, userId, gmailToken: clientGmailToken } = req.body;
+    const { orderId, userId } = req.body;
     if (!orderId || !userId) {
       return res.status(400).json({ error: "Missing orderId or userId" });
     }
@@ -679,7 +728,7 @@ ordersRouter.post("/admin-verify-order", async (req, res) => {
       return res.status(404).json({ error: "Order not found" });
     }
 
-    const activeToken = await getActiveGmailToken(clientGmailToken);
+    const activeToken = await getActiveGmailToken();
     if (!activeToken) {
       return res.status(400).json({
         success: false,
@@ -707,7 +756,19 @@ ordersRouter.post("/admin-verify-order", async (req, res) => {
       bankEmails
     );
 
-    const isMatch = aiVerdict.matched && (aiVerdict.confidence === "high" || aiVerdict.confidence === "medium");
+    let isMatch = aiVerdict.matched && (aiVerdict.confidence === "high" || aiVerdict.confidence === "medium");
+    
+    // Uniqueness Check
+    if (isMatch) {
+      const claimResult = await checkAndClaimPayment(firestore, (targetOrder.trxId || "").trim(), aiVerdict.matchedMessageId, orderId, userId);
+      if (claimResult.isClaimed) {
+        isMatch = false;
+        aiVerdict.matched = false;
+        aiVerdict.confidence = "none";
+        aiVerdict.reason = claimResult.duplicateReason;
+      }
+    }
+
     const nowIso = new Date().toISOString();
 
     if (isMatch) {
