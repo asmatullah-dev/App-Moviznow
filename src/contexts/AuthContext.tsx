@@ -5,6 +5,7 @@ import React, {
   useState,
   useRef,
   useCallback,
+  useMemo,
 } from "react";
 import { auth, db, runWithNetwork } from "../firebase";
 import { safeStorage } from "../utils/safeStorage";
@@ -241,7 +242,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const timestamp = parseInt(timestampStr, 10);
       const now = Date.now();
       if (now - timestamp <= 30 * 60 * 60 * 1000) {
-        return JSON.parse(cached);
+        try {
+          const parsed = JSON.parse(cached);
+          return normalizeUserStatusAndExpiry(parsed);
+        } catch (e) {
+          return null;
+        }
       }
     }
     return null;
@@ -467,14 +473,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const isDailySync = lastSyncDateStr !== pktDate;
 
         if (localProfile && !profile) {
-          setProfile(localProfile);
+          const normLocal = normalizeUserStatusAndExpiry(localProfile);
+          setProfile(normLocal);
           setLoading(false); // Unblock immediately if we have cached data
         }
 
         // Fast Local Storage Reload: If not forced, daily sync is not due, and local profile exists,
         // do not check Firestore on reload. Use local storage data directly.
         if (!force && !isDailySync && localProfile && localProfile.uid === currentUser.uid) {
-          setProfile(localProfile);
+          const normLocal = normalizeUserStatusAndExpiry(localProfile);
+          setProfile(normLocal);
+          if (normLocal.status !== localProfile.status) {
+            safeStorage.setItem("profile_cache", JSON.stringify(normLocal));
+          }
           setLoading(false);
           setIsSyncing(false);
           return false;
@@ -971,6 +982,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               } catch (e) {}
             }
 
+            if (mergedProfile) {
+              const normMerged = normalizeUserStatusAndExpiry(mergedProfile);
+              if (normMerged.status === "expired" && serverProfile?.status !== "expired") {
+                updatesToPush.status = "expired";
+              }
+            }
             updatesToPush.lastActive = new Date().toISOString();
 
             if (Object.keys(updatesToPush).length > 0) {
@@ -1145,9 +1162,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             data.hasPassword = true;
           }
 
-          // Perform consolidated update if needed
+          // Perform consolidated update if needed (skip if update is status="expired" only)
+          const isOnlyStatusExpired = Object.keys(updates).length === 1 && updates.status === "expired";
           if (
             Object.keys(updates).length > 0 &&
+            !isOnlyStatusExpired &&
             (isDailySync ||
               isLogin ||
               isSignOut ||
@@ -1812,7 +1831,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               safeStorage.removeItem(`profile_version_${currentUser.uid}`);
               safeStorage.removeItem("cached_all_users");
             } else if (cachedP && cachedP.uid === currentUser.uid) {
-              setProfile(cachedP);
+              const normCachedP = normalizeUserStatusAndExpiry(cachedP);
+              setProfile(normCachedP);
+              if (normCachedP.status !== cachedP.status) {
+                safeStorage.setItem("profile_cache", JSON.stringify(normCachedP));
+              }
               hasValidCachedProfile = true;
             }
           } catch (e) {}
@@ -2959,11 +2982,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [user?.uid, profile?.uid]);
 
+  const normalizedProfile = useMemo(() => {
+    if (!profile) return null;
+    return normalizeUserStatusAndExpiry(profile);
+  }, [profile]);
+
   return (
     <AuthContext.Provider
       value={{
         user,
-        profile,
+        profile: normalizedProfile,
         loading,
         authLoading,
         error,

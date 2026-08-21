@@ -11,6 +11,7 @@ import {
 import { Helmet } from "react-helmet-async";
 
 import { AdBanner } from "../../components/AdBanner";
+import { isUserExemptFromAds } from "../../utils/adUtils";
 import { GuestAccessBanner } from "../../components/GuestAccessBanner";
 import { Content, QualityLinks, Season, Trailer } from "../../types";
 import { Translate } from "../../components/Translate";
@@ -240,11 +241,11 @@ export default function MovieDetails() {
 
   useEffect(() => {
     if (linkPopup?.isOpen) {
-      const isBasicUser = profile?.role === "basic" || profile?.role === "trial" || !profile;
+      const isExempt = isUserExemptFromAds(profile);
       const provider = settings?.adProvider || 'both';
       const isAdsActive = settings && provider !== "disabled" && provider !== "google_adsense";
       
-      if (isBasicUser && isAdsActive) {
+      if (!isExempt && isAdsActive) {
         setAdState({
           isPlaying: true,
           timeLeft: settings?.adSkipTimer ?? 5,
@@ -264,7 +265,7 @@ export default function MovieDetails() {
     } else {
       setAdState(null);
     }
-  }, [linkPopup?.isOpen, profile?.role, settings?.adProvider, settings?.adSkipTimer]);
+  }, [linkPopup?.isOpen, profile, settings?.adProvider, settings?.adSkipTimer]);
 
   const scrollRecommended = (direction: 'left' | 'right') => {
     if (recommendedScrollRef.current) {

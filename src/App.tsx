@@ -20,6 +20,7 @@ import { safeStorage } from './utils/safeStorage';
 import { OfflineBanner } from './components/OfflineBanner';
 import { SyncBanner } from './components/SyncBanner';
 import { AnalyticsTracker } from './components/AnalyticsTracker';
+import { AdSenseScriptManager } from './components/AdSenseScriptManager';
 
 // Eager Loaded Core Pages for Instant Initial Render
 import Home from './pages/user/Home';
@@ -302,6 +303,7 @@ export default function App() {
                     <BrowserRouter>
                     <ScrollToTopOrRestore />
                     <AnalyticsTracker />
+                    <AdSenseScriptManager />
                     <MediaModalController isOpen={isMediaModalOpen} onClose={() => setIsMediaModalOpen(false)} />
                     <Suspense fallback={<LoadingFallback />}>
                       <Routes>

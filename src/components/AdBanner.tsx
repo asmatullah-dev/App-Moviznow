@@ -3,6 +3,7 @@ import { Sparkles, Crown } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
+import { isUserExemptFromAds } from '../utils/adUtils';
 
 interface AdBannerProps {
   className?: string;
@@ -13,16 +14,15 @@ export const AdBanner: React.FC<AdBannerProps> = ({ className = '' }) => {
   const { settings } = useSettings();
   const adInitedRef = useRef(false);
 
-  // Only render ads for Basic role users
-  const isBasic = profile?.role === 'basic' || profile?.role === 'trial' || !profile;
+  const isExempt = isUserExemptFromAds(profile);
   const provider = settings?.adProvider || 'both';
 
   useEffect(() => {
-    if (!isBasic || provider === 'disabled') return;
+    if (isExempt || provider === 'disabled') return;
     if (provider !== 'google_adsense' && provider !== 'both') return;
     if (adInitedRef.current) return;
 
-    const client = settings?.adSenseClientId || 'ca-pub-3940256099942544';
+    const client = settings?.adSenseClientId || 'ca-pub-3128773545517669';
     
     // Check if script already exists
     const script = document.querySelector(`script[src*="adsbygoogle.js"]`);
@@ -41,9 +41,9 @@ export const AdBanner: React.FC<AdBannerProps> = ({ className = '' }) => {
     } catch (e) {
       console.warn('AdSense push failed (expected in sandbox/preview):', e);
     }
-  }, [isBasic, provider, settings?.adSenseClientId]);
+  }, [isExempt, provider, settings?.adSenseClientId]);
 
-  if (!isBasic || provider === 'disabled') {
+  if (isExempt || provider === 'disabled') {
     return null;
   }
 
