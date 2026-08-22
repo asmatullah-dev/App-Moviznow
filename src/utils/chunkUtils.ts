@@ -5,7 +5,7 @@ import { getChunkMeta, clearChunkMetaCache } from './chunkMeta';
 import { safeStorage } from './safeStorage';
 
 export const CONTENT_CHUNK_MOVIE_SIZE = 500;
-export const CONTENT_CHUNK_SERIES_SIZE = 100;
+export const CONTENT_CHUNK_SERIES_SIZE = 200;
 // No search chunk size needed anymore as we use only content chunks
 
 const FIELD_MAP: Record<string, string> = {
@@ -390,6 +390,112 @@ export async function saveContentsToChunks(rawContents: Content[]): Promise<void
      registerChunkUpdates(updatedChunkIdsArr, batch, sizes);
      await batch.commit();
   }
+
+  await autoRebalanceChunks();
+}
+
+/**
+ * Automatically reconfigures all content chunks when syncing/saving to Firestore.
+ * Ensures movie chunks have at most 500 items and series chunks have at most 200 items.
+ * Moves extra overflow items to subsequent chunks (movie_chunk_1, series_chunk_1, etc.).
+ */
+export async function autoRebalanceChunks(): Promise<{ rebalancedCount: number }> {
+  try {
+    const chunksSnap = await getDocs(collection(db, 'content_chunks'));
+    if (chunksSnap.empty) return { rebalancedCount: 0 };
+
+    const movieChunksMap = new Map<number, { id: string; items: Record<string, any> }>();
+    const seriesChunksMap = new Map<number, { id: string; items: Record<string, any> }>();
+
+    chunksSnap.docs.forEach(d => {
+      const cid = d.id;
+      if (cid === 'metadata') return;
+      const items = d.data().items || {};
+      if (cid.startsWith('movie_chunk_')) {
+        const idx = parseInt(cid.replace('movie_chunk_', ''), 10);
+        if (!isNaN(idx)) movieChunksMap.set(idx, { id: cid, items: { ...items } });
+      } else if (cid.startsWith('series_chunk_')) {
+        const idx = parseInt(cid.replace('series_chunk_', ''), 10);
+        if (!isNaN(idx)) seriesChunksMap.set(idx, { id: cid, items: { ...items } });
+      }
+    });
+
+    let rebalancedCount = 0;
+    const batch = writeBatch(db);
+    const updatedMeta: Record<string, { version: number; count: number }> = {};
+    const now = Date.now();
+
+    const processGroup = (
+      chunksMap: Map<number, { id: string; items: Record<string, any> }>,
+      prefix: string,
+      maxSize: number
+    ) => {
+      const indices = Array.from(chunksMap.keys()).sort((a, b) => a - b);
+      if (indices.length === 0) return;
+
+      let maxIdx = Math.max(...indices);
+
+      for (let i = 0; i <= maxIdx; i++) {
+        const currentChunk = chunksMap.get(i);
+        if (!currentChunk) continue;
+
+        const itemEntries = Object.entries(currentChunk.items);
+        if (itemEntries.length > maxSize) {
+          // Keep first maxSize items, move extra items to next chunk
+          const keepEntries = itemEntries.slice(0, maxSize);
+          const overflowEntries = itemEntries.slice(maxSize);
+
+          currentChunk.items = Object.fromEntries(keepEntries);
+          rebalancedCount += overflowEntries.length;
+
+          const nextIdx = i + 1;
+          let nextChunk = chunksMap.get(nextIdx);
+          if (!nextChunk) {
+            nextChunk = { id: `${prefix}${nextIdx}`, items: {} };
+            chunksMap.set(nextIdx, nextChunk);
+            if (nextIdx > maxIdx) maxIdx = nextIdx;
+          }
+
+          overflowEntries.forEach(([itemId, val]) => {
+            nextChunk!.items[itemId] = val;
+          });
+
+          // Track updates for Firestore write batch
+          batch.set(doc(db, 'content_chunks', currentChunk.id), { items: currentChunk.items });
+          updatedMeta[currentChunk.id] = { version: now, count: Object.keys(currentChunk.items).length };
+
+          batch.set(doc(db, 'content_chunks', nextChunk.id), { items: nextChunk.items });
+          updatedMeta[nextChunk.id] = { version: now, count: Object.keys(nextChunk.items).length };
+        }
+      }
+    };
+
+    processGroup(movieChunksMap, 'movie_chunk_', CONTENT_CHUNK_MOVIE_SIZE);
+    processGroup(seriesChunksMap, 'series_chunk_', CONTENT_CHUNK_SERIES_SIZE);
+
+    if (rebalancedCount > 0) {
+      batch.set(doc(db, 'chunk_meta', 'versions'), updatedMeta, { merge: true });
+      await batch.commit();
+
+      // Sync updated chunks to local cache
+      for (const [cid] of Object.entries(updatedMeta)) {
+        if (cid.startsWith('movie_chunk_')) {
+          const idx = parseInt(cid.replace('movie_chunk_', ''), 10);
+          const c = movieChunksMap.get(idx);
+          if (c) safeStorage.setItem('content_chunk_' + cid, JSON.stringify(c.items));
+        } else if (cid.startsWith('series_chunk_')) {
+          const idx = parseInt(cid.replace('series_chunk_', ''), 10);
+          const c = seriesChunksMap.get(idx);
+          if (c) safeStorage.setItem('content_chunk_' + cid, JSON.stringify(c.items));
+        }
+      }
+    }
+
+    return { rebalancedCount };
+  } catch (err) {
+    console.error('Error in autoRebalanceChunks:', err);
+    return { rebalancedCount: 0 };
+  }
 }
 
 /**
@@ -541,6 +647,7 @@ export async function getContentFromChunks(contentId: string): Promise<Content |
  * Scans all chunks in Firestore and ensures chunk_meta/versions is up to date
  */
 export async function repairChunkMetadata(): Promise<{ repairedContent: number }> {
+  await autoRebalanceChunks();
   const batch = writeBatch(db);
   const now = Date.now();
 

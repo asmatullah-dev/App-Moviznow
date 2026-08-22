@@ -401,6 +401,9 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         const { updateChunkMetaLocalCache } = await import('../utils/chunkMeta');
         updateChunkMetaLocalCache(versionsUpdate);
 
+        const { autoRebalanceChunks } = await import('../utils/chunkUtils');
+        await autoRebalanceChunks();
+
         setHasPendingChanges(false);
         refreshContentFromLocal();
         refreshCollectionsFromLocal();
