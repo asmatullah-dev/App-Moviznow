@@ -134,59 +134,24 @@ export default function OrdersManagement() {
   };
 
   useEffect(() => {
-    const allOrders = allUsers.flatMap(u => u.orders || []);
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+    const allOrders = allUsers.flatMap(u => (u.orders || []).filter(order => {
+      const createdAt = (order.createdAt as any)?.seconds 
+        ? new Date((order.createdAt as any).seconds * 1000) 
+        : new Date(order.createdAt);
+      
+      if (order.status === 'pending' && createdAt < sevenDaysAgo) return false;
+      if (order.status === 'cancelled' && createdAt < twentyFourHoursAgo) return false;
+      return true;
+    }));
     allOrders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     safeStorage.setItem(CACHE_KEY, JSON.stringify(allOrders));
     setOrders(allOrders);
     setLoading(false);
   }, [allUsers]);
-
-  // Separate effect for auto-deletion
-  useEffect(() => {
-    if (loading || orders.length === 0) return;
-
-    const runAutoDelete = async () => {
-      const now = new Date();
-      const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-      const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-      
-      const batch = writeBatch(db);
-      let changesMade = false;
-
-      allUsers.forEach(user => {
-        if (!user.orders || user.orders.length === 0) return;
-        
-        let changed = false;
-        const keptOrders = user.orders.filter(order => {
-          const createdAt = (order.createdAt as any)?.seconds 
-            ? new Date((order.createdAt as any).seconds * 1000) 
-            : new Date(order.createdAt);
-          
-          if (order.status === 'pending' && createdAt < sevenDaysAgo) { changed = true; return false; }
-          if (order.status === 'cancelled' && createdAt < twentyFourHoursAgo) { changed = true; return false; }
-          return true;
-        });
-
-        if (changed) {
-          batch.update(doc(db, 'users', user.uid), { orders: keptOrders });
-          updateUserFields(user.uid, { orders: keptOrders });
-          changesMade = true;
-        }
-      });
-
-      if (changesMade) {
-        try {
-          await batch.commit();
-          console.log(`Auto-deleted old orders`);
-        } catch (err) {
-          console.error("Failed to commit auto-delete batch:", err);
-        }
-      }
-    };
-
-    const timer = setTimeout(runAutoDelete, 5000); // Wait 5s after load/change
-    return () => clearTimeout(timer);
-  }, [orders, loading]);
 
   const handleApprove = async (order: Order) => {
     setProcessingId(order.id);

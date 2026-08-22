@@ -297,23 +297,11 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           throw err;
         }
       } else {
-        // Fetch only recently active/updated users since our last run
+        // Fetch only specific users modified/updated, tracked via chunkMeta
         try {
           const currentUsersMap = new Map(currentUsers.map(u => [u.uid, normalizeUserStatusAndExpiry(u)]));
 
-          // 1. Fetch recently active users
-          const bufferTime = 60 * 60 * 1000;
-          const sinceIso = new Date(Math.max(0, lastFetchTime - bufferTime)).toISOString();
-          const q = query(collection(db, 'users'), where('lastActive', '>=', sinceIso));
-          const snapshot = await runWithNetwork(() => getDocs(q));
-          
-          if (!snapshot.empty) {
-            updatedSomething = true;
-            const fetchedUsers = snapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id })) as UserProfile[];
-            fetchedUsers.forEach(u => currentUsersMap.set(u.uid, normalizeUserStatusAndExpiry(u)));
-          }
-
-          // 2. Fetch specific users modified by admins, found via chunkMeta
+          // Fetch specific users modified, found via chunkMeta
           const { getChunkMeta } = await import('../utils/chunkMeta');
           const versions = await getChunkMeta(force);
           const serverUsersVersion = versions?.users || {};
@@ -413,19 +401,16 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
   }, [profile, user, authLoading]);
 
   useEffect(() => {
-    // Only fetch users if the current user is an admin, owner, manager, or user_manager
+    // Only clear users if not a privileged user.
+    // Do NOT automatically trigger a heavy fetchUsers() full pull at root app boot!
+    // Individual admin pages (like UserManagement) will request users via refreshUsers() on demand.
     const isPrivilegedUser = profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'manager' || profile?.role === 'user_manager';
     
-    if (!isPrivilegedUser || authLoading || !user) {
-      if (!isPrivilegedUser && !authLoading) {
-        setUsers([]);
-        setLoading(false);
-      }
-      return;
+    if (!isPrivilegedUser && !authLoading) {
+      setUsers([]);
+      setLoading(false);
     }
-
-    fetchUsers();
-  }, [profile?.role, user, authLoading, fetchUsers]);
+  }, [profile?.role, authLoading]);
 
   useEffect(() => {
     const handlePendingChanges = () => {

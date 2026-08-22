@@ -241,7 +241,8 @@ export default function UserManagement() {
           } catch(e) {}
         }
         
-        const res = await refreshUsers(true);
+        // Delta sync users using chunk_meta (zero reads if up-to-date, or delta reads only)
+        const res = await refreshUsers(false);
         if (mounted) {
           if (res.users && Array.isArray(res.users)) {
             res.users.forEach(u => {
@@ -327,63 +328,11 @@ export default function UserManagement() {
 
     const runAutoUpdates = async () => {
       hasRunAutoUpdates.current = true;
-      const now = new Date();
-      const batchUpdates: Record<string, any> = {};
 
-      users.forEach((user: UserProfile) => {
-        let needsUpdate = false;
-        const updates: any = {};
-        
-        // Auto-assign owner role to asmatn628@gmail.com
-        if (user.email === 'asmatn628@gmail.com' && user.role !== 'owner') {
-          updates.role = 'owner';
-          updates.expiryDate = 'Lifetime';
-          needsUpdate = true;
-        }
-        
-        // Reconcile user status with expiry date: if expiry date is in the future, set status to active; if passed, set to expired
-        if (user.role !== 'owner' && user.role !== 'admin') {
-          if (!user.expiryDate || user.expiryDate === 'null' || user.expiryDate === '') {
-            if (user.status !== 'expired' && user.status !== 'suspended' && user.status !== 'pending') {
-              updates.status = 'expired';
-              needsUpdate = true;
-            }
-          } else if (user.expiryDate !== 'Lifetime') {
-            if (isUserExpired(user.expiryDate)) {
-              if (user.status !== 'expired' && user.status !== 'suspended') {
-                updates.status = 'expired';
-                needsUpdate = true;
-              }
-            } else {
-              if (user.status === 'expired' || !user.status) {
-                if (user.status !== 'suspended' && user.status !== 'pending') {
-                  updates.status = 'active';
-                  needsUpdate = true;
-                }
-              }
-            }
-          }
-        }
+      // Note: User status and expiry normalization is performed purely in-memory dynamically
+      // to eliminate unnecessary bulk Firestore writes.
 
-        // Wipe tracking data offline then sync
-        if (('contentClicks' in user) || ('linkClicks' in user)) {
-          (updates as any).contentClicks = '__DELETE_FIELD__';
-          (updates as any).linkClicks = '__DELETE_FIELD__';
-          needsUpdate = true;
-          delete (user as any).contentClicks;
-          delete (user as any).linkClicks;
-        }
-
-        if (needsUpdate) {
-          batchUpdates[user.uid] = updates;
-        }
-      });
-      
-      if (Object.keys(batchUpdates).length > 0) {
-        updateMultipleUserFields(batchUpdates);
-      }
-
-      // Check for duplicate users by email or phone and auto-consolidate
+      // Check for duplicate pending users by email or phone and auto-consolidate
       try {
         const emailMap: Record<string, UserProfile[]> = {};
         allUsers.forEach((u) => {
@@ -457,7 +406,7 @@ export default function UserManagement() {
               });
               batch.set(doc(db, 'chunk_meta', 'versions'), { users: metaUpdates }, { merge: true });
               await batch.commit();
-              refreshUsers(true).catch(console.error);
+              refreshUsers(false).catch(console.error);
             }
           }
         });

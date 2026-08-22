@@ -374,31 +374,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           safeStorage.setItem('cached_notifications_data', JSON.stringify(localList));
         }
       } catch (e) {}
-
-      // Try writing to Firestore notification_chunks if admin user
-      const userEmailLower = (userEmail || '').toLowerCase();
-      const isAdminUser = [
-        "asmatn628@gmail.com",
-        "asmatullah9327@gmail.com",
-        "kabirahmaddev@gmail.com",
-        "wamoviesstation@gmail.com"
-      ].includes(userEmailLower);
-
-      if (isAdminUser) {
-        const { doc, getDoc, serverTimestamp, writeBatch } = await import("firebase/firestore");
-        const cid = "app_chunk_0";
-        const chunkRef = doc(db, 'notification_chunks', cid);
-        const chunkSnap = await getDoc(chunkRef);
-        const chunkItems = chunkSnap.exists() ? chunkSnap.data()?.items || {} : {};
-        const newChunkItems = { [id]: notifItem, ...chunkItems };
-
-        const batch = writeBatch(db);
-        batch.set(chunkRef, { items: newChunkItems, updatedAt: serverTimestamp() }, { merge: true });
-        batch.set(doc(db, 'chunk_meta', 'versions'), { notifications: { version: Date.now(), latestAppChunkId: cid, latestChunkId: cid } }, { merge: true });
-        await batch.commit();
-
-        safeStorage.removeItem('cached_notifications_version');
-      }
     } catch (err) {
       // Ignore background notification creation notices
     }
