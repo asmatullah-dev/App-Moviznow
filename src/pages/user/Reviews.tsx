@@ -192,6 +192,10 @@ export default function Reviews() {
         triggerConfetti();
       }
 
+      if ((window as any).triggerSyncUserData) {
+        (window as any).triggerSyncUserData('review_made');
+      }
+
       setText('');
       setRating(5);
       setCity('');

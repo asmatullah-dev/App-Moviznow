@@ -419,7 +419,7 @@ let lastFullExpiryRunTimestamp = 0;
  * Checks users in Firestore once every 24 hours and sends Email (via Alerts@MovizNow.com), FCM push, and in-app notifications
  * for accounts on the date of expired.
  */
-export async function checkAndSendExpiryNotifications(targetUserId?: string, force = false): Promise<ExpiryCheckResult> {
+export async function checkAndSendExpiryNotifications(targetUserIds?: string | string[], force = false): Promise<ExpiryCheckResult> {
   const result: ExpiryCheckResult = {
     totalUsersChecked: 0,
     expiredUsersFound: 0,
@@ -441,8 +441,13 @@ export async function checkAndSendExpiryNotifications(targetUserId?: string, for
     return result;
   }
 
-  // Persistent daily rate limit check across server instances and restarts (Once a day after 6 AM PKT / 1 AM UTC)
-  if (!targetUserId && !force) {
+  const hasTargets = Boolean(
+    targetUserIds &&
+      (Array.isArray(targetUserIds) ? targetUserIds.length > 0 : Boolean(targetUserIds))
+  );
+
+  // Persistent daily rate limit check across server instances and restarts
+  if (!hasTargets && !force) {
     try {
       const metaRef = firestore.collection("system_meta").doc("expiry_service");
       const metaSnap = await metaRef.get();
@@ -476,17 +481,23 @@ export async function checkAndSendExpiryNotifications(targetUserId?: string, for
   try {
     const emailConfig = await getEmailConfig();
 
-    let usersQuery: admin.firestore.Query = firestore.collection("users");
-    if (targetUserId) {
-      const userDoc = await firestore.collection("users").doc(targetUserId).get();
-      if (!userDoc.exists) {
-        result.errors.push(`Target user ${targetUserId} not found`);
-        return result;
+    if (hasTargets) {
+      const uidsToProcess = Array.isArray(targetUserIds) ? targetUserIds : [targetUserIds as string];
+      const docs: admin.firestore.DocumentSnapshot[] = [];
+      for (const tid of uidsToProcess) {
+        if (!tid) continue;
+        const userDoc = await firestore.collection("users").doc(tid).get();
+        if (userDoc.exists) {
+          docs.push(userDoc);
+        } else {
+          result.errors.push(`Target user ${tid} not found`);
+        }
       }
-      return await processUserDocs([userDoc], firestore, emailConfig, result);
+      if (docs.length === 0) return result;
+      return await processUserDocs(docs, firestore, emailConfig, result);
     }
 
-    const usersSnap = await usersQuery.get();
+    const usersSnap = await firestore.collection("users").get();
     return await processUserDocs(usersSnap.docs, firestore, emailConfig, result);
   } catch (err: any) {
     console.error("[Expiry Service Error]:", err);

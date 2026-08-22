@@ -327,7 +327,14 @@ export default function PaymentVerificationForm({
       }
 
       // Refresh auth profile to sync new membership status / active content
-      await refreshProfile(true);
+      if ((window as any).triggerSyncUserData) {
+        await (window as any).triggerSyncUserData('order_confirmed');
+      }
+      if ((window as any).triggerRefreshAppData) {
+        await (window as any).triggerRefreshAppData('manual');
+      } else {
+        await refreshProfile(true);
+      }
 
       onOrderCompleted(result.order, !!result.autoApproved);
     } catch (error: any) {

@@ -1,0 +1,245 @@
+import { useEffect, useCallback, useRef } from 'react';
+import { doc, getDoc } from 'firebase/firestore';
+import { db, runWithNetwork } from '../firebase';
+import { useContent } from '../contexts/ContentContext';
+import { useAuth } from '../contexts/AuthContext';
+import { useSettings } from '../contexts/SettingsContext';
+import { useNotifications } from '../contexts/NotificationContext';
+import { safeStorage } from '../utils/safeStorage';
+
+const THIRTY_MINUTES_MS = 30 * 60 * 1000;
+
+export function RefreshAppDataManager() {
+  const { contentList, quickRefreshCatalog } = useContent();
+  const { user, refreshProfile } = useAuth();
+  const { refreshSettings } = useSettings();
+  const { refreshNotifications } = useNotifications();
+  const isRefreshingRef = useRef(false);
+
+  const executeRefreshAppData = useCallback(async (reason: 'app_open' | 'manual' | 'catalog_button' | 'content_not_found' | 'user_profile_button' = 'manual') => {
+    if (isRefreshingRef.current) return;
+
+    const isLibraryEmpty = !contentList || contentList.length === 0;
+
+    // Strict cooldown check using last success check time
+    const lastSuccessStr = safeStorage.getItem('last_success_refresh_time');
+    const lastSuccess = lastSuccessStr ? parseInt(lastSuccessStr, 10) : 0;
+    const cooldown = reason === 'user_profile_button' ? 3 * 60 * 1000 : THIRTY_MINUTES_MS;
+
+    if (!isLibraryEmpty && (Date.now() - lastSuccess < cooldown)) {
+      return; // Skip if already refreshed successfully within cooldown period
+    }
+
+    if (!navigator.onLine) {
+      if (reason !== 'app_open') {
+        window.dispatchEvent(new CustomEvent('sync_status', {
+          detail: {
+            status: 'up-to-date',
+            isInitialLoad: false,
+            updatedCount: 0,
+            message: 'Data is up to date'
+          }
+        }));
+      }
+      return;
+    }
+
+    isRefreshingRef.current = true;
+
+    // Dispatch start toast
+    window.dispatchEvent(new CustomEvent('sync_status', {
+      detail: {
+        status: 'syncing',
+        isInitialLoad: isLibraryEmpty,
+        message: isLibraryEmpty ? 'Loading Data...' : 'Updating data...'
+      }
+    }));
+
+    try {
+      // 1. Fetch single meta version doc from Firestore
+      const metaSnap = await runWithNetwork(() => getDoc(doc(db, 'chunk_meta', 'versions')));
+      const versions: Record<string, any> = metaSnap.exists() ? metaSnap.data() : {};
+
+      const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+      let localMeta: Record<string, any> = {};
+      try { localMeta = JSON.parse(localMetaString); } catch(e) {}
+
+      let isUpToDate = true;
+
+      // Check content chunks
+      for (const [chunkId, versionMeta] of Object.entries(versions)) {
+        if (['collections', 'notifications', 'lastGlobalUpdate', 'metadata', 'users', 'fcm_tokens', 'settings'].includes(chunkId)) continue;
+        const serverVer = typeof versionMeta === 'object' ? ((versionMeta as any).version || 0) : (versionMeta || 0);
+        const localV = localMeta[chunkId];
+        const localVer = typeof localV === 'object' ? (localV.version || 0) : (localV || 0);
+        const hasChunkData = !!safeStorage.getItem('content_chunk_' + chunkId);
+        if (!hasChunkData || localVer < serverVer) {
+          isUpToDate = false;
+          break;
+        }
+      }
+
+      // Check metadata version
+      if (isUpToDate) {
+        const serverMetadataVal = versions.metadata;
+        const serverMetadataVer = typeof serverMetadataVal === 'object' ? (serverMetadataVal?.version || 0) : (serverMetadataVal || 0);
+        const localMetadataVal = localMeta.metadata;
+        const localMetadataVer = typeof localMetadataVal === 'object' ? (localMetadataVal?.version || 0) : (localMetadataVal || 0);
+        const hasMetadata = !!safeStorage.getItem('genres_cache');
+        if (!hasMetadata || localMetadataVer < serverMetadataVer) {
+          isUpToDate = false;
+        }
+      }
+
+      // Check collections version
+      if (isUpToDate) {
+        const serverCollectionsVal = versions.collections;
+        const serverCollectionsVer = typeof serverCollectionsVal === 'object' ? (serverCollectionsVal?.version || 0) : (serverCollectionsVal || 0);
+        const localCollectionsVer = localMeta.collections || 0;
+        const hasCollections = !!safeStorage.getItem('collections_cache');
+        if (!hasCollections || localCollectionsVer < serverCollectionsVer) {
+          isUpToDate = false;
+        }
+      }
+
+      // Check settings version
+      if (isUpToDate) {
+        const serverSettingsVer = versions.settings || 0;
+        const localSettingsVer = parseInt(localStorage.getItem('cached_settings_version') || '0', 10);
+        const hasSettings = !!localStorage.getItem('cached_app_settings');
+        if (!hasSettings || localSettingsVer < serverSettingsVer) {
+          isUpToDate = false;
+        }
+      }
+
+      // Check notifications version
+      if (isUpToDate) {
+        const serverNotifVal = versions.notifications;
+        const serverNotifVer = typeof serverNotifVal === 'object' ? (serverNotifVal?.version || 0) : (serverNotifVal || 0);
+        const localNotifVer = parseInt(localStorage.getItem('cached_notifications_version') || '0', 10);
+        if (localNotifVer < serverNotifVer) {
+          isUpToDate = false;
+        }
+      }
+
+      // Check self user version (from user data only check for self version by ignoring other user versions)
+      if (isUpToDate && user?.uid) {
+        const chunkUsersMeta = versions.users || {};
+        const serverUserVer = chunkUsersMeta[user.uid] || 0;
+        const localUserVer = parseInt(safeStorage.getItem(`profile_version_${user.uid}`) || '0', 10);
+        if (localUserVer === 0 || localUserVer < serverUserVer) {
+          isUpToDate = false;
+        }
+      }
+
+      if (isUpToDate && !isLibraryEmpty) {
+        safeStorage.setItem('last_success_refresh_time', Date.now().toString());
+        window.dispatchEvent(new CustomEvent('sync_status', {
+          detail: {
+            status: 'up-to-date',
+            isInitialLoad: false,
+            updatedCount: 0,
+            message: 'Data is up to date'
+          }
+        }));
+        isRefreshingRef.current = false;
+        return;
+      }
+
+      // 2. Refresh catalog content chunks
+      const catalogResult = await quickRefreshCatalog(true, versions);
+
+      // 3. Check settings version
+      const serverSettingsVer = versions.settings || 0;
+      const localSettingsVer = parseInt(localStorage.getItem('cached_settings_version') || '0', 10);
+      if (serverSettingsVer > localSettingsVer || !localStorage.getItem('cached_app_settings')) {
+        await refreshSettings(true).catch(() => {});
+      }
+
+      // 4. Check notifications version
+      const serverNotifVer = (versions.notifications && typeof versions.notifications === 'object')
+        ? versions.notifications.version || 0
+        : (versions.notifications || 0);
+      const localNotifVer = parseInt(localStorage.getItem('cached_notifications_version') || '0', 10);
+      if (serverNotifVer > localNotifVer) {
+        await refreshNotifications().catch(() => {});
+      }
+
+      // 5. Check self user version
+      if (user?.uid) {
+        const chunkUsersMeta = versions.users || {};
+        const serverUserVer = chunkUsersMeta[user.uid] || 0;
+        const localUserVer = parseInt(safeStorage.getItem(`profile_version_${user.uid}`) || '0', 10);
+        if (serverUserVer > localUserVer || localUserVer === 0) {
+          await refreshProfile(true, 'manual').catch(() => {});
+        }
+      }
+
+      const updatedCount = catalogResult.updatedCount || 0;
+
+      // Update the last success refresh time stamp
+      safeStorage.setItem('last_success_refresh_time', Date.now().toString());
+
+      // Dispatch completion toast
+      if (isLibraryEmpty) {
+        window.dispatchEvent(new CustomEvent('sync_status', {
+          detail: {
+            status: 'success',
+            isInitialLoad: true,
+            updatedCount: 0,
+            message: 'Loaded All Contents Successfully'
+          }
+        }));
+      } else {
+        window.dispatchEvent(new CustomEvent('sync_status', {
+          detail: {
+            status: 'success',
+            isInitialLoad: false,
+            updatedCount: updatedCount,
+            message: updatedCount === 1 ? '1 item updated' : `${updatedCount} items updated`
+          }
+        }));
+      }
+    } catch (err) {
+      console.error('Error during Refresh App Data:', err);
+      window.dispatchEvent(new CustomEvent('sync_status', {
+        detail: {
+          status: 'error',
+          isInitialLoad: isLibraryEmpty,
+          message: 'Sync failed. Will retry automatically.'
+        }
+      }));
+    } finally {
+      isRefreshingRef.current = false;
+    }
+  }, [contentList, quickRefreshCatalog, user?.uid, refreshProfile, refreshSettings, refreshNotifications]);
+
+  // Expose window trigger
+  useEffect(() => {
+    (window as any).triggerRefreshAppData = (reason: any) => {
+      executeRefreshAppData(reason);
+    };
+
+    const handleEvent = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const reason = customEvent.detail?.reason || 'manual';
+      executeRefreshAppData(reason);
+    };
+
+    window.addEventListener('trigger_refresh_app_data', handleEvent);
+    return () => {
+      delete (window as any).triggerRefreshAppData;
+      window.removeEventListener('trigger_refresh_app_data', handleEvent);
+    };
+  }, [executeRefreshAppData]);
+
+  // Trigger on App Open (with 30-min cooldown)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      executeRefreshAppData('app_open');
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [executeRefreshAppData]);
+
+  return null;
+}

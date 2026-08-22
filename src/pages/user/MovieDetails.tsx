@@ -1630,12 +1630,16 @@ export default function MovieDetails() {
     // When movie details page is opened and library is empty, load content automatically and show toast
     if (isLibraryEmpty && !hasAttemptedGlobalRefresh) {
       setHasAttemptedGlobalRefresh(true);
-      checkForUpdates(true).catch((e) =>
-        console.error("Error auto-loading catalog on empty library:", e)
-      );
-      refreshProfile(false).catch((e) =>
-        console.error("Error refreshing profile:", e)
-      );
+      if ((window as any).triggerRefreshAppData) {
+        (window as any).triggerRefreshAppData('app_open');
+      } else {
+        checkForUpdates(true).catch((e) =>
+          console.error("Error auto-loading catalog on empty library:", e)
+        );
+        refreshProfile(false).catch((e) =>
+          console.error("Error refreshing profile:", e)
+        );
+      }
     } else if (!isLibraryEmpty && !hasAttemptedGlobalRefresh) {
       // Library is NOT empty: mark as attempted so we don't auto update or show global search loader
       setHasAttemptedGlobalRefresh(true);
@@ -1691,11 +1695,18 @@ export default function MovieDetails() {
                 vibrate(50);
                 setIsManualRefreshing(true);
                 try {
-                  await Promise.all([
-                    checkForUpdates(true),
-                    refreshProfile(true, 'manual'),
-                    refreshSettings(true)
-                  ]);
+                  if ((window as any).triggerSyncUserData) {
+                    await (window as any).triggerSyncUserData('manual');
+                  }
+                  if ((window as any).triggerRefreshAppData) {
+                    await (window as any).triggerRefreshAppData('manual');
+                  } else {
+                    await Promise.all([
+                      checkForUpdates(true),
+                      refreshProfile(true, 'manual'),
+                      refreshSettings(true)
+                    ]);
+                  }
                   // Give a small delay for state to propagate
                   await new Promise(resolve => setTimeout(resolve, 800));
                 } catch (e) {

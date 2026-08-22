@@ -19,6 +19,8 @@ import { useGlobalButtonHaptics } from './hooks/useHaptics';
 import { safeStorage } from './utils/safeStorage';
 import { OfflineBanner } from './components/OfflineBanner';
 import { SyncBanner } from './components/SyncBanner';
+import { SyncUserDataManager } from './components/SyncUserDataManager';
+import { RefreshAppDataManager } from './components/RefreshAppDataManager';
 import { AnalyticsTracker } from './components/AnalyticsTracker';
 import { AdSenseScriptManager } from './components/AdSenseScriptManager';
 
@@ -299,6 +301,8 @@ export default function App() {
                     <SyncErrorOverlay />
                     <OfflineBanner />
                     <SyncBanner />
+                    <SyncUserDataManager />
+                    <RefreshAppDataManager />
                     <SystemNotificationWrapper />
                     <BrowserRouter>
                     <ScrollToTopOrRestore />

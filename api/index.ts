@@ -2035,14 +2035,26 @@ async function startServer() {
     },
   );
 
-  // Expiry notifications trigger endpoint (checks all or specific user for expired membership)
+  // Expiry notifications trigger endpoint (checks target users for expired membership)
   app.post(
     ["/api/notifications/check-expiry", "/notifications/check-expiry"],
     async (req, res) => {
       try {
-        const { targetUserId } = req.body || {};
-        const uid = targetUserId || req.query.userId?.toString();
-        const result = await checkAndSendExpiryNotifications(uid);
+        const { targetUserId, targetUserIds, adminUid } = req.body || {};
+        const uids = targetUserIds || targetUserId || req.query.userId?.toString();
+
+        if (adminUid) {
+          const adminDoc = await db.collection("users").doc(adminUid).get();
+          if (!adminDoc.exists) {
+            return res.status(403).json({ error: "Unauthorized" });
+          }
+          const adminRole = adminDoc.data()?.role;
+          if (adminRole !== "admin" && adminRole !== "owner") {
+            return res.status(403).json({ error: "Unauthorized: Only Admin or Owner can trigger expiry notifications" });
+          }
+        }
+
+        const result = await checkAndSendExpiryNotifications(uids, true);
         res.json({ success: true, ...result });
       } catch (error: any) {
         console.error("Error checking expiry notifications:", error);
@@ -3416,19 +3428,6 @@ async function startServer() {
       }
     });
   }
-
-  // Start automated background expiry notification scheduler (runs once every 24 hours)
-  setTimeout(() => {
-    checkAndSendExpiryNotifications().catch((err) =>
-      console.warn("Initial background expiry check failed:", err)
-    );
-  }, 10000);
-
-  setInterval(() => {
-    checkAndSendExpiryNotifications().catch((err) =>
-      console.warn("Scheduled background expiry check failed:", err)
-    );
-  }, 24 * 60 * 60 * 1000);
 
   // Only listen if not running as a Vercel function
   if (!process.env.VERCEL) {

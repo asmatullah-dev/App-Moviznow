@@ -44,7 +44,7 @@ interface ContentContextType {
   finalizeChanges: () => Promise<void>;
   hasPendingChanges: boolean;
   checkForUpdates: (force?: boolean) => Promise<{ updated: boolean; updatedContentCount: number; isInitialLoad?: boolean }>;
-  quickRefreshCatalog: (manual?: boolean) => Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean; isInitialLoad?: boolean }>;
+  quickRefreshCatalog: (manual?: boolean, prefetchedVersions?: Record<string, any>) => Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean; isInitialLoad?: boolean }>;
 }
 
 const ContentContext = createContext<ContentContextType | undefined>(undefined);
@@ -836,15 +836,9 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     };
   };
 
-  useEffect(() => {
-    if (authProfileLoading) return;
-    if (!navigator.onLine) {
-        setLoading(false);
-        return;
-    }
-    // Auto-check should NOT be forced (force=false)
-    checkForUpdates(false);
-  }, [profile?.role, profile?.phone, authProfileLoading]);
+
+  // Automatic mount checking is disabled here to avoid duplicate Firestore checks.
+  // The RefreshAppDataManager component now acts as the sole orchestrator of app-open and daily updates.
 
   const checkForUpdates = async (force: boolean = false): Promise<{ updated: boolean; updatedContentCount: number; isInitialLoad?: boolean }> => {
     if (authProfileLoading) {
@@ -1004,7 +998,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     };
   };
 
-  const quickRefreshCatalog = async (manual: boolean = false): Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean; isInitialLoad?: boolean }> => {
+  const quickRefreshCatalog = async (manual: boolean = false, prefetchedVersions?: Record<string, any>): Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean; isInitialLoad?: boolean }> => {
     const LAST_QUICK_REFRESH_KEY = 'last_catalog_quick_refresh_time';
     const now = Date.now();
 
@@ -1068,8 +1062,11 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
     try {
       // 1. Fetch chunk_meta versions doc from Firestore (read-only)
-      const metaDocSnap = await runWithNetwork(() => getDoc(doc(db, 'chunk_meta', 'versions')));
-      const versions: Record<string, any> = metaDocSnap.exists() ? metaDocSnap.data() : {};
+      let versions: Record<string, any> = prefetchedVersions || {};
+      if (!prefetchedVersions) {
+        const metaDocSnap = await runWithNetwork(() => getDoc(doc(db, 'chunk_meta', 'versions')));
+        versions = metaDocSnap.exists() ? metaDocSnap.data() : {};
+      }
 
       safeStorage.setItem('cached_chunk_meta_doc', JSON.stringify(versions));
       safeStorage.setItem('last_chunk_meta_fetch_time', now.toString());
@@ -1347,39 +1344,9 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     }
     if (!chunkId) {
         const prefix = content.type === 'movie' ? 'movie_chunk_' : 'series_chunk_';
-        const maxSize = content.type === 'movie' ? CONTENT_CHUNK_MOVIE_SIZE : CONTENT_CHUNK_SERIES_SIZE;
-        let matching = Object.keys(localMeta).filter(k => k.startsWith(prefix));
-        
-        // Sort by the chunk index so we can confidently pick the *first* defined chunk. e.g. move_chunk_0
-        matching.sort((a, b) => {
-            const numA = parseInt(a.replace(prefix, '')) || 0;
-            const numB = parseInt(b.replace(prefix, '')) || 0;
-            return numA - numB;
-        });
-
-        // Find first chunk with space
-        for (const cid of matching) {
-            const metaInfo = localMeta[cid];
-            let count = -1;
-            if (metaInfo && typeof metaInfo === 'object' && metaInfo.count !== undefined) {
-                count = metaInfo.count;
-            } else {
-                const chunkStr = safeStorage.getItem('content_chunk_' + cid) || '{}';
-                const items = JSON.parse(chunkStr);
-                count = Object.keys(items).length;
-                // Cache it back to structured format
-                localMeta[cid] = { version: typeof metaInfo === 'number' ? metaInfo : (metaInfo?.version || Date.now()), count };
-            }
-            if (count < maxSize) {
-                chunkId = cid;
-                break;
-            }
-        }
-
-        if (!chunkId) {
-            // All existing chunks are full or no chunks exist, create new one
-            chunkId = `${prefix}${matching.length}`;
-        }
+        // Assigning new/unedited content to first chunk initially without chunk size checking.
+        // Chunk sizes are strictly verified and rebalanced during sync (finalizeChanges -> autoRebalanceChunks).
+        chunkId = `${prefix}0`;
         if (!localMeta[chunkId]) localMeta[chunkId] = { version: Date.now(), count: 0 };
     }
 

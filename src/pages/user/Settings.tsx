@@ -203,6 +203,10 @@ export default function Settings() {
         notificationPreferences: notificationPreferences,
       }, newPassword || undefined);
 
+      if ((window as any).triggerSyncUserData) {
+        await (window as any).triggerSyncUserData('settings_changed');
+      }
+
       setSuccess(t('Profile updated successfully'));
       setCurrentPassword('');
       setNewPassword('');

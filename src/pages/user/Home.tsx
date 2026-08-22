@@ -1163,7 +1163,11 @@ export default function Home({
               <button
                 onClick={() => {
                   vibrate(50);
-                  checkForUpdates(true).catch(console.error);
+                  if ((window as any).triggerRefreshAppData) {
+                    (window as any).triggerRefreshAppData('manual');
+                  } else {
+                    checkForUpdates(true).catch(console.error);
+                  }
                 }}
                 className="px-6 py-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 font-bold border border-emerald-500/20 transition-all active:scale-95 flex items-center gap-2"
               >

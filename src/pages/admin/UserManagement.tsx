@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
 import { collection, doc, updateDoc, getDoc, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit, deleteField, increment } from 'firebase/firestore';
@@ -198,6 +198,24 @@ export default function UserManagement() {
 
   const { users: allUsers, loading: usersLoading, updateMultipleUserFields, updateUserFields, finalizeUserChanges, hasPendingChanges, refreshUsers } = useUsers();
   
+  // Track user UIDs whose status changed to 'expired' during the User Management tab session
+  const changedToExpiredUidsRef = useRef<Set<string>>(new Set());
+  const prevUsersMapRef = useRef<Map<string, string>>(new Map());
+
+  // Track status changes to 'expired' across user updates
+  useEffect(() => {
+    if (!allUsers || allUsers.length === 0) return;
+    allUsers.forEach(u => {
+      if (u && u.uid && u.role !== 'admin' && u.role !== 'owner') {
+        const prevStatus = prevUsersMapRef.current.get(u.uid);
+        if (u.status === 'expired' && prevStatus && prevStatus !== 'expired') {
+          changedToExpiredUidsRef.current.add(u.uid);
+        }
+        prevUsersMapRef.current.set(u.uid, u.status || '');
+      }
+    });
+  }, [allUsers]);
+
   // Fetch fresh data on mount and force sync on unmount
   const { checkForUpdates } = useContent();
 
@@ -209,6 +227,9 @@ export default function UserManagement() {
       try {
         window.dispatchEvent(new CustomEvent('sync_status', { detail: 'syncing' }));
         
+        // Record initial statuses before refresh
+        const initialMap = new Map((allUsers || []).map(u => [u.uid, u.status]));
+
         // If there are pending changes from previous session/offline, finalize them first
         const pendingStr = safeStorage.getItem('pending_user_updates');
         if (pendingStr) {
@@ -222,6 +243,16 @@ export default function UserManagement() {
         
         const res = await refreshUsers(true);
         if (mounted) {
+          if (res.users && Array.isArray(res.users)) {
+            res.users.forEach(u => {
+              if (u && u.uid && u.role !== 'admin' && u.role !== 'owner') {
+                const initStatus = initialMap.get(u.uid);
+                if (u.status === 'expired' && (initStatus !== 'expired' || !u.expiryNoticeSent)) {
+                  changedToExpiredUidsRef.current.add(u.uid);
+                }
+              }
+            });
+          }
           if (res.updatedSomething) {
             window.dispatchEvent(new CustomEvent('sync_status', { detail: 'success' }));
           } else {
@@ -242,6 +273,23 @@ export default function UserManagement() {
       mounted = false;
       // Sync after exiting of tab
       finalizeUserChanges(true).catch(console.error);
+
+      // Email notification for Expiry only triggered by admin and owner when exiting User Management tab
+      if ((profile?.role === 'admin' || profile?.role === 'owner') && changedToExpiredUidsRef.current.size > 0 && profile?.uid) {
+        const expiredUids = Array.from(changedToExpiredUidsRef.current);
+        if (expiredUids.length > 0) {
+          console.log(`[UserManagement Exit] Triggering expiry notifications for ${expiredUids.length} user(s):`, expiredUids);
+          fetch('/api/notifications/check-expiry', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              adminUid: profile.uid,
+              targetUserIds: expiredUids,
+            }),
+            keepalive: true,
+          }).catch(err => console.error("Error triggering exit expiry notifications:", err));
+        }
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading]);
@@ -1332,6 +1380,9 @@ export default function UserManagement() {
         const user = users.find(u => u.uid === uid);
         if (user?.role !== 'owner') {
           updateUserFields(uid, { status });
+          if (status === 'expired') {
+            changedToExpiredUidsRef.current.add(uid);
+          }
         }
       });
     } catch (error) {

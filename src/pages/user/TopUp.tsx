@@ -73,9 +73,7 @@ export default function TopUp() {
     }
   }, [location]);
 
-  useEffect(() => {
-    refreshProfile(true);
-  }, [refreshProfile]);
+
 
   useEffect(() => {
     const checkPendingOrder = async () => {
