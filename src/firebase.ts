@@ -2,8 +2,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { 
   initializeFirestore, 
-  persistentLocalCache, 
-  persistentMultipleTabManager, 
+  memoryLocalCache, 
   doc, 
   getDoc, 
   updateDoc, 
@@ -28,10 +27,12 @@ delete (appConfig as any).measurementId;
 export const app = initializeApp(appConfig);
 
 export const db = initializeFirestore(app, {
-  localCache: typeof window !== 'undefined' ? persistentLocalCache({ tabManager: persistentMultipleTabManager() }) : undefined
+  localCache: typeof window !== 'undefined' ? memoryLocalCache() : undefined
 }, (appConfig as any).firestoreDatabaseId);
 
 if (typeof window !== 'undefined') {
+  // Ensure legacy document snapshot caches are removed
+  safeStorage.removeItem('profile_doc_snap');
   // Ensure the client recovers from any previously persisted offline state
   enableNetwork(db).catch(err => console.warn('Failed to enable Firestore network:', err));
 }
