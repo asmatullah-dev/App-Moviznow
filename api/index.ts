@@ -126,15 +126,16 @@ async function startServer() {
   });
 
   app.get("/ads.txt", (req, res) => {
-    res.setHeader("Content-Type", "text/plain");
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=86400");
+    res.setHeader("Access-Control-Allow-Origin", "*");
     res.send("google.com, pub-3128773545517669, DIRECT, f08c47fec0942fa0\n");
   });
 
   app.get("/robots.txt", (req, res) => {
-    res.setHeader("Content-Type", "text/plain");
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=86400");
-    res.send("User-agent: *\nAllow: /\nSitemap: https://moviznow.com/sitemap.xml\n");
+    res.send("User-agent: Mediapartners-Google\nAllow: /\n\nUser-agent: Google-Adwords-Instant\nAllow: /\n\nUser-agent: *\nAllow: /\nDisallow: /api/\n");
   });
 
   app.use(express.json({ limit: "50mb" }));

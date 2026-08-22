@@ -6,6 +6,37 @@
     <meta name="theme-color" content="#000000" />
     <meta name="description" content="MovizNow - Your premium movie and series streaming platform" />
     
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <meta name="keywords" content="movies, web series, watch movies online, stream hd movies, popular tv shows, entertainment, moviznow" />
+    
+    <!-- Structured JSON-LD Schema for Google Search and AdSense Crawlers -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "WebSite",
+          "@id": "https://moviznow.com/#website",
+          "url": "https://moviznow.com/",
+          "name": "MovizNow",
+          "description": "Watch and stream high-quality movies and popular television series with ultra-fast playback and offline sync.",
+          "potentialAction": {
+            "@type": "SearchAction",
+            "target": "https://moviznow.com/?search={search_term_string}",
+            "query-input": "required name=search_term_string"
+          }
+        },
+        {
+          "@type": "Organization",
+          "@id": "https://moviznow.com/#organization",
+          "name": "MovizNow",
+          "url": "https://moviznow.com/",
+          "logo": "https://moviznow.com/logo.svg"
+        }
+      ]
+    }
+    </script>
+    
     <!-- Google AdSense script is dynamically managed based on user membership and role -->
     
     <!-- Open Graph / Facebook / WhatsApp Meta Tags -->
@@ -92,51 +123,51 @@
       });
     </script>
   </head>
-  <body>
+  <body class="bg-gray-950 text-white min-h-screen">
     <div id="root">
-      <!-- SEO and Crawler Semantic Markup: Serves as zero-delay rich content for Google AdSense Crawler -->
-      <header style="padding: 20px; background-color: #0b0f19; color: #ffffff; text-align: center; font-family: sans-serif;">
-        <h1 style="margin: 0; font-size: 28px;">MovizNow - Premium Movie & Series Streaming Platform</h1>
-        <p style="margin: 5px 0 0 0; color: #9ca3af;">Unlimited Premium Movies, Series, and Stream Quality</p>
-      </header>
-      <main style="max-width: 1200px; margin: 0 auto; padding: 20px; font-family: sans-serif; color: #1f2937; line-height: 1.6;">
-        <section style="margin-bottom: 30px;">
-          <h2 style="color: #111827;">Watch High-Quality Movies and Popular Television Series</h2>
-          <p>MovizNow offers an extensive curated catalog of high-definition content spanning multiple genres, including Action, Comedy, Drama, Thriller, Sci-Fi, Romance, and Documentaries. Enjoy seamless streaming on any device with ultra-fast offline syncing and personalized recommendations.</p>
-        </section>
-        
-        <section style="margin-bottom: 30px;">
-          <h2 style="color: #111827;">Featured Entertainment Categories</h2>
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
-            <div style="border: 1px solid #e5e7eb; padding: 15px; border-radius: 8px;">
-              <h3 style="margin-top: 0; color: #1f2937;">Latest Blockbusters</h3>
-              <p style="margin-bottom: 0; color: #4b5563;">Explore recently released theatrical movies and award-winning international cinema.</p>
-            </div>
-            <div style="border: 1px solid #e5e7eb; padding: 15px; border-radius: 8px;">
-              <h3 style="margin-top: 0; color: #1f2937;">Top-Rated Series</h3>
-              <p style="margin-bottom: 0; color: #4b5563;">Binge-watch complete seasons of highly acclaimed television series and episodic shows.</p>
-            </div>
-            <div style="border: 1px solid #e5e7eb; padding: 15px; border-radius: 8px;">
-              <h3 style="margin-top: 0; color: #1f2937;">Trending & Global Hits</h3>
-              <p style="margin-bottom: 0; color: #4b5563;">Discover what is currently popular and trending globally among streaming enthusiasts.</p>
-            </div>
-          </div>
-        </section>
-
-        <section style="margin-bottom: 30px;">
-          <h2 style="color: #111827;">Premium Features and Services</h2>
-          <ul style="padding-left: 20px; color: #374151;">
-            <li style="margin-bottom: 8px;"><strong>Ultra HD & 4K Playback:</strong> Crisp resolutions designed for the ultimate home theater experience.</li>
-            <li style="margin-bottom: 8px;"><strong>Smart Offline Sync:</strong> Securely cache your list and watch on-the-go without data consumption.</li>
-            <li style="margin-bottom: 8px;"><strong>Multiple User Profiles:</strong> Individualized watchlists, histories, and language preferences.</li>
-            <li style="margin-bottom: 8px;"><strong>Ad-Free Experience:</strong> Seamless, non-intrusive premium tier entertainment options.</li>
-          </ul>
-        </section>
-      </main>
-      <footer style="padding: 20px; text-align: center; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px; font-family: sans-serif;">
-        <p>&copy; 2026 MovizNow. All rights reserved. Subject to terms of use and privacy policies.</p>
-      </footer>
+      <!-- Fast-rendering initial application splash loader while React JavaScript initializes -->
+      <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: #0b0f19; color: #ffffff; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 16px;">
+          <img src="/logo.svg" alt="MovizNow Logo" style="width: 64px; height: 64px; object-fit: contain; animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;" />
+          <div style="width: 32px; height: 32px; border: 3px solid rgba(59, 130, 246, 0.2); border-top-color: #3b82f6; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+        </div>
+        <style>
+          @keyframes spin { to { transform: rotate(360deg); } }
+          @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+        </style>
+      </div>
     </div>
+
+    <!-- Semantic Crawler and Non-JS SEO Fallback: Crawlers without JS see full textual content and links -->
+    <noscript>
+      <div style="max-width: 900px; margin: 0 auto; padding: 24px; font-family: sans-serif; color: #e5e7eb; background: #0b0f19;">
+        <header style="padding: 20px 0; text-align: center; border-bottom: 1px solid #1f2937;">
+          <h1 style="margin: 0; font-size: 26px; color: #ffffff;">MovizNow - Premium Movie & Series Streaming Platform</h1>
+          <p style="margin: 6px 0 0 0; color: #9ca3af;">Watch and stream high-quality cinema and episodic shows</p>
+        </header>
+        <main style="padding: 20px 0; line-height: 1.6;">
+          <h2>Watch High-Quality Movies and Popular Television Series</h2>
+          <p>MovizNow offers an extensive curated catalog of high-definition content spanning multiple genres, including Action, Comedy, Drama, Thriller, Sci-Fi, Romance, and Documentaries. Enjoy seamless streaming on any device with ultra-fast offline syncing and personalized recommendations.</p>
+          
+          <h3>Featured Entertainment Categories</h3>
+          <ul>
+            <li><strong>Latest Blockbusters:</strong> Explore recently released theatrical movies and award-winning international cinema.</li>
+            <li><strong>Top-Rated Series:</strong> Binge-watch complete seasons of highly acclaimed television series and episodic shows.</li>
+            <li><strong>Trending & Global Hits:</strong> Discover what is currently popular and trending globally among streaming enthusiasts.</li>
+          </ul>
+
+          <h3>Features and Services</h3>
+          <ul>
+            <li>Ultra HD & 4K streaming quality with adaptive bitrate playback.</li>
+            <li>Smart offline catalog caching for fast on-the-go browsing.</li>
+            <li>Personalized watchlists, continue watching progress, and language preferences.</li>
+          </ul>
+        </main>
+        <footer style="padding: 16px 0; text-align: center; border-top: 1px solid #1f2937; color: #6b7280; font-size: 13px;">
+          <p>&copy; 2026 MovizNow. All rights reserved.</p>
+        </footer>
+      </div>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
