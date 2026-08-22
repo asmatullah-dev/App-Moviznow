@@ -1,4 +1,4 @@
-import { doc, getDoc, getDocs, collection, writeBatch, setDoc, updateDoc, deleteField, QueryDocumentSnapshot, DocumentData, WriteBatch } from 'firebase/firestore';
+import { doc, getDoc, getDocs, collection, writeBatch, setDoc, updateDoc, deleteField, serverTimestamp, QueryDocumentSnapshot, DocumentData, WriteBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Content } from '../types';
 import { getChunkMeta, clearChunkMetaCache } from './chunkMeta';
@@ -395,100 +395,133 @@ export async function saveContentsToChunks(rawContents: Content[]): Promise<void
 }
 
 /**
- * Automatically reconfigures all content chunks when syncing/saving to Firestore.
- * Ensures movie chunks have at most 500 items and series chunks have at most 200 items.
- * Moves extra overflow items to subsequent chunks (movie_chunk_1, series_chunk_1, etc.).
+ * Checks and balances content chunks LOCALLY in safeStorage before syncing to Firestore.
+ * Ensures movie chunks have at most CONTENT_CHUNK_MOVIE_SIZE (500) items and series chunks have at most CONTENT_CHUNK_SERIES_SIZE (200) items.
+ * If overflow is found, moves extra items locally into subsequent chunks (movie_chunk_1, series_chunk_1, etc.)
+ * and registers all affected chunk IDs into pending_chunk_updates.
+ * Returns { rebalanced: boolean, rebalancedCount: number, affectedChunkIds: string[] }
+ */
+export function rebalanceLocalChunks(): { rebalanced: boolean; rebalancedCount: number; affectedChunkIds: string[] } {
+  let rebalancedCount = 0;
+  const affectedChunkIds = new Set<string>();
+
+  const processType = (prefix: string, maxSize: number) => {
+    // 1. Gather all local chunks for this prefix
+    const chunksMap = new Map<number, { id: string; items: Record<string, any> }>();
+    for (let i = 0; i < 50; i++) {
+      const cid = `${prefix}${i}`;
+      const chunkStr = safeStorage.getItem(`content_chunk_${cid}`) || safeStorage.getItem(cid);
+      if (chunkStr) {
+        try {
+          const items = JSON.parse(chunkStr);
+          chunksMap.set(i, { id: cid, items: { ...items } });
+        } catch(e) {}
+      }
+    }
+
+    const indices = Array.from(chunksMap.keys()).sort((a, b) => a - b);
+    if (indices.length === 0) return;
+
+    let maxIdx = Math.max(...indices);
+
+    for (let i = 0; i <= maxIdx; i++) {
+      const currentChunk = chunksMap.get(i);
+      if (!currentChunk) continue;
+
+      const itemEntries = Object.entries(currentChunk.items);
+      if (itemEntries.length > maxSize) {
+        // Keep first maxSize items, move extra items to next chunk
+        const keepEntries = itemEntries.slice(0, maxSize);
+        const overflowEntries = itemEntries.slice(maxSize);
+
+        currentChunk.items = Object.fromEntries(keepEntries);
+        rebalancedCount += overflowEntries.length;
+        affectedChunkIds.add(currentChunk.id);
+
+        const nextIdx = i + 1;
+        let nextChunk = chunksMap.get(nextIdx);
+        if (!nextChunk) {
+          nextChunk = { id: `${prefix}${nextIdx}`, items: {} };
+          chunksMap.set(nextIdx, nextChunk);
+          if (nextIdx > maxIdx) maxIdx = nextIdx;
+        }
+
+        overflowEntries.forEach(([itemId, val]) => {
+          nextChunk!.items[itemId] = val;
+        });
+        affectedChunkIds.add(nextChunk.id);
+
+        // Save immediately to local storage
+        safeStorage.setItem(`content_chunk_${currentChunk.id}`, JSON.stringify(currentChunk.items));
+        safeStorage.setItem(`content_chunk_${nextChunk.id}`, JSON.stringify(nextChunk.items));
+      }
+    }
+  };
+
+  processType('movie_chunk_', CONTENT_CHUNK_MOVIE_SIZE);
+  processType('series_chunk_', CONTENT_CHUNK_SERIES_SIZE);
+
+  if (affectedChunkIds.size > 0) {
+    // Register affected chunks in pending_chunk_updates
+    const pendingStr = safeStorage.getItem('pending_chunk_updates') || '[]';
+    let pendingSet: Set<string>;
+    try {
+      pendingSet = new Set<string>(JSON.parse(pendingStr));
+    } catch(e) {
+      pendingSet = new Set<string>();
+    }
+    affectedChunkIds.forEach(id => pendingSet.add(id));
+    safeStorage.setItem('pending_chunk_updates', JSON.stringify(Array.from(pendingSet)));
+
+    // Update chunk_meta_versions
+    const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+    let localMeta: Record<string, any> = {};
+    try { localMeta = JSON.parse(localMetaString); } catch(e) {}
+    const now = Date.now();
+    affectedChunkIds.forEach(cid => {
+      const chunkStr = safeStorage.getItem(`content_chunk_${cid}`) || '{}';
+      try {
+        const items = JSON.parse(chunkStr);
+        localMeta[cid] = { version: now, count: Object.keys(items).length };
+      } catch(e) {}
+    });
+    safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+  }
+
+  return {
+    rebalanced: rebalancedCount > 0,
+    rebalancedCount,
+    affectedChunkIds: Array.from(affectedChunkIds)
+  };
+}
+
+/**
+ * Automatically reconfigures content chunks when syncing/saving to Firestore.
+ * Performs balancing locally first, and only writes to Firestore if rebalancing occurred.
  */
 export async function autoRebalanceChunks(): Promise<{ rebalancedCount: number }> {
   try {
-    const chunksSnap = await getDocs(collection(db, 'content_chunks'));
-    if (chunksSnap.empty) return { rebalancedCount: 0 };
+    const { rebalanced, rebalancedCount, affectedChunkIds } = rebalanceLocalChunks();
+    if (!rebalanced || affectedChunkIds.length === 0) {
+      return { rebalancedCount: 0 };
+    }
 
-    const movieChunksMap = new Map<number, { id: string; items: Record<string, any> }>();
-    const seriesChunksMap = new Map<number, { id: string; items: Record<string, any> }>();
-
-    chunksSnap.docs.forEach(d => {
-      const cid = d.id;
-      if (cid === 'metadata') return;
-      const items = d.data().items || {};
-      if (cid.startsWith('movie_chunk_')) {
-        const idx = parseInt(cid.replace('movie_chunk_', ''), 10);
-        if (!isNaN(idx)) movieChunksMap.set(idx, { id: cid, items: { ...items } });
-      } else if (cid.startsWith('series_chunk_')) {
-        const idx = parseInt(cid.replace('series_chunk_', ''), 10);
-        if (!isNaN(idx)) seriesChunksMap.set(idx, { id: cid, items: { ...items } });
-      }
-    });
-
-    let rebalancedCount = 0;
     const batch = writeBatch(db);
     const updatedMeta: Record<string, { version: number; count: number }> = {};
     const now = Date.now();
 
-    const processGroup = (
-      chunksMap: Map<number, { id: string; items: Record<string, any> }>,
-      prefix: string,
-      maxSize: number
-    ) => {
-      const indices = Array.from(chunksMap.keys()).sort((a, b) => a - b);
-      if (indices.length === 0) return;
+    for (const cid of affectedChunkIds) {
+      const chunkStr = safeStorage.getItem(`content_chunk_${cid}`) || '{}';
+      try {
+        const items = JSON.parse(chunkStr);
+        batch.set(doc(db, 'content_chunks', cid), { items, updatedAt: serverTimestamp() }, { merge: true });
+        updatedMeta[cid] = { version: now, count: Object.keys(items).length };
+      } catch(e) {}
+    }
 
-      let maxIdx = Math.max(...indices);
-
-      for (let i = 0; i <= maxIdx; i++) {
-        const currentChunk = chunksMap.get(i);
-        if (!currentChunk) continue;
-
-        const itemEntries = Object.entries(currentChunk.items);
-        if (itemEntries.length > maxSize) {
-          // Keep first maxSize items, move extra items to next chunk
-          const keepEntries = itemEntries.slice(0, maxSize);
-          const overflowEntries = itemEntries.slice(maxSize);
-
-          currentChunk.items = Object.fromEntries(keepEntries);
-          rebalancedCount += overflowEntries.length;
-
-          const nextIdx = i + 1;
-          let nextChunk = chunksMap.get(nextIdx);
-          if (!nextChunk) {
-            nextChunk = { id: `${prefix}${nextIdx}`, items: {} };
-            chunksMap.set(nextIdx, nextChunk);
-            if (nextIdx > maxIdx) maxIdx = nextIdx;
-          }
-
-          overflowEntries.forEach(([itemId, val]) => {
-            nextChunk!.items[itemId] = val;
-          });
-
-          // Track updates for Firestore write batch
-          batch.set(doc(db, 'content_chunks', currentChunk.id), { items: currentChunk.items });
-          updatedMeta[currentChunk.id] = { version: now, count: Object.keys(currentChunk.items).length };
-
-          batch.set(doc(db, 'content_chunks', nextChunk.id), { items: nextChunk.items });
-          updatedMeta[nextChunk.id] = { version: now, count: Object.keys(nextChunk.items).length };
-        }
-      }
-    };
-
-    processGroup(movieChunksMap, 'movie_chunk_', CONTENT_CHUNK_MOVIE_SIZE);
-    processGroup(seriesChunksMap, 'series_chunk_', CONTENT_CHUNK_SERIES_SIZE);
-
-    if (rebalancedCount > 0) {
+    if (Object.keys(updatedMeta).length > 0) {
       batch.set(doc(db, 'chunk_meta', 'versions'), updatedMeta, { merge: true });
       await batch.commit();
-
-      // Sync updated chunks to local cache
-      for (const [cid] of Object.entries(updatedMeta)) {
-        if (cid.startsWith('movie_chunk_')) {
-          const idx = parseInt(cid.replace('movie_chunk_', ''), 10);
-          const c = movieChunksMap.get(idx);
-          if (c) safeStorage.setItem('content_chunk_' + cid, JSON.stringify(c.items));
-        } else if (cid.startsWith('series_chunk_')) {
-          const idx = parseInt(cid.replace('series_chunk_', ''), 10);
-          const c = seriesChunksMap.get(idx);
-          if (c) safeStorage.setItem('content_chunk_' + cid, JSON.stringify(c.items));
-        }
-      }
     }
 
     return { rebalancedCount };
@@ -499,11 +532,39 @@ export async function autoRebalanceChunks(): Promise<{ rebalancedCount: number }
 }
 
 /**
+ * Locates the chunk ID for a given content item from local storage
+ */
+export function findLocalChunkForContent(contentId: string): string | null {
+  for (let i = 0; i < 50; i++) {
+    const mStr = safeStorage.getItem(`content_chunk_movie_chunk_${i}`);
+    if (mStr && mStr.includes(`"${contentId}"`)) {
+      try {
+        const items = JSON.parse(mStr);
+        if (items[contentId]) return `movie_chunk_${i}`;
+      } catch(e) {}
+    }
+    const sStr = safeStorage.getItem(`content_chunk_series_chunk_${i}`);
+    if (sStr && sStr.includes(`"${contentId}"`)) {
+      try {
+        const items = JSON.parse(sStr);
+        if (items[contentId]) return `series_chunk_${i}`;
+      } catch(e) {}
+    }
+  }
+  return null;
+}
+
+/**
  * Updates specific fields for multiple content items in their respective chunks
  */
 export async function updateContentFieldsInChunks(updates: { id: string, chunkId?: string, fields?: any, [key: string]: any }[]): Promise<void> {
-  const explicitUpdates = updates.filter(u => u.chunkId);
-  const unknownUpdates = updates.filter(u => !u.chunkId);
+  const resolvedUpdates = updates.map(u => ({
+    ...u,
+    chunkId: u.chunkId || findLocalChunkForContent(u.id) || undefined
+  }));
+
+  const explicitUpdates = resolvedUpdates.filter(u => u.chunkId);
+  const unknownUpdates = resolvedUpdates.filter(u => !u.chunkId);
   
   let chunksSnap: any = null;
   if (unknownUpdates.length > 0) {
@@ -530,11 +591,13 @@ export async function updateContentFieldsInChunks(updates: { id: string, chunkId
 
   for (const updateObj of unknownUpdates) {
     const contentId = updateObj.id;
-    for (const chunkDoc of chunksSnap.docs) {
-      const items = chunkDoc.data().items || {};
-      if (items[contentId]) {
-        aggregateUpdate(chunkDoc.id, contentId, updateObj);
-        break;
+    if (chunksSnap) {
+      for (const chunkDoc of chunksSnap.docs) {
+        const items = chunkDoc.data().items || {};
+        if (items[contentId]) {
+          aggregateUpdate(chunkDoc.id, contentId, updateObj);
+          break;
+        }
       }
     }
   }
@@ -576,8 +639,13 @@ export async function deleteContentFromChunk(contentId: string, chunkId?: string
  * Deletes multiple content items from chunks efficiently
  */
 export async function deleteContentsFromChunks(itemsToRemove: {id: string, chunkId?: string}[]): Promise<void> {
-  const explicitRemovals = itemsToRemove.filter(i => i.chunkId);
-  const unknownRemovals = itemsToRemove.filter(i => !i.chunkId);
+  const resolvedRemovals = itemsToRemove.map(i => ({
+    ...i,
+    chunkId: i.chunkId || findLocalChunkForContent(i.id) || undefined
+  }));
+
+  const explicitRemovals = resolvedRemovals.filter(i => i.chunkId);
+  const unknownRemovals = resolvedRemovals.filter(i => !i.chunkId);
 
   let chunksSnap: any = null;
   if (unknownRemovals.length > 0) {
@@ -632,6 +700,19 @@ export async function deleteContentsFromChunks(itemsToRemove: {id: string, chunk
 }
 
 export async function getContentFromChunks(contentId: string): Promise<Content | null> {
+  const localChunkId = findLocalChunkForContent(contentId);
+  if (localChunkId) {
+    const chunkStr = safeStorage.getItem(`content_chunk_${localChunkId}`) || safeStorage.getItem(localChunkId);
+    if (chunkStr) {
+      try {
+        const items = JSON.parse(chunkStr);
+        if (items[contentId]) {
+          return expandContent({ ...items[contentId], id: contentId }, localChunkId);
+        }
+      } catch(e) {}
+    }
+  }
+
   const chunksSnap = await getDocs(collection(db, 'content_chunks'));
   
   for (const chunkDoc of chunksSnap.docs) {
@@ -754,7 +835,7 @@ export async function fetchReviewsFromChunks(forceRefresh = false): Promise<any[
   const cachedVersion = safeStorage.getItem('cached_review_version') || '0';
   const serverVersion = meta.reviews?.version?.toString() || '0';
   
-  if (!forceRefresh && cachedVersion === serverVersion) {
+  if (!forceRefresh && cachedVersion === serverVersion && cachedVersion !== '0') {
     const cachedData = safeStorage.getItem('cached_reviews_data');
     if (cachedData) {
       try {
@@ -763,12 +844,26 @@ export async function fetchReviewsFromChunks(forceRefresh = false): Promise<any[
     }
   }
 
-  const snapshot = await getDocs(collection(db, 'review_chunks'));
+  // If serverVersion is 0 or meta has no reviews yet, and we have local cache, return cache
+  if (serverVersion === '0') {
+    const cachedData = safeStorage.getItem('cached_reviews_data');
+    if (cachedData) {
+      try {
+        return JSON.parse(cachedData);
+      } catch (e) {}
+    }
+  }
+
   let allReviews: any[] = [];
-  snapshot.docs.forEach(d => {
-    const items = d.data().items || {};
-    allReviews = [...allReviews, ...Object.values(items)];
-  });
+  try {
+    const mainDoc = await getDoc(doc(db, 'review_chunks', 'main'));
+    if (mainDoc.exists()) {
+      const items = mainDoc.data().items || {};
+      allReviews = Object.values(items);
+    }
+  } catch (e) {
+    console.error("Error fetching review chunks:", e);
+  }
 
   // Sort by date descending
   allReviews.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());

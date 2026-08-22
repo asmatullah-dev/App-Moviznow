@@ -264,8 +264,8 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       let currentUsers = [...locallyCachedUsers];
       let { getDocs, query, collection, where, documentId } = await import('firebase/firestore');
 
-      if (force || currentUsers.length === 0) {
-        // Full pull when forced or when local cache is empty
+      if (currentUsers.length === 0) {
+        // Initial bootstrap pull only when local cache is completely empty
         try {
           updatedSomething = true;
           const q = query(collection(db, 'users'));
@@ -297,7 +297,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           throw err;
         }
       } else {
-        // Fetch only specific users modified/updated, tracked via chunkMeta
+        // Fetch only specific users modified/updated, tracked via chunkMeta delta sync
         try {
           const currentUsersMap = new Map(currentUsers.map(u => [u.uid, normalizeUserStatusAndExpiry(u)]));
 
@@ -318,11 +318,23 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
                    currentUsersMap.delete(uid);
                    updatedSomething = true;
                  }
+                 delete knownMtimes[uid];
                } else if (mtime > (knownMtimes[uid] || 0) && mtime > 0) {
                  uidsToFetch.add(uid);
                  knownMtimes[uid] = mtime;
                }
              }
+          });
+
+          // Check if any previously known users were deleted from chunk_meta/versions
+          Object.keys(knownMtimes).forEach(knownUid => {
+            if (!(knownUid in serverUsersVersion)) {
+              delete knownMtimes[knownUid];
+              if (currentUsersMap.has(knownUid)) {
+                currentUsersMap.delete(knownUid);
+                updatedSomething = true;
+              }
+            }
           });
 
           if (uidsToFetch.size > 0) {

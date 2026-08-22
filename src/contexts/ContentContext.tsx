@@ -273,6 +273,11 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
   const finalizeChanges = async () => {
     if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
+
+    // First check and balance all content chunks locally before constructing the sync payload
+    const { rebalanceLocalChunks } = await import('../utils/chunkUtils');
+    rebalanceLocalChunks();
+
     const contentPendingStr = safeStorage.getItem('pending_chunk_updates');
     const collectionPendingStr = safeStorage.getItem('pending_collection_updates');
     const metadataPending = safeStorage.getItem('pending_metadata_updates') === 'true';
@@ -400,9 +405,6 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
         const { updateChunkMetaLocalCache } = await import('../utils/chunkMeta');
         updateChunkMetaLocalCache(versionsUpdate);
-
-        const { autoRebalanceChunks } = await import('../utils/chunkUtils');
-        await autoRebalanceChunks();
 
         setHasPendingChanges(false);
         refreshContentFromLocal();
@@ -533,38 +535,6 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         const metaData = await import('../utils/chunkMeta').then(m => m.getChunkMeta(force));
         if (Object.keys(metaData).length > 0) {
             versions = metaData;
-        } else if (isAdmin && !safeStorage.getItem('content_chunks_migration_checked')) {
-            safeStorage.setItem('content_chunks_migration_checked', 'true');
-            // First time setup or recovery
-            const chunksSnap = await getDocs(collection(db, 'content_chunks'));
-            if (chunksSnap.empty) {
-                // Check for legacy individual content to migrate
-                const contentSnap = await getDocs(collection(db, 'content'));
-                if (!contentSnap.empty) {
-                    console.log(`Migrating ${contentSnap.size} legacy content items to chunks...`);
-                    const allContent = contentSnap.docs.map(d => ({ id: d.id, ...d.data() } as Content));
-                    const { rebuildAllChunks } = await import('../utils/chunkUtils');
-                    await rebuildAllChunks(allContent);
-                    const newMetaData = await import('../utils/chunkMeta').then(m => m.getChunkMeta(true));
-                    versions = newMetaData;
-                    // Optional: delete legacy individual content
-                    // const delBatch = writeBatch(db);
-                    // contentSnap.docs.forEach(d => delBatch.delete(d.ref));
-                    // await delBatch.commit();
-                }
-            } else {
-                const newVersions: Record<string, any> = {};
-                const batch = writeBatch(db);
-                chunksSnap.docs.forEach(d => {
-                    const now = Date.now();
-                    const items = d.data().items || {};
-                    newVersions[d.id] = { version: now, count: Object.keys(items).length };
-                    safeStorage.setItem('content_chunk_' + d.id, JSON.stringify(items));
-                });
-                batch.set(doc(db, 'chunk_meta', 'versions'), newVersions, { merge: true });
-                await batch.commit();
-                versions = newVersions;
-            }
         }
     } catch(e) { console.error("Error fetching chunk_meta", e); }
 
@@ -699,92 +669,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         }
 
         // Handle collections with versioning and chunks
-        let collectionsMeta = versions.collections;
-
-        // Migration logic: If no collection chunks exist but legacy collections do, migrate them
-        if (!collectionsMeta && isAdmin) {
-            try {
-                const legacySnap = await getDocs(collection(db, 'collections'));
-                if (!legacySnap.empty) {
-                    console.log(`Migrating ${legacySnap.size} legacy collections to chunks...`);
-                    const legacyItems: Record<string, AppCollection> = {};
-                    legacySnap.docs.forEach(d => {
-                        legacyItems[d.id] = { id: d.id, ...d.data() } as AppCollection;
-                    });
-
-                    const batch = writeBatch(db);
-                    const now = Date.now();
-                    const cid = COLLECTION_CHUNK_PREFIX + '0';
-                    
-                    batch.set(doc(db, 'collection_chunks', cid), {
-                        items: legacyItems,
-                        updatedAt: serverTimestamp()
-                    });
-
-                    collectionsMeta = {
-                        version: now,
-                        updatedAt: serverTimestamp(),
-                        latestChunkId: cid
-                    };
-
-                    batch.set(doc(db, 'chunk_meta', 'versions'), { 
-                        collections: collectionsMeta,
-                        lastGlobalUpdate: serverTimestamp()
-                    }, { merge: true });
-
-                    await batch.commit();
-                    
-                    // Cleanup legacy collections to complete the "replacement"
-                    const delBatch = writeBatch(db);
-                    legacySnap.docs.forEach(d => delBatch.delete(d.ref));
-                    await delBatch.commit();
-                    console.log("Legacy collections deleted.");
-                }
-            } catch(e) { console.error("Migration failed", e); }
-        }
-
-        // Migration logic for FCM tokens
-        if (isAdmin && !safeStorage.getItem('fcm_tokens_migration_checked')) {
-            safeStorage.setItem('fcm_tokens_migration_checked', 'true');
-            try {
-                const metaData = await import('../utils/chunkMeta').then(m => m.getChunkMeta());
-                if (!metaData.fcm_tokens) {
-                    const legacyTokensSnap = await getDocs(collection(db, 'fcm_tokens'));
-                    // Only migrate if we have many individual docs and no chunking yet
-                    const individualDocs = legacyTokensSnap.docs.filter(d => !d.id.startsWith('fcm_chunk_'));
-                    if (individualDocs.length > 0) {
-                        console.log(`Migrating ${individualDocs.length} legacy FCM tokens to chunks...`);
-                        const tokensMap: Record<string, any> = {};
-                        individualDocs.forEach(d => {
-                            const data = d.data();
-                            tokensMap[d.id] = data;
-                        });
-
-                        const batch = writeBatch(db);
-                        const cid = 'fcm_chunk_0';
-                        batch.set(doc(db, 'fcm_tokens', cid), tokensMap, { merge: true });
-                        batch.set(doc(db, 'chunk_meta', 'versions'), {
-                            fcm_tokens: {
-                                latestChunkId: cid,
-                                version: Date.now(),
-                                updatedAt: serverTimestamp()
-                            }
-                        }, { merge: true });
-
-                        await batch.commit();
-                        
-                        // Cleanup individual tokens
-                        const delBatch = writeBatch(db);
-                        individualDocs.forEach(d => delBatch.delete(d.ref));
-                        await delBatch.commit();
-                        console.log("Legacy FCM tokens cleaned up.");
-                    }
-                }
-            } catch (e) {
-                console.error("FCM Token migration failed:", e);
-            }
-        }
-
+        const collectionsMeta = versions.collections;
         const collectionsVersion = (collectionsMeta && typeof collectionsMeta === 'object' ? collectionsMeta.version : collectionsMeta) || 0;
         const localCollectionsVersion = localMeta.collections || 0;
         

@@ -112,7 +112,7 @@ export default function Rewards() {
         myJoins = Object.values(joins).filter((j: any) => j.inviterUid === profile.uid);
       }
 
-      if (myJoins.length === 0) {
+      if (myJoins.length === 0 && !refDoc.exists()) {
         try {
           const q = query(
             collection(db, 'users'),

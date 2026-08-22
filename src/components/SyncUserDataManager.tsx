@@ -373,7 +373,7 @@ export function SyncUserDataManager() {
     };
 
     checkDailySync();
-    const interval = setInterval(checkDailySync, 5 * 60 * 1000); // Check every 5 minutes
+    const interval = setInterval(checkDailySync, 30 * 60 * 1000); // Check every 30 minutes
     return () => clearInterval(interval);
   }, [user?.uid, handleSync]);
 

@@ -54,7 +54,7 @@ export default function Notifications() {
   const handleRefreshUsers = useCallback(async () => {
     setIsRefreshingUsers(true);
     try {
-      await refreshUsers(true);
+      await refreshUsers(false);
     } catch (e) {
       console.error("Error refreshing users:", e);
     } finally {
@@ -131,7 +131,7 @@ export default function Notifications() {
       const data = await res.json();
       setExpiryCheckResult(data);
       setIsExpiryModalOpen(true);
-      await refreshUsers(true);
+      await refreshUsers(false);
     } catch (err: any) {
       console.error("Error triggering expiry check:", err);
       setExpiryCheckResult({

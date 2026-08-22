@@ -35,25 +35,6 @@ export default function IncomeManagement() {
         if (snap.exists()) {
           const data = snap.data();
           list = Array.isArray(data.records) ? data.records : [];
-        } else {
-          // Legacy migration check: fetch individual documents in 'income' collection
-          const q = query(collection(db, 'income'));
-          const oldSnap = await getDocs(q);
-          const legacy: Income[] = [];
-          const legacyDocsToDelete: string[] = [];
-          oldSnap.docs.forEach(d => {
-            if (d.id !== 'data') {
-              legacy.push({ id: d.id, ...d.data() } as Income);
-              legacyDocsToDelete.push(d.id);
-            }
-          });
-          if (legacy.length > 0) {
-            list = legacy;
-            await setDoc(docRef, { records: legacy, updatedAt: new Date().toISOString() });
-            for (const dId of legacyDocsToDelete) {
-              await deleteDoc(doc(db, 'income', dId)).catch(() => {});
-            }
-          }
         }
 
         list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());

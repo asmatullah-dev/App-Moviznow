@@ -320,104 +320,7 @@ export default function UserManagement() {
     setLoading(usersLoading);
   }, [usersLoading]);
 
-  const hasRunAutoUpdates = React.useRef(false);
-
-  // Separate effect for auto-updates and caching to avoid blocking the main listener
-  useEffect(() => {
-    if (loading || users.length === 0 || hasRunAutoUpdates.current) return;
-
-    const runAutoUpdates = async () => {
-      hasRunAutoUpdates.current = true;
-
-      // Note: User status and expiry normalization is performed purely in-memory dynamically
-      // to eliminate unnecessary bulk Firestore writes.
-
-      // Check for duplicate pending users by email or phone and auto-consolidate
-      try {
-        const emailMap: Record<string, UserProfile[]> = {};
-        allUsers.forEach((u) => {
-          if (u.email && !u.email.endsWith('@moviznow.com')) {
-            const key = u.email.trim().toLowerCase();
-            if (!emailMap[key]) emailMap[key] = [];
-            emailMap[key].push(u);
-          }
-        });
-
-        Object.values(emailMap).forEach(async (group) => {
-          if (group.length > 1) {
-            // Sort to pick primary: Real UID > active status > oldest createdAt
-            group.sort((a, b) => {
-              const aIsPending = a.uid.startsWith('pending_');
-              const bIsPending = b.uid.startsWith('pending_');
-              if (aIsPending !== bIsPending) return aIsPending ? 1 : -1;
-              const aActive = a.status === 'active' ? 1 : 0;
-              const bActive = b.status === 'active' ? 1 : 0;
-              if (aActive !== bActive) return bActive - aActive;
-              return (a.createdAt || '').localeCompare(b.createdAt || '');
-            });
-
-            const primary = { ...group[0] };
-            const dups = group.slice(1);
-            const dupsToDelete: string[] = [];
-            let needsUpdate = false;
-
-            dups.forEach((dup) => {
-              // Only auto-merge if the duplicate is a pending_ account, or if the user is completely empty. We shouldn't delete real Firebase Auth UIDs automatically from the admin panel to avoid recreation loops.
-              if (dup.uid.startsWith('pending_') || dup.uid.startsWith('anonymous_') || (!dup.email && !dup.phone)) {
-                 dupsToDelete.push(dup.uid);
-                 needsUpdate = true;
-              } else {
-                 return; // Skip merging this real auth duplicate here, let AuthContext handle it when they log in
-              }
-              const rolePriority: Record<string, number> = {
-                owner: 100, admin: 90, manager: 80, user_manager: 75, content_manager: 70, selected_content: 60, user: 10, trial: 5
-              };
-              const statusPriority: Record<string, number> = { active: 100, pending: 50, expired: 20, suspended: 0 };
-              const getRoleRank = (r: string) => rolePriority[r] || 0;
-              const getStatusRank = (s: string) => statusPriority[s] || 0;
-
-              if (getRoleRank(dup.role) > getRoleRank(primary.role)) primary.role = dup.role;
-              if (getStatusRank(dup.status) > getStatusRank(primary.status)) primary.status = dup.status;
-              if (dup.expiryDate === 'Lifetime' || primary.expiryDate === 'Lifetime') {
-                primary.expiryDate = 'Lifetime';
-              } else if (dup.expiryDate && (!primary.expiryDate || dup.expiryDate > primary.expiryDate)) {
-                primary.expiryDate = dup.expiryDate;
-              }
-              if ((!primary.displayName || primary.displayName.startsWith('User ')) && dup.displayName && !dup.displayName.startsWith('User ')) {
-                primary.displayName = dup.displayName;
-              }
-              if (!primary.phone && dup.phone) primary.phone = dup.phone;
-              if (!primary.city && dup.city) primary.city = dup.city;
-
-              primary.favorites = Array.from(new Set([...(primary.favorites || []), ...(dup.favorites || [])]));
-              primary.watchLater = Array.from(new Set([...(primary.watchLater || []), ...(dup.watchLater || [])]));
-              primary.assignedContent = Array.from(new Set([...(primary.assignedContent || []), ...(dup.assignedContent || [])]));
-            });
-
-            if (needsUpdate && dupsToDelete.length > 0) {
-              const { doc, writeBatch } = await import('firebase/firestore');
-              primary.uid = primary.uid;
-              const batch = writeBatch(db);
-              batch.set(doc(db, 'users', primary.uid), primary, { merge: true });
-              const metaUpdates: Record<string, number> = { [primary.uid]: Date.now() };
-              dupsToDelete.forEach((dupId) => {
-                batch.delete(doc(db, 'users', dupId));
-                metaUpdates[dupId] = -1;
-              });
-              batch.set(doc(db, 'chunk_meta', 'versions'), { users: metaUpdates }, { merge: true });
-              await batch.commit();
-              refreshUsers(false).catch(console.error);
-            }
-          }
-        });
-      } catch (e) {
-        console.error('Error auto-consolidating duplicate users:', e);
-      }
-    };
-
-    const timer = setTimeout(runAutoUpdates, 3000); // Wait 3s after load/change
-    return () => clearTimeout(timer);
-  }, [users, loading, profile, managedByFilter]);
+  // Removed unsolicited background auto-update write loop to prevent phantom Firestore writes
 
   // Removed separate effect for caching users
 
@@ -814,7 +717,7 @@ export default function UserManagement() {
       
       // 1. Delete user document
       batch.delete(doc(db, 'users', currentDeleteConfirm));
-      batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentDeleteConfirm]: -1 } }, { merge: true });
+      batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentDeleteConfirm]: deleteField() } }, { merge: true });
       
       // Parallelize all data fetches
       const metaDoc = await getDoc(doc(db, 'chunk_meta', 'versions'));
@@ -855,6 +758,16 @@ export default function UserManagement() {
         body: JSON.stringify({ userId: currentDeleteConfirm })
       }).catch(() => {});
 
+      // Clean up sync_user_mtimes cache
+      const mtimesStr = safeStorage.getItem('sync_user_mtimes');
+      if (mtimesStr) {
+        try {
+          const mtimes = JSON.parse(mtimesStr);
+          delete mtimes[currentDeleteConfirm];
+          safeStorage.setItem('sync_user_mtimes', JSON.stringify(mtimes));
+        } catch (e) {}
+      }
+
       // Immediately remove from local storage cache so UI updates synchronously
       const cachedStr = safeStorage.getItem('cached_all_users');
       if (cachedStr) {
@@ -867,7 +780,7 @@ export default function UserManagement() {
 
       // OPTIONAL: Immediately hide it from UI if refreshUsers takes time
       // But refreshUsers should pick up the -1 mtime anyway
-      await refreshUsers(true);
+      await refreshUsers(false);
 
       setAlertConfig({ isOpen: true, title: 'Success', message: 'User and all associated data deleted successfully' });
       setDeleteConfirm(null);
@@ -941,11 +854,11 @@ export default function UserManagement() {
       for (let i = 0; i < uidsToDelete.length; i += BATCH_CHUNK_SIZE) {
         const batch = writeBatch(db);
         const chunkUids = uidsToDelete.slice(i, i + BATCH_CHUNK_SIZE);
-        const versionUsersUpdate: Record<string, number> = {};
+        const versionUsersUpdate: Record<string, any> = {};
 
         chunkUids.forEach(uid => {
           batch.delete(doc(db, 'users', uid));
-          versionUsersUpdate[uid] = -1;
+          versionUsersUpdate[uid] = deleteField();
         });
 
         batch.set(doc(db, 'chunk_meta', 'versions'), { users: versionUsersUpdate }, { merge: true });
@@ -981,7 +894,16 @@ export default function UserManagement() {
         }).catch(() => {});
       });
 
-      // 4. Update local storage cache
+      // 4. Update local storage cache and mtimes
+      const mtimesStr = safeStorage.getItem('sync_user_mtimes');
+      if (mtimesStr) {
+        try {
+          const mtimes = JSON.parse(mtimesStr);
+          validUidsSet.forEach(uid => delete mtimes[uid]);
+          safeStorage.setItem('sync_user_mtimes', JSON.stringify(mtimes));
+        } catch (e) {}
+      }
+
       const cachedStr = safeStorage.getItem('cached_all_users');
       if (cachedStr) {
         try {
@@ -992,7 +914,7 @@ export default function UserManagement() {
       }
 
       // 5. Refresh users list & reset state
-      await refreshUsers(true);
+      await refreshUsers(false);
       setSelectedUsers([]);
       setIsBulkDeleteConfirmOpen(false);
       setBulkDeleteValidUids([]);
@@ -1281,6 +1203,7 @@ export default function UserManagement() {
 
       batch.update(u1Ref, updates);
       batch.delete(u2Ref);
+      batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [user1.uid]: Date.now(), [user2.uid]: deleteField() } }, { merge: true });
 
       // Re-assign relational collections from user2 to user1
       const migrateCollections = ['movie_requests', 'orders', 'reported_links', 'fcm_tokens'];
@@ -1614,7 +1537,7 @@ export default function UserManagement() {
           await batch.commit();
           
           setAlertConfig({ isOpen: true, title: 'Success', message: 'Pending user added successfully.' });
-          refreshUsers(true).catch(console.error);
+          refreshUsers(false).catch(console.error);
         }
       }
       
@@ -1623,7 +1546,7 @@ export default function UserManagement() {
       setFoundUser(null);
       setSearchStatus('idle');
       if (foundUser) {
-        refreshUsers(true).catch(console.error);
+        refreshUsers(false).catch(console.error);
       }
     } catch (error) {
       console.error('Error adding/claiming user:', error);
@@ -1667,7 +1590,7 @@ export default function UserManagement() {
                        }
                      } catch(e) {}
                    }
-                   return await refreshUsers(true);
+                   return await refreshUsers(false);
                 };
                 
                 doSync().then((res) => {
