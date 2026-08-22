@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
-import { collection, query, orderBy, doc, updateDoc, getDoc, arrayUnion, deleteDoc, writeBatch } from 'firebase/firestore';
+import { collection, query, orderBy, doc, updateDoc, getDoc, setDoc, arrayUnion, deleteDoc, writeBatch } from 'firebase/firestore';
 import { Order, UserProfile } from '../../types';
 import { Check, X, Clock, Search, Filter, Eye, Loader2, Trash2, Zap, Sparkles, CheckCircle2, AlertCircle, Image as ImageIcon, ExternalLink, ShieldCheck, Mail } from 'lucide-react';
 import { format } from 'date-fns';
@@ -247,15 +247,27 @@ export default function OrdersManagement() {
         })
       }).catch(err => console.warn('Failed to send order approval notification:', err));
 
-      // Record in Income Management
-      const batch = writeBatch(db);
-      batch.set(doc(collection(db, 'income')), {
-        amount: order.amount,
-        description: `${order.type === 'membership' ? 'Membership Renewal' : 'Content Purchase'} (${order.id})`,
-        date: new Date().toISOString(),
-        userName: order.userName || 'Unknown User'
-      });
-      await batch.commit();
+      // Record in Income Management (single document: income/data)
+      try {
+        const incomeDocRef = doc(db, 'income', 'data');
+        const incomeSnap = await getDoc(incomeDocRef);
+        let currentIncome: any[] = [];
+        if (incomeSnap.exists()) {
+          const data = incomeSnap.data();
+          currentIncome = Array.isArray(data.records) ? data.records : [];
+        }
+        const newIncomeRecord = {
+          id: 'inc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+          amount: order.amount,
+          description: `${order.type === 'membership' ? 'Membership Renewal' : 'Content Purchase'} (${order.id})`,
+          date: new Date().toISOString(),
+          userName: order.userName || 'Unknown User'
+        };
+        const updatedIncome = [newIncomeRecord, ...currentIncome];
+        await setDoc(incomeDocRef, { records: updatedIncome, updatedAt: new Date().toISOString() });
+      } catch (incErr) {
+        console.error('Error recording income:', incErr);
+      }
 
       if (selectedOrder?.id === order.id) {
         setSelectedOrder({ ...selectedOrder, status: 'approved' });

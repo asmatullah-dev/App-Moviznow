@@ -13,7 +13,7 @@ import {
 } from 'firebase/firestore';
 import { db, runWithNetwork } from '../firebase';
 import { safeStorage } from '../utils/safeStorage';
-import { expandContent } from '../utils/chunkUtils';
+import { expandContent, CONTENT_CHUNK_MOVIE_SIZE, CONTENT_CHUNK_SERIES_SIZE } from '../utils/chunkUtils';
 import { useAuth } from './AuthContext';
 import { useUsers } from './UsersContext';
 import { Content, Genre, Language, Quality, Collection as AppCollection } from '../types';
@@ -1344,7 +1344,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     }
     if (!chunkId) {
         const prefix = content.type === 'movie' ? 'movie_chunk_' : 'series_chunk_';
-        const maxSize = content.type === 'movie' ? 800 : 300;
+        const maxSize = content.type === 'movie' ? CONTENT_CHUNK_MOVIE_SIZE : CONTENT_CHUNK_SERIES_SIZE;
         let matching = Object.keys(localMeta).filter(k => k.startsWith(prefix));
         
         // Sort by the chunk index so we can confidently pick the *first* defined chunk. e.g. move_chunk_0

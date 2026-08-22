@@ -2513,9 +2513,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const isPhoneWhitelisted = async (phone: string): Promise<boolean> => {
     const standardizedPhone = standardizePhone(phone);
-    const docRef = doc(db, "whitelisted_phones", standardizedPhone);
-    const docSnap = await getDoc(docRef);
-    return docSnap.exists();
+    if (!standardizedPhone) return false;
+
+    try {
+      // Check single document storage in settings/whitelisted_phones
+      const docRef = doc(db, "settings", "whitelisted_phones");
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const numbers: string[] = Array.isArray(data.numbers) ? data.numbers : (Array.isArray(data.phones) ? data.phones : []);
+        if (numbers.includes(standardizedPhone)) {
+          return true;
+        }
+      }
+      // Check legacy individual document fallback
+      const legacyRef = doc(db, "whitelisted_phones", standardizedPhone);
+      const legacySnap = await getDoc(legacyRef);
+      return legacySnap.exists();
+    } catch (err) {
+      console.error("Error checking whitelisted phone:", err);
+      return false;
+    }
   };
 
   const findUsersByEmailOrPhone = async (

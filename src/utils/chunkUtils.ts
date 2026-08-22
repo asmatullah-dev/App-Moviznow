@@ -4,8 +4,8 @@ import { Content } from '../types';
 import { getChunkMeta, clearChunkMetaCache } from './chunkMeta';
 import { safeStorage } from './safeStorage';
 
-export const CONTENT_CHUNK_MOVIE_SIZE = 800;
-export const CONTENT_CHUNK_SERIES_SIZE = 300;
+export const CONTENT_CHUNK_MOVIE_SIZE = 500;
+export const CONTENT_CHUNK_SERIES_SIZE = 100;
 // No search chunk size needed anymore as we use only content chunks
 
 const FIELD_MAP: Record<string, string> = {

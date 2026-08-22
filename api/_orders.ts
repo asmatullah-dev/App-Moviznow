@@ -752,10 +752,17 @@ ordersRouter.post("/verify-and-confirm", async (req, res) => {
     // Save user profile update with strict sanitization
     await userRef.set(sanitizeForFirestore(userUpdates), { merge: true });
 
-    // If auto-approved, record income in Firestore
+    // If auto-approved, record income in Firestore (single document: income/data)
     if (isAutoApproved && Number(amount) > 0) {
       try {
-        await firestore.collection("income").add(sanitizeForFirestore({
+        const incomeDocRef = firestore.collection("income").doc("data");
+        const incomeSnap = await incomeDocRef.get();
+        let currentRecords: any[] = [];
+        if (incomeSnap.exists) {
+          currentRecords = incomeSnap.data()?.records || [];
+        }
+        const newIncomeItem = sanitizeForFirestore({
+          id: "inc_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7),
           orderId,
           userId,
           userName: newOrder.userName,
@@ -769,7 +776,12 @@ ordersRouter.post("/verify-and-confirm", async (req, res) => {
           date: nowIso,
           createdAt: nowIso,
           verifiedBy: "AI Auto-Approval",
-        }));
+          description: `${type === 'membership' ? 'Membership Renewal' : 'Content Purchase'} (${orderId})`,
+        });
+        await incomeDocRef.set({
+          records: [newIncomeItem, ...currentRecords],
+          updatedAt: nowIso
+        }, { merge: true });
       } catch (incomeErr) {
         console.warn("Failed to record income document:", incomeErr);
       }
@@ -946,9 +958,16 @@ ordersRouter.post("/admin-verify-order", async (req, res) => {
 
       await userRef.set(sanitizeForFirestore(userUpdates), { merge: true });
 
-      // Record income
+      // Record income (single document: income/data)
       try {
-        await firestore.collection("income").add(sanitizeForFirestore({
+        const incomeDocRef = firestore.collection("income").doc("data");
+        const incomeSnap = await incomeDocRef.get();
+        let currentRecords: any[] = [];
+        if (incomeSnap.exists) {
+          currentRecords = incomeSnap.data()?.records || [];
+        }
+        const newIncomeItem = sanitizeForFirestore({
+          id: "inc_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7),
           orderId,
           userId,
           userName: targetOrder.userName,
@@ -962,8 +981,15 @@ ordersRouter.post("/admin-verify-order", async (req, res) => {
           date: nowIso,
           createdAt: nowIso,
           verifiedBy: "AI Auto-Approval",
-        }));
-      } catch (e) {}
+          description: `${targetOrder.type === 'membership' ? 'Membership Renewal' : 'Content Purchase'} (${orderId})`,
+        });
+        await incomeDocRef.set({
+          records: [newIncomeItem, ...currentRecords],
+          updatedAt: nowIso
+        }, { merge: true });
+      } catch (e) {
+        console.warn("Failed to record income document:", e);
+      }
 
       sendOrderApprovedNotification({
         userId,

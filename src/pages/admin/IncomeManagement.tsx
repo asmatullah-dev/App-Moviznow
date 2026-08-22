@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../firebase';
-import { collection, addDoc, deleteDoc, doc, query, orderBy, getDocs } from 'firebase/firestore';
+import { collection, doc, getDoc, setDoc, deleteDoc, query, getDocs } from 'firebase/firestore';
 import { Income } from '../../types';
 import { Plus, Trash2, DollarSign, Calendar, TrendingUp, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
@@ -28,9 +28,36 @@ export default function IncomeManagement() {
   useEffect(() => {
     const fetchIncome = async () => {
       try {
-        const q = query(collection(db, 'income'), orderBy('date', 'desc'));
-        const snapshot = await getDocs(q);
-        setIncomes(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Income)));
+        const docRef = doc(db, 'income', 'data');
+        const snap = await getDoc(docRef);
+        let list: Income[] = [];
+
+        if (snap.exists()) {
+          const data = snap.data();
+          list = Array.isArray(data.records) ? data.records : [];
+        } else {
+          // Legacy migration check: fetch individual documents in 'income' collection
+          const q = query(collection(db, 'income'));
+          const oldSnap = await getDocs(q);
+          const legacy: Income[] = [];
+          const legacyDocsToDelete: string[] = [];
+          oldSnap.docs.forEach(d => {
+            if (d.id !== 'data') {
+              legacy.push({ id: d.id, ...d.data() } as Income);
+              legacyDocsToDelete.push(d.id);
+            }
+          });
+          if (legacy.length > 0) {
+            list = legacy;
+            await setDoc(docRef, { records: legacy, updatedAt: new Date().toISOString() });
+            for (const dId of legacyDocsToDelete) {
+              await deleteDoc(doc(db, 'income', dId)).catch(() => {});
+            }
+          }
+        }
+
+        list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        setIncomes(list);
       } catch (error) {
         console.error("Income fetch error:", error);
         handleFirestoreError(error, OperationType.LIST, 'income');
@@ -47,21 +74,32 @@ export default function IncomeManagement() {
     setProcessing(prev => ({ ...prev, add: true }));
 
     try {
-      await addDoc(collection(db, 'income'), {
+      const docRef = doc(db, 'income', 'data');
+      const snap = await getDoc(docRef);
+      let current: Income[] = [];
+      if (snap.exists()) {
+        const data = snap.data();
+        current = Array.isArray(data.records) ? data.records : [];
+      }
+
+      const newRecord: Income = {
+        id: 'inc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
         amount: parseFloat(amount),
         description,
         date: new Date(date).toISOString(),
         userName: userName || 'Anonymous',
-      });
+      };
+
+      const updated = [newRecord, ...current];
+      updated.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      await setDoc(docRef, { records: updated, updatedAt: new Date().toISOString() });
+
       setIsAdding(false);
       setAmount('');
       setDescription('');
       setDate(new Date().toISOString().split('T')[0]);
       setUserName('');
-      // Refresh incomes
-      const q = query(collection(db, 'income'), orderBy('date', 'desc'));
-      const snapshot = await getDocs(q);
-      setIncomes(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Income)));
+      setIncomes(updated);
     } catch (error) {
       console.error('Error adding income:', error);
       setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to add income' });
@@ -74,8 +112,11 @@ export default function IncomeManagement() {
     if (!deleteId) return;
     setProcessing(prev => ({ ...prev, delete: true }));
     try {
-      await deleteDoc(doc(db, 'income', deleteId));
-      setIncomes(incomes.filter(i => i.id !== deleteId));
+      const docRef = doc(db, 'income', 'data');
+      const updated = incomes.filter(i => i.id !== deleteId);
+      await setDoc(docRef, { records: updated, updatedAt: new Date().toISOString() });
+      setIncomes(updated);
+      setDeleteId(null);
     } catch (error) {
       console.error('Error deleting income:', error);
     } finally {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, doc, setDoc, deleteDoc, query, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc, collection, query, getDocs } from 'firebase/firestore';
 import { Plus, Trash2, Loader2 } from 'lucide-react';
 import { Button } from './Button';
 import { standardizePhone } from '../contexts/AuthContext';
@@ -15,20 +15,44 @@ export function PhoneWhitelistManager() {
     let isMounted = true;
     const fetchPhones = async () => {
       try {
-        const q = query(collection(db, 'whitelisted_phones'));
-        const { getDocs } = await import('firebase/firestore');
-        const snap = await getDocs(q);
+        const docRef = doc(db, 'settings', 'whitelisted_phones');
+        const snap = await getDoc(docRef);
+        let list: string[] = [];
+
+        if (snap.exists()) {
+          const data = snap.data();
+          list = Array.isArray(data.numbers) ? data.numbers : (Array.isArray(data.phones) ? data.phones : []);
+        } else {
+          // Legacy check: query individual documents in 'whitelisted_phones' collection
+          const q = query(collection(db, 'whitelisted_phones'));
+          const oldSnap = await getDocs(q);
+          const legacyNumbers: string[] = [];
+          oldSnap.docs.forEach(d => {
+            if (d.id !== 'list' && d.id !== 'whitelisted_phones') {
+              legacyNumbers.push(d.id);
+            }
+          });
+          if (legacyNumbers.length > 0) {
+            list = Array.from(new Set(legacyNumbers));
+            await setDoc(docRef, { numbers: list, updatedAt: new Date().toISOString() });
+            // Clean up individual documents
+            for (const dId of legacyNumbers) {
+              await deleteDoc(doc(db, 'whitelisted_phones', dId)).catch(() => {});
+            }
+          }
+        }
+
         if (isMounted) {
-          setPhones(snap.docs.map(doc => doc.id));
+          setPhones(list);
         }
       } catch (err) {
-        console.error(err);
+        console.error('Error fetching whitelisted phones:', err);
       }
     };
     fetchPhones();
     return () => {
       isMounted = false;
-    }
+    };
   }, []);
 
   const handleAdd = async () => {
@@ -42,7 +66,20 @@ export function PhoneWhitelistManager() {
         setLoading(false);
         return;
       }
-      await setDoc(doc(db, 'whitelisted_phones', standardized), { createdAt: new Date().toISOString() });
+
+      const docRef = doc(db, 'settings', 'whitelisted_phones');
+      const snap = await getDoc(docRef);
+      let current: string[] = [];
+      if (snap.exists()) {
+        const data = snap.data();
+        current = Array.isArray(data.numbers) ? data.numbers : [];
+      }
+
+      if (!current.includes(standardized)) {
+        const updated = [...current, standardized];
+        await setDoc(docRef, { numbers: updated, updatedAt: new Date().toISOString() });
+        setPhones(updated);
+      }
       setNewPhone('');
     } catch (e: any) {
       console.error(e);
@@ -54,7 +91,10 @@ export function PhoneWhitelistManager() {
 
   const handleRemove = async (phone: string) => {
     try {
-      await deleteDoc(doc(db, 'whitelisted_phones', phone));
+      const docRef = doc(db, 'settings', 'whitelisted_phones');
+      const updated = phones.filter(p => p !== phone);
+      await setDoc(docRef, { numbers: updated, updatedAt: new Date().toISOString() });
+      setPhones(updated);
     } catch (e) {
       console.error(e);
     }
