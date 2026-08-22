@@ -2136,9 +2136,14 @@ async function startServer() {
 
   app.post("/api/admin/users/delete", async (req, res) => {
     try {
-      const { uid, adminUid } = req.body;
-      if (!uid || !adminUid)
-        return res.status(400).json({ error: "Missing uid or adminUid" });
+      const { uid, uids, adminUid } = req.body;
+      const targetUids: string[] = Array.isArray(uids)
+        ? uids
+        : uid
+        ? [uid]
+        : [];
+      if (targetUids.length === 0 || !adminUid)
+        return res.status(400).json({ error: "Missing uid/uids or adminUid" });
 
       // Verify admin
       const adminDoc = await db.collection("users").doc(adminUid).get();
@@ -2150,10 +2155,15 @@ async function startServer() {
         return res.status(403).json({ error: "Unauthorized" });
       }
 
-      // Delete user from Firebase Auth
-      await admin.auth().deleteUser(uid);
+      // Delete user(s) from Firebase Auth
+      const results = await Promise.allSettled(
+        targetUids.map((u) => admin.auth().deleteUser(u))
+      );
 
-      res.json({ success: true });
+      const deletedCount = results.filter((r) => r.status === "fulfilled").length;
+      const failedCount = results.filter((r) => r.status === "rejected").length;
+
+      res.json({ success: true, deletedCount, failedCount });
     } catch (error) {
       console.error("Admin Delete User Error:", error);
       res.status(500).json({ error: "Internal Server Error" });

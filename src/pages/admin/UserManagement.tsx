@@ -58,6 +58,8 @@ export default function UserManagement() {
     sessionStorage.setItem('user_mgmt_reward', filterReward);
   }, [searchTerm, sortField, sortOrder, filterRole, filterStatus, filterLanguage, filterReward]);
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
+  const [isBulkDeleteConfirmOpen, setIsBulkDeleteConfirmOpen] = useState(false);
+  const [bulkDeleteValidUids, setBulkDeleteValidUids] = useState<string[]>([]);
 
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [copiedUid, setCopiedUid] = useState(false);
@@ -185,6 +187,7 @@ export default function UserManagement() {
 
   useModalBehavior(alertConfig.isOpen, () => setAlertConfig(prev => ({ ...prev, isOpen: false })));
   useModalBehavior(!!deleteConfirm, () => setDeleteConfirm(null));
+  useModalBehavior(isBulkDeleteConfirmOpen, () => setIsBulkDeleteConfirmOpen(false));
   useModalBehavior(isContentPickerOpen, () => setIsContentPickerOpen(false));
   useModalBehavior(isAddUserModalOpen, () => setIsAddUserModalOpen(false));
   useModalBehavior(!!selectedUser, () => {
@@ -877,6 +880,137 @@ export default function UserManagement() {
       handleFirestoreError(error, OperationType.DELETE, `users/${currentDeleteConfirm}`);
     } finally {
       setProcessing(prev => ({ ...prev, delete: false }));
+    }
+  };
+
+  const handleBulkDeleteUsers = () => {
+    if (selectedUsers.length === 0) return;
+
+    // Filter out owner role users and current logged-in account
+    const validToDel = selectedUsers.filter(uid => {
+      const u = users.find(user => user.uid === uid);
+      return u && u.role !== 'owner' && u.uid !== profile?.uid;
+    });
+
+    if (validToDel.length === 0) {
+      setAlertConfig({
+        isOpen: true,
+        title: 'Action Not Allowed',
+        message: 'None of the selected users can be deleted (Owner accounts and your own logged-in account cannot be deleted).'
+      });
+      return;
+    }
+
+    setBulkDeleteValidUids(validToDel);
+    setIsBulkDeleteConfirmOpen(true);
+  };
+
+  const executeBulkDelete = async () => {
+    if (bulkDeleteValidUids.length === 0) return;
+    setProcessing(prev => ({ ...prev, delete: true, bulk: true }));
+
+    const uidsToDelete = [...bulkDeleteValidUids];
+    const validUidsSet = new Set(uidsToDelete);
+
+    try {
+      // 1. Delete users from Firebase Auth via Admin API
+      if (profile?.uid) {
+        try {
+          const res = await fetch('/api/admin/users/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uids: uidsToDelete, adminUid: profile.uid })
+          });
+          if (!res.ok) {
+            const errorData = await res.json().catch(() => ({}));
+            console.error("Failed to bulk delete users from Firebase Auth:", errorData);
+          }
+        } catch (e) {
+          console.error("Failed to call bulk delete API:", e);
+        }
+      }
+
+      // 2. Process Firestore deletions in chunks of 200 users per write batch
+      const metaDoc = await getDoc(doc(db, 'chunk_meta', 'versions'));
+      let maxFcmIndex = 0;
+      if (metaDoc.exists()) {
+        const metaData = metaDoc.data();
+        const latestId = (metaData.fcm_tokens && metaData.fcm_tokens.latestChunkId) || 'fcm_chunk_0';
+        const match = latestId.match(/(\d+)$/);
+        maxFcmIndex = match ? parseInt(match[1]) : 0;
+      }
+
+      const BATCH_CHUNK_SIZE = 200;
+      for (let i = 0; i < uidsToDelete.length; i += BATCH_CHUNK_SIZE) {
+        const batch = writeBatch(db);
+        const chunkUids = uidsToDelete.slice(i, i + BATCH_CHUNK_SIZE);
+        const versionUsersUpdate: Record<string, number> = {};
+
+        chunkUids.forEach(uid => {
+          batch.delete(doc(db, 'users', uid));
+          versionUsersUpdate[uid] = -1;
+        });
+
+        batch.set(doc(db, 'chunk_meta', 'versions'), { users: versionUsersUpdate }, { merge: true });
+
+        // Clean up matching user tokens from FCM token chunks
+        for (let idx = 0; idx <= maxFcmIndex; idx++) {
+          const cid = 'fcm_chunk_' + idx;
+          const cDoc = await getDoc(doc(db, 'fcm_tokens', cid));
+          if (cDoc.exists()) {
+            const tokensData = cDoc.data() || {};
+            let changed = false;
+            Object.keys(tokensData).forEach(token => {
+              if (validUidsSet.has(tokensData[token]?.userId)) {
+                delete tokensData[token];
+                changed = true;
+              }
+            });
+            if (changed) {
+              batch.set(doc(db, 'fcm_tokens', cid), tokensData);
+            }
+          }
+        }
+
+        await batch.commit();
+      }
+
+      // 3. Trigger backend notification unsubscribe for deleted users
+      uidsToDelete.forEach(uid => {
+        fetch('/api/notifications/unsubscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: uid })
+        }).catch(() => {});
+      });
+
+      // 4. Update local storage cache
+      const cachedStr = safeStorage.getItem('cached_all_users');
+      if (cachedStr) {
+        try {
+          const cached: UserProfile[] = JSON.parse(cachedStr);
+          const updated = cached.filter(u => !validUidsSet.has(u.uid));
+          safeStorage.setItem('cached_all_users', JSON.stringify(updated));
+        } catch (e) {}
+      }
+
+      // 5. Refresh users list & reset state
+      await refreshUsers(true);
+      setSelectedUsers([]);
+      setIsBulkDeleteConfirmOpen(false);
+      setBulkDeleteValidUids([]);
+
+      setAlertConfig({
+        isOpen: true,
+        title: 'Success',
+        message: `${uidsToDelete.length} users and all associated data deleted successfully.`
+      });
+    } catch (error) {
+      console.error('Error in bulk delete action:', error);
+      setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to delete selected users.' });
+      handleFirestoreError(error, OperationType.DELETE, 'users/bulk');
+    } finally {
+      setProcessing(prev => ({ ...prev, delete: false, bulk: false }));
     }
   };
 
@@ -1590,54 +1724,73 @@ export default function UserManagement() {
           {/* Line 3: Filters and Bulk Actions */}
           <div className="flex flex-wrap gap-3 items-center">
             {selectedUsers.length > 0 && (
-              <div className="flex items-center gap-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5">
-                <span className="text-xs text-zinc-500 dark:text-zinc-400">{selectedUsers.length} selected</span>
-                <select
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      if (e.target.value === 'merge') {
-                        handleMergeUsers();
-                      } else if (e.target.value.startsWith('role_')) {
-                        const targetRole = e.target.value.substring(5) as Role;
-                        handleBulkRoleChange(targetRole);
-                      } else {
-                        handleBulkStatusChange(e.target.value as any);
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5">
+                  <span className="text-xs text-zinc-500 dark:text-zinc-400">{selectedUsers.length} selected</span>
+                  <select
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        if (e.target.value === 'merge') {
+                          handleMergeUsers();
+                        } else if (e.target.value === 'delete_selected') {
+                          handleBulkDeleteUsers();
+                        } else if (e.target.value.startsWith('role_')) {
+                          const targetRole = e.target.value.substring(5) as Role;
+                          handleBulkRoleChange(targetRole);
+                        } else {
+                          handleBulkStatusChange(e.target.value as any);
+                        }
+                        e.target.value = '';
                       }
-                      e.target.value = '';
-                    }
-                  }}
-                  className="bg-transparent border-none text-xs focus:outline-none text-emerald-500 font-medium cursor-pointer"
-                >
-                  <option value="">Bulk Actions</option>
-                  <optgroup label="Change Status" className="text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900">
-                    <option value="active">Set Active</option>
-                    <option value="pending">Set Pending</option>
-                    <option value="expired">Set Expired</option>
-                    {(profile?.role === 'admin' || profile?.role === 'owner') && (
-                      <option value="suspended">Suspend</option>
-                    )}
-                  </optgroup>
-                  <optgroup label="Change Role" className="text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900">
-                    <option value="role_user">Set Role: User</option>
-                    <option value="role_basic">Set Role: Basic (With Ads)</option>
-                    <option value="role_vip">Set Role: VIP (Ad-Free)</option>
-                    <option value="role_trial">Set Role: Trial</option>
-                    <option value="role_selected_content">Set Role: Selected Content</option>
-                    {(profile?.role === 'admin' || profile?.role === 'owner') && (
-                      <>
-                        <option value="role_admin">Set Role: Admin</option>
-                        <option value="role_manager">Set Role: Manager</option>
-                        <option value="role_user_manager">Set Role: User Manager</option>
-                        <option value="role_content_manager">Set Role: Content Manager</option>
-                      </>
-                    )}
-                  </optgroup>
-                  {selectedUsers.length === 2 && (profile?.role === 'admin' || profile?.role === 'owner') && (
-                    <optgroup label="Others" className="text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900">
-                      <option value="merge">Merge Users</option>
+                    }}
+                    className="bg-transparent border-none text-xs focus:outline-none text-emerald-500 font-medium cursor-pointer"
+                  >
+                    <option value="">Bulk Actions</option>
+                    <optgroup label="Change Status" className="text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900">
+                      <option value="active">Set Active</option>
+                      <option value="pending">Set Pending</option>
+                      <option value="expired">Set Expired</option>
+                      {(profile?.role === 'admin' || profile?.role === 'owner') && (
+                        <option value="suspended">Suspend</option>
+                      )}
                     </optgroup>
+                    <optgroup label="Change Role" className="text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900">
+                      <option value="role_user">Set Role: User</option>
+                      <option value="role_basic">Set Role: Basic (With Ads)</option>
+                      <option value="role_vip">Set Role: VIP (Ad-Free)</option>
+                      <option value="role_trial">Set Role: Trial</option>
+                      <option value="role_selected_content">Set Role: Selected Content</option>
+                      {(profile?.role === 'admin' || profile?.role === 'owner') && (
+                        <>
+                          <option value="role_admin">Set Role: Admin</option>
+                          <option value="role_manager">Set Role: Manager</option>
+                          <option value="role_user_manager">Set Role: User Manager</option>
+                          <option value="role_content_manager">Set Role: Content Manager</option>
+                        </>
+                      )}
+                    </optgroup>
+                    <optgroup label="Danger Zone" className="text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900">
+                      {selectedUsers.length === 2 && (profile?.role === 'admin' || profile?.role === 'owner') && (
+                        <option value="merge">Merge Users</option>
+                      )}
+                      <option value="delete_selected" className="text-red-500 font-semibold">Delete Selected Users ({selectedUsers.length})</option>
+                    </optgroup>
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleBulkDeleteUsers}
+                  disabled={processing.delete || processing.bulk}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-red-500 hover:text-white bg-red-500/10 hover:bg-red-600 border border-red-500/30 rounded-lg transition-colors disabled:opacity-50 shrink-0 cursor-pointer"
+                  title="Delete all selected users and their data"
+                >
+                  {processing.delete || processing.bulk ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="w-3.5 h-3.5" />
                   )}
-                </select>
+                  <span>Delete ({selectedUsers.length})</span>
+                </button>
               </div>
             )}
             <div className="flex gap-2 flex-1 overflow-x-auto pb-1 md:pb-0 items-center">
@@ -3013,6 +3166,19 @@ export default function UserManagement() {
         onConfirm={handleDelete}
         onCancel={() => setDeleteConfirm(null)}
         loading={processing.delete}
+      />
+
+      <ConfirmModal
+        isOpen={isBulkDeleteConfirmOpen}
+        title={`Delete ${bulkDeleteValidUids.length} Selected Users`}
+        message={`Are you sure you want to PERMANENTLY delete these ${bulkDeleteValidUids.length} selected users and ALL their associated data (auth accounts, orders, requests, FCM tokens)? This action cannot be undone.`}
+        confirmText="Delete Selected Users"
+        onConfirm={executeBulkDelete}
+        onCancel={() => {
+          setIsBulkDeleteConfirmOpen(false);
+          setBulkDeleteValidUids([]);
+        }}
+        loading={processing.delete || processing.bulk}
       />
 
       {/* Whitelist Modal */}
