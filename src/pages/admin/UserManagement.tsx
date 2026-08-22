@@ -242,7 +242,7 @@ export default function UserManagement() {
         }
         
         // Delta sync users using chunk_meta (zero reads if up-to-date, or delta reads only)
-        const res = await refreshUsers(false);
+        const res = await refreshUsers(true);
         if (mounted) {
           if (res.users && Array.isArray(res.users)) {
             res.users.forEach(u => {
@@ -776,7 +776,7 @@ export default function UserManagement() {
 
       // OPTIONAL: Immediately hide it from UI if refreshUsers takes time
       // But refreshUsers should pick up the -1 mtime anyway
-      await refreshUsers(false);
+      await refreshUsers(true);
 
       setAlertConfig({ isOpen: true, title: 'Success', message: 'User and all associated data deleted successfully' });
       setDeleteConfirm(null);
@@ -923,7 +923,7 @@ export default function UserManagement() {
       }
 
       // 5. Refresh users list & reset state
-      await refreshUsers(false);
+      await refreshUsers(true);
       setSelectedUsers([]);
       setIsBulkDeleteConfirmOpen(false);
       setBulkDeleteValidUids([]);
@@ -1571,7 +1571,7 @@ export default function UserManagement() {
           await batch.commit();
           
           setAlertConfig({ isOpen: true, title: 'Success', message: 'Pending user added successfully.' });
-          refreshUsers(false).catch(console.error);
+          refreshUsers(true).catch(console.error);
         }
       }
       
@@ -1580,7 +1580,7 @@ export default function UserManagement() {
       setFoundUser(null);
       setSearchStatus('idle');
       if (foundUser) {
-        refreshUsers(false).catch(console.error);
+        refreshUsers(true).catch(console.error);
       }
     } catch (error) {
       console.error('Error adding/claiming user:', error);
@@ -1624,7 +1624,7 @@ export default function UserManagement() {
                        }
                      } catch(e) {}
                    }
-                   return await refreshUsers(false);
+                   return await refreshUsers(true);
                 };
                 
                 doSync().then((res) => {

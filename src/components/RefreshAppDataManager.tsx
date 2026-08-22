@@ -7,7 +7,7 @@ import { useSettings } from '../contexts/SettingsContext';
 import { useNotifications } from '../contexts/NotificationContext';
 import { safeStorage } from '../utils/safeStorage';
 
-const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
+const FIVE_MINUTES_MS = 5 * 60 * 1000;
 const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
 
 export function RefreshAppDataManager() {
@@ -26,8 +26,8 @@ export function RefreshAppDataManager() {
     const lastSuccessStr = safeStorage.getItem('last_success_refresh_time');
     const lastSuccess = lastSuccessStr ? parseInt(lastSuccessStr, 10) : 0;
     
-    // Default 15 minutes, App Open 3 hours
-    let cooldown = FIFTEEN_MINUTES_MS;
+    // Default 5 minutes, App Open 3 hours
+    let cooldown = FIVE_MINUTES_MS;
     if (reason === 'app_open') {
       cooldown = THREE_HOURS_MS;
     }

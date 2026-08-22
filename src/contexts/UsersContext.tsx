@@ -319,6 +319,9 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
                    updatedSomething = true;
                  }
                  delete knownMtimes[uid];
+               } else if (!knownMtimes[uid] && currentUsersMap.has(uid)) {
+                 // User is already cached locally; seed recorded mtime baseline
+                 knownMtimes[uid] = mtime;
                } else if (mtime > (knownMtimes[uid] || 0) && mtime > 0) {
                  uidsToFetch.add(uid);
                  knownMtimes[uid] = mtime;

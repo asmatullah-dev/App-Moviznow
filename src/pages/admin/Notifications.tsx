@@ -54,7 +54,7 @@ export default function Notifications() {
   const handleRefreshUsers = useCallback(async () => {
     setIsRefreshingUsers(true);
     try {
-      await refreshUsers(false);
+      await refreshUsers(true);
     } catch (e) {
       console.error("Error refreshing users:", e);
     } finally {
