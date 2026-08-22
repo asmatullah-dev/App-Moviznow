@@ -582,7 +582,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         const localVersion = typeof localV === 'object' ? localV.version : localV;
         const hasData = !!safeStorage.getItem('content_chunk_' + chunkId);
         
-        if (force || !hasData || !localVersion || localVersion < (version as number)) {
+        if (!hasData || !localVersion || localVersion < (version as number)) {
             chunksToFetch.push(chunkId);
         }
     }
@@ -652,7 +652,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         const hasMetadata = !!genresCacheStr && genresCacheStr !== '[]';
         const hasPendingMetadata = !!safeStorage.getItem('pending_metadata_updates');
         
-        if (!hasPendingMetadata && (force || !hasMetadata || !localMetaVersion || localMetaVersion < metadataVersion)) {
+        if (!hasPendingMetadata && (!hasMetadata || !localMetaVersion || localMetaVersion < metadataVersion)) {
             try {
                 const metaDoc = await getDoc(doc(db, 'content_chunks', 'metadata'));
                 if (metaDoc.exists()) {
@@ -788,7 +788,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         const latestCollChunkId = (collectionsMeta && typeof collectionsMeta === 'object' ? collectionsMeta.latestChunkId : null) || 'collection_chunk_0';
         latestCollChunkIdRef.current = latestCollChunkId;
 
-        if (force || !safeStorage.getItem('collections_cache') || localCollectionsVersion < collectionsVersion) {
+        if (!safeStorage.getItem('collections_cache') || localCollectionsVersion < collectionsVersion) {
             let allCollections: AppCollection[] = [];
             
             const matchIndex = latestCollChunkId.match(/(\d+)$/);
@@ -908,16 +908,14 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         return { updated: false, updatedContentCount: 0, isInitialLoad: false };
     }
     
-    // Proceed with sync - show 'syncing' toast on manual force checks or initial load/empty library
-    if (force || noLocalData || isLibraryEmpty) {
-        window.dispatchEvent(new CustomEvent('sync_status', {
-          detail: {
-            status: 'syncing',
-            isInitialLoad: noLocalData || isLibraryEmpty,
-            message: (noLocalData || isLibraryEmpty) ? 'Loading Data...' : 'Updating data...'
-          }
-        }));
-    }
+    // Proceed with sync - ALWAYS show 'syncing' toast when updating data (both scheduled and force)
+    window.dispatchEvent(new CustomEvent('sync_status', {
+      detail: {
+        status: 'syncing',
+        isInitialLoad: noLocalData || isLibraryEmpty,
+        message: (noLocalData || isLibraryEmpty) ? 'Loading Data...' : 'Updating data...'
+      }
+    }));
 
     let updatedSomething = false;
     let serverUpdatedCount = 0;
@@ -990,7 +988,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
             message: `${serverUpdatedCount} content updated`
           }
         }));
-    } else if (force) {
+    } else {
         window.dispatchEvent(new CustomEvent('sync_status', {
           detail: {
             status: updatedSomething ? 'success' : 'up-to-date',

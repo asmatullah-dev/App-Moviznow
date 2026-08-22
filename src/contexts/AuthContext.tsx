@@ -517,8 +517,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         let serverProfile: UserProfile | null = null;
         let docSnap;
 
-        // 7. Always verify user UID in Firestore when online
-        if (navigator.onLine) {
+        // 7. Verify user UID in Firestore when online and version changed or profile missing
+        if (navigator.onLine && (versionChanged || !localProfile || force)) {
           try {
             docSnap = await runWithNetwork(() => getDoc(userRef));
             if (docSnap.exists()) {
