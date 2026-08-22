@@ -18,6 +18,7 @@ export function ProtectedRoute({ children, requireAdmin = false, requireAuth = f
   const location = useLocation();
 
   const [maxWaitReached, setMaxWaitReached] = React.useState(false);
+  const [adminWaitReached, setAdminWaitReached] = React.useState(false);
   const [whatsappNumber, setWhatsappNumber] = useState("");
   const [whatsappError, setWhatsappError] = useState<string | null>(null);
   const [isSavingWhatsapp, setIsSavingWhatsapp] = useState(false);
@@ -27,7 +28,16 @@ export function ProtectedRoute({ children, requireAdmin = false, requireAuth = f
     const timer = setTimeout(() => {
       setMaxWaitReached(true);
     }, 120);
-    return () => clearTimeout(timer);
+
+    // Safety cap for admin profile check: max 2000ms
+    const adminTimer = setTimeout(() => {
+      setAdminWaitReached(true);
+    }, 2000);
+
+    return () => {
+      clearTimeout(timer);
+      clearTimeout(adminTimer);
+    };
   }, []);
 
   const hasCachedUser = !!user || !!profile || !!safeStorage.getItem('profile_cache');
@@ -159,8 +169,8 @@ export function ProtectedRoute({ children, requireAdmin = false, requireAuth = f
 
   // If admin is required, we must wait for the profile to check roles
   if (requireAdmin) {
-    // If we already have the profile in memory, do not block on background authProfileLoading sync
-    if (!profile) {
+    // Show spinner only while auth or profile is actively loading and safety window hasn't expired
+    if (!profile && !adminWaitReached && (authLoading || authProfileLoading || isSyncing)) {
       return (
         <div className="min-h-screen bg-white dark:bg-zinc-950 flex flex-col items-center justify-center gap-6 transition-colors duration-300">
           <div className="flex flex-col items-center animate-pulse">
@@ -171,7 +181,7 @@ export function ProtectedRoute({ children, requireAdmin = false, requireAuth = f
         </div>
       );
     }
-    if (profile.role !== 'admin' && profile.role !== 'content_manager' && profile.role !== 'user_manager' && profile.role !== 'manager' && profile.role !== 'owner') {
+    if (!profile || (profile.role !== 'admin' && profile.role !== 'content_manager' && profile.role !== 'user_manager' && profile.role !== 'manager' && profile.role !== 'owner')) {
       console.log('ProtectedRoute: Admin required but user is not admin/manager/owner, redirecting to home');
       return <Navigate to="/" replace />;
     }

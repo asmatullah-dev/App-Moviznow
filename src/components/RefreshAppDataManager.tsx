@@ -7,7 +7,8 @@ import { useSettings } from '../contexts/SettingsContext';
 import { useNotifications } from '../contexts/NotificationContext';
 import { safeStorage } from '../utils/safeStorage';
 
-const THIRTY_MINUTES_MS = 30 * 60 * 1000;
+const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
+const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
 
 export function RefreshAppDataManager() {
   const { contentList, quickRefreshCatalog } = useContent();
@@ -24,7 +25,12 @@ export function RefreshAppDataManager() {
     // Strict cooldown check using last success check time
     const lastSuccessStr = safeStorage.getItem('last_success_refresh_time');
     const lastSuccess = lastSuccessStr ? parseInt(lastSuccessStr, 10) : 0;
-    const cooldown = reason === 'user_profile_button' ? 3 * 60 * 1000 : THIRTY_MINUTES_MS;
+    
+    // Default 15 minutes, App Open 3 hours
+    let cooldown = FIFTEEN_MINUTES_MS;
+    if (reason === 'app_open') {
+      cooldown = THREE_HOURS_MS;
+    }
 
     if (!isLibraryEmpty && (Date.now() - lastSuccess < cooldown)) {
       return; // Skip if already refreshed successfully within cooldown period
@@ -146,14 +152,17 @@ export function RefreshAppDataManager() {
         return;
       }
 
-      // 2. Refresh catalog content chunks
-      const catalogResult = await quickRefreshCatalog(true, versions);
+      // 2. Refresh catalog content chunks (pass false so quickRefreshCatalog does not dispatch premature completion toast)
+      const catalogResult = await quickRefreshCatalog(false, versions);
+
+      let otherUpdated = false;
 
       // 3. Check settings version
       const serverSettingsVer = versions.settings || 0;
       const localSettingsVer = parseInt(localStorage.getItem('cached_settings_version') || '0', 10);
       if (serverSettingsVer > localSettingsVer || !localStorage.getItem('cached_app_settings')) {
         await refreshSettings(true).catch(() => {});
+        otherUpdated = true;
       }
 
       // 4. Check notifications version
@@ -163,6 +172,7 @@ export function RefreshAppDataManager() {
       const localNotifVer = parseInt(localStorage.getItem('cached_notifications_version') || '0', 10);
       if (serverNotifVer > localNotifVer) {
         await refreshNotifications().catch(() => {});
+        otherUpdated = true;
       }
 
       // 5. Check self user version
@@ -172,6 +182,7 @@ export function RefreshAppDataManager() {
         const localUserVer = parseInt(safeStorage.getItem(`profile_version_${user.uid}`) || '0', 10);
         if (serverUserVer > localUserVer || localUserVer === 0) {
           await refreshProfile(true, 'manual').catch(() => {});
+          otherUpdated = true;
         }
       }
 
@@ -180,7 +191,7 @@ export function RefreshAppDataManager() {
       // Update the last success refresh time stamp
       safeStorage.setItem('last_success_refresh_time', Date.now().toString());
 
-      // Dispatch completion toast
+      // Dispatch single completion toast
       if (isLibraryEmpty) {
         window.dispatchEvent(new CustomEvent('sync_status', {
           detail: {
@@ -190,13 +201,31 @@ export function RefreshAppDataManager() {
             message: 'Loaded All Contents Successfully'
           }
         }));
-      } else {
+      } else if (updatedCount > 0) {
         window.dispatchEvent(new CustomEvent('sync_status', {
           detail: {
             status: 'success',
             isInitialLoad: false,
             updatedCount: updatedCount,
-            message: updatedCount === 1 ? '1 item updated' : `${updatedCount} items updated`
+            message: `${updatedCount} content updated`
+          }
+        }));
+      } else if (otherUpdated || catalogResult.updated) {
+        window.dispatchEvent(new CustomEvent('sync_status', {
+          detail: {
+            status: 'success',
+            isInitialLoad: false,
+            updatedCount: 0,
+            message: 'Data updated successfully'
+          }
+        }));
+      } else {
+        window.dispatchEvent(new CustomEvent('sync_status', {
+          detail: {
+            status: 'up-to-date',
+            isInitialLoad: false,
+            updatedCount: 0,
+            message: 'Data is up to date'
           }
         }));
       }
@@ -215,15 +244,20 @@ export function RefreshAppDataManager() {
   }, [contentList, quickRefreshCatalog, user?.uid, refreshProfile, refreshSettings, refreshNotifications]);
 
   // Expose window trigger
+  const executeRefreshRef = useRef(executeRefreshAppData);
+  useEffect(() => {
+    executeRefreshRef.current = executeRefreshAppData;
+  }, [executeRefreshAppData]);
+
   useEffect(() => {
     (window as any).triggerRefreshAppData = (reason: any) => {
-      executeRefreshAppData(reason);
+      executeRefreshRef.current(reason);
     };
 
     const handleEvent = (e: Event) => {
       const customEvent = e as CustomEvent;
       const reason = customEvent.detail?.reason || 'manual';
-      executeRefreshAppData(reason);
+      executeRefreshRef.current(reason);
     };
 
     window.addEventListener('trigger_refresh_app_data', handleEvent);
@@ -231,15 +265,20 @@ export function RefreshAppDataManager() {
       delete (window as any).triggerRefreshAppData;
       window.removeEventListener('trigger_refresh_app_data', handleEvent);
     };
-  }, [executeRefreshAppData]);
+  }, []);
 
-  // Trigger on App Open (with 30-min cooldown)
+  const hasRunAppOpenRef = useRef(false);
+
+  // Trigger on App Open (once on mount with 30-min cooldown)
   useEffect(() => {
+    if (hasRunAppOpenRef.current) return;
+    hasRunAppOpenRef.current = true;
+
     const timer = setTimeout(() => {
-      executeRefreshAppData('app_open');
+      executeRefreshRef.current('app_open');
     }, 1000);
     return () => clearTimeout(timer);
-  }, [executeRefreshAppData]);
+  }, []);
 
   return null;
 }

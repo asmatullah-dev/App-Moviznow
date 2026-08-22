@@ -25,7 +25,6 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
   const { isInstallable, installApp } = usePWA();
   const { checkForUpdates, quickRefreshCatalog } = useContent();
   const { refreshSettings } = useSettings();
-  const { refreshUsers } = useUsers();
   const { enabled: isHapticsEnabled, toggleHaptics, vibrate } = useHaptics();
   const navigate = useNavigate();
   const location = useLocation();

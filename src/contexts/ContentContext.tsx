@@ -136,7 +136,7 @@ export const checkHasPendingChanges = (): boolean => {
 
 export function ContentProvider({ children }: { children: React.ReactNode }) {
   const { profile, loading: authProfileLoading, refreshProfile } = useAuth();
-  const { users: allUsers, refreshUsers, finalizeUserChanges } = useUsers();
+  const { users: allUsers, finalizeUserChanges } = useUsers();
 
   const [contentList, setContentList] = useState<Content[]>(() => {
     const cached = safeStorage.getItem('content_cache');
@@ -813,14 +813,6 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     // Refresh users list if admin and push pending user changes
     if (isAdmin) {
       finalizeUserChanges(force).catch(console.error);
-      tasks.push(
-        refreshUsers(force)
-          .then(res => Boolean(res?.updatedSomething))
-          .catch(err => {
-            console.error("Users refresh error:", err);
-            return false;
-          })
-      );
     }
 
     // Sync content with server

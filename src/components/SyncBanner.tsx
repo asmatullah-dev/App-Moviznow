@@ -82,12 +82,12 @@ export function SyncBanner() {
       if (updatedCount && updatedCount > 0) {
         return `${updatedCount} ${t('content updated')}`;
       }
-      if (customMessage) {
+      if (customMessage && customMessage !== '0 items updated' && customMessage !== '0 content updated') {
         return t(customMessage);
       }
       return t('Data updated successfully');
     }
-    if (customMessage) {
+    if (customMessage && customMessage !== '0 items updated' && customMessage !== '0 content updated') {
       return t(customMessage);
     }
     return t('Data is up to date');

@@ -871,6 +871,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const isLogin = justLoggedInRef.current || reason === "login";
         const isSignOut = reason === "logout";
         const shouldWrite =
+          reason !== "manual" &&
           (serverProfile || localProfile) &&
           (isVersionMissing ||
             isLogin ||
@@ -2987,7 +2988,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const sessionReconciledKey = `referral_reconciled_${user.uid}`;
       if (!sessionStorage.getItem(sessionReconciledKey)) {
         sessionStorage.setItem(sessionReconciledKey, "true");
-        runReconciliation();
+        if (!profile.referralCode) {
+          runReconciliation();
+        }
       }
     }
   }, [user?.uid, profile?.uid]);
