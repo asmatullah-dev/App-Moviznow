@@ -6,6 +6,15 @@ let chunkMetaPromise: Promise<Record<string, any>> | null = null;
 let memoryCache: Record<string, any> | null = null;
 
 const shouldFetchMeta = () => {
+  const cachedStr = safeStorage.getItem('cached_chunk_meta_doc');
+  if (!cachedStr || cachedStr === '{}') {
+    return true;
+  }
+  const contentCache = safeStorage.getItem('content_cache');
+  if (!contentCache || contentCache === '[]') {
+    return true;
+  }
+
   const now = Date.now();
   // PKT is UTC+5. Shift back by 7 hours to align the daily update cycle with 7 AM PKT.
   const shiftedTime = new Date(now + (5 - 7) * 60 * 60 * 1000);

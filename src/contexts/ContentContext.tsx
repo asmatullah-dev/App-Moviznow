@@ -844,8 +844,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
   }, [profile?.role, profile?.phone, authProfileLoading]);
 
   const checkForUpdates = async (force: boolean = false): Promise<{ updated: boolean; updatedContentCount: number; isInitialLoad?: boolean }> => {
-    if (authProfileLoading || !profile) {
-        if (!authProfileLoading && !profile) setLoading(false);
+    if (authProfileLoading) {
         return { updated: false, updatedContentCount: 0, isInitialLoad: false };
     }
 
@@ -870,12 +869,6 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (!navigator.onLine) {
-        setLoading(false);
-        return { updated: false, updatedContentCount: 0, isInitialLoad: false };
-    }
-    
-    // Strict check: don't load data if Whatsapp number is missing
-    if (!profile.phone && profile.role !== 'admin' && profile.role !== 'owner') {
         setLoading(false);
         return { updated: false, updatedContentCount: 0, isInitialLoad: false };
     }
@@ -923,15 +916,17 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
     const tasks: Promise<boolean>[] = [];
 
-    // Trigger profile refresh 
-    tasks.push(
-      refreshProfile(force, force ? 'manual' : 'auto')
-        .then(res => Boolean(res))
-        .catch(err => {
-          console.error("Profile refresh error:", err);
-          return false;
-        })
-    );
+    // Trigger profile refresh if logged in
+    if (profile) {
+      tasks.push(
+        refreshProfile(force, force ? 'manual' : 'auto')
+          .then(res => Boolean(res))
+          .catch(err => {
+            console.error("Profile refresh error:", err);
+            return false;
+          })
+      );
+    }
     
     // Refresh users list if admin and push pending user changes
     if (isAdmin) {
