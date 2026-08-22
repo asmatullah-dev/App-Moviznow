@@ -213,6 +213,7 @@ export default function Notifications() {
     setProcessing(prev => ({ ...prev, deleteTemplate: true }));
     try {
       await deleteDoc(doc(db, "notification_templates", deleteTemplateId));
+      setTemplates(prev => prev.filter(t => t.id !== deleteTemplateId));
     } catch (error) {
       console.error("Error deleting template:", error);
     } finally {
@@ -229,11 +230,13 @@ export default function Notifications() {
         await updateDoc(doc(db, "notification_templates", editingTemplate.id), {
           ...templateForm
         });
+        setTemplates(prev => prev.map(t => t.id === editingTemplate.id ? { ...t, ...templateForm } : t));
       } else {
-        await addDoc(collection(db, "notification_templates"), {
+        const docRef = await addDoc(collection(db, "notification_templates"), {
           ...templateForm,
           createdAt: new Date().toISOString()
         });
+        setTemplates(prev => [{ id: docRef.id, ...templateForm, createdAt: new Date().toISOString() }, ...prev]);
       }
       setIsTemplateModalOpen(false);
       setTemplateForm({ name: '', title: '', body: '', buttonLabel: '', buttonUrl: '' });

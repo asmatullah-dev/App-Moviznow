@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { CheckCircle2, AlertCircle, Loader2, ArrowLeft, Lock, UserX, LogOut } from 'lucide-react';
-import { doc, updateDoc, collection, query, where, getDocs, setDoc, limit } from 'firebase/firestore';
+import { doc, updateDoc, collection, query, where, getDocs, setDoc, limit, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -54,17 +54,33 @@ export default function Unsubscribe() {
 
   const updateFirestoreUser = async (userEmail: string): Promise<boolean> => {
     try {
+      if (user?.uid && (user.email?.toLowerCase() === userEmail.toLowerCase() || profile?.email?.toLowerCase() === userEmail.toLowerCase())) {
+        const currentPrefs = profile?.notificationPreferences || {};
+        const emailPrefs = currentPrefs.email || {};
+        await updateDoc(doc(db, 'users', user.uid), {
+          notificationPreferences: {
+            ...currentPrefs,
+            email: {
+              ...emailPrefs,
+              newContent: false
+            }
+          }
+        });
+        return true;
+      }
+
       const q = query(collection(db, 'users'), where('email', '==', userEmail.toLowerCase()), limit(50));
       const snap = await getDocs(q);
       
       let updated = false;
       if (!snap.empty) {
+        const batch = writeBatch(db);
         for (const userDoc of snap.docs) {
           const userData = userDoc.data();
           const currentPrefs = userData.notificationPreferences || {};
           const emailPrefs = currentPrefs.email || {};
 
-          await updateDoc(doc(db, 'users', userDoc.id), {
+          batch.update(userDoc.ref, {
             notificationPreferences: {
               ...currentPrefs,
               email: {
@@ -75,6 +91,7 @@ export default function Unsubscribe() {
           });
           updated = true;
         }
+        await batch.commit();
       }
 
       return updated;

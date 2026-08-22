@@ -215,12 +215,6 @@ export default function OrdersManagement() {
       // Record in Income Management (single document: income/data)
       try {
         const incomeDocRef = doc(db, 'income', 'data');
-        const incomeSnap = await getDoc(incomeDocRef);
-        let currentIncome: any[] = [];
-        if (incomeSnap.exists()) {
-          const data = incomeSnap.data();
-          currentIncome = Array.isArray(data.records) ? data.records : [];
-        }
         const newIncomeRecord = {
           id: 'inc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
           amount: order.amount,
@@ -228,8 +222,12 @@ export default function OrdersManagement() {
           date: new Date().toISOString(),
           userName: order.userName || 'Unknown User'
         };
-        const updatedIncome = [newIncomeRecord, ...currentIncome];
-        await setDoc(incomeDocRef, { records: updatedIncome, updatedAt: new Date().toISOString() });
+        await updateDoc(incomeDocRef, {
+          records: arrayUnion(newIncomeRecord),
+          updatedAt: new Date().toISOString()
+        }).catch(async () => {
+          await setDoc(incomeDocRef, { records: [newIncomeRecord], updatedAt: new Date().toISOString() });
+        });
       } catch (incErr) {
         console.error('Error recording income:', incErr);
       }

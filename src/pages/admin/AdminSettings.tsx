@@ -264,6 +264,17 @@ export default function AdminSettings() {
 
     const fetchSettings = async () => {
       try {
+        const { getChunkMeta } = await import('../../utils/chunkMeta');
+        const meta = await getChunkMeta();
+        const serverVersion = meta.settings || 0;
+        const localVersion = parseInt(localStorage.getItem('cached_settings_version') || '0', 10);
+        const cachedSettings = localStorage.getItem('cached_app_settings');
+
+        if (cachedSettings && localVersion > 0 && serverVersion <= localVersion) {
+          setLoading(false);
+          return;
+        }
+
         const docRef = doc(db, 'settings', 'app_settings');
         const docSnap = await getDoc(docRef);
 

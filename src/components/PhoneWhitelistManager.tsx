@@ -50,15 +50,9 @@ export function PhoneWhitelistManager() {
       }
 
       const docRef = doc(db, 'settings', 'whitelisted_phones');
-      const snap = await getDoc(docRef);
-      let current: string[] = [];
-      if (snap.exists()) {
-        const data = snap.data();
-        current = Array.isArray(data.numbers) ? data.numbers : [];
-      }
 
-      if (!current.includes(standardized)) {
-        const updated = [...current, standardized];
+      if (!phones.includes(standardized)) {
+        const updated = [...phones, standardized];
         await setDoc(docRef, { numbers: updated, updatedAt: new Date().toISOString() });
         setPhones(updated);
       }

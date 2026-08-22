@@ -3,6 +3,7 @@ import { Database, CheckCircle2, AlertCircle, Loader2, ShieldCheck, Save, ArrowU
 import { clsx } from 'clsx';
 import { db as sourceDb } from '../../firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { useSettings } from '../../contexts/SettingsContext';
 
 interface LogEntry {
   timestamp: string;
@@ -24,6 +25,7 @@ interface ComparisonResult {
 }
 
 export default function ContentSync() {
+  const { settings } = useSettings();
   const [sourceKey, setSourceKey] = useState<string>('');
   const [availableTargets, setAvailableTargets] = useState<{ id: string; title: string; databaseId: string; key?: string }[]>([]);
   const [selectedTargetId, setSelectedTargetId] = useState<string>('');
@@ -82,27 +84,32 @@ export default function ContentSync() {
   // Load targets on mount
   useEffect(() => {
     const loadTargets = async () => {
-      addLog("Loading targets from cloud...");
       try {
-        const settingsDoc = await getDoc(doc(sourceDb, 'settings', 'app_settings'));
-        if (settingsDoc.exists()) {
-          const data = settingsDoc.data();
-          const targets = data?.serviceAccounts?.targets || [];
-          const sKey = data?.serviceAccounts?.sourceKey || '';
-          setSourceKey(sKey);
-          setAvailableTargets(targets);
-          if (targets.length > 0) {
-            setSelectedTargetId(targets[0].id);
-            checkStatus(targets[0].id, sKey, targets);
+        let targets = settings?.serviceAccounts?.targets || [];
+        let sKey = settings?.serviceAccounts?.sourceKey || '';
+
+        if (!targets.length && !sKey) {
+          const settingsDoc = await getDoc(doc(sourceDb, 'settings', 'app_settings'));
+          if (settingsDoc.exists()) {
+            const data = settingsDoc.data();
+            targets = data?.serviceAccounts?.targets || [];
+            sKey = data?.serviceAccounts?.sourceKey || '';
           }
-          addLog(`${targets.length} targets loaded.`, 'success');
         }
+
+        setSourceKey(sKey);
+        setAvailableTargets(targets);
+        if (targets.length > 0) {
+          setSelectedTargetId(targets[0].id);
+          checkStatus(targets[0].id, sKey, targets);
+        }
+        addLog(`${targets.length} targets loaded.`, 'success');
       } catch (err: any) {
         addLog(`Error loading targets: ${err.message}`, 'error');
       }
     };
     loadTargets();
-  }, []);
+  }, [settings]);
 
   useEffect(() => {
     if (selectedTargetId) {

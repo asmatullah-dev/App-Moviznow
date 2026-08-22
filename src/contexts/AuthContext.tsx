@@ -2501,10 +2501,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return true;
         }
       }
-      // Check legacy individual document fallback
-      const legacyRef = doc(db, "whitelisted_phones", standardizedPhone);
-      const legacySnap = await getDoc(legacyRef);
-      return legacySnap.exists();
+      return false;
     } catch (err) {
       console.error("Error checking whitelisted phone:", err);
       return false;
@@ -2517,6 +2514,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const trimmed = identifier.trim();
       if (!trimmed) return [];
+
+      // Check local cached users first if available
+      try {
+        const cachedUsersStr = safeStorage.getItem('cached_all_users');
+        if (cachedUsersStr) {
+          const cachedUsers: UserProfile[] = JSON.parse(cachedUsersStr);
+          if (Array.isArray(cachedUsers) && cachedUsers.length > 0) {
+            const lower = trimmed.toLowerCase();
+            const cleanedDigits = trimmed.replace(/\D/g, "");
+            const localMatches = cachedUsers.filter(u => {
+              if (u.email && u.email.toLowerCase() === lower) return true;
+              if (u.phone && (u.phone === trimmed || (cleanedDigits && u.phone.replace(/\D/g, "").includes(cleanedDigits)))) return true;
+              return false;
+            });
+            if (localMatches.length > 0) {
+              return localMatches;
+            }
+          }
+        }
+      } catch (e) {}
 
       const matches: UserProfile[] = [];
       const seenUids = new Set<string>();

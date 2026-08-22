@@ -558,14 +558,9 @@ export default function UserManagement() {
           try {
             // Check if activation reward was already claimed
             if (!selectedUser.activationRewardClaimed) {
-              const inviterRef = doc(db, 'users', inviterUid);
-              const inviterSnap = await getDoc(inviterRef);
+              const inviterData = allUsers.find(u => u.uid === inviterUid);
               
-              const batch = writeBatch(db);
-              
-              // Increment the inviter's expiryDate by 5 days
-              if (inviterSnap.exists()) {
-                const inviterData = inviterSnap.data();
+              if (inviterData) {
                 let baseDate = new Date();
                 if (inviterData.expiryDate && inviterData.expiryDate !== 'Lifetime') {
                   const currentExp = new Date(inviterData.expiryDate);
@@ -584,11 +579,11 @@ export default function UserManagement() {
                   inviterUpdate.role = 'basic';
                 }
                 
-                batch.update(inviterRef, inviterUpdate);
+                updateUserFields(inviterUid, inviterUpdate);
               }
               
               // Set the activationClaimed and status = 'paid' on the join record in /referral/all
-              batch.set(doc(db, 'referral', 'all'), {
+              await setDoc(doc(db, 'referral', 'all'), {
                 joins: {
                   [selectedUser.uid]: {
                     status: 'paid',
@@ -602,11 +597,9 @@ export default function UserManagement() {
                 }
               }, { merge: true });
               
-              await batch.commit();
-              
               // Also ensure updateData itself marks activationRewardClaimed as true on the user's profile
               updateData.activationRewardClaimed = true;
-              console.log("Successfully sent 5 days reward to inviter:", inviterUid);
+              console.log("Successfully sent 10 days reward to inviter:", inviterUid);
             }
           } catch (e) {
             console.error("Failed to automatically grant referral activation reward:", e);
@@ -719,35 +712,38 @@ export default function UserManagement() {
       batch.delete(doc(db, 'users', currentDeleteConfirm));
       batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentDeleteConfirm]: deleteField() } }, { merge: true });
       
-      // Parallelize all data fetches
-      const metaDoc = await getDoc(doc(db, 'chunk_meta', 'versions'));
-      
-      // 4. Update consolidated FCM tokens document across chunks
-      if (metaDoc.exists()) {
-        const metaData = metaDoc.data();
-        const latestId = (metaData.fcm_tokens && metaData.fcm_tokens.latestChunkId) || 'fcm_chunk_0';
-        const match = latestId.match(/(\d+)$/);
-        const maxIndex = match ? parseInt(match[1]) : 0;
+      // 2. Update consolidated FCM tokens document across chunks using cached chunk_meta
+      try {
+        const { getChunkMeta } = await import('../../utils/chunkMeta');
+        const metaData = await getChunkMeta();
+        if (metaData) {
+          const latestId = (metaData.fcm_tokens && metaData.fcm_tokens.latestChunkId) || 'fcm_chunk_0';
+          const match = latestId.match(/(\d+)$/);
+          const maxIndex = match ? parseInt(match[1]) : 0;
 
-        // Process all chunks
-        for (let i = 0; i <= maxIndex; i++) {
-          const cid = 'fcm_chunk_' + i;
-          const cDoc = await getDoc(doc(db, 'fcm_tokens', cid));
-          if (cDoc.exists()) {
-            const tokensData = cDoc.data() || {};
-            let changed = false;
-            Object.keys(tokensData).forEach(token => {
-              if (tokensData[token].userId === currentDeleteConfirm) {
-                delete tokensData[token];
-                changed = true;
+          const fcmPromises = [];
+          for (let i = 0; i <= maxIndex; i++) {
+            const cid = 'fcm_chunk_' + i;
+            fcmPromises.push(getDoc(doc(db, 'fcm_tokens', cid)).then(cDoc => ({ cid, cDoc })).catch(() => null));
+          }
+          const fcmResults = await Promise.all(fcmPromises);
+          for (const res of fcmResults) {
+            if (res && res.cDoc && res.cDoc.exists()) {
+              const tokensData = res.cDoc.data() || {};
+              let changed = false;
+              Object.keys(tokensData).forEach(token => {
+                if (tokensData[token].userId === currentDeleteConfirm) {
+                  delete tokensData[token];
+                  changed = true;
+                }
+              });
+              if (changed) {
+                batch.set(doc(db, 'fcm_tokens', res.cid), tokensData);
               }
-            });
-            if (changed) {
-              batch.set(doc(db, 'fcm_tokens', cid), tokensData);
             }
           }
         }
-      }
+      } catch (e) {}
 
       await batch.commit();
 
@@ -840,16 +836,41 @@ export default function UserManagement() {
         }
       }
 
-      // 2. Process Firestore deletions in chunks of 200 users per write batch
-      const metaDoc = await getDoc(doc(db, 'chunk_meta', 'versions'));
-      let maxFcmIndex = 0;
-      if (metaDoc.exists()) {
-        const metaData = metaDoc.data();
-        const latestId = (metaData.fcm_tokens && metaData.fcm_tokens.latestChunkId) || 'fcm_chunk_0';
-        const match = latestId.match(/(\d+)$/);
-        maxFcmIndex = match ? parseInt(match[1]) : 0;
-      }
+      // 2. Fetch and clean up matching user tokens from FCM token chunks ONCE
+      const fcmUpdates: { cid: string; data: any }[] = [];
+      try {
+        const { getChunkMeta } = await import('../../utils/chunkMeta');
+        const metaData = await getChunkMeta();
+        if (metaData) {
+          const latestId = (metaData.fcm_tokens && metaData.fcm_tokens.latestChunkId) || 'fcm_chunk_0';
+          const match = latestId.match(/(\d+)$/);
+          const maxFcmIndex = match ? parseInt(match[1]) : 0;
 
+          const fcmPromises = [];
+          for (let idx = 0; idx <= maxFcmIndex; idx++) {
+            const cid = 'fcm_chunk_' + idx;
+            fcmPromises.push(getDoc(doc(db, 'fcm_tokens', cid)).then(cDoc => ({ cid, cDoc })).catch(() => null));
+          }
+          const fcmResults = await Promise.all(fcmPromises);
+          for (const res of fcmResults) {
+            if (res && res.cDoc && res.cDoc.exists()) {
+              const tokensData = res.cDoc.data() || {};
+              let changed = false;
+              Object.keys(tokensData).forEach(token => {
+                if (validUidsSet.has(tokensData[token]?.userId)) {
+                  delete tokensData[token];
+                  changed = true;
+                }
+              });
+              if (changed) {
+                fcmUpdates.push({ cid: res.cid, data: tokensData });
+              }
+            }
+          }
+        }
+      } catch (e) {}
+
+      // 3. Process Firestore deletions in chunks of 200 users per write batch
       const BATCH_CHUNK_SIZE = 200;
       for (let i = 0; i < uidsToDelete.length; i += BATCH_CHUNK_SIZE) {
         const batch = writeBatch(db);
@@ -863,23 +884,11 @@ export default function UserManagement() {
 
         batch.set(doc(db, 'chunk_meta', 'versions'), { users: versionUsersUpdate }, { merge: true });
 
-        // Clean up matching user tokens from FCM token chunks
-        for (let idx = 0; idx <= maxFcmIndex; idx++) {
-          const cid = 'fcm_chunk_' + idx;
-          const cDoc = await getDoc(doc(db, 'fcm_tokens', cid));
-          if (cDoc.exists()) {
-            const tokensData = cDoc.data() || {};
-            let changed = false;
-            Object.keys(tokensData).forEach(token => {
-              if (validUidsSet.has(tokensData[token]?.userId)) {
-                delete tokensData[token];
-                changed = true;
-              }
-            });
-            if (changed) {
-              batch.set(doc(db, 'fcm_tokens', cid), tokensData);
-            }
-          }
+        // Apply FCM token updates in the first batch
+        if (i === 0 && fcmUpdates.length > 0) {
+          fcmUpdates.forEach(({ cid, data }) => {
+            batch.set(doc(db, 'fcm_tokens', cid), data);
+          });
         }
 
         await batch.commit();
@@ -1205,14 +1214,39 @@ export default function UserManagement() {
       batch.delete(u2Ref);
       batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [user1.uid]: Date.now(), [user2.uid]: deleteField() } }, { merge: true });
 
-      // Re-assign relational collections from user2 to user1
-      const migrateCollections = ['movie_requests', 'orders', 'reported_links', 'fcm_tokens'];
-      for (const colName of migrateCollections) {
-        const docsSnapshot = await getDocs(query(collection(db, colName), where('userId', '==', user2.uid)));
-        docsSnapshot.docs.forEach(docSnap => {
-          batch.update(docSnap.ref, { userId: user1.uid });
-        });
-      }
+      // Migrate FCM tokens from user2 to user1 across FCM token chunks
+      try {
+        const { getChunkMeta } = await import('../../utils/chunkMeta');
+        const metaData = await getChunkMeta();
+        if (metaData) {
+          const latestId = (metaData.fcm_tokens && metaData.fcm_tokens.latestChunkId) || 'fcm_chunk_0';
+          const match = latestId.match(/(\d+)$/);
+          const maxFcmIndex = match ? parseInt(match[1]) : 0;
+
+          const fcmPromises = [];
+          for (let idx = 0; idx <= maxFcmIndex; idx++) {
+            const cid = 'fcm_chunk_' + idx;
+            fcmPromises.push(getDoc(doc(db, 'fcm_tokens', cid)).then(cDoc => ({ cid, cDoc })).catch(() => null));
+          }
+          const fcmResults = await Promise.all(fcmPromises);
+          for (const res of fcmResults) {
+            if (res && res.cDoc && res.cDoc.exists()) {
+              const tokensData = res.cDoc.data() || {};
+              let changed = false;
+              Object.keys(tokensData).forEach(token => {
+                if (tokensData[token]?.userId === user2.uid) {
+                  tokensData[token].userId = user1.uid;
+                  tokensData[token].updatedAt = new Date().toISOString();
+                  changed = true;
+                }
+              });
+              if (changed) {
+                batch.set(doc(db, 'fcm_tokens', res.cid), tokensData);
+              }
+            }
+          }
+        }
+      } catch (e) {}
 
       // Re-assign any content they added (for Content Management Tab)
       const contentUpdates = contentList

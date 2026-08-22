@@ -170,12 +170,16 @@ export const requestNotificationPermission = async (force: boolean = false) => {
               const matchIdx = latest.match(/(\d+)$/);
               if (matchIdx) maxIdx = parseInt(matchIdx[1], 10);
 
+              const chunkPromises = [];
               for (let i = 0; i <= maxIdx; i++) {
                 const cid = 'fcm_chunk_' + i;
                 const cRef = doc(db, 'fcm_tokens', cid);
-                const cSnap = await getDoc(cRef);
-                if (cSnap.exists()) {
-                  const cData = cSnap.data() || {};
+                chunkPromises.push(getDoc(cRef).then(cSnap => ({ cid, cRef, cSnap })).catch(() => null));
+              }
+              const chunkResults = await Promise.all(chunkPromises);
+              for (const item of chunkResults) {
+                if (item && item.cSnap.exists()) {
+                  const cData = item.cSnap.data() || {};
                   const deletes: Record<string, any> = {};
                   let hasDeletes = false;
                   Object.keys(cData).forEach(tKey => {
@@ -185,7 +189,7 @@ export const requestNotificationPermission = async (force: boolean = false) => {
                     }
                   });
                   if (hasDeletes) {
-                    await updateDoc(cRef, deletes).catch(() => {});
+                    await updateDoc(item.cRef, deletes).catch(() => {});
                   }
                 }
               }

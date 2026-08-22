@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../firebase';
+import { safeStorage } from '../../utils/safeStorage';
 import { collection, doc, getDoc, setDoc, deleteDoc, query, getDocs } from 'firebase/firestore';
 import { Income } from '../../types';
 import { Plus, Trash2, DollarSign, Calendar, TrendingUp, Loader2 } from 'lucide-react';
@@ -10,7 +11,10 @@ import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorH
 import { useModalBehavior } from '../../hooks/useModalBehavior';
 
 export default function IncomeManagement() {
-  const [incomes, setIncomes] = useState<Income[]>([]);
+  const [incomes, setIncomes] = useState<Income[]>(() => {
+    const cached = safeStorage.getItem('cached_admin_income');
+    return cached ? JSON.parse(cached) : [];
+  });
   const [isAdding, setIsAdding] = useState(false);
   
   const [amount, setAmount] = useState('');
@@ -56,12 +60,6 @@ export default function IncomeManagement() {
 
     try {
       const docRef = doc(db, 'income', 'data');
-      const snap = await getDoc(docRef);
-      let current: Income[] = [];
-      if (snap.exists()) {
-        const data = snap.data();
-        current = Array.isArray(data.records) ? data.records : [];
-      }
 
       const newRecord: Income = {
         id: 'inc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
@@ -71,7 +69,7 @@ export default function IncomeManagement() {
         userName: userName || 'Anonymous',
       };
 
-      const updated = [newRecord, ...current];
+      const updated = [newRecord, ...incomes];
       updated.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       await setDoc(docRef, { records: updated, updatedAt: new Date().toISOString() });
 

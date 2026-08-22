@@ -5,8 +5,6 @@ import { useModalBehavior } from '../hooks/useModalBehavior';
 import { LinkCheckResult, performFullLinkScan, guessLinkType } from '../utils/linkScanner';
 import { searchTMDBByTitle, fetchTMDBDetails, fetchSeriesSeasons, fetchIMDbRating, getBestTrailer, searchYouTubeTrailer, fetchKinoCheckTrailer, getBestAlternativeTitle } from './MediaModal';
 import { normalizeOttPlatformName, extractOttPlatformFromTMDBDetails, fetchMovieDigitalReleaseDate, predictOttPlatformWithAI } from '../services/tmdb';
-import { db } from '../firebase';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { useContent } from '../contexts/ContentContext';
 
 interface Props {

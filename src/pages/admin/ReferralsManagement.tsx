@@ -52,6 +52,14 @@ export default function ReferralsManagement() {
   });
 
   useEffect(() => {
+    const cachedAnalytics = safeStorage.getItem('admin_referral_analytics');
+    const cachedList = safeStorage.getItem('admin_referral_list');
+
+    if (cachedAnalytics && cachedList) {
+      setIsLoadingAnalytics(false);
+      return;
+    }
+
     const fetchData = async () => {
       try {
         const { doc, getDoc } = await import('firebase/firestore');
