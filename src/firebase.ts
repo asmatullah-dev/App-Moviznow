@@ -159,44 +159,6 @@ export const requestNotificationPermission = async (force: boolean = false) => {
         }
 
         try {
-          // 0. Clean up any previous tokens for this user across all chunks (ensures 1 active device per user)
-          if (currentUserId && currentUserId !== 'anonymous') {
-            try {
-              const { getChunkMeta } = await import('./utils/chunkMeta');
-              const metaData = await getChunkMeta();
-              let maxIdx = 0;
-              const latest = metaData?.fcm_tokens?.latestChunkId || 'fcm_chunk_0';
-              const matchIdx = latest.match(/(\d+)$/);
-              if (matchIdx) maxIdx = parseInt(matchIdx[1], 10);
-
-              const chunkPromises = [];
-              for (let i = 0; i <= maxIdx; i++) {
-                const cid = 'fcm_chunk_' + i;
-                const cRef = doc(db, 'fcm_tokens', cid);
-                chunkPromises.push(getDoc(cRef).then(cSnap => ({ cid, cRef, cSnap })).catch(() => null));
-              }
-              const chunkResults = await Promise.all(chunkPromises);
-              for (const item of chunkResults) {
-                if (item && item.cSnap.exists()) {
-                  const cData = item.cSnap.data() || {};
-                  const deletes: Record<string, any> = {};
-                  let hasDeletes = false;
-                  Object.keys(cData).forEach(tKey => {
-                    if (cData[tKey]?.userId === currentUserId && tKey !== token) {
-                      deletes[tKey] = deleteField();
-                      hasDeletes = true;
-                    }
-                  });
-                  if (hasDeletes) {
-                    await updateDoc(item.cRef, deletes).catch(() => {});
-                  }
-                }
-              }
-            } catch (cleanupErr) {
-              console.warn('Error purging old FCM tokens on client:', cleanupErr);
-            }
-          }
-
           // 1. Get current chunk ID from meta
           const { getChunkMeta } = await import('./utils/chunkMeta');
           const metaRef = doc(db, 'chunk_meta', 'versions');

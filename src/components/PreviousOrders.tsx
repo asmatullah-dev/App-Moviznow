@@ -12,8 +12,11 @@ export default function PreviousOrders() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
-    refreshProfile(true);
-  }, [refreshProfile]);
+    // Only refresh if profile is not cached yet
+    if (!profile) {
+      refreshProfile(false);
+    }
+  }, []);
 
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;

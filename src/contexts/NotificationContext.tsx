@@ -81,7 +81,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
       try {
         const { getChunkMeta } = await import('../utils/chunkMeta');
-        const meta = await getChunkMeta();
+        const meta = await getChunkMeta(force);
         if (meta && meta.notifications) {
           if (meta.notifications.latestAppChunkId) chunksToFetch.add(meta.notifications.latestAppChunkId);
           if (meta.notifications.latestPushChunkId) chunksToFetch.add(meta.notifications.latestPushChunkId);
@@ -91,6 +91,26 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         }
       } catch (err) { }
       
+      const cachedVersion = safeStorage.getItem('cached_notifications_version');
+      if (!force && cachedData && serverVersion !== '0' && cachedVersion === serverVersion) {
+        try {
+          const parsed = JSON.parse(cachedData);
+          if (Array.isArray(parsed)) {
+            let filtered = parsed.filter(n => {
+              const isTargeted = n.targetUserId || (n.targetUserIds && n.targetUserIds.length > 0);
+              if (isTargeted) {
+                if (!profile?.uid) return false;
+                return n.targetUserId === profile.uid || n.targetUserIds?.includes(profile.uid);
+              }
+              return true;
+            });
+            setNotifications(filtered);
+            setLoading(false);
+            return;
+          }
+        } catch(e) {}
+      }
+
       const notifMap = new Map<string, AppNotification>();
       
       await Promise.all(

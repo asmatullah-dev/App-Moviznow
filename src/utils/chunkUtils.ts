@@ -568,9 +568,26 @@ export async function updateContentFieldsInChunks(updates: { id: string, chunkId
   
   let chunksSnap: any = null;
   if (unknownUpdates.length > 0) {
-      chunksSnap = await getDocs(collection(db, 'content_chunks'));
+      const metaDoc = await getDoc(doc(db, 'chunk_meta', 'versions'));
+      const metaData = metaDoc.exists() ? metaDoc.data() : {};
+      const knownChunkIds = Object.keys(metaData).filter(k => k.startsWith('movie_chunk_') || k.startsWith('series_chunk_') || k.startsWith('content_chunk_'));
+      
+      for (const updateObj of unknownUpdates) {
+          let found = false;
+          for (const cid of knownChunkIds) {
+              const chunkDoc = await getDoc(doc(db, 'content_chunks', cid));
+              if (chunkDoc.exists()) {
+                  const items = chunkDoc.data().items || {};
+                  if (items[updateObj.id]) {
+                      updateObj.chunkId = cid;
+                      found = true;
+                      break;
+                  }
+              }
+          }
+          if (found) explicitUpdates.push(updateObj);
+      }
   }
-
   const chunkUpdatesMap = new Map<string, Record<string, any>>();
   
   const aggregateUpdate = (chunkId: string, contentId: string, updateObj: any) => {
@@ -589,18 +606,8 @@ export async function updateContentFieldsInChunks(updates: { id: string, chunkId
       aggregateUpdate(updateObj.chunkId!, updateObj.id, updateObj);
   }
 
-  for (const updateObj of unknownUpdates) {
-    const contentId = updateObj.id;
-    if (chunksSnap) {
-      for (const chunkDoc of chunksSnap.docs) {
-        const items = chunkDoc.data().items || {};
-        if (items[contentId]) {
-          aggregateUpdate(chunkDoc.id, contentId, updateObj);
-          break;
-        }
-      }
-    }
-  }
+  // Fallback has been moved to explicitUpdates above, no need to loop unknownUpdates with chunksSnap
+
 
   let batches = [writeBatch(db)];
   let operationCount = 0;

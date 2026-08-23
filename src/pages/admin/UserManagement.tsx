@@ -244,16 +244,6 @@ export default function UserManagement() {
         // Delta sync users using chunk_meta (zero reads if up-to-date, or delta reads only)
         const res = await refreshUsers(true);
         if (mounted) {
-          if (res.users && Array.isArray(res.users)) {
-            res.users.forEach(u => {
-              if (u && u.uid && u.role !== 'admin' && u.role !== 'owner') {
-                const initStatus = initialMap.get(u.uid);
-                if (u.status === 'expired' && (initStatus !== 'expired' || !u.expiryNoticeSent)) {
-                  changedToExpiredUidsRef.current.add(u.uid);
-                }
-              }
-            });
-          }
           if (res.updatedSomething) {
             window.dispatchEvent(new CustomEvent('sync_status', { detail: 'success' }));
           } else {
@@ -711,48 +701,8 @@ export default function UserManagement() {
       // 1. Delete user document
       batch.delete(doc(db, 'users', currentDeleteConfirm));
       batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentDeleteConfirm]: deleteField() } }, { merge: true });
-      
-      // 2. Update consolidated FCM tokens document across chunks using cached chunk_meta
-      try {
-        const { getChunkMeta } = await import('../../utils/chunkMeta');
-        const metaData = await getChunkMeta();
-        if (metaData) {
-          const latestId = (metaData.fcm_tokens && metaData.fcm_tokens.latestChunkId) || 'fcm_chunk_0';
-          const match = latestId.match(/(\d+)$/);
-          const maxIndex = match ? parseInt(match[1]) : 0;
-
-          const fcmPromises = [];
-          for (let i = 0; i <= maxIndex; i++) {
-            const cid = 'fcm_chunk_' + i;
-            fcmPromises.push(getDoc(doc(db, 'fcm_tokens', cid)).then(cDoc => ({ cid, cDoc })).catch(() => null));
-          }
-          const fcmResults = await Promise.all(fcmPromises);
-          for (const res of fcmResults) {
-            if (res && res.cDoc && res.cDoc.exists()) {
-              const tokensData = res.cDoc.data() || {};
-              let changed = false;
-              Object.keys(tokensData).forEach(token => {
-                if (tokensData[token].userId === currentDeleteConfirm) {
-                  delete tokensData[token];
-                  changed = true;
-                }
-              });
-              if (changed) {
-                batch.set(doc(db, 'fcm_tokens', res.cid), tokensData);
-              }
-            }
-          }
-        }
-      } catch (e) {}
 
       await batch.commit();
-
-      // Trigger backend unsubscribe to remove topic subscriptions for deleted user
-      fetch('/api/notifications/unsubscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentDeleteConfirm })
-      }).catch(() => {});
 
       // Clean up sync_user_mtimes cache
       const mtimesStr = safeStorage.getItem('sync_user_mtimes');
@@ -836,42 +786,8 @@ export default function UserManagement() {
         }
       }
 
-      // 2. Fetch and clean up matching user tokens from FCM token chunks ONCE
-      const fcmUpdates: { cid: string; data: any }[] = [];
-      try {
-        const { getChunkMeta } = await import('../../utils/chunkMeta');
-        const metaData = await getChunkMeta();
-        if (metaData) {
-          const latestId = (metaData.fcm_tokens && metaData.fcm_tokens.latestChunkId) || 'fcm_chunk_0';
-          const match = latestId.match(/(\d+)$/);
-          const maxFcmIndex = match ? parseInt(match[1]) : 0;
-
-          const fcmPromises = [];
-          for (let idx = 0; idx <= maxFcmIndex; idx++) {
-            const cid = 'fcm_chunk_' + idx;
-            fcmPromises.push(getDoc(doc(db, 'fcm_tokens', cid)).then(cDoc => ({ cid, cDoc })).catch(() => null));
-          }
-          const fcmResults = await Promise.all(fcmPromises);
-          for (const res of fcmResults) {
-            if (res && res.cDoc && res.cDoc.exists()) {
-              const tokensData = res.cDoc.data() || {};
-              let changed = false;
-              Object.keys(tokensData).forEach(token => {
-                if (validUidsSet.has(tokensData[token]?.userId)) {
-                  delete tokensData[token];
-                  changed = true;
-                }
-              });
-              if (changed) {
-                fcmUpdates.push({ cid: res.cid, data: tokensData });
-              }
-            }
-          }
-        }
-      } catch (e) {}
-
-      // 3. Process Firestore deletions in chunks of 200 users per write batch
-      const BATCH_CHUNK_SIZE = 200;
+      // 2. Process Firestore deletions in batches of up to 400 users
+      const BATCH_CHUNK_SIZE = 400;
       for (let i = 0; i < uidsToDelete.length; i += BATCH_CHUNK_SIZE) {
         const batch = writeBatch(db);
         const chunkUids = uidsToDelete.slice(i, i + BATCH_CHUNK_SIZE);
@@ -884,26 +800,10 @@ export default function UserManagement() {
 
         batch.set(doc(db, 'chunk_meta', 'versions'), { users: versionUsersUpdate }, { merge: true });
 
-        // Apply FCM token updates in the first batch
-        if (i === 0 && fcmUpdates.length > 0) {
-          fcmUpdates.forEach(({ cid, data }) => {
-            batch.set(doc(db, 'fcm_tokens', cid), data);
-          });
-        }
-
         await batch.commit();
       }
 
-      // 3. Trigger backend notification unsubscribe for deleted users
-      uidsToDelete.forEach(uid => {
-        fetch('/api/notifications/unsubscribe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: uid })
-        }).catch(() => {});
-      });
-
-      // 4. Update local storage cache and mtimes
+      // 3. Update local storage cache and mtimes
       const mtimesStr = safeStorage.getItem('sync_user_mtimes');
       if (mtimesStr) {
         try {
@@ -1214,39 +1114,10 @@ export default function UserManagement() {
       batch.delete(u2Ref);
       batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [user1.uid]: Date.now(), [user2.uid]: deleteField() } }, { merge: true });
 
-      // Migrate FCM tokens from user2 to user1 across FCM token chunks
-      try {
-        const { getChunkMeta } = await import('../../utils/chunkMeta');
-        const metaData = await getChunkMeta();
-        if (metaData) {
-          const latestId = (metaData.fcm_tokens && metaData.fcm_tokens.latestChunkId) || 'fcm_chunk_0';
-          const match = latestId.match(/(\d+)$/);
-          const maxFcmIndex = match ? parseInt(match[1]) : 0;
-
-          const fcmPromises = [];
-          for (let idx = 0; idx <= maxFcmIndex; idx++) {
-            const cid = 'fcm_chunk_' + idx;
-            fcmPromises.push(getDoc(doc(db, 'fcm_tokens', cid)).then(cDoc => ({ cid, cDoc })).catch(() => null));
-          }
-          const fcmResults = await Promise.all(fcmPromises);
-          for (const res of fcmResults) {
-            if (res && res.cDoc && res.cDoc.exists()) {
-              const tokensData = res.cDoc.data() || {};
-              let changed = false;
-              Object.keys(tokensData).forEach(token => {
-                if (tokensData[token]?.userId === user2.uid) {
-                  tokensData[token].userId = user1.uid;
-                  tokensData[token].updatedAt = new Date().toISOString();
-                  changed = true;
-                }
-              });
-              if (changed) {
-                batch.set(doc(db, 'fcm_tokens', res.cid), tokensData);
-              }
-            }
-          }
-        }
-      } catch (e) {}
+      // Migrate FCM token from user2 to user1 if present
+      if ((user2 as any).fcmToken && !(user1 as any).fcmToken) {
+        updates.fcmToken = (user2 as any).fcmToken;
+      }
 
       // Re-assign any content they added (for Content Management Tab)
       const contentUpdates = contentList
