@@ -112,9 +112,9 @@ export function RefreshAppDataManager() {
       // Check settings version
       if (isUpToDate) {
         const serverSettingsVer = versions.settings || 0;
-        const localSettingsVer = parseInt(localStorage.getItem('cached_settings_version') || '0', 10);
-        const hasSettings = !!localStorage.getItem('cached_app_settings');
-        if (!hasSettings || localSettingsVer < serverSettingsVer) {
+        const localSettingsVer = parseInt(safeStorage.getItem('cached_settings_version') || '0', 10);
+        const hasSettings = !!safeStorage.getItem('cached_app_settings');
+        if (!hasSettings || (serverSettingsVer > 0 && localSettingsVer < serverSettingsVer)) {
           isUpToDate = false;
         }
       }
@@ -123,8 +123,8 @@ export function RefreshAppDataManager() {
       if (isUpToDate) {
         const serverNotifVal = versions.notifications;
         const serverNotifVer = typeof serverNotifVal === 'object' ? (serverNotifVal?.version || 0) : (serverNotifVal || 0);
-        const localNotifVer = parseInt(localStorage.getItem('cached_notifications_version') || '0', 10);
-        if (localNotifVer < serverNotifVer) {
+        const localNotifVer = parseInt(safeStorage.getItem('cached_notifications_version') || '0', 10);
+        if (serverNotifVer > 0 && localNotifVer < serverNotifVer) {
           isUpToDate = false;
         }
       }
@@ -134,7 +134,7 @@ export function RefreshAppDataManager() {
         const chunkUsersMeta = versions.users || {};
         const serverUserVer = chunkUsersMeta[user.uid] || 0;
         const localUserVer = parseInt(safeStorage.getItem(`profile_version_${user.uid}`) || '0', 10);
-        if (localUserVer === 0 || localUserVer < serverUserVer) {
+        if (serverUserVer > 0 && localUserVer < serverUserVer) {
           isUpToDate = false;
         }
       }
@@ -160,8 +160,8 @@ export function RefreshAppDataManager() {
 
       // 3. Check settings version
       const serverSettingsVer = versions.settings || 0;
-      const localSettingsVer = parseInt(localStorage.getItem('cached_settings_version') || '0', 10);
-      if (serverSettingsVer > localSettingsVer || !localStorage.getItem('cached_app_settings')) {
+      const localSettingsVer = parseInt(safeStorage.getItem('cached_settings_version') || '0', 10);
+      if ((serverSettingsVer > 0 && serverSettingsVer > localSettingsVer) || !safeStorage.getItem('cached_app_settings')) {
         await refreshSettings(true).catch(() => {});
         otherUpdated = true;
       }
@@ -170,8 +170,8 @@ export function RefreshAppDataManager() {
       const serverNotifVer = (versions.notifications && typeof versions.notifications === 'object')
         ? versions.notifications.version || 0
         : (versions.notifications || 0);
-      const localNotifVer = parseInt(localStorage.getItem('cached_notifications_version') || '0', 10);
-      if (serverNotifVer > localNotifVer) {
+      const localNotifVer = parseInt(safeStorage.getItem('cached_notifications_version') || '0', 10);
+      if (serverNotifVer > 0 && serverNotifVer > localNotifVer) {
         await refreshNotifications().catch(() => {});
         otherUpdated = true;
       }
@@ -181,7 +181,7 @@ export function RefreshAppDataManager() {
         const chunkUsersMeta = versions.users || {};
         const serverUserVer = chunkUsersMeta[user.uid] || 0;
         const localUserVer = parseInt(safeStorage.getItem(`profile_version_${user.uid}`) || '0', 10);
-        if (serverUserVer > localUserVer || localUserVer === 0) {
+        if (serverUserVer > 0 && serverUserVer > localUserVer) {
           await refreshProfile(true, 'manual').catch(() => {});
           otherUpdated = true;
         }

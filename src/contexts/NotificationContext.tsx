@@ -91,8 +91,9 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         }
       } catch (err) { }
       
+      const effectiveServerVersion = serverVersion !== '0' ? serverVersion : '1';
       const cachedVersion = safeStorage.getItem('cached_notifications_version');
-      if (!force && cachedData && serverVersion !== '0' && cachedVersion === serverVersion) {
+      if (!force && cachedData && (cachedVersion === effectiveServerVersion || (now - lastFetchTime < NOTIFICATION_FETCH_INTERVAL))) {
         try {
           const parsed = JSON.parse(cachedData);
           if (Array.isArray(parsed)) {
@@ -134,7 +135,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       const allNotifs = Array.from(notifMap.values());
       
       safeStorage.setItem('last_notifications_fetch_time', now.toString());
-      safeStorage.setItem('cached_notifications_version', serverVersion !== '0' ? serverVersion : now.toString());
+      safeStorage.setItem('cached_notifications_version', effectiveServerVersion);
       safeStorage.setItem('cached_notifications_data', JSON.stringify(allNotifs));
 
       let filtered = allNotifs.filter(n => {

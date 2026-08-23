@@ -1088,7 +1088,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         const serverUserVer = chunkUsersMeta[uid] || 0;
         const localUserVer = parseInt(safeStorage.getItem(`profile_version_${uid}`) || '0', 10);
 
-        if (serverUserVer > localUserVer || localUserVer === 0) {
+        if ((serverUserVer > 0 && serverUserVer > localUserVer) || (!profile && localUserVer === 0)) {
           try {
             await refreshProfile(true, 'manual');
             updatedSomething = true;
@@ -1100,8 +1100,8 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
       // 6. Compare settings version
       const serverSettingsVer = versions.settings || 0;
-      const localSettingsVer = parseInt(localStorage.getItem('cached_settings_version') || '0', 10);
-      if (serverSettingsVer > localSettingsVer || !localStorage.getItem('cached_app_settings')) {
+      const localSettingsVer = parseInt(safeStorage.getItem('cached_settings_version') || '0', 10);
+      if ((serverSettingsVer > 0 && serverSettingsVer > localSettingsVer) || !safeStorage.getItem('cached_app_settings')) {
         try {
           const settingsDocSnap = await getDoc(doc(db, 'settings', 'app_settings'));
           if (settingsDocSnap.exists()) {

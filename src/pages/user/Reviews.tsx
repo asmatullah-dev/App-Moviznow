@@ -100,7 +100,7 @@ export default function Reviews() {
 
       setSyncing(true);
       try {
-        const data = await fetchReviewsFromChunks(true);
+        const data = await fetchReviewsFromChunks(false);
         if (data) {
           setReviews(data);
           if (profile?.uid && data.some((r: any) => r.userId === profile.uid || (profile.email && r.userEmail === profile.email))) {

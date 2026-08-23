@@ -486,8 +486,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         // 2. If version changes found
+        const effectiveServerVersion = (typeof serverVersion === "number" && serverVersion > 0) ? serverVersion : 1;
         const versionChanged =
-          serverVersion > localVersion || localVersion === 0;
+          (serverVersion > 0 && serverVersion > localVersion) || (!localProfile);
 
         let serverProfile: UserProfile | null = null;
         let docSnap;
@@ -992,8 +993,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         } else {
           if (isDailySync) localStorage.setItem(dailySyncKey, pktDate);
-          if (serverProfile) {
-            safeStorage.setItem(localVersionKey, serverVersion.toString());
+          if (serverProfile || localProfile) {
+            safeStorage.setItem(localVersionKey, effectiveServerVersion.toString());
           }
         }
 

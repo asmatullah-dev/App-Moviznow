@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import { doc, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { db, runWithNetwork } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -330,14 +330,18 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
 
 export function SyncUserDataManager() {
   const { user, profile, refreshProfile } = useAuth();
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
+  const refreshProfileRef = useRef(refreshProfile);
+  refreshProfileRef.current = refreshProfile;
 
   const handleSync = useCallback(async (reason: string = 'manual') => {
     if (!user?.uid) return;
-    const success = await executeSyncUserData(user.uid, profile, reason);
+    const success = await executeSyncUserData(user.uid, profileRef.current, reason);
     if (success) {
-      await refreshProfile(false, 'auto');
+      await refreshProfileRef.current(false, 'auto');
     }
-  }, [user?.uid, profile, refreshProfile]);
+  }, [user?.uid]);
 
   // Expose trigger globally
   useEffect(() => {
