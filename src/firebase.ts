@@ -22,7 +22,6 @@ import { APP_VERSION, APP_NAME } from './version';
 const appConfig = {
   ...firebaseConfig
 };
-delete (appConfig as any).measurementId;
 
 export const app = initializeApp(appConfig);
 

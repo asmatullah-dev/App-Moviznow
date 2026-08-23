@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { useNotifications } from '../contexts/NotificationContext';
 import { safeStorage } from '../utils/safeStorage';
+import { getChunkMeta } from '../utils/chunkMeta';
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
@@ -62,9 +63,9 @@ export function RefreshAppDataManager() {
     }));
 
     try {
-      // 1. Fetch single meta version doc from Firestore
-      const metaSnap = await runWithNetwork(() => getDoc(doc(db, 'chunk_meta', 'versions')));
-      const versions: Record<string, any> = metaSnap.exists() ? metaSnap.data() : {};
+      // 1. Fetch single meta version doc from Firestore (using cached meta if recent)
+      const isManualTrigger = reason === 'catalog_button' || reason === 'user_profile_button' || reason === 'manual';
+      const versions: Record<string, any> = await getChunkMeta(isManualTrigger);
 
       const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
       let localMeta: Record<string, any> = {};
