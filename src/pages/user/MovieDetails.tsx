@@ -1744,31 +1744,27 @@ export default function MovieDetails() {
     (id) => id === mergedContent.id || id.startsWith(`${mergedContent.id}:`),
   );
   const canPlay =
-    profile?.role !== "user" && (
-      profile?.role === "admin" ||
-      profile?.role === "owner" ||
-      profile?.role === "content_manager" ||
-      profile?.role === "manager" ||
-      isAssigned ||
-      (profile?.status === "active" &&
-        !(isSelectedContent || mergedContent.status === "selected_content"))
-    );
+    profile?.role === "admin" ||
+    profile?.role === "owner" ||
+    profile?.role === "content_manager" ||
+    profile?.role === "manager" ||
+    isAssigned ||
+    (profile?.role !== "user" && profile?.status === "active" &&
+      !(isSelectedContent || mergedContent.status === "selected_content"));
 
   const allowedSeasons =
     profile?.assignedContent
       ?.filter((id) => id.startsWith(`${mergedContent.id}:`))
       .map((id) => id.split(":")[1]) || [];
   const hasFullAccess =
-    profile?.role !== "user" && (
-      profile?.role === "admin" ||
-      profile?.role === "owner" ||
-      profile?.role === "content_manager" ||
-      profile?.role === "manager" ||
-      profile?.assignedContent?.includes(mergedContent.id) ||
-      (profile &&
-        profile.status === "active" &&
-        !(isSelectedContent || mergedContent.status === "selected_content"))
-    );
+    profile?.role === "admin" ||
+    profile?.role === "owner" ||
+    profile?.role === "content_manager" ||
+    profile?.role === "manager" ||
+    profile?.assignedContent?.includes(mergedContent.id) ||
+    (profile?.role !== "user" &&
+      profile?.status === "active" &&
+      !(isSelectedContent || mergedContent.status === "selected_content"));
 
   const toggleWatchLater = async () => {
     if (!profile) {

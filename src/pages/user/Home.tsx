@@ -489,10 +489,10 @@ export default function Home({
   const getCanPlay = useCallback(
     (c: any) => {
       if (canPlayBase) return true;
-      if (profile?.role === "user") return false;
-
       const isContentAssigned = assignedContentSet.has(c.id);
       if (isContentAssigned) return true;
+
+      if (profile?.role === "user") return false;
 
       return isProfileActive && !isSelectedContentRole && c.status !== "selected_content";
     },

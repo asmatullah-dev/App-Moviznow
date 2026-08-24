@@ -2095,6 +2095,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Check if we need to link phone/email in Firestore
       const userRef = doc(db, "users", result.user.uid);
+      
+      // Before getting the new uid doc, check if email already exists for merging
+      let oldDocData = null;
+      let shouldSignOutDeleted = false;
+      if (result.user.email) {
+        const { collection, query, where, getDocs } = await import("firebase/firestore");
+        const usersRef = collection(db, "users");
+        const q = query(usersRef, where("email", "==", result.user.email));
+        const qs = await getDocs(q);
+        
+        // Find existing doc with different UID
+        const existingDoc = qs.docs.find(d => d.id !== result.user.uid);
+        if (existingDoc) {
+          oldDocData = existingDoc.data();
+          if (oldDocData.status === "deleted") {
+            shouldSignOutDeleted = true;
+          }
+        }
+      }
+
+      if (shouldSignOutDeleted) {
+        justLoggedInRef.current = false;
+        await signOut(auth);
+        throw new Error("Your account has been deleted or blocked.");
+      }
+
       const snap = await getDoc(userRef);
       const localSessionId = getLocalSessionId();
 
@@ -2141,6 +2167,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (result.user.photoURL && !data.photoURL) {
           updates.photoURL = result.user.photoURL;
         }
+      } else if (oldDocData) {
+        // Safely merge existing email data into new uid (except timeSpent and uid)
+        for (const key of Object.keys(oldDocData)) {
+          if (key !== "timeSpent" && key !== "uid" && key !== "sessionId" && key !== "createdAt" && key !== "updatedAt") {
+            updates[key] = oldDocData[key];
+          }
+        }
+        updates.email = result.user.email;
+        if (result.user.displayName) updates.displayName = result.user.displayName;
+        if (result.user.photoURL) updates.photoURL = result.user.photoURL;
       }
 
       const applyUpdates = async () => {
