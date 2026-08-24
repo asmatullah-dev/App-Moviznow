@@ -22,7 +22,6 @@ import { PhoneWhitelistManager } from '../../components/PhoneWhitelistManager';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { useUsers, isUserExpired } from '../../contexts/UsersContext';
-import { fetchReviewsFromChunks } from '../../utils/chunkUtils';
 
 type SortField = 'createdAt' | 'displayName' | 'phone' | 'expiryDate' | 'lastActive';
 type SortOrder = 'asc' | 'desc';
@@ -87,21 +86,26 @@ export default function UserManagement() {
   const [userReviews, setUserReviews] = useState<Record<string, {rating: number, text: string}[]>>({});
 
   useEffect(() => {
-    const loadReviews = async () => {
+    const loadReviews = () => {
       try {
-        const data = await fetchReviewsFromChunks(false);
-        const reviewMap: Record<string, {rating: number, text: string}[]> = {};
-        data.forEach(r => {
-          if (r.userId) {
-            if (!reviewMap[r.userId]) {
-              reviewMap[r.userId] = [];
-            }
-            reviewMap[r.userId].push({ rating: r.rating, text: r.text });
+        const cached = safeStorage.getItem('cached_reviews_data');
+        if (cached) {
+          const data = JSON.parse(cached);
+          if (Array.isArray(data)) {
+            const reviewMap: Record<string, {rating: number, text: string}[]> = {};
+            data.forEach(r => {
+              if (r.userId) {
+                if (!reviewMap[r.userId]) {
+                  reviewMap[r.userId] = [];
+                }
+                reviewMap[r.userId].push({ rating: r.rating, text: r.text });
+              }
+            });
+            setUserReviews(reviewMap);
           }
-        });
-        setUserReviews(reviewMap);
+        }
       } catch (e) {
-        console.error("Failed to fetch reviews", e);
+        console.error("Failed to parse reviews from cache", e);
       }
     };
     loadReviews();

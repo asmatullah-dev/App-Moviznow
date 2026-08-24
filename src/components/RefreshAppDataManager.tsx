@@ -119,8 +119,8 @@ export function RefreshAppDataManager() {
         }
       }
 
-      // Check notifications version
-      if (isUpToDate) {
+      // Check notifications version (only if logged in)
+      if (isUpToDate && user?.uid) {
         const serverNotifVal = versions.notifications;
         const serverNotifVer = typeof serverNotifVal === 'object' ? (serverNotifVal?.version || 0) : (serverNotifVal || 0);
         const localNotifVer = parseInt(safeStorage.getItem('cached_notifications_version') || '0', 10);
@@ -166,14 +166,16 @@ export function RefreshAppDataManager() {
         otherUpdated = true;
       }
 
-      // 4. Check notifications version
-      const serverNotifVer = (versions.notifications && typeof versions.notifications === 'object')
-        ? versions.notifications.version || 0
-        : (versions.notifications || 0);
-      const localNotifVer = parseInt(safeStorage.getItem('cached_notifications_version') || '0', 10);
-      if (serverNotifVer > 0 && serverNotifVer > localNotifVer) {
-        await refreshNotifications().catch(() => {});
-        otherUpdated = true;
+      // 4. Check notifications version (only if logged in)
+      if (user?.uid) {
+        const serverNotifVer = (versions.notifications && typeof versions.notifications === 'object')
+          ? versions.notifications.version || 0
+          : (versions.notifications || 0);
+        const localNotifVer = parseInt(safeStorage.getItem('cached_notifications_version') || '0', 10);
+        if (serverNotifVer > 0 && serverNotifVer > localNotifVer) {
+          await refreshNotifications().catch(() => {});
+          otherUpdated = true;
+        }
       }
 
       // 5. Check self user version

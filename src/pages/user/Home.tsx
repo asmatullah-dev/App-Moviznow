@@ -26,7 +26,6 @@ import { AdBanner } from "../../components/AdBanner";
 import { GuestAccessBanner } from "../../components/GuestAccessBanner";
 import { Content, Collection as AppCollection } from "../../types";
 import { isUserExpired } from "../../contexts/UsersContext";
-import { fetchReviewsFromChunks } from "../../utils/chunkUtils";
 import { safeStorage } from "../../utils/safeStorage";
 import { smartSearch } from "../../utils/searchUtils";
 import { memoryStore } from "../../utils/memoryStore";
@@ -146,30 +145,21 @@ export default function Home({
   const [hasUserRated, setHasUserRated] = useState<boolean>(() => safeStorage.getItem("has_rated") === "true");
 
   useEffect(() => {
-    const loadReviews = async () => {
+    const loadReviews = () => {
       try {
         const cachedData = safeStorage.getItem("cached_reviews_data");
-        let data: any[] | null = null;
         if (cachedData) {
-          try {
-            const parsed = JSON.parse(cachedData);
-            if (Array.isArray(parsed)) {
-              data = parsed;
+          const data = JSON.parse(cachedData);
+          if (Array.isArray(data) && data.length > 0) {
+            const avg = (data.reduce((acc: number, curr: any) => acc + (curr.rating || 5), 0) / data.length).toFixed(1);
+            setReviewsData({ average: avg, total: data.length });
+            if (
+              profile?.uid &&
+              data.some((r: any) => r.userId === profile.uid || (profile.email && r.userEmail === profile.email))
+            ) {
+              safeStorage.setItem("has_rated", "true");
+              setHasUserRated(true);
             }
-          } catch (e) {}
-        }
-        if (data === null) {
-          data = await fetchReviewsFromChunks(false);
-        }
-        if (data && data.length > 0) {
-          const avg = (data.reduce((acc, curr) => acc + curr.rating, 0) / data.length).toFixed(1);
-          setReviewsData({ average: avg, total: data.length });
-          if (
-            profile?.uid &&
-            data.some((r: any) => r.userId === profile.uid || (profile.email && r.userEmail === profile.email))
-          ) {
-            safeStorage.setItem("has_rated", "true");
-            setHasUserRated(true);
           }
         }
       } catch (e) {}

@@ -1098,23 +1098,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      // 6. Compare settings version
-      const serverSettingsVer = versions.settings || 0;
-      const localSettingsVer = parseInt(safeStorage.getItem('cached_settings_version') || '0', 10);
-      if ((serverSettingsVer > 0 && serverSettingsVer > localSettingsVer) || !safeStorage.getItem('cached_app_settings')) {
-        try {
-          const settingsDocSnap = await getDoc(doc(db, 'settings', 'app_settings'));
-          if (settingsDocSnap.exists()) {
-            const settingsData = settingsDocSnap.data();
-            localStorage.setItem('cached_app_settings', JSON.stringify(settingsData));
-            localStorage.setItem('cached_settings_version', serverSettingsVer.toString());
-            updatedSomething = true;
-          }
-        } catch (e) {
-          console.error("Error fetching settings in quick refresh:", e);
-        }
-      }
-
+      // 6. Settings are handled and synchronized by SettingsContext
       // Mark the 5-minute relaxation timestamp
       safeStorage.setItem(LAST_QUICK_REFRESH_KEY, now.toString());
 

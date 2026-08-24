@@ -1062,31 +1062,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               }
             } else if (data.expiryDate !== "Lifetime") {
               if (isUserExpired(data.expiryDate)) {
-                let isReallyExpired = true;
-                if (!serverProfile && navigator.onLine) {
-                  try {
-                    const freshSnap = await getDoc(userRef);
-                    if (freshSnap.exists()) {
-                      const freshData = freshSnap.data() as UserProfile;
-                      serverProfile = freshData;
-                      if (freshData.expiryDate) {
-                        if (!isUserExpired(freshData.expiryDate)) {
-                          isReallyExpired = false;
-                          data.expiryDate = freshData.expiryDate;
-                          data.status = freshData.status;
-                          if (mergedProfile) {
-                            mergedProfile.expiryDate = freshData.expiryDate;
-                            mergedProfile.status = freshData.status;
-                          }
-                        }
-                      }
-                    }
-                  } catch (e) {
-                    console.error("Failed to fresh fetch for expiry check", e);
-                  }
-                }
-
-                if (isReallyExpired && data.status !== "suspended") {
+                if (data.status !== "suspended") {
                   updates.status = "expired";
                   data.status = "expired";
                   if (mergedProfile) {

@@ -1,5 +1,4 @@
 import { standardizePhone } from "../../contexts/AuthContext";
-import { fetchReviewsFromChunks } from "../../utils/chunkUtils";
 import { useState, useEffect, useRef, useMemo } from "react";
 import {
   useParams,
@@ -281,16 +280,20 @@ export default function MovieDetails() {
     }
     if (!profile?.uid && !profile?.email) return;
 
-    fetchReviewsFromChunks(false).then((data) => {
-      if (data && data.some((r: any) => 
-        (profile?.uid && r.userId === profile.uid) || 
-        (profile?.email && r.userEmail === profile.email) ||
-        (profile?.displayName && r.userName === profile.displayName)
-      )) {
-        safeStorage.setItem('has_rated', 'true');
-        setHasUserRated(true);
+    try {
+      const cachedReviewsStr = safeStorage.getItem('cached_reviews_data');
+      if (cachedReviewsStr) {
+        const data = JSON.parse(cachedReviewsStr);
+        if (Array.isArray(data) && data.some((r: any) => 
+          (profile?.uid && r.userId === profile.uid) || 
+          (profile?.email && r.userEmail === profile.email) ||
+          (profile?.displayName && r.userName === profile.displayName)
+        )) {
+          safeStorage.setItem('has_rated', 'true');
+          setHasUserRated(true);
+        }
       }
-    }).catch(() => {});
+    } catch (e) {}
   }, [profile?.uid, profile?.email, profile?.displayName, profile?.reviewRewardClaimed]);
   const [sharePreviewModal, setSharePreviewModal] = useState<{
     isOpen: boolean;
@@ -2151,11 +2154,14 @@ export default function MovieDetails() {
       const promptShownFor = safeStorage.getItem('rate_prompt_shown_for');
       if (promptShownFor !== '3') {
         try {
-          // Verify if they actually haven't rated in the DB
-          const data = await fetchReviewsFromChunks(false);
-          if (data && data.some(r => r.userId === profile.uid)) {
-            safeStorage.setItem('has_rated', 'true');
-            return;
+          // Verify if they actually haven't rated in the cached data
+          const cached = safeStorage.getItem('cached_reviews_data');
+          if (cached) {
+            const data = JSON.parse(cached);
+            if (Array.isArray(data) && data.some((r: any) => r.userId === profile.uid)) {
+              safeStorage.setItem('has_rated', 'true');
+              return;
+            }
           }
         } catch (e) {}
         setTimeout(() => setShowRatePrompt(true), 1000);

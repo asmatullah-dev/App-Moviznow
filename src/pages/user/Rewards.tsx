@@ -316,20 +316,24 @@ export default function Rewards() {
     }
 
     if (profile?.uid) {
-      fetchReviewsFromChunks(false).then(allReviews => {
-        if (allReviews && Array.isArray(allReviews)) {
-          const userHasReviewed = allReviews.some((r: any) =>
-            r.userId === profile.uid || (profile.email && r.userEmail === profile.email)
-          );
-          if (userHasReviewed) {
-            safeStorage.setItem('has_rated', 'true');
-            setHasRatedState(true);
-          } else {
-            safeStorage.removeItem('has_rated');
-            setHasRatedState(false);
+      try {
+        const cachedStr = safeStorage.getItem('cached_reviews_data');
+        if (cachedStr) {
+          const allReviews = JSON.parse(cachedStr);
+          if (allReviews && Array.isArray(allReviews)) {
+            const userHasReviewed = allReviews.some((r: any) =>
+              r.userId === profile.uid || (profile.email && r.userEmail === profile.email)
+            );
+            if (userHasReviewed) {
+              safeStorage.setItem('has_rated', 'true');
+              setHasRatedState(true);
+            } else {
+              safeStorage.removeItem('has_rated');
+              setHasRatedState(false);
+            }
           }
         }
-      }).catch(console.error);
+      } catch (e) {}
     }
   }, [profile?.uid, profile?.email]);
 
