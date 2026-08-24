@@ -10,6 +10,7 @@ import React, {
 import { auth, db, runWithNetwork } from "../firebase";
 import { safeStorage } from "../utils/safeStorage";
 import { isValidGmailAddress } from "../utils/emailValidation";
+import { getUserDisplayName } from "../utils/userUtils";
 import { isUserExpired, normalizeUserStatusAndExpiry } from "./UsersContext";
 import {
   onAuthStateChanged,
@@ -1298,7 +1299,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   suspended: 0,
                 };
                 const getStatusRank = (s: string) => statusPriority[s] || 0;
-                const betterStatus =
+                let betterStatus =
                   getStatusRank(data.status) > getStatusRank(acc.status || "")
                     ? data.status
                     : acc.status || data.status;
@@ -1310,11 +1311,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   acc.expiryDate === "Lifetime"
                 ) {
                   betterExpiry = "Lifetime";
-                } else if (
-                  data.expiryDate &&
-                  (!acc.expiryDate || data.expiryDate > acc.expiryDate)
-                ) {
-                  betterExpiry = data.expiryDate;
+                } else if (data.expiryDate) {
+                  if (!acc.expiryDate || acc.expiryDate === "null" || acc.expiryDate === "") {
+                    betterExpiry = data.expiryDate;
+                  } else {
+                    const accTime = new Date(acc.expiryDate).getTime();
+                    const dataTime = new Date(data.expiryDate).getTime();
+                    if (!isNaN(dataTime) && (isNaN(accTime) || dataTime > accTime)) {
+                      betterExpiry = data.expiryDate;
+                    }
+                  }
+                }
+
+                // If merged expiry is valid / in future, ensure status is active
+                if (betterExpiry === "Lifetime" || (betterExpiry && !isUserExpired(betterExpiry))) {
+                  if (betterStatus !== "suspended") {
+                    betterStatus = "active";
+                  }
                 }
 
                 return {
@@ -1354,6 +1367,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                       : data.lastActive || acc.lastActive,
                 };
               }, {} as any);
+            } else {
+              // No existing matching profile found in search
+              const isNewSignup =
+                justLoggedInRef.current ||
+                !!safeStorage.getItem("pending_signup_profile") ||
+                !!sessionStorage.getItem("pending_signup_phone") ||
+                (currentUser.metadata?.creationTime &&
+                  Date.now() - new Date(currentUser.metadata.creationTime).getTime() < 3 * 60 * 1000);
+
+              if (!isNewSignup) {
+                console.warn(
+                  `User UID ${currentUser.uid} was deleted from Firestore and no matching profile exists. Signing out safely.`,
+                );
+                safeStorage.removeItem("profile_cache");
+                safeStorage.removeItem("profile_doc_snap");
+                safeStorage.removeItem(`profile_version_${currentUser.uid}`);
+                safeStorage.removeItem("cached_all_users");
+                localStorage.removeItem("session_started");
+                setProfile(null);
+                setUser(null);
+                setLoading(false);
+                await signOut(auth).catch(() => {});
+                return false;
+              }
             }
           } catch (e) {
             console.error("Failed to check for existing accounts:", e);
@@ -1396,18 +1433,69 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             localStorage.setItem("referral_credit_message", "Your account is credited with 5 Days membership with referral code " + storedRefCode);
           }
 
+          let pendingSignupProfile: any = null;
+          try {
+            const pendingSignupStr = safeStorage.getItem("pending_signup_profile");
+            if (pendingSignupStr) {
+              pendingSignupProfile = JSON.parse(pendingSignupStr);
+            }
+          } catch (e) {}
+
+          const cleanAuthName =
+            currentUser.displayName &&
+            currentUser.displayName.trim() &&
+            currentUser.displayName !== "No Name" &&
+            currentUser.displayName !== "null" &&
+            currentUser.displayName !== "undefined"
+              ? currentUser.displayName.trim()
+              : "";
+          const cleanPendingName =
+            pendingSignupProfile?.displayName &&
+            pendingSignupProfile.displayName.trim() &&
+            pendingSignupProfile.displayName !== "No Name"
+              ? pendingSignupProfile.displayName.trim()
+              : "";
+          const cleanOldName =
+            mergedOldData.displayName &&
+            mergedOldData.displayName.trim() &&
+            mergedOldData.displayName !== "No Name" &&
+            mergedOldData.displayName !== "null" &&
+            mergedOldData.displayName !== "undefined"
+              ? mergedOldData.displayName.trim()
+              : "";
+          const isDummyEmail =
+            currentUser.email && currentUser.email.endsWith("@moviznow.com");
+          const cleanEmailName =
+            currentUser.email && !isDummyEmail
+              ? currentUser.email.split("@")[0]
+              : "";
+
+          const resolvedPhone =
+            pendingSignupProfile?.phone ||
+            standardizedUserPhone ||
+            mergedOldData.phone ||
+            "";
+          const resolvedEmail =
+            pendingSignupProfile?.email ||
+            currentUser.email ||
+            mergedOldData.email ||
+            "";
+
+          const resolvedDisplayName =
+            cleanAuthName ||
+            cleanPendingName ||
+            cleanOldName ||
+            cleanEmailName ||
+            (resolvedPhone ? `User (${resolvedPhone})` : `User (${currentUser.uid.slice(0, 6)})`);
+
           const newProfile: UserProfile = {
             // Start with all aggregated data from old accounts
             ...mergedOldData,
             // Ensure identity fields match exactly what was used for this successful login
             uid: currentUser.uid,
-            email: currentUser.email || mergedOldData.email || "",
-            phone: standardizedUserPhone || mergedOldData.phone || "",
-            displayName:
-              (currentUser.displayName && currentUser.displayName.trim()) ||
-              (mergedOldData.displayName && mergedOldData.displayName.trim()) ||
-              (currentUser.email ? currentUser.email.split('@')[0] : '') ||
-              (standardizedUserPhone ? `User (${standardizedUserPhone})` : `User ${currentUser.uid.slice(0, 6)}`),
+            email: resolvedEmail,
+            phone: resolvedPhone,
+            displayName: resolvedDisplayName,
             photoURL: currentUser.photoURL || mergedOldData.photoURL || "",
             referralCode: mergedOldData.referralCode || generateReferralCode(currentUser.uid),
             referredBy: referredByUid || mergedOldData.referredBy || null,
@@ -1417,6 +1505,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             notificationRewardClaimed: mergedOldData.notificationRewardClaimed || false,
             pwaRewardClaimed: mergedOldData.pwaRewardClaimed || false,
             reviewRewardClaimed: mergedOldData.reviewRewardClaimed || false,
+            timeSpent: (mergedOldData.timeSpent || 0) + (localProfile?.timeSpent || 0),
             // Increment session data for the current session, unless it's an owner
             sessionsCount: isOwner
               ? mergedOldData.sessionsCount || 0
@@ -1436,7 +1525,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 ? "active"
                 : isNewlyReferred
                   ? "active"
-                  : mergedOldData.status || defaultStatusToSet,
+                  : (mergedOldData.expiryDate && (mergedOldData.expiryDate === "Lifetime" || !isUserExpired(mergedOldData.expiryDate)) && mergedOldData.status !== "suspended")
+                    ? "active"
+                    : mergedOldData.status || defaultStatusToSet,
             expiryDate: isOwner
               ? "Lifetime"
               : isNewlyReferred
@@ -2044,6 +2135,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!data.email && result.user.email) {
           updates.email = result.user.email;
         }
+        if (result.user.displayName && (!data.displayName || data.displayName === "No Name" || data.displayName === "null" || data.displayName === "undefined" || data.displayName.startsWith("User ("))) {
+          updates.displayName = result.user.displayName;
+        }
+        if (result.user.photoURL && !data.photoURL) {
+          updates.photoURL = result.user.photoURL;
+        }
       }
 
       const applyUpdates = async () => {
@@ -2099,6 +2196,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signInWithEmail = async (email: string, password: string) => {
     try {
       setError(null);
+      
+      // If logging in with phone-generated email, verify whitelist
+      if (email.endsWith('@moviznow.com')) {
+        const phonePart = email.split('@')[0];
+        const isWhitelisted = await isPhoneWhitelisted(phonePart);
+        if (!isWhitelisted) {
+          throw new Error("This WhatsApp number is not authorized. Please contact admin.");
+        }
+      }
+
       justLoggedInRef.current = true;
       const result = await signInWithEmailAndPassword(auth, email, password);
 
@@ -2196,10 +2303,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         );
       }
 
+      const cleanSignupName = displayName.trim() || (phone ? `User (${standardizePhone(phone)})` : email.split('@')[0]);
+
       if (phone) {
         const standardizedPhone = standardizePhone(phone);
         sessionStorage.setItem("pending_signup_phone", standardizedPhone);
       }
+
+      safeStorage.setItem("pending_signup_profile", JSON.stringify({
+        displayName: cleanSignupName,
+        phone: phone ? standardizePhone(phone) : "",
+        email: email,
+      }));
 
       justLoggedInRef.current = true;
       let userCredential;
@@ -2217,7 +2332,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         throw authErr;
       }
-      await updateProfile(userCredential.user, { displayName });
+      await updateProfile(userCredential.user, { displayName: cleanSignupName });
+
+      try {
+        const { setDoc } = await import("firebase/firestore");
+        await setDoc(doc(db, "users", userCredential.user.uid), {
+          displayName: cleanSignupName,
+          phone: phone ? standardizePhone(phone) : "",
+          email: email,
+        }, { merge: true });
+      } catch (e) {}
+
+      safeStorage.removeItem("pending_signup_profile");
 
       setTimeout(() => {
         justLoggedInRef.current = false;
@@ -2271,9 +2397,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
+      const cleanPhoneSignupName = displayName.trim() || (standardizedPhone ? `User (${standardizedPhone})` : (signupEmail ? signupEmail.split('@')[0] : 'User'));
+
       if (standardizedPhone) {
         sessionStorage.setItem("pending_signup_phone", standardizedPhone);
       }
+
+      safeStorage.setItem("pending_signup_profile", JSON.stringify({
+        displayName: cleanPhoneSignupName,
+        phone: standardizedPhone || "",
+        email: signupEmail,
+      }));
 
       justLoggedInRef.current = true;
       let userCredential;
@@ -2296,7 +2430,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         throw authErr;
       }
-      await updateProfile(userCredential.user, { displayName });
+      await updateProfile(userCredential.user, { displayName: cleanPhoneSignupName });
+
+      try {
+        const { setDoc } = await import("firebase/firestore");
+        await setDoc(doc(db, "users", userCredential.user.uid), {
+          displayName: cleanPhoneSignupName,
+          phone: standardizedPhone || "",
+          email: signupEmail,
+        }, { merge: true });
+      } catch (e) {}
+
+      safeStorage.removeItem("pending_signup_profile");
 
       setTimeout(() => {
         justLoggedInRef.current = false;
@@ -2316,6 +2461,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isPhoneWhitelisted = async (phone: string): Promise<boolean> => {
     const standardizedPhone = standardizePhone(phone);
     if (!standardizedPhone) return false;
+    const stdDigits = standardizedPhone.replace(/\D/g, "");
+    const last10 = stdDigits.slice(-10);
 
     try {
       // Check single document storage in settings/whitelisted_phones
@@ -2324,9 +2471,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (docSnap.exists()) {
         const data = docSnap.data();
         const numbers: string[] = Array.isArray(data.numbers) ? data.numbers : (Array.isArray(data.phones) ? data.phones : []);
-        if (numbers.includes(standardizedPhone)) {
-          return true;
-        }
+        return numbers.some((n: any) => {
+          if (!n || typeof n !== "string") return false;
+          const stdN = standardizePhone(n);
+          if (stdN && stdN === standardizedPhone) return true;
+          const nDigits = n.replace(/\D/g, "");
+          if (nDigits.slice(-10) === last10 && last10.length === 10) return true;
+          return n.trim() === phone.trim() || n.trim() === standardizedPhone;
+        });
       }
       return false;
     } catch (err) {

@@ -46,7 +46,7 @@ export function ContactSupportButtons({ content }: ContactSupportButtonsProps) {
           <button
             onClick={() => {
               const adminPhone = standardizePhone(
-                settings?.supportNumber || "3363284466"
+                settings?.supportNumber || "3416286423"
               ).replace("+", "");
               
               let msg = `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${profile?.displayName || t("Unknown")}\n${t("Email")}: ${profile?.email || "N/A"}\n${t("Phone")}: ${profile?.phone || "N/A"}\n${t("Role & Status")}: ${String(

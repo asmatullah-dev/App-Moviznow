@@ -151,7 +151,7 @@ export default function VipTrial() {
   };
 
   const handleContactAdmin = () => {
-    let supportPhone = settings?.supportNumber || '3363284466';
+    let supportPhone = settings?.supportNumber || '3416286423';
     // Clean up the number to ensure it starts with country code for WhatsApp link
     if (supportPhone.startsWith('0')) {
       supportPhone = '92' + supportPhone.substring(1);

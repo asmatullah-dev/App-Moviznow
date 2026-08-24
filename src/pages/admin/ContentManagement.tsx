@@ -2846,7 +2846,7 @@ export default function ContentManagement() {
                 const tinyUrl = await generateTinyUrl(
                   extractedUrl,
                   true,
-                  settings?.supportNumber || "3363284466",
+                  settings?.supportNumber || "3416286423",
                 );
                 if (
                   tinyUrl &&
@@ -2876,7 +2876,7 @@ export default function ContentManagement() {
                 } catch(e) {}
              }
              if (processedSampleUrl.length > 100 && !processedSampleUrl.includes('pixeldrain.com') && !processedSampleUrl.includes('pixeldrain.dev') && !processedSampleUrl.includes('pixeldrain.net') && !processedSampleUrl.includes('t.me')) {
-                const tinyUrl = await generateTinyUrl(processedSampleUrl, true, settings?.supportNumber || '3363284466');
+                const tinyUrl = await generateTinyUrl(processedSampleUrl, true, settings?.supportNumber || '3416286423');
                 if (tinyUrl && !tinyUrl.toLowerCase().includes('<html')) processedSampleUrl = tinyUrl;
              }
              newContent.sampleUrl = processedSampleUrl;
@@ -3229,7 +3229,7 @@ export default function ContentManagement() {
 
       text += `\n\n🍿 Enjoy watching on ${settings?.headerText || "MovizNow"}!\n`;
       text += `🔗 Watch here: MovizNow.com/${content.id}\n`;
-      let sn = settings?.supportNumber || "3363284466";
+      let sn = settings?.supportNumber || "3416286423";
       if (sn.startsWith("92")) sn = "0" + sn.substring(2);
       else if (!sn.startsWith("0")) sn = "0" + sn;
       text += `📞 WhatsApp: ${sn}`;
@@ -3385,7 +3385,7 @@ export default function ContentManagement() {
 
     if (processedSampleUrl) {
       if (processedSampleUrl.length > 100 && !processedSampleUrl.includes('pixeldrain.com') && !processedSampleUrl.includes('pixeldrain.dev') && !processedSampleUrl.includes('pixeldrain.net') && !processedSampleUrl.includes('t.me')) {
-        const tinyUrl = await generateTinyUrl(processedSampleUrl, true, settings?.supportNumber || '3363284466');
+        const tinyUrl = await generateTinyUrl(processedSampleUrl, true, settings?.supportNumber || '3416286423');
         if (tinyUrl && !tinyUrl.toLowerCase().includes('<html')) {
           processedSampleUrl = tinyUrl;
         }
@@ -3462,7 +3462,7 @@ export default function ContentManagement() {
           const tinyUrl = await generateTinyUrl(
             extractedUrl,
             true,
-            settings?.supportNumber || "3363284466",
+            settings?.supportNumber || "3416286423",
           );
           if (
             tinyUrl &&
@@ -3685,7 +3685,7 @@ export default function ContentManagement() {
 
     text += `\n🍿 Enjoy watching on ${settings?.headerText || "MovizNow"}!\n`;
     text += `🔗 Watch here: MovizNow.com/${updatedContent.id}\n`;
-    let sn = settings?.supportNumber || "3363284466";
+    let sn = settings?.supportNumber || "3416286423";
     if (sn.startsWith("92")) sn = "0" + sn.substring(2);
     else if (!sn.startsWith("0")) sn = "0" + sn;
     text += `📞 WhatsApp: ${sn}`;
@@ -3874,7 +3874,7 @@ export default function ContentManagement() {
     if (content.sampleUrl) {
       let tmpSample = content.sampleUrl;
       if (tmpSample.length > 100 && !tmpSample.includes('pixeldrain.com') && !tmpSample.includes('pixeldrain.dev') && !tmpSample.includes('pixeldrain.net') && !tmpSample.includes('t.me')) {
-        const tinyUrl = await generateTinyUrl(tmpSample, false, settings?.supportNumber || '3363284466');
+        const tinyUrl = await generateTinyUrl(tmpSample, false, settings?.supportNumber || '3416286423');
         if (tinyUrl && !tinyUrl.toLowerCase().includes('<html')) {
           tmpSample = tinyUrl;
         }

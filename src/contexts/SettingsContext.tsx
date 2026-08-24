@@ -29,7 +29,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   recentViewLimit: 10,
   recommendedLimit: 10,
   defaultAppImage: 'https://picsum.photos/seed/movie/400/600',
-  supportNumber: '3363284466',
+  supportNumber: '3416286423',
   accountTitle: 'Asmat Ullah',
   accountNumber: '03416286423',
   isTrialEnabled: true,
@@ -64,12 +64,20 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [settings, setSettings] = useState<AppSettings>(() => {
     try {
       const cached = localStorage.getItem('cached_app_settings');
-      return cached ? JSON.parse(cached) : DEFAULT_APP_SETTINGS;
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && (parsed.supportNumber === '3363284466' || parsed.supportNumber === '03363284466')) {
+          parsed.supportNumber = '3416286423';
+          localStorage.setItem('cached_app_settings', JSON.stringify(parsed));
+        }
+        return parsed;
+      }
+      return DEFAULT_APP_SETTINGS;
     } catch {
       return DEFAULT_APP_SETTINGS;
     }
   });
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const refreshSettings = useCallback(async (force: boolean = false) => {
     try {
@@ -83,6 +91,9 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         
         if (docSnap.exists()) {
           const data = docSnap.data() as AppSettings;
+          if (data && (data.supportNumber === '3363284466' || data.supportNumber === '03363284466')) {
+            data.supportNumber = '3416286423';
+          }
           setSettings(data);
           localStorage.setItem('cached_app_settings', JSON.stringify(data));
           localStorage.setItem('cached_settings_version', serverVersion.toString());

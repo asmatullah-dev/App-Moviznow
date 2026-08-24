@@ -13,6 +13,7 @@ import { Button } from '../../components/Button';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
 import { formatDateToMonthDDYYYY } from '../../utils/contentUtils';
 import { useAuth, standardizePhone } from '../../contexts/AuthContext';
+import { getUserDisplayName } from '../../utils/userUtils';
 import { smartSearch } from '../../utils/searchUtils';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
 import { useSettings } from '../../contexts/SettingsContext';
@@ -128,19 +129,23 @@ export default function UserManagement() {
   const safeFormat = (dateStr: string | null | undefined, fmt: string) => {
     if (!dateStr) return 'N/A';
     if (dateStr === 'Lifetime') return 'Lifetime';
-    const cleanDateStr = dateStr.split('T')[0];
-    const parts = cleanDateStr.split('-');
-    if (parts.length === 3 && parts[0].length === 4) {
+
+    // If dateStr is strictly YYYY-MM-DD (date only), format in local time to prevent UTC day shift
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr.trim())) {
+      const parts = dateStr.trim().split('-');
       const year = parseInt(parts[0], 10);
       const month = parseInt(parts[1], 10) - 1;
       const day = parseInt(parts[2], 10);
-      if (!isNaN(year) && !isNaN(month) && !isNaN(day)) {
-        const d = new Date(year, month, day);
-        return isNaN(d.getTime()) ? 'Invalid Date' : format(d, fmt);
-      }
+      const d = new Date(year, month, day);
+      return isNaN(d.getTime()) ? 'Invalid Date' : format(d, fmt);
     }
+
+    // Full ISO timestamp or string with time
     const d = new Date(dateStr);
-    return isNaN(d.getTime()) ? 'Invalid Date' : format(d, fmt);
+    if (!isNaN(d.getTime())) {
+      return format(d, fmt);
+    }
+    return 'Invalid Date';
   };
 
   const safeDistance = (dateStr: string | null | undefined) => {
@@ -373,7 +378,7 @@ export default function UserManagement() {
       safeStorage.setItem(`user_analytics_${user.uid}`, JSON.stringify(newAnalytics));
 
       // 3. Update assigned content titles
-      if (freshUser.role === 'selected_content' && freshUser.assignedContent && freshUser.assignedContent.length > 0) {
+      if (freshUser.assignedContent && freshUser.assignedContent.length > 0) {
         const contentMap = new Map<string, string>();
         contentList.forEach(c => {
           contentMap.set(c.id, c.title);
@@ -1082,8 +1087,14 @@ export default function UserManagement() {
         updates.phone = user2.phone;
       }
 
-      // Merge expiry (take the latest)
-      if (user1.expiryDate || user2.expiryDate) {
+      // Merge timeSpent & sessionsCount
+      updates.timeSpent = (user1.timeSpent || 0) + (user2.timeSpent || 0);
+      updates.sessionsCount = (user1.sessionsCount || 0) + (user2.sessionsCount || 0);
+
+      // Merge expiry (take Lifetime or latest date)
+      if (user1.expiryDate === "Lifetime" || user2.expiryDate === "Lifetime") {
+        updates.expiryDate = "Lifetime";
+      } else if (user1.expiryDate || user2.expiryDate) {
         const t1 = user1.expiryDate ? new Date(user1.expiryDate).getTime() : 0;
         const t2 = user2.expiryDate ? new Date(user2.expiryDate).getTime() : 0;
         updates.expiryDate = t1 > t2 ? user1.expiryDate : user2.expiryDate;
@@ -1763,7 +1774,7 @@ export default function UserManagement() {
                       )}
                       <div className="min-w-0 flex-1">
                         <div className="font-medium text-zinc-900 dark:text-white flex items-center gap-2 truncate">
-                          {user.displayName && user.displayName.trim() !== '' ? user.displayName : (user.phone ? `User (${user.phone})` : `User ${user.uid.slice(0, 6)}`)} {user.city && <span className="text-zinc-500 font-normal">({user.city})</span>}
+                          {getUserDisplayName(user)} {user.city && <span className="text-zinc-500 font-normal">({user.city})</span>}
                         </div>
                         <div className="text-zinc-500 dark:text-zinc-400 text-xs mt-0.5 truncate" title={user.email}>
                           {user.email && !user.email.endsWith('@moviznow.com') ? user.email : (user.phone ? `${user.phone} (Phone)` : 'No Email')}
@@ -2049,7 +2060,7 @@ export default function UserManagement() {
                     )}
                     <div>
                       <h3 className="text-lg font-bold text-zinc-900 dark:text-white flex items-center gap-2">
-                        {selectedUser.displayName || 'No Name'} 
+                        {getUserDisplayName(selectedUser)} 
                       </h3>
                       {selectedUser.city && <p className="text-zinc-600 dark:text-zinc-300 font-medium text-sm">{selectedUser.city}</p>}
                       <p className="text-zinc-500 dark:text-zinc-400 text-sm">{selectedUser.email?.endsWith('@moviznow.com') ? 'No Email' : selectedUser.email}</p>
@@ -2475,65 +2486,63 @@ export default function UserManagement() {
                     )}
                   </div>
 
-                  {['selected_content', 'user', 'trial'].includes(selectedUser.role) && (
-                    <div className="border-t border-zinc-200 dark:border-zinc-800 pt-6">
-                      <div className="flex items-center justify-between mb-4">
-                        <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Assigned Content</h4>
-                        <Button 
-                          onClick={() => setIsContentPickerOpen(true)}
-                          variant="ghost"
-                          className="text-xs font-bold text-emerald-500 hover:text-emerald-400 transition-colors flex items-center gap-1 h-auto py-1 px-2"
-                          icon={<Plus className="w-3 h-3" />}
-                        >
-                          Manage
-                        </Button>
-                      </div>
-                      
-                      <div className="flex flex-wrap gap-2">
-                        {selectedUser.assignedContent?.map(id => {
-                          const [contentId, seasonId] = id.split(':');
-                          const content = allContent.find(c => c.id === contentId);
-                          let displayName = content?.title || contentId;
-                          
-                          if (seasonId && content?.seasons) {
-                            try {
-                              const seasons = Array.isArray(content.seasons) ? content.seasons : JSON.parse(content.seasons || '[]');
-                              const season = seasons.find((s: any) => s.id === seasonId);
-                              if (season) {
-                                displayName += ` - Season ${season.seasonNumber}`;
-                              }
-                            } catch (e) {
-                              console.error("Error parsing seasons:", e);
-                            }
-                          }
-                          
-                          return (
-                            <div key={id} className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded-lg border border-zinc-300 dark:border-zinc-700">
-                              <span className="text-[10px] text-zinc-600 dark:text-zinc-300">{displayName}</span>
-                              <button 
-                                onClick={async () => {
-                                  const nextAssigned = (selectedUser.assignedContent || []).filter(cid => cid !== id);
-                                  updateUserFields(selectedUser.uid, {
-                                    assignedContent: nextAssigned
-                                  });
-                                  setSelectedUser({ ...selectedUser, assignedContent: nextAssigned });
-                                  setAssignedIds(new Set(nextAssigned));
-                                  // Update titles
-                                  setAssignedContentTitles(prev => prev.filter(t => t !== content?.title));
-                                }} 
-                                className="text-zinc-500 hover:text-red-500 transition-colors"
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
-                            </div>
-                          );
-                        })}
-                        {(!selectedUser.assignedContent || selectedUser.assignedContent.length === 0) && (
-                          <p className="text-[10px] text-zinc-500 italic">No content assigned yet.</p>
-                        )}
-                      </div>
+                  <div className="border-t border-zinc-200 dark:border-zinc-800 pt-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Assigned Content</h4>
+                      <Button 
+                        onClick={() => setIsContentPickerOpen(true)}
+                        variant="ghost"
+                        className="text-xs font-bold text-emerald-500 hover:text-emerald-400 transition-colors flex items-center gap-1 h-auto py-1 px-2"
+                        icon={<Plus className="w-3 h-3" />}
+                      >
+                        Manage
+                      </Button>
                     </div>
-                  )}
+                    
+                    <div className="flex flex-wrap gap-2">
+                      {selectedUser.assignedContent?.map(id => {
+                        const [contentId, seasonId] = id.split(':');
+                        const content = allContent.find(c => c.id === contentId);
+                        let displayName = content?.title || contentId;
+                        
+                        if (seasonId && content?.seasons) {
+                          try {
+                            const seasons = Array.isArray(content.seasons) ? content.seasons : JSON.parse(content.seasons || '[]');
+                            const season = seasons.find((s: any) => s.id === seasonId);
+                            if (season) {
+                              displayName += ` - Season ${season.seasonNumber}`;
+                            }
+                          } catch (e) {
+                            console.error("Error parsing seasons:", e);
+                          }
+                        }
+                        
+                        return (
+                          <div key={id} className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded-lg border border-zinc-300 dark:border-zinc-700">
+                            <span className="text-[10px] text-zinc-600 dark:text-zinc-300">{displayName}</span>
+                            <button 
+                              onClick={async () => {
+                                const nextAssigned = (selectedUser.assignedContent || []).filter(cid => cid !== id);
+                                updateUserFields(selectedUser.uid, {
+                                  assignedContent: nextAssigned
+                                });
+                                setSelectedUser({ ...selectedUser, assignedContent: nextAssigned });
+                                setAssignedIds(new Set(nextAssigned));
+                                // Update titles
+                                setAssignedContentTitles(prev => prev.filter(t => t !== content?.title));
+                              }} 
+                              className="text-zinc-500 hover:text-red-500 transition-colors"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                      {(!selectedUser.assignedContent || selectedUser.assignedContent.length === 0) && (
+                        <p className="text-[10px] text-zinc-500 italic">No content assigned yet.</p>
+                      )}
+                    </div>
+                  </div>
 
                   {profile?.role !== 'user_manager' && (
                     <>
@@ -3053,7 +3062,7 @@ export default function UserManagement() {
                     <div className="bg-zinc-100 dark:bg-zinc-800 p-4 rounded-xl flex items-center gap-4">
                       <img src={foundUser.photoURL || 'https://ui-avatars.com/api/?name=' + foundUser.displayName} alt={foundUser.displayName} className="w-12 h-12 rounded-full" />
                       <div>
-                        <p className="font-bold">{foundUser.displayName || 'No Name'}</p>
+                        <p className="font-bold">{getUserDisplayName(foundUser)}</p>
                         <p className="text-sm text-zinc-500 dark:text-zinc-400">{foundUser.phone}</p>
                         <p className="text-sm text-zinc-500 dark:text-zinc-400">{foundUser.email}</p>
                       </div>

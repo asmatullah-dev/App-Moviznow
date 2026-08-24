@@ -27,7 +27,7 @@ export default function AdminSettings() {
     recentViewLimit: 10,
     recommendedLimit: 10,
     defaultAppImage: 'https://picsum.photos/seed/movie/400/600',
-    supportNumber: '3363284466',
+    supportNumber: '3416286423',
     accountTitle: 'Asmat Ullah',
     accountNumber: '03416286423',
     bankAccounts: [
@@ -526,7 +526,7 @@ export default function AdminSettings() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Support WhatsApp Number (e.g. 3363284466)</label>
+              <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Support WhatsApp Number (e.g. 3416286423)</label>
               <div className="relative">
                 <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
                 <input
@@ -534,7 +534,7 @@ export default function AdminSettings() {
                   value={settings.supportNumber}
                   onChange={(e) => setSettings({ ...settings, supportNumber: e.target.value })}
                   className="w-full pl-10 pr-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
-                  placeholder="3363284466"
+                  placeholder="3416286423"
                 />
               </div>
             </div>

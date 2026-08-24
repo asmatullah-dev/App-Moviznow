@@ -2768,7 +2768,7 @@ export default function MovieDetails() {
       `🖨️ Print Quality: ${contentQuality}\n\n` +
       `🔗 Watch here: https://MovizNow.com/${mergedContent.id}\n` +
       `📞 WhatsApp: ${(() => {
-        let sn = settings?.supportNumber || "3363284466";
+        let sn = settings?.supportNumber || "3416286423";
         if (sn.startsWith("92")) sn = "0" + sn.substring(2);
         else if (!sn.startsWith("0")) sn = "0" + sn;
         return sn;
@@ -3155,7 +3155,7 @@ export default function MovieDetails() {
                     <button
                       onClick={() => {
                         let supportPhone =
-                          settings?.supportNumber || "3363284466";
+                          settings?.supportNumber || "3416286423";
                         if (supportPhone.startsWith("0")) {
                           supportPhone = "92" + supportPhone.substring(1);
                         } else if (!supportPhone.startsWith("92")) {
@@ -3188,11 +3188,11 @@ export default function MovieDetails() {
                       className="inline-flex items-center gap-2 bg-red-500/20 px-6 py-3 text-sm sm:text-base rounded-xl font-medium hover:bg-red-500/30 transition-colors text-red-500"
                     >
                       <MessageCircle className="w-5 h-5" /> {t('Contact Admin')} (
-                      {(settings?.supportNumber || "03363284466").startsWith(
+                      {(settings?.supportNumber || "03416286423").startsWith(
                         "0",
                       )
-                        ? settings?.supportNumber || "03363284466"
-                        : `0${settings?.supportNumber || "3363284466"}`}
+                        ? settings?.supportNumber || "03416286423"
+                        : `0${settings?.supportNumber || "3416286423"}`}
                       )
                     </button>
                   )}
@@ -3800,7 +3800,7 @@ export default function MovieDetails() {
                                       <button
                                         onClick={() => {
                                           let supportPhone =
-                                            settings?.supportNumber || "3363284466";
+                                            settings?.supportNumber || "3416286423";
                                           if (supportPhone.startsWith("0")) {
                                             supportPhone = "92" + supportPhone.substring(1);
                                           } else if (!supportPhone.startsWith("92")) {
@@ -4671,7 +4671,7 @@ export default function MovieDetails() {
             {settings?.isAdminContactEnabled !== false && (
               <a
                 href={(() => {
-                  let supportPhone = settings?.supportNumber || "3363284466";
+                  let supportPhone = settings?.supportNumber || "3416286423";
                   if (supportPhone.startsWith("0")) {
                     supportPhone = "92" + supportPhone.substring(1);
                   } else if (!supportPhone.startsWith("92")) {

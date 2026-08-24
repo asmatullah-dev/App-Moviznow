@@ -87,18 +87,19 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
       setLoading(true);
 
-      const chunksToFetch = new Set<string>([
-        'app_chunk_0',
-        'push_chunk_0',
-        'Email_chunk_0',
-        'notification_chunk_0'
-      ]);
+      const chunksToFetch = new Set<string>();
       let serverVersion = '0';
 
       try {
         const { getChunkMeta } = await import('../utils/chunkMeta');
         const meta = await getChunkMeta(force);
         if (meta && meta.notifications) {
+          if (Array.isArray(meta.notifications.chunks)) {
+            meta.notifications.chunks.forEach((c: string) => { if (c) chunksToFetch.add(c); });
+          }
+          if (Array.isArray(meta.notifications.chunkIds)) {
+            meta.notifications.chunkIds.forEach((c: string) => { if (c) chunksToFetch.add(c); });
+          }
           if (meta.notifications.latestAppChunkId) chunksToFetch.add(meta.notifications.latestAppChunkId);
           if (meta.notifications.latestPushChunkId) chunksToFetch.add(meta.notifications.latestPushChunkId);
           if (meta.notifications.latestEmailChunkId) chunksToFetch.add(meta.notifications.latestEmailChunkId);
@@ -106,6 +107,10 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
           if (meta.notifications.version) serverVersion = meta.notifications.version.toString();
         }
       } catch (err) { }
+
+      if (chunksToFetch.size === 0) {
+        chunksToFetch.add('notification_chunk_0');
+      }
       
       const effectiveServerVersion = serverVersion !== '0' ? serverVersion : '1';
       const cachedVersion = safeStorage.getItem('cached_notifications_version');

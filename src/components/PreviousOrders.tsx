@@ -85,7 +85,7 @@ export default function PreviousOrders() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          const adminPhone = standardizePhone(settings?.supportNumber || '3363284466').replace('+', '');
+                          const adminPhone = standardizePhone(settings?.supportNumber || '3416286423').replace('+', '');
                           let itemsCount = 0;
                           let itemsDetail = '';
                           if (order.type === 'content' && order.items && Array.isArray(order.items)) {

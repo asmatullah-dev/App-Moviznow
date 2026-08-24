@@ -148,18 +148,10 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
   }
 
   try {
-    const batch = writeBatch(db);
-    batch.set(userRef, updatesToPush, { merge: true });
-
-    // Also update chunk_meta versions for user
-    const chunkMetaRef = doc(db, 'chunk_meta', 'versions');
-    batch.set(chunkMetaRef, {
-      users: {
-        [currentUserUid]: nowTime
-      }
-    }, { merge: true });
-
-    await runWithNetwork(() => batch.commit());
+    const { setDoc } = await import('firebase/firestore');
+    
+    // Write directly to user document with merge - 0 pre-reads required
+    await runWithNetwork(() => setDoc(userRef, updatesToPush, { merge: true }));
 
     // --- CLEANUP IN LOCAL QUEUES ONLY AFTER CONFIRMED SUCCESS ---
     safeStorage.removeItem('needs_user_sync');
@@ -321,9 +313,18 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
     console.log(`Sync completed successfully. Reason: ${reason}`);
 
     return true;
-  } catch (err) {
+  } catch (err: any) {
     console.error('Failed to sync user data to Firestore:', err);
-    safeStorage.setItem('needs_user_sync', 'true');
+    if (err && (err.code === 'permission-denied' || err.message?.includes('permission') || err.message?.includes('not-found'))) {
+      console.warn("Permission denied or user document missing. Clearing local queues and signing out.");
+      safeStorage.removeItem('needs_user_sync');
+      safeStorage.removeItem('profile_cache');
+      const { signOut } = await import('firebase/auth');
+      const { auth } = await import('../firebase');
+      await signOut(auth).catch(() => {});
+    } else {
+      safeStorage.setItem('needs_user_sync', 'true');
+    }
     return false;
   }
 }
@@ -337,10 +338,7 @@ export function SyncUserDataManager() {
 
   const handleSync = useCallback(async (reason: string = 'manual') => {
     if (!user?.uid) return;
-    const success = await executeSyncUserData(user.uid, profileRef.current, reason);
-    if (success) {
-      await refreshProfileRef.current(false, 'auto');
-    }
+    await executeSyncUserData(user.uid, profileRef.current, reason);
   }, [user?.uid]);
 
   // Expose trigger globally

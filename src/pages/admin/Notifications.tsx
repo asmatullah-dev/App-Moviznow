@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useUsers } from "../../contexts/UsersContext";
 import { isValidGmailAddress } from "../../utils/emailValidation";
+import { getUserDisplayName } from "../../utils/userUtils";
 import { useNotifications } from "../../contexts/NotificationContext";
 import {
   collection,
@@ -875,7 +876,7 @@ export default function Notifications() {
                               {(u.displayName || u.email || 'User')[0]?.toUpperCase() || 'U'}
                             </div>
                             <div className="flex-1">
-                              <div className="font-bold text-sm text-zinc-900 dark:text-white">{u.displayName || 'No Name'}</div>
+                              <div className="font-bold text-sm text-zinc-900 dark:text-white">{getUserDisplayName(u)}</div>
                               <div className="text-xs text-zinc-500">{u.email}</div>
                               <div className="text-[10px] text-zinc-400 mt-0.5 flex items-center gap-2">
                                 <span>{u.phone || 'No Phone'}</span>

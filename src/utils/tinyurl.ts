@@ -1,4 +1,4 @@
-export const generateTinyUrl = async (url: string, useAlias: boolean = true, aliasPrefix: string = '3363284466'): Promise<string> => {
+export const generateTinyUrl = async (url: string, useAlias: boolean = true, aliasPrefix: string = '3416286423'): Promise<string> => {
   if (!url || typeof url !== 'string') return url;
   
   // If it's HTML content, don't try to shorten it

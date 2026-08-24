@@ -184,8 +184,50 @@ export default function Login() {
     
     try {
       const rawTrimmed = identifier.trim();
+      const isEmail = rawTrimmed.includes('@');
       const formatted = formatIdentifier(rawTrimmed);
       
+      // If it is a phone number, ALWAYS enforce whitelist check first
+      if (!isEmail) {
+        const standardizedPhone = standardizePhone(rawTrimmed);
+        const isWhitelisted = await isPhoneWhitelisted(standardizedPhone);
+        
+        if (!isWhitelisted) {
+          setCustomError(
+            <div className="flex flex-col gap-3">
+              <p>This number is not authorized.</p>
+              <div className="flex flex-col gap-2 mt-2">
+                <button 
+                  type="button"
+                  onClick={handleGoogleLogin}
+                  className="w-full bg-emerald-500 text-white py-2.5 rounded-lg font-medium hover:bg-emerald-600 transition-colors flex items-center justify-center gap-2 shadow-sm"
+                >
+                  Use Google <span className="text-[10px] uppercase tracking-wider opacity-90 bg-white/20 px-1.5 py-0.5 rounded-md">(Recommended)</span>
+                </button>
+                {settings?.isAdminContactEnabled !== false && (
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      let supportPhone = settings?.supportNumber || '3416286423';
+                      if (supportPhone.startsWith('92')) supportPhone = supportPhone.substring(2);
+                      if (supportPhone.startsWith('0')) supportPhone = supportPhone.substring(1);
+                      const adminPhone = `92${supportPhone}`;
+                      const message = `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${user?.displayName || t("Unknown")}\n${t("Email")}: ${user?.email || 'N/A'}\n${t("Phone")}: ${standardizedPhone}\n${t("Role & Status")}: ${t("Unknown")}, ${t("Unknown")}\n\n${t("Your message/question:")}\n${t("I need help logging in.")}`;
+                      window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
+                    }}
+                    className="w-full bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-700 py-2.5 rounded-lg font-medium hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors"
+                  >
+                    Contact Admin
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+          setIsLoggingIn(false);
+          return;
+        }
+      }
+
       // Try finding user with both raw and formatted identifier
       const [foundUsersRaw, foundUsersFormatted] = await Promise.all([
         findUsersByEmailOrPhone(rawTrimmed),
@@ -203,6 +245,48 @@ export default function Login() {
         if (/^[\d+]+$/.test(rawTrimmed)) {
           setIdentifier(formatted);
         }
+        
+        // Double check: if found user is associated with a phone number, ensure it is whitelisted
+        if (foundUser.phone || foundUser.email?.endsWith('@moviznow.com')) {
+          const userPhone = foundUser.phone || foundUser.email?.split('@')[0] || '';
+          if (userPhone) {
+            const isWhitelisted = await isPhoneWhitelisted(userPhone);
+            if (!isWhitelisted) {
+              setCustomError(
+                <div className="flex flex-col gap-3">
+                  <p>This number is not authorized.</p>
+                  <div className="flex flex-col gap-2 mt-2">
+                    <button 
+                      type="button"
+                      onClick={handleGoogleLogin}
+                      className="w-full bg-emerald-500 text-white py-2.5 rounded-lg font-medium hover:bg-emerald-600 transition-colors flex items-center justify-center gap-2 shadow-sm"
+                    >
+                      Use Google <span className="text-[10px] uppercase tracking-wider opacity-90 bg-white/20 px-1.5 py-0.5 rounded-md">(Recommended)</span>
+                    </button>
+                    {settings?.isAdminContactEnabled !== false && (
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          let supportPhone = settings?.supportNumber || '3416286423';
+                          if (supportPhone.startsWith('92')) supportPhone = supportPhone.substring(2);
+                          if (supportPhone.startsWith('0')) supportPhone = supportPhone.substring(1);
+                          const adminPhone = `92${supportPhone}`;
+                          const message = `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${foundUser?.displayName || t("Unknown")}\n${t("Email")}: ${foundUser?.email || 'N/A'}\n${t("Phone")}: ${foundUser?.phone || userPhone}\n${t("Role & Status")}: ${t("Unknown")}, ${t("Unknown")}\n\n${t("Your message/question:")}\n${t("I need help logging in.")}`;
+                          window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
+                        }}
+                        className="w-full bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-700 py-2.5 rounded-lg font-medium hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors"
+                      >
+                        Contact Admin
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+              setIsLoggingIn(false);
+              return;
+            }
+          }
+        }
       }
 
       if (foundUser) {
@@ -216,47 +300,8 @@ export default function Login() {
           setStep('create_password');
         }
       } else {
-        // Not registered, check if it's a WhatsApp number and if it's whitelisted
-        const isEmail = identifier.includes('@');
         if (!isEmail) {
           const standardizedPhone = standardizePhone(rawTrimmed);
-          const isWhitelisted = await isPhoneWhitelisted(standardizedPhone);
-          
-          if (!isWhitelisted) {
-            setCustomError(
-              <div className="flex flex-col gap-3">
-                <p>This number is not authorized.</p>
-                <div className="flex flex-col gap-2 mt-2">
-                  <button 
-                    type="button"
-                    onClick={handleGoogleLogin}
-                    className="w-full bg-emerald-500 text-white py-2.5 rounded-lg font-medium hover:bg-emerald-600 transition-colors flex items-center justify-center gap-2 shadow-sm"
-                  >
-                    Use Google <span className="text-[10px] uppercase tracking-wider opacity-90 bg-white/20 px-1.5 py-0.5 rounded-md">(Recommended)</span>
-                  </button>
-                  {settings?.isAdminContactEnabled !== false && (
-                    <button 
-                      type="button"
-                      onClick={() => {
-                        let supportPhone = settings?.supportNumber || '3363284466';
-                        if (supportPhone.startsWith('92')) supportPhone = supportPhone.substring(2);
-                        if (supportPhone.startsWith('0')) supportPhone = supportPhone.substring(1);
-                        const adminPhone = `92${supportPhone}`;
-                        const message = `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${user?.displayName || t("Unknown")}\n${t("Email")}: ${user?.email || 'N/A'}\n${t("Phone")}: ${standardizedPhone}\n${t("Role & Status")}: ${t("Unknown")}, ${t("Unknown")}\n\n${t("Your message/question:")}\n${t("I need help logging in.")}`;
-                        window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
-                      }}
-                      className="w-full bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-700 py-2.5 rounded-lg font-medium hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors"
-                    >
-                      Contact Admin
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-            setIsLoggingIn(false);
-            return;
-          }
-          // If whitelisted but not found, ensure we use standardized phone for next steps
           setIdentifier(standardizedPhone);
         }
         
@@ -307,7 +352,7 @@ export default function Login() {
         return;
       }
       // Open WhatsApp to admin
-      let supportPhone = settings?.supportNumber || '3363284466';
+      let supportPhone = settings?.supportNumber || '3416286423';
       if (supportPhone.startsWith('92')) supportPhone = supportPhone.substring(2);
       if (supportPhone.startsWith('0')) supportPhone = supportPhone.substring(1);
       const adminPhone = `92${supportPhone}`;

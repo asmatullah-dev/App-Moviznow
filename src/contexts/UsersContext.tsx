@@ -5,6 +5,7 @@ import { UserProfile } from '../types';
 import { useAuth } from './AuthContext';
 import { safeStorage } from '../utils/safeStorage';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
+import { getUserDisplayName } from '../utils/userUtils';
 
 export function isUserExpired(expiryDate?: string | null): boolean {
   if (!expiryDate || expiryDate === 'Lifetime' || expiryDate === 'null' || expiryDate === '') return false;
@@ -32,6 +33,12 @@ export function isUserExpired(expiryDate?: string | null): boolean {
 
 export function normalizeUserStatusAndExpiry(u: UserProfile): UserProfile {
   if (!u || !u.uid) return u;
+
+  // Clean and ensure displayName is valid and populated
+  const resolvedName = getUserDisplayName(u);
+  if (!u.displayName || u.displayName.trim() === '' || u.displayName === 'No Name' || u.displayName === 'null' || u.displayName === 'undefined') {
+    u = { ...u, displayName: resolvedName };
+  }
 
   if (u.role === 'owner' || u.role === 'admin') {
     return { ...u, status: 'active', expiryDate: u.expiryDate || 'Lifetime' };

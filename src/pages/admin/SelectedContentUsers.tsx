@@ -11,6 +11,8 @@ import { useContent } from '../../contexts/ContentContext';
 import { useUsers } from '../../contexts/UsersContext';
 import { safeStorage } from '../../utils/safeStorage';
 
+import { getUserDisplayName } from '../../utils/userUtils';
+
 export default function SelectedContentUsers() {
   const { users: allUsers, loading: usersLoading, finalizeUserChanges, hasPendingChanges, updateUserFields } = useUsers();
 
@@ -214,7 +216,7 @@ export default function SelectedContentUsers() {
           <div key={user.uid} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 shadow-sm transition-colors duration-300">
             <div className="flex items-start justify-between mb-4">
               <div>
-                <h3 className="font-semibold text-lg text-zinc-900 dark:text-white transition-colors duration-300">{user.displayName || 'No Name'}</h3>
+                <h3 className="font-semibold text-lg text-zinc-900 dark:text-white transition-colors duration-300">{getUserDisplayName(user)}</h3>
                 <p className="text-zinc-500 dark:text-zinc-400 text-sm transition-colors duration-300">{user.email}</p>
               </div>
               <div className="flex flex-col gap-1 items-end">

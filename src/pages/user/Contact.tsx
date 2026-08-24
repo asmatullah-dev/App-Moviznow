@@ -28,7 +28,7 @@ export default function Contact() {
   const appName = settings?.headerText || 'MovizNow';
 
   const handleWhatsappSupportClick = () => {
-    const adminPhone = standardizePhone(settings?.supportNumber || "3363284466").replace("+", "");
+    const adminPhone = standardizePhone(settings?.supportNumber || "3416286423").replace("+", "");
     const msg = `Assalam O Alaikum! I need some help.`;
     window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(msg)}`, "_blank");
   };

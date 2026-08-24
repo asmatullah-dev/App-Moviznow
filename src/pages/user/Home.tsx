@@ -867,7 +867,7 @@ export default function Home({
                 {settings?.isAdminContactEnabled !== false && (
                   <button
                     onClick={() => {
-                      let supportPhone = settings?.supportNumber || "3363284466";
+                      let supportPhone = settings?.supportNumber || "3416286423";
                       if (supportPhone.startsWith("0")) {
                         supportPhone = "92" + supportPhone.substring(1);
                       } else if (!supportPhone.startsWith("92")) {
@@ -921,7 +921,7 @@ export default function Home({
                 {settings?.isAdminContactEnabled !== false && (
                   <button
                     onClick={() => {
-                      let supportPhone = settings?.supportNumber || "3363284466";
+                      let supportPhone = settings?.supportNumber || "3416286423";
                       if (supportPhone.startsWith("0")) {
                         supportPhone = "92" + supportPhone.substring(1);
                       } else if (!supportPhone.startsWith("92")) {
@@ -1294,7 +1294,7 @@ export default function Home({
             <button
               onClick={() => {
                 const adminPhone = standardizePhone(
-                  settings?.supportNumber || "3363284466",
+                  settings?.supportNumber || "3416286423",
                 ).replace("+", "");
                 const msg = `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${profile?.displayName || t("Unknown")}\n${t("Email")}: ${profile?.email || "N/A"}\n${t("Phone")}: ${profile?.phone || "N/A"}\n${t("Role & Status")}: ${String(
                   profile?.role || "Unknown",
@@ -1309,7 +1309,7 @@ export default function Home({
               className="inline-flex items-center gap-2 text-emerald-500 hover:text-emerald-400 mt-2 font-medium cursor-pointer bg-transparent border-none"
             >
               <MessageCircle className="w-4 h-4" /> WhatsApp:{" "}
-              {standardizePhone(settings?.supportNumber || "3363284466")}
+              {standardizePhone(settings?.supportNumber || "3416286423")}
             </button>
 
             {settings?.whatsappChannelLink && (

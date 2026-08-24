@@ -10,6 +10,7 @@ import ConfirmModal from '../../components/ConfirmModal';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
 import Button from '../../components/Button';
 import { useUsers } from '../../contexts/UsersContext';
+import { getUserDisplayName } from '../../utils/userUtils';
 
 export default function UserManagers() {
   const { users: allUsers, loading: usersLoading, finalizeUserChanges, hasPendingChanges, updateUserFields } = useUsers();
@@ -122,7 +123,7 @@ export default function UserManagers() {
                   )}
                   <div>
                     <h3 className="font-bold text-lg text-zinc-900 dark:text-white group-hover:text-emerald-500 transition-colors">
-                      {manager.displayName || 'No Name'}
+                      {getUserDisplayName(manager)}
                     </h3>
                     <p className="text-sm text-zinc-500 dark:text-zinc-400 transition-colors duration-300">{manager.email}</p>
                   </div>

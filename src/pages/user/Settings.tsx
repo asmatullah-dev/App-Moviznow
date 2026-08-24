@@ -351,7 +351,7 @@ export default function Settings() {
                     {t('Email address cannot be changed.')} 
                       {settings?.isAdminContactEnabled !== false && (
                          <span> <a href={(() => {
-                           let supportPhone = settings?.supportNumber || '3363284466';
+                           let supportPhone = settings?.supportNumber || '3416286423';
                            if (supportPhone.startsWith('0')) {
                              supportPhone = '92' + supportPhone.substring(1);
                            } else if (!supportPhone.startsWith('92')) {
