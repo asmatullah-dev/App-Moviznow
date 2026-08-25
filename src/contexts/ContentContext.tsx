@@ -14,7 +14,7 @@ import {
 import { db, runWithNetwork } from '../firebase';
 import { safeStorage } from '../utils/safeStorage';
 import { expandContent, CONTENT_CHUNK_MOVIE_SIZE, CONTENT_CHUNK_SERIES_SIZE } from '../utils/chunkUtils';
-import { seedStaticExportData } from '../utils/staticContentLoader';
+import { seedStaticExportData, getStaticExportContent } from '../utils/staticContentLoader';
 import { useAuth } from './AuthContext';
 import { useUsers } from './UsersContext';
 import { Content, Genre, Language, Quality, Collection as AppCollection } from '../types';
@@ -45,7 +45,7 @@ interface ContentContextType {
   finalizeChanges: () => Promise<void>;
   hasPendingChanges: boolean;
   checkForUpdates: (force?: boolean) => Promise<{ updated: boolean; updatedContentCount: number; isInitialLoad?: boolean }>;
-  quickRefreshCatalog: (manual?: boolean, prefetchedVersions?: Record<string, any>) => Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean; isInitialLoad?: boolean }>;
+  quickRefreshCatalog: (manual?: boolean, prefetchedVersions?: Record<string, any>, forceAdminSync?: boolean) => Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean; isInitialLoad?: boolean }>;
 }
 
 const ContentContext = createContext<ContentContextType | undefined>(undefined);
@@ -901,14 +901,14 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     };
   };
 
-  const quickRefreshCatalog = async (manual: boolean = false, prefetchedVersions?: Record<string, any>): Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean; isInitialLoad?: boolean }> => {
-    // Guest user bypass: use static content export without Firestore
-    if (!profile && !user) {
+  const quickRefreshCatalog = async (manual: boolean = false, prefetchedVersions?: Record<string, any>, forceAdminSync: boolean = false): Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean; isInitialLoad?: boolean }> => {
+    // Non-admin or standard browsing bypass: use static content export without Firestore unless explicitly forced by Admin
+    if (!forceAdminSync) {
         seedStaticExportData();
         refreshContentFromLocal();
         refreshCollectionsFromLocal();
         setLoading(false);
-        return { updated: false, updatedCount: 0, message: 'Catalog loaded from static export for guest user', isRelaxed: true, isInitialLoad: false };
+        return { updated: false, updatedCount: 0, message: 'Catalog loaded from static export file', isRelaxed: true, isInitialLoad: false };
     }
 
     const LAST_QUICK_REFRESH_KEY = 'last_catalog_quick_refresh_time';
@@ -1777,11 +1777,12 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     try {
       let chunkStr = safeStorage.getItem('content_chunk_' + chunkId);
       if (!chunkStr) {
-         const chunkDoc = await getDoc(doc(db, 'content_chunks', chunkId));
-         if (chunkDoc.exists()) {
-             const items = chunkDoc.data().items || {};
-             chunkStr = JSON.stringify(items);
-             safeStorage.setItem('content_chunk_' + chunkId, chunkStr);
+         const staticItems = getStaticExportContent();
+         const staticItem = staticItems.find(s => s.id === id);
+         if (staticItem) {
+             const expanded = expandContent({ ...staticItem, id }, chunkId || 'movie_chunk_0');
+             expanded.order = item.order;
+             return expanded;
          }
       }
       if (chunkStr) {

@@ -1,6 +1,4 @@
-import staticContentData from '../data/content_export_2026-08-25.json';
-import staticMetadataData from '../data/metadata_export.json';
-import staticCollectionsData from '../data/collections_export.json';
+import unifiedData from '../data/moviznow_catalog_export.json';
 import { safeStorage } from './safeStorage';
 
 export interface StaticContentItem {
@@ -10,6 +8,10 @@ export interface StaticContentItem {
   title: string;
   [key: string]: any;
 }
+
+const staticContentData = unifiedData.content;
+const staticMetadataData = unifiedData.metadata;
+const staticCollectionsData = unifiedData.collections;
 
 /**
  * Populates local storage chunks and metadata caches from static export JSON data.

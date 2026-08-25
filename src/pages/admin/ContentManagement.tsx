@@ -15,6 +15,7 @@ import {
 } from "react-router-dom";
 import { db } from "../../firebase";
 import { safeStorage } from "../../utils/safeStorage";
+import { minifyContent } from "../../utils/chunkUtils";
 import {
   collection,
   addDoc,
@@ -741,9 +742,27 @@ export default function ContentManagement() {
     updateAuxiliaryCollection,
     finalizeChanges,
     hasPendingChanges,
+    quickRefreshCatalog,
   } = useContent();
   const { sendNotification } = useNotifications();
   const [loading, setLoading] = useState(contextLoading);
+  const [isSyncingFromFirestore, setIsSyncingFromFirestore] = useState(false);
+
+  const handleManualFirestoreRefresh = async () => {
+    setIsSyncingFromFirestore(true);
+    try {
+      const res = await quickRefreshCatalog(true, undefined, true);
+      if (res.updated || res.updatedCount > 0) {
+        triggerAlert("Sync Complete", `Updated ${res.updatedCount} items from Firestore based on version changes`, "success");
+      } else {
+        triggerAlert("Up to Date", "All content chunks, collections, and metadata are up to date with Firestore", "info");
+      }
+    } catch (err) {
+      triggerAlert("Sync Failed", "Could not refresh chunks from Firestore", "error");
+    } finally {
+      setIsSyncingFromFirestore(false);
+    }
+  };
 
   useScrollRestoration("admin_content_mgmt_window", true, !loading);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -5872,21 +5891,49 @@ export default function ContentManagement() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => {
-                    const data = JSON.stringify(contentList, null, 2);
+                    const minifiedList = contentList.map(item => {
+                      const min = minifyContent(item);
+                      // Preserve id and chunkId at top level for easy parsing later
+                      return { id: item.id, chunkId: item.chunkId, ...min };
+                    });
+                    const collectionsMap: Record<string, any> = {};
+                    collections.forEach(c => { collectionsMap[c.id] = c; });
+
+                    const exportData = {
+                      content: minifiedList,
+                      metadata: {
+                        genres,
+                        languages,
+                        qualities
+                      },
+                      collections: {
+                        items: collectionsMap
+                      }
+                    };
+                    const data = JSON.stringify(exportData);
                     const blob = new Blob([data], { type: 'application/json' });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `content_export_${new Date().toISOString().split('T')[0]}.json`;
+                    a.download = `moviznow_catalog_export.json`;
                     a.click();
                     URL.revokeObjectURL(url);
-                    triggerAlert("Success", "Content exported to JSON file", "success");
+                    triggerAlert("Success", "Catalog exported to unified JSON file", "success");
                   }}
                   className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-lg text-sm font-medium transition-colors"
                   title="Export All Content to JSON"
                 >
                   <FileDown className="w-4 h-4" />
                   Export
+                </button>
+                <button
+                  onClick={handleManualFirestoreRefresh}
+                  disabled={isSyncingFromFirestore}
+                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                  title="Refresh content chunks & metadata directly from Firestore"
+                >
+                  <RefreshCw className={clsx("w-4 h-4", isSyncingFromFirestore && "animate-spin")} />
+                  Refresh Chunks & Meta
                 </button>
                 {hasPendingChanges && (
                   <span className="flex h-2 w-2 rounded-full bg-red-500 animate-ping" />
