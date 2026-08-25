@@ -84,6 +84,7 @@ import {
   TrendingUp,
   Clock,
   GitMerge,
+  Github,
 } from "lucide-react";
 import {
   DragDropContext,
@@ -747,6 +748,47 @@ export default function ContentManagement() {
   const { sendNotification } = useNotifications();
   const [loading, setLoading] = useState(contextLoading);
   const [isSyncingFromFirestore, setIsSyncingFromFirestore] = useState(false);
+  const [isGithubModalOpen, setIsGithubModalOpen] = useState(false);
+  const [githubRepo, setGithubRepo] = useState(() => localStorage.getItem("githubRepo") || "");
+  const [githubPat, setGithubPat] = useState(() => localStorage.getItem("githubPat") || "");
+  const [isTriggeringWorkflow, setIsTriggeringWorkflow] = useState(false);
+
+  const handleTriggerGithubExport = async () => {
+    if (!githubRepo || !githubPat) {
+      triggerAlert("Error", "Please provide both GitHub Repository and Personal Access Token.", "error");
+      return;
+    }
+    
+    setIsTriggeringWorkflow(true);
+    try {
+      // Save config for future uses
+      localStorage.setItem("githubRepo", githubRepo);
+      localStorage.setItem("githubPat", githubPat);
+
+      const response = await fetch(`https://api.github.com/repos/${githubRepo}/actions/workflows/daily-export.yml/dispatches`, {
+        method: "POST",
+        headers: {
+          "Accept": "application/vnd.github.v3+json",
+          "Authorization": `Bearer ${githubPat}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ref: "main" }), // Triggering on main branch
+      });
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        throw new Error(errorData || "Failed to trigger workflow");
+      }
+
+      setIsGithubModalOpen(false);
+      triggerAlert("Success", "GitHub export workflow triggered successfully. It will run in the background.", "success");
+    } catch (error: any) {
+      console.error("GitHub Action error:", error);
+      triggerAlert("Error", "Failed to trigger workflow: " + (error.message || "Unknown error"), "error");
+    } finally {
+      setIsTriggeringWorkflow(false);
+    }
+  };
 
   const handleManualFirestoreRefresh = async () => {
     setIsSyncingFromFirestore(true);
@@ -5927,6 +5969,14 @@ export default function ContentManagement() {
                   Export
                 </button>
                 <button
+                  onClick={() => setIsGithubModalOpen(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-100 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 rounded-lg text-sm font-medium transition-colors"
+                  title="Trigger GitHub Actions JSON Sync Workflow"
+                >
+                  <Github className="w-4 h-4" />
+                  GitHub Sync
+                </button>
+                <button
                   onClick={handleManualFirestoreRefresh}
                   disabled={isSyncingFromFirestore}
                   className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
@@ -7310,6 +7360,65 @@ export default function ContentManagement() {
         onClose={() => setTelegramDownloadContent(null)}
         content={telegramDownloadContent}
       />
+      
+      {/* GitHub Sync Modal */}
+      {isGithubModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-zinc-900 rounded-xl w-full max-w-md overflow-hidden shadow-2xl border border-zinc-200 dark:border-zinc-800">
+            <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+              <h3 className="text-xl font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+                <Github className="w-5 h-5" />
+                GitHub Sync
+              </h3>
+              <button
+                onClick={() => setIsGithubModalOpen(false)}
+                className="text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                Trigger the GitHub Actions workflow to update your catalog JSON export on your GitHub repository.
+              </p>
+              <div>
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                  GitHub Repository
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. username/repository"
+                  value={githubRepo}
+                  onChange={(e) => setGithubRepo(e.target.value)}
+                  className="w-full px-4 py-2 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-zinc-900 dark:text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                  Personal Access Token (PAT)
+                </label>
+                <input
+                  type="password"
+                  placeholder="ghp_xxxxxxxxxxxx"
+                  value={githubPat}
+                  onChange={(e) => setGithubPat(e.target.value)}
+                  className="w-full px-4 py-2 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-zinc-900 dark:text-white"
+                />
+                <p className="text-xs text-zinc-500 mt-1">Requires the "repo" scope.</p>
+              </div>
+            </div>
+            <div className="p-6 border-t border-zinc-200 dark:border-zinc-800 flex justify-end gap-3">
+              <Button variant="secondary" onClick={() => setIsGithubModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleTriggerGithubExport} disabled={isTriggeringWorkflow}>
+                {isTriggeringWorkflow ? <Loader2 className="w-4 h-4 animate-spin" /> : "Trigger Sync"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {loading && contentList.length > 0 && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[9999] bg-emerald-500 text-white px-6 py-2.5 rounded-full flex items-center justify-center gap-2 text-sm font-medium shadow-lg whitespace-nowrap">
           <Loader2 className="w-4 h-4 animate-spin" />
