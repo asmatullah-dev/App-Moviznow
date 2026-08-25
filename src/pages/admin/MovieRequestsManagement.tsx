@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useAdminContent } from '../../contexts/AdminContentContext';
+import { useContent } from '../../contexts/ContentContext';
 import { useUsers } from '../../contexts/UsersContext';
 import { Film, Search, Clock, CheckCircle2, XCircle, MessageCircle, Trash2, Tv, Filter, User, Mail, Calendar, ArrowUp, ArrowDown, Plus, X, Eye, MessageSquare } from 'lucide-react';
 import { clsx } from 'clsx';
@@ -28,7 +28,7 @@ interface MovieRequest {
 
 export default function MovieRequestsManagement() {
   const { profile } = useAuth();
-  const { contentList: allContent } = useAdminContent();
+  const { contentList: allContent } = useContent();
   const [requests, setRequests] = useState<MovieRequest[]>([]);
   const [search, setSearch] = useState(() => sessionStorage.getItem('requests_mgmt_search') || '');
   const [contentSearch, setContentSearch] = useState('');

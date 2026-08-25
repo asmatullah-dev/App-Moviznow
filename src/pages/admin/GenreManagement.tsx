@@ -6,10 +6,10 @@ import ConfirmModal from '../../components/ConfirmModal';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
 
-import { useAdminContent } from '../../contexts/AdminContentContext';
+import { useContent } from '../../contexts/ContentContext';
 
 export default function GenreManagement() {
-  const { genres, addAuxiliaryItem, updateAuxiliaryItem, deleteAuxiliaryItem } = useAdminContent();
+  const { genres, addAuxiliaryItem, updateAuxiliaryItem, deleteAuxiliaryItem } = useContent();
   const [newGenre, setNewGenre] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');

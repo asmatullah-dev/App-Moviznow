@@ -8,7 +8,7 @@ import {
   X,
   Save,
 } from "lucide-react";
-import { useAdminContent } from "../../contexts/AdminContentContext";
+import { useContent } from "../../contexts/ContentContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { useUsers } from "../../contexts/UsersContext";
 import { Content, QualityLinks, Season } from "../../types";
@@ -31,7 +31,7 @@ interface ReportedLink {
 }
 
 export default function ReportedLinks() {
-  const { getContent, updateContentFields, contentList } = useAdminContent();
+  const { getContent, updateContentFields, contentList } = useContent();
   const [alertConfig, setAlertConfig] = useState<{
     isOpen: boolean;
     title: string;

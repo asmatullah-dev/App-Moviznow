@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Trash2, Edit2, Save, X, Layers, Film, ChevronUp, ChevronDown, Loader2, TrendingUp, Zap, Clock } from 'lucide-react';
 import { Collection as AppCollection, Content } from '../../types';
-import { useAdminContent } from '../../contexts/AdminContentContext';
+import { useContent } from '../../contexts/ContentContext';
 import { Button } from '../../components/Button';
 import { clsx } from 'clsx';
 import ConfirmModal from '../../components/ConfirmModal';
@@ -18,7 +18,7 @@ export default function CollectionsManagement() {
     finalizeChanges, 
     hasPendingChanges,
     reorderCollections
-  } = useAdminContent();
+  } = useContent();
   const [isEditing, setIsEditing] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{ title: string; description: string; contentIds: string[] }>({ title: '', description: '', contentIds: [] });
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);

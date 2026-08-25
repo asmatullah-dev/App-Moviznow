@@ -1,4 +1,3 @@
-import { AdminContentProvider } from "../../contexts/AdminContentContext";
 import { useState, useEffect, useMemo } from 'react';
 import { Outlet, Link, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -242,9 +241,7 @@ export default function AdminLayout() {
 
       {/* Main Content */}
       <main className="flex-1 p-4 md:p-8">
-        <AdminContentProvider>
-          <Outlet />
-        </AdminContentProvider>
+        <Outlet />
       </main>
 
       <ConfirmModal

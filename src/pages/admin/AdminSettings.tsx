@@ -4,7 +4,7 @@ import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { db, storage, auth, requestNotificationPermission } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSettings } from '../../contexts/SettingsContext';
-import { useAdminContent } from '../../contexts/AdminContentContext';
+import { useContent } from '../../contexts/ContentContext';
 import { Save, AlertCircle, GripVertical, Plus, Trash2, Layout, Wallet, Phone, Image as ImageIcon, Settings as SettingsIcon, RefreshCw, ShieldCheck, X, Eye, EyeOff, Database, Rocket, Loader2, Bell, BellOff, Info, Mail, Check, Megaphone } from 'lucide-react';
 import { clsx } from 'clsx';
 import { Navigate } from 'react-router-dom';
@@ -16,7 +16,7 @@ import { AppSettings, BankAccount } from '../../types';
 export default function AdminSettings() {
   const { profile } = useAuth();
   const { refreshSettings } = useSettings();
-  const { contentList } = useAdminContent();
+  const { contentList } = useContent();
   const [settings, setSettings] = useState<AppSettings>({
     headerText: 'MovizNow',
     membershipFee: 200,
