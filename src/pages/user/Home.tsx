@@ -126,21 +126,6 @@ export default function Home({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const catalogSearchInputRef = useRef<HTMLInputElement>(null);
 
-  const [isRefreshingCatalog, setIsRefreshingCatalog] = useState(false);
-
-  const handleQuickRefresh = async () => {
-    if (isRefreshingCatalog) return;
-    vibrate(30);
-    setIsRefreshingCatalog(true);
-    try {
-      await quickRefreshCatalog(true);
-    } catch (err) {
-      console.error("Quick refresh error:", err);
-    } finally {
-      setIsRefreshingCatalog(false);
-    }
-  };
-
   const [reviewsData, setReviewsData] = useState({ average: "0.0", total: 0 });
   const [hasUserRated, setHasUserRated] = useState<boolean>(() => safeStorage.getItem("has_rated") === "true");
 
@@ -1052,27 +1037,6 @@ export default function Home({
                 <h2 className="text-lg sm:text-xl font-extrabold tracking-tight text-zinc-900 dark:text-white">
                   {t("Explore Catalog")}
                 </h2>
-                <button
-                  type="button"
-                  id="refresh-catalog-btn"
-                  onClick={handleQuickRefresh}
-                  disabled={isRefreshingCatalog}
-                  className={clsx(
-                    "p-1.5 rounded-xl transition-all cursor-pointer flex items-center justify-center",
-                    "text-zinc-500 hover:text-emerald-500 dark:text-zinc-400 dark:hover:text-emerald-400",
-                    "hover:bg-emerald-500/10 active:scale-90",
-                    isRefreshingCatalog && "opacity-80",
-                  )}
-                  title={t("Refresh Catalog")}
-                  aria-label={t("Refresh Catalog")}
-                >
-                  <RefreshCw
-                    className={clsx(
-                      "w-4 h-4 sm:w-4.5 sm:h-4.5 transition-transform duration-300",
-                      isRefreshingCatalog && "animate-spin text-emerald-500",
-                    )}
-                  />
-                </button>
               </div>
             </div>
 
