@@ -16,6 +16,13 @@ const shouldFetchMeta = () => {
   }
 
   const now = Date.now();
+  const lastFetchTimeStr = safeStorage.getItem('last_chunk_meta_fetch_time');
+  const lastFetchTime = lastFetchTimeStr ? parseInt(lastFetchTimeStr, 10) : 0;
+  // If older than 30 seconds, fetch latest chunk meta
+  if (now - lastFetchTime > 30 * 1000) {
+    return true;
+  }
+
   // PKT is UTC+5. Shift back by 7 hours to align the daily update cycle with 7 AM PKT.
   const shiftedTime = new Date(now + (5 - 7) * 60 * 60 * 1000);
   const checkPeriod = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
@@ -35,7 +42,11 @@ export const getChunkMeta = async (forceRefresh = false) => {
     chunkMetaPromise = null;
     memoryCache = null;
   } else if (memoryCache) {
-    return memoryCache;
+    const lastFetchTimeStr = safeStorage.getItem('last_chunk_meta_fetch_time');
+    const lastFetchTime = lastFetchTimeStr ? parseInt(lastFetchTimeStr, 10) : 0;
+    if (nowMs - lastFetchTime <= 30 * 1000) {
+      return memoryCache;
+    }
   }
 
   const requiresFetch = forceRefresh || shouldFetchMeta();
@@ -87,6 +98,9 @@ export const updateChunkMetaLocalCache = (updates: Record<string, any>) => {
     } else {
       memoryCache = {};
     }
+  }
+  if (updates.users) {
+    memoryCache.users = { ...(memoryCache.users || {}), ...updates.users };
   }
   memoryCache = { ...memoryCache, ...updates };
   safeStorage.setItem('cached_chunk_meta_doc', JSON.stringify(memoryCache));

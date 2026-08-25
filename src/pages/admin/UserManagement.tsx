@@ -460,6 +460,7 @@ export default function UserManagement() {
       updateUserFields(userId, {
         requirePasswordReset: true
       });
+      await finalizeUserChanges(true);
       setAlertConfig({ isOpen: true, title: 'Success', message: 'User has been flagged for password reset on next login.' });
     } catch (error: any) {
       console.error("Error resetting password:", error);
@@ -614,6 +615,7 @@ export default function UserManagement() {
       const newRole = editForm.role;
 
       updateUserFields(currentEditingId, updateData);
+      await finalizeUserChanges(true);
 
       // Send membership update notification to enabled services if expiry date changed
       if (updateData.expiryDate !== undefined && updateData.expiryDate !== selectedUser.expiryDate) {
@@ -901,6 +903,7 @@ export default function UserManagement() {
       updateUserFields(selectedUser.uid, {
         assignedContent: nextAssigned
       });
+      await finalizeUserChanges(true);
       
       // Update local state for immediate feedback
       setSelectedUser({ ...selectedUser, assignedContent: nextAssigned });
@@ -917,6 +920,7 @@ export default function UserManagement() {
       updateUserFields(selectedUser.uid, {
         assignedContent: nextAssigned
       });
+      await finalizeUserChanges(true);
       
       // Update local state
       setSelectedUser({ ...selectedUser, assignedContent: nextAssigned });
@@ -933,6 +937,7 @@ export default function UserManagement() {
       updateUserFields(selectedUser.uid, {
         assignedContent: nextAssigned
       });
+      await finalizeUserChanges(true);
       
       // Update local state
       setSelectedUser({ ...selectedUser, assignedContent: nextAssigned });
@@ -1007,6 +1012,7 @@ export default function UserManagement() {
       const updatedRequests = userRequests.map(r => r.id === requestId ? { ...r, status } : r);
       if (selectedUser) {
         updateUserFields(selectedUser.uid, { movieRequests: updatedRequests });
+        await finalizeUserChanges(true);
       }
       setUserRequests(updatedRequests);
     } catch (error) {
@@ -1020,6 +1026,7 @@ export default function UserManagement() {
       const updatedRequests = userRequests.filter(r => r.id !== requestId);
       if (selectedUser) {
         updateUserFields(selectedUser.uid, { movieRequests: updatedRequests });
+        await finalizeUserChanges(true);
       }
       setUserRequests(updatedRequests);
     } catch (error) {
@@ -1177,6 +1184,7 @@ export default function UserManagement() {
           }
         }
       });
+      await finalizeUserChanges(true);
     } catch (error) {
       console.error('Error updating users:', error);
       setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to update users' });
@@ -1204,6 +1212,7 @@ export default function UserManagement() {
       });
       if (Object.keys(batchUpdates).length > 0) {
         updateMultipleUserFields(batchUpdates);
+        await finalizeUserChanges(true);
       }
     } catch (error) {
       console.error('Error updating user roles:', error);
@@ -1365,6 +1374,7 @@ export default function UserManagement() {
         }
         
         updateUserFields((foundUser as any).id, updateData);
+        await finalizeUserChanges(true);
         setAlertConfig({ isOpen: true, title: 'Success', message: 'Pending user claimed successfully.' });
       } else {
         const standardizedPhone = newUserForm.phone ? standardizePhone(newUserForm.phone) : '';
@@ -1414,6 +1424,7 @@ export default function UserManagement() {
               updateData.managedBy = profile.uid;
             }
             updateUserFields(existingUser.uid, updateData);
+            await finalizeUserChanges(true);
             setAlertConfig({ isOpen: true, title: 'Success', message: `Existing user account (${existingUser.email || existingUser.phone}) updated successfully.` });
             setProcessing(prev => ({ ...prev, addUser: false }));
             return;
@@ -2167,7 +2178,7 @@ export default function UserManagement() {
                       const emailNewContent = emailPref.newContent !== false;
                       const emailMembershipAlerts = emailPref.membershipAlerts !== false && emailPref.membershipExpiry !== false;
 
-                      const handleUpdateNotificationPrefs = (newPrefs: any, legacyUpdates: any = {}) => {
+                      const handleUpdateNotificationPrefs = async (newPrefs: any, legacyUpdates: any = {}) => {
                         try {
                           const mergedPrefs = {
                             fcm: {
@@ -2197,6 +2208,7 @@ export default function UserManagement() {
 
                           // Save into pending changes buffer (synced when tab switched, exited, or saved)
                           updateUserFields(selectedUser.uid, updateData);
+                          await finalizeUserChanges(true);
                         } catch (err) {
                           console.error("Failed to update notification preferences:", err);
                         }
@@ -2526,6 +2538,7 @@ export default function UserManagement() {
                                 updateUserFields(selectedUser.uid, {
                                   assignedContent: nextAssigned
                                 });
+                                await finalizeUserChanges(true);
                                 setSelectedUser({ ...selectedUser, assignedContent: nextAssigned });
                                 setAssignedIds(new Set(nextAssigned));
                                 // Update titles

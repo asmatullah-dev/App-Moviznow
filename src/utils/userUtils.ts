@@ -3,7 +3,9 @@ export function getUserDisplayName(user?: { displayName?: string | null; phone?:
   
   if (user.displayName && typeof user.displayName === 'string') {
     const trimmed = user.displayName.trim();
-    if (trimmed !== '' && trimmed !== 'No Name' && trimmed !== 'null' && trimmed !== 'undefined' && trimmed !== 'Anonymous') {
+    const lower = trimmed.toLowerCase();
+    const invalidNames = ['no name', 'null', 'undefined', 'anonymous', 'unknown', 'none', 'n/a', ''];
+    if (!invalidNames.includes(lower) && !lower.startsWith('user (')) {
       return trimmed;
     }
   }

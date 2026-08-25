@@ -145,11 +145,11 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     updateMultipleUserFields({ [userId]: fields });
   }, [updateMultipleUserFields]);
 
-  const finalizeUserChanges = useCallback(async (force: boolean = false) => {
+  const finalizeUserChanges = useCallback(async (force: boolean = true) => {
     const pendingStr = safeStorage.getItem('pending_user_updates');
     if (!pendingStr) return;
     
-    // Only allow sync when forced via the UI buttons for admins
+    // Only allow sync when forced (default true)
     if (!force) {
         console.log("Users sync deferred: Only manual sync is allowed.");
         return;
@@ -206,6 +206,12 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       batches[batches.length - 1].set(doc(db, 'chunk_meta', 'versions'), { users: usersMeta }, { merge: true });
       for (const b of batches) await b.commit();
       
+      // Update local chunk_meta cache immediately
+      try {
+        const { updateChunkMetaLocalCache } = await import('../utils/chunkMeta');
+        updateChunkMetaLocalCache({ users: usersMeta });
+      } catch (e) {}
+
       // Update local known mtimes cache
       const knownMtimesStr = safeStorage.getItem('sync_user_mtimes') || '{}';
       let knownMtimes: Record<string, number> = {};
@@ -253,10 +259,9 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     const lastFetchTimeStr = safeStorage.getItem('last_users_sync_timestamp');
     const lastFetchTime = lastFetchTimeStr ? parseInt(lastFetchTimeStr, 10) : 0;
 
-    // Throttle checks to avoid redundant fetches on every reload/navigation
-    const lastCheckPeriod = safeStorage.getItem('last_chunk_users_check_period');
-    const isRecentFetch = (now - lastFetchTime) < 30 * 60 * 1000;
-    if (!force && locallyCachedUsers.length > 0 && (lastCheckPeriod === checkPeriod || isRecentFetch)) {
+    // Fast return if freshly fetched within 30 seconds, unless forced
+    const isRecentFetch = (now - lastFetchTime) < 30 * 1000;
+    if (!force && locallyCachedUsers.length > 0 && isRecentFetch) {
         setLoading(false);
         return { users: locallyCachedUsers, updatedSomething: false };
     }

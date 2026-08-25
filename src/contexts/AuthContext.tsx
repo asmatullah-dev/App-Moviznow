@@ -448,29 +448,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const pktDate = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
         const isDailySync = lastSyncDateStr !== pktDate;
 
-        if (localProfile && !profile) {
-          const normLocal = normalizeUserStatusAndExpiry(localProfile);
-          setProfile(normLocal);
-          setLoading(false); // Unblock immediately if we have cached data
-        }
-
-        // Fast Local Storage Reload: If not forced, daily sync is not due, and local profile exists,
-        // do not check Firestore on reload. Use local storage data directly.
-        if (!force && !isDailySync && localProfile && localProfile.uid === currentUser.uid) {
+        if (localProfile) {
           const normLocal = normalizeUserStatusAndExpiry(localProfile);
           setProfile(normLocal);
           if (normLocal.status !== localProfile.status) {
             safeStorage.setItem("profile_cache", JSON.stringify(normLocal));
           }
-          setLoading(false);
-          setIsSyncing(false);
-          return false;
+          setLoading(false); // Unblock immediately if we have cached data
         }
 
         // 1. Firstly read chunk_meta
         let serverVersion = localVersion;
         let isVersionMissing = false;
-        if (navigator.onLine && (force || isDailySync || !localProfile)) {
+        if (navigator.onLine) {
           setIsSyncing(true);
           try {
             const { getChunkMeta } = await import("../utils/chunkMeta");
@@ -489,7 +479,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // 2. If version changes found
         const effectiveServerVersion = (typeof serverVersion === "number" && serverVersion > 0) ? serverVersion : 1;
         const versionChanged =
-          (serverVersion > 0 && serverVersion > localVersion) || (!localProfile);
+          (serverVersion > 0 && serverVersion > localVersion) || (!localProfile) || isDailySync;
 
         let serverProfile: UserProfile | null = null;
         let docSnap;

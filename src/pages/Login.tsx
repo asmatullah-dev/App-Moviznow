@@ -8,6 +8,7 @@ import { Film, Mail, Phone, ArrowLeft, Eye, EyeOff, Lock, User as UserIcon, Load
 import { ConfirmationResult } from 'firebase/auth';
 import { UserProfile } from '../types';
 import AlertModal from '../components/AlertModal';
+import { getUserDisplayName } from '../utils/userUtils';
 
 type LoginStep = 'social' | 'identifier' | 'password' | 'reset-password' | 'create_password';
 
@@ -212,7 +213,8 @@ export default function Login() {
                       if (supportPhone.startsWith('92')) supportPhone = supportPhone.substring(2);
                       if (supportPhone.startsWith('0')) supportPhone = supportPhone.substring(1);
                       const adminPhone = `92${supportPhone}`;
-                      const message = `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${user?.displayName || t("Unknown")}\n${t("Email")}: ${user?.email || 'N/A'}\n${t("Phone")}: ${standardizedPhone}\n${t("Role & Status")}: ${t("Unknown")}, ${t("Unknown")}\n\n${t("Your message/question:")}\n${t("I need help logging in.")}`;
+                      const contactName = getUserDisplayName(user || { phone: standardizedPhone });
+                      const message = `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${contactName}\n${t("Email")}: ${user?.email || 'N/A'}\n${t("Phone")}: ${standardizedPhone}\n${t("Role & Status")}: ${t("Unknown")}, ${t("Unknown")}\n\n${t("Your message/question:")}\n${t("I need help logging in.")}`;
                       window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
                     }}
                     className="w-full bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-700 py-2.5 rounded-lg font-medium hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors"
@@ -271,7 +273,8 @@ export default function Login() {
                           if (supportPhone.startsWith('92')) supportPhone = supportPhone.substring(2);
                           if (supportPhone.startsWith('0')) supportPhone = supportPhone.substring(1);
                           const adminPhone = `92${supportPhone}`;
-                          const message = `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${foundUser?.displayName || t("Unknown")}\n${t("Email")}: ${foundUser?.email || 'N/A'}\n${t("Phone")}: ${foundUser?.phone || userPhone}\n${t("Role & Status")}: ${t("Unknown")}, ${t("Unknown")}\n\n${t("Your message/question:")}\n${t("I need help logging in.")}`;
+                          const contactName = getUserDisplayName(foundUser || { phone: userPhone });
+                          const message = `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${contactName}\n${t("Email")}: ${foundUser?.email || 'N/A'}\n${t("Phone")}: ${foundUser?.phone || userPhone}\n${t("Role & Status")}: ${t("Unknown")}, ${t("Unknown")}\n\n${t("Your message/question:")}\n${t("I need help logging in.")}`;
                           window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
                         }}
                         className="w-full bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-700 py-2.5 rounded-lg font-medium hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors"
@@ -295,7 +298,9 @@ export default function Login() {
           setStep('password');
         } else {
           // Pre-fill details for create_password step
-          setDisplayName(foundUser.displayName || '');
+          const resolvedName = getUserDisplayName(foundUser);
+          const isGenericName = resolvedName.startsWith('User (') || resolvedName === 'User';
+          setDisplayName(isGenericName ? '' : resolvedName);
           setOptionalEmail(foundUser.email?.endsWith('@moviznow.com') ? '' : (foundUser.email || ''));
           setStep('create_password');
         }
@@ -356,7 +361,8 @@ export default function Login() {
       if (supportPhone.startsWith('92')) supportPhone = supportPhone.substring(2);
       if (supportPhone.startsWith('0')) supportPhone = supportPhone.substring(1);
       const adminPhone = `92${supportPhone}`;
-      const message = `Assalam O Alaikum! Admin,\n\nName: ${registeredUser?.displayName || 'Unknown'}\nEmail: ${registeredUser?.email || 'N/A'}\nPhone: ${registeredUser?.phone || identifier}\nRole & Status: ${String(registeredUser?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(registeredUser?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\n${t("Your message/question:")}\n${t("I forgot my password and need help resetting it.")}`;
+      const contactName = getUserDisplayName(registeredUser || { phone: identifier });
+      const message = `Assalam O Alaikum! Admin,\n\nName: ${contactName}\nEmail: ${registeredUser?.email || 'N/A'}\nPhone: ${registeredUser?.phone || identifier}\nRole & Status: ${String(registeredUser?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(registeredUser?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\n${t("Your message/question:")}\n${t("I forgot my password and need help resetting it.")}`;
       window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
     }
   };
@@ -549,7 +555,13 @@ export default function Login() {
             setCustomError(null);
             setIsLoggingIn(true);
             
-            if (!registeredUser?.displayName && (!displayName.trim() || displayName.trim().length < 2)) {
+            const hasValidRegisteredName = (() => {
+              const name = registeredUser?.displayName?.trim() || '';
+              const lower = name.toLowerCase();
+              return name.length >= 2 && !['no name', 'null', 'undefined', 'anonymous', 'unknown', 'none', 'n/a'].includes(lower) && !lower.startsWith('user (');
+            })();
+
+            if (!hasValidRegisteredName && (!displayName.trim() || displayName.trim().length < 2)) {
               setCustomError("Please enter your Full Name (minimum 2 characters).");
               setIsLoggingIn(false);
               return;
@@ -614,22 +626,27 @@ export default function Login() {
               </div>
             ) : (
               <>
-                {!registeredUser?.displayName && (
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Full Name</label>
-                    <div className="relative">
-                      <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
-                      <input
-                        type="text"
-                        required
-                        value={displayName}
-                        onChange={(e) => setDisplayName(e.target.value)}
-                        className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-11 pr-4 py-3 text-sm focus:outline-none focus:border-emerald-500 transition-colors"
-                        placeholder="John Doe"
-                      />
+                {(() => {
+                  const name = registeredUser?.displayName?.trim() || '';
+                  const lower = name.toLowerCase();
+                  const hasValid = name.length >= 2 && !['no name', 'null', 'undefined', 'anonymous', 'unknown', 'none', 'n/a'].includes(lower) && !lower.startsWith('user (');
+                  return !hasValid ? (
+                    <div>
+                      <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Full Name</label>
+                      <div className="relative">
+                        <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                        <input
+                          type="text"
+                          required
+                          value={displayName}
+                          onChange={(e) => setDisplayName(e.target.value)}
+                          className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-11 pr-4 py-3 text-sm focus:outline-none focus:border-emerald-500 transition-colors"
+                          placeholder="John Doe"
+                        />
+                      </div>
                     </div>
-                  </div>
-                )}
+                  ) : null;
+                })()}
                 {(!registeredUser?.email || registeredUser.email.endsWith('@moviznow.com')) && (
                   <div>
                     <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Email</label>
