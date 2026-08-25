@@ -7,6 +7,7 @@ import { useSettings } from '../contexts/SettingsContext';
 import { useNotifications } from '../contexts/NotificationContext';
 import { safeStorage } from '../utils/safeStorage';
 import { getChunkMeta } from '../utils/chunkMeta';
+import { seedStaticExportData } from '../utils/staticContentLoader';
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
@@ -20,6 +21,23 @@ export function RefreshAppDataManager() {
 
   const executeRefreshAppData = useCallback(async (reason: 'app_open' | 'manual' | 'catalog_button' | 'content_not_found' | 'user_profile_button' = 'manual') => {
     if (isRefreshingRef.current) return;
+
+    // For guest users (unauthenticated), populate content library from static export JSON and skip Firestore network calls!
+    if (!user) {
+      seedStaticExportData();
+      safeStorage.setItem('last_success_refresh_time', Date.now().toString());
+      if (reason !== 'app_open') {
+        window.dispatchEvent(new CustomEvent('sync_status', {
+          detail: {
+            status: 'up-to-date',
+            isInitialLoad: false,
+            updatedCount: 0,
+            message: 'Data is up to date'
+          }
+        }));
+      }
+      return;
+    }
 
     const isLibraryEmpty = !contentList || contentList.length === 0;
 

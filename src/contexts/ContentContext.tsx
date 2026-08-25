@@ -14,6 +14,7 @@ import {
 import { db, runWithNetwork } from '../firebase';
 import { safeStorage } from '../utils/safeStorage';
 import { expandContent, CONTENT_CHUNK_MOVIE_SIZE, CONTENT_CHUNK_SERIES_SIZE } from '../utils/chunkUtils';
+import { seedStaticExportData } from '../utils/staticContentLoader';
 import { useAuth } from './AuthContext';
 import { useUsers } from './UsersContext';
 import { Content, Genre, Language, Quality, Collection as AppCollection } from '../types';
@@ -135,7 +136,7 @@ export const checkHasPendingChanges = (): boolean => {
 };
 
 export function ContentProvider({ children }: { children: React.ReactNode }) {
-  const { profile, loading: authProfileLoading, refreshProfile } = useAuth();
+  const { user, profile, loading: authProfileLoading, refreshProfile } = useAuth();
   const { users: allUsers, finalizeUserChanges } = useUsers();
 
   const [contentList, setContentList] = useState<Content[]>(() => {
@@ -169,6 +170,13 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     if (hasLoadedRef.current) return;
     hasLoadedRef.current = true;
     
+    // Seed static content export immediately if local cache is empty or incomplete
+    const contentCache = safeStorage.getItem('content_cache');
+    const localMeta = safeStorage.getItem('chunk_meta_versions');
+    if (!contentCache || contentCache === '[]' || !localMeta) {
+      seedStaticExportData();
+    }
+
     // Initial sync from local storage for IMMEDIATE UI feedback
     refreshContentFromLocal();
     refreshCollectionsFromLocal();
@@ -512,6 +520,15 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
   };
 
   const syncWithServer = async (force: boolean = false): Promise<{ updatedSomething: boolean; updatedContentCount: number; isInitialLoad?: boolean }> => {
+    // Guest user bypass: use static content export without Firestore
+    if (!profile && !user) {
+        seedStaticExportData();
+        refreshContentFromLocal();
+        refreshCollectionsFromLocal();
+        setLoading(false);
+        return { updatedSomething: false, updatedContentCount: 0, isInitialLoad: false };
+    }
+
     let updatedSomething = false;
     let updatedContentCount = 0;
     if (!navigator.onLine) {
@@ -730,6 +747,15 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         return { updated: false, updatedContentCount: 0, isInitialLoad: false };
     }
 
+    // Guest user bypass: use static content export without Firestore
+    if (!profile && !user) {
+        seedStaticExportData();
+        refreshContentFromLocal();
+        refreshCollectionsFromLocal();
+        setLoading(false);
+        return { updated: false, updatedContentCount: 0, isInitialLoad: false };
+    }
+
     const now = Date.now();
     const lastSuccessfulMetaCheckStr = safeStorage.getItem('last_successful_meta_check');
     const lastSuccessfulMetaCheck = lastSuccessfulMetaCheckStr ? parseInt(lastSuccessfulMetaCheckStr) : 0;
@@ -876,6 +902,15 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
   };
 
   const quickRefreshCatalog = async (manual: boolean = false, prefetchedVersions?: Record<string, any>): Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean; isInitialLoad?: boolean }> => {
+    // Guest user bypass: use static content export without Firestore
+    if (!profile && !user) {
+        seedStaticExportData();
+        refreshContentFromLocal();
+        refreshCollectionsFromLocal();
+        setLoading(false);
+        return { updated: false, updatedCount: 0, message: 'Catalog loaded from static export for guest user', isRelaxed: true, isInitialLoad: false };
+    }
+
     const LAST_QUICK_REFRESH_KEY = 'last_catalog_quick_refresh_time';
     const now = Date.now();
 
