@@ -7,7 +7,7 @@ import AlertModal from '../../components/AlertModal';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
 import { smartSearch } from '../../utils/searchUtils';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
-import { useContent } from '../../contexts/ContentContext';
+import { useAdminContent } from '../../contexts/AdminContentContext';
 import { useUsers } from '../../contexts/UsersContext';
 import { safeStorage } from '../../utils/safeStorage';
 
@@ -22,7 +22,7 @@ export default function SelectedContentUsers() {
     };
   }, [finalizeUserChanges]);
   const [users, setUsers] = useState<UserProfile[]>([]);
-  const { contentList } = useContent();
+  const { contentList } = useAdminContent();
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [assignedIds, setAssignedIds] = useState<Set<string>>(new Set());
   const [userSearchTerm, setUserSearchTerm] = useState('');

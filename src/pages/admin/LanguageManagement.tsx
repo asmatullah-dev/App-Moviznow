@@ -6,10 +6,10 @@ import ConfirmModal from '../../components/ConfirmModal';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
 
-import { useContent } from '../../contexts/ContentContext';
+import { useAdminContent } from '../../contexts/AdminContentContext';
 
 export default function LanguageManagement() {
-  const { languages, addAuxiliaryItem, updateAuxiliaryItem, deleteAuxiliaryItem } = useContent();
+  const { languages, addAuxiliaryItem, updateAuxiliaryItem, deleteAuxiliaryItem } = useAdminContent();
   const [newLanguage, setNewLanguage] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');

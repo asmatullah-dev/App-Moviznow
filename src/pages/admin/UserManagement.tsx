@@ -17,7 +17,7 @@ import { getUserDisplayName } from '../../utils/userUtils';
 import { smartSearch } from '../../utils/searchUtils';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
 import { useSettings } from '../../contexts/SettingsContext';
-import { useContent } from '../../contexts/ContentContext';
+import { useAdminContent } from '../../contexts/AdminContentContext';
 import { PhoneWhitelistManager } from '../../components/PhoneWhitelistManager';
 
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -30,7 +30,7 @@ type SortOrder = 'asc' | 'desc';
 export default function UserManagement() {
   const { profile, findUsersByEmailOrPhone, authLoading } = useAuth();
   const { settings } = useSettings();
-  const { contentList, updateContentFields } = useContent();
+  const { contentList, updateContentFields } = useAdminContent();
   const location = useLocation();
   const navigate = useNavigate();
   const searchParams = new URLSearchParams(location.search);
@@ -226,7 +226,7 @@ export default function UserManagement() {
   }, [allUsers]);
 
   // Fetch fresh data on mount and force sync on unmount
-  const { checkForUpdates } = useContent();
+  const { checkForUpdates } = useAdminContent();
 
   useEffect(() => {
     let mounted = true;

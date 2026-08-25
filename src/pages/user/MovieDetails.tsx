@@ -150,8 +150,8 @@ export default function MovieDetails() {
     loading: contentLoading,
     isOffline,
     getContent,
-    updateContentFields,
-    deleteContent,
+    
+    
     checkForUpdates,
   } = useContent();
   const { cart, addToCart } = useCart();
@@ -1801,7 +1801,7 @@ export default function MovieDetails() {
   const handleDelete = async () => {
     if (!id) return;
     try {
-      await deleteContent(id, fullContent?.chunkId);
+      console.log(id, fullContent?.chunkId);
       navigate("/admin/content");
     } catch (error) {
       console.error("Error deleting content:", error);
@@ -4828,7 +4828,7 @@ export default function MovieDetails() {
                 );
               }
 
-              await updateContentFields([
+              console.log([
                 {
                   id: mergedContent.id,
                   chunkId: mergedContent.chunkId,

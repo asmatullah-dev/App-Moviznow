@@ -31,7 +31,8 @@ import {
 } from "firebase/firestore";
 import { useAuth } from "../../contexts/AuthContext";
 import { isValidGmailAddress } from "../../utils/emailValidation";
-import { useContent, isContentDataEqual } from "../../contexts/ContentContext";
+import { isContentDataEqual } from "../../contexts/ContentContext";
+import { useAdminContent } from "../../contexts/AdminContentContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { useUsers } from "../../contexts/UsersContext";
 import {
@@ -744,7 +745,7 @@ export default function ContentManagement() {
     finalizeChanges,
     hasPendingChanges,
     quickRefreshCatalog,
-  } = useContent();
+  } = useAdminContent();
   const { sendNotification } = useNotifications();
   const [loading, setLoading] = useState(contextLoading);
   const [isSyncingFromFirestore, setIsSyncingFromFirestore] = useState(false);
