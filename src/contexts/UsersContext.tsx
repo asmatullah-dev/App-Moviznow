@@ -322,24 +322,31 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           let knownMtimes: Record<string, number> = {};
           try { knownMtimes = JSON.parse(knownMtimesStr); } catch (e) {}
           
+          const isBaselineEmpty = Object.keys(knownMtimes).length === 0;
           const uidsToFetch = new Set<string>();
-          Object.entries(serverUsersVersion).forEach(([uid, mtime]) => {
-             if (typeof mtime === 'number') {
-               if (mtime === -1) {
-                 if (currentUsersMap.has(uid)) {
-                   currentUsersMap.delete(uid);
-                   updatedSomething = true;
+
+          if (isBaselineEmpty) {
+            // Baseline uninitialized: Seed baseline with current server version timestamps to avoid full collection queries
+            Object.assign(knownMtimes, serverUsersVersion);
+          } else {
+            Object.entries(serverUsersVersion).forEach(([uid, mtime]) => {
+               if (typeof mtime === 'number') {
+                 if (mtime === -1) {
+                   if (currentUsersMap.has(uid)) {
+                     currentUsersMap.delete(uid);
+                     updatedSomething = true;
+                   }
+                   delete knownMtimes[uid];
+                 } else if (knownMtimes[uid] === undefined) {
+                   uidsToFetch.add(uid);
+                   knownMtimes[uid] = mtime;
+                 } else if (mtime > knownMtimes[uid] && mtime > 0) {
+                   uidsToFetch.add(uid);
+                   knownMtimes[uid] = mtime;
                  }
-                 delete knownMtimes[uid];
-               } else if (!knownMtimes[uid] && currentUsersMap.has(uid)) {
-                 // User is already cached locally; seed recorded mtime baseline
-                 knownMtimes[uid] = mtime;
-               } else if (mtime > (knownMtimes[uid] || 0) && mtime > 0) {
-                 uidsToFetch.add(uid);
-                 knownMtimes[uid] = mtime;
                }
-             }
-          });
+            });
+          }
 
           // Check if any previously known users were deleted from chunk_meta/versions
           Object.keys(knownMtimes).forEach(knownUid => {
