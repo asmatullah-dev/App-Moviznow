@@ -10,7 +10,7 @@ import { getChunkMeta } from '../utils/chunkMeta';
 import { seedStaticExportData } from '../utils/staticContentLoader';
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
-const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
+const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 
 export function RefreshAppDataManager() {
   const { contentList, quickRefreshCatalog } = useContent();
@@ -45,10 +45,10 @@ export function RefreshAppDataManager() {
     const lastSuccessStr = safeStorage.getItem('last_success_refresh_time');
     const lastSuccess = lastSuccessStr ? parseInt(lastSuccessStr, 10) : 0;
     
-    // Default 5 minutes, App Open 3 hours
+    // Default 5 minutes, App Open 6 hours
     let cooldown = FIVE_MINUTES_MS;
     if (reason === 'app_open') {
-      cooldown = THREE_HOURS_MS;
+      cooldown = SIX_HOURS_MS;
     }
 
     if (!isLibraryEmpty && (Date.now() - lastSuccess < cooldown)) {

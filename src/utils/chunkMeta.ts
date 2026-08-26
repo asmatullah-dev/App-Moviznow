@@ -4,6 +4,7 @@ import { safeStorage } from './safeStorage';
 
 let chunkMetaPromise: Promise<Record<string, any>> | null = null;
 let memoryCache: Record<string, any> | null = null;
+let lastForceRefreshTime = 0;
 
 const shouldFetchMeta = () => {
   const cachedStr = safeStorage.getItem('cached_chunk_meta_doc');
@@ -38,10 +39,14 @@ const shouldFetchMeta = () => {
 export const getChunkMeta = async (forceRefresh = false) => {
   const nowMs = Date.now();
 
-  if (forceRefresh) {
+  // If forceRefresh is requested, only allow it once every 5 seconds to prevent component loops from hammering Firestore
+  const actualForce = forceRefresh && (nowMs - lastForceRefreshTime > 5000);
+  
+  if (actualForce) {
+    lastForceRefreshTime = nowMs;
     chunkMetaPromise = null;
     memoryCache = null;
-  } else if (memoryCache) {
+  } else if (memoryCache && !chunkMetaPromise) {
     const lastFetchTimeStr = safeStorage.getItem('last_chunk_meta_fetch_time');
     const lastFetchTime = lastFetchTimeStr ? parseInt(lastFetchTimeStr, 10) : 0;
     if (nowMs - lastFetchTime <= 30 * 1000) {
@@ -49,9 +54,9 @@ export const getChunkMeta = async (forceRefresh = false) => {
     }
   }
 
-  const requiresFetch = forceRefresh || shouldFetchMeta();
+  const requiresFetch = actualForce || shouldFetchMeta();
   
-  if (!requiresFetch) {
+  if (!requiresFetch && !chunkMetaPromise) {
     const cachedStr = safeStorage.getItem('cached_chunk_meta_doc');
     if (cachedStr) {
       try {
@@ -61,32 +66,31 @@ export const getChunkMeta = async (forceRefresh = false) => {
     }
   }
 
-  if (chunkMetaPromise && !forceRefresh) {
+  if (chunkMetaPromise) {
      return chunkMetaPromise;
   }
 
-  if (!chunkMetaPromise || forceRefresh) {
-    chunkMetaPromise = runWithNetwork(() => getDoc(doc(db, 'chunk_meta', 'versions')))
-      .then(snap => snap.exists() ? snap.data() : {})
-      .then(data => {
-        memoryCache = data;
-        safeStorage.setItem('cached_chunk_meta_doc', JSON.stringify(data));
-        safeStorage.setItem('last_chunk_meta_fetch_time', Date.now().toString());
+  chunkMetaPromise = runWithNetwork(() => getDoc(doc(db, 'chunk_meta', 'versions')))
+    .then(snap => snap.exists() ? snap.data() : {})
+    .then(data => {
+      memoryCache = data;
+      safeStorage.setItem('cached_chunk_meta_doc', JSON.stringify(data));
+      safeStorage.setItem('last_chunk_meta_fetch_time', Date.now().toString());
 
-        const nowInternal = Date.now();
-        const shiftedTimeInternal = new Date(nowInternal + (5 - 7) * 60 * 60 * 1000);
-        const periodInternal = `${shiftedTimeInternal.getUTCFullYear()}-${shiftedTimeInternal.getUTCMonth() + 1}-${shiftedTimeInternal.getUTCDate()}`;
-        safeStorage.setItem('last_chunk_meta_period', periodInternal);
-        
-        chunkMetaPromise = null;
-        return data;
-      })
-      .catch(err => {
-        console.error("Error fetching chunk_meta:", err);
-        chunkMetaPromise = null;
-        return memoryCache || {};
-      });
-  }
+      const nowInternal = Date.now();
+      const shiftedTimeInternal = new Date(nowInternal + (5 - 7) * 60 * 60 * 1000);
+      const periodInternal = `${shiftedTimeInternal.getUTCFullYear()}-${shiftedTimeInternal.getUTCMonth() + 1}-${shiftedTimeInternal.getUTCDate()}`;
+      safeStorage.setItem('last_chunk_meta_period', periodInternal);
+      
+      chunkMetaPromise = null;
+      return data;
+    })
+    .catch(err => {
+      console.error("Error fetching chunk_meta:", err);
+      chunkMetaPromise = null;
+      return memoryCache || {};
+    });
+
   return chunkMetaPromise;
 };
 

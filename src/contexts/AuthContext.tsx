@@ -413,6 +413,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [profile?.uid]);
 
+  const lastRefreshTimeRef = useRef<number>(0);
+
   const refreshProfile = useCallback(
     async (
       force = false,
@@ -425,6 +427,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLoading(false);
         return false;
       }
+
+      const now = Date.now();
+      // Throttle automatic refreshes to once every 15 seconds per tab
+      if (reason === "auto" && now - lastRefreshTimeRef.current < 15000 && !force) {
+        return false;
+      }
+      lastRefreshTimeRef.current = now;
 
       const userRef = doc(db, "users", currentUser.uid);
       const cachedProfileStr = safeStorage.getItem("profile_cache");
@@ -858,18 +867,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const hasLocalChanges =
           needsUserSync || accSecs > 0 || pendingUpdatesExist;
 
-        // Strict rule: Only write to Firestore if forced or if it's the daily sync window (after 9 AM PKT)
-        // If needsUserSync is true but it's not the daily sync time, it stays in local storage until next day
+        // Strict rule: Only write to Firestore if explicitly forced or manual, or daily sync
         const isLogin = justLoggedInRef.current || reason === "login";
         const isSignOut = reason === "logout";
         const shouldWrite =
-          reason !== "manual" &&
+          reason !== "auto" && // Don't write on background auto-refreshes unless explicit
           (serverProfile || localProfile) &&
           (isVersionMissing ||
             isLogin ||
             isSignOut ||
             force ||
-            (hasLocalChanges && isDailySync));
+            (hasLocalChanges && (isDailySync || reason === "manual")));
 
         if (shouldWrite) {
           try {
@@ -1736,10 +1744,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const isDailySync = lastSyncDateStr !== pktDate;
 
-        // If user has no local cache or daily sync is due, fetch via getDoc once
-        if (!hasValidCachedProfile || isDailySync) {
+        // If user has no local cache, fetch via getDoc once
+        if (!hasValidCachedProfile) {
           refreshProfile(false, "auto").catch((err) => {
-            console.warn("Initial daily profile sync failed:", err);
+            console.warn("Initial profile sync failed:", err);
           });
         }
 

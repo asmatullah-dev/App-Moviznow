@@ -839,80 +839,61 @@ export async function rebuildAllChunks(contents: Content[]): Promise<number> {
 }
 
 export async function fetchReviewsFromChunks(forceRefresh = false, syncWithFirestore = false): Promise<any[]> {
-  // If not forcing a live Firestore sync, prioritize local cache or static export JSON
+  // Requirement: "Automatically load reviews json from home page for all users even for admin"
+  // Requirement: "Don't directly refersh by Firestore, when user submit review then sync it with Firestore and save to local storage to show"
+  // Requirement: "after daily auto GitHub sync it will present to all users"
+
+  const cachedData = safeStorage.getItem('cached_reviews_data');
+  const cachedVersion = safeStorage.getItem('cached_review_version');
+
+  // If we are NOT syncing with Firestore, we should use the staticReviews + any recently submitted local reviews if possible,
+  // or just staticReviews if we want a clean state.
   if (!syncWithFirestore) {
-    const cachedData = safeStorage.getItem('cached_reviews_data');
-    const cachedVersion = safeStorage.getItem('cached_review_version');
-    
-    // If we have cached data and it's not the initial static fallback, return it
-    // We only return cached data if we're NOT forcing a refresh.
-    if (cachedData && !forceRefresh && cachedVersion !== 'static') {
+    if (cachedData && !forceRefresh) {
       try {
-        return JSON.parse(cachedData);
+        const parsed = JSON.parse(cachedData);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
       } catch (e) {}
-    }
-
-    // Default: Use the static reviews from the daily export if no live data is cached or if we want to reset
-    // This fulfills the requirement: "after daily auto GitHub sync it will present to all users"
-    // and "Don't directly refersh by Firestore" for normal usage.
-    if (!cachedData || cachedVersion === 'static' || forceRefresh) {
-      safeStorage.setItem('cached_reviews_data', JSON.stringify(staticReviews));
-      safeStorage.setItem('cached_review_version', 'static');
-      return staticReviews;
     }
     
-    // If we have cached non-static data but forceRefresh is false, it was handled above.
-    // If for some reason we reach here with cachedData, return it.
-    try {
-      return JSON.parse(cachedData || '[]');
-    } catch (e) {
-      return staticReviews;
-    }
+    // Default fallback to static JSON for all users (including admins)
+    return staticReviews;
   }
 
-  // Live Firestore fetch (typically used only after a new review is submitted to sync state)
-  // This fulfills: "when user submit review then sync it with Firestore and save to local storage to show"
-  const meta = await getChunkMeta(forceRefresh);
-  const serverVersion = meta.reviews?.version?.toString() || '0';
-  const cachedVersion = safeStorage.getItem('cached_review_version') || '0';
-  
-  if (!forceRefresh && cachedVersion === serverVersion && cachedVersion !== '0' && cachedVersion !== 'static') {
-    const cachedData = safeStorage.getItem('cached_reviews_data');
-    if (cachedData) {
-      try {
-        return JSON.parse(cachedData);
-      } catch (e) {}
-    }
-  }
-
-  // If serverVersion is 0 or meta has no reviews yet, and we have local cache, return cache
-  if (serverVersion === '0') {
-    const cachedData = safeStorage.getItem('cached_reviews_data');
-    if (cachedData) {
-      try {
-        return JSON.parse(cachedData);
-      } catch (e) {}
-    }
-  }
-
-  let allReviews: any[] = [];
+  // Live Firestore fetch (triggered ONLY after a new review is submitted or explicit admin action)
   try {
-    const mainDoc = await getDoc(doc(db, 'review_chunks', 'main'));
+    const meta = await getChunkMeta(forceRefresh);
+    const serverVersion = meta.reviews?.version?.toString() || '0';
+    
+    // If version matches and we're not forcing, return cache
+    if (!forceRefresh && cachedVersion === serverVersion && cachedVersion !== '0' && cachedVersion !== 'static' && cachedData) {
+      try {
+        return JSON.parse(cachedData);
+      } catch (e) {}
+    }
+
+    let allReviews: any[] = [];
+    const mainDoc = await runWithNetwork(() => getDoc(doc(db, 'review_chunks', 'main')));
     if (mainDoc.exists()) {
       const items = mainDoc.data().items || {};
       allReviews = Object.values(items);
+    } else {
+      allReviews = [...staticReviews];
     }
+
+    // Sort by date descending
+    allReviews.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    safeStorage.setItem('cached_reviews_data', JSON.stringify(allReviews));
+    safeStorage.setItem('cached_review_version', serverVersion === '0' ? Date.now().toString() : serverVersion);
+    
+    return allReviews;
   } catch (e) {
-    console.error("Error fetching review chunks:", e);
+    console.error("Error fetching review chunks from Firestore:", e);
+    return staticReviews;
   }
-
-  // Sort by date descending
-  allReviews.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-  safeStorage.setItem('cached_reviews_data', JSON.stringify(allReviews));
-  safeStorage.setItem('cached_review_version', serverVersion);
-  
-  return allReviews;
 }
 
 export async function saveReviewToChunk(review: any): Promise<void> {

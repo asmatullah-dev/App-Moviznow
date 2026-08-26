@@ -360,16 +360,20 @@ export function SyncUserDataManager() {
     };
   }, [handleSync]);
 
-  // Automatic daily trigger after 7 AM
+  // Automatic daily trigger after 7 AM PKT
   useEffect(() => {
     if (!user?.uid) return;
 
     const checkDailySync = () => {
-      const targetWindow = getToday7AMDateString();
-      const lastSyncWindow = safeStorage.getItem(`last_daily_7am_user_sync_${user.uid}`);
+      const now = Date.now();
+      const shiftedTime = new Date(now + (5 - 7) * 60 * 60 * 1000);
+      const pktDate = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
+      
+      const lastSyncKey = `last_daily_sync_${user.uid}`;
+      const lastSyncDateStr = localStorage.getItem(lastSyncKey);
 
-      if (lastSyncWindow !== targetWindow) {
-        safeStorage.setItem(`last_daily_7am_user_sync_${user.uid}`, targetWindow);
+      if (lastSyncDateStr !== pktDate) {
+        localStorage.setItem(lastSyncKey, pktDate);
         handleSync('daily_7am');
       }
     };
