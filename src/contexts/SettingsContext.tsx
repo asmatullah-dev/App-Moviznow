@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
-import { db, runWithNetwork } from '../firebase';
+import { db, auth, runWithNetwork } from '../firebase';
 import { getChunkMeta } from '../utils/chunkMeta';
 
 import { AppSettings } from '../types';
@@ -87,6 +87,20 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const refreshSettings = useCallback(async (force: boolean = false) => {
     try {
+      // For guest users (unauthenticated), use local storage or default app settings and skip Firestore network calls
+      if (!auth.currentUser) {
+        const cached = localStorage.getItem('cached_app_settings');
+        if (cached) {
+          try {
+            setSettings(JSON.parse(cached));
+          } catch {}
+        } else {
+          setSettings(DEFAULT_APP_SETTINGS);
+        }
+        setLoading(false);
+        return;
+      }
+
       const meta = await getChunkMeta(force);
       const serverVersion = meta.settings || 0;
       const localVersion = parseInt(localStorage.getItem('cached_settings_version') || '0', 10);
