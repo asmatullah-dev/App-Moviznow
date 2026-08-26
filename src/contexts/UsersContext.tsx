@@ -274,13 +274,13 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
 
     try {
       let currentUsers = [...locallyCachedUsers];
-      let { getDocs, query, collection, where, documentId } = await import('firebase/firestore');
+      let { getDocs, query, collection, where, documentId, limit } = await import('firebase/firestore');
 
       if (currentUsers.length === 0) {
-        // Initial bootstrap pull only when local cache is completely empty
+        // Initial bootstrap pull when local cache is empty: use strict limit query to avoid downloading all 1900+ user documents
         try {
           updatedSomething = true;
-          const q = query(collection(db, 'users'));
+          const q = query(collection(db, 'users'), limit(100));
           const snapshot = await runWithNetwork(() => getDocs(q));
           const rawFetched = snapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id })) as UserProfile[];
           const uMap = new Map<string, UserProfile>();
@@ -289,10 +289,10 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           });
           currentUsers = Array.from(uMap.values());
 
-          // Also update known mtimes from chunk_meta so future delta syncs work seamlessly
+          // Save mtimes baseline
           try {
             const { getChunkMeta } = await import('../utils/chunkMeta');
-            const versions = await getChunkMeta(true);
+            const versions = await getChunkMeta(force);
             const serverUsersVersion = versions?.users || {};
             const knownMtimesStr = safeStorage.getItem('sync_user_mtimes') || '{}';
             let knownMtimes: Record<string, number> = {};

@@ -962,12 +962,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 updatesToPush.status = "expired";
               }
             }
-            updatesToPush.lastActive = new Date().toISOString();
-
-            if (Object.keys(updatesToPush).length > 0) {
+            const realKeysToPush = Object.keys(updatesToPush).filter(k => k !== 'lastActive' && k !== 'updatedAt');
+            if (realKeysToPush.length > 0) {
+              updatesToPush.lastActive = new Date().toISOString();
               batch.set(userRef, updatesToPush, { merge: true });
+              await batch.commit();
             }
-            await batch.commit();
 
             localStorage.setItem(userSyncKey, now.toString());
             safeStorage.setItem("needs_user_sync", "false");

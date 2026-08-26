@@ -123,12 +123,23 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
     Object.assign(updatesToPush, startUserUpdates);
   }
 
-  // Include preferredTheme / preferredLanguage if updated in localStorage
+  // Include preferredTheme / preferredLanguage ONLY if changed from currentProfile
   const currentTheme = safeStorage.getItem('theme_preference');
-  if (currentTheme) updatesToPush.preferredTheme = currentTheme;
+  if (currentTheme && currentTheme !== (currentProfile as any)?.preferredTheme) {
+    updatesToPush.preferredTheme = currentTheme;
+  }
 
   const currentLang = safeStorage.getItem('language_preference');
-  if (currentLang) updatesToPush.preferredLanguage = currentLang;
+  if (currentLang && currentLang !== currentProfile?.preferredLanguage) {
+    updatesToPush.preferredLanguage = currentLang;
+  }
+
+  // If no fields to update, remove sync requirement and exit immediately without Firestore write
+  if (Object.keys(updatesToPush).length === 0) {
+    safeStorage.removeItem('needs_user_sync');
+    localStorage.setItem(lastSyncKey, nowTime.toString());
+    return true;
+  }
 
   updatesToPush.updatedAt = serverTimestamp();
 
