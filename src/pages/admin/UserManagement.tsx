@@ -1039,7 +1039,7 @@ export default function UserManagement() {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
     } else {
       setSortField(field);
-      setSortOrder(field === 'lastActive' ? 'desc' : 'asc');
+      setSortOrder(field === 'lastActive' || field === 'createdAt' || field === 'expiryDate' ? 'desc' : 'asc');
     }
   };
 
@@ -1289,59 +1289,71 @@ export default function UserManagement() {
     }
 
     // Sort
-    if (!searchTerm) {
-      result.sort((a, b) => {
-        let comparison = 0;
-        switch (sortField) {
-                    case 'createdAt':
-            {
-              const getT = (val: any) => {
-                if (!val) return 0;
-                if (val.toMillis) return val.toMillis();
-                if (val.seconds) return val.seconds * 1000;
-                return new Date(val).getTime();
-              };
-              const timeA = getT(a.createdAt);
-              const timeB = getT(b.createdAt);
-              comparison = (isNaN(timeA) ? 0 : timeA) - (isNaN(timeB) ? 0 : timeB);
+    result.sort((a, b) => {
+      let comparison = 0;
+      switch (sortField) {
+        case 'createdAt': {
+          const getT = (val: any) => {
+            if (!val) return 0;
+            if (typeof val === 'object') {
+              if (val.toMillis) return val.toMillis();
+              if (val.seconds) return val.seconds * 1000;
             }
-            break;
-          case 'lastActive':
-            {
-              const getT = (val: any) => {
-                if (!val) return 0;
-                if (val.toMillis) return val.toMillis();
-                if (val.seconds) return val.seconds * 1000;
-                return new Date(val).getTime();
-              };
-              const timeA = getT(a.lastActive);
-              const timeB = getT(b.lastActive);
-              comparison = (isNaN(timeA) ? 0 : timeA) - (isNaN(timeB) ? 0 : timeB);
-            }
-            break;
-          case 'displayName':
-            comparison = (a.displayName || '').localeCompare(b.displayName || '');
-            break;
-          case 'phone':
-            comparison = (a.phone || '').localeCompare(b.phone || '');
-            break;
-          case 'expiryDate':
-            const hasA = !!a.expiryDate;
-            const hasB = !!b.expiryDate;
-            if (!hasA && !hasB) {
-              comparison = 0;
-            } else if (!hasA) {
-              comparison = sortOrder === 'asc' ? 1 : -1;
-            } else if (!hasB) {
-              comparison = sortOrder === 'asc' ? -1 : 1;
-            } else {
-              comparison = new Date(a.expiryDate!).getTime() - new Date(b.expiryDate!).getTime();
-            }
-            break;
+            const t = new Date(val).getTime();
+            return isNaN(t) ? 0 : t;
+          };
+          const timeA = getT(a.createdAt);
+          const timeB = getT(b.createdAt);
+          comparison = timeA - timeB;
+          break;
         }
-        return sortOrder === 'asc' ? comparison : -comparison;
-      });
-    }
+        case 'lastActive': {
+          const getT = (val: any) => {
+            if (!val) return 0;
+            if (typeof val === 'object') {
+              if (val.toMillis) return val.toMillis();
+              if (val.seconds) return val.seconds * 1000;
+            }
+            const t = new Date(val).getTime();
+            return isNaN(t) ? 0 : t;
+          };
+          const timeA = getT(a.lastActive);
+          const timeB = getT(b.lastActive);
+          comparison = timeA - timeB;
+          break;
+        }
+        case 'displayName': {
+          const nameA = (a.displayName || a.email || a.phone || '').toLowerCase();
+          const nameB = (b.displayName || b.email || b.phone || '').toLowerCase();
+          comparison = nameA.localeCompare(nameB);
+          break;
+        }
+        case 'phone': {
+          comparison = (a.phone || '').localeCompare(b.phone || '');
+          break;
+        }
+        case 'expiryDate': {
+          const getExpiryT = (u: UserProfile) => {
+            if (u.role === 'owner' || u.expiryDate === 'Lifetime') {
+              return Number.MAX_SAFE_INTEGER;
+            }
+            const val = u.expiryDate;
+            if (!val) return 0;
+            if (typeof val === 'object') {
+              if ((val as any).toMillis) return (val as any).toMillis();
+              if ((val as any).seconds) return (val as any).seconds * 1000;
+            }
+            const t = new Date(val).getTime();
+            return isNaN(t) ? 0 : t;
+          };
+          const timeA = getExpiryT(a);
+          const timeB = getExpiryT(b);
+          comparison = timeA - timeB;
+          break;
+        }
+      }
+      return sortOrder === 'asc' ? comparison : -comparison;
+    });
 
     return result;
   }, [users, searchTerm, filterRole, filterStatus, filterLanguage, filterReward, sortField, sortOrder, allUsers]);
