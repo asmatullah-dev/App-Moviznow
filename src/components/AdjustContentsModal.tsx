@@ -10,7 +10,7 @@ import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHand
 import { getContrastColor } from '../utils/contentUtils';
 import { useModalBehavior } from '../hooks/useModalBehavior';
 
-import { useContent } from '../contexts/ContentContext';
+import { useAdminContent } from '../contexts/AdminContentContext';
 
 interface Props {
   isOpen: boolean;
@@ -138,7 +138,7 @@ const ContentItem = memo(({
 ContentItem.displayName = 'ContentItem';
 
 export const AdjustContentsModal: React.FC<Props> = ({ isOpen, onClose, contentList }) => {
-  const { updateOrder, qualities } = useContent();
+  const { updateOrder, qualities } = useAdminContent();
   const [items, setItems] = useState<Content[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [multiSelectMode, setMultiSelectMode] = useState(false);

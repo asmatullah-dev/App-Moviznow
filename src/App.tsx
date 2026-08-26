@@ -3,6 +3,7 @@ import { Suspense, lazy, useState, useEffect, useRef } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { ContentProvider } from './contexts/ContentContext';
+import { AdminContentProvider } from './contexts/AdminContentContext';
 import { NotificationProvider } from './contexts/NotificationContext';
 import { PWAProvider } from './contexts/PWAContext';
 import { CartProvider } from './contexts/CartContext';
@@ -292,6 +293,7 @@ export default function App() {
         <AuthLanguageSync />
         <UsersProvider>
           <SettingsProvider>
+            <AdminContentProvider>
             <ContentProvider>
               <NotificationProvider>
                 <CartProvider>
@@ -366,6 +368,7 @@ export default function App() {
                 </CartProvider>
               </NotificationProvider>
             </ContentProvider>
+            </AdminContentProvider>
           </SettingsProvider>
         </UsersProvider>
       </AuthProvider>

@@ -17,6 +17,7 @@ import { Translate } from "../../components/Translate";
 import { useAuth } from "../../contexts/AuthContext";
 import { useLanguage } from "../../contexts/LanguageContext";
 import { useContent } from "../../contexts/ContentContext";
+import { useAdminContent } from "../../contexts/AdminContentContext";
 import { useCart } from "../../contexts/CartContext";
 import { useHaptics } from "../../hooks/useHaptics";
 import { globalScrollState } from "../../hooks/useScrollRestoration";
@@ -150,10 +151,17 @@ export default function MovieDetails() {
     loading: contentLoading,
     isOffline,
     getContent,
-    updateContentFields,
-    deleteContent,
+    
+    
     checkForUpdates,
   } = useContent();
+  const adminContentContext = useAdminContent();
+  const { contentList: adminContentList, getContent: getAdminContent } = adminContentContext;
+
+  const isAdminOrEditor = useMemo(() => {
+    return profile?.role === 'owner' || profile?.role === 'manager' || profile?.role === 'content_manager';
+  }, [profile?.role]);
+
   const { cart, addToCart } = useCart();
   const { settings, refreshSettings } = useSettings();
   const [hasAttemptedGlobalRefresh, setHasAttemptedGlobalRefresh] =
@@ -161,11 +169,18 @@ export default function MovieDetails() {
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
 
   const content = useMemo(() => {
+    if (isAdminOrEditor) {
+      const adminFound = adminContentList.find((c) => c.id === id);
+      if (adminFound) return adminFound;
+    }
     return contentList.find((c) => c.id === id) || null;
-  }, [contentList, id]);
+  }, [contentList, adminContentList, id, isAdminOrEditor]);
 
   const [loading, setLoading] = useState(() => {
-    const found = contentList.find((c) => c.id === id);
+    if (!isAdminOrEditor) {
+      return !contentList.some((c) => c.id === id);
+    }
+    const found = contentList.some((c) => c.id === id) || (isAdminOrEditor && adminContentList.some((c) => c.id === id));
     return !found;
   });
   const [alertConfig, setAlertConfig] = useState<{
@@ -395,8 +410,16 @@ export default function MovieDetails() {
   // Reset state and load cache on ID change
   useEffect(() => {
     let activeId = id;
-    const foundInList = contentList.some((c) => c.id === id);
-    if (!foundInList) setLoading(true);
+    if (!isAdminOrEditor) {
+      if (!contentList.some((c) => c.id === id)) {
+        setLoading(true);
+      } else {
+        setLoading(false);
+      }
+    } else {
+      const foundInList = contentList.some((c) => c.id === id) || (isAdminOrEditor && adminContentList.some((c) => c.id === id));
+      if (!foundInList) setLoading(true);
+    }
 
     // Clear state synchronously for new ID
     setFullContent(null);
@@ -447,7 +470,7 @@ export default function MovieDetails() {
     hasAttemptedEpisodeFetch.current = {};
 
     return () => { activeId = null; };
-  }, [id]);
+  }, [id, adminContentList, isAdminOrEditor]);
 
   const [recentlyViewed, setRecentlyViewed] = useState<Content[]>([]);
 
@@ -510,32 +533,36 @@ export default function MovieDetails() {
       hasFetchedFull.current[id] = true;
       const fetchFullContent = async () => {
         try {
-          if (content && (content as any).chunkId) {
-            const { safeStorage } = await import("../../utils/safeStorage");
-            const { expandContent } = await import("../../utils/chunkUtils");
-            const chunkStr = safeStorage.getItem(
-              "content_chunk_" + (content as any).chunkId,
-            );
-            if (chunkStr) {
-              const items = JSON.parse(chunkStr);
-              if (items[id]) {
-                const expanded = expandContent(
-                  { ...items[id], id },
-                  (content as any).chunkId,
-                );
-                expanded.order = content.order;
-                setFullContent(expanded);
-                setLoading(false);
-                safeStorage.setItemAsync(
-                  `movie_details_${id}`,
-                  JSON.stringify(expanded),
-                );
-                return; // STOP! Don't fetch from Firestore
+          if (!isAdminOrEditor) {
+            if (content && (content as any).chunkId) {
+              const { safeStorage } = await import("../../utils/safeStorage");
+              const { expandContent } = await import("../../utils/chunkUtils");
+              const chunkStr = safeStorage.getItem(
+                "content_chunk_" + (content as any).chunkId,
+              );
+              if (chunkStr) {
+                const items = JSON.parse(chunkStr);
+                if (items[id]) {
+                  const expanded = expandContent(
+                    { ...items[id], id },
+                    (content as any).chunkId,
+                  );
+                  expanded.order = content.order;
+                  setFullContent(expanded);
+                  setLoading(false);
+                  safeStorage.setItemAsync(
+                    `movie_details_${id}`,
+                    JSON.stringify(expanded),
+                  );
+                  return; // STOP! Don't fetch from Firestore
+                }
               }
             }
+            setLoading(false);
+            return;
           }
 
-          const data = await getContent(id);
+          const data = isAdminOrEditor ? await getAdminContent(id) : await getContent(id);
           if (data) {
             setFullContent(data);
             setLoading(false);
@@ -1801,8 +1828,7 @@ export default function MovieDetails() {
   const handleDelete = async () => {
     if (!id) return;
     try {
-      await deleteContent(id, fullContent?.chunkId);
-      navigate("/admin/content");
+      navigate(`/admin/content?delete=${id}`);
     } catch (error) {
       console.error("Error deleting content:", error);
       setAlertConfig({
@@ -4828,7 +4854,7 @@ export default function MovieDetails() {
                 );
               }
 
-              await updateContentFields([
+              console.log([
                 {
                   id: mergedContent.id,
                   chunkId: mergedContent.chunkId,

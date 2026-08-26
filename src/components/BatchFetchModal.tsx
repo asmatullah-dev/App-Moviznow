@@ -5,7 +5,7 @@ import { useModalBehavior } from '../hooks/useModalBehavior';
 import { LinkCheckResult, performFullLinkScan, guessLinkType } from '../utils/linkScanner';
 import { searchTMDBByTitle, fetchTMDBDetails, fetchSeriesSeasons, fetchIMDbRating, getBestTrailer, searchYouTubeTrailer, fetchKinoCheckTrailer, getBestAlternativeTitle } from './MediaModal';
 import { normalizeOttPlatformName, extractOttPlatformFromTMDBDetails, fetchMovieDigitalReleaseDate, predictOttPlatformWithAI } from '../services/tmdb';
-import { useContent } from '../contexts/ContentContext';
+import { useAdminContent } from '../contexts/AdminContentContext';
 
 interface Props {
   isOpen: boolean;
@@ -41,7 +41,7 @@ export const BatchFetchModal: React.FC<Props> = ({
   mode,
   genres,
 }) => {
-  const { contentList, getContent, updateContentFields } = useContent();
+  const { contentList, getContent, updateContentFields } = useAdminContent();
   const [progress, setProgress] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [results, setResults] = useState<{ id: string; title: string; status: 'success' | 'error' | 'pending'; message?: string }[]>([]);

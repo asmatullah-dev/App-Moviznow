@@ -6,10 +6,10 @@ import ConfirmModal from '../../components/ConfirmModal';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
 
-import { useContent } from '../../contexts/ContentContext';
+import { useAdminContent } from '../../contexts/AdminContentContext';
 
 export default function QualityManagement() {
-  const { qualities, addAuxiliaryItem, updateAuxiliaryItem, deleteAuxiliaryItem } = useContent();
+  const { qualities, addAuxiliaryItem, updateAuxiliaryItem, deleteAuxiliaryItem } = useAdminContent();
   const [newQuality, setNewQuality] = useState('');
   const [newColor, setNewColor] = useState('#10b981');
   const [editingId, setEditingId] = useState<string | null>(null);

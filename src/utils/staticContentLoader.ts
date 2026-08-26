@@ -32,37 +32,69 @@ export function seedStaticExportData(): void {
       chunkMap[cId][item.id] = item;
     }
 
-    // 2. Write chunk objects into local storage
-    const localMeta: Record<string, any> = {};
+    const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+    let localMeta: Record<string, any> = {};
+    try { localMeta = JSON.parse(localMetaString); } catch (e) {}
+
+    // 2. Write chunk objects into local storage without overwriting existing local edits/items
     for (const [chunkId, itemsObj] of Object.entries(chunkMap)) {
       const storageKey = 'content_chunk_' + chunkId;
-      safeStorage.setItem(storageKey, JSON.stringify(itemsObj));
-      localMeta[chunkId] = { version: 1, count: Object.keys(itemsObj).length };
+      const existingStr = safeStorage.getItem(storageKey);
+      if (!existingStr || existingStr === '{}') {
+        safeStorage.setItem(storageKey, JSON.stringify(itemsObj));
+        if (!localMeta[chunkId]) {
+          localMeta[chunkId] = { version: 1, count: Object.keys(itemsObj).length };
+        }
+      } else {
+        try {
+          const existing = JSON.parse(existingStr);
+          let modified = false;
+          for (const [id, staticItem] of Object.entries(itemsObj)) {
+            if (!existing[id]) {
+              existing[id] = staticItem;
+              modified = true;
+            }
+          }
+          if (modified) {
+            safeStorage.setItem(storageKey, JSON.stringify(existing));
+          }
+          if (!localMeta[chunkId]) {
+            localMeta[chunkId] = { version: 1, count: Object.keys(existing).length };
+          }
+        } catch (e) {
+          safeStorage.setItem(storageKey, JSON.stringify(itemsObj));
+        }
+      }
     }
 
-    // 3. Populate metadata (genres, languages, qualities)
-    if (staticMetadataData.genres && staticMetadataData.genres.length > 0) {
+    // 3. Populate metadata (genres, languages, qualities) if missing
+    if (staticMetadataData.genres && staticMetadataData.genres.length > 0 && !safeStorage.getItem('genres_cache')) {
       safeStorage.setItem('genres_cache', JSON.stringify(staticMetadataData.genres));
     }
-    if (staticMetadataData.languages && staticMetadataData.languages.length > 0) {
+    if (staticMetadataData.languages && staticMetadataData.languages.length > 0 && !safeStorage.getItem('languages_cache')) {
       safeStorage.setItem('languages_cache', JSON.stringify(staticMetadataData.languages));
     }
-    if (staticMetadataData.qualities && staticMetadataData.qualities.length > 0) {
+    if (staticMetadataData.qualities && staticMetadataData.qualities.length > 0 && !safeStorage.getItem('qualities_cache')) {
       safeStorage.setItem('qualities_cache', JSON.stringify(staticMetadataData.qualities));
     }
-    localMeta.metadata = 1;
+    if (!localMeta.metadata) localMeta.metadata = 1;
 
-    // 4. Populate collections
+    // 4. Populate collections if missing
     if (staticCollectionsData.items && Object.keys(staticCollectionsData.items).length > 0) {
-      const collItems = staticCollectionsData.items;
-      safeStorage.setItem('local_collection_chunk_collection_chunk_0', JSON.stringify(collItems));
-      const collList = Object.values(collItems).sort((a: any, b: any) => (b.order || 0) - (a.order || 0));
-      safeStorage.setItem('collections_cache', JSON.stringify(collList));
+      if (!safeStorage.getItem('local_collection_chunk_collection_chunk_0')) {
+        safeStorage.setItem('local_collection_chunk_collection_chunk_0', JSON.stringify(staticCollectionsData.items));
+      }
+      if (!safeStorage.getItem('collections_cache')) {
+        const collList = Object.values(staticCollectionsData.items).sort((a: any, b: any) => (b.order || 0) - (a.order || 0));
+        safeStorage.setItem('collections_cache', JSON.stringify(collList));
+      }
     }
-    localMeta.collections = 1;
+    if (!localMeta.collections) localMeta.collections = 1;
 
     safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
-    safeStorage.setItem('last_successful_meta_check', Date.now().toString());
+    if (!safeStorage.getItem('last_successful_meta_check')) {
+      safeStorage.setItem('last_successful_meta_check', Date.now().toString());
+    }
   } catch (e) {
     console.error('Error seeding static export data:', e);
   }

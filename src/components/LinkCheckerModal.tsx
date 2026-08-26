@@ -30,7 +30,7 @@ import {
   Loader2 as LoaderIcon
 } from "lucide-react";
 import { QualityLinks, Language, Quality, LinkDef, Content } from '../types';
-import { useContent } from '../contexts/ContentContext';
+import { useAdminContent } from '../contexts/AdminContentContext';
 import { 
   LinkCheckResult, 
   StatusLabel, 
@@ -765,7 +765,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
   qualities = [],
   disableAutoClipboard = false,
 }) => {
-  const { contentList = [] } = useContent();
+  const { contentList = [] } = useAdminContent();
   const [availabilityFilter, setAvailabilityFilter] = useState<'all' | 'missing' | 'available'>('all');
   const [showDomainSettings, setShowDomainSettings] = useState(false);
   const [moviesdriveDomainInput, setMoviesdriveDomainInput] = useState(() => getMoviesdriveDomain());

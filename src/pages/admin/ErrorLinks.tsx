@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../firebase';
-import { useContent } from '../../contexts/ContentContext';
+import { useAdminContent } from '../../contexts/AdminContentContext';
 import { doc, updateDoc, getDoc } from 'firebase/firestore';
 import { Content, Season, QualityLinks, LinkDef, ErrorLinkInfo, Language, Quality } from '../../types';
 import { AlertTriangle, Edit2, ExternalLink, RefreshCw, X, Save, CheckCircle2, Filter, ArrowUpDown, Search, Trash2, Plus, ClipboardPaste, StopCircle } from 'lucide-react';
@@ -33,7 +33,7 @@ const parseLinks = (linksStr: string | undefined): QualityLinks => {
 };
 
 export default function ErrorLinks() {
-  const { contentList, languages, qualities, updateContentFields, loading: contentLoading } = useContent();
+  const { contentList, languages, qualities, updateContentFields, loading: contentLoading } = useAdminContent();
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   

@@ -23,7 +23,7 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
   const { theme, setTheme } = useTheme();
   const { language, setLanguage, t } = useLanguage();
   const { isInstallable, installApp } = usePWA();
-  const { checkForUpdates, quickRefreshCatalog } = useContent();
+  const { } = useContent();
   const { refreshSettings } = useSettings();
   const { enabled: isHapticsEnabled, toggleHaptics, vibrate } = useHaptics();
   const navigate = useNavigate();
@@ -538,7 +538,7 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                           await (window as any).triggerRefreshAppData('user_profile_button');
                         } else {
                           await Promise.all([
-                            quickRefreshCatalog(true),
+                            Promise.resolve(),
                             refreshProfile(true, 'manual'),
                             refreshSettings()
                           ]);
