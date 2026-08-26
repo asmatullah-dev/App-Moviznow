@@ -1294,7 +1294,7 @@ export default function UserManagement() {
       switch (sortField) {
         case 'createdAt': {
           const getT = (val: any) => {
-            if (!val) return 0;
+            if (!val || val === 'null' || val === 'undefined' || val === '') return 0;
             if (typeof val === 'object') {
               if (val.toMillis) return val.toMillis();
               if (val.seconds) return val.seconds * 1000;
@@ -1304,12 +1304,12 @@ export default function UserManagement() {
           };
           const timeA = getT(a.createdAt);
           const timeB = getT(b.createdAt);
-          comparison = timeA - timeB;
+          comparison = sortOrder === 'asc' ? timeA - timeB : timeB - timeA;
           break;
         }
         case 'lastActive': {
           const getT = (val: any) => {
-            if (!val) return 0;
+            if (!val || val === 'null' || val === 'undefined' || val === '') return 0;
             if (typeof val === 'object') {
               if (val.toMillis) return val.toMillis();
               if (val.seconds) return val.seconds * 1000;
@@ -1319,17 +1319,22 @@ export default function UserManagement() {
           };
           const timeA = getT(a.lastActive);
           const timeB = getT(b.lastActive);
-          comparison = timeA - timeB;
+          // If sorting desc, put never active (0) at bottom
+          if (timeA === 0 && timeB !== 0) return 1;
+          if (timeB === 0 && timeA !== 0) return -1;
+          comparison = sortOrder === 'asc' ? timeA - timeB : timeB - timeA;
           break;
         }
         case 'displayName': {
-          const nameA = (a.displayName || a.email || a.phone || '').toLowerCase();
-          const nameB = (b.displayName || b.email || b.phone || '').toLowerCase();
-          comparison = nameA.localeCompare(nameB);
+          const nameA = (getUserDisplayName(a) || a.displayName || a.email || a.phone || '').toLowerCase();
+          const nameB = (getUserDisplayName(b) || b.displayName || b.email || b.phone || '').toLowerCase();
+          comparison = sortOrder === 'asc' ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
           break;
         }
         case 'phone': {
-          comparison = (a.phone || '').localeCompare(b.phone || '');
+          const phoneA = (a.phone || '').replace(/\D/g, '');
+          const phoneB = (b.phone || '').replace(/\D/g, '');
+          comparison = sortOrder === 'asc' ? phoneA.localeCompare(phoneB) : phoneB.localeCompare(phoneA);
           break;
         }
         case 'expiryDate': {
@@ -1338,21 +1343,50 @@ export default function UserManagement() {
               return Number.MAX_SAFE_INTEGER;
             }
             const val = u.expiryDate;
-            if (!val) return 0;
+            if (!val || val === 'null' || val === 'undefined' || val === '') return 0;
             if (typeof val === 'object') {
               if ((val as any).toMillis) return (val as any).toMillis();
               if ((val as any).seconds) return (val as any).seconds * 1000;
+            }
+            if (typeof val === 'string') {
+              const cleanStr = val.trim();
+              if (/^\d{4}-\d{2}-\d{2}$/.test(cleanStr)) {
+                const parts = cleanStr.split('-');
+                const y = parseInt(parts[0], 10);
+                const m = parseInt(parts[1], 10) - 1;
+                const d = parseInt(parts[2], 10);
+                const dateObj = new Date(y, m, d, 23, 59, 59, 999);
+                return isNaN(dateObj.getTime()) ? 0 : dateObj.getTime();
+              }
             }
             const t = new Date(val).getTime();
             return isNaN(t) ? 0 : t;
           };
           const timeA = getExpiryT(a);
           const timeB = getExpiryT(b);
-          comparison = timeA - timeB;
+
+          if (sortOrder === 'asc') {
+            // In ascending order: users with no expiry date (0) go to bottom
+            if (timeA === 0 && timeB !== 0) return 1;
+            if (timeB === 0 && timeA !== 0) return -1;
+            comparison = timeA - timeB;
+          } else {
+            // In descending order: Lifetime (MAX_SAFE_INTEGER) at top, valid dates next, no expiry (0) at bottom
+            if (timeA === 0 && timeB !== 0) return 1;
+            if (timeB === 0 && timeA !== 0) return -1;
+            comparison = timeB - timeA;
+          }
           break;
         }
       }
-      return sortOrder === 'asc' ? comparison : -comparison;
+
+      // Stable tie-breaker if primary comparison is equal
+      if (comparison === 0) {
+        const createA = (a.createdAt || '').toString();
+        const createB = (b.createdAt || '').toString();
+        return createB.localeCompare(createA);
+      }
+      return comparison;
     });
 
     return result;

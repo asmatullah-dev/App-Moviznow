@@ -5,22 +5,11 @@ import { useAuth } from '../contexts/AuthContext';
 import { safeStorage } from '../utils/safeStorage';
 import { UserProfile } from '../types';
 
-export function getToday7AMDateString(): string {
-  const now = new Date();
-  const currentHour = now.getHours();
-
-  // If before 7 AM, the last 7 AM window was yesterday
-  if (currentHour < 7) {
-    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    return `${yesterday.getFullYear()}-${yesterday.getMonth() + 1}-${yesterday.getDate()}_7am`;
-  }
-  return `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}_7am`;
-}
-
 export async function executeSyncUserData(currentUserUid: string, currentProfile: UserProfile | null, reason: string = 'manual'): Promise<boolean> {
   if (!currentUserUid) return false;
 
   const nowTime = Date.now();
+  const lastSyncKey = `last_user_sync_time_${currentUserUid}`;
   const userRef = doc(db, 'users', currentUserUid);
 
   // 1. Flush accumulated time
@@ -69,7 +58,8 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
   );
 
   if (!hasPending) {
-    // If there is absolutely no pending data to sync, exit immediately with zero Firestore writes and zero reads.
+    // If there is absolutely no pending data to sync, update last sync timestamp and exit immediately.
+    localStorage.setItem(lastSyncKey, nowTime.toString());
     return true;
   }
 
@@ -310,6 +300,7 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
       safeStorage.setItem('profile_cache', JSON.stringify(updatedProfile));
     }
 
+    localStorage.setItem(lastSyncKey, nowTime.toString());
     console.log(`Sync completed successfully. Reason: ${reason}`);
 
     return true;
@@ -360,29 +351,27 @@ export function SyncUserDataManager() {
     };
   }, [handleSync]);
 
-  // Automatic daily trigger after 7 AM PKT (checked on mount/tab resume, no aggressive 30-min polling)
+  // Automatic 10-hour check trigger (checked on app open / mount & tab resume)
   useEffect(() => {
     if (!user?.uid) return;
 
-    const checkDailySync = () => {
+    const check10HourSync = () => {
+      const lastSyncKey = `last_user_sync_time_${user.uid}`;
+      const lastSyncStr = localStorage.getItem(lastSyncKey);
+      const lastSyncTime = lastSyncStr ? parseInt(lastSyncStr, 10) : 0;
       const now = Date.now();
-      const shiftedTime = new Date(now + (5 - 7) * 60 * 60 * 1000);
-      const pktDate = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
-      
-      const lastSyncKey = `last_daily_sync_${user.uid}`;
-      const lastSyncDateStr = localStorage.getItem(lastSyncKey);
+      const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
 
-      if (lastSyncDateStr !== pktDate) {
-        localStorage.setItem(lastSyncKey, pktDate);
-        handleSync('daily_7am');
+      if (!lastSyncTime || (now - lastSyncTime >= TEN_HOURS_MS)) {
+        handleSync('10_hour_sync');
       }
     };
 
-    checkDailySync();
+    check10HourSync();
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        checkDailySync();
+        check10HourSync();
       }
     };
 

@@ -450,12 +450,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         );
 
         const now = Date.now();
-        const dailySyncKey = `last_daily_sync_${currentUser.uid}`;
-        const lastSyncDateStr = localStorage.getItem(dailySyncKey);
-
-        const shiftedTime = new Date(now + (5 - 7) * 60 * 60 * 1000);
-        const pktDate = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
-        const isDailySync = lastSyncDateStr !== pktDate;
+        const userSyncKey = `last_user_sync_time_${currentUser.uid}`;
+        const lastSyncStr = localStorage.getItem(userSyncKey);
+        const lastSyncTime = lastSyncStr ? parseInt(lastSyncStr, 10) : 0;
+        const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
+        const is10HourSyncPassed = !lastSyncTime || (now - lastSyncTime >= TEN_HOURS_MS);
 
         if (localProfile) {
           const normLocal = normalizeUserStatusAndExpiry(localProfile);
@@ -970,7 +969,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
             await batch.commit();
 
-            if (isDailySync) localStorage.setItem(dailySyncKey, pktDate);
+            localStorage.setItem(userSyncKey, now.toString());
             safeStorage.setItem("needs_user_sync", "false");
             safeStorage.removeItem("pending_favorites_array");
             safeStorage.removeItem("pending_watch_later_array");
@@ -990,7 +989,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             console.error("Manual/Daily profile sync failed:", err);
           }
         } else {
-          if (isDailySync) localStorage.setItem(dailySyncKey, pktDate);
+          localStorage.setItem(userSyncKey, now.toString());
           if (serverProfile || localProfile) {
             safeStorage.setItem(localVersionKey, effectiveServerVersion.toString());
           }
@@ -1118,7 +1117,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (
             Object.keys(updates).length > 0 &&
             !isOnlyStatusExpired &&
-            (isDailySync ||
+            (is10HourSyncPassed ||
               isLogin ||
               isSignOut ||
               (force && reason !== "manual"))
@@ -1988,7 +1987,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       safeStorage.removeItem("profile_cache");
       safeStorage.removeItem("cached_chunk_users_versions");
       safeStorage.removeItem("cached_all_users");
-      localStorage.removeItem(`last_daily_sync_${result.user.uid}`);
+      localStorage.removeItem(`last_user_sync_time_${result.user.uid}`);
 
       // Check if we need to link phone/email in Firestore
       const userRef = doc(db, "users", result.user.uid);
@@ -2146,7 +2145,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       safeStorage.removeItem("profile_cache");
       safeStorage.removeItem("cached_chunk_users_versions");
       safeStorage.removeItem("cached_all_users");
-      localStorage.removeItem(`last_daily_sync_${result.user.uid}`);
+      localStorage.removeItem(`last_user_sync_time_${result.user.uid}`);
 
       try {
         const { writeBatch } = await import("firebase/firestore");
@@ -2560,7 +2559,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw new Error("No user logged in");
 
     const now = Date.now();
-    const dailySyncKey = `last_daily_sync_${user.uid}`;
+    const userSyncKey = `last_user_sync_time_${user.uid}`;
 
     try {
       setError(null);
@@ -2774,10 +2773,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      const shiftedTime = new Date(Date.now() + (5 - 7) * 60 * 60 * 1000);
-      const pktDate = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
-      const isDailySync = safeStorage.getItem(dailySyncKey) !== pktDate;
-      if (isDailySync) safeStorage.setItem(dailySyncKey, pktDate);
+      safeStorage.setItem(userSyncKey, Date.now().toString());
       safeStorage.setItem("needs_user_sync", "false");
 
       setProfile({ ...profile, ...data });
@@ -2825,7 +2821,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     safeStorage.removeItem("referral_stats_activated");
     safeStorage.removeItem("referral_users_list");
     if (auth.currentUser) {
-      localStorage.removeItem(`last_daily_sync_${auth.currentUser.uid}`);
+      localStorage.removeItem(`last_user_sync_time_${auth.currentUser.uid}`);
       safeStorage.removeItem(`referral_stats_count_${auth.currentUser.uid}`);
       safeStorage.removeItem(`referral_stats_activated_${auth.currentUser.uid}`);
       safeStorage.removeItem(`referral_users_list_${auth.currentUser.uid}`);
