@@ -838,25 +838,45 @@ export async function rebuildAllChunks(contents: Content[]): Promise<number> {
   return Object.keys(chunkDocs).length;
 }
 
-export async function fetchReviewsFromChunks(forceRefresh = false, isGuest = false): Promise<any[]> {
-  if (isGuest) {
+export async function fetchReviewsFromChunks(forceRefresh = false, syncWithFirestore = false): Promise<any[]> {
+  // If not forcing a live Firestore sync, prioritize local cache or static export JSON
+  if (!syncWithFirestore) {
     const cachedData = safeStorage.getItem('cached_reviews_data');
-    if (cachedData) {
+    const cachedVersion = safeStorage.getItem('cached_review_version');
+    
+    // If we have cached data and it's not the initial static fallback, return it
+    // We only return cached data if we're NOT forcing a refresh.
+    if (cachedData && !forceRefresh && cachedVersion !== 'static') {
       try {
         return JSON.parse(cachedData);
       } catch (e) {}
     }
-    // Set cache to staticReviews and return
-    safeStorage.setItem('cached_reviews_data', JSON.stringify(staticReviews));
-    safeStorage.setItem('cached_review_version', 'static');
-    return staticReviews;
+
+    // Default: Use the static reviews from the daily export if no live data is cached or if we want to reset
+    // This fulfills the requirement: "after daily auto GitHub sync it will present to all users"
+    // and "Don't directly refersh by Firestore" for normal usage.
+    if (!cachedData || cachedVersion === 'static' || forceRefresh) {
+      safeStorage.setItem('cached_reviews_data', JSON.stringify(staticReviews));
+      safeStorage.setItem('cached_review_version', 'static');
+      return staticReviews;
+    }
+    
+    // If we have cached non-static data but forceRefresh is false, it was handled above.
+    // If for some reason we reach here with cachedData, return it.
+    try {
+      return JSON.parse(cachedData || '[]');
+    } catch (e) {
+      return staticReviews;
+    }
   }
 
+  // Live Firestore fetch (typically used only after a new review is submitted to sync state)
+  // This fulfills: "when user submit review then sync it with Firestore and save to local storage to show"
   const meta = await getChunkMeta(forceRefresh);
-  const cachedVersion = safeStorage.getItem('cached_review_version') || '0';
   const serverVersion = meta.reviews?.version?.toString() || '0';
+  const cachedVersion = safeStorage.getItem('cached_review_version') || '0';
   
-  if (!forceRefresh && cachedVersion === serverVersion && cachedVersion !== '0') {
+  if (!forceRefresh && cachedVersion === serverVersion && cachedVersion !== '0' && cachedVersion !== 'static') {
     const cachedData = safeStorage.getItem('cached_reviews_data');
     if (cachedData) {
       try {

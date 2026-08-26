@@ -98,13 +98,9 @@ export default function Reviews() {
         console.error("Failed to load cached reviews:", e);
       }
 
-      const isGuest = !authLoading && !authProfileLoading && !profile?.uid;
-      
-      if (!isGuest) {
-        setSyncing(true);
-      }
+      setSyncing(true);
       try {
-        const data = await fetchReviewsFromChunks(false, isGuest);
+        const data = await fetchReviewsFromChunks(false, false);
         if (data) {
           setReviews(data);
           if (profile?.uid && data.some((r: any) => r.userId === profile.uid || (profile.email && r.userEmail === profile.email))) {
@@ -161,7 +157,10 @@ export default function Reviews() {
     
     try {
       await saveReviewToChunk(newReview);
-      const updatedReviews = [newReview, ...reviews];
+      
+      // After saving, sync with Firestore to ensure we have the latest server state
+      // This fulfills the "sync with Firestore only when logged in user submits" requirement
+      const updatedReviews = await fetchReviewsFromChunks(true, true);
       setReviews(updatedReviews);
       safeStorage.setItem(CACHE_KEY, JSON.stringify(updatedReviews));
       safeStorage.setItem('has_rated', 'true');

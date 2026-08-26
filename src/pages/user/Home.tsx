@@ -52,6 +52,7 @@ import { CollectionRow } from "../../components/home/CollectionRow";
 import { CuratedCollectionsOverview } from "../../components/home/CuratedCollectionsOverview";
 import { HomeCategoryChips } from "../../components/home/HomeCategoryChips";
 import { CollectionModal } from "../../components/home/CollectionModal";
+import { fetchReviewsFromChunks } from "../../utils/chunkUtils";
 import { APP_VERSION } from "../../version";
 
 export default function Home({
@@ -130,24 +131,24 @@ export default function Home({
   const [hasUserRated, setHasUserRated] = useState<boolean>(() => safeStorage.getItem("has_rated") === "true");
 
   useEffect(() => {
-    const loadReviews = () => {
+    const loadReviews = async () => {
       try {
-        const cachedData = safeStorage.getItem("cached_reviews_data");
-        if (cachedData) {
-          const data = JSON.parse(cachedData);
-          if (Array.isArray(data) && data.length > 0) {
-            const avg = (data.reduce((acc: number, curr: any) => acc + (curr.rating || 5), 0) / data.length).toFixed(1);
-            setReviewsData({ average: avg, total: data.length });
-            if (
-              profile?.uid &&
-              data.some((r: any) => r.userId === profile.uid || (profile.email && r.userEmail === profile.email))
-            ) {
-              safeStorage.setItem("has_rated", "true");
-              setHasUserRated(true);
-            }
+        // Initial load for all users defaults to static reviews
+        const data = await fetchReviewsFromChunks();
+        if (Array.isArray(data) && data.length > 0) {
+          const avg = (data.reduce((acc: number, curr: any) => acc + (curr.rating || 5), 0) / data.length).toFixed(1);
+          setReviewsData({ average: avg, total: data.length });
+          if (
+            profile?.uid &&
+            data.some((r: any) => r.userId === profile.uid || (profile.email && r.userEmail === profile.email))
+          ) {
+            safeStorage.setItem("has_rated", "true");
+            setHasUserRated(true);
           }
         }
-      } catch (e) {}
+      } catch (e) {
+        console.error("Failed to pre-load reviews on home:", e);
+      }
     };
     loadReviews();
   }, [profile?.uid, profile?.email]);

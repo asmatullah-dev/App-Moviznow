@@ -341,7 +341,8 @@ export default function Rewards() {
     if (!profile?.uid || profile.reviewRewardClaimed || claimingReview) return;
     setClaimingReview(true);
     try {
-      const allReviews = await fetchReviewsFromChunks(true);
+      // Use cached/static reviews without forcing a Firestore sync
+      const allReviews = await fetchReviewsFromChunks();
       const userHasReviewed = allReviews?.some((r: any) => 
         r.userId === profile.uid || (profile.email && r.userEmail === profile.email)
       );
