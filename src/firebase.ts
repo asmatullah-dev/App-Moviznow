@@ -148,13 +148,12 @@ export const requestNotificationPermission = async (force: boolean = false) => {
       });
       
       if (token) {
-        // Fast path: If token is unchanged and was synced within 24 hours, skip all Firestore writes
-        const tokenSyncedRecently = parsedCache && 
+        // Fast path: If token is unchanged and already cached in local storage, skip all Firestore reads and writes
+        const tokenAlreadySynced = parsedCache && 
           parsedCache.token === token && 
-          parsedCache.userId === currentUserId && 
-          (now - parsedCache.timestamp < ONE_DAY);
+          parsedCache.userId === currentUserId;
 
-        if (!force && tokenSyncedRecently) {
+        if (!force && tokenAlreadySynced) {
           return token;
         }
 
@@ -252,7 +251,6 @@ export const requestNotificationPermission = async (force: boolean = false) => {
               pendingAll[uid] = pendingAll[uid] || {};
               pendingAll[uid].notification = 'no';
               safeStorage.setItem('pending_user_updates', JSON.stringify(pendingAll));
-              safeStorage.setItem('needs_user_sync', 'true');
               
               // Also update profile cache
               const cachedStr = safeStorage.getItem('profile_cache');

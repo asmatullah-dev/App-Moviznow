@@ -2,6 +2,7 @@ import { doc, getDoc, getDocs, collection, writeBatch, setDoc, updateDoc, delete
 import { db } from '../firebase';
 import { Content } from '../types';
 import { getChunkMeta, clearChunkMetaCache } from './chunkMeta';
+import { runWithNetwork } from '../firebase';
 import { safeStorage } from './safeStorage';
 import staticReviews from '../data/moviznow_reviews_export.json';
 

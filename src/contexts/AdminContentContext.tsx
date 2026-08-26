@@ -979,11 +979,11 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     let totalUpdatedContentCount = 0;
 
     try {
-      // 1. Fetch chunk_meta versions doc from Firestore (read-only)
+      // 1. Fetch chunk_meta versions doc using getChunkMeta (cached & throttled)
       let versions: Record<string, any> = prefetchedVersions || {};
       if (!prefetchedVersions) {
-        const metaDocSnap = await runWithNetwork(() => getDoc(doc(db, 'chunk_meta', 'versions')));
-        versions = metaDocSnap.exists() ? metaDocSnap.data() : {};
+        const { getChunkMeta } = await import('../utils/chunkMeta');
+        versions = await getChunkMeta(manual);
       }
 
       safeStorage.setItem('cached_chunk_meta_doc', JSON.stringify(versions));

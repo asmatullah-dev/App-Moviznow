@@ -101,8 +101,19 @@ export default function Rewards() {
 
   const currentBadge = getBadge(referredCount);
 
-  const fetchReferralStats = async () => {
+  const fetchReferralStats = async (force: boolean = false) => {
     if (!profile?.uid) return;
+
+    const cacheTimeKey = `referral_stats_time_${profile.uid}`;
+    const lastFetchTime = parseInt(safeStorage.getItem(cacheTimeKey) || '0', 10);
+    const now = Date.now();
+    const hasCachedList = !!safeStorage.getItem(`referral_users_list_${profile.uid}`);
+
+    // If fetched within 15 minutes and we already have cached data, skip network read
+    if (!force && hasCachedList && (now - lastFetchTime < 15 * 60 * 1000)) {
+      setIsLoadingStats(false);
+      return;
+    }
 
     try {
       const refDoc = await getDoc(doc(db, 'referral', 'all'));
@@ -110,63 +121,6 @@ export default function Rewards() {
       if (refDoc.exists()) {
         const joins = refDoc.data()?.joins || {};
         myJoins = Object.values(joins).filter((j: any) => j.inviterUid === profile.uid);
-      }
-
-      if (myJoins.length === 0 && !refDoc.exists()) {
-        try {
-          const q = query(
-            collection(db, 'users'),
-            where('referredBy', '==', profile.uid),
-            limit(500)
-          );
-          const snap = await getDocs(q);
-          
-          if (!snap.empty) {
-            const batch = writeBatch(db);
-            const migratedJoins: any = {};
-            
-            snap.docs.forEach(docSnap => {
-              const data = docSnap.data();
-              const uid = docSnap.id;
-              const isPaid = (data.orders && data.orders.length > 0) || data.activationRewardClaimed;
-              
-              const joinRecord = {
-                uid,
-                code: profile.referralCode || 'UNKNOWN',
-                inviterUid: profile.uid,
-                displayName: data.displayName || data.email || 'User',
-                email: data.email || '',
-                status: isPaid ? 'paid' : 'login',
-                createdAt: data.createdAt || new Date().toISOString(),
-                signupClaimed: data.signupRewardClaimed || false,
-                activationClaimed: data.activationRewardClaimed || false
-              };
-              
-              migratedJoins[uid] = joinRecord;
-            });
-            
-            batch.set(doc(db, 'referral', 'all'), {
-              codes: {
-                [profile.uid]: profile.referralCode || 'UNKNOWN'
-              },
-              codeToUid: {
-                [profile.referralCode || 'UNKNOWN']: profile.uid
-              },
-              joins: migratedJoins,
-              stats: {
-                [profile.uid]: {
-                  totalJoined: snap.size,
-                  totalPaid: snap.docs.filter(d => (d.data().orders && d.data().orders.length > 0) || d.data().activationRewardClaimed).length
-                }
-              }
-            }, { merge: true });
-
-            await batch.commit();
-            myJoins = Object.values(migratedJoins);
-          }
-        } catch (err) {
-          // Ignore legacy migration query permission errors
-        }
       }
 
       const users: any[] = [];
@@ -204,6 +158,7 @@ export default function Rewards() {
         safeStorage.setItem(`referral_stats_count_${profile.uid}`, myJoins.length.toString());
         safeStorage.setItem(`referral_stats_activated_${profile.uid}`, activated.toString());
         safeStorage.setItem(`referral_users_list_${profile.uid}`, JSON.stringify(sortedUsers));
+        safeStorage.setItem(`referral_stats_time_${profile.uid}`, Date.now().toString());
       }
     } catch (e) {
       console.error("Error fetching referral stats:", e);
@@ -251,7 +206,7 @@ export default function Rewards() {
       await batch.commit();
       
       await updateUserProfileData(userUpdates);
-      await fetchReferralStats();
+      await fetchReferralStats(true);
       triggerConfetti();
     } catch (e) {
       console.error("Failed to claim reward:", e);

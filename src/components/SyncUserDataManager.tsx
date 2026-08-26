@@ -360,7 +360,7 @@ export function SyncUserDataManager() {
     };
   }, [handleSync]);
 
-  // Automatic daily trigger after 7 AM PKT
+  // Automatic daily trigger after 7 AM PKT (checked on mount/tab resume, no aggressive 30-min polling)
   useEffect(() => {
     if (!user?.uid) return;
 
@@ -379,8 +379,17 @@ export function SyncUserDataManager() {
     };
 
     checkDailySync();
-    const interval = setInterval(checkDailySync, 30 * 60 * 1000); // Check every 30 minutes
-    return () => clearInterval(interval);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkDailySync();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [user?.uid, handleSync]);
 
   return null;

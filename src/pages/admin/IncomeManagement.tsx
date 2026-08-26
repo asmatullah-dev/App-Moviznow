@@ -31,6 +31,15 @@ export default function IncomeManagement() {
 
   useEffect(() => {
     const fetchIncome = async () => {
+      const cacheTimeKey = 'income_fetch_time';
+      const lastFetch = parseInt(safeStorage.getItem(cacheTimeKey) || '0', 10);
+      const now = Date.now();
+      const hasCached = incomes.length > 0;
+
+      if (hasCached && (now - lastFetch < 5 * 60 * 1000)) {
+        return;
+      }
+
       try {
         const docRef = doc(db, 'income', 'data');
         const snap = await getDoc(docRef);
@@ -43,6 +52,8 @@ export default function IncomeManagement() {
 
         list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
         setIncomes(list);
+        safeStorage.setItem('cached_admin_income', JSON.stringify(list));
+        safeStorage.setItem(cacheTimeKey, now.toString());
       } catch (error) {
         console.error("Income fetch error:", error);
         handleFirestoreError(error, OperationType.LIST, 'income');

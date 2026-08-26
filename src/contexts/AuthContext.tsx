@@ -488,13 +488,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // 2. If version changes found
         const effectiveServerVersion = (typeof serverVersion === "number" && serverVersion > 0) ? serverVersion : 1;
         const versionChanged =
-          (serverVersion > 0 && serverVersion > localVersion) || (!localProfile) || isDailySync;
+          (serverVersion > 0 && serverVersion > localVersion) || (!localProfile) || (force && reason === "manual");
 
         let serverProfile: UserProfile | null = null;
         let docSnap;
 
         // 7. Verify user UID in Firestore when online and version changed or profile missing
-        if (navigator.onLine && (versionChanged || !localProfile || force)) {
+        if (navigator.onLine && (versionChanged || !localProfile || (force && reason === "manual"))) {
           try {
             docSnap = await runWithNetwork(() => getDoc(userRef));
             if (docSnap.exists()) {
@@ -867,17 +867,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const hasLocalChanges =
           needsUserSync || accSecs > 0 || pendingUpdatesExist;
 
-        // Strict rule: Only write to Firestore if explicitly forced or manual, or daily sync
+        // Strict rule: Only write to Firestore if explicitly manual or on fresh login/logout with local changes
         const isLogin = justLoggedInRef.current || reason === "login";
         const isSignOut = reason === "logout";
         const shouldWrite =
-          reason !== "auto" && // Don't write on background auto-refreshes unless explicit
+          reason !== "auto" && // Never write on automatic refreshes/session starts
           (serverProfile || localProfile) &&
-          (isVersionMissing ||
-            isLogin ||
+          (isLogin ||
             isSignOut ||
-            force ||
-            (hasLocalChanges && (isDailySync || reason === "manual")));
+            (force && reason === "manual") ||
+            (hasLocalChanges && reason === "manual"));
 
         if (shouldWrite) {
           try {
@@ -1735,62 +1734,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         const sessionKey = `last_session_start_${currentUser.uid}`;
-        const dailySyncKey = `last_daily_sync_${currentUser.uid}`;
-        const lastSyncDateStr = localStorage.getItem(dailySyncKey);
-        const lastSessionStart = localStorage.getItem(sessionKey);
         const now = Date.now();
-        const shiftedTime = new Date(now + (5 - 7) * 60 * 60 * 1000);
-        const pktDate = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
+        const twelveHours = 12 * 60 * 60 * 1000;
+        const lastSessionStart = localStorage.getItem(sessionKey);
 
-        const isDailySync = lastSyncDateStr !== pktDate;
-
-        // If user has no local cache, fetch via getDoc once
+        // If user has no local cache, fetch via getDoc once to initialize
         if (!hasValidCachedProfile) {
           refreshProfile(false, "auto").catch((err) => {
             console.warn("Initial profile sync failed:", err);
           });
         }
 
-        const twelveHours = 12 * 60 * 60 * 1000;
-
         // Always initialize the ref for this React lifecycle to ensure interval tracking works
         if (!sessionStartTimeRef.current) {
           sessionStartTimeRef.current = now;
         }
 
-        let pendingUpdates: any = {};
         if (!sessionStorage.getItem("session_started")) {
           sessionStorage.setItem("session_started", "true");
 
           if (
             !lastSessionStart ||
-            now - parseInt(lastSessionStart) > twelveHours
+            now - parseInt(lastSessionStart, 10) > twelveHours
           ) {
-            let isOwnerUser =
-              currentUser.email?.toLowerCase() === "asmatn628@gmail.com";
-            try {
-              const cachedProfileStr = safeStorage.getItem("profile_cache");
-              if (cachedProfileStr) {
-                const p = JSON.parse(cachedProfileStr);
-                if (p.role === "owner") isOwnerUser = true;
-              }
-            } catch (e) {}
-
             logEvent("session_start", currentUser.uid, {}, true); // Log to GA, skip individual Firestore write
             localStorage.setItem(sessionKey, now.toString());
 
-            if (!isOwnerUser) {
-              pendingUpdates.sessionsCount = increment(1);
-            }
-            pendingUpdates.lastActive = new Date().toISOString();
-
+            // Track session count & device details purely in local storage
             const { getDeviceDetails } = await import("../utils/deviceInfo");
             const deviceDetails = await getDeviceDetails();
             if (deviceDetails) {
               try {
                 const pendingStr =
                   safeStorage.getItem("pending_user_updates") || "{}";
-                let pendingAll = JSON.parse(pendingStr);
+                const pendingAll = JSON.parse(pendingStr);
                 pendingAll[currentUser.uid] = pendingAll[currentUser.uid] || {};
                 pendingAll[currentUser.uid].device = deviceDetails;
                 safeStorage.setItem(
@@ -1799,84 +1776,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 );
               } catch (e) {}
             }
-          }
-        }
-
-        // Add pending local state lists if daily sync applies or it's past 7AM and needs sync
-        const needsSync = safeStorage.getItem("needs_user_sync") === "true";
-        const isPast7AM = new Date(now + 5 * 3600000).getUTCHours() >= 7;
-        if (isDailySync || (isPast7AM && needsSync)) {
-          const pendingFavorites = safeStorage.getItem(
-            "pending_favorites_array",
-          );
-          if (pendingFavorites)
-            pendingUpdates.favorites = JSON.parse(pendingFavorites);
-
-          const pendingWatchLater = safeStorage.getItem(
-            "pending_watch_later_array",
-          );
-          if (pendingWatchLater)
-            pendingUpdates.watchLater = JSON.parse(pendingWatchLater);
-
-          const pendingOrders = safeStorage.getItem("pending_orders_array");
-          if (pendingOrders) {
-            const { arrayUnion } = await import("firebase/firestore");
-            pendingUpdates.orders = arrayUnion(...JSON.parse(pendingOrders));
-          }
-        }
-
-        let mergedPendingKeys = false;
-        // When other user data is updating, include the pending user updates (like gender, age, device)
-        if (
-          Object.keys(pendingUpdates).length > 0 ||
-          isDailySync ||
-          (isPast7AM && needsSync)
-        ) {
-          const pendingUpdatesStr = safeStorage.getItem("pending_user_updates");
-          if (pendingUpdatesStr) {
-            try {
-              const pendingAll = JSON.parse(pendingUpdatesStr);
-              if (pendingAll[currentUser.uid]) {
-                const myPending = pendingAll[currentUser.uid];
-                // timeSpent is accumulated later so delete it to not mess up integer vs accumulation logic if any
-                Object.assign(pendingUpdates, myPending);
-                mergedPendingKeys = true;
-              }
-            } catch (e) {}
-          }
-        }
-
-        const hasLocalProfile = !!safeStorage.getItem("profile_cache");
-        if (Object.keys(pendingUpdates).length > 0 && hasLocalProfile) {
-          try {
-            const { writeBatch } = await import("firebase/firestore");
-            const batch = writeBatch(db);
-            batch.set(userRef, pendingUpdates, { merge: true });
-            await batch.commit();
-
-            if (isDailySync) localStorage.setItem(dailySyncKey, pktDate);
-            safeStorage.setItem("needs_user_sync", "false");
-            safeStorage.removeItem("pending_favorites_array");
-            safeStorage.removeItem("pending_watch_later_array");
-            safeStorage.removeItem("pending_content_clicks");
-            safeStorage.removeItem("pending_link_clicks");
-            safeStorage.removeItem("pending_orders_array");
-
-            if (mergedPendingKeys) {
-              try {
-                const pStr = safeStorage.getItem("pending_user_updates");
-                if (pStr) {
-                  const pAll = JSON.parse(pStr);
-                  delete pAll[currentUser.uid];
-                  safeStorage.setItem(
-                    "pending_user_updates",
-                    JSON.stringify(pAll),
-                  );
-                }
-              } catch (e) {}
-            }
-          } catch (err) {
-            console.error("Daily sync failed:", err);
           }
         }
       } else {
