@@ -102,6 +102,29 @@ async function exportCatalog() {
     fs.writeFileSync(path.join(srcDataDir, exportFileName), jsonString);
 
     console.log('Successfully saved unified content export file to root, public/, and src/data/');
+
+    // 5. Export reviews from Firestore
+    console.log('Starting reviews export from Firestore...');
+    let allReviews = [];
+    try {
+      const reviewDocSnap = await getDoc(doc(db, 'review_chunks', 'main'));
+      if (reviewDocSnap.exists()) {
+        const items = reviewDocSnap.data().items || {};
+        allReviews = Object.values(items);
+        allReviews.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      }
+    } catch (e) {
+      console.error('Error fetching reviews during export:', e);
+    }
+
+    const reviewsFileName = 'moviznow_reviews_export.json';
+    const reviewsJsonString = JSON.stringify(allReviews);
+
+    fs.writeFileSync(path.join(__dirname, '..', reviewsFileName), reviewsJsonString);
+    fs.writeFileSync(path.join(publicDir, reviewsFileName), reviewsJsonString);
+    fs.writeFileSync(path.join(srcDataDir, reviewsFileName), reviewsJsonString);
+
+    console.log(`Successfully saved ${allReviews.length} reviews to root, public/, and src/data/`);
     process.exit(0);
   } catch (error) {
     console.error('Error during catalog export:', error);

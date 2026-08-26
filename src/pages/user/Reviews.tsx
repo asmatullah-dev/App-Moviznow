@@ -98,9 +98,13 @@ export default function Reviews() {
         console.error("Failed to load cached reviews:", e);
       }
 
-      setSyncing(true);
+      const isGuest = !authLoading && !authProfileLoading && !profile?.uid;
+      
+      if (!isGuest) {
+        setSyncing(true);
+      }
       try {
-        const data = await fetchReviewsFromChunks(false);
+        const data = await fetchReviewsFromChunks(false, isGuest);
         if (data) {
           setReviews(data);
           if (profile?.uid && data.some((r: any) => r.userId === profile.uid || (profile.email && r.userEmail === profile.email))) {
@@ -108,14 +112,14 @@ export default function Reviews() {
           }
         }
       } catch (e) {
-        console.error("Failed to load reviews from Firestore:", e);
+        console.error("Failed to load reviews:", e);
       } finally {
         setLoading(false);
         setSyncing(false);
       }
     };
     loadReviews();
-  }, [profile?.uid, profile?.email]);
+  }, [profile?.uid, profile?.email, authLoading, authProfileLoading]);
 
   const triggerConfetti = () => {
     confetti({

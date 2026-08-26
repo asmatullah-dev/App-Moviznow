@@ -58,6 +58,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   adSkipTimer: 5,
   adVideoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-popcorn-machine-in-action-close-up-42289-large.mp4',
   adRedirectUrl: 'https://moviznow.app/premium',
+  whatsappChannelLink: 'https://whatsapp.com/channel/0029Vb7PxRC9MF96ZZVGdx2n',
 };
 
 export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -66,11 +67,16 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const cached = localStorage.getItem('cached_app_settings');
       if (cached) {
         const parsed = JSON.parse(cached);
-        if (parsed && (parsed.supportNumber === '3363284466' || parsed.supportNumber === '03363284466')) {
-          parsed.supportNumber = '3416286423';
+        if (parsed) {
+          if (parsed.supportNumber === '3363284466' || parsed.supportNumber === '03363284466') {
+            parsed.supportNumber = '3416286423';
+          }
+          if (!parsed.whatsappChannelLink) {
+            parsed.whatsappChannelLink = 'https://whatsapp.com/channel/0029Vb7PxRC9MF96ZZVGdx2n';
+          }
           localStorage.setItem('cached_app_settings', JSON.stringify(parsed));
         }
-        return parsed;
+        return parsed || DEFAULT_APP_SETTINGS;
       }
       return DEFAULT_APP_SETTINGS;
     } catch {
@@ -91,8 +97,13 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         
         if (docSnap.exists()) {
           const data = docSnap.data() as AppSettings;
-          if (data && (data.supportNumber === '3363284466' || data.supportNumber === '03363284466')) {
-            data.supportNumber = '3416286423';
+          if (data) {
+            if (data.supportNumber === '3363284466' || data.supportNumber === '03363284466') {
+              data.supportNumber = '3416286423';
+            }
+            if (!data.whatsappChannelLink) {
+              data.whatsappChannelLink = 'https://whatsapp.com/channel/0029Vb7PxRC9MF96ZZVGdx2n';
+            }
           }
           setSettings(data);
           localStorage.setItem('cached_app_settings', JSON.stringify(data));

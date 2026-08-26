@@ -3,6 +3,7 @@ import { db } from '../firebase';
 import { Content } from '../types';
 import { getChunkMeta, clearChunkMetaCache } from './chunkMeta';
 import { safeStorage } from './safeStorage';
+import staticReviews from '../data/moviznow_reviews_export.json';
 
 export const CONTENT_CHUNK_MOVIE_SIZE = 500;
 export const CONTENT_CHUNK_SERIES_SIZE = 200;
@@ -837,7 +838,20 @@ export async function rebuildAllChunks(contents: Content[]): Promise<number> {
   return Object.keys(chunkDocs).length;
 }
 
-export async function fetchReviewsFromChunks(forceRefresh = false): Promise<any[]> {
+export async function fetchReviewsFromChunks(forceRefresh = false, isGuest = false): Promise<any[]> {
+  if (isGuest) {
+    const cachedData = safeStorage.getItem('cached_reviews_data');
+    if (cachedData) {
+      try {
+        return JSON.parse(cachedData);
+      } catch (e) {}
+    }
+    // Set cache to staticReviews and return
+    safeStorage.setItem('cached_reviews_data', JSON.stringify(staticReviews));
+    safeStorage.setItem('cached_review_version', 'static');
+    return staticReviews;
+  }
+
   const meta = await getChunkMeta(forceRefresh);
   const cachedVersion = safeStorage.getItem('cached_review_version') || '0';
   const serverVersion = meta.reviews?.version?.toString() || '0';
