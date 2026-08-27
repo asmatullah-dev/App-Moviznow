@@ -799,25 +799,27 @@ export async function performFullLinkScan(
       statusLabel: "WORKING",
       message: "Assuming working (initial)",
     };
-    for (let attempt = 1; attempt <= 1; attempt++) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         const extractController = new AbortController();
-        const extractTimeout = setTimeout(() => extractController.abort(), 7000);
+        const extractTimeout = setTimeout(() => extractController.abort(), 18000);
         
         const directController = new AbortController();
-        const directTimeout = setTimeout(() => directController.abort(), 7000);
+        const directTimeout = setTimeout(() => directController.abort(), 18000);
+
+        const currentForce = attempt === 2 ? true : force;
 
         const [res, dLinkRes] = await Promise.allSettled([
           fetch("/api/hubcloud/extract", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: normalizedUrl, force }),
+            body: JSON.stringify({ url: normalizedUrl, force: currentForce }),
             signal: extractController.signal
           }),
           fetch("/api/hubcloud/direct-link", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: normalizedUrl, checkOnly: false, force }),
+            body: JSON.stringify({ url: normalizedUrl, checkOnly: false, force: currentForce }),
             signal: directController.signal
           })
         ]);
@@ -826,11 +828,13 @@ export async function performFullLinkScan(
         clearTimeout(directTimeout);
 
         let candidatesInfo: undefined | any[] = undefined;
-        
+        let dLinkData: any = null;
+        let extractData: any = null;
+
         if (dLinkRes.status === "fulfilled" && dLinkRes.value.ok) {
           try {
-            const dLinkData = await dLinkRes.value.json();
-            if (dLinkData && dLinkData.candidates) {
+            dLinkData = await dLinkRes.value.json();
+            if (dLinkData && dLinkData.candidates && Array.isArray(dLinkData.candidates) && dLinkData.candidates.length > 0) {
               candidatesInfo = dLinkData.candidates;
             }
           } catch (e) {
@@ -839,62 +843,41 @@ export async function performFullLinkScan(
         }
 
         if (res.status === "fulfilled" && res.value.ok) {
-          const data = await res.value.json();
-          if (data.size && data.unit) {
-            hubcloudTitle = data.title || "";
-            base = {
-              url,
-              ok: true,
-              statusLabel: hubcloudTitle ? "WORKING" : "WORKING",
-              fileName: hubcloudTitle || undefined,
-              fileSizeText: `${data.size} ${data.unit}`,
-              candidates: candidatesInfo
-            };
-            if (!hubcloudTitle) base.statusLabel = "MISSING_FILENAME";
-            finalUrlToUse = url;
-            break;
-          } else if (data.isNotFound) {
-            base = {
-              url,
-              ok: false,
-              statusLabel: "BROKEN",
-              message: "File Not Found",
-            };
-            finalUrlToUse = url;
-            break;
-          } else if (data.isWorking) {
-            hubcloudTitle = data.title || "";
-            base = {
-              url,
-              ok: true,
-              statusLabel: "WORKING",
-              fileName: hubcloudTitle || undefined,
-              candidates: candidatesInfo
-            };
-            finalUrlToUse = url;
-            if (!hubcloudTitle) base.statusLabel = "MISSING_FILENAME";
-            break;
-          } else {
-            base = {
-              url,
-              ok: true,
-              statusLabel: "WORKING",
-              message: "Assuming working (size extraction failed)",
-              candidates: candidatesInfo
-            };
-            finalUrlToUse = url;
-            if (candidatesInfo) break;
+          try {
+            extractData = await res.value.json();
+          } catch (e) {
+            console.error("Extract link parsing error", e);
           }
-        } else {
+        }
+
+        const resolvedTitle = extractData?.title || dLinkData?.title || "";
+        const resolvedSize = (extractData?.size && extractData?.unit) ? `${extractData.size} ${extractData.unit}` : (dLinkData?.size || "");
+        const isNotFound = extractData?.isNotFound || dLinkData?.isNotFound;
+
+        if (isNotFound) {
           base = {
             url,
-            ok: true,
-            statusLabel: "WORKING",
-            message: "Assuming working (timeout/blocked)",
-            candidates: candidatesInfo
+            ok: false,
+            statusLabel: "BROKEN",
+            message: "File Not Found",
           };
           finalUrlToUse = url;
-          if (candidatesInfo) break;
+          break;
+        }
+
+        hubcloudTitle = resolvedTitle;
+        base = {
+          url,
+          ok: true,
+          statusLabel: resolvedTitle ? "WORKING" : "MISSING_FILENAME",
+          fileName: resolvedTitle || undefined,
+          fileSizeText: resolvedSize || undefined,
+          candidates: candidatesInfo
+        };
+        finalUrlToUse = url;
+
+        if ((candidatesInfo && candidatesInfo.length > 0) || resolvedTitle || attempt === 2) {
+          break;
         }
       } catch {
         base = {

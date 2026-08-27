@@ -789,9 +789,11 @@ export const LinkCheckerModal: React.FC<Props> = ({
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<LinkCheckResult[]>([]);
   const [selectedUrls, setSelectedUrls] = useState<Set<string>>(new Set());
+  const isHubcloudVariant = (u: string) => /(hubcloud|vcloud|hubdrive|drivehub|gdflix|hubcdn|hblinks)/i.test(u);
+
   const eligibleUrlsForSelect = useMemo(() => {
     return results.filter(r => {
-      const isHubcloud = r.url.toLowerCase().includes("hubcloud");
+      const isHubcloud = isHubcloudVariant(r.url);
       if (!isHubcloud) return true;
       const hasPixeldrain = !!r.candidates?.some(c => c.text.toLowerCase().includes("pixeldrain") || c.href.toLowerCase().includes("pixeldrain"));
       return hasPixeldrain;
@@ -2015,7 +2017,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
             allResults.push(result);
             completedCount++;
 
-            const isHubcloud = result.url.toLowerCase().includes("hubcloud");
+            const isHubcloud = isHubcloudVariant(result.url);
             const hasPixeldrain = isHubcloud && !!result.candidates?.some(c => c.text.toLowerCase().includes("pixeldrain") || c.href.toLowerCase().includes("pixeldrain"));
             const isSelectable = result.statusLabel === "WORKING" || result.statusLabel === "SMALL_FILE" || result.statusLabel === "MISSING_FILENAME" || result.statusLabel === "MISSING_METADATA" || result.statusLabel === "SIZE_MISMATCH";
 
@@ -2618,8 +2620,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
       const b = itemB.result;
 
       // 2. Hubcloud / Pixeldrain prioritization
-      const isHubcloudA = (a.url || "").toLowerCase().includes("hubcloud");
-      const isHubcloudB = (b.url || "").toLowerCase().includes("hubcloud");
+      const isHubcloudA = isHubcloudVariant(a.url || "");
+      const isHubcloudB = isHubcloudVariant(b.url || "");
 
       const hasPixeldrainA = isHubcloudA && !!a.candidates?.some(c => c.text.toLowerCase().includes("pixeldrain") || c.href.toLowerCase().includes("pixeldrain"));
       const hasPixeldrainB = isHubcloudB && !!b.candidates?.some(c => c.text.toLowerCase().includes("pixeldrain") || c.href.toLowerCase().includes("pixeldrain"));
@@ -3639,7 +3641,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                                     </>
                                   )}
                                 </div>
-                                {(result.url.toLowerCase().includes("hubcloud") || (result.candidates && result.candidates.length > 0)) && (
+                                {(isHubcloudVariant(result.url) || (result.candidates && result.candidates.length > 0)) && (
                                   <div className="mt-2 flex flex-wrap gap-2 items-center">
                                     <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 mr-1 flex items-center gap-1.5"><Server className="h-3.5 w-3.5" /> Downloads:</span>
                                     {result.candidates && result.candidates.length > 0 ? (
