@@ -257,7 +257,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     const pendingIds = new Set(JSON.parse(safeStorage.getItem('pending_collection_updates') || '[]'));
     
     [coll1, coll2].forEach(coll => {
-        const keys = Object.keys(localStorage).filter(k => k.startsWith('local_collection_chunk_'));
+        const keys = safeStorage.keys().filter(k => k.startsWith('local_collection_chunk_'));
         for (const key of keys) {
             const chunkStr = safeStorage.getItem(key);
             if (chunkStr && chunkStr.includes(`"${coll.id}"`)) {
@@ -297,8 +297,38 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
 
     let pendingChunkIds: string[] = [];
     let pendingCollChunkIds: string[] = [];
-    try { if (contentPendingStr) pendingChunkIds = JSON.parse(contentPendingStr); } catch(e) {}
-    try { if (collectionPendingStr) pendingCollChunkIds = JSON.parse(collectionPendingStr); } catch(e) {}
+    try { 
+        if (contentPendingStr) {
+            const rawIds: string[] = JSON.parse(contentPendingStr);
+            const uniqueIds = Array.from(new Set(rawIds));
+            // Filter out content chunks that are identical to the last known server state to minimize Firestore writes
+            pendingChunkIds = uniqueIds.filter(cid => {
+                const currentChunkStr = safeStorage.getItem('content_chunk_' + cid) || safeStorage.getItem(cid);
+                const syncedStr = safeStorage.getItem('synced_content_chunk_' + cid);
+                if (syncedStr && currentChunkStr === syncedStr) {
+                    console.log(`Bypassing write for content chunk ${cid} - matches server state`);
+                    return false;
+                }
+                return true;
+            });
+        }
+    } catch(e) {}
+    try { 
+        if (collectionPendingStr) {
+            const rawIds: string[] = JSON.parse(collectionPendingStr);
+            const uniqueIds = Array.from(new Set(rawIds));
+            // Filter out collection chunks that are identical to the last known server state to minimize Firestore writes
+            pendingCollChunkIds = uniqueIds.filter(cid => {
+                const currentChunkStr = safeStorage.getItem('local_collection_chunk_' + cid);
+                const syncedStr = safeStorage.getItem('synced_collection_chunk_' + cid);
+                if (syncedStr && currentChunkStr === syncedStr) {
+                    console.log(`Bypassing write for collection chunk ${cid} - matches server state`);
+                    return false;
+                }
+                return true;
+            });
+        }
+    } catch(e) {}
     
     if (pendingChunkIds.length === 0 && pendingCollChunkIds.length === 0 && !metadataPending) {
         safeStorage.removeItem('pending_chunk_updates');
@@ -336,8 +366,11 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                         batch.set(doc(db, 'content_chunks', cid), { 
                             items: parsedItems,
                             updatedAt: serverTimestamp()
-                        }, { merge: true });
+                        }); // Overwrite document for massive speedups and proper item deletes
                     });
+                    
+                    // Update the last known synced reference
+                    safeStorage.setItem('synced_content_chunk_' + cid, chunkStr);
                     
                     versionsUpdate[cid] = {
                         version: now,
@@ -349,7 +382,6 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
 
         // Handle collection chunks
         if (pendingCollChunkIds.length > 0) {
-            let maxCollIndex = 0;
             for (const cid of pendingCollChunkIds) {
                 const chunkStr = safeStorage.getItem('local_collection_chunk_' + cid);
                 if (chunkStr) {
@@ -357,10 +389,23 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                         batch.set(doc(db, 'collection_chunks', cid), {
                             items: JSON.parse(chunkStr),
                             updatedAt: serverTimestamp()
-                        }, { merge: true });
+                        }); // Overwrite document for massive speedups and proper item deletes
                     });
-                    const match = cid.match(/(\d+)$/);
-                    if (match) maxCollIndex = Math.max(maxCollIndex, parseInt(match[1]));
+
+                    // Update the last known synced reference
+                    safeStorage.setItem('synced_collection_chunk_' + cid, chunkStr);
+                }
+            }
+            
+            // Calculate true max index across all local collection chunks to avoid resetting latestChunkId to a lower value and losing collections
+            let maxCollIndex = 0;
+            const collectionKeys = safeStorage.keys();
+            for (const key of collectionKeys) {
+                if (key.startsWith('local_collection_chunk_')) {
+                    const match = key.match(/(\d+)$/);
+                    if (match) {
+                        maxCollIndex = Math.max(maxCollIndex, parseInt(match[1]));
+                    }
                 }
             }
             
@@ -382,7 +427,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                     languages: mLanguages,
                     qualities: mQualities,
                     updatedAt: serverTimestamp()
-                }, { merge: true });
+                }); // Overwrite document
             });
             
             versionsUpdate.metadata = {
@@ -451,7 +496,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     try { localMeta = JSON.parse(localMetaString); } catch(e) {}
     
     const rawContentMap: Record<string, Content> = {};
-    const chunkKeys = Object.keys(localStorage).filter(k => 
+    const chunkKeys = safeStorage.keys().filter(k => 
         k.startsWith('content_chunk_') || 
         k.startsWith('movie_chunk_') || 
         k.startsWith('series_chunk_')
@@ -504,7 +549,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
 
   const refreshCollectionsFromLocal = () => {
     let allCollections: AppCollection[] = [];
-    const keys = Object.keys(localStorage).filter(k => k.startsWith('local_collection_chunk_'));
+    const keys = safeStorage.keys().filter(k => k.startsWith('local_collection_chunk_'));
     
     for (const key of keys) {
         const chunkStr = safeStorage.getItem(key);
@@ -624,6 +669,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                     }
                     
                     safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(items));
+                    safeStorage.setItem('synced_content_chunk_' + chunkId, JSON.stringify(items));
                     localMeta[chunkId] = typeof versions[chunkId] === 'object' ? versions[chunkId] : { version: versions[chunkId], count: Object.keys(items).length };
                 }
             } catch(e) { console.error(e); }
@@ -719,6 +765,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                     const chunkList = Object.values(items) as AppCollection[];
                     allCollections = [...allCollections, ...chunkList];
                     safeStorage.setItem('local_collection_chunk_' + res.cid, JSON.stringify(items));
+                    safeStorage.setItem('synced_collection_chunk_' + res.cid, JSON.stringify(items));
                 }
             }
             
@@ -1107,6 +1154,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
               const chunkList = Object.values(items) as AppCollection[];
               allCollections = [...allCollections, ...chunkList];
               safeStorage.setItem('local_collection_chunk_' + res.cid, JSON.stringify(items));
+              safeStorage.setItem('synced_collection_chunk_' + res.cid, JSON.stringify(items));
             }
           }
           const sorted = allCollections.sort((a, b) => (b.order || 0) - (a.order || 0));
@@ -1251,7 +1299,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     }
 
     // Scan all chunks to ensure the item is removed from any previous chunk it might have been in
-    Object.keys(localStorage).forEach(key => {
+    safeStorage.keys().forEach(key => {
         if (key.startsWith('content_chunk_') || key.startsWith('movie_chunk_') || key.startsWith('series_chunk_')) {
             if (key !== 'content_chunk_' + chunkId) {
                 const s = safeStorage.getItem(key);
@@ -1490,7 +1538,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     const affectedChunkIds = new Set<string>();
 
     // Scan ALL local storage chunk keys to thoroughly purge deleted items from local storage
-    const allStorageKeys = Object.keys(localStorage);
+    const allStorageKeys = safeStorage.keys();
     const chunkKeys = allStorageKeys.filter(k => 
         k.startsWith('content_chunk_') || 
         k.startsWith('movie_chunk_') || 
@@ -1686,7 +1734,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
 
     // Find and update chunk locally
     let foundChunkId: string | null = null;
-    const keys = Object.keys(localStorage).filter(k => k.startsWith('local_collection_chunk_'));
+    const keys = safeStorage.keys().filter(k => k.startsWith('local_collection_chunk_'));
     for (const key of keys) {
         const chunkStr = safeStorage.getItem(key);
         if (chunkStr) {

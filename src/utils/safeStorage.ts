@@ -74,6 +74,17 @@ class SafeStorage {
     this.memoryStorage.clear();
   }
 
+  keys(): string[] {
+    if (this.isAvailable) {
+      try {
+        return Object.keys(window.localStorage);
+      } catch (e) {
+        return Array.from(this.memoryStorage.keys());
+      }
+    }
+    return Array.from(this.memoryStorage.keys());
+  }
+
   // --- Asynchronous methods (IndexedDB, unlimited size basically) ---
   
   private initDB(): Promise<IDBDatabase> {
