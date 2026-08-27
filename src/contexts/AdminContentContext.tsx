@@ -294,50 +294,50 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     const contentPendingStr = safeStorage.getItem('pending_chunk_updates');
     const collectionPendingStr = safeStorage.getItem('pending_collection_updates');
     const metadataPending = safeStorage.getItem('pending_metadata_updates') === 'true';
+
+    let pendingChunkIds: string[] = [];
+    let pendingCollChunkIds: string[] = [];
+    try { if (contentPendingStr) pendingChunkIds = JSON.parse(contentPendingStr); } catch(e) {}
+    try { if (collectionPendingStr) pendingCollChunkIds = JSON.parse(collectionPendingStr); } catch(e) {}
     
-    if (!contentPendingStr && !collectionPendingStr && !metadataPending) {
+    if (pendingChunkIds.length === 0 && pendingCollChunkIds.length === 0 && !metadataPending) {
+        safeStorage.removeItem('pending_chunk_updates');
+        safeStorage.removeItem('pending_item_updates');
+        safeStorage.removeItem('pending_collection_updates');
+        safeStorage.removeItem('pending_metadata_updates');
         setHasPendingChanges(false);
         return;
     }
     
     try {
-        const batch = writeBatch(db);
+        const batches: any[] = [writeBatch(db)];
+        let opCount = 0;
+        const addBatchOp = (fn: (b: any) => void) => {
+            if (opCount >= 450) {
+                batches.push(writeBatch(db));
+                opCount = 0;
+            }
+            fn(batches[batches.length - 1]);
+            opCount++;
+        };
+
         const now = Date.now();
         const versionsUpdate: Record<string, any> = { 
             lastGlobalUpdate: serverTimestamp() 
         };
 
         // Handle content chunks
-        if (contentPendingStr) {
-            const pendingChunkIds = JSON.parse(contentPendingStr) as string[];
-            const pendingItemsMapStr = safeStorage.getItem('pending_item_updates') || '{}';
-            const pendingItemsMap = JSON.parse(pendingItemsMapStr);
-
+        if (pendingChunkIds.length > 0) {
             for (const cid of pendingChunkIds) {
                 const chunkStr = safeStorage.getItem('content_chunk_' + cid) || safeStorage.getItem(cid);
                 if (chunkStr) {
                     const parsedItems = JSON.parse(chunkStr);
-                    const itemIds = pendingItemsMap[cid];
-                    
-                    if (Array.isArray(itemIds) && itemIds.length > 0) {
-                        const updateMap: Record<string, any> = {};
-                        for (const itemId of itemIds) {
-                            if (parsedItems[itemId]) {
-                                updateMap[itemId] = parsedItems[itemId];
-                            } else {
-                                updateMap[itemId] = deleteField();
-                            }
-                        }
-                        batch.set(doc(db, 'content_chunks', cid), {
-                            items: updateMap,
-                            updatedAt: serverTimestamp()
-                        }, { merge: true });
-                    } else {
+                    addBatchOp((batch) => {
                         batch.set(doc(db, 'content_chunks', cid), { 
                             items: parsedItems,
                             updatedAt: serverTimestamp()
                         }, { merge: true });
-                    }
+                    });
                     
                     versionsUpdate[cid] = {
                         version: now,
@@ -348,15 +348,16 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         }
 
         // Handle collection chunks
-        if (collectionPendingStr) {
-            const pendingCollChunkIds = JSON.parse(collectionPendingStr) as string[];
+        if (pendingCollChunkIds.length > 0) {
             let maxCollIndex = 0;
             for (const cid of pendingCollChunkIds) {
                 const chunkStr = safeStorage.getItem('local_collection_chunk_' + cid);
                 if (chunkStr) {
-                    batch.set(doc(db, 'collection_chunks', cid), {
-                        items: JSON.parse(chunkStr),
-                        updatedAt: serverTimestamp()
+                    addBatchOp((batch) => {
+                        batch.set(doc(db, 'collection_chunks', cid), {
+                            items: JSON.parse(chunkStr),
+                            updatedAt: serverTimestamp()
+                        }, { merge: true });
                     });
                     const match = cid.match(/(\d+)$/);
                     if (match) maxCollIndex = Math.max(maxCollIndex, parseInt(match[1]));
@@ -375,11 +376,13 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             const mLanguages = JSON.parse(safeStorage.getItem('languages_cache') || '[]');
             const mQualities = JSON.parse(safeStorage.getItem('qualities_cache') || '[]');
             
-            batch.set(doc(db, 'content_chunks', 'metadata'), {
-                genres: mGenres,
-                languages: mLanguages,
-                qualities: mQualities,
-                updatedAt: serverTimestamp()
+            addBatchOp((batch) => {
+                batch.set(doc(db, 'content_chunks', 'metadata'), {
+                    genres: mGenres,
+                    languages: mLanguages,
+                    qualities: mQualities,
+                    updatedAt: serverTimestamp()
+                }, { merge: true });
             });
             
             versionsUpdate.metadata = {
@@ -388,8 +391,11 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             };
         }
 
-        batch.set(doc(db, 'chunk_meta', 'versions'), versionsUpdate, { merge: true });
-        await batch.commit();
+        addBatchOp((batch) => {
+            batch.set(doc(db, 'chunk_meta', 'versions'), versionsUpdate, { merge: true });
+        });
+
+        await Promise.all(batches.map(b => b.commit()));
         
         const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
         let localMeta: Record<string, any> = {};
@@ -402,18 +408,10 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             }
         }
 
-        if (contentPendingStr) {
-            safeStorage.removeItem('pending_chunk_updates');
-            safeStorage.removeItem('pending_item_updates');
-        }
-
-        if (collectionPendingStr) {
-            safeStorage.removeItem('pending_collection_updates');
-        }
-
-        if (metadataPending) {
-            safeStorage.removeItem('pending_metadata_updates');
-        }
+        safeStorage.removeItem('pending_chunk_updates');
+        safeStorage.removeItem('pending_item_updates');
+        safeStorage.removeItem('pending_collection_updates');
+        safeStorage.removeItem('pending_metadata_updates');
 
         safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
         const { updateChunkMetaLocalCache } = await import('../utils/chunkMeta');
