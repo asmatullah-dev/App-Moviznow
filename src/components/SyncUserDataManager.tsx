@@ -149,10 +149,17 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
   }
 
   try {
-    const { setDoc } = await import('firebase/firestore');
+    const { writeBatch, doc } = await import('firebase/firestore');
+    const batch = writeBatch(db);
     
     // Write directly to user document with merge - 0 pre-reads required
-    await runWithNetwork(() => setDoc(userRef, updatesToPush, { merge: true }));
+    batch.set(userRef, updatesToPush, { merge: true });
+    
+    // Also update chunk_meta versions so admins are immediately notified about the change
+    const metaRef = doc(db, 'chunk_meta', 'versions');
+    batch.set(metaRef, { users: { [currentUserUid]: nowTime } }, { merge: true });
+    
+    await runWithNetwork(() => batch.commit());
 
     // --- CLEANUP IN LOCAL QUEUES ONLY AFTER CONFIRMED SUCCESS ---
     safeStorage.removeItem('needs_user_sync');

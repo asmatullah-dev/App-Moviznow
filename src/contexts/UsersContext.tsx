@@ -326,8 +326,16 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           const uidsToFetch = new Set<string>();
 
           if (isBaselineEmpty) {
-            // Baseline uninitialized: Seed baseline with current server version timestamps to avoid full collection queries
-            Object.assign(knownMtimes, serverUsersVersion);
+            // Baseline uninitialized: Seed baseline, but check which ones need to be fetched (e.g. not in currentUsersMap or mtime > lastFetchTime)
+            Object.entries(serverUsersVersion).forEach(([uid, mtime]) => {
+              if (typeof mtime === 'number') {
+                const existing = currentUsersMap.get(uid);
+                if (!existing || mtime > lastFetchTime) {
+                  uidsToFetch.add(uid);
+                }
+                knownMtimes[uid] = mtime;
+              }
+            });
           } else {
             Object.entries(serverUsersVersion).forEach(([uid, mtime]) => {
                if (typeof mtime === 'number') {
@@ -337,7 +345,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
                      updatedSomething = true;
                    }
                    delete knownMtimes[uid];
-                 } else if (knownMtimes[uid] === undefined) {
+                 } else if (knownMtimes[uid] === undefined || !currentUsersMap.has(uid)) {
                    uidsToFetch.add(uid);
                    knownMtimes[uid] = mtime;
                  } else if (mtime > knownMtimes[uid] && mtime > 0) {

@@ -60,6 +60,13 @@ export function SyncBanner() {
 
   if (!syncStatus) return null;
 
+  // Suppress "updating data" and "data is up to date" in user-facing pages (not admin)
+  const isUserPage = !window.location.pathname.startsWith('/admin');
+  if (isUserPage) {
+    if (syncStatus === 'up-to-date') return null;
+    if (syncStatus === 'syncing' && !isInitialLoad && customMessage !== 'Loading Data...') return null;
+  }
+
   const bgClasses = {
     syncing: 'bg-blue-600 dark:bg-blue-600',
     'up-to-date': 'bg-zinc-800 dark:bg-zinc-800',

@@ -68,8 +68,8 @@ export const getChunkMeta = async (forceRefresh = false) => {
     }
   }
 
-  // If forceRefresh is requested but we fetched within 90s, reuse the cache unless forced and >90s has elapsed
-  const actualForce = forceRefresh && !isWithin90Sec;
+  // If forceRefresh is requested, bypass the 90-second and memory caches completely
+  const actualForce = forceRefresh;
 
   if (actualForce) {
     chunkMetaPromise = null;

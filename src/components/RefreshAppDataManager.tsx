@@ -65,25 +65,6 @@ export function RefreshAppDataManager() {
       const isManualTrigger = reason === 'catalog_button' || reason === 'user_profile_button' || reason === 'manual';
       const versions: Record<string, any> = await getChunkMeta(isManualTrigger);
 
-      // Check if user has been deleted/does not exist on the server
-      if (user?.uid) {
-        const chunkUsersMeta = versions.users || {};
-        const userExistsInMeta = user.uid in chunkUsersMeta;
-
-        if (!userExistsInMeta) {
-          console.warn(`User UID ${user.uid} does not exist in chunk_meta.users (likely deleted). Triggering automatic relogin.`);
-          window.dispatchEvent(new CustomEvent('sync_status', {
-            detail: {
-              status: 'error',
-              message: 'Session invalid / user deleted. Logging out...'
-            }
-          }));
-          await logout().catch(() => {});
-          isRefreshingRef.current = false;
-          return;
-        }
-      }
-
       let otherUpdated = false;
 
       // 1. Check settings version
