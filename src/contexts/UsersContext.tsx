@@ -40,8 +40,27 @@ export function normalizeUserStatusAndExpiry(u: UserProfile): UserProfile {
     u = { ...u, displayName: resolvedName };
   }
 
+  // Ensure createdAt (Joined Date) is always present
+  if (!u.createdAt || u.createdAt === 'null' || u.createdAt === 'undefined') {
+    u = { ...u, createdAt: new Date().toISOString() };
+  }
+
+  // Ensure role is populated
+  if (!u.role) {
+    u = { ...u, role: 'user' };
+  }
+
   if (u.role === 'owner' || u.role === 'admin') {
     return { ...u, status: 'active', expiryDate: u.expiryDate || 'Lifetime' };
+  }
+
+  // If status is empty, null, or undefined, default to 'pending' (unless it has a valid future expiry date)
+  if (!u.status || (u.status as any) === 'null' || (u.status as any) === 'undefined') {
+    if (u.expiryDate && u.expiryDate !== 'Lifetime' && !isUserExpired(u.expiryDate)) {
+      u = { ...u, status: 'active' };
+    } else {
+      u = { ...u, status: 'pending' };
+    }
   }
 
   if (!u.expiryDate || u.expiryDate === 'null' || u.expiryDate === '') {

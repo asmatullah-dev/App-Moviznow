@@ -1037,10 +1037,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (data.role !== "owner" && data.role !== "admin") {
             if (!data.expiryDate || data.expiryDate === "null" || data.expiryDate === "") {
               if (data.status !== "suspended" && data.status !== "pending") {
-                updates.status = "expired";
-                data.status = "expired";
-                if (mergedProfile) {
-                  mergedProfile.status = "expired";
+                if (!data.status) {
+                  updates.status = "pending";
+                  data.status = "pending";
+                  if (mergedProfile) mergedProfile.status = "pending";
+                } else if (data.status === "active") {
+                  updates.status = "expired";
+                  data.status = "expired";
+                  if (mergedProfile) {
+                    mergedProfile.status = "expired";
+                  }
                 }
               }
             } else if (data.expiryDate !== "Lifetime") {
@@ -1064,6 +1070,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   }
                 }
               }
+            }
+          }
+
+          // Ensure joined date (createdAt) is never missing
+          if (!data.createdAt || data.createdAt === "null" || data.createdAt === "undefined") {
+            const fallbackCreatedAt = currentUser.metadata?.creationTime
+              ? new Date(currentUser.metadata.creationTime).toISOString()
+              : new Date().toISOString();
+            data.createdAt = fallbackCreatedAt;
+            updates.createdAt = fallbackCreatedAt;
+            if (mergedProfile) {
+              mergedProfile.createdAt = fallbackCreatedAt;
             }
           }
 
@@ -2249,6 +2267,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         displayName: cleanSignupName,
         phone: phone ? standardizePhone(phone) : "",
         email: email,
+        createdAt: new Date().toISOString(),
+        status: "pending",
+        role: "user",
       }));
 
       justLoggedInRef.current = true;
@@ -2275,13 +2296,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           displayName: cleanSignupName,
           phone: phone ? standardizePhone(phone) : "",
           email: email,
+          createdAt: new Date().toISOString(),
+          status: "pending",
+          role: "user",
         }, { merge: true });
       } catch (e) {}
 
-      safeStorage.removeItem("pending_signup_profile");
-
       setTimeout(() => {
         justLoggedInRef.current = false;
+        safeStorage.removeItem("pending_signup_profile");
       }, 10000);
     } catch (err: any) {
       justLoggedInRef.current = false;
@@ -2342,6 +2365,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         displayName: cleanPhoneSignupName,
         phone: standardizedPhone || "",
         email: signupEmail,
+        createdAt: new Date().toISOString(),
+        status: "pending",
+        role: "user",
       }));
 
       justLoggedInRef.current = true;
@@ -2373,13 +2399,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           displayName: cleanPhoneSignupName,
           phone: standardizedPhone || "",
           email: signupEmail,
+          createdAt: new Date().toISOString(),
+          status: "pending",
+          role: "user",
         }, { merge: true });
       } catch (e) {}
 
-      safeStorage.removeItem("pending_signup_profile");
-
       setTimeout(() => {
         justLoggedInRef.current = false;
+        safeStorage.removeItem("pending_signup_profile");
       }, 10000);
     } catch (err: any) {
       justLoggedInRef.current = false;

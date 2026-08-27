@@ -98,8 +98,24 @@ export function RefreshAppDataManager() {
             console.error("Profile refresh failed:", err);
             return null;
           });
-          // If refreshProfile returned false, it means they might be deleted or auth state dropped. It handles logout internally.
+          // If refreshProfile returned false, it means they might be deleted or user ID not found. It handles logout internally.
           if (profileFetched === false) {
+            window.dispatchEvent(new CustomEvent('sync_status', {
+              detail: {
+                status: 'error',
+                message: 'User ID not found / session expired.'
+              }
+            }));
+            isRefreshingRef.current = false;
+            return;
+          }
+          if (profileFetched === null && isManualTrigger) {
+            window.dispatchEvent(new CustomEvent('sync_status', {
+              detail: {
+                status: 'error',
+                message: 'Profile refresh failed. Please retry.'
+              }
+            }));
             isRefreshingRef.current = false;
             return;
           }

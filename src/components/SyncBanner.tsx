@@ -39,7 +39,17 @@ export function SyncBanner() {
       setIsInitialLoad(initialLoad);
 
       if (status === 'syncing') {
-        // Do not auto-dismiss while actively syncing/loading data; let the sync completion event set the success/error state
+        // Safety timeout: if still syncing after 8 seconds (e.g. user missing, disconnected, or unhandled rejection), report error and auto-dismiss
+        syncingSafetyTimeout = setTimeout(() => {
+          setSyncStatus('error');
+          setCustomMessage('Refresh failed. Please check connection.');
+          timeoutId = setTimeout(() => {
+            setSyncStatus(null);
+            setUpdatedCount(undefined);
+            setCustomMessage(undefined);
+            setIsInitialLoad(false);
+          }, 3500);
+        }, 8000);
       } else if (status === 'success' || status === 'up-to-date' || status === 'error') {
         timeoutId = setTimeout(() => {
           setSyncStatus(null);
@@ -92,7 +102,10 @@ export function SyncBanner() {
       }
       return t('Refreshing...');
     }
-    if (syncStatus === 'error') return t('Sync failed. Will retry automatically.');
+    if (syncStatus === 'error') {
+      if (customMessage) return t(customMessage);
+      return t('Sync failed. Will retry automatically.');
+    }
     if (syncStatus === 'success') {
       if (isInitialLoad || customMessage === 'Loaded All Contents Successfully') {
         return t('Loaded All Contents Successfully');
