@@ -1737,12 +1737,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const twelveHours = 12 * 60 * 60 * 1000;
         const lastSessionStart = localStorage.getItem(sessionKey);
 
-        // If user has no local cache, fetch via getDoc once to initialize
-        if (!hasValidCachedProfile) {
-          refreshProfile(false, "auto").catch((err) => {
-            console.warn("Initial profile sync failed:", err);
-          });
-        }
+        // Always try to refresh user profile from Firestore on app startup/auth state to sync latest status/dates
+        refreshProfile(false, "auto").catch((err) => {
+          console.warn("Initial profile sync failed:", err);
+        });
 
         // Always initialize the ref for this React lifecycle to ensure interval tracking works
         if (!sessionStartTimeRef.current) {

@@ -3009,6 +3009,7 @@ export default function MovieDetails() {
                 )}
                 {mergedContent.sampleUrl && (
                   <button
+                    disabled={extractingLinkId === mergedContent.sampleUrl}
                     onClick={() =>
                       handlePlayClick(
                         mergedContent.sampleUrl!,
@@ -3021,9 +3022,14 @@ export default function MovieDetails() {
                         `${mergedContent.title || ""} - Sample`,
                       )
                     }
-                    className="bg-zinc-100 dark:bg-zinc-800/90 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-6 py-3.5 text-sm sm:text-base rounded-2xl font-bold flex items-center gap-2 transition-all active:scale-95 border border-zinc-300 dark:border-zinc-700 shadow-sm"
+                    className="bg-zinc-100 dark:bg-zinc-800/90 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-6 py-3.5 text-sm sm:text-base rounded-2xl font-bold flex items-center gap-2 transition-all active:scale-95 border border-zinc-300 dark:border-zinc-700 shadow-sm disabled:opacity-75 disabled:cursor-not-allowed"
                   >
-                    <Play className="w-5 h-5 fill-current text-emerald-500" /> <span>{t('Sample')}</span>
+                    {extractingLinkId === mergedContent.sampleUrl ? (
+                      <Loader2 className="w-5 h-5 animate-spin text-emerald-500" />
+                    ) : (
+                      <Play className="w-5 h-5 fill-current text-emerald-500" />
+                    )}
+                    <span>{extractingLinkId === mergedContent.sampleUrl ? t('Extracting...') : t('Sample')}</span>
                   </button>
                 )}
                 {mergedContent.imdbLink && (

@@ -47,6 +47,10 @@ export default function UserManagement() {
   const [filterLanguage, setFilterLanguage] = useState<string>(() => sessionStorage.getItem('user_mgmt_lang') || 'all');
   const [filterReward, setFilterReward] = useState<string>(() => sessionStorage.getItem('user_mgmt_reward') || 'all');
   const [filterStatus, setFilterStatus] = useState<Status | 'all'>(() => (sessionStorage.getItem('user_mgmt_status') as any) || 'all');
+  const [hideAnonymousAndInvalid, setHideAnonymousAndInvalid] = useState(() => {
+    const cached = sessionStorage.getItem('user_mgmt_hide_anonymous_invalid');
+    return cached === null ? true : cached === 'true';
+  });
 
   useEffect(() => {
     sessionStorage.setItem('user_mgmt_search', searchTerm);
@@ -56,7 +60,8 @@ export default function UserManagement() {
     sessionStorage.setItem('user_mgmt_status', filterStatus);
     sessionStorage.setItem('user_mgmt_lang', filterLanguage);
     sessionStorage.setItem('user_mgmt_reward', filterReward);
-  }, [searchTerm, sortField, sortOrder, filterRole, filterStatus, filterLanguage, filterReward]);
+    sessionStorage.setItem('user_mgmt_hide_anonymous_invalid', hideAnonymousAndInvalid.toString());
+  }, [searchTerm, sortField, sortOrder, filterRole, filterStatus, filterLanguage, filterReward, hideAnonymousAndInvalid]);
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
   const [isBulkDeleteConfirmOpen, setIsBulkDeleteConfirmOpen] = useState(false);
   const [bulkDeleteValidUids, setBulkDeleteValidUids] = useState<string[]>([]);
@@ -1234,6 +1239,23 @@ export default function UserManagement() {
 
     // Filter
     result = result.filter(u => u.role !== 'owner');
+
+    if (hideAnonymousAndInvalid) {
+      result = result.filter(u => {
+        const hasEmail = u.email && typeof u.email === 'string' && u.email.trim() !== '' && !u.email.endsWith('@moviznow.com');
+        const phoneDigits = u.phone ? u.phone.replace(/\D/g, '') : '';
+        // Real phone numbers are at least 10 digits if they don't start with 92, and at least 12 digits if they start with 92
+        const hasRealPhone = phoneDigits.length >= 10 && (phoneDigits.startsWith('92') ? phoneDigits.length >= 12 : true);
+        
+        // Check if the displayName is a dummy name
+        const isDummyName = !u.displayName || u.displayName.trim() === '' || u.displayName.toLowerCase().startsWith('user (');
+        
+        if (!hasEmail && isDummyName && !hasRealPhone) {
+          return false;
+        }
+        return true;
+      });
+    }
     
     if (searchTerm) {
       result = smartSearch(result, searchTerm, ['displayName', 'email', 'phone', 'uid', 'city', 'preferredLanguage', 'device.os', 'device.model', 'device.type'] as any);
@@ -1390,7 +1412,7 @@ export default function UserManagement() {
     });
 
     return result;
-  }, [users, searchTerm, filterRole, filterStatus, filterLanguage, filterReward, sortField, sortOrder, allUsers]);
+  }, [users, searchTerm, filterRole, filterStatus, filterLanguage, filterReward, sortField, sortOrder, allUsers, hideAnonymousAndInvalid]);
 
   const handleAddUser = async () => {
     if (!foundUser && !newUserForm.phone && !newUserForm.email) {
@@ -1694,7 +1716,7 @@ export default function UserManagement() {
               </div>
             )}
             <div className="flex gap-2 flex-1 overflow-x-auto pb-1 md:pb-0 items-center">
-              {(searchTerm || filterRole !== 'all' || filterStatus !== 'all' || filterLanguage !== 'all' || filterReward !== 'all' || sortField !== 'createdAt' || sortOrder !== 'desc') && (
+              {(searchTerm || filterRole !== 'all' || filterStatus !== 'all' || filterLanguage !== 'all' || filterReward !== 'all' || sortField !== 'createdAt' || sortOrder !== 'desc' || !hideAnonymousAndInvalid) && (
                 <button
                   onClick={() => {
                     setSearchTerm('');
@@ -1704,6 +1726,7 @@ export default function UserManagement() {
                     setFilterReward('all');
                     setSortField('createdAt');
                     setSortOrder('desc');
+                    setHideAnonymousAndInvalid(true);
                   }}
                   className="p-1.5 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors shrink-0"
                   title="Reset Filters & Sorting"
@@ -1767,6 +1790,16 @@ export default function UserManagement() {
                 <option value="ur-roman">Roman Urdu</option>
                 <option value="none">No Language</option>
               </select>
+              
+              <label className="flex items-center gap-2 cursor-pointer bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 shrink-0 select-none">
+                <input
+                  type="checkbox"
+                  checked={hideAnonymousAndInvalid}
+                  onChange={(e) => setHideAnonymousAndInvalid(e.target.checked)}
+                  className="w-3.5 h-3.5 text-emerald-500 rounded border-zinc-300 dark:border-zinc-700 focus:ring-emerald-500 bg-zinc-50 dark:bg-zinc-900 cursor-pointer"
+                />
+                <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">Hide Anonymous & Invalid</span>
+              </label>
             </div>
           </div>
         </div>

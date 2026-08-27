@@ -102,6 +102,7 @@ const translations: Record<string, Record<Language, string>> = {
   'Copy Link': { en: 'Copy Link', 'ur-roman': 'Link Copy Karein', ur: 'لنک کاپی کریں' },
   'Download': { en: 'Download', 'ur-roman': 'Download Karein', ur: 'ڈاؤن لوڈ کریں' },
   'Extracting link...': { en: 'Extracting link...', 'ur-roman': 'Link nikal raha hai...', ur: 'لنک نکالا جا رہا ہے...' },
+  'Extracting...': { en: 'Extracting...', 'ur-roman': 'Nikal raha hai...', ur: 'نکالا جا رہا ہے...' },
   'Select Trailer': { en: 'Select Trailer', 'ur-roman': 'Trailer Muntakhib Karein', ur: 'ٹریلر منتخب کریں' },
   'Open externally': { en: 'Open externally', 'ur-roman': 'Bahar kholain', ur: 'باہر کھولیں' },
   'Open in New Tab': { en: 'Open in New Tab', 'ur-roman': 'Naye Tab mein Kholein', ur: 'نئے ٹیب میں کھولیں' },
