@@ -399,13 +399,11 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             
             // Calculate true max index across all local collection chunks to avoid resetting latestChunkId to a lower value and losing collections
             let maxCollIndex = 0;
-            const collectionKeys = safeStorage.keys();
+            const collectionKeys = safeStorage.keys().filter(key => key.startsWith('local_collection_chunk_'));
             for (const key of collectionKeys) {
-                if (key.startsWith('local_collection_chunk_')) {
-                    const match = key.match(/(\d+)$/);
-                    if (match) {
-                        maxCollIndex = Math.max(maxCollIndex, parseInt(match[1]));
-                    }
+                const match = key.match(/(\d+)$/);
+                if (match) {
+                    maxCollIndex = Math.max(maxCollIndex, parseInt(match[1]));
                 }
             }
             
@@ -1298,38 +1296,38 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         if (!localMeta[chunkId]) localMeta[chunkId] = { version: Date.now(), count: 0 };
     }
 
-    // Scan all chunks to ensure the item is removed from any previous chunk it might have been in
-    safeStorage.keys().forEach(key => {
-        if (key.startsWith('content_chunk_') || key.startsWith('movie_chunk_') || key.startsWith('series_chunk_')) {
-            if (key !== 'content_chunk_' + chunkId) {
-                const s = safeStorage.getItem(key);
-                if (s && s.includes(`"${content.id}"`)) {
-                    try {
-                        const items = JSON.parse(s);
-                        if (items[content.id]) {
-                            delete items[content.id];
-                            safeStorage.setItem(key, JSON.stringify(items));
-                            // Mark this old chunk as needing sync too
-                            // Extract actual chunk ID from key (handling both legacy and new formats)
-                            const cid = key.startsWith('content_chunk_') ? key.replace('content_chunk_', '') : key;
-                            
-                            const pendingStr = safeStorage.getItem('pending_chunk_updates') || '[]';
-                            const pendingIds = new Set(JSON.parse(pendingStr));
-                            pendingIds.add(cid);
-                            safeStorage.setItem('pending_chunk_updates', JSON.stringify(Array.from(pendingIds)));
+    // Scan only other chunk keys to ensure the item is removed from any previous chunk it might have been in
+    const otherChunkKeys = safeStorage.keys().filter(key => {
+        const isChunk = key.startsWith('content_chunk_') || key.startsWith('movie_chunk_') || key.startsWith('series_chunk_');
+        return isChunk && key !== 'content_chunk_' + chunkId && key !== chunkId;
+    });
 
-                            const pendingItemsStr = safeStorage.getItem('pending_item_updates') || '{}';
-                            const pendingItemsMap = JSON.parse(pendingItemsStr);
-                            if (!pendingItemsMap[cid]) pendingItemsMap[cid] = [];
-                            if (!pendingItemsMap[cid].includes(content.id)) pendingItemsMap[cid].push(content.id);
-                            safeStorage.setItem('pending_item_updates', JSON.stringify(pendingItemsMap));
-                            
-                            const extMeta = localMeta[cid];
-                            localMeta[cid] = { version: Date.now(), count: Object.keys(items).length };
-                        }
-                    } catch(e) {}
+    otherChunkKeys.forEach(key => {
+        const s = safeStorage.getItem(key);
+        if (s && s.includes(`"${content.id}"`)) {
+            try {
+                const items = JSON.parse(s);
+                if (items[content.id]) {
+                    delete items[content.id];
+                    safeStorage.setItem(key, JSON.stringify(items));
+                    // Mark this old chunk as needing sync too
+                    // Extract actual chunk ID from key (handling both legacy and new formats)
+                    const cid = key.startsWith('content_chunk_') ? key.replace('content_chunk_', '') : key;
+                    
+                    const pendingStr = safeStorage.getItem('pending_chunk_updates') || '[]';
+                    const pendingIds = new Set(JSON.parse(pendingStr));
+                    pendingIds.add(cid);
+                    safeStorage.setItem('pending_chunk_updates', JSON.stringify(Array.from(pendingIds)));
+
+                    const pendingItemsStr = safeStorage.getItem('pending_item_updates') || '{}';
+                    const pendingItemsMap = JSON.parse(pendingItemsStr);
+                    if (!pendingItemsMap[cid]) pendingItemsMap[cid] = [];
+                    if (!pendingItemsMap[cid].includes(content.id)) pendingItemsMap[cid].push(content.id);
+                    safeStorage.setItem('pending_item_updates', JSON.stringify(pendingItemsMap));
+                    
+                    localMeta[cid] = { version: Date.now(), count: Object.keys(items).length };
                 }
-            }
+            } catch(e) {}
         }
     });
 

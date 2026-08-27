@@ -404,20 +404,52 @@ export async function saveContentsToChunks(rawContents: Content[]): Promise<void
  * Returns { rebalanced: boolean, rebalancedCount: number, affectedChunkIds: string[] }
  */
 export function rebalanceLocalChunks(): { rebalanced: boolean; rebalancedCount: number; affectedChunkIds: string[] } {
+  // 0. Quick metadata-driven pre-check to bypass loop entirely if no chunk overflows its limit.
+  // This avoids loading and parsing large JSON strings when editing or syncing.
+  const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+  let localMeta: Record<string, any> = {};
+  try { localMeta = JSON.parse(localMetaString); } catch(e) {}
+
+  let hasOverflow = false;
+  for (const [cid, meta] of Object.entries(localMeta)) {
+    const count = typeof meta === 'number' ? meta : (meta as any)?.count || 0;
+    if (cid.startsWith('movie_chunk_') && count > CONTENT_CHUNK_MOVIE_SIZE) {
+      hasOverflow = true;
+      break;
+    }
+    if (cid.startsWith('series_chunk_') && count > CONTENT_CHUNK_SERIES_SIZE) {
+      hasOverflow = true;
+      break;
+    }
+  }
+
+  if (!hasOverflow) {
+    return {
+      rebalanced: false,
+      rebalancedCount: 0,
+      affectedChunkIds: []
+    };
+  }
+
   let rebalancedCount = 0;
   const affectedChunkIds = new Set<string>();
 
   const processType = (prefix: string, maxSize: number) => {
-    // 1. Gather all local chunks for this prefix
+    // 1. Gather all local chunks for this prefix that actually exist in safeStorage to avoid querying non-existent index ranges
     const chunksMap = new Map<number, { id: string; items: Record<string, any> }>();
-    for (let i = 0; i < 50; i++) {
-      const cid = `${prefix}${i}`;
-      const chunkStr = safeStorage.getItem(`content_chunk_${cid}`) || safeStorage.getItem(cid);
-      if (chunkStr) {
-        try {
-          const items = JSON.parse(chunkStr);
-          chunksMap.set(i, { id: cid, items: { ...items } });
-        } catch(e) {}
+    const keys = safeStorage.keys().filter(k => k.startsWith('content_chunk_' + prefix) || k.startsWith(prefix));
+    
+    for (const key of keys) {
+      const match = key.match(/(\d+)$/);
+      if (match) {
+        const idx = parseInt(match[1]);
+        const chunkStr = safeStorage.getItem(key);
+        if (chunkStr) {
+          try {
+            const items = JSON.parse(chunkStr);
+            chunksMap.set(idx, { id: `${prefix}${idx}`, items: { ...items } });
+          } catch(e) {}
+        }
       }
     }
 
