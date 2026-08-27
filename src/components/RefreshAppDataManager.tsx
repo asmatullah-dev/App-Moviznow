@@ -49,20 +49,21 @@ export function RefreshAppDataManager() {
 
     isRefreshingRef.current = true;
 
+    const isManualTrigger = reason === 'catalog_button' || reason === 'user_profile_button' || reason === 'manual';
+
     // Dispatch start toast
     window.dispatchEvent(new CustomEvent('sync_status', {
       detail: {
         status: 'syncing',
         isInitialLoad: false,
-        message: 'Updating data...'
+        message: isManualTrigger ? 'Refreshing...' : 'Updating data...'
       }
     }));
 
     try {
       // ==========================================
-      // STEP 1: REFRESH APP DATA COMPLETELY (Settings, Notifications, and Profile only, NO Content chunks or reviews)
+      // STEP 1: REFRESH APP DATA FIRST (Settings, Notifications, and Profile only, NO Content chunks or reviews)
       // ==========================================
-      const isManualTrigger = reason === 'catalog_button' || reason === 'user_profile_button' || reason === 'manual';
       const versions: Record<string, any> = await getChunkMeta(isManualTrigger);
 
       let otherUpdated = false;
@@ -92,7 +93,7 @@ export function RefreshAppDataManager() {
         const chunkUsersMeta = versions.users || {};
         const serverUserVer = chunkUsersMeta[user.uid] || 0;
         const localUserVer = parseInt(safeStorage.getItem(`profile_version_${user.uid}`) || '0', 10);
-        if (serverUserVer > 0 && serverUserVer > localUserVer) {
+        if (isManualTrigger || (serverUserVer > 0 && serverUserVer > localUserVer)) {
           const profileFetched = await refreshProfile(true, 'manual').catch((err) => {
             console.error("Profile refresh failed:", err);
             return null;
@@ -107,12 +108,12 @@ export function RefreshAppDataManager() {
       }
 
       // ==========================================
-      // STEP 2: SYNC PENDING USER CHANGES
+      // STEP 2: SYNC PENDING USER CHANGES AFTER SUCCESSFUL REFRESH (Sessions, Time, Click History, Content History)
       // ==========================================
       if (user?.uid) {
         const syncSuccess = await executeSyncUserData(user.uid, profile, reason);
         if (!syncSuccess) {
-          console.warn("Unified Step 2: Syncing pending changes failed/returned false, but proceeding since Step 1 succeeded.");
+          console.warn("Unified Step 2: Syncing pending changes failed/returned false, but proceeding.");
         }
       }
 
@@ -121,7 +122,16 @@ export function RefreshAppDataManager() {
       localStorage.setItem(storageKey, Date.now().toString());
 
       // Dispatch single unified completion toast
-      if (otherUpdated) {
+      if (isManualTrigger) {
+        window.dispatchEvent(new CustomEvent('sync_status', {
+          detail: {
+            status: 'success',
+            isInitialLoad: false,
+            updatedCount: 0,
+            message: 'Refresh successfully'
+          }
+        }));
+      } else if (otherUpdated) {
         window.dispatchEvent(new CustomEvent('sync_status', {
           detail: {
             status: 'success',

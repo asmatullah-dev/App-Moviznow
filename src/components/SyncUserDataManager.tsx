@@ -12,19 +12,31 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
   const lastSyncKey = `last_user_sync_time_${currentUserUid}`;
   const userRef = doc(db, 'users', currentUserUid);
 
-  // 1. Flush accumulated time
+  // 1. Flush accumulated time & sessions
   const timeCacheKey = `accumulated_time_seconds_${currentUserUid}`;
   const accSecs = parseInt(safeStorage.getItem(timeCacheKey) || '0', 10);
-  if (accSecs > 0) {
-    safeStorage.setItem(timeCacheKey, '0');
+  const sessionCacheKey = `accumulated_sessions_${currentUserUid}`;
+  const accSessions = parseInt(safeStorage.getItem(sessionCacheKey) || '0', 10);
+
+  if (accSecs > 0 || accSessions > 0) {
     const pendingStr = safeStorage.getItem('pending_user_updates') || '{}';
     try {
       const pendingAll = JSON.parse(pendingStr);
       pendingAll[currentUserUid] = pendingAll[currentUserUid] || {};
-      const currentBase = typeof pendingAll[currentUserUid].timeSpent === 'number'
-        ? pendingAll[currentUserUid].timeSpent
-        : (currentProfile?.timeSpent || 0);
-      pendingAll[currentUserUid].timeSpent = currentBase + accSecs;
+      if (accSecs > 0) {
+        safeStorage.setItem(timeCacheKey, '0');
+        const currentBaseTime = typeof pendingAll[currentUserUid].timeSpent === 'number'
+          ? pendingAll[currentUserUid].timeSpent
+          : (currentProfile?.timeSpent || 0);
+        pendingAll[currentUserUid].timeSpent = currentBaseTime + accSecs;
+      }
+      if (accSessions > 0) {
+        safeStorage.setItem(sessionCacheKey, '0');
+        const currentBaseSessions = typeof pendingAll[currentUserUid].sessionsCount === 'number'
+          ? pendingAll[currentUserUid].sessionsCount
+          : (currentProfile?.sessionsCount || 0);
+        pendingAll[currentUserUid].sessionsCount = currentBaseSessions + accSessions;
+      }
       safeStorage.setItem('pending_user_updates', JSON.stringify(pendingAll));
     } catch (e) {}
   }
@@ -149,17 +161,10 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
   }
 
   try {
-    const { writeBatch, doc } = await import('firebase/firestore');
-    const batch = writeBatch(db);
+    const { setDoc } = await import('firebase/firestore');
     
-    // Write directly to user document with merge - 0 pre-reads required
-    batch.set(userRef, updatesToPush, { merge: true });
-    
-    // Also update chunk_meta versions so admins are immediately notified about the change
-    const metaRef = doc(db, 'chunk_meta', 'versions');
-    batch.set(metaRef, { users: { [currentUserUid]: nowTime } }, { merge: true });
-    
-    await runWithNetwork(() => batch.commit());
+    // Write directly to user document with merge - 0 pre-reads required and no chunk_meta invalidation
+    await runWithNetwork(() => setDoc(userRef, updatesToPush, { merge: true }));
 
     // --- CLEANUP IN LOCAL QUEUES ONLY AFTER CONFIRMED SUCCESS ---
     safeStorage.removeItem('needs_user_sync');

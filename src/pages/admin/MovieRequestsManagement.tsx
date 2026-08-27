@@ -60,12 +60,6 @@ export default function MovieRequestsManagement() {
   const { users: allUsers, updateUserFields, finalizeUserChanges, hasPendingChanges } = useUsers();
 
   useEffect(() => {
-    return () => {
-       finalizeUserChanges(true).catch(console.error);
-    };
-  }, [finalizeUserChanges]);
-
-  useEffect(() => {
     const aggregated = new Map<string, MovieRequest>();
 
     allUsers.forEach(user => {

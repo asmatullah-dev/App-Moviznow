@@ -55,12 +55,6 @@ export default function ReportedLinks() {
 
   const { users: allUsers, updateUserFields, finalizeUserChanges, hasPendingChanges } = useUsers();
 
-  useEffect(() => {
-    return () => {
-       finalizeUserChanges(true).catch(console.error);
-    };
-  }, [finalizeUserChanges]);
-
   // Reusable parsing for extracting links out of stringified JSON
   const parseLinks = (linksStr: string | undefined): QualityLinks => {
     if (!linksStr) return [];

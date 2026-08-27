@@ -148,85 +148,37 @@ export const requestNotificationPermission = async (force: boolean = false) => {
       });
       
       if (token) {
-        // Fast path: If token is unchanged and already cached in local storage, skip all Firestore reads and writes
+        // Fast path: If token is already cached for this user/device, skip all Firestore reads and writes
         const tokenAlreadySynced = parsedCache && 
           parsedCache.token === token && 
-          parsedCache.userId === currentUserId;
+          parsedCache.userId === currentUserId &&
+          (now - (parsedCache.timestamp || 0) < 30 * 24 * 60 * 60 * 1000);
 
         if (!force && tokenAlreadySynced) {
           return token;
         }
 
         try {
-          // 1. Get current chunk ID from meta
-          const { getChunkMeta } = await import('./utils/chunkMeta');
-          const metaRef = doc(db, 'chunk_meta', 'versions');
-          const metaData = await getChunkMeta();
-          let latestChunkId = metaData?.fcm_tokens?.latestChunkId || 'fcm_chunk_0';
-
-          const chunkRef = doc(db, 'fcm_tokens', latestChunkId);
-          const chunkDoc = await getDoc(chunkRef);
-          
-          let targetChunkId = latestChunkId;
+          // Store token in current user's device doc directly to avoid reading/writing large chunks or chunk_meta
+          const tokenDocRef = doc(db, 'fcm_tokens', token.substring(0, 100).replace(/[/#$\[\]]/g, '_'));
           const tokenData = {
             token,
             updatedAt: new Date().toISOString(),
             userId: auth.currentUser?.uid || 'anonymous'
           };
-
-          if (chunkDoc.exists()) {
-            const items = chunkDoc.data() || {};
-            if (Object.keys(items).length >= 2000 && !items[token]) {
-              const match = latestChunkId.match(/(\d+)$/);
-              const nextIndex = match ? parseInt(match[1]) + 1 : 1;
-              targetChunkId = 'fcm_chunk_' + nextIndex;
-              
-              await setDoc(doc(db, 'fcm_tokens', targetChunkId), {
-                [token]: tokenData
-              });
-              
-              await updateDoc(metaRef, {
-                'fcm_tokens.latestChunkId': targetChunkId,
-                'fcm_tokens.version': Date.now(),
-                'lastGlobalUpdate': serverTimestamp()
-              });
-            } else {
-              await setDoc(chunkRef, {
-                 [token]: tokenData
-              }, { merge: true });
-            }
-          } else {
-            await setDoc(chunkRef, { [token]: tokenData });
-            await setDoc(metaRef, {
-              fcm_tokens: {
-                latestChunkId: targetChunkId,
-                version: Date.now()
-              }
-            }, { merge: true });
-          }
+          await runWithNetwork(() => setDoc(tokenDocRef, tokenData, { merge: true }));
 
           if (auth.currentUser) {
             try {
-               const uid = auth.currentUser.uid;
-               const pendingStr = safeStorage.getItem('pending_user_updates') || '{}';
-               let pendingAll = JSON.parse(pendingStr);
-               pendingAll[uid] = pendingAll[uid] || {};
-               pendingAll[uid].notification = 'yes';
-               safeStorage.setItem('pending_user_updates', JSON.stringify(pendingAll));
-               
                const cachedStr = safeStorage.getItem('profile_cache');
                if (cachedStr) {
-                 try {
-                    const profileCache = JSON.parse(cachedStr);
-                    profileCache.notification = 'yes';
-                    safeStorage.setItem('profile_cache', JSON.stringify(profileCache));
-                    window.dispatchEvent(new Event('profile_cache_updated'));
-                 } catch(e){}
+                 const profileCache = JSON.parse(cachedStr);
+                 profileCache.notification = 'yes';
+                 safeStorage.setItem('profile_cache', JSON.stringify(profileCache));
+                 window.dispatchEvent(new Event('profile_cache_updated'));
                }
-
-               window.dispatchEvent(new Event('pending_user_updates_changed'));
             } catch (e) {
-               console.log("Failed to update user profile with notification status");
+               console.log("Failed to update user profile cache with notification status");
             }
           }
 
@@ -238,37 +190,9 @@ export const requestNotificationPermission = async (force: boolean = false) => {
             body: JSON.stringify({ token, userId: auth.currentUser?.uid })
           }).catch(() => {});
         } catch (e) {
-          console.warn('Error saving FCM token:', e);
+          console.warn("Could not sync FCM token to server:", e);
         }
-        
         return token;
-      } else {
-        if (auth.currentUser) {
-           try {
-              const uid = auth.currentUser.uid;
-              const pendingStr = safeStorage.getItem('pending_user_updates') || '{}';
-              let pendingAll = JSON.parse(pendingStr);
-              pendingAll[uid] = pendingAll[uid] || {};
-              pendingAll[uid].notification = 'no';
-              safeStorage.setItem('pending_user_updates', JSON.stringify(pendingAll));
-              
-              // Also update profile cache
-              const cachedStr = safeStorage.getItem('profile_cache');
-              if (cachedStr) {
-                try {
-                   const profileCache = JSON.parse(cachedStr);
-                   profileCache.notification = 'no';
-                   safeStorage.setItem('profile_cache', JSON.stringify(profileCache));
-                   // Dispatch a generic auth update to refresh context if needed
-                   window.dispatchEvent(new Event('profile_cache_updated'));
-                } catch(e){}
-              }
-
-              window.dispatchEvent(new Event('pending_user_updates_changed'));
-           } catch (e) {
-              console.log("Failed to update user profile with notification status");
-           }
-        }
       }
     }
   } catch (error) {

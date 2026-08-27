@@ -15,11 +15,6 @@ import { getUserDisplayName } from '../../utils/userUtils';
 export default function UserManagers() {
   const { users: allUsers, loading: usersLoading, finalizeUserChanges, hasPendingChanges, updateUserFields } = useUsers();
 
-  useEffect(() => {
-    return () => {
-       finalizeUserChanges(true).catch(console.error);
-    };
-  }, [finalizeUserChanges]);
   const [managers, setManagers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState(() => sessionStorage.getItem('user_managers_search') || '');

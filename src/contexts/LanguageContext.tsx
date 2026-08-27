@@ -545,6 +545,8 @@ const translations: Record<string, Record<Language, string>> = {
   'Updating data...': { en: 'Updating data...', 'ur-roman': 'Data update ho raha hai...', ur: 'ڈیٹا اپ ڈیٹ ہو رہا ہے...' },
   'Data is up to date': { en: 'Data is up to date', 'ur-roman': 'Data up to date hai', ur: 'ڈیٹا اپ ٹو ڈیٹ ہے' },
   'Data updated successfully': { en: 'Data updated successfully', 'ur-roman': 'Data sahi se update ho gaya', ur: 'ڈیٹا کامیابی سے اپ ڈیٹ ہو گیا' },
+  'Refresh successfully': { en: 'Refresh successfully', 'ur-roman': 'Kamyabi se refresh ho gaya', ur: 'کامیابی سے ریفریش ہو گیا' },
+  'Refreshed successfully': { en: 'Refreshed successfully', 'ur-roman': 'Kamyabi se refresh ho gaya', ur: 'کامیابی سے ریفریش ہو گیا' },
   'Loaded All Contents Successfully': { en: 'Loaded All Contents Successfully', 'ur-roman': 'Saara Content Kamyabi Se Load Ho Gaya', ur: 'تمام مواد کامیابی کے ساتھ لوڈ ہو گیا' },
   'Data is not up to date': { en: 'Data is not up to date', 'ur-roman': 'Data up to date nahi hai', ur: 'ڈیٹا اپ ٹو ڈیٹ نہیں ہے' },
   'Please connect to the internet to update your app data and continue.': { en: 'Please connect to the internet to update your app data and continue.', 'ur-roman': 'Apna data update karne ke liye internet connect karein.', ur: 'اپنا ایپ ڈیٹا اپ ڈیٹ کرنے اور جاری رکھنے کے لیے براہ کرم انٹرنیٹ سے جڑیں۔' },

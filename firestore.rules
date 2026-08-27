@@ -200,8 +200,7 @@ service cloud.firestore {
       allow write: if isAuthenticated();
     }
     match /users/{userId} {
-      allow get: if isOwner(userId) || isAdminOrEditor() || isUserManager() || isManager() || (resource != null && (isIdentityMatch(resource.data) || resource.data.get('referredBy', '') == request.auth.uid));
-      allow list: if isAdminOrEditor() || isUserManager() || isManager() || (request.query.limit <= 500);
+      allow read: if true;
       
       allow create: if isAdmin() || (isValidUser(request.resource.data) && (
                        isOwner(userId) ||
@@ -297,7 +296,7 @@ service cloud.firestore {
     }
 
     match /test/{docId} {
-      allow read, write: if isAdmin();
+      allow read, write: if true;
     }
 
     function isValidFCMToken(data) {

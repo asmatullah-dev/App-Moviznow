@@ -60,11 +60,19 @@ export function SyncBanner() {
 
   if (!syncStatus) return null;
 
-  // Suppress "updating data" and "data is up to date" in user-facing pages (not admin)
+  // Suppress silent background "updating data" and "data is up to date" in user-facing pages (not admin)
   const isUserPage = !window.location.pathname.startsWith('/admin');
   if (isUserPage) {
     if (syncStatus === 'up-to-date') return null;
-    if (syncStatus === 'syncing' && !isInitialLoad && customMessage !== 'Loading Data...') return null;
+    if (
+      syncStatus === 'syncing' &&
+      !isInitialLoad &&
+      customMessage !== 'Loading Data...' &&
+      customMessage !== 'Refreshing...' &&
+      !customMessage?.toLowerCase().includes('refresh')
+    ) {
+      return null;
+    }
   }
 
   const bgClasses = {
@@ -79,7 +87,10 @@ export function SyncBanner() {
       if (isInitialLoad || customMessage === 'Loading Data...') {
         return t('Loading Data...');
       }
-      return t('Updating data...');
+      if (customMessage) {
+        return t(customMessage);
+      }
+      return t('Refreshing...');
     }
     if (syncStatus === 'error') return t('Sync failed. Will retry automatically.');
     if (syncStatus === 'success') {
@@ -92,7 +103,7 @@ export function SyncBanner() {
       if (customMessage && customMessage !== '0 items updated' && customMessage !== '0 content updated') {
         return t(customMessage);
       }
-      return t('Data updated successfully');
+      return t('Refresh successfully');
     }
     if (customMessage && customMessage !== '0 items updated' && customMessage !== '0 content updated') {
       return t(customMessage);

@@ -531,14 +531,10 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                       vibrate(50);
                       setIsRefreshingData(true);
                       try {
-                        if ((window as any).triggerSyncUserData) {
-                          await (window as any).triggerSyncUserData('manual');
-                        }
                         if ((window as any).triggerRefreshAppData) {
                           await (window as any).triggerRefreshAppData('user_profile_button');
                         } else {
                           await Promise.all([
-                            Promise.resolve(),
                             refreshProfile(true, 'manual'),
                             refreshSettings()
                           ]);

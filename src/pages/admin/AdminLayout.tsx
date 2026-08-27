@@ -17,13 +17,7 @@ export default function AdminLayout() {
   const navigate = useNavigate();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
-  const { users, finalizeUserChanges, hasPendingChanges } = useUsers();
-
-  useEffect(() => {
-    if (hasPendingChanges) {
-      finalizeUserChanges(true);
-    }
-  }, [location.pathname, hasPendingChanges, finalizeUserChanges]);
+  const { users, hasPendingChanges } = useUsers();
 
   
   const reportedLinksCount = useMemo(() => {

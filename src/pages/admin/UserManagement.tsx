@@ -256,7 +256,7 @@ export default function UserManagement() {
         }
         
         // Delta sync users using chunk_meta (zero reads if up-to-date, or delta reads only)
-        const res = await refreshUsers(true);
+        const res = await refreshUsers(false);
         if (mounted) {
           if (res.updatedSomething) {
             window.dispatchEvent(new CustomEvent('sync_status', { detail: 'success' }));
@@ -276,8 +276,6 @@ export default function UserManagement() {
     
     return () => {
       mounted = false;
-      // Sync after exiting of tab
-      finalizeUserChanges(true).catch(console.error);
 
       // Email notification for Expiry only triggered by admin and owner when exiting User Management tab
       if ((profile?.role === 'admin' || profile?.role === 'owner') && changedToExpiredUidsRef.current.size > 0 && profile?.uid) {
@@ -1577,9 +1575,10 @@ export default function UserManagement() {
           <div className="flex gap-2">
             <Button
               onClick={() => {
-                window.dispatchEvent(new CustomEvent('sync_status', { detail: 'syncing' }));
+                window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'syncing', message: 'Refreshing...' } }));
                 
                 const doSync = async () => {
+                   const res = await refreshUsers(true);
                    const pendingStr = safeStorage.getItem('pending_user_updates');
                    if (pendingStr) {
                      try {
@@ -1589,18 +1588,14 @@ export default function UserManagement() {
                        }
                      } catch(e) {}
                    }
-                   return await refreshUsers(true);
+                   return res;
                 };
                 
                 doSync().then((res) => {
-                  if (res?.updatedSomething) {
-                    window.dispatchEvent(new CustomEvent('sync_status', { detail: 'success' }));
-                  } else {
-                    window.dispatchEvent(new CustomEvent('sync_status', { detail: 'up-to-date' }));
-                  }
+                  window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'success', message: 'Refresh successfully' } }));
                 }).catch((err) => {
                   console.error("Manual refresh failed:", err);
-                  window.dispatchEvent(new CustomEvent('sync_status', { detail: 'error' }));
+                  window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'error', message: 'Sync failed. Will retry automatically.' } }));
                 });
               }}
               variant="ghost"

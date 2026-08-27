@@ -16,11 +16,6 @@ import { getUserDisplayName } from '../../utils/userUtils';
 export default function SelectedContentUsers() {
   const { users: allUsers, loading: usersLoading, finalizeUserChanges, hasPendingChanges, updateUserFields } = useUsers();
 
-  useEffect(() => {
-    return () => {
-       finalizeUserChanges(true).catch(console.error);
-    };
-  }, [finalizeUserChanges]);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const { contentList } = useAdminContent();
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);

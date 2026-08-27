@@ -635,32 +635,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
-          if (modified || !mergedProfile.referralCode) {
-            let newlyGenerated = false;
-            if (!mergedProfile.referralCode) {
-              mergedProfile.referralCode = generateReferralCode(currentUser.uid);
-              newlyGenerated = true;
-            }
-
+          if (!mergedProfile.referralCode) {
+            mergedProfile.referralCode = generateReferralCode(currentUser.uid);
             try {
               const pStr = safeStorage.getItem("pending_user_updates");
               let pAll = pStr ? JSON.parse(pStr) : {};
               pAll[currentUser.uid] = pAll[currentUser.uid] || {};
-              
-              if (modified) {
-                if (mergedProfile.reported_links) pAll[currentUser.uid].reported_links = mergedProfile.reported_links;
-                if (mergedProfile.movieRequests) pAll[currentUser.uid].movieRequests = mergedProfile.movieRequests;
-              }
-              if (newlyGenerated) {
-                pAll[currentUser.uid].referralCode = mergedProfile.referralCode;
-              }
-              
+              pAll[currentUser.uid].referralCode = mergedProfile.referralCode;
               safeStorage.setItem("pending_user_updates", JSON.stringify(pAll));
+              safeStorage.setItem("needs_user_sync", "true");
             } catch (e) {
-              console.error("Failed to queue modified profile fields", e);
+              console.error("Failed to queue referralCode update", e);
             }
-            
-            safeStorage.setItem("needs_user_sync", "true");
           }
         }
 
@@ -1758,6 +1744,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             localStorage.setItem(sessionKey, now.toString());
 
             // Track session count & device details purely in local storage
+            try {
+              const cachedProfileStr = safeStorage.getItem("profile_cache");
+              const p = cachedProfileStr ? JSON.parse(cachedProfileStr) : null;
+              if (p?.role !== "owner") {
+                const sessionCacheKey = `accumulated_sessions_${currentUser.uid}`;
+                const curSessions = parseInt(safeStorage.getItem(sessionCacheKey) || "0", 10);
+                safeStorage.setItem(sessionCacheKey, (curSessions + 1).toString());
+              }
+            } catch (e) {}
+
             const { getDeviceDetails } = await import("../utils/deviceInfo");
             const deviceDetails = await getDeviceDetails();
             if (deviceDetails) {
@@ -1994,18 +1990,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       let oldDocData = null;
       let shouldSignOutDeleted = false;
       if (result.user.email) {
-        const { collection, query, where, getDocs } = await import("firebase/firestore");
-        const usersRef = collection(db, "users");
-        const q = query(usersRef, where("email", "==", result.user.email));
-        const qs = await getDocs(q);
-        
-        // Find existing doc with different UID
-        const existingDoc = qs.docs.find(d => d.id !== result.user.uid);
-        if (existingDoc) {
-          oldDocData = existingDoc.data();
-          if (oldDocData.status === "deleted") {
-            shouldSignOutDeleted = true;
+        try {
+          const { collection, query, where, getDocs, limit } = await import("firebase/firestore");
+          const usersRef = collection(db, "users");
+          const q = query(usersRef, where("email", "==", result.user.email), limit(10));
+          const qs = await getDocs(q);
+          
+          // Find existing doc with different UID
+          const existingDoc = qs.docs.find(d => d.id !== result.user.uid);
+          if (existingDoc) {
+            oldDocData = existingDoc.data();
+            if (oldDocData.status === "deleted") {
+              shouldSignOutDeleted = true;
+            }
           }
+        } catch (queryErr) {
+          console.warn("Could not check duplicate email doc during login:", queryErr);
         }
       }
 
@@ -2015,7 +2015,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error("Your account has been deleted or blocked.");
       }
 
-      const snap = await getDoc(userRef);
+      let snap: any = null;
+      try {
+        snap = await getDoc(userRef);
+      } catch (getErr) {
+        console.warn("Could not fetch user document directly, onAuthStateChanged will synchronize:", getErr);
+      }
       const localSessionId = getLocalSessionId();
 
       const updates: any = {};
@@ -2048,7 +2053,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch (e) {}
 
       let docExists = false;
-      if (snap.exists()) {
+      if (snap && snap.exists()) {
         docExists = true;
         const data = snap.data();
         updates.sessionId = localSessionId;
