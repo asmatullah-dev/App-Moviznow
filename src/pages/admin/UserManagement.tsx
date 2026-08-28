@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
-import { collection, doc, updateDoc, getDoc, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit, deleteField, increment, onSnapshot} from 'firebase/firestore';
+import { collection, doc, updateDoc, getDoc, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit, deleteField, increment} from 'firebase/firestore';
 import { UserProfile, Role, Status, AnalyticsEvent, Content } from '../../types';
 import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, Bell, Mail, RefreshCw, Link2 as LinkIcon, Copy } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
@@ -274,19 +274,9 @@ export default function UserManagement() {
     if (mounted) {
       syncOnMount();
     }
-
-    // Set up real-time listener on chunk_meta versions to receive instant updates (e.g. user online status, last active, edits)
-    const unsubscribe = onSnapshot(doc(db, 'chunk_meta', 'versions'), (snapshot) => {
-      if (mounted && snapshot.exists()) {
-        refreshUsers(true).catch(console.error);
-      }
-    }, (err) => {
-      console.warn("Chunk meta listener warning:", err);
-    });
     
     return () => {
       mounted = false;
-      unsubscribe();
 
       // Email notification for Expiry only triggered by admin and owner when exiting User Management tab
       if ((profile?.role === 'admin' || profile?.role === 'owner') && changedToExpiredUidsRef.current.size > 0 && profile?.uid) {

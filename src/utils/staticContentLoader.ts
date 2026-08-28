@@ -20,11 +20,6 @@ const staticCollectionsData = unifiedData.collections;
  */
 export function seedStaticExportData(forceOverwrite: boolean = false): void {
   try {
-    const isSeeded = safeStorage.getItem('static_data_seeded_v3');
-    if (!forceOverwrite && isSeeded === 'true') {
-      return; // Instantly skip redundant parsing, mapping and writing of 2,478 catalog items
-    }
-
     // 1. Group content items by chunkId
     const chunkMap: Record<string, Record<string, any>> = {};
     const items = staticContentData as StaticContentItem[];
@@ -102,7 +97,6 @@ export function seedStaticExportData(forceOverwrite: boolean = false): void {
     if (!safeStorage.getItem('last_successful_meta_check')) {
       safeStorage.setItem('last_successful_meta_check', Date.now().toString());
     }
-    safeStorage.setItem('static_data_seeded_v3', 'true');
   } catch (e) {
     console.error('Error seeding static export data:', e);
   }
