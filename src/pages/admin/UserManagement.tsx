@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
-import { collection, doc, updateDoc, getDoc, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit, deleteField, increment} from 'firebase/firestore';
+import { collection, doc, updateDoc, getDoc, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit, deleteField, increment, onSnapshot} from 'firebase/firestore';
 import { UserProfile, Role, Status, AnalyticsEvent, Content } from '../../types';
 import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, Bell, Mail, RefreshCw, Link2 as LinkIcon, Copy } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
@@ -240,6 +240,8 @@ export default function UserManagement() {
 
     const syncOnMount = async () => {
       try {
+        window.dispatchEvent(new CustomEvent('sync_status', { detail: 'syncing' }));
+        
         // Record initial statuses before refresh
         const initialMap = new Map((allUsers || []).map(u => [u.uid, u.status]));
 
@@ -255,18 +257,36 @@ export default function UserManagement() {
         }
         
         // Delta sync users using chunk_meta (zero reads if up-to-date, or delta reads only)
-        await refreshUsers(true);
+        const res = await refreshUsers(true);
+        if (mounted) {
+          if (res.updatedSomething) {
+            window.dispatchEvent(new CustomEvent('sync_status', { detail: 'success' }));
+          } else {
+            window.dispatchEvent(new CustomEvent('sync_status', { detail: 'up-to-date' }));
+          }
+        }
       } catch (err) {
         console.error("Refresh users failed:", err);
+        if (mounted) window.dispatchEvent(new CustomEvent('sync_status', { detail: 'error' }));
       }
     };
 
     if (mounted) {
       syncOnMount();
     }
+
+    // Set up real-time listener on chunk_meta versions to receive instant updates (e.g. user online status, last active, edits)
+    const unsubscribe = onSnapshot(doc(db, 'chunk_meta', 'versions'), (snapshot) => {
+      if (mounted && snapshot.exists()) {
+        refreshUsers(true).catch(console.error);
+      }
+    }, (err) => {
+      console.warn("Chunk meta listener warning:", err);
+    });
     
     return () => {
       mounted = false;
+      unsubscribe();
 
       // Email notification for Expiry only triggered by admin and owner when exiting User Management tab
       if ((profile?.role === 'admin' || profile?.role === 'owner') && changedToExpiredUidsRef.current.size > 0 && profile?.uid) {
@@ -1566,6 +1586,8 @@ export default function UserManagement() {
           <div className="flex gap-2">
             <Button
               onClick={() => {
+                window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'syncing', message: 'Refreshing...' } }));
+                
                 const doSync = async () => {
                    const res = await refreshUsers(true);
                    const pendingStr = safeStorage.getItem('pending_user_updates');
@@ -1580,8 +1602,11 @@ export default function UserManagement() {
                    return res;
                 };
                 
-                doSync().catch((err) => {
+                doSync().then((res) => {
+                  window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'success', message: 'Refresh successfully' } }));
+                }).catch((err) => {
                   console.error("Manual refresh failed:", err);
+                  window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'error', message: 'Sync failed. Will retry automatically.' } }));
                 });
               }}
               variant="ghost"
