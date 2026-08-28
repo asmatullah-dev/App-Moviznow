@@ -487,13 +487,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const serverVersionTime = parseVersionTime(serverVersion);
         const effectiveServerVersion = serverVersionTime > 0 ? (typeof serverVersion === 'object' ? (serverVersion.updatedAt || serverVersion.version) : serverVersion) : 1;
         const versionChanged =
-          (serverVersionTime > 0 && serverVersionTime > localVersionTime) || (!localProfile) || (force && reason === "manual");
+          (serverVersionTime > 0 && serverVersionTime > localVersionTime) || (!localProfile);
 
         let serverProfile: UserProfile | null = null;
         let docSnap;
 
-        // 7. Verify user UID in Firestore when online and version changed or profile missing
-        if (navigator.onLine && (versionChanged || !localProfile || (force && reason === "manual"))) {
+        // 7. Verify user UID in Firestore when online and chunk_meta version has changed or profile is missing
+        if (navigator.onLine && (versionChanged || !localProfile)) {
           try {
             docSnap = await runWithNetwork(() => getDoc(userRef));
             if (docSnap.exists()) {
@@ -1001,7 +1001,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (mergedProfile && Object.keys(mergedProfile).length > 0) {
-          safeStorage.setItem("profile_cache", JSON.stringify(mergedProfile));
+          const profileJson = JSON.stringify(mergedProfile);
+          safeStorage.setItem("profile_cache", profileJson);
+          safeStorage.setItemAsync("profile_cache", profileJson).catch(() => {});
           safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
           setProfile(mergedProfile);
         }

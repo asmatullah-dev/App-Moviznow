@@ -15,12 +15,12 @@ class SafeStorage {
 
   private checkAvailability(): boolean {
     try {
+      if (typeof window === 'undefined' || !window.localStorage) return false;
       const testKey = '__storage_test__';
       window.localStorage.setItem(testKey, testKey);
       window.localStorage.removeItem(testKey);
       return true;
     } catch (e) {
-      console.warn('LocalStorage is not available. Falling back to in-memory storage.', e);
       return false;
     }
   }
@@ -88,6 +88,9 @@ class SafeStorage {
   // --- Asynchronous methods (IndexedDB, unlimited size basically) ---
   
   private initDB(): Promise<IDBDatabase> {
+    if (typeof window === 'undefined' || typeof indexedDB === 'undefined') {
+      return Promise.reject(new Error('IndexedDB not available'));
+    }
     return new Promise((resolve, reject) => {
       const request = indexedDB.open('moviznow_cache_db', 2);
       request.onerror = () => reject(request.error);

@@ -133,6 +133,51 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     }
   });
 
+  // Reusable multi-tier cache persistence helper (Synchronous LocalStorage + Asynchronous IndexedDB)
+  const saveUsersCache = useCallback((usersList: UserProfile[], mtimes?: Record<string, any>) => {
+    try {
+      const serialized = JSON.stringify(usersList);
+      safeStorage.setItem('cached_all_users', serialized);
+      safeStorage.setItemAsync('cached_all_users', serialized).catch(() => {});
+
+      if (mtimes && Object.keys(mtimes).length > 0) {
+        const mtimesStr = JSON.stringify(mtimes);
+        safeStorage.setItem('sync_user_mtimes', mtimesStr);
+        safeStorage.setItemAsync('sync_user_mtimes', mtimesStr).catch(() => {});
+        try {
+          updateChunkMetaLocalCache({ users: mtimes });
+        } catch (e) {}
+      }
+    } catch (e) {
+      console.warn("Failed to persist users cache:", e);
+    }
+  }, []);
+
+  // Hydrate from IndexedDB on initial mount if local memory/localStorage was empty
+  useEffect(() => {
+    if (users.length === 0) {
+      safeStorage.getItemAsync('cached_all_users').then(asyncCached => {
+        if (asyncCached) {
+          try {
+            const parsed: UserProfile[] = JSON.parse(asyncCached);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              const uniqueMap = new Map<string, UserProfile>();
+              parsed.forEach(u => {
+                if (u && u.uid && !uniqueMap.has(u.uid)) {
+                  uniqueMap.set(u.uid, normalizeUserStatusAndExpiry(u));
+                }
+              });
+              const loaded = Array.from(uniqueMap.values());
+              setUsers(loaded);
+              setLoading(false);
+              safeStorage.setItem('cached_all_users', JSON.stringify(loaded));
+            }
+          } catch (e) {}
+        }
+      }).catch(() => {});
+    }
+  }, []);
+
   const updateMultipleUserFields = useCallback((updates: Record<string, Partial<UserProfile>>) => {
     if (Object.keys(updates).length === 0) return;
 
@@ -143,7 +188,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         }
         return u;
       });
-      safeStorage.setItem('cached_all_users', JSON.stringify(next));
+      saveUsersCache(next);
       return next;
     });
 
@@ -158,7 +203,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     safeStorage.setItem('pending_user_updates', JSON.stringify(pending));
     setHasPendingChanges(true);
     window.dispatchEvent(new CustomEvent('pending_user_updates_changed'));
-  }, []);
+  }, [saveUsersCache]);
 
   // Buffer changes locally
   const updateUserFields = useCallback((userId: string, fields: Partial<UserProfile>) => {
@@ -227,13 +272,13 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         batches.push(writeBatch(db));
         opCount = 0;
       }
-      batches[batches.length - 1].set(doc(db, 'chunk_meta', 'versions'), { users: metaUsersUpdate }, { merge: true });
+      batches[batches.length - 1].set(doc(db, 'chunk_meta', 'versions'), { users: metaUsersUpdate, users_version: Date.now() }, { merge: true });
 
       for (const b of batches) await runWithNetwork(() => b.commit());
 
       try {
         const { updateChunkMetaLocalCache } = await import('../utils/chunkMeta');
-        updateChunkMetaLocalCache({ users: metaUsersUpdate });
+        updateChunkMetaLocalCache({ users: metaUsersUpdate, users_version: Date.now() });
       } catch (e) {}
 
       try {
@@ -241,6 +286,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         const knownMtimes = JSON.parse(knownMtimesStr);
         Object.assign(knownMtimes, metaUsersUpdate);
         safeStorage.setItem('sync_user_mtimes', JSON.stringify(knownMtimes));
+        safeStorage.setItemAsync('sync_user_mtimes', JSON.stringify(knownMtimes)).catch(() => {});
       } catch (e) {}
 
       safeStorage.removeItem('pending_user_updates');
@@ -327,52 +373,186 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         const versions = await getChunkMeta(force);
         const serverUsersVersion: Record<string, any> = (versions && typeof versions === 'object' && versions.users && typeof versions.users === 'object') ? versions.users : {};
 
-        // 2. Fetch fresh users collection directly from Firestore
-        const snap = await runWithNetwork(() => getDocs(collection(db, 'users')));
-        
-        const freshUsersMap = new Map<string, UserProfile>();
-        const updatedMtimes: Record<string, any> = {};
+        // 2. Read local chunk meta / mtimes for users
+        let localUsersVersion: Record<string, any> = {};
+        const knownMtimesStr = safeStorage.getItem('sync_user_mtimes');
+        if (knownMtimesStr) {
+          try { localUsersVersion = JSON.parse(knownMtimesStr); } catch (e) {}
+        }
+        if (Object.keys(localUsersVersion).length === 0) {
+          const cachedMetaStr = safeStorage.getItem('cached_chunk_meta_doc');
+          if (cachedMetaStr) {
+            try {
+              const parsed = JSON.parse(cachedMetaStr);
+              if (parsed?.users) localUsersVersion = { ...parsed.users };
+            } catch (e) {}
+          }
+        }
 
-        snap.docs.forEach(docSnap => {
-          const raw = { ...docSnap.data(), uid: docSnap.id } as UserProfile;
-          const normalized = normalizeUserStatusAndExpiry(raw);
-          freshUsersMap.set(docSnap.id, normalized);
-          updatedMtimes[docSnap.id] = serverUsersVersion[docSnap.id] || normalized.updatedAt || getUtcVersion();
+        // Build existing users map from cache
+        const currentUsersMap = new Map<string, UserProfile>();
+        locallyCachedUsers.forEach(u => {
+          if (u && u.uid) {
+            currentUsersMap.set(u.uid, normalizeUserStatusAndExpiry(u));
+          }
         });
 
-        // 3. Compare with locally cached users to detect actual additions, deletions, or field changes
-        const oldMap = new Map(locallyCachedUsers.map(u => [u.uid, u]));
-        if (freshUsersMap.size !== locallyCachedUsers.length) {
-          updatedSomething = true;
-        } else {
-          for (const [uid, freshUser] of freshUsersMap.entries()) {
-            const oldUser = oldMap.get(uid);
-            if (!oldUser) {
+        // If local cache is completely empty, perform initial full load from Firestore
+        if (currentUsersMap.size === 0) {
+          const snap = await runWithNetwork(() => getDocs(collection(db, 'users')));
+          const initialMap = new Map<string, UserProfile>();
+          const initialMtimes: Record<string, any> = {};
+
+          snap.docs.forEach(docSnap => {
+            const raw = { ...docSnap.data(), uid: docSnap.id } as UserProfile;
+            const normalized = normalizeUserStatusAndExpiry(raw);
+            initialMap.set(docSnap.id, normalized);
+            initialMtimes[docSnap.id] = serverUsersVersion[docSnap.id] || normalized.updatedAt || getUtcVersion();
+          });
+
+          // Preserve any uncommitted local pending updates
+          let initialList = Array.from(initialMap.values());
+          const pendingStr = safeStorage.getItem('pending_user_updates');
+          if (pendingStr) {
+            try {
+              const pending = JSON.parse(pendingStr);
+              initialList = initialList.map(u => {
+                if (pending[u.uid]) {
+                  return normalizeUserStatusAndExpiry({ ...u, ...pending[u.uid] });
+                }
+                return u;
+              });
+            } catch (e) {}
+          }
+
+          saveUsersCache(initialList, initialMtimes);
+          setUsers(initialList);
+          safeStorage.setItem('last_users_sync_timestamp', now.toString());
+          setLoading(false);
+          setError(null);
+          return { users: initialList, updatedSomething: true };
+        }
+
+        // 3. Find changed users by comparing local version against server chunk_meta version
+        const uidsToFetch = new Set<string>();
+        let hadDeletions = false;
+
+        for (const [uid, serverVer] of Object.entries(serverUsersVersion)) {
+          if (!uid || typeof uid !== 'string' || uid.trim() === '' || uid.includes('/') || uid === 'null' || uid === 'undefined') continue;
+          const cleanUid = uid.trim();
+          const serverTime = parseVersionTime(serverVer);
+
+          // Handle explicitly deleted user in chunk_meta
+          if (serverVer === -1 || (typeof serverVer === 'object' && (serverVer as any)?.deleted)) {
+            if (currentUsersMap.has(cleanUid)) {
+              currentUsersMap.delete(cleanUid);
+              delete localUsersVersion[cleanUid];
+              hadDeletions = true;
               updatedSomething = true;
-              break;
             }
-            if (
-              oldUser.status !== freshUser.status ||
-              oldUser.expiryDate !== freshUser.expiryDate ||
-              oldUser.role !== freshUser.role ||
-              oldUser.displayName !== freshUser.displayName ||
-              oldUser.email !== freshUser.email ||
-              oldUser.phone !== freshUser.phone ||
-              oldUser.city !== freshUser.city ||
-              oldUser.managedBy !== freshUser.managedBy ||
-              oldUser.referralCode !== freshUser.referralCode ||
-              oldUser.trialActivated !== freshUser.trialActivated ||
-              oldUser.updatedAt !== freshUser.updatedAt ||
-              (oldUser as any).notes !== (freshUser as any).notes
-            ) {
-              updatedSomething = true;
-              break;
+            continue;
+          }
+
+          if (serverTime > 0) {
+            const localVer = localUsersVersion[cleanUid];
+            const localTime = parseVersionTime(localVer);
+            const userInLocal = currentUsersMap.get(cleanUid);
+
+            // User must be updated ONLY IF chunk meta has changed:
+            // 1. User doesn't exist locally at all (brand new user created)
+            // 2. Local version is undefined / missing
+            // 3. Server timestamp is newer than local timestamp
+            // 4. Or serverVer !== localVer (version changed)
+            if (!userInLocal || localVer === undefined || serverTime > localTime || (localVer !== serverVer && serverTime >= localTime)) {
+              uidsToFetch.add(cleanUid);
             }
           }
         }
 
-        // 4. Preserve any uncommitted local pending updates so in-flight edits are not overwritten
-        let finalUsers = Array.from(freshUsersMap.values());
+        // If serverUsersVersion has valid data, check if any local users were deleted on server
+        if (Object.keys(serverUsersVersion).length >= 10) {
+          for (const uid of Array.from(currentUsersMap.keys())) {
+            const serverVer = serverUsersVersion[uid];
+            if (serverVer === undefined || serverVer === -1 || (typeof serverVer === 'object' && (serverVer as any)?.deleted)) {
+              currentUsersMap.delete(uid);
+              delete localUsersVersion[uid];
+              hadDeletions = true;
+              updatedSomething = true;
+            }
+          }
+        }
+
+        // 4. IF NO USERS CHANGED IN CHUNK_META, RETURN IMMEDIATELY (0 FIRESTORE READS)
+        if (uidsToFetch.size === 0 && !hadDeletions) {
+          let finalUsers = Array.from(currentUsersMap.values());
+          const pendingStr = safeStorage.getItem('pending_user_updates');
+          if (pendingStr) {
+            try {
+              const pending = JSON.parse(pendingStr);
+              finalUsers = finalUsers.map(u => {
+                if (pending[u.uid]) {
+                  return normalizeUserStatusAndExpiry({ ...u, ...pending[u.uid] });
+                }
+                return u;
+              });
+            } catch (e) {}
+          }
+
+          setUsers(finalUsers);
+          safeStorage.setItem('last_users_sync_timestamp', now.toString());
+          setLoading(false);
+          setError(null);
+          return { users: finalUsers, updatedSomething: false };
+        }
+
+        // 5. Fetch ONLY the changed users from Firestore
+        const validUids = Array.from(uidsToFetch);
+        if (validUids.length > 0) {
+          const chunks: string[][] = [];
+          for (let i = 0; i < validUids.length; i += 30) {
+            chunks.push(validUids.slice(i, i + 30));
+          }
+
+          const chunkSnapshots = await Promise.allSettled(
+            chunks.map(async chunk => {
+              const q = query(collection(db, 'users'), where(documentId(), 'in', chunk));
+              const snap = await runWithNetwork(() => getDocs(q));
+              return { chunk, snap };
+            })
+          );
+
+          for (const result of chunkSnapshots) {
+            if (result.status === 'rejected') {
+              console.warn("Failed to fetch chunk of changed users:", result.reason);
+              continue;
+            }
+            const { chunk, snap } = result.value;
+            const foundUids = new Set<string>();
+
+            snap.docs.forEach(docSnap => {
+              const raw = { ...docSnap.data(), uid: docSnap.id } as UserProfile;
+              const normalized = normalizeUserStatusAndExpiry(raw);
+              foundUids.add(docSnap.id);
+              currentUsersMap.set(docSnap.id, normalized);
+              localUsersVersion[docSnap.id] = serverUsersVersion[docSnap.id] || normalized.updatedAt || getUtcVersion();
+              updatedSomething = true;
+            });
+
+            // If a requested UID was not returned by Firestore, remove it from local cache
+            chunk.forEach(reqUid => {
+              if (!foundUids.has(reqUid)) {
+                if (currentUsersMap.has(reqUid)) {
+                  currentUsersMap.delete(reqUid);
+                  delete localUsersVersion[reqUid];
+                  updatedSomething = true;
+                }
+              }
+            });
+          }
+        }
+
+        // 6. Preserve uncommitted local pending updates
+        let finalUsers = Array.from(currentUsersMap.values());
         const pendingStr = safeStorage.getItem('pending_user_updates');
         if (pendingStr) {
           try {
@@ -386,14 +566,9 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           } catch (e) {}
         }
 
-        // 5. Update state and cache
-        safeStorage.setItem('sync_user_mtimes', JSON.stringify(updatedMtimes));
-        try {
-          updateChunkMetaLocalCache({ users: updatedMtimes });
-        } catch (e) {}
-
+        // 7. Persist updated cache & local mtimes to both localStorage and IndexedDB
+        saveUsersCache(finalUsers, localUsersVersion);
         setUsers(finalUsers);
-        safeStorage.setItem('cached_all_users', JSON.stringify(finalUsers));
         safeStorage.setItem('last_users_sync_timestamp', now.toString());
 
         // Mark as checked in this period
@@ -419,7 +594,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     });
     fetchPromiseRef.current = p;
     return p;
-  }, [profile, user, authLoading]);
+  }, [profile, user, authLoading, saveUsersCache]);
 
   useEffect(() => {
     // Only clear users if not a privileged user.
