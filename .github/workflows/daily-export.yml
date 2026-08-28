@@ -2,8 +2,8 @@ name: Daily Content Catalog Export
 
 on:
   schedule:
-    # Runs every day at 02:00 UTC (7:00 AM PKT / Pakistan Time)
-    - cron: '0 2 * * *'
+    # Runs every day at 01:53 UTC (6:53 AM PKT / Pakistan Time)
+    - cron: '53 1 * * *'
   workflow_dispatch: # Allows manual trigger from GitHub Actions UI
 
 jobs:

@@ -3,6 +3,7 @@ import { doc, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { db, runWithNetwork } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { safeStorage } from '../utils/safeStorage';
+import { updateChunkMetaLocalCache } from '../utils/chunkMeta';
 import { UserProfile } from '../types';
 
 export async function executeSyncUserData(currentUserUid: string, currentProfile: UserProfile | null, reason: string = 'manual'): Promise<boolean> {
@@ -161,10 +162,33 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
   }
 
   try {
-    const { setDoc } = await import('firebase/firestore');
+    const batch = writeBatch(db);
     
-    // Write directly to user document with merge - 0 pre-reads required and no chunk_meta invalidation
-    await runWithNetwork(() => setDoc(userRef, updatesToPush, { merge: true }));
+    // 1. Write user document updates with merge
+    batch.set(userRef, updatesToPush, { merge: true });
+
+    // 2. Atomically update chunk_meta version for this user so all sessions, devices, and admin delta-sync know user data was updated
+    batch.set(doc(db, 'chunk_meta', 'versions'), {
+      users: {
+        [currentUserUid]: nowTime
+      }
+    }, { merge: true });
+
+    await runWithNetwork(() => batch.commit());
+
+    // 3. Update local chunk_meta cache and mtimes
+    try {
+      updateChunkMetaLocalCache({ users: { [currentUserUid]: nowTime } });
+    } catch (e) {}
+
+    try {
+      const mtimesStr = safeStorage.getItem('sync_user_mtimes');
+      if (mtimesStr) {
+        const mtimes = JSON.parse(mtimesStr);
+        mtimes[currentUserUid] = nowTime;
+        safeStorage.setItem('sync_user_mtimes', JSON.stringify(mtimes));
+      }
+    } catch (e) {}
 
     // --- CLEANUP IN LOCAL QUEUES ONLY AFTER CONFIRMED SUCCESS ---
     safeStorage.removeItem('needs_user_sync');

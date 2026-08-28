@@ -216,13 +216,35 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         opCount++;
       }
 
+      const nowSync = Date.now();
+      const metaUsersUpdate: Record<string, number> = {};
+      for (const uid of userIds) {
+        metaUsersUpdate[uid] = nowSync;
+      }
+      if (opCount >= 490) {
+        batches.push(writeBatch(db));
+        opCount = 0;
+      }
+      batches[batches.length - 1].set(doc(db, 'chunk_meta', 'versions'), { users: metaUsersUpdate }, { merge: true });
+
       for (const b of batches) await runWithNetwork(() => b.commit());
+
+      try {
+        const { updateChunkMetaLocalCache } = await import('../utils/chunkMeta');
+        updateChunkMetaLocalCache({ users: metaUsersUpdate });
+      } catch (e) {}
+
+      try {
+        const knownMtimesStr = safeStorage.getItem('sync_user_mtimes') || '{}';
+        const knownMtimes = JSON.parse(knownMtimesStr);
+        Object.assign(knownMtimes, metaUsersUpdate);
+        safeStorage.setItem('sync_user_mtimes', JSON.stringify(knownMtimes));
+      } catch (e) {}
 
       safeStorage.removeItem('pending_user_updates');
       setHasPendingChanges(false);
       window.dispatchEvent(new CustomEvent('pending_user_updates_changed'));
       
-      const nowSync = Date.now();
       const shiftedSync = new Date(nowSync + (5 - 7) * 60 * 60 * 1000);
       const periodSync = `${shiftedSync.getUTCFullYear()}-${shiftedSync.getUTCMonth() + 1}-${shiftedSync.getUTCDate()}`;
       safeStorage.setItem('last_user_finalize_period', periodSync);

@@ -11,6 +11,7 @@ import { useModalBehavior } from '../../hooks/useModalBehavior';
 import Button from '../../components/Button';
 import { useUsers } from '../../contexts/UsersContext';
 import { getUserDisplayName } from '../../utils/userUtils';
+import { updateChunkMetaLocalCache } from '../../utils/chunkMeta';
 
 export default function UserManagers() {
   const { users: allUsers, loading: usersLoading, finalizeUserChanges, hasPendingChanges, updateUserFields } = useUsers();
@@ -53,16 +54,26 @@ export default function UserManagers() {
 
       // Expire all managed users
       const managedUsers = allUsers.filter(u => u.managedBy === managerToRemove);
+      const nowTime = Date.now();
+      const metaUsersUpdate: Record<string, number> = { [managerToRemove]: nowTime };
+
       managedUsers.forEach(userData => {
         if (userData.status !== 'pending') {
           batch.update(doc(db, 'users', userData.uid), {
             status: 'expired',
             previousStatus: userData.status || 'active'
           });
+          metaUsersUpdate[userData.uid] = nowTime;
         }
       });
 
+      batch.set(doc(db, 'chunk_meta', 'versions'), { users: metaUsersUpdate }, { merge: true });
+
       await batch.commit();
+
+      try {
+        updateChunkMetaLocalCache({ users: metaUsersUpdate });
+      } catch (e) {}
       setManagers(prev => prev.filter(m => m.uid !== managerToRemove));
     } catch (error) {
       console.error('Error removing manager:', error);

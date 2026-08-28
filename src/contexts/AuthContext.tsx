@@ -952,7 +952,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (realKeysToPush.length > 0) {
               updatesToPush.lastActive = new Date().toISOString();
               batch.set(userRef, updatesToPush, { merge: true });
+              batch.set(doc(db, "chunk_meta", "versions"), {
+                users: {
+                  [currentUser.uid]: newVersion
+                }
+              }, { merge: true });
               await batch.commit();
+
+              try {
+                const { updateChunkMetaLocalCache } = await import("../utils/chunkMeta");
+                updateChunkMetaLocalCache({ users: { [currentUser.uid]: newVersion } });
+              } catch (e) {}
+
+              try {
+                const mtimesStr = safeStorage.getItem("sync_user_mtimes");
+                if (mtimesStr) {
+                  const mtimes = JSON.parse(mtimesStr);
+                  mtimes[currentUser.uid] = newVersion;
+                  safeStorage.setItem("sync_user_mtimes", JSON.stringify(mtimes));
+                }
+              } catch (e) {}
             }
 
             localStorage.setItem(userSyncKey, now.toString());
@@ -1129,8 +1148,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             try {
               const { writeBatch } = await import("firebase/firestore");
               const batch = writeBatch(db);
+              const verTime = Date.now();
               batch.set(userRef, updates, { merge: true });
+              batch.set(doc(db, "chunk_meta", "versions"), {
+                users: {
+                  [currentUser.uid]: verTime
+                }
+              }, { merge: true });
               await batch.commit();
+              safeStorage.setItem(`profile_version_${currentUser.uid}`, verTime.toString());
+              try {
+                const { updateChunkMetaLocalCache } = await import("../utils/chunkMeta");
+                updateChunkMetaLocalCache({ users: { [currentUser.uid]: verTime } });
+              } catch (e) {}
             } catch (err) {
               handleFirestoreError(
                 err,
@@ -2188,8 +2218,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         } catch (e) {}
 
+        const loginVerTime = Date.now();
         batch.update(doc(db, "users", result.user.uid), updates);
+        batch.set(doc(db, "chunk_meta", "versions"), {
+          users: {
+            [result.user.uid]: loginVerTime
+          }
+        }, { merge: true });
         await batch.commit();
+        safeStorage.setItem(`profile_version_${result.user.uid}`, loginVerTime.toString());
+        try {
+          const { updateChunkMetaLocalCache } = await import("../utils/chunkMeta");
+          updateChunkMetaLocalCache({ users: { [result.user.uid]: loginVerTime } });
+        } catch (e) {}
       } catch (e) {}
 
       if (result.user) {
@@ -2291,8 +2332,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await updateProfile(userCredential.user, { displayName: cleanSignupName });
 
       try {
-        const { setDoc } = await import("firebase/firestore");
-        await setDoc(doc(db, "users", userCredential.user.uid), {
+        const { writeBatch } = await import("firebase/firestore");
+        const batch = writeBatch(db);
+        const signupTime = Date.now();
+        batch.set(doc(db, "users", userCredential.user.uid), {
           displayName: cleanSignupName,
           phone: phone ? standardizePhone(phone) : "",
           email: email,
@@ -2300,6 +2343,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           status: "pending",
           role: "user",
         }, { merge: true });
+        batch.set(doc(db, "chunk_meta", "versions"), {
+          users: {
+            [userCredential.user.uid]: signupTime
+          }
+        }, { merge: true });
+        await runWithNetwork(() => batch.commit());
+        safeStorage.setItem(`profile_version_${userCredential.user.uid}`, signupTime.toString());
+        try {
+          const { updateChunkMetaLocalCache } = await import("../utils/chunkMeta");
+          updateChunkMetaLocalCache({ users: { [userCredential.user.uid]: signupTime } });
+        } catch (e) {}
       } catch (e) {}
 
       setTimeout(() => {
@@ -2394,8 +2448,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await updateProfile(userCredential.user, { displayName: cleanPhoneSignupName });
 
       try {
-        const { setDoc } = await import("firebase/firestore");
-        await setDoc(doc(db, "users", userCredential.user.uid), {
+        const { writeBatch } = await import("firebase/firestore");
+        const batch = writeBatch(db);
+        const signupTime = Date.now();
+        batch.set(doc(db, "users", userCredential.user.uid), {
           displayName: cleanPhoneSignupName,
           phone: standardizedPhone || "",
           email: signupEmail,
@@ -2403,6 +2459,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           status: "pending",
           role: "user",
         }, { merge: true });
+        batch.set(doc(db, "chunk_meta", "versions"), {
+          users: {
+            [userCredential.user.uid]: signupTime
+          }
+        }, { merge: true });
+        await runWithNetwork(() => batch.commit());
+        safeStorage.setItem(`profile_version_${userCredential.user.uid}`, signupTime.toString());
+        try {
+          const { updateChunkMetaLocalCache } = await import("../utils/chunkMeta");
+          updateChunkMetaLocalCache({ users: { [userCredential.user.uid]: signupTime } });
+        } catch (e) {}
       } catch (e) {}
 
       setTimeout(() => {

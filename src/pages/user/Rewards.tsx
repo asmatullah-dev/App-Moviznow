@@ -194,6 +194,13 @@ export default function Rewards() {
       
       batch.update(doc(db, 'users', profile.uid), userUpdates);
       
+      const nowTime = Date.now();
+      batch.set(doc(db, 'chunk_meta', 'versions'), {
+        users: {
+          [profile.uid]: nowTime
+        }
+      }, { merge: true });
+
       const claimField = type === 'signup' ? 'signupClaimed' : 'activationClaimed';
       batch.set(doc(db, 'referral', 'all'), {
         joins: {
@@ -204,6 +211,12 @@ export default function Rewards() {
       }, { merge: true });
       
       await batch.commit();
+
+      safeStorage.setItem(`profile_version_${profile.uid}`, nowTime.toString());
+      try {
+        const { updateChunkMetaLocalCache } = await import('../../utils/chunkMeta');
+        updateChunkMetaLocalCache({ users: { [profile.uid]: nowTime } });
+      } catch (e) {}
       
       await updateUserProfileData(userUpdates);
       await fetchReferralStats(true);

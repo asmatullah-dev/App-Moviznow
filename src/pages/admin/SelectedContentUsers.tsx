@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { db } from '../../firebase';
-import { collection, doc, updateDoc, query } from 'firebase/firestore';
+import { collection, doc, updateDoc, writeBatch, query } from 'firebase/firestore';
 import { UserProfile, Content, Role, Status } from '../../types';
 import { Settings, X, Check, Search } from 'lucide-react';
 import AlertModal from '../../components/AlertModal';
@@ -10,6 +10,7 @@ import { useModalBehavior } from '../../hooks/useModalBehavior';
 import { useAdminContent } from '../../contexts/AdminContentContext';
 import { useUsers } from '../../contexts/UsersContext';
 import { safeStorage } from '../../utils/safeStorage';
+import { updateChunkMetaLocalCache } from '../../utils/chunkMeta';
 
 import { getUserDisplayName } from '../../utils/userUtils';
 
@@ -28,9 +29,22 @@ export default function SelectedContentUsers() {
     if (!selectedUser) return;
     try {
       const assignedContent = Array.from(assignedIds);
-      await updateDoc(doc(db, 'users', selectedUser.uid), {
+      const nowTime = Date.now();
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'users', selectedUser.uid), {
         assignedContent: assignedContent,
       });
+      batch.set(doc(db, 'chunk_meta', 'versions'), {
+        users: {
+          [selectedUser.uid]: nowTime
+        }
+      }, { merge: true });
+      await batch.commit();
+
+      try {
+        updateChunkMetaLocalCache({ users: { [selectedUser.uid]: nowTime } });
+      } catch (e) {}
+
       setUsers(prev => prev.map(u => u.uid === selectedUser.uid ? { ...u, assignedContent } : u));
       safeStorage.removeItem(`pending_access_${selectedUser.uid}`);
       setSelectedUser(null);
@@ -47,9 +61,22 @@ export default function SelectedContentUsers() {
       if (pendingAccess) {
         try {
           const assignedContent = JSON.parse(pendingAccess);
-          await updateDoc(doc(db, 'users', selectedUser.uid), {
+          const nowTime = Date.now();
+          const batch = writeBatch(db);
+          batch.update(doc(db, 'users', selectedUser.uid), {
             assignedContent: assignedContent,
           });
+          batch.set(doc(db, 'chunk_meta', 'versions'), {
+            users: {
+              [selectedUser.uid]: nowTime
+            }
+          }, { merge: true });
+          await batch.commit();
+
+          try {
+            updateChunkMetaLocalCache({ users: { [selectedUser.uid]: nowTime } });
+          } catch (e) {}
+
           setUsers(prev => prev.map(u => u.uid === selectedUser.uid ? { ...u, assignedContent } : u));
           safeStorage.removeItem(`pending_access_${selectedUser.uid}`);
         } catch (error) {
