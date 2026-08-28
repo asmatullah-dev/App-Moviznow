@@ -274,7 +274,7 @@ export default function UserManagement() {
       } catch (err) {
         console.error("Refresh users failed on tab open:", err);
         if (mounted) {
-          window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'up-to-date', message: 'Users are up to date' } }));
+          window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'error', message: 'Failed to refresh users' } }));
         }
       } finally {
         isSyncingOnMountRef.current = false;
@@ -1616,7 +1616,7 @@ export default function UserManagement() {
                   }
                 }).catch((err) => {
                   console.error("Manual refresh failed:", err);
-                  window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'up-to-date', message: 'Users loaded' } }));
+                  window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'error', message: 'Failed to refresh users' } }));
                 }).finally(() => {
                   setIsManualRefreshing(false);
                 });

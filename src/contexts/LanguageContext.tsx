@@ -545,6 +545,7 @@ const translations: Record<string, Record<Language, string>> = {
   'Updating data...': { en: 'Updating data...', 'ur-roman': 'Data update ho raha hai...', ur: 'ڈیٹا اپ ڈیٹ ہو رہا ہے...' },
   'Refreshing users...': { en: 'Refreshing users...', 'ur-roman': 'Users refresh ho rahe hain...', ur: 'صارفین ریفریش ہو رہے ہیں...' },
   'Users refreshed successfully': { en: 'Users refreshed successfully', 'ur-roman': 'Users kamyabi se refresh ho gaye', ur: 'صارفین کامیابی سے ریفریش ہو گئے' },
+  'Failed to refresh users': { en: 'Failed to refresh users', 'ur-roman': 'Users refresh nakam ho gaya', ur: 'صارفین کی ریفریش ناکام ہو گئی' },
   'Users are up to date': { en: 'Users are up to date', 'ur-roman': 'Users up to date hain', ur: 'صارفین اپ ٹو ڈیٹ ہیں' },
   'Data is up to date': { en: 'Data is up to date', 'ur-roman': 'Data up to date hai', ur: 'ڈیٹا اپ ٹو ڈیٹ ہے' },
   'Data updated successfully': { en: 'Data updated successfully', 'ur-roman': 'Data sahi se update ho gaya', ur: 'ڈیٹا کامیابی سے اپ ڈیٹ ہو گیا' },
