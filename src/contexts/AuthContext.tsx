@@ -9,6 +9,7 @@ import React, {
 } from "react";
 import { auth, db, runWithNetwork } from "../firebase";
 import { safeStorage } from "../utils/safeStorage";
+import { getUtcVersion, parseVersionTime } from "../utils/chunkMeta";
 import { isValidGmailAddress } from "../utils/emailValidation";
 import { getUserDisplayName } from "../utils/userUtils";
 import { isUserExpired, normalizeUserStatusAndExpiry } from "./UsersContext";
@@ -444,10 +445,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       try {
         const localVersionKey = `profile_version_${currentUser.uid}`;
-        const localVersion = parseInt(
-          safeStorage.getItem(localVersionKey) || "0",
-          10,
-        );
+        const localVersion = safeStorage.getItem(localVersionKey) || "0";
+        const localVersionTime = parseVersionTime(localVersion);
 
         const now = Date.now();
         const userSyncKey = `last_user_sync_time_${currentUser.uid}`;
@@ -466,7 +465,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         // 1. Firstly read chunk_meta
-        let serverVersion = localVersion;
+        let serverVersion: any = localVersion;
         let isVersionMissing = false;
         if (navigator.onLine) {
           setIsSyncing(true);
@@ -485,9 +484,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         // 2. If version changes found
-        const effectiveServerVersion = (typeof serverVersion === "number" && serverVersion > 0) ? serverVersion : 1;
+        const serverVersionTime = parseVersionTime(serverVersion);
+        const effectiveServerVersion = serverVersionTime > 0 ? (typeof serverVersion === 'object' ? (serverVersion.updatedAt || serverVersion.version) : serverVersion) : 1;
         const versionChanged =
-          (serverVersion > 0 && serverVersion > localVersion) || (!localProfile) || (force && reason === "manual");
+          (serverVersionTime > 0 && serverVersionTime > localVersionTime) || (!localProfile) || (force && reason === "manual");
 
         let serverProfile: UserProfile | null = null;
         let docSnap;
@@ -867,7 +867,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           try {
             const { writeBatch } = await import("firebase/firestore");
             const batch = writeBatch(db);
-            const newVersion = Date.now();
+            const newVersion = getUtcVersion();
 
             const updatesToPush: any = {};
             if (needsUserSync) {
@@ -1148,7 +1148,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             try {
               const { writeBatch } = await import("firebase/firestore");
               const batch = writeBatch(db);
-              const verTime = Date.now();
+              const verTime = getUtcVersion();
               batch.set(userRef, updates, { merge: true });
               batch.set(doc(db, "chunk_meta", "versions"), {
                 users: {
@@ -1655,7 +1655,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             // Update version metadata safely
             try {
               const { setDoc } = await import("firebase/firestore");
-              const metaUpdates: Record<string, number> = { [currentUser.uid]: Date.now() };
+              const metaUpdates: Record<string, any> = { [currentUser.uid]: getUtcVersion() };
               oldDocIds.forEach((oldId) => { metaUpdates[oldId] = -1; });
               await setDoc(doc(db, "chunk_meta", "versions"), { users: metaUpdates }, { merge: true });
             } catch (metaErr) {}
@@ -2218,7 +2218,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         } catch (e) {}
 
-        const loginVerTime = Date.now();
+        const loginVerTime = getUtcVersion();
         batch.update(doc(db, "users", result.user.uid), updates);
         batch.set(doc(db, "chunk_meta", "versions"), {
           users: {
@@ -2334,7 +2334,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const { writeBatch } = await import("firebase/firestore");
         const batch = writeBatch(db);
-        const signupTime = Date.now();
+        const signupTime = getUtcVersion();
         batch.set(doc(db, "users", userCredential.user.uid), {
           displayName: cleanSignupName,
           phone: phone ? standardizePhone(phone) : "",
@@ -2450,7 +2450,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const { writeBatch } = await import("firebase/firestore");
         const batch = writeBatch(db);
-        const signupTime = Date.now();
+        const signupTime = getUtcVersion();
         batch.set(doc(db, "users", userCredential.user.uid), {
           displayName: cleanPhoneSignupName,
           phone: standardizedPhone || "",
@@ -2814,10 +2814,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const { writeBatch } = await import("firebase/firestore");
         let batch = writeBatch(db);
+        const updateVerTime = getUtcVersion();
         batch.set(userRefPath, data, { merge: true });
         batch.set(doc(db, "chunk_meta", "versions"), {
           users: {
-            [user.uid]: Date.now()
+            [user.uid]: updateVerTime
           }
         }, { merge: true });
 

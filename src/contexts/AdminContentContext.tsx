@@ -14,6 +14,7 @@ import {
 import { db, runWithNetwork } from '../firebase';
 import { safeStorage } from '../utils/safeStorage';
 import { expandContent, CONTENT_CHUNK_MOVIE_SIZE, CONTENT_CHUNK_SERIES_SIZE } from '../utils/chunkUtils';
+import { getUtcVersion, parseVersionTime } from '../utils/chunkMeta';
 import { seedStaticExportData, getStaticExportContent } from '../utils/staticContentLoader';
 import { useAuth } from './AuthContext';
 import { useUsers } from './UsersContext';
@@ -351,7 +352,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             opCount++;
         };
 
-        const now = Date.now();
+        const utcNow = getUtcVersion();
         const versionsUpdate: Record<string, any> = { 
             lastGlobalUpdate: serverTimestamp() 
         };
@@ -373,7 +374,8 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                     safeStorage.setItem('synced_content_chunk_' + cid, chunkStr);
                     
                     versionsUpdate[cid] = {
-                        version: now,
+                        version: utcNow,
+                        updatedAt: utcNow,
                         count: Object.keys(parsedItems).length
                     };
                 }
@@ -408,8 +410,8 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             }
             
             versionsUpdate.collections = {
-                version: now,
-                updatedAt: serverTimestamp(),
+                version: utcNow,
+                updatedAt: utcNow,
                 latestChunkId: COLLECTION_CHUNK_PREFIX + maxCollIndex
             };
         }
@@ -429,8 +431,8 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             });
             
             versionsUpdate.metadata = {
-                version: now,
-                updatedAt: serverTimestamp()
+                version: utcNow,
+                updatedAt: utcNow
             };
         }
 
@@ -612,14 +614,13 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     const pendingChunkIds = new Set(JSON.parse(pendingStr));
 
     for (const [chunkId, versionMeta] of Object.entries(versions)) {
-        if (chunkId === 'collections' || chunkId === 'notifications' || chunkId === 'lastGlobalUpdate' || chunkId === 'metadata' || chunkId === 'users' || chunkId === 'fcm_tokens') continue;
+        if (chunkId === 'collections' || chunkId === 'notifications' || chunkId === 'lastGlobalUpdate' || chunkId === 'metadata' || chunkId === 'users' || chunkId === 'fcm_tokens' || chunkId === 'settings' || chunkId === 'reviews') continue;
 
-        const version = typeof versionMeta === 'object' ? (versionMeta as any).version : versionMeta;
-        const localV = localMeta[chunkId];
-        const localVersion = typeof localV === 'object' ? localV.version : localV;
+        const serverVersionTime = parseVersionTime(versionMeta);
+        const localVersionTime = parseVersionTime(localMeta[chunkId]);
         const hasData = !!safeStorage.getItem('content_chunk_' + chunkId);
         
-        if (!hasData || !localVersion || localVersion < (version as number)) {
+        if (!hasData || !localVersionTime || localVersionTime < serverVersionTime) {
             chunksToFetch.push(chunkId);
         }
     }
@@ -682,15 +683,13 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     try {
         const isAdmin = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
         let metadataMeta = versions.metadata;
-
-        const metadataVersion = metadataMeta ? (typeof metadataMeta === 'object' ? metadataMeta.version : metadataMeta) : 0;
-        const localMetaV = localMeta.metadata;
-        const localMetaVersion = typeof localMetaV === 'object' ? localMetaV.version : localMetaV;
+        const metadataVersionTime = parseVersionTime(metadataMeta);
+        const localMetaVersionTime = parseVersionTime(localMeta.metadata);
         const genresCacheStr = safeStorage.getItem('genres_cache');
         const hasMetadata = !!genresCacheStr && genresCacheStr !== '[]';
         const hasPendingMetadata = !!safeStorage.getItem('pending_metadata_updates');
         
-        if (!hasPendingMetadata && (!hasMetadata || !localMetaVersion || localMetaVersion < metadataVersion)) {
+        if (!hasPendingMetadata && (!hasMetadata || !localMetaVersionTime || localMetaVersionTime < metadataVersionTime)) {
             try {
                 const metaDoc = await getDoc(doc(db, 'content_chunks', 'metadata'));
                 if (metaDoc.exists()) {
@@ -721,8 +720,8 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                     safeStorage.setItem('genres_cache', JSON.stringify(chunksGenres));
                     safeStorage.setItem('languages_cache', JSON.stringify(chunksLanguages));
                     safeStorage.setItem('qualities_cache', JSON.stringify(chunksQualities));
-                    if (metadataVersion) {
-                        localMeta.metadata = metadataVersion;
+                    if (metadataMeta) {
+                        localMeta.metadata = typeof metadataMeta === 'object' ? metadataMeta : { version: metadataMeta, updatedAt: metadataMeta };
                         safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
                     }
                     setGenres([...chunksGenres].sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
@@ -735,13 +734,13 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
 
         // Handle collections with versioning and chunks
         const collectionsMeta = versions.collections;
-        const collectionsVersion = (collectionsMeta && typeof collectionsMeta === 'object' ? collectionsMeta.version : collectionsMeta) || 0;
-        const localCollectionsVersion = localMeta.collections || 0;
+        const collectionsVersionTime = parseVersionTime(collectionsMeta);
+        const localCollectionsVersionTime = parseVersionTime(localMeta.collections);
         
         const latestCollChunkId = (collectionsMeta && typeof collectionsMeta === 'object' ? collectionsMeta.latestChunkId : null) || 'collection_chunk_0';
         latestCollChunkIdRef.current = latestCollChunkId;
 
-        if (!safeStorage.getItem('collections_cache') || localCollectionsVersion < collectionsVersion) {
+        if (!safeStorage.getItem('collections_cache') || !localCollectionsVersionTime || localCollectionsVersionTime < collectionsVersionTime) {
             let allCollections: AppCollection[] = [];
             
             const matchIndex = latestCollChunkId.match(/(\d+)$/);
@@ -771,8 +770,10 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             setCollections(sorted);
             safeStorage.setItem('collections_cache', JSON.stringify(sorted));
             
-            localMeta.collections = collectionsVersion;
-            safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+            if (collectionsMeta) {
+                localMeta.collections = typeof collectionsMeta === 'object' ? collectionsMeta : { version: collectionsMeta, updatedAt: collectionsMeta };
+                safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+            }
             updatedSomething = true;
         }
         
@@ -1293,7 +1294,10 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         // Assigning new/unedited content to first chunk initially without chunk size checking.
         // Chunk sizes are strictly verified and rebalanced during sync (finalizeChanges -> autoRebalanceChunks).
         chunkId = `${prefix}0`;
-        if (!localMeta[chunkId]) localMeta[chunkId] = { version: Date.now(), count: 0 };
+        if (!localMeta[chunkId]) {
+            const utcNow = getUtcVersion();
+            localMeta[chunkId] = { version: utcNow, updatedAt: utcNow, count: 0 };
+        }
     }
 
     // Scan only other chunk keys to ensure the item is removed from any previous chunk it might have been in
@@ -1325,7 +1329,8 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                     if (!pendingItemsMap[cid].includes(content.id)) pendingItemsMap[cid].push(content.id);
                     safeStorage.setItem('pending_item_updates', JSON.stringify(pendingItemsMap));
                     
-                    localMeta[cid] = { version: Date.now(), count: Object.keys(items).length };
+                    const utcNow = getUtcVersion();
+                    localMeta[cid] = { version: utcNow, updatedAt: utcNow, count: Object.keys(items).length };
                 }
             } catch(e) {}
         }
@@ -1339,7 +1344,8 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(newChunkItems));
     
     // Update local metadata immediately so refreshContentFromLocal can find the new version/chunk
-    localMeta[chunkId] = { version: Date.now(), count: Object.keys(newChunkItems).length };
+    const utcNowSave = getUtcVersion();
+    localMeta[chunkId] = { version: utcNowSave, updatedAt: utcNowSave, count: Object.keys(newChunkItems).length };
     safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
 
     if (isAdminOrEditor) {
@@ -1466,7 +1472,8 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
 
             safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(items));
             // Update local metadata immediately
-            localMeta[chunkId] = { version: Date.now(), count: Object.keys(items).length };
+            const utcNowChunk = getUtcVersion();
+            localMeta[chunkId] = { version: utcNowChunk, updatedAt: utcNowChunk, count: Object.keys(items).length };
         }
     }
     
@@ -1559,7 +1566,8 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                 safeStorage.setItem(key, JSON.stringify(chunkItems));
                 const cid = key.startsWith('content_chunk_') ? key.replace('content_chunk_', '') : key;
                 affectedChunkIds.add(cid);
-                localMeta[cid] = { version: Date.now(), count: Object.keys(chunkItems).length };
+                const utcNowDel = getUtcVersion();
+                localMeta[cid] = { version: utcNowDel, updatedAt: utcNowDel, count: Object.keys(chunkItems).length };
             }
         } catch(e) {}
     }

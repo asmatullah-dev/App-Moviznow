@@ -11,7 +11,7 @@ import { useModalBehavior } from '../../hooks/useModalBehavior';
 import Button from '../../components/Button';
 import { useUsers } from '../../contexts/UsersContext';
 import { getUserDisplayName } from '../../utils/userUtils';
-import { updateChunkMetaLocalCache } from '../../utils/chunkMeta';
+import { updateChunkMetaLocalCache, getUtcVersion } from '../../utils/chunkMeta';
 
 export default function UserManagers() {
   const { users: allUsers, loading: usersLoading, finalizeUserChanges, hasPendingChanges, updateUserFields } = useUsers();
@@ -54,8 +54,8 @@ export default function UserManagers() {
 
       // Expire all managed users
       const managedUsers = allUsers.filter(u => u.managedBy === managerToRemove);
-      const nowTime = Date.now();
-      const metaUsersUpdate: Record<string, number> = { [managerToRemove]: nowTime };
+      const nowTime = getUtcVersion();
+      const metaUsersUpdate: Record<string, any> = { [managerToRemove]: nowTime };
 
       managedUsers.forEach(userData => {
         if (userData.status !== 'pending') {

@@ -10,7 +10,7 @@ import { useModalBehavior } from '../../hooks/useModalBehavior';
 import { useAdminContent } from '../../contexts/AdminContentContext';
 import { useUsers } from '../../contexts/UsersContext';
 import { safeStorage } from '../../utils/safeStorage';
-import { updateChunkMetaLocalCache } from '../../utils/chunkMeta';
+import { updateChunkMetaLocalCache, getUtcVersion } from '../../utils/chunkMeta';
 
 import { getUserDisplayName } from '../../utils/userUtils';
 
@@ -29,7 +29,7 @@ export default function SelectedContentUsers() {
     if (!selectedUser) return;
     try {
       const assignedContent = Array.from(assignedIds);
-      const nowTime = Date.now();
+      const nowTime = getUtcVersion();
       const batch = writeBatch(db);
       batch.update(doc(db, 'users', selectedUser.uid), {
         assignedContent: assignedContent,
@@ -61,7 +61,7 @@ export default function SelectedContentUsers() {
       if (pendingAccess) {
         try {
           const assignedContent = JSON.parse(pendingAccess);
-          const nowTime = Date.now();
+          const nowTime = getUtcVersion();
           const batch = writeBatch(db);
           batch.update(doc(db, 'users', selectedUser.uid), {
             assignedContent: assignedContent,

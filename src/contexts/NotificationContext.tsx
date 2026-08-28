@@ -14,6 +14,7 @@ import { db, runWithNetwork } from '../firebase';
 import { useAuth } from './AuthContext';
 import { AppNotification } from '../types';
 import { safeStorage } from '../utils/safeStorage';
+import { getChunkMeta, getUtcVersion, parseVersionTime } from '../utils/chunkMeta';
 
 interface NotificationContextType {
   notifications: AppNotification[];
@@ -88,10 +89,10 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       setLoading(true);
 
       const chunksToFetch = new Set<string>();
-      let serverVersion = '0';
+      let serverVersionTime = 0;
+      let effectiveServerVersion = '1';
 
       try {
-        const { getChunkMeta } = await import('../utils/chunkMeta');
         const meta = await getChunkMeta(force);
         if (meta && meta.notifications) {
           if (Array.isArray(meta.notifications.chunks)) {
@@ -104,7 +105,9 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
           if (meta.notifications.latestPushChunkId) chunksToFetch.add(meta.notifications.latestPushChunkId);
           if (meta.notifications.latestEmailChunkId) chunksToFetch.add(meta.notifications.latestEmailChunkId);
           if (meta.notifications.latestChunkId) chunksToFetch.add(meta.notifications.latestChunkId);
-          if (meta.notifications.version) serverVersion = meta.notifications.version.toString();
+          
+          serverVersionTime = parseVersionTime(meta.notifications);
+          effectiveServerVersion = typeof meta.notifications === 'object' ? (meta.notifications.updatedAt || meta.notifications.version || '1').toString() : meta.notifications.toString();
         }
       } catch (err) { }
 
@@ -112,9 +115,11 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         chunksToFetch.add('notification_chunk_0');
       }
       
-      const effectiveServerVersion = serverVersion !== '0' ? serverVersion : '1';
       const cachedVersion = safeStorage.getItem('cached_notifications_version');
-      if (!force && cachedData && (cachedVersion === effectiveServerVersion || (now - lastFetchTime < NOTIFICATION_FETCH_INTERVAL))) {
+      const cachedVersionTime = parseVersionTime(cachedVersion);
+      const isVersionMatch = (serverVersionTime > 0 && cachedVersionTime === serverVersionTime) || (cachedVersion === effectiveServerVersion);
+
+      if (!force && cachedData && (isVersionMatch || (now - lastFetchTime < NOTIFICATION_FETCH_INTERVAL))) {
         try {
           const parsed = JSON.parse(cachedData);
           if (Array.isArray(parsed)) {
@@ -260,11 +265,12 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       }
 
       // Update chunk_meta
+      const utcNow = getUtcVersion();
       batch.set(doc(db, 'chunk_meta', 'versions'), { 
         notifications: {
           ...notifMeta,
-          version: Date.now(),
-          updatedAt: serverTimestamp()
+          version: utcNow,
+          updatedAt: utcNow
         },
         lastGlobalUpdate: serverTimestamp()
       }, { merge: true });
@@ -317,11 +323,12 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       }
 
       if (foundAny) {
+        const utcNow = getUtcVersion();
         batch.set(doc(db, 'chunk_meta', 'versions'), { 
           notifications: {
             ...notifMeta,
-            version: Date.now(),
-            updatedAt: serverTimestamp()
+            version: utcNow,
+            updatedAt: utcNow
           },
           lastGlobalUpdate: serverTimestamp()
         }, { merge: true });

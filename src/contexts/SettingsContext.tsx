@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
 import { db, auth, runWithNetwork } from '../firebase';
-import { getChunkMeta } from '../utils/chunkMeta';
+import { getChunkMeta, parseVersionTime, getUtcVersion } from '../utils/chunkMeta';
 
 import { AppSettings } from '../types';
 
@@ -102,10 +102,10 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
 
       const meta = await getChunkMeta(force);
-      const serverVersion = meta.settings || 0;
-      const localVersion = parseInt(localStorage.getItem('cached_settings_version') || '0', 10);
+      const serverVersionTime = parseVersionTime(meta.settings);
+      const localVersionTime = parseVersionTime(localStorage.getItem('cached_settings_version'));
 
-      if (force || !localStorage.getItem('cached_app_settings') || serverVersion > localVersion) {
+      if (force || !localStorage.getItem('cached_app_settings') || serverVersionTime > localVersionTime) {
         const docRef = doc(db, 'settings', 'app_settings');
         const docSnap = await runWithNetwork(() => getDoc(docRef));
         
@@ -121,11 +121,12 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           }
           setSettings(data);
           localStorage.setItem('cached_app_settings', JSON.stringify(data));
-          localStorage.setItem('cached_settings_version', serverVersion.toString());
+          const serverVersionStr = typeof meta.settings === 'object' ? (meta.settings?.updatedAt || meta.settings?.version || getUtcVersion()) : (meta.settings ? meta.settings.toString() : getUtcVersion());
+          localStorage.setItem('cached_settings_version', serverVersionStr);
         } else if (!localStorage.getItem('cached_app_settings')) {
           setSettings(DEFAULT_APP_SETTINGS);
           localStorage.setItem('cached_app_settings', JSON.stringify(DEFAULT_APP_SETTINGS));
-          localStorage.setItem('cached_settings_version', Date.now().toString());
+          localStorage.setItem('cached_settings_version', getUtcVersion());
         }
       }
     } catch (error) {

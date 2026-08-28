@@ -4,7 +4,7 @@ import { CheckCircle2, AlertCircle, Loader2, ArrowLeft, Lock, UserX, LogOut } fr
 import { doc, updateDoc, collection, query, where, getDocs, setDoc, limit, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { updateChunkMetaLocalCache } from '../utils/chunkMeta';
+import { updateChunkMetaLocalCache, getUtcVersion } from '../utils/chunkMeta';
 import { safeStorage } from '../utils/safeStorage';
 
 export default function Unsubscribe() {
@@ -59,7 +59,7 @@ export default function Unsubscribe() {
       if (user?.uid && (user.email?.toLowerCase() === userEmail.toLowerCase() || profile?.email?.toLowerCase() === userEmail.toLowerCase())) {
         const currentPrefs = profile?.notificationPreferences || {};
         const emailPrefs = currentPrefs.email || {};
-        const nowTime = Date.now();
+        const nowTime = getUtcVersion();
         const batch = writeBatch(db);
         batch.update(doc(db, 'users', user.uid), {
           notificationPreferences: {
@@ -88,9 +88,9 @@ export default function Unsubscribe() {
       
       let updated = false;
       if (!snap.empty) {
-        const nowTime = Date.now();
+        const nowTime = getUtcVersion();
         const batch = writeBatch(db);
-        const metaUsersUpdate: Record<string, number> = {};
+        const metaUsersUpdate: Record<string, any> = {};
         for (const userDoc of snap.docs) {
           const userData = userDoc.data();
           const currentPrefs = userData.notificationPreferences || {};

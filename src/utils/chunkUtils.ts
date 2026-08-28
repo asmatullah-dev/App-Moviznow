@@ -1,7 +1,7 @@
 import { doc, getDoc, getDocs, collection, writeBatch, setDoc, updateDoc, deleteField, serverTimestamp, QueryDocumentSnapshot, DocumentData, WriteBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Content } from '../types';
-import { getChunkMeta, clearChunkMetaCache } from './chunkMeta';
+import { getChunkMeta, clearChunkMetaCache, getUtcVersion, parseVersionTime } from './chunkMeta';
 import { runWithNetwork } from '../firebase';
 import { safeStorage } from './safeStorage';
 import staticReviews from '../data/moviznow_reviews_export.json';
@@ -232,12 +232,12 @@ export function expandContent(minified: any, chunkId?: string): Content {
 function registerChunkUpdates(chunkIds: string[], batch: WriteBatch, sizes?: Record<string, number>) {
   const metaRef = doc(db, 'chunk_meta', 'versions');
   const updates: Record<string, any> = {};
-  const now = Date.now();
+  const utcNow = getUtcVersion();
   chunkIds.forEach(id => {
     if (sizes && sizes[id] !== undefined) {
-      updates[id] = { version: now, count: sizes[id] };
+      updates[id] = { version: utcNow, updatedAt: utcNow, count: sizes[id] };
     } else {
-      updates[id] = { version: now };
+      updates[id] = { version: utcNow, updatedAt: utcNow };
     }
   });
   batch.set(metaRef, updates, { merge: true });
@@ -511,12 +511,12 @@ export function rebalanceLocalChunks(): { rebalanced: boolean; rebalancedCount: 
     const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
     let localMeta: Record<string, any> = {};
     try { localMeta = JSON.parse(localMetaString); } catch(e) {}
-    const now = Date.now();
+    const utcNow = getUtcVersion();
     affectedChunkIds.forEach(cid => {
       const chunkStr = safeStorage.getItem(`content_chunk_${cid}`) || '{}';
       try {
         const items = JSON.parse(chunkStr);
-        localMeta[cid] = { version: now, count: Object.keys(items).length };
+        localMeta[cid] = { version: utcNow, updatedAt: utcNow, count: Object.keys(items).length };
       } catch(e) {}
     });
     safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
@@ -541,15 +541,15 @@ export async function autoRebalanceChunks(): Promise<{ rebalancedCount: number }
     }
 
     const batch = writeBatch(db);
-    const updatedMeta: Record<string, { version: number; count: number }> = {};
-    const now = Date.now();
+    const updatedMeta: Record<string, { version: string; updatedAt: string; count: number }> = {};
+    const utcNow = getUtcVersion();
 
     for (const cid of affectedChunkIds) {
       const chunkStr = safeStorage.getItem(`content_chunk_${cid}`) || '{}';
       try {
         const items = JSON.parse(chunkStr);
         batch.set(doc(db, 'content_chunks', cid), { items, updatedAt: serverTimestamp() }, { merge: true });
-        updatedMeta[cid] = { version: now, count: Object.keys(items).length };
+        updatedMeta[cid] = { version: utcNow, updatedAt: utcNow, count: Object.keys(items).length };
       } catch(e) {}
     }
 
@@ -771,14 +771,14 @@ export async function getContentFromChunks(contentId: string): Promise<Content |
 export async function repairChunkMetadata(): Promise<{ repairedContent: number }> {
   await autoRebalanceChunks();
   const batch = writeBatch(db);
-  const now = Date.now();
+  const utcNow = getUtcVersion();
 
   // 1. Repair content_chunks
   const contentSnap = await getDocs(collection(db, 'content_chunks'));
   const contentVersions: Record<string, any> = {};
   contentSnap.docs.forEach(d => {
     const items = d.data().items || {};
-    contentVersions[d.id] = { version: now, count: Object.keys(items).length };
+    contentVersions[d.id] = { version: utcNow, updatedAt: utcNow, count: Object.keys(items).length };
   });
   batch.set(doc(db, 'chunk_meta', 'versions'), contentVersions, { merge: true });
 
@@ -859,9 +859,9 @@ export async function rebuildAllChunks(contents: Content[]): Promise<number> {
     opCount = 0;
   }
   const metaUpdates: Record<string, any> = {};
-  const now = Date.now();
+  const utcNow = getUtcVersion();
   Object.entries(chunkDocs).forEach(([id, itemsObj]) => {
-    metaUpdates[id] = { version: now, count: Object.keys(itemsObj as object).length };
+    metaUpdates[id] = { version: utcNow, updatedAt: utcNow, count: Object.keys(itemsObj as object).length };
   });
   batches[batches.length - 1].set(doc(db, 'chunk_meta', 'versions'), metaUpdates);
 
@@ -898,10 +898,11 @@ export async function fetchReviewsFromChunks(forceRefresh = false, syncWithFires
   // Live Firestore fetch (triggered ONLY after a new review is submitted or explicit admin action)
   try {
     const meta = await getChunkMeta(forceRefresh);
-    const serverVersion = meta.reviews?.version?.toString() || '0';
+    const serverVersionTime = parseVersionTime(meta.reviews);
+    const cachedVersionTime = parseVersionTime(cachedVersion);
     
     // If version matches and we're not forcing, return cache
-    if (!forceRefresh && cachedVersion === serverVersion && cachedVersion !== '0' && cachedVersion !== 'static' && cachedData) {
+    if (!forceRefresh && cachedVersionTime === serverVersionTime && cachedVersionTime > 0 && cachedVersion !== 'static' && cachedData) {
       try {
         return JSON.parse(cachedData);
       } catch (e) {}
@@ -920,7 +921,8 @@ export async function fetchReviewsFromChunks(forceRefresh = false, syncWithFires
     allReviews.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
     safeStorage.setItem('cached_reviews_data', JSON.stringify(allReviews));
-    safeStorage.setItem('cached_review_version', serverVersion === '0' ? Date.now().toString() : serverVersion);
+    const serverVersionStr = typeof meta.reviews === 'object' ? (meta.reviews?.updatedAt || meta.reviews?.version || getUtcVersion()) : (meta.reviews?.toString() || getUtcVersion());
+    safeStorage.setItem('cached_review_version', serverVersionStr);
     
     return allReviews;
   } catch (e) {
@@ -931,7 +933,7 @@ export async function fetchReviewsFromChunks(forceRefresh = false, syncWithFires
 
 export async function saveReviewToChunk(review: any): Promise<void> {
   const batch = writeBatch(db);
-  const now = Date.now();
+  const utcNow = getUtcVersion();
   
   // Clean review object of undefined values to prevent Firestore errors
   const cleanedReview: any = {};
@@ -954,7 +956,7 @@ export async function saveReviewToChunk(review: any): Promise<void> {
   
   // Update version
   const metaRef = doc(db, 'chunk_meta', 'versions');
-  batch.set(metaRef, { reviews: { version: now } }, { merge: true });
+  batch.set(metaRef, { reviews: { version: utcNow, updatedAt: utcNow } }, { merge: true });
   
   await batch.commit();
   clearChunkMetaCache();
@@ -962,7 +964,7 @@ export async function saveReviewToChunk(review: any): Promise<void> {
 
 export async function deleteReviewFromChunk(reviewId: string): Promise<void> {
   const batch = writeBatch(db);
-  const now = Date.now();
+  const utcNow = getUtcVersion();
   
   const chunkRef = doc(db, 'review_chunks', 'main');
   
@@ -977,7 +979,7 @@ export async function deleteReviewFromChunk(reviewId: string): Promise<void> {
   
   // Update version
   const metaRef = doc(db, 'chunk_meta', 'versions');
-  batch.set(metaRef, { reviews: { version: now } }, { merge: true });
+  batch.set(metaRef, { reviews: { version: utcNow, updatedAt: utcNow } }, { merge: true });
   
   await batch.commit();
   clearChunkMetaCache();

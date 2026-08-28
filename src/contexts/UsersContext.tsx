@@ -4,6 +4,7 @@ import { db, runWithNetwork } from '../firebase';
 import { UserProfile } from '../types';
 import { useAuth } from './AuthContext';
 import { safeStorage } from '../utils/safeStorage';
+import { getUtcVersion, parseVersionTime } from '../utils/chunkMeta';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
 import { getUserDisplayName } from '../utils/userUtils';
 
@@ -216,10 +217,10 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         opCount++;
       }
 
-      const nowSync = Date.now();
-      const metaUsersUpdate: Record<string, number> = {};
+      const nowSyncUtc = getUtcVersion();
+      const metaUsersUpdate: Record<string, any> = {};
       for (const uid of userIds) {
-        metaUsersUpdate[uid] = nowSync;
+        metaUsersUpdate[uid] = nowSyncUtc;
       }
       if (opCount >= 490) {
         batches.push(writeBatch(db));
@@ -320,10 +321,10 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
             const versions = await getChunkMeta(force);
             const serverUsersVersion = versions?.users || {};
             const knownMtimesStr = safeStorage.getItem('sync_user_mtimes') || '{}';
-            let knownMtimes: Record<string, number> = {};
+            let knownMtimes: Record<string, any> = {};
             try { knownMtimes = JSON.parse(knownMtimesStr); } catch(e) {}
             Object.entries(serverUsersVersion).forEach(([uid, mtime]) => {
-              if (typeof mtime === 'number') {
+              if (mtime !== undefined && mtime !== null) {
                 knownMtimes[uid] = mtime;
               }
             });
@@ -344,7 +345,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           const serverUsersVersion = versions?.users || {};
           
           const knownMtimesStr = safeStorage.getItem('sync_user_mtimes') || '{}';
-          let knownMtimes: Record<string, number> = {};
+          let knownMtimes: Record<string, any> = {};
           try { knownMtimes = JSON.parse(knownMtimesStr); } catch (e) {}
           
           const isBaselineEmpty = Object.keys(knownMtimes).length === 0;
@@ -353,9 +354,10 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           if (isBaselineEmpty) {
             // Baseline uninitialized: Seed baseline, but only fetch missing or genuinely new users
             Object.entries(serverUsersVersion).forEach(([uid, mtime]) => {
-              if (typeof mtime === 'number') {
+              const serverTime = parseVersionTime(mtime);
+              if (serverTime > 0) {
                 const existing = currentUsersMap.get(uid);
-                if (!existing || (lastFetchTime > 0 && mtime > lastFetchTime)) {
+                if (!existing || (lastFetchTime > 0 && serverTime > lastFetchTime)) {
                   uidsToFetch.add(uid);
                 }
                 knownMtimes[uid] = mtime;
@@ -363,21 +365,23 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
             });
           } else {
             Object.entries(serverUsersVersion).forEach(([uid, mtime]) => {
-               if (typeof mtime === 'number') {
-                 if (mtime === -1) {
-                   if (currentUsersMap.has(uid)) {
-                     currentUsersMap.delete(uid);
-                     updatedSomething = true;
-                   }
-                   delete knownMtimes[uid];
-                 } else if (knownMtimes[uid] === undefined || !currentUsersMap.has(uid)) {
-                   uidsToFetch.add(uid);
-                   knownMtimes[uid] = mtime;
-                 } else if (mtime > knownMtimes[uid] && mtime > 0) {
-                   uidsToFetch.add(uid);
-                   knownMtimes[uid] = mtime;
-                 }
-               }
+              const serverTime = parseVersionTime(mtime);
+              if (mtime === -1 || (typeof mtime === 'object' && (mtime as any)?.deleted)) {
+                if (currentUsersMap.has(uid)) {
+                  currentUsersMap.delete(uid);
+                  updatedSomething = true;
+                }
+                delete knownMtimes[uid];
+              } else if (serverTime > 0) {
+                const knownTime = parseVersionTime(knownMtimes[uid]);
+                if (knownMtimes[uid] === undefined || !currentUsersMap.has(uid)) {
+                  uidsToFetch.add(uid);
+                  knownMtimes[uid] = mtime;
+                } else if (serverTime > knownTime) {
+                  uidsToFetch.add(uid);
+                  knownMtimes[uid] = mtime;
+                }
+              }
             });
           }
 

@@ -2,6 +2,81 @@ import { doc, getDoc } from 'firebase/firestore';
 import { db, runWithNetwork } from '../firebase';
 import { safeStorage } from './safeStorage';
 
+/**
+ * Standard UTC version generator.
+ * Returns ISO 8601 UTC timestamp string: e.g. "2026-08-27T17:42:30.123Z"
+ */
+export const getUtcVersion = (date?: Date | number | string): string => {
+  if (!date) return new Date().toISOString();
+  if (typeof date === 'string') {
+    const ms = parseVersionTime(date);
+    return ms > 0 ? new Date(ms).toISOString() : new Date().toISOString();
+  }
+  return new Date(date).toISOString();
+};
+
+/**
+ * Safely parses any version representation into epoch milliseconds.
+ * Supports ISO strings ("2026-08-27T..."), numeric timestamps (1740683050123),
+ * objects with updatedAt or version fields, and deletion markers (-1).
+ */
+export const parseVersionTime = (val: any): number => {
+  if (val === null || val === undefined) return 0;
+  if (typeof val === 'number') return val;
+  if (typeof val === 'object') {
+    return parseVersionTime(val.updatedAt || val.version || val.updated_at || 0);
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (!trimmed || trimmed === '0') return 0;
+    if (trimmed === '-1') return -1;
+    // Check if it's a numeric string representation of epoch timestamp (12-14 digits)
+    if (/^\d{12,14}$/.test(trimmed)) {
+      return parseInt(trimmed, 10);
+    }
+    const parsed = Date.parse(trimmed);
+    if (!isNaN(parsed)) {
+      return parsed;
+    }
+    const num = parseInt(trimmed, 10);
+    return isNaN(num) ? 0 : num;
+  }
+  return 0;
+};
+
+/**
+ * Generates a UTC time version that is guaranteed to be strictly newer than previousVersion.
+ */
+export const getNewerUtcVersion = (previousVersion?: any): string => {
+  const nowMs = Date.now();
+  if (previousVersion) {
+    const prevMs = parseVersionTime(previousVersion);
+    if (prevMs >= nowMs) {
+      return new Date(prevMs + 1000).toISOString();
+    }
+  }
+  return new Date(nowMs).toISOString();
+};
+
+/**
+ * Checks if incomingVersion is strictly newer than currentVersion.
+ */
+export const isVersionNewer = (incoming: any, current: any): boolean => {
+  return parseVersionTime(incoming) > parseVersionTime(current);
+};
+
+/**
+ * Standard chunk_meta version object containing both version and updatedAt in UTC ISO format.
+ */
+export const createVersionMeta = (extra: Record<string, any> = {}, prevVersion?: any) => {
+  const utcNow = getNewerUtcVersion(prevVersion);
+  return {
+    version: utcNow,
+    updatedAt: utcNow,
+    ...extra,
+  };
+};
+
 let chunkMetaPromise: Promise<Record<string, any>> | null = null;
 let memoryCache: Record<string, any> | null = null;
 let lastFetchTimeMs = 0;

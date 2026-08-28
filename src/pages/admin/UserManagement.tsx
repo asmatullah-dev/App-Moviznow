@@ -23,6 +23,7 @@ import { PhoneWhitelistManager } from '../../components/PhoneWhitelistManager';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { useUsers, isUserExpired } from '../../contexts/UsersContext';
+import { getUtcVersion } from '../../utils/chunkMeta';
 
 type SortField = 'createdAt' | 'displayName' | 'phone' | 'expiryDate' | 'lastActive';
 type SortOrder = 'asc' | 'desc';
@@ -1137,7 +1138,7 @@ export default function UserManagement() {
 
       batch.update(u1Ref, updates);
       batch.delete(u2Ref);
-      batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [user1.uid]: Date.now(), [user2.uid]: deleteField() } }, { merge: true });
+      batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [user1.uid]: getUtcVersion(), [user2.uid]: deleteField() } }, { merge: true });
 
       // Migrate FCM token from user2 to user1 if present
       if ((user2 as any).fcmToken && !(user1 as any).fcmToken) {
@@ -1530,7 +1531,7 @@ export default function UserManagement() {
 
           const batch = writeBatch(db);
           batch.set(doc(db, 'users', newUserId), newUserData);
-          batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [newUserId]: Date.now() } }, { merge: true });
+          batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [newUserId]: getUtcVersion() } }, { merge: true });
           await batch.commit();
           
           setAlertConfig({ isOpen: true, title: 'Success', message: 'Pending user added successfully.' });

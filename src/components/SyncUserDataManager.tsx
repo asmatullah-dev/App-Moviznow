@@ -3,13 +3,14 @@ import { doc, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { db, runWithNetwork } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { safeStorage } from '../utils/safeStorage';
-import { updateChunkMetaLocalCache } from '../utils/chunkMeta';
+import { updateChunkMetaLocalCache, getUtcVersion } from '../utils/chunkMeta';
 import { UserProfile } from '../types';
 
 export async function executeSyncUserData(currentUserUid: string, currentProfile: UserProfile | null, reason: string = 'manual'): Promise<boolean> {
   if (!currentUserUid) return false;
 
   const nowTime = Date.now();
+  const nowUtc = getUtcVersion();
   const lastSyncKey = `last_user_sync_time_${currentUserUid}`;
   const userRef = doc(db, 'users', currentUserUid);
 
@@ -170,7 +171,7 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
     // 2. Atomically update chunk_meta version for this user so all sessions, devices, and admin delta-sync know user data was updated
     batch.set(doc(db, 'chunk_meta', 'versions'), {
       users: {
-        [currentUserUid]: nowTime
+        [currentUserUid]: nowUtc
       }
     }, { merge: true });
 
@@ -178,14 +179,14 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
 
     // 3. Update local chunk_meta cache and mtimes
     try {
-      updateChunkMetaLocalCache({ users: { [currentUserUid]: nowTime } });
+      updateChunkMetaLocalCache({ users: { [currentUserUid]: nowUtc } });
     } catch (e) {}
 
     try {
       const mtimesStr = safeStorage.getItem('sync_user_mtimes');
       if (mtimesStr) {
         const mtimes = JSON.parse(mtimesStr);
-        mtimes[currentUserUid] = nowTime;
+        mtimes[currentUserUid] = nowUtc;
         safeStorage.setItem('sync_user_mtimes', JSON.stringify(mtimes));
       }
     } catch (e) {}
@@ -339,7 +340,7 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
     }
 
     // Update local cached profile version
-    safeStorage.setItem(`profile_version_${currentUserUid}`, nowTime.toString());
+    safeStorage.setItem(`profile_version_${currentUserUid}`, nowUtc);
 
     // Update profile cache
     if (currentProfile) {

@@ -5,6 +5,7 @@ import { db, storage, auth, requestNotificationPermission } from '../../firebase
 import { useAuth } from '../../contexts/AuthContext';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useAdminContent } from '../../contexts/AdminContentContext';
+import { getUtcVersion } from '../../utils/chunkMeta';
 import { Save, AlertCircle, GripVertical, Plus, Trash2, Layout, Wallet, Phone, Image as ImageIcon, Settings as SettingsIcon, RefreshCw, ShieldCheck, X, Eye, EyeOff, Database, Rocket, Loader2, Bell, BellOff, Info, Mail, Check, Megaphone } from 'lucide-react';
 import { clsx } from 'clsx';
 import { Navigate } from 'react-router-dom';
@@ -355,8 +356,9 @@ export default function AdminSettings() {
 
       const { writeBatch } = await import('firebase/firestore');
       const batch = writeBatch(db);
+      const utcNow = getUtcVersion();
       batch.set(doc(db, 'settings', 'app_settings'), settings);
-      batch.set(doc(db, 'chunk_meta', 'versions'), { settings: Date.now() }, { merge: true });
+      batch.set(doc(db, 'chunk_meta', 'versions'), { settings: { version: utcNow, updatedAt: utcNow } }, { merge: true });
       await batch.commit();
       
       await refreshSettings(true);
