@@ -256,14 +256,14 @@ async function saveInAppExpiryNotification(
 
     // 2. Update chunk metadata version so all active clients fetch it immediately
     const metaRef = firestore.collection("chunk_meta").doc("versions");
+    const pktString = new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString().replace('Z', '+05:00');
     batch.set(
       metaRef,
       {
         notifications: {
-          version: Date.now(),
+          updatedAt: pktString,
           latestAppChunkId: "app_chunk_0",
           latestChunkId: "app_chunk_0",
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
         lastGlobalUpdate: admin.firestore.FieldValue.serverTimestamp(),
       },
@@ -328,13 +328,13 @@ async function saveEmailExpiryNotificationChunk(
     );
 
     const metaRef = firestore.collection("chunk_meta").doc("versions");
+    const pktString = new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString().replace('Z', '+05:00');
     batch.set(
       metaRef,
       {
         notifications: {
-          version: Date.now(),
+          updatedAt: pktString,
           latestEmailChunkId: "Email_chunk_0",
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
         lastGlobalUpdate: admin.firestore.FieldValue.serverTimestamp(),
       },
@@ -767,14 +767,14 @@ async function saveInAppMembershipUpdateNotification(
     );
 
     const metaRef = firestore.collection("chunk_meta").doc("versions");
+    const pktString = new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString().replace('Z', '+05:00');
     batch.set(
       metaRef,
       {
         notifications: {
-          version: Date.now(),
+          updatedAt: pktString,
           latestAppChunkId: "app_chunk_0",
           latestChunkId: "app_chunk_0",
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
         lastGlobalUpdate: admin.firestore.FieldValue.serverTimestamp(),
       },

@@ -45,7 +45,7 @@ export function seedStaticExportData(): void {
       if (!existingStr || existingStr === '{}') {
         safeStorage.setItem(storageKey, JSON.stringify(itemsObj));
         if (!localMeta[chunkId]) {
-          localMeta[chunkId] = { version: baseSeedVersion, updatedAt: baseSeedVersion, count: Object.keys(itemsObj).length };
+          localMeta[chunkId] = { updatedAt: baseSeedVersion, count: Object.keys(itemsObj).length };
         }
       } else {
         try {
@@ -61,7 +61,7 @@ export function seedStaticExportData(): void {
             safeStorage.setItem(storageKey, JSON.stringify(existing));
           }
           if (!localMeta[chunkId]) {
-            localMeta[chunkId] = { version: baseSeedVersion, updatedAt: baseSeedVersion, count: Object.keys(existing).length };
+            localMeta[chunkId] = { updatedAt: baseSeedVersion, count: Object.keys(existing).length };
           }
         } catch (e) {
           safeStorage.setItem(storageKey, JSON.stringify(itemsObj));
@@ -79,7 +79,7 @@ export function seedStaticExportData(): void {
     if (staticMetadataData.qualities && staticMetadataData.qualities.length > 0 && !safeStorage.getItem('qualities_cache')) {
       safeStorage.setItem('qualities_cache', JSON.stringify(staticMetadataData.qualities));
     }
-    if (!localMeta.metadata) localMeta.metadata = { version: baseSeedVersion, updatedAt: baseSeedVersion };
+    if (!localMeta.metadata) localMeta.metadata = { updatedAt: baseSeedVersion };
 
     // 4. Populate collections if missing
     if (staticCollectionsData.items && Object.keys(staticCollectionsData.items).length > 0) {
@@ -91,7 +91,7 @@ export function seedStaticExportData(): void {
         safeStorage.setItem('collections_cache', JSON.stringify(collList));
       }
     }
-    if (!localMeta.collections) localMeta.collections = { version: baseSeedVersion, updatedAt: baseSeedVersion };
+    if (!localMeta.collections) localMeta.collections = { updatedAt: baseSeedVersion };
 
     safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
     if (!safeStorage.getItem('last_successful_meta_check')) {

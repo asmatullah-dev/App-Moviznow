@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { CheckCircle2, AlertCircle, Loader2, ArrowLeft, Lock, UserX, LogOut } from 'lucide-react';
-import { doc, updateDoc, collection, query, where, getDocs, setDoc, limit, writeBatch, serverTimestamp } from 'firebase/firestore';
+import { doc, updateDoc, collection, query, where, getDocs, setDoc, limit, writeBatch} from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { updateChunkMetaLocalCache, getUtcVersion } from '../utils/chunkMeta';
@@ -59,7 +59,7 @@ export default function Unsubscribe() {
       if (user?.uid && (user.email?.toLowerCase() === userEmail.toLowerCase() || profile?.email?.toLowerCase() === userEmail.toLowerCase())) {
         const currentPrefs = profile?.notificationPreferences || {};
         const emailPrefs = currentPrefs.email || {};
-        const nowTime = serverTimestamp();
+        const nowTime = getUtcVersion();
         const batch = writeBatch(db);
         batch.update(doc(db, 'users', user.uid), {
           notificationPreferences: {
@@ -88,7 +88,7 @@ export default function Unsubscribe() {
       
       let updated = false;
       if (!snap.empty) {
-        const nowTime = serverTimestamp();
+        const nowTime = getUtcVersion();
         const batch = writeBatch(db);
         const metaUsersUpdate: Record<string, any> = {};
         for (const userDoc of snap.docs) {

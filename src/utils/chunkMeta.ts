@@ -3,16 +3,21 @@ import { db, runWithNetwork } from '../firebase';
 import { safeStorage } from './safeStorage';
 
 /**
- * Standard UTC version generator.
- * Returns ISO 8601 UTC timestamp string: e.g. "2026-08-27T17:42:30.123Z"
+ * Standard UTC+5 (PKT) version generator.
+ * Returns ISO 8601 timestamp string with +05:00 offset: e.g. "2026-08-27T17:42:30.123+05:00"
  */
 export const getUtcVersion = (date?: Date | number | string): string => {
-  if (!date) return new Date().toISOString();
+  const getPktString = (ms: number) => {
+    const pktDate = new Date(ms + 5 * 60 * 60 * 1000);
+    return pktDate.toISOString().replace('Z', '+05:00');
+  };
+
+  if (!date) return getPktString(Date.now());
   if (typeof date === 'string') {
     const ms = parseVersionTime(date);
-    return ms > 0 ? new Date(ms).toISOString() : new Date().toISOString();
+    return ms > 0 ? getPktString(ms) : getPktString(Date.now());
   }
-  return new Date(date).toISOString();
+  return getPktString(new Date(date).getTime());
 };
 
 /**
@@ -51,13 +56,18 @@ export const parseVersionTime = (val: any): number => {
  */
 export const getNewerUtcVersion = (previousVersion?: any): string => {
   const nowMs = Date.now();
+  const getPktString = (ms: number) => {
+    const pktDate = new Date(ms + 5 * 60 * 60 * 1000);
+    return pktDate.toISOString().replace('Z', '+05:00');
+  };
+
   if (previousVersion) {
     const prevMs = parseVersionTime(previousVersion);
     if (prevMs >= nowMs) {
-      return new Date(prevMs + 1000).toISOString();
+      return getPktString(prevMs + 1000);
     }
   }
-  return new Date(nowMs).toISOString();
+  return getPktString(nowMs);
 };
 
 /**
@@ -68,12 +78,11 @@ export const isVersionNewer = (incoming: any, current: any): boolean => {
 };
 
 /**
- * Standard chunk_meta version object containing both version and updatedAt in UTC ISO format.
+ * Standard chunk_meta version object containing updatedAt in PKT ISO format.
  */
 export const createVersionMeta = (extra: Record<string, any> = {}, prevVersion?: any) => {
   const utcNow = getNewerUtcVersion(prevVersion);
   return {
-    version: utcNow,
     updatedAt: utcNow,
     ...extra,
   };

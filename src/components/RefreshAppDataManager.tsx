@@ -81,7 +81,7 @@ export function RefreshAppDataManager() {
       // 2. Check notifications version
       if (user?.uid) {
         const serverNotifVer = (versions.notifications && typeof versions.notifications === 'object')
-          ? versions.notifications.version || 0
+          ? versions.notifications.updatedAt || versions.notifications.version || 0
           : (versions.notifications || 0);
         const localNotifVer = safeStorage.getItem('cached_notifications_version') || '0';
         const serverNotifTime = parseVersionTime(serverNotifVer);

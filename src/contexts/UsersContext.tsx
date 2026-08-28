@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
-import { collection, query, getDocs, doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, getDocs, doc, getDoc, setDoc} from 'firebase/firestore';
 import { db, runWithNetwork } from '../firebase';
 import { UserProfile } from '../types';
 import { useAuth } from './AuthContext';
@@ -217,7 +217,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         opCount++;
       }
 
-      const nowSyncUtc = serverTimestamp();
+      const nowSyncUtc = getUtcVersion();
       const metaUsersUpdate: Record<string, any> = {};
       for (const uid of userIds) {
         metaUsersUpdate[uid] = nowSyncUtc;

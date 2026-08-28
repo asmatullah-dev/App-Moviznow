@@ -798,7 +798,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 updates.role = 'basic';
               }
 
-              const { writeBatch, serverTimestamp } = await import("firebase/firestore");
+              const { writeBatch} = await import("firebase/firestore");
               const batch = writeBatch(db);
               batch.set(userRef, updates, { merge: true });
               await batch.commit();
@@ -865,7 +865,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (shouldWrite) {
           try {
-            const { writeBatch, serverTimestamp } = await import("firebase/firestore");
+            const { writeBatch} = await import("firebase/firestore");
             const batch = writeBatch(db);
             const newVersion = getUtcVersion();
 
@@ -954,14 +954,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               batch.set(userRef, updatesToPush, { merge: true });
               batch.set(doc(db, "chunk_meta", "versions"), {
                 users: {
-                  [currentUser.uid]: serverTimestamp()
+                  [currentUser.uid]: getUtcVersion()
                 }
               }, { merge: true });
               await batch.commit();
 
               try {
                 const { updateChunkMetaLocalCache } = await import("../utils/chunkMeta");
-                updateChunkMetaLocalCache({ users: { [currentUser.uid]: serverTimestamp() } });
+                updateChunkMetaLocalCache({ users: { [currentUser.uid]: getUtcVersion() } });
               } catch (e) {}
 
               try {
@@ -1146,20 +1146,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               (force && reason !== "manual"))
           ) {
             try {
-              const { writeBatch, serverTimestamp } = await import("firebase/firestore");
+              const { writeBatch} = await import("firebase/firestore");
               const batch = writeBatch(db);
               const verTime = getUtcVersion();
               batch.set(userRef, updates, { merge: true });
               batch.set(doc(db, "chunk_meta", "versions"), {
                 users: {
-                  [currentUser.uid]: serverTimestamp()
+                  [currentUser.uid]: getUtcVersion()
                 }
               }, { merge: true });
               await batch.commit();
               safeStorage.setItem(`profile_version_${currentUser.uid}`, getUtcVersion());
               try {
                 const { updateChunkMetaLocalCache } = await import("../utils/chunkMeta");
-                updateChunkMetaLocalCache({ users: { [currentUser.uid]: serverTimestamp() } });
+                updateChunkMetaLocalCache({ users: { [currentUser.uid]: getUtcVersion() } });
               } catch (e) {}
             } catch (err) {
               handleFirestoreError(
@@ -1654,8 +1654,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
             // Update version metadata safely
             try {
-              const { setDoc, serverTimestamp } = await import("firebase/firestore");
-              const metaUpdates: Record<string, any> = { [currentUser.uid]: serverTimestamp() };
+              const { setDoc} = await import("firebase/firestore");
+              const metaUpdates: Record<string, any> = { [currentUser.uid]: getUtcVersion() };
               oldDocIds.forEach((oldId) => { metaUpdates[oldId] = -1; });
               await setDoc(doc(db, "chunk_meta", "versions"), { users: metaUpdates }, { merge: true });
             } catch (metaErr) {}
@@ -1688,7 +1688,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             console.error("Failed to merge/create user profile:", err);
             // Fallback attempt if batch fails
             try {
-              const { writeBatch, serverTimestamp } = await import("firebase/firestore");
+              const { writeBatch} = await import("firebase/firestore");
               const fbBatch = writeBatch(db);
               fbBatch.set(userRef, newProfile);
               fbBatch.set(doc(db, "referral", "all"), {
@@ -2129,7 +2129,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const applyUpdates = async () => {
         if (Object.keys(updates).length > 0) {
           try {
-            const { setDoc, serverTimestamp } = await import("firebase/firestore");
+            const { setDoc} = await import("firebase/firestore");
             await setDoc(userRef, updates, { merge: true });
             setProfile((prev: any) => {
               if (!prev) return prev;
@@ -2199,7 +2199,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       localStorage.removeItem(`last_user_sync_time_v2_${result.user.uid}`);
 
       try {
-        const { writeBatch, serverTimestamp } = await import("firebase/firestore");
+        const { writeBatch} = await import("firebase/firestore");
         const batch = writeBatch(db);
         const updates: any = { sessionId: getLocalSessionId() };
 
@@ -2222,14 +2222,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         batch.update(doc(db, "users", result.user.uid), updates);
         batch.set(doc(db, "chunk_meta", "versions"), {
           users: {
-            [result.user.uid]: serverTimestamp()
+            [result.user.uid]: getUtcVersion()
           }
         }, { merge: true });
         await batch.commit();
         safeStorage.setItem(`profile_version_${result.user.uid}`, getUtcVersion());
         try {
           const { updateChunkMetaLocalCache } = await import("../utils/chunkMeta");
-          updateChunkMetaLocalCache({ users: { [result.user.uid]: serverTimestamp() } });
+          updateChunkMetaLocalCache({ users: { [result.user.uid]: getUtcVersion() } });
         } catch (e) {}
       } catch (e) {}
 
@@ -2332,7 +2332,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await updateProfile(userCredential.user, { displayName: cleanSignupName });
 
       try {
-        const { writeBatch, serverTimestamp } = await import("firebase/firestore");
+        const { writeBatch} = await import("firebase/firestore");
         const batch = writeBatch(db);
         const signupTime = getUtcVersion();
         batch.set(doc(db, "users", userCredential.user.uid), {
@@ -2345,14 +2345,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }, { merge: true });
         batch.set(doc(db, "chunk_meta", "versions"), {
           users: {
-            [userCredential.user.uid]: serverTimestamp()
+            [userCredential.user.uid]: getUtcVersion()
           }
         }, { merge: true });
         await runWithNetwork(() => batch.commit());
         safeStorage.setItem(`profile_version_${userCredential.user.uid}`, getUtcVersion());
         try {
           const { updateChunkMetaLocalCache } = await import("../utils/chunkMeta");
-          updateChunkMetaLocalCache({ users: { [userCredential.user.uid]: serverTimestamp() } });
+          updateChunkMetaLocalCache({ users: { [userCredential.user.uid]: getUtcVersion() } });
         } catch (e) {}
       } catch (e) {}
 
@@ -2448,7 +2448,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await updateProfile(userCredential.user, { displayName: cleanPhoneSignupName });
 
       try {
-        const { writeBatch, serverTimestamp } = await import("firebase/firestore");
+        const { writeBatch} = await import("firebase/firestore");
         const batch = writeBatch(db);
         const signupTime = getUtcVersion();
         batch.set(doc(db, "users", userCredential.user.uid), {
@@ -2461,14 +2461,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }, { merge: true });
         batch.set(doc(db, "chunk_meta", "versions"), {
           users: {
-            [userCredential.user.uid]: serverTimestamp()
+            [userCredential.user.uid]: getUtcVersion()
           }
         }, { merge: true });
         await runWithNetwork(() => batch.commit());
         safeStorage.setItem(`profile_version_${userCredential.user.uid}`, getUtcVersion());
         try {
           const { updateChunkMetaLocalCache } = await import("../utils/chunkMeta");
-          updateChunkMetaLocalCache({ users: { [userCredential.user.uid]: serverTimestamp() } });
+          updateChunkMetaLocalCache({ users: { [userCredential.user.uid]: getUtcVersion() } });
         } catch (e) {}
       } catch (e) {}
 
@@ -2812,13 +2812,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const userRefPath = doc(db, "users", user.uid);
 
       try {
-        const { writeBatch, serverTimestamp } = await import("firebase/firestore");
+        const { writeBatch} = await import("firebase/firestore");
         let batch = writeBatch(db);
         const updateVerTime = getUtcVersion();
         batch.set(userRefPath, data, { merge: true });
         batch.set(doc(db, "chunk_meta", "versions"), {
           users: {
-            [user.uid]: serverTimestamp()
+            [user.uid]: getUtcVersion()
           }
         }, { merge: true });
 
@@ -2888,7 +2888,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await updatePassword(auth.currentUser, newPassword);
       const userRef = doc(db, "users", user.uid);
-      const { writeBatch, serverTimestamp } = await import("firebase/firestore");
+      const { writeBatch} = await import("firebase/firestore");
       const batch = writeBatch(db);
       batch.update(userRef, { hasPassword: true });
             await batch.commit();

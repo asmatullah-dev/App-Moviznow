@@ -235,9 +235,9 @@ function registerChunkUpdates(chunkIds: string[], batch: WriteBatch, sizes?: Rec
   const utcNow = getUtcVersion();
   chunkIds.forEach(id => {
     if (sizes && sizes[id] !== undefined) {
-      updates[id] = { version: utcNow, updatedAt: utcNow, count: sizes[id] };
+      updates[id] = { updatedAt: utcNow, count: sizes[id] };
     } else {
-      updates[id] = { version: utcNow, updatedAt: utcNow };
+      updates[id] = { updatedAt: utcNow };
     }
   });
   batch.set(metaRef, updates, { merge: true });
@@ -516,7 +516,7 @@ export function rebalanceLocalChunks(): { rebalanced: boolean; rebalancedCount: 
       const chunkStr = safeStorage.getItem(`content_chunk_${cid}`) || '{}';
       try {
         const items = JSON.parse(chunkStr);
-        localMeta[cid] = { version: utcNow, updatedAt: utcNow, count: Object.keys(items).length };
+        localMeta[cid] = { updatedAt: utcNow, count: Object.keys(items).length };
       } catch(e) {}
     });
     safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
@@ -541,7 +541,7 @@ export async function autoRebalanceChunks(): Promise<{ rebalancedCount: number }
     }
 
     const batch = writeBatch(db);
-    const updatedMeta: Record<string, { version: string; updatedAt: string; count: number }> = {};
+    const updatedMeta: Record<string, { updatedAt: string; count: number }> = {};
     const utcNow = getUtcVersion();
 
     for (const cid of affectedChunkIds) {
@@ -549,7 +549,7 @@ export async function autoRebalanceChunks(): Promise<{ rebalancedCount: number }
       try {
         const items = JSON.parse(chunkStr);
         batch.set(doc(db, 'content_chunks', cid), { items, updatedAt: serverTimestamp() }, { merge: true });
-        updatedMeta[cid] = { version: utcNow, updatedAt: utcNow, count: Object.keys(items).length };
+        updatedMeta[cid] = { updatedAt: utcNow, count: Object.keys(items).length };
       } catch(e) {}
     }
 
@@ -778,7 +778,7 @@ export async function repairChunkMetadata(): Promise<{ repairedContent: number }
   const contentVersions: Record<string, any> = {};
   contentSnap.docs.forEach(d => {
     const items = d.data().items || {};
-    contentVersions[d.id] = { version: utcNow, updatedAt: utcNow, count: Object.keys(items).length };
+    contentVersions[d.id] = { updatedAt: utcNow, count: Object.keys(items).length };
   });
   batch.set(doc(db, 'chunk_meta', 'versions'), contentVersions, { merge: true });
 
@@ -861,7 +861,7 @@ export async function rebuildAllChunks(contents: Content[]): Promise<number> {
   const metaUpdates: Record<string, any> = {};
   const utcNow = getUtcVersion();
   Object.entries(chunkDocs).forEach(([id, itemsObj]) => {
-    metaUpdates[id] = { version: utcNow, updatedAt: utcNow, count: Object.keys(itemsObj as object).length };
+    metaUpdates[id] = { updatedAt: utcNow, count: Object.keys(itemsObj as object).length };
   });
   batches[batches.length - 1].set(doc(db, 'chunk_meta', 'versions'), metaUpdates);
 
@@ -956,7 +956,7 @@ export async function saveReviewToChunk(review: any): Promise<void> {
   
   // Update version
   const metaRef = doc(db, 'chunk_meta', 'versions');
-  batch.set(metaRef, { reviews: { version: utcNow, updatedAt: utcNow } }, { merge: true });
+  batch.set(metaRef, { reviews: { updatedAt: utcNow } }, { merge: true });
   
   await batch.commit();
   clearChunkMetaCache();
@@ -979,7 +979,7 @@ export async function deleteReviewFromChunk(reviewId: string): Promise<void> {
   
   // Update version
   const metaRef = doc(db, 'chunk_meta', 'versions');
-  batch.set(metaRef, { reviews: { version: utcNow, updatedAt: utcNow } }, { merge: true });
+  batch.set(metaRef, { reviews: { updatedAt: utcNow } }, { merge: true });
   
   await batch.commit();
   clearChunkMetaCache();

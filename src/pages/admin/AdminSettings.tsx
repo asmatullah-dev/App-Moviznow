@@ -358,7 +358,7 @@ export default function AdminSettings() {
       const batch = writeBatch(db);
       const utcNow = getUtcVersion();
       batch.set(doc(db, 'settings', 'app_settings'), settings);
-      batch.set(doc(db, 'chunk_meta', 'versions'), { settings: { version: utcNow, updatedAt: utcNow } }, { merge: true });
+      batch.set(doc(db, 'chunk_meta', 'versions'), { settings: { updatedAt: utcNow } }, { merge: true });
       await batch.commit();
       
       await refreshSettings(true);

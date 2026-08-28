@@ -797,8 +797,10 @@ ordersRouter.post("/verify-and-confirm", async (req, res) => {
 
     // Update chunk metadata version so frontend stays in sync
     try {
+      const pktDate = new Date(Date.now() + 5 * 60 * 60 * 1000);
+      const pktString = pktDate.toISOString().replace('Z', '+05:00');
       await firestore.collection("chunk_meta").doc("versions").set({
-        users: { [userId]: Date.now() },
+        users: { [userId]: pktString },
       }, { merge: true });
     } catch (metaErr) {}
 

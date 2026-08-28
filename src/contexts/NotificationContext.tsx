@@ -269,7 +269,6 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       batch.set(doc(db, 'chunk_meta', 'versions'), { 
         notifications: {
           ...notifMeta,
-          version: utcNow,
           updatedAt: utcNow
         },
         lastGlobalUpdate: serverTimestamp()
@@ -327,7 +326,6 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         batch.set(doc(db, 'chunk_meta', 'versions'), { 
           notifications: {
             ...notifMeta,
-            version: utcNow,
             updatedAt: utcNow
           },
           lastGlobalUpdate: serverTimestamp()

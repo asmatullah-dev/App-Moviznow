@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { db } from '../../firebase';
-import { collection, doc, updateDoc, writeBatch, query, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, updateDoc, writeBatch, query} from 'firebase/firestore';
 import { UserProfile, Content, Role, Status } from '../../types';
 import { Settings, X, Check, Search } from 'lucide-react';
 import AlertModal from '../../components/AlertModal';
@@ -29,7 +29,7 @@ export default function SelectedContentUsers() {
     if (!selectedUser) return;
     try {
       const assignedContent = Array.from(assignedIds);
-      const nowTime = serverTimestamp();
+      const nowTime = getUtcVersion();
       const batch = writeBatch(db);
       batch.update(doc(db, 'users', selectedUser.uid), {
         assignedContent: assignedContent,
@@ -61,7 +61,7 @@ export default function SelectedContentUsers() {
       if (pendingAccess) {
         try {
           const assignedContent = JSON.parse(pendingAccess);
-          const nowTime = serverTimestamp();
+          const nowTime = getUtcVersion();
           const batch = writeBatch(db);
           batch.update(doc(db, 'users', selectedUser.uid), {
             assignedContent: assignedContent,
