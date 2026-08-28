@@ -148,13 +148,9 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
     updatesToPush.preferredLanguage = currentLang;
   }
 
-  // If no fields to update, remove sync requirement and exit immediately without Firestore write
-  if (Object.keys(updatesToPush).length === 0) {
-    safeStorage.removeItem('needs_user_sync');
-    localStorage.setItem(lastSyncKey, nowTime.toString());
-    return true;
-  }
-
+  // Set lastActive and updatedAt when there are pending updates
+  const nowIso = new Date().toISOString();
+  updatesToPush.lastActive = nowIso;
   updatesToPush.updatedAt = serverTimestamp();
 
   if (!navigator.onLine) {
@@ -188,6 +184,17 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
         const mtimes = JSON.parse(mtimesStr);
         mtimes[currentUserUid] = nowUtc;
         safeStorage.setItem('sync_user_mtimes', JSON.stringify(mtimes));
+      }
+      const cachedUsersStr = safeStorage.getItem('cached_all_users');
+      if (cachedUsersStr) {
+        const cachedUsers = JSON.parse(cachedUsersStr);
+        const idx = cachedUsers.findIndex((u: any) => u.uid === currentUserUid);
+        if (idx !== -1) {
+          // Replace serverTimestamp with serializable ISO string for local JSON storage
+          const localUpdates = { ...updatesToPush, updatedAt: nowIso };
+          cachedUsers[idx] = { ...cachedUsers[idx], ...localUpdates };
+          safeStorage.setItem('cached_all_users', JSON.stringify(cachedUsers));
+        }
       }
     } catch (e) {}
 
@@ -342,9 +349,10 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
     // Update local cached profile version
     safeStorage.setItem(`profile_version_${currentUserUid}`, nowUtc);
 
-    // Update profile cache
+    // Update profile cache with serializable date strings
     if (currentProfile) {
-      const updatedProfile = { ...currentProfile, ...updatesToPush };
+      const localUpdates = { ...updatesToPush, updatedAt: nowIso };
+      const updatedProfile = { ...currentProfile, ...localUpdates };
       safeStorage.setItem('profile_cache', JSON.stringify(updatedProfile));
     }
 
@@ -369,5 +377,91 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
 }
 
 export function SyncUserDataManager() {
+  const { user, profile } = useAuth();
+  const lastSyncAttemptRef = useRef<number>(0);
+
+  const triggerSync = useCallback(async (reason: string = 'auto') => {
+    if (!user?.uid) return;
+    
+    // Cooldown check of 5 seconds to avoid flooding writes
+    const now = Date.now();
+    if (now - lastSyncAttemptRef.current < 5000) return;
+    lastSyncAttemptRef.current = now;
+
+    await executeSyncUserData(user.uid, profile, reason);
+  }, [user?.uid, profile]);
+
+  // 1. Periodic sync every 2 minutes
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const interval = setInterval(() => {
+      // Check if there are any accumulated time/sessions or pending updates
+      const timeCacheKey = `accumulated_time_seconds_${user.uid}`;
+      const accSecs = parseInt(safeStorage.getItem(timeCacheKey) || '0', 10);
+      const sessionCacheKey = `accumulated_sessions_${user.uid}`;
+      const accSessions = parseInt(safeStorage.getItem(sessionCacheKey) || '0', 10);
+      
+      const needsUserSync = safeStorage.getItem('needs_user_sync') === 'true';
+      const hasFavs = !!safeStorage.getItem('pending_favorites_array');
+      const hasWL = !!safeStorage.getItem('pending_watch_later_array');
+      const hasOrders = !!safeStorage.getItem('pending_orders_array');
+      const hasUserUpdates = !!safeStorage.getItem('pending_user_updates');
+
+      const hasPending = accSecs > 0 || accSessions > 0 || needsUserSync || hasFavs || hasWL || hasOrders || hasUserUpdates;
+
+      if (hasPending && navigator.onLine) {
+        triggerSync('periodic');
+      }
+    }, 120 * 1000); // 2 minutes
+
+    return () => clearInterval(interval);
+  }, [user?.uid, triggerSync]);
+
+  // 2. Sync immediately on page visibility change to hidden
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        const timeCacheKey = `accumulated_time_seconds_${user.uid}`;
+        const accSecs = parseInt(safeStorage.getItem(timeCacheKey) || '0', 10);
+        const sessionCacheKey = `accumulated_sessions_${user.uid}`;
+        const accSessions = parseInt(safeStorage.getItem(sessionCacheKey) || '0', 10);
+
+        const needsUserSync = safeStorage.getItem('needs_user_sync') === 'true';
+        const hasFavs = !!safeStorage.getItem('pending_favorites_array');
+        const hasWL = !!safeStorage.getItem('pending_watch_later_array');
+        const hasOrders = !!safeStorage.getItem('pending_orders_array');
+        const hasUserUpdates = !!safeStorage.getItem('pending_user_updates');
+
+        const hasPending = accSecs > 0 || accSessions > 0 || needsUserSync || hasFavs || hasWL || hasOrders || hasUserUpdates;
+
+        if (hasPending && navigator.onLine) {
+          triggerSync('visibility_hidden');
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [user?.uid, triggerSync]);
+
+  // 3. Monitor for custom sync request triggers
+  useEffect(() => {
+    const handleSyncRequest = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const reason = customEvent.detail?.reason || 'event_trigger';
+      triggerSync(reason);
+    };
+
+    window.addEventListener('trigger_sync_user_data_immediate', handleSyncRequest);
+    return () => {
+      window.removeEventListener('trigger_sync_user_data_immediate', handleSyncRequest);
+    };
+  }, [triggerSync]);
+
   return null;
 }

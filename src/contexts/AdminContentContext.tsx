@@ -1044,7 +1044,10 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         const localVersion = typeof localV === 'object' ? localV.updatedAt : localV;
         const hasData = !!safeStorage.getItem('content_chunk_' + chunkId);
 
-        if (!hasData || !localVersion || localVersion < (serverVersion as number)) {
+        const serverVersionTime = parseVersionTime(serverVersion);
+        const localVersionTime = parseVersionTime(localVersion);
+
+        if (!hasData || !localVersionTime || localVersionTime < serverVersionTime) {
           chunksToFetch.push(chunkId);
         }
       }
@@ -1095,7 +1098,10 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       const genresCacheStr = safeStorage.getItem('genres_cache');
       const hasMetadata = !!genresCacheStr && genresCacheStr !== '[]';
 
-      if (!hasMetadata || !localMetaVersion || localMetaVersion < metadataVersion) {
+      const metadataVersionTime = parseVersionTime(metadataVersion);
+      const localMetaVersionTime = parseVersionTime(localMetaVersion);
+
+      if (!hasMetadata || !localMetaVersionTime || localMetaVersionTime < metadataVersionTime) {
         try {
           const metaDoc = await getDoc(doc(db, 'content_chunks', 'metadata'));
           if (metaDoc.exists()) {
@@ -1127,7 +1133,10 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       const localCollectionsVersion = localMeta.collections || 0;
       const hasCollectionsCache = !!safeStorage.getItem('collections_cache');
 
-      if (!hasCollectionsCache || localCollectionsVersion < collectionsVersion) {
+      const collectionsVersionTime = parseVersionTime(collectionsVersion);
+      const localCollectionsVersionTime = parseVersionTime(localCollectionsVersion);
+
+      if (!hasCollectionsCache || !localCollectionsVersionTime || localCollectionsVersionTime < collectionsVersionTime) {
         try {
           const latestCollChunkId = (collectionsMeta && typeof collectionsMeta === 'object' ? collectionsMeta.latestChunkId : null) || 'collection_chunk_0';
           const matchIndex = latestCollChunkId.match(/(\d+)$/);
@@ -1184,6 +1193,11 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       // 6. Settings are handled and synchronized by SettingsContext
       // Mark the 5-minute relaxation timestamp
       safeStorage.setItem(LAST_QUICK_REFRESH_KEY, now.toString());
+
+      if (manual || updatedSomething) {
+        refreshContentFromLocal();
+        refreshCollectionsFromLocal();
+      }
 
       if (isLibraryEmpty) {
         window.dispatchEvent(new CustomEvent('sync_status', {

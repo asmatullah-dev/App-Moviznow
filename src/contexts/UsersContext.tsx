@@ -167,6 +167,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
 
   const isFinalizingRef = useRef(false);
   const lastFetchTimestampRef = useRef(0);
+  const fetchPromiseRef = useRef<Promise<{ users: UserProfile[], updatedSomething: boolean }> | null>(null);
 
   const finalizeUserChanges = useCallback(async (force: boolean = true) => {
     if (isFinalizingRef.current) return;
@@ -260,207 +261,222 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const fetchUsers = useCallback(async (force = false) => {
-    if (authLoading || !user) {
-        setLoading(false);
-        return { users: [], updatedSomething: false };
+    if (fetchPromiseRef.current) {
+        return fetchPromiseRef.current;
     }
 
-    const isPrivilegedUser = profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'manager' || profile?.role === 'user_manager';
-    if (!isPrivilegedUser) {
-        setLoading(false);
-        return { users: [], updatedSomething: false };
-    }
+    const runFetch = async () => {
+      if (authLoading || !user) {
+          setLoading(false);
+          return { users: [], updatedSomething: false };
+      }
 
-    const now = Date.now();
-    // PKT is UTC+5. Shift back by 7 hours to align the daily update cycle with 7 AM PKT.
-    const shiftedTime = new Date(now + (5 - 7) * 60 * 60 * 1000);
-    const checkPeriod = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
+      const isPrivilegedUser = profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'manager' || profile?.role === 'user_manager';
+      if (!isPrivilegedUser) {
+          setLoading(false);
+          return { users: [], updatedSomething: false };
+      }
 
-    const cachedStr = safeStorage.getItem('cached_all_users');
-    const locallyCachedUsers: UserProfile[] = cachedStr ? JSON.parse(cachedStr) : [];
-    const lastFetchTimeStr = safeStorage.getItem('last_users_sync_timestamp');
-    const lastFetchTime = lastFetchTimeStr ? parseInt(lastFetchTimeStr, 10) : 0;
+      const now = Date.now();
+      // PKT is UTC+5. Shift back by 7 hours to align the daily update cycle with 7 AM PKT.
+      const shiftedTime = new Date(now + (5 - 7) * 60 * 60 * 1000);
+      const checkPeriod = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
 
-    // Minimum cooldown between fetch attempts (15 seconds) to prevent cascading queries
-    if (!force && (now - lastFetchTime < 60 * 1000) && locallyCachedUsers.length > 0) {
-        setLoading(false);
-        return { users: locallyCachedUsers, updatedSomething: false };
-    }
-    
-    if (force && (now - lastFetchTimestampRef.current < 5 * 1000) && locallyCachedUsers.length > 0) {
-        setLoading(false);
-        return { users: locallyCachedUsers, updatedSomething: false };
-    }
-    lastFetchTimestampRef.current = now;
+      const cachedStr = safeStorage.getItem('cached_all_users');
+      const locallyCachedUsers: UserProfile[] = cachedStr ? JSON.parse(cachedStr) : [];
+      const lastFetchTimeStr = safeStorage.getItem('last_users_sync_timestamp');
+      const lastFetchTime = lastFetchTimeStr ? parseInt(lastFetchTimeStr, 10) : 0;
 
-    if (locallyCachedUsers.length === 0) {
-        setLoading(true);
-    }
-    
-    let updatedSomething = false;
+      // Minimum cooldown between non-forced fetch attempts (15 seconds) to prevent cascading queries
+      if (!force && (now - lastFetchTime < 15 * 1000) && locallyCachedUsers.length > 0) {
+          setLoading(false);
+          return { users: locallyCachedUsers, updatedSomething: false };
+      }
+      
+      // For forced calls, allow execution but prevent tight loop (e.g. 1 sec debounce)
+      if (force && (now - lastFetchTimestampRef.current < 1000) && locallyCachedUsers.length > 0) {
+          setLoading(false);
+          return { users: locallyCachedUsers, updatedSomething: false };
+      }
+      lastFetchTimestampRef.current = now;
 
-    try {
-      let currentUsers = [...locallyCachedUsers];
-      let { getDocs, query, collection, where, documentId, limit } = await import('firebase/firestore');
+      if (locallyCachedUsers.length === 0) {
+          setLoading(true);
+      }
+      
+      let updatedSomething = false;
 
-      if (currentUsers.length === 0) {
-        // Initial bootstrap pull when local cache is empty: use strict limit query to avoid downloading all 1900+ user documents
-        try {
-          updatedSomething = true;
-          const q = query(collection(db, 'users'), limit(100));
-          const snapshot = await runWithNetwork(() => getDocs(q));
-          const rawFetched = snapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id })) as UserProfile[];
-          const uMap = new Map<string, UserProfile>();
-          rawFetched.forEach(u => {
-            if (u && u.uid) uMap.set(u.uid, normalizeUserStatusAndExpiry(u));
-          });
-          currentUsers = Array.from(uMap.values());
+      try {
+        let currentUsers = [...locallyCachedUsers];
+        const currentUsersMap = new Map(currentUsers.map(u => [u.uid, normalizeUserStatusAndExpiry(u)]));
+        let { getDocs, query, collection, where, documentId } = await import('firebase/firestore');
 
-          // Save mtimes baseline
-          try {
-            const { getChunkMeta } = await import('../utils/chunkMeta');
-            const versions = await getChunkMeta(force);
-            const serverUsersVersion = versions?.users || {};
-            const knownMtimesStr = safeStorage.getItem('sync_user_mtimes') || '{}';
-            let knownMtimes: Record<string, any> = {};
-            try { knownMtimes = JSON.parse(knownMtimesStr); } catch(e) {}
-            Object.entries(serverUsersVersion).forEach(([uid, mtime]) => {
-              if (mtime !== undefined && mtime !== null) {
-                knownMtimes[uid] = mtime;
-              }
-            });
-            safeStorage.setItem('sync_user_mtimes', JSON.stringify(knownMtimes));
-          } catch(e) {}
-        } catch (err) {
-          handleFirestoreError(err, OperationType.LIST, 'users');
-          throw err;
+        // 1. Get chunk_meta (server chunk meta from Firestore)
+        const { getChunkMeta, updateChunkMetaLocalCache } = await import('../utils/chunkMeta');
+        const versions = await getChunkMeta(force);
+        const serverUsersVersion: Record<string, any> = versions?.users || {};
+
+        // 2. Get local chunk meta / mtimes for users
+        const knownMtimesStr = safeStorage.getItem('sync_user_mtimes') || '{}';
+        let localUsersVersion: Record<string, any> = {};
+        try { localUsersVersion = JSON.parse(knownMtimesStr); } catch (e) {}
+
+        // Fallback: If localUsersVersion is empty, attempt reading from cached_chunk_meta_doc
+        if (Object.keys(localUsersVersion).length === 0) {
+          const cachedMetaStr = safeStorage.getItem('cached_chunk_meta_doc');
+          if (cachedMetaStr) {
+            try {
+              const parsed = JSON.parse(cachedMetaStr);
+              if (parsed?.users) localUsersVersion = { ...parsed.users };
+            } catch (e) {}
+          }
         }
-      } else {
-        // Fetch only specific users modified/updated, tracked via chunkMeta delta sync
-        try {
-          const currentUsersMap = new Map(currentUsers.map(u => [u.uid, normalizeUserStatusAndExpiry(u)]));
 
-          // Fetch specific users modified, found via chunkMeta
-          const { getChunkMeta } = await import('../utils/chunkMeta');
-          const versions = await getChunkMeta(force);
-          const serverUsersVersion = versions?.users || {};
-          
-          const knownMtimesStr = safeStorage.getItem('sync_user_mtimes') || '{}';
-          let knownMtimes: Record<string, any> = {};
-          try { knownMtimes = JSON.parse(knownMtimesStr); } catch (e) {}
-          
-          const isBaselineEmpty = Object.keys(knownMtimes).length === 0;
-          const uidsToFetch = new Set<string>();
+        const uidsToFetch = new Set<string>();
 
-          if (isBaselineEmpty) {
-            // Baseline uninitialized: Seed baseline, but only fetch missing or genuinely new users
-            Object.entries(serverUsersVersion).forEach(([uid, mtime]) => {
-              const serverTime = parseVersionTime(mtime);
-              if (serverTime > 0) {
-                const existing = currentUsersMap.get(uid);
-                if (!existing || (lastFetchTime > 0 && serverTime > lastFetchTime)) {
-                  uidsToFetch.add(uid);
-                }
-                knownMtimes[uid] = mtime;
-              }
-            });
-          } else {
-            Object.entries(serverUsersVersion).forEach(([uid, mtime]) => {
-              const serverTime = parseVersionTime(mtime);
-              if (mtime === -1 || (typeof mtime === 'object' && (mtime as any)?.deleted)) {
-                if (currentUsersMap.has(uid)) {
-                  currentUsersMap.delete(uid);
+        // 3. Compare all user versions from local chunk meta with server chunk meta
+        // Identify all changed users whose version is NOT matched (direct value comparison)
+        Object.entries(serverUsersVersion).forEach(([uid, serverVer]) => {
+          const serverTime = parseVersionTime(serverVer);
+          
+          if (serverVer === -1 || (typeof serverVer === 'object' && (serverVer as any)?.deleted)) {
+            // Document deleted on server
+            if (currentUsersMap.has(uid)) {
+              currentUsersMap.delete(uid);
+              updatedSomething = true;
+            }
+            delete localUsersVersion[uid];
+          } else if (serverTime > 0) {
+            const localVer = localUsersVersion[uid];
+
+            // Version is NOT matched if:
+            // a) localVer is missing/undefined
+            // b) User doc is missing from local map
+            // c) serverVer !== localVer
+            if (localVer === undefined || !currentUsersMap.has(uid) || localVer !== serverVer) {
+              uidsToFetch.add(uid);
+            }
+          }
+        });
+
+        const uidsArray = Array.from(uidsToFetch);
+        // Fetch all pending unmatched UIDs if force = true; cap at 150 per cycle for background sync
+        const maxFetchCount = force ? uidsArray.length : 150;
+        const cappedUids = uidsArray.slice(0, maxFetchCount);
+
+        // 4. Fetch all changed users whose version is not matched from Firestore
+        if (cappedUids.length > 0) {
+          const chunks: string[][] = [];
+          for (let i = 0; i < cappedUids.length; i += 30) {
+            chunks.push(cappedUids.slice(i, i + 30));
+          }
+
+          const chunkSnapshots = await Promise.all(
+            chunks.map(chunk => {
+              const qMerged = query(collection(db, 'users'), where(documentId(), 'in', chunk));
+              return getDocs(qMerged).then(snap => ({ chunk, snap }));
+            })
+          );
+
+          for (const { chunk, snap } of chunkSnapshots) {
+            const foundUids = new Set<string>();
+
+            snap.docs.forEach(docSnap => {
+              const firestoreUserRaw = { ...docSnap.data(), uid: docSnap.id } as UserProfile;
+              const firestoreUser = normalizeUserStatusAndExpiry(firestoreUserRaw);
+              foundUids.add(docSnap.id);
+
+              const localUser = currentUsersMap.get(docSnap.id);
+
+              // 5. Fetch and compare time between local user doc and Firestore user doc
+              const firestoreUserTime = parseVersionTime(
+                firestoreUser.updatedAt || (firestoreUser as any).updated_at || (firestoreUser as any).version || 0
+              );
+              const localUserTime = localUser ? parseVersionTime(
+                localUser.updatedAt || (localUser as any).updated_at || (localUser as any).version || 0
+              ) : 0;
+
+              // Newer time (or missing local user) will update local user doc
+              if (!localUser || firestoreUserTime > localUserTime) {
+                currentUsersMap.set(docSnap.id, firestoreUser);
+                updatedSomething = true;
+              } else if (firestoreUserTime === localUserTime) {
+                // If timestamps are equal (or both 0), but chunk_meta version has updated, use chunk_meta version comparison
+                const serverMetaTime = parseVersionTime(serverUsersVersion[docSnap.id]);
+                const localMetaTime = parseVersionTime(localUsersVersion[docSnap.id]);
+                if (serverMetaTime > localMetaTime) {
+                  currentUsersMap.set(docSnap.id, firestoreUser);
                   updatedSomething = true;
                 }
-                delete knownMtimes[uid];
-              } else if (serverTime > 0) {
-                const knownTime = parseVersionTime(knownMtimes[uid]);
-                if (knownMtimes[uid] === undefined || !currentUsersMap.has(uid)) {
-                  uidsToFetch.add(uid);
-                  knownMtimes[uid] = mtime;
-                } else if (serverTime > knownTime) {
-                  uidsToFetch.add(uid);
-                  knownMtimes[uid] = mtime;
+              }
+
+              // Update local chunk meta / version for this user to match server chunk meta version
+              localUsersVersion[docSnap.id] = serverUsersVersion[docSnap.id] || getUtcVersion();
+            });
+
+            // Handle UIDs requested but no longer existing in Firestore
+            chunk.forEach(reqUid => {
+              if (!foundUids.has(reqUid)) {
+                if (currentUsersMap.has(reqUid)) {
+                  currentUsersMap.delete(reqUid);
+                  updatedSomething = true;
                 }
+                delete localUsersVersion[reqUid];
               }
             });
           }
-
-          // Cap delta fetches to max 60 users per cycle to prevent burst read spikes
-          const cappedUids = Array.from(uidsToFetch).slice(0, 60);
-
-          if (cappedUids.length > 0) {
-            const chunks: string[][] = [];
-            for (let i = 0; i < cappedUids.length; i += 30) {
-               chunks.push(cappedUids.slice(i, i + 30));
-            }
-            const chunkSnapshots = await Promise.all(
-              chunks.map(chunk => {
-                const qMerged = query(collection(db, 'users'), where(documentId(), 'in', chunk));
-                return getDocs(qMerged).then(snap => ({ chunk, snap }));
-              })
-            );
-
-            for (const { chunk, snap } of chunkSnapshots) {
-               updatedSomething = true;
-               const foundUids = new Set<string>();
-               snap.docs.forEach(doc => {
-                  const u = { ...doc.data(), uid: doc.id } as UserProfile;
-                  currentUsersMap.set(u.uid, normalizeUserStatusAndExpiry(u));
-                  foundUids.add(doc.id);
-               });
-               chunk.forEach(reqUid => {
-                 if (!foundUids.has(reqUid) && currentUsersMap.has(reqUid)) {
-                   currentUsersMap.delete(reqUid);
-                 }
-               });
-            }
-          }
-          
-          safeStorage.setItem('sync_user_mtimes', JSON.stringify(knownMtimes));
-
-          currentUsers = Array.from(currentUsersMap.values()).map(normalizeUserStatusAndExpiry);
-        } catch (err) {
-          handleFirestoreError(err, OperationType.LIST, 'users filter delta updates');
-          throw err;
         }
-      }
-      
-      // CRITICAL: Preserve any uncommitted local pending updates so in-flight edits are not overwritten
-      const pendingStr = safeStorage.getItem('pending_user_updates');
-      if (pendingStr) {
-        try {
-          const pending = JSON.parse(pendingStr);
-          currentUsers = currentUsers.map(u => {
-            if (pending[u.uid]) {
-              return normalizeUserStatusAndExpiry({ ...u, ...pending[u.uid] });
-            }
-            return u;
-          });
-        } catch (e) {}
-      }
 
-      setUsers(currentUsers);
-      safeStorage.setItem('cached_all_users', JSON.stringify(currentUsers));
-      safeStorage.setItem('last_users_sync_timestamp', now.toString());
-      
-      // Mark as checked in this period
-      const nowChecked = Date.now();
-      const shiftedChecked = new Date(nowChecked + (5 - 7) * 60 * 60 * 1000);
-      const periodChecked = `${shiftedChecked.getUTCFullYear()}-${shiftedChecked.getUTCMonth() + 1}-${shiftedChecked.getUTCDate()}`;
-      safeStorage.setItem('last_chunk_users_check_period', periodChecked);
-      
-      setLoading(false);
-      setError(null);
-      
-      return { users: currentUsers, updatedSomething };
-    } catch (err: any) {
-      console.error('Error fetching users:', err);
-      setError(err.message);
-      setLoading(false);
-      
-      return { users: locallyCachedUsers, updatedSomething: false };
-    }
+        // Save updated local chunk meta / mtimes back to local storage
+        safeStorage.setItem('sync_user_mtimes', JSON.stringify(localUsersVersion));
+        try {
+          updateChunkMetaLocalCache({ users: localUsersVersion });
+        } catch (e) {}
+
+        currentUsers = Array.from(currentUsersMap.values()).map(normalizeUserStatusAndExpiry);
+        
+        // CRITICAL: Preserve any uncommitted local pending updates so in-flight edits are not overwritten
+        const pendingStr = safeStorage.getItem('pending_user_updates');
+        if (pendingStr) {
+          try {
+            const pending = JSON.parse(pendingStr);
+            currentUsers = currentUsers.map(u => {
+              if (pending[u.uid]) {
+                return normalizeUserStatusAndExpiry({ ...u, ...pending[u.uid] });
+              }
+              return u;
+            });
+          } catch (e) {}
+        }
+
+        setUsers(currentUsers);
+        safeStorage.setItem('cached_all_users', JSON.stringify(currentUsers));
+        safeStorage.setItem('last_users_sync_timestamp', now.toString());
+        
+        // Mark as checked in this period
+        const nowChecked = Date.now();
+        const shiftedChecked = new Date(nowChecked + (5 - 7) * 60 * 60 * 1000);
+        const periodChecked = `${shiftedChecked.getUTCFullYear()}-${shiftedChecked.getUTCMonth() + 1}-${shiftedChecked.getUTCDate()}`;
+        safeStorage.setItem('last_chunk_users_check_period', periodChecked);
+        
+        setLoading(false);
+        setError(null);
+        
+        return { users: currentUsers, updatedSomething };
+      } catch (err: any) {
+        console.error('Error fetching users:', err);
+        setError(err.message);
+        setLoading(false);
+        
+        return { users: locallyCachedUsers, updatedSomething: false };
+      }
+    };
+
+    const p = runFetch().finally(() => {
+      fetchPromiseRef.current = null;
+    });
+    fetchPromiseRef.current = p;
+    return p;
   }, [profile, user, authLoading]);
 
   useEffect(() => {

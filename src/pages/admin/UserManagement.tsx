@@ -257,7 +257,7 @@ export default function UserManagement() {
         }
         
         // Delta sync users using chunk_meta (zero reads if up-to-date, or delta reads only)
-        const res = await refreshUsers(false);
+        const res = await refreshUsers(true);
         if (mounted) {
           if (res.updatedSomething) {
             window.dispatchEvent(new CustomEvent('sync_status', { detail: 'success' }));

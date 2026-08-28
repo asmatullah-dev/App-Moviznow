@@ -138,7 +138,7 @@ export const getChunkMeta = async (forceRefresh = false) => {
   const effectiveLastFetch = Math.max(lastFetchTimeMs, storedFetchTime);
 
   // Requirement: Keep chunkmeta in local cache for 90 sec to reuse without connecting again with network
-  const isWithin90Sec = (nowMs - effectiveLastFetch) < NINETY_SECONDS_MS;
+  const isWithin90Sec = !forceRefresh && (nowMs - effectiveLastFetch) < NINETY_SECONDS_MS;
 
   // If we already have memoryCache or local storage cache within 90 seconds, return it immediately without network
   if (isWithin90Sec) {

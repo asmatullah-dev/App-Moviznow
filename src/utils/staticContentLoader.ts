@@ -18,7 +18,7 @@ const staticCollectionsData = unifiedData.collections;
  * Guarantees guest users and initial page loads have the entire 2,478 item content catalog
  * instantly available without needing any Firestore connection.
  */
-export function seedStaticExportData(): void {
+export function seedStaticExportData(forceOverwrite: boolean = false): void {
   try {
     // 1. Group content items by chunkId
     const chunkMap: Record<string, Record<string, any>> = {};
@@ -38,11 +38,11 @@ export function seedStaticExportData(): void {
 
     const baseSeedVersion = '1970-01-01T00:00:00.000Z';
 
-    // 2. Write chunk objects into local storage without overwriting existing local edits/items
+    // 2. Write chunk objects into local storage
     for (const [chunkId, itemsObj] of Object.entries(chunkMap)) {
       const storageKey = 'content_chunk_' + chunkId;
       const existingStr = safeStorage.getItem(storageKey);
-      if (!existingStr || existingStr === '{}') {
+      if (forceOverwrite || !existingStr || existingStr === '{}') {
         safeStorage.setItem(storageKey, JSON.stringify(itemsObj));
         if (!localMeta[chunkId]) {
           localMeta[chunkId] = { updatedAt: baseSeedVersion, count: Object.keys(itemsObj).length };
@@ -52,7 +52,7 @@ export function seedStaticExportData(): void {
           const existing = JSON.parse(existingStr);
           let modified = false;
           for (const [id, staticItem] of Object.entries(itemsObj)) {
-            if (!existing[id]) {
+            if (!existing[id] || JSON.stringify(existing[id]) !== JSON.stringify(staticItem)) {
               existing[id] = staticItem;
               modified = true;
             }

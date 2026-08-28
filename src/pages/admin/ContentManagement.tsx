@@ -16,6 +16,7 @@ import {
 import { db } from "../../firebase";
 import { safeStorage } from "../../utils/safeStorage";
 import { minifyContent } from "../../utils/chunkUtils";
+import { seedStaticExportData } from "../../utils/staticContentLoader";
 import {
   collection,
   addDoc,
@@ -794,13 +795,15 @@ export default function ContentManagement() {
   const handleManualFirestoreRefresh = async () => {
     setIsSyncingFromFirestore(true);
     try {
+      seedStaticExportData(true);
       const res = await quickRefreshCatalog(true, undefined, true);
       if (res.updated || res.updatedCount > 0) {
         triggerAlert("Sync Complete", `Updated ${res.updatedCount} items from Firestore based on version changes`, "success");
       } else {
-        triggerAlert("Up to Date", "All content chunks, collections, and metadata are up to date with Firestore", "info");
+        triggerAlert("Refreshed", "Content catalog and metadata refreshed successfully", "info");
       }
     } catch (err) {
+      console.error("Sync Failed:", err);
       triggerAlert("Sync Failed", "Could not refresh chunks from Firestore", "error");
     } finally {
       setIsSyncingFromFirestore(false);
