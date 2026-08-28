@@ -89,6 +89,7 @@ export function normalizeUserStatusAndExpiry(u: UserProfile): UserProfile {
 interface UsersContextType {
   users: UserProfile[];
   loading: boolean;
+  isRefreshing: boolean;
   error: string | null;
   refreshUsers: (force?: boolean) => Promise<{ users: UserProfile[], updatedSomething: boolean }>;
   updateUserFields: (userId: string, fields: Partial<UserProfile>) => void;
@@ -106,6 +107,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     if (!cached) return [];
     try {
       const parsed: UserProfile[] = JSON.parse(cached);
+      if (!Array.isArray(parsed)) return [];
       const uniqueMap = new Map<string, UserProfile>();
       parsed.forEach(u => {
         if (u && u.uid && !uniqueMap.has(u.uid)) {
@@ -119,8 +121,15 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
   });
   const [loading, setLoading] = useState(() => {
     const cached = safeStorage.getItem('cached_all_users');
-    return cached ? JSON.parse(cached).length === 0 : true;
+    if (!cached) return true;
+    try {
+      const parsed = JSON.parse(cached);
+      return !Array.isArray(parsed) || parsed.length === 0;
+    } catch (e) {
+      return true;
+    }
   });
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasPendingChanges, setHasPendingChanges] = useState(() => {
     const pendingStr = safeStorage.getItem('pending_user_updates');
@@ -306,23 +315,13 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const isAdminEmail = (email?: string | null) => {
-    if (!email) return false;
-    const lower = email.toLowerCase().trim();
-    return [
-      "asmatn628@gmail.com",
-      "asmatullah9327@gmail.com",
-      "kabirahmaddev@gmail.com",
-      "wamoviesstation@gmail.com"
-    ].includes(lower);
-  };
-
   const fetchUsers = useCallback(async (force = false) => {
     if (fetchPromiseRef.current) {
         return fetchPromiseRef.current;
     }
 
     const runFetch = async () => {
+      setIsRefreshing(true);
       if (authLoading || !user) {
           setLoading(false);
           return { users: [], updatedSomething: false };
@@ -332,17 +331,6 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       let locallyCachedUsers: UserProfile[] = [];
       if (cachedStr) {
         try { locallyCachedUsers = JSON.parse(cachedStr); } catch (e) {}
-      }
-      if (locallyCachedUsers.length === 0 && users.length > 0) {
-        locallyCachedUsers = [...users];
-      }
-      if (locallyCachedUsers.length === 0) {
-        try {
-          const asyncCached = await safeStorage.getItemAsync('cached_all_users');
-          if (asyncCached) {
-            locallyCachedUsers = JSON.parse(asyncCached);
-          }
-        } catch (e) {}
       }
 
       let effectiveProfile = profile;
@@ -354,7 +342,13 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       }
 
       const userEmailLower = user?.email?.toLowerCase() || effectiveProfile?.email?.toLowerCase() || '';
-      const isPrivilegedUser = isAdminEmail(userEmailLower) || effectiveProfile?.role === 'admin' || effectiveProfile?.role === 'owner' || effectiveProfile?.role === 'manager' || effectiveProfile?.role === 'user_manager';
+      const isAdminEmail = [
+        "asmatn628@gmail.com",
+        "asmatullah9327@gmail.com",
+        "kabirahmaddev@gmail.com",
+        "wamoviesstation@gmail.com"
+      ].includes(userEmailLower);
+      const isPrivilegedUser = isAdminEmail || effectiveProfile?.role === 'admin' || effectiveProfile?.role === 'owner' || effectiveProfile?.role === 'manager' || effectiveProfile?.role === 'user_manager';
       if (!isPrivilegedUser) {
           setLoading(false);
           return { users: locallyCachedUsers, updatedSomething: false };
@@ -485,6 +479,19 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
+        // If serverUsersVersion has valid data, check if any local users were deleted on server
+        if (Object.keys(serverUsersVersion).length >= 10) {
+          for (const uid of Array.from(currentUsersMap.keys())) {
+            const serverVer = serverUsersVersion[uid];
+            if (serverVer === undefined || serverVer === -1 || (typeof serverVer === 'object' && (serverVer as any)?.deleted)) {
+              currentUsersMap.delete(uid);
+              delete localUsersVersion[uid];
+              hadDeletions = true;
+              updatedSomething = true;
+            }
+          }
+        }
+
         // 4. IF NO USERS CHANGED IN CHUNK_META, RETURN IMMEDIATELY (0 FIRESTORE READS)
         if (uidsToFetch.size === 0 && !hadDeletions) {
           let finalUsers = Array.from(currentUsersMap.values());
@@ -594,28 +601,23 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
 
     const p = runFetch().finally(() => {
       fetchPromiseRef.current = null;
+      setIsRefreshing(false);
     });
     fetchPromiseRef.current = p;
     return p;
-  }, [profile, user, authLoading, saveUsersCache, users]);
+  }, [profile, user, authLoading, saveUsersCache]);
 
   useEffect(() => {
-    if (authLoading) return; // Wait until authentication state is resolved
-
-    const effectiveEmail = user?.email || profile?.email;
-    const isPrivilegedUser = 
-      isAdminEmail(effectiveEmail) ||
-      profile?.role === 'admin' ||
-      profile?.role === 'owner' ||
-      profile?.role === 'manager' ||
-      profile?.role === 'user_manager';
+    // Only clear users if not a privileged user.
+    // Do NOT automatically trigger a heavy fetchUsers() full pull at root app boot!
+    // Individual admin pages (like UserManagement) will request users via refreshUsers() on demand.
+    const isPrivilegedUser = profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'manager' || profile?.role === 'user_manager';
     
-    // Only clear cached users if there is an authenticated user and they are confirmed to NOT be privileged
-    if (user && profile && !isPrivilegedUser) {
+    if (!isPrivilegedUser && !authLoading) {
       setUsers([]);
       setLoading(false);
     }
-  }, [profile, user, authLoading]);
+  }, [profile?.role, authLoading]);
 
   useEffect(() => {
     const handlePendingChanges = () => {
@@ -638,7 +640,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
   }, [finalizeUserChanges]);
 
   return (
-    <UsersContext.Provider value={{ users, loading, error, refreshUsers: fetchUsers, updateUserFields, updateMultipleUserFields, finalizeUserChanges, hasPendingChanges }}>
+    <UsersContext.Provider value={{ users, loading, isRefreshing, error, refreshUsers: fetchUsers, updateUserFields, updateMultipleUserFields, finalizeUserChanges, hasPendingChanges }}>
       {children}
     </UsersContext.Provider>
   );
