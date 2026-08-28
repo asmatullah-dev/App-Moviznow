@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../firebase';
-import { writeBatch, doc } from 'firebase/firestore';
+import { writeBatch, doc, serverTimestamp } from 'firebase/firestore';
 import { UserProfile, Role } from '../../types';
 import { Users, ChevronRight, Search, X, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
@@ -54,7 +54,7 @@ export default function UserManagers() {
 
       // Expire all managed users
       const managedUsers = allUsers.filter(u => u.managedBy === managerToRemove);
-      const nowTime = getUtcVersion();
+      const nowTime = serverTimestamp();
       const metaUsersUpdate: Record<string, any> = { [managerToRemove]: nowTime };
 
       managedUsers.forEach(userData => {

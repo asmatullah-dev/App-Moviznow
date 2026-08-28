@@ -24,6 +24,8 @@ export const parseVersionTime = (val: any): number => {
   if (val === null || val === undefined) return 0;
   if (typeof val === 'number') return val;
   if (typeof val === 'object') {
+    if (typeof val.toMillis === 'function') return val.toMillis();
+    if (val.seconds !== undefined) return val.seconds * 1000 + (val.nanoseconds || 0) / 1000000;
     return parseVersionTime(val.updatedAt || val.version || val.updated_at || 0);
   }
   if (typeof val === 'string') {

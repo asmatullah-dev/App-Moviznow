@@ -32,7 +32,7 @@ import {
   Sliders
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { collection, query, where, getDocs, limit, doc, getDoc, writeBatch, increment } from 'firebase/firestore';
+import { collection, query, where, getDocs, limit, doc, getDoc, writeBatch, increment, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
 import { getUtcVersion } from '../../utils/chunkMeta';
@@ -195,7 +195,7 @@ export default function Rewards() {
       
       batch.update(doc(db, 'users', profile.uid), userUpdates);
       
-      const nowTime = getUtcVersion();
+      const nowTime = serverTimestamp();
       batch.set(doc(db, 'chunk_meta', 'versions'), {
         users: {
           [profile.uid]: nowTime

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
-import { collection, query, getDocs, doc, getDoc, setDoc } from 'firebase/firestore';
+import { collection, query, getDocs, doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db, runWithNetwork } from '../firebase';
 import { UserProfile } from '../types';
 import { useAuth } from './AuthContext';
@@ -217,7 +217,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         opCount++;
       }
 
-      const nowSyncUtc = getUtcVersion();
+      const nowSyncUtc = serverTimestamp();
       const metaUsersUpdate: Record<string, any> = {};
       for (const uid of userIds) {
         metaUsersUpdate[uid] = nowSyncUtc;
@@ -246,7 +246,8 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       setHasPendingChanges(false);
       window.dispatchEvent(new CustomEvent('pending_user_updates_changed'));
       
-      const shiftedSync = new Date(nowSync + (5 - 7) * 60 * 60 * 1000);
+      const nowSyncMs = Date.now();
+      const shiftedSync = new Date(nowSyncMs + (5 - 7) * 60 * 60 * 1000);
       const periodSync = `${shiftedSync.getUTCFullYear()}-${shiftedSync.getUTCMonth() + 1}-${shiftedSync.getUTCDate()}`;
       safeStorage.setItem('last_user_finalize_period', periodSync);
 

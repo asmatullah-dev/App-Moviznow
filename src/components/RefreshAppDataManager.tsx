@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { useNotifications } from '../contexts/NotificationContext';
 import { safeStorage } from '../utils/safeStorage';
-import { getChunkMeta } from '../utils/chunkMeta';
+import { getChunkMeta, parseVersionTime } from '../utils/chunkMeta';
 import { seedStaticExportData } from '../utils/staticContentLoader';
 import { executeSyncUserData } from './SyncUserDataManager';
 
@@ -19,7 +19,7 @@ export function RefreshAppDataManager() {
     // For guest users (unauthenticated), populate content library from static export JSON and skip Firestore network calls!
     if (!user) {
       seedStaticExportData();
-      localStorage.setItem('last_unified_10h_refresh_sync_time_guest', Date.now().toString());
+      localStorage.setItem('last_unified_10h_refresh_sync_time_v2_guest', Date.now().toString());
       if (reason !== 'app_open' && reason !== '10_hour_sync') {
         window.dispatchEvent(new CustomEvent('sync_status', {
           detail: {
@@ -70,8 +70,10 @@ export function RefreshAppDataManager() {
 
       // 1. Check settings version
       const serverSettingsVer = versions.settings || 0;
-      const localSettingsVer = parseInt(safeStorage.getItem('cached_settings_version') || '0', 10);
-      if ((serverSettingsVer > 0 && serverSettingsVer > localSettingsVer) || !safeStorage.getItem('cached_app_settings')) {
+      const localSettingsVer = safeStorage.getItem('cached_settings_version') || '0';
+      const serverSettingsTime = parseVersionTime(serverSettingsVer);
+      const localSettingsTime = parseVersionTime(localSettingsVer);
+      if ((serverSettingsTime > 0 && serverSettingsTime > localSettingsTime) || !safeStorage.getItem('cached_app_settings')) {
         await refreshSettings(true).catch(() => {});
         otherUpdated = true;
       }
@@ -81,8 +83,10 @@ export function RefreshAppDataManager() {
         const serverNotifVer = (versions.notifications && typeof versions.notifications === 'object')
           ? versions.notifications.version || 0
           : (versions.notifications || 0);
-        const localNotifVer = parseInt(safeStorage.getItem('cached_notifications_version') || '0', 10);
-        if (serverNotifVer > 0 && serverNotifVer > localNotifVer) {
+        const localNotifVer = safeStorage.getItem('cached_notifications_version') || '0';
+        const serverNotifTime = parseVersionTime(serverNotifVer);
+        const localNotifTime = parseVersionTime(localNotifVer);
+        if (serverNotifTime > 0 && serverNotifTime > localNotifTime) {
           await refreshNotifications().catch(() => {});
           otherUpdated = true;
         }
@@ -92,8 +96,10 @@ export function RefreshAppDataManager() {
       if (user?.uid) {
         const chunkUsersMeta = versions.users || {};
         const serverUserVer = chunkUsersMeta[user.uid] || 0;
-        const localUserVer = parseInt(safeStorage.getItem(`profile_version_${user.uid}`) || '0', 10);
-        if (isManualTrigger || (serverUserVer > 0 && serverUserVer > localUserVer)) {
+        const localUserVer = safeStorage.getItem(`profile_version_${user.uid}`) || '0';
+        const serverUserTime = parseVersionTime(serverUserVer);
+        const localUserTime = parseVersionTime(localUserVer);
+        if (isManualTrigger || (serverUserTime > 0 && serverUserTime > localUserTime)) {
           const profileFetched = await refreshProfile(true, 'manual').catch((err) => {
             console.error("Profile refresh failed:", err);
             return null;
@@ -134,7 +140,7 @@ export function RefreshAppDataManager() {
       }
 
       // Save unified last successful refresh & sync timestamp
-      const storageKey = `last_unified_10h_refresh_sync_time_${user.uid}`;
+      const storageKey = `last_unified_10h_refresh_sync_time_v2_${user.uid}`;
       localStorage.setItem(storageKey, Date.now().toString());
 
       // Dispatch single unified completion toast
@@ -236,7 +242,7 @@ export function RefreshAppDataManager() {
     if (!user?.uid) return;
 
     const check10HourUnified = () => {
-      const storageKey = `last_unified_10h_refresh_sync_time_${user.uid}`;
+      const storageKey = `last_unified_10h_refresh_sync_time_v2_${user.uid}`;
       const lastUnifiedStr = localStorage.getItem(storageKey);
       const lastUnifiedTime = lastUnifiedStr ? parseInt(lastUnifiedStr, 10) : 0;
       const now = Date.now();

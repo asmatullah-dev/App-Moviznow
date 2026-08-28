@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
-import { collection, doc, updateDoc, getDoc, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit, deleteField, increment } from 'firebase/firestore';
+import { collection, doc, updateDoc, getDoc, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit, deleteField, increment, serverTimestamp } from 'firebase/firestore';
 import { UserProfile, Role, Status, AnalyticsEvent, Content } from '../../types';
 import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, Bell, Mail, RefreshCw, Link2 as LinkIcon, Copy } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
@@ -1138,7 +1138,7 @@ export default function UserManagement() {
 
       batch.update(u1Ref, updates);
       batch.delete(u2Ref);
-      batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [user1.uid]: getUtcVersion(), [user2.uid]: deleteField() } }, { merge: true });
+      batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [user1.uid]: serverTimestamp(), [user2.uid]: deleteField() } }, { merge: true });
 
       // Migrate FCM token from user2 to user1 if present
       if ((user2 as any).fcmToken && !(user1 as any).fcmToken) {
@@ -1531,7 +1531,7 @@ export default function UserManagement() {
 
           const batch = writeBatch(db);
           batch.set(doc(db, 'users', newUserId), newUserData);
-          batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [newUserId]: getUtcVersion() } }, { merge: true });
+          batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [newUserId]: serverTimestamp() } }, { merge: true });
           await batch.commit();
           
           setAlertConfig({ isOpen: true, title: 'Success', message: 'Pending user added successfully.' });
