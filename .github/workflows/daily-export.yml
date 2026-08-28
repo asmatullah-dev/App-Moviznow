@@ -2,8 +2,8 @@ name: Daily Content Catalog Export
 
 on:
   schedule:
-    # Runs every day at 01:53 UTC (6:53 AM PKT / Pakistan Time)
-    - cron: '53 1 * * *'
+    # Runs every day at 01:52 UTC (6:52 AM PKT / Pakistan Time)
+    - cron: '52 1 * * *'
   workflow_dispatch: # Allows manual trigger from GitHub Actions UI
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: 'npm'
 
       - name: Install dependencies
