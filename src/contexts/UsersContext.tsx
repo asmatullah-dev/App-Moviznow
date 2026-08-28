@@ -306,6 +306,17 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const isAdminEmail = (email?: string | null) => {
+    if (!email) return false;
+    const lower = email.toLowerCase().trim();
+    return [
+      "asmatn628@gmail.com",
+      "asmatullah9327@gmail.com",
+      "kabirahmaddev@gmail.com",
+      "wamoviesstation@gmail.com"
+    ].includes(lower);
+  };
+
   const fetchUsers = useCallback(async (force = false) => {
     if (fetchPromiseRef.current) {
         return fetchPromiseRef.current;
@@ -322,6 +333,17 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       if (cachedStr) {
         try { locallyCachedUsers = JSON.parse(cachedStr); } catch (e) {}
       }
+      if (locallyCachedUsers.length === 0 && users.length > 0) {
+        locallyCachedUsers = [...users];
+      }
+      if (locallyCachedUsers.length === 0) {
+        try {
+          const asyncCached = await safeStorage.getItemAsync('cached_all_users');
+          if (asyncCached) {
+            locallyCachedUsers = JSON.parse(asyncCached);
+          }
+        } catch (e) {}
+      }
 
       let effectiveProfile = profile;
       if (!effectiveProfile) {
@@ -332,13 +354,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       }
 
       const userEmailLower = user?.email?.toLowerCase() || effectiveProfile?.email?.toLowerCase() || '';
-      const isAdminEmail = [
-        "asmatn628@gmail.com",
-        "asmatullah9327@gmail.com",
-        "kabirahmaddev@gmail.com",
-        "wamoviesstation@gmail.com"
-      ].includes(userEmailLower);
-      const isPrivilegedUser = isAdminEmail || effectiveProfile?.role === 'admin' || effectiveProfile?.role === 'owner' || effectiveProfile?.role === 'manager' || effectiveProfile?.role === 'user_manager';
+      const isPrivilegedUser = isAdminEmail(userEmailLower) || effectiveProfile?.role === 'admin' || effectiveProfile?.role === 'owner' || effectiveProfile?.role === 'manager' || effectiveProfile?.role === 'user_manager';
       if (!isPrivilegedUser) {
           setLoading(false);
           return { users: locallyCachedUsers, updatedSomething: false };
@@ -469,19 +485,6 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
-        // If serverUsersVersion has valid data, check if any local users were deleted on server
-        if (Object.keys(serverUsersVersion).length >= 10) {
-          for (const uid of Array.from(currentUsersMap.keys())) {
-            const serverVer = serverUsersVersion[uid];
-            if (serverVer === undefined || serverVer === -1 || (typeof serverVer === 'object' && (serverVer as any)?.deleted)) {
-              currentUsersMap.delete(uid);
-              delete localUsersVersion[uid];
-              hadDeletions = true;
-              updatedSomething = true;
-            }
-          }
-        }
-
         // 4. IF NO USERS CHANGED IN CHUNK_META, RETURN IMMEDIATELY (0 FIRESTORE READS)
         if (uidsToFetch.size === 0 && !hadDeletions) {
           let finalUsers = Array.from(currentUsersMap.values());
@@ -594,19 +597,25 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     });
     fetchPromiseRef.current = p;
     return p;
-  }, [profile, user, authLoading, saveUsersCache]);
+  }, [profile, user, authLoading, saveUsersCache, users]);
 
   useEffect(() => {
-    // Only clear users if not a privileged user.
-    // Do NOT automatically trigger a heavy fetchUsers() full pull at root app boot!
-    // Individual admin pages (like UserManagement) will request users via refreshUsers() on demand.
-    const isPrivilegedUser = profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'manager' || profile?.role === 'user_manager';
+    if (authLoading) return; // Wait until authentication state is resolved
+
+    const effectiveEmail = user?.email || profile?.email;
+    const isPrivilegedUser = 
+      isAdminEmail(effectiveEmail) ||
+      profile?.role === 'admin' ||
+      profile?.role === 'owner' ||
+      profile?.role === 'manager' ||
+      profile?.role === 'user_manager';
     
-    if (!isPrivilegedUser && !authLoading) {
+    // Only clear cached users if there is an authenticated user and they are confirmed to NOT be privileged
+    if (user && profile && !isPrivilegedUser) {
       setUsers([]);
       setLoading(false);
     }
-  }, [profile?.role, authLoading]);
+  }, [profile, user, authLoading]);
 
   useEffect(() => {
     const handlePendingChanges = () => {

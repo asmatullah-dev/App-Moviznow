@@ -77,7 +77,15 @@ export default function UserManagement() {
   const [allContent, setAllContent] = useState<any[]>([]);
   const [contentSearch, setContentSearch] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => {
+    const cached = safeStorage.getItem('cached_all_users');
+    if (!cached) return true;
+    try {
+      return JSON.parse(cached).length === 0;
+    } catch {
+      return true;
+    }
+  });
   const [isContentPickerOpen, setIsContentPickerOpen] = useState(false);
   const [assignedIds, setAssignedIds] = useState<Set<string>>(new Set());
   const [contentSearchTerm, setContentSearchTerm] = useState('');
@@ -330,8 +338,12 @@ export default function UserManagement() {
   }, [allUsers, profile, managedByFilter]);
 
   useEffect(() => {
-    setLoading(usersLoading);
-  }, [usersLoading]);
+    if (allUsers.length > 0) {
+      setLoading(false);
+    } else {
+      setLoading(usersLoading);
+    }
+  }, [usersLoading, allUsers.length]);
 
   // Removed unsolicited background auto-update write loop to prevent phantom Firestore writes
 
