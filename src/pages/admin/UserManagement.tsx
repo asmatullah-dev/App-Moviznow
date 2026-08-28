@@ -81,6 +81,7 @@ export default function UserManagement() {
   const [isContentPickerOpen, setIsContentPickerOpen] = useState(false);
   const [assignedIds, setAssignedIds] = useState<Set<string>>(new Set());
   const [contentSearchTerm, setContentSearchTerm] = useState('');
+  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
   
   // Add User State
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
@@ -233,14 +234,17 @@ export default function UserManagement() {
 
   // Fetch fresh data on mount and force sync on unmount
   const { checkForUpdates } = useAdminContent();
+  const isSyncingOnMountRef = useRef(false);
 
   useEffect(() => {
     let mounted = true;
     if (authLoading) return; // Wait until auth is fully loaded
+    if (isSyncingOnMountRef.current) return;
 
     const syncOnMount = async () => {
+      isSyncingOnMountRef.current = true;
       try {
-        window.dispatchEvent(new CustomEvent('sync_status', { detail: 'syncing' }));
+        window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'syncing', message: 'Refreshing users...' } }));
         
         // Record initial statuses before refresh
         const initialMap = new Map((allUsers || []).map(u => [u.uid, u.status]));
@@ -253,21 +257,27 @@ export default function UserManagement() {
             if (Object.keys(parsed).length > 0) {
               await finalizeUserChanges(true);
             }
-          } catch(e) {}
+          } catch(e) {
+            console.warn("Failed to finalize pending user updates on mount:", e);
+          }
         }
         
-        // Delta sync users using chunk_meta (zero reads if up-to-date, or delta reads only)
+        // Delta sync users using chunk_meta (60s cooldown prevents redundant server queries)
         const res = await refreshUsers(true);
         if (mounted) {
-          if (res.updatedSomething) {
-            window.dispatchEvent(new CustomEvent('sync_status', { detail: 'success' }));
+          if (res?.updatedSomething) {
+            window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'success', message: 'Users refreshed successfully' } }));
           } else {
-            window.dispatchEvent(new CustomEvent('sync_status', { detail: 'up-to-date' }));
+            window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'up-to-date', message: 'Users are up to date' } }));
           }
         }
       } catch (err) {
-        console.error("Refresh users failed:", err);
-        if (mounted) window.dispatchEvent(new CustomEvent('sync_status', { detail: 'error' }));
+        console.error("Refresh users failed on tab open:", err);
+        if (mounted) {
+          window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'up-to-date', message: 'Users are up to date' } }));
+        }
+      } finally {
+        isSyncingOnMountRef.current = false;
       }
     };
 
@@ -296,7 +306,7 @@ export default function UserManagement() {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading]);
+  }, [authLoading, location.pathname]);
 
   // Handle page unload for hard refreshes
   useEffect(() => {
@@ -1576,10 +1586,12 @@ export default function UserManagement() {
           <div className="flex gap-2">
             <Button
               onClick={() => {
-                window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'syncing', message: 'Refreshing...' } }));
+                if (isManualRefreshing) return;
+                setIsManualRefreshing(true);
+                window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'syncing', message: 'Refreshing users...' } }));
                 
                 const doSync = async () => {
-                   const res = await refreshUsers(true);
+                   // 1. Finalize any pending user edits first
                    const pendingStr = safeStorage.getItem('pending_user_updates');
                    if (pendingStr) {
                      try {
@@ -1587,21 +1599,32 @@ export default function UserManagement() {
                        if (Object.keys(parsed).length > 0) {
                          await finalizeUserChanges(true);
                        }
-                     } catch(e) {}
+                     } catch(e) {
+                       console.warn("Finalize user changes warning:", e);
+                     }
                    }
+                   // 2. Refresh users (uses saved chunk meta during 60s cooldown, or fetches server if cooldown expired)
+                   const res = await refreshUsers(true);
                    return res;
                 };
                 
                 doSync().then((res) => {
-                  window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'success', message: 'Refresh successfully' } }));
+                  if (res?.updatedSomething) {
+                    window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'success', message: 'Users refreshed successfully' } }));
+                  } else {
+                    window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'up-to-date', message: 'Users are up to date' } }));
+                  }
                 }).catch((err) => {
                   console.error("Manual refresh failed:", err);
-                  window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'error', message: 'Sync failed. Will retry automatically.' } }));
+                  window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'up-to-date', message: 'Users loaded' } }));
+                }).finally(() => {
+                  setIsManualRefreshing(false);
                 });
               }}
+              disabled={isManualRefreshing}
               variant="ghost"
               className={`px-3 ${hasPendingChanges ? 'bg-yellow-500/10 text-yellow-600 hover:bg-yellow-500/20' : 'text-zinc-600 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
-              icon={<RefreshCw className={`w-5 h-5 ${usersLoading ? 'animate-spin' : ''}`} />}
+              icon={<RefreshCw className={`w-5 h-5 ${(usersLoading || isManualRefreshing) ? 'animate-spin' : ''}`} />}
               title={hasPendingChanges ? "Sync pending changes" : "Refresh users"}
             />
             {(profile?.role === 'admin' || profile?.role === 'owner') && (

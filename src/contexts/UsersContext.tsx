@@ -1,10 +1,10 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
-import { collection, query, getDocs, doc, getDoc, setDoc} from 'firebase/firestore';
+import { collection, query, getDocs, doc, getDoc, setDoc, where, documentId, limit } from 'firebase/firestore';
 import { db, runWithNetwork } from '../firebase';
 import { UserProfile } from '../types';
 import { useAuth } from './AuthContext';
 import { safeStorage } from '../utils/safeStorage';
-import { getUtcVersion, parseVersionTime } from '../utils/chunkMeta';
+import { getUtcVersion, parseVersionTime, getChunkMeta, updateChunkMetaLocalCache } from '../utils/chunkMeta';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
 import { getUserDisplayName } from '../utils/userUtils';
 
@@ -271,10 +271,23 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           return { users: [], updatedSomething: false };
       }
 
-      const isPrivilegedUser = profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'manager' || profile?.role === 'user_manager';
+      const cachedStr = safeStorage.getItem('cached_all_users');
+      let locallyCachedUsers: UserProfile[] = [];
+      if (cachedStr) {
+        try { locallyCachedUsers = JSON.parse(cachedStr); } catch (e) {}
+      }
+
+      const userEmailLower = user?.email?.toLowerCase() || profile?.email?.toLowerCase() || '';
+      const isAdminEmail = [
+        "asmatn628@gmail.com",
+        "asmatullah9327@gmail.com",
+        "kabirahmaddev@gmail.com",
+        "wamoviesstation@gmail.com"
+      ].includes(userEmailLower);
+      const isPrivilegedUser = isAdminEmail || profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'manager' || profile?.role === 'user_manager';
       if (!isPrivilegedUser) {
           setLoading(false);
-          return { users: [], updatedSomething: false };
+          return { users: locallyCachedUsers, updatedSomething: false };
       }
 
       const now = Date.now();
@@ -282,8 +295,6 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       const shiftedTime = new Date(now + (5 - 7) * 60 * 60 * 1000);
       const checkPeriod = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
 
-      const cachedStr = safeStorage.getItem('cached_all_users');
-      const locallyCachedUsers: UserProfile[] = cachedStr ? JSON.parse(cachedStr) : [];
       const lastFetchTimeStr = safeStorage.getItem('last_users_sync_timestamp');
       const lastFetchTime = lastFetchTimeStr ? parseInt(lastFetchTimeStr, 10) : 0;
 
@@ -310,12 +321,9 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       try {
         let currentUsers = [...locallyCachedUsers];
         const currentUsersMap = new Map(currentUsers.map(u => [u.uid, normalizeUserStatusAndExpiry(u)]));
-        let { getDocs, query, collection, where, documentId } = await import('firebase/firestore');
-
-        // 1. Get chunk_meta (server chunk meta from Firestore)
-        const { getChunkMeta, updateChunkMetaLocalCache } = await import('../utils/chunkMeta');
+        // 1. Get chunk_meta (server chunk meta from Firestore, protected by 60s cooldown)
         const versions = await getChunkMeta(force);
-        const serverUsersVersion: Record<string, any> = versions?.users || {};
+        const serverUsersVersion: Record<string, any> = (versions && typeof versions === 'object' && versions.users && typeof versions.users === 'object') ? versions.users : {};
 
         // 2. Get local chunk meta / mtimes for users
         const knownMtimesStr = safeStorage.getItem('sync_user_mtimes') || '{}';
@@ -338,6 +346,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         // 3. Compare all user versions from local chunk meta with server chunk meta
         // Identify all changed users whose version is NOT matched (direct value comparison)
         Object.entries(serverUsersVersion).forEach(([uid, serverVer]) => {
+          if (!uid || typeof uid !== 'string' || uid.trim() === '' || uid.includes('/') || uid === 'null' || uid === 'undefined') return;
           const serverTime = parseVersionTime(serverVer);
           
           if (serverVer === -1 || (typeof serverVer === 'object' && (serverVer as any)?.deleted)) {
@@ -355,7 +364,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
             // b) User doc is missing from local map
             // c) serverVer !== localVer
             if (localVer === undefined || !currentUsersMap.has(uid) || localVer !== serverVer) {
-              uidsToFetch.add(uid);
+              uidsToFetch.add(uid.trim());
             }
           }
         });
@@ -364,22 +373,35 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         // Fetch all pending unmatched UIDs if force = true; cap at 150 per cycle for background sync
         const maxFetchCount = force ? uidsArray.length : 150;
         const cappedUids = uidsArray.slice(0, maxFetchCount);
+        const validUids = cappedUids.filter(uid => 
+          typeof uid === 'string' && 
+          uid.trim().length > 0 && 
+          !uid.includes('/') && 
+          uid !== 'null' && 
+          uid !== 'undefined'
+        );
 
-        // 4. Fetch all changed users whose version is not matched from Firestore
-        if (cappedUids.length > 0) {
+        // 4. Fetch all changed users whose version is not matched from Firestore safely
+        if (validUids.length > 0) {
           const chunks: string[][] = [];
-          for (let i = 0; i < cappedUids.length; i += 30) {
-            chunks.push(cappedUids.slice(i, i + 30));
+          for (let i = 0; i < validUids.length; i += 30) {
+            chunks.push(validUids.slice(i, i + 30));
           }
 
-          const chunkSnapshots = await Promise.all(
-            chunks.map(chunk => {
+          const chunkSnapshots = await Promise.allSettled(
+            chunks.map(async chunk => {
               const qMerged = query(collection(db, 'users'), where(documentId(), 'in', chunk));
-              return getDocs(qMerged).then(snap => ({ chunk, snap }));
+              const snap = await runWithNetwork(() => getDocs(qMerged));
+              return { chunk, snap };
             })
           );
 
-          for (const { chunk, snap } of chunkSnapshots) {
+          for (const result of chunkSnapshots) {
+            if (result.status === 'rejected') {
+              console.warn("Failed to fetch a chunk of users:", result.reason);
+              continue;
+            }
+            const { chunk, snap } = result.value;
             const foundUids = new Set<string>();
 
             snap.docs.forEach(docSnap => {
@@ -425,6 +447,21 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
                 delete localUsersVersion[reqUid];
               }
             });
+          }
+        }
+
+        // Fallback for brand new environments where currentUsersMap is empty and serverUsersVersion is empty
+        if (currentUsersMap.size === 0 && Object.keys(serverUsersVersion).length === 0) {
+          try {
+            const snap = await runWithNetwork(() => getDocs(query(collection(db, 'users'), limit(300))));
+            snap.docs.forEach(docSnap => {
+              const u = normalizeUserStatusAndExpiry({ ...docSnap.data(), uid: docSnap.id } as UserProfile);
+              currentUsersMap.set(docSnap.id, u);
+              localUsersVersion[docSnap.id] = u.updatedAt || getUtcVersion();
+              updatedSomething = true;
+            });
+          } catch (e) {
+            console.warn("Initial users collection fetch fallback error:", e);
           }
         }
 

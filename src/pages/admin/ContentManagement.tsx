@@ -5955,7 +5955,10 @@ export default function ContentManagement() {
                     const collectionsMap: Record<string, any> = {};
                     collections.forEach(c => { collectionsMap[c.id] = c; });
 
+                    const nowIso = new Date().toISOString();
                     const exportData = {
+                      exportedAt: nowIso,
+                      version: nowIso,
                       content: minifiedList,
                       metadata: {
                         genres,

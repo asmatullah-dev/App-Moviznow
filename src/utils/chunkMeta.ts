@@ -45,6 +45,11 @@ export const parseVersionTime = (val: any): number => {
     if (!isNaN(parsed)) {
       return parsed;
     }
+    const timePart = trimmed.includes('_') ? trimmed.split('_')[0] : trimmed;
+    const parsedTimePart = Date.parse(timePart);
+    if (!isNaN(parsedTimePart)) {
+      return parsedTimePart;
+    }
     const num = parseInt(trimmed, 10);
     return isNaN(num) ? 0 : num;
   }
@@ -92,12 +97,29 @@ let chunkMetaPromise: Promise<Record<string, any>> | null = null;
 let memoryCache: Record<string, any> | null = null;
 let lastFetchTimeMs = 0;
 
-const NINETY_SECONDS_MS = 90 * 1000;
+const SIXTY_SECONDS_MS = 60 * 1000;
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 
-const shouldFetchMeta = () => {
+export const getSavedChunkMeta = (): Record<string, any> | null => {
+  if (memoryCache && typeof memoryCache === 'object' && Object.keys(memoryCache).length > 0) {
+    return memoryCache;
+  }
   const cachedStr = safeStorage.getItem('cached_chunk_meta_doc');
-  if (!cachedStr || cachedStr === '{}') {
+  if (cachedStr && cachedStr !== '{}' && cachedStr !== 'null') {
+    try {
+      const parsed = JSON.parse(cachedStr);
+      if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
+        memoryCache = parsed;
+        return parsed;
+      }
+    } catch (e) {}
+  }
+  return null;
+};
+
+const shouldFetchMeta = () => {
+  const saved = getSavedChunkMeta();
+  if (!saved) {
     return true;
   }
   const contentCache = safeStorage.getItem('content_cache');
@@ -108,14 +130,15 @@ const shouldFetchMeta = () => {
   const now = Date.now();
   const lastFetchTimeStr = safeStorage.getItem('last_chunk_meta_fetch_time');
   const lastFetchTime = lastFetchTimeStr ? parseInt(lastFetchTimeStr, 10) : 0;
+  const effectiveLastFetch = Math.max(lastFetchTimeMs, lastFetchTime);
   
-  // If fetched within 90 seconds, definitely do not fetch
-  if (now - lastFetchTime < NINETY_SECONDS_MS) {
+  // If fetched within 60 seconds, definitely do not fetch
+  if (effectiveLastFetch > 0 && (now - effectiveLastFetch < SIXTY_SECONDS_MS)) {
     return false;
   }
 
   // If older than 6 hours, fetch latest chunk meta
-  if (now - lastFetchTime > SIX_HOURS_MS) {
+  if (now - effectiveLastFetch > SIX_HOURS_MS) {
     return true;
   }
 
@@ -131,61 +154,41 @@ const shouldFetchMeta = () => {
   return false;
 };
 
-export const getChunkMeta = async (forceRefresh = false) => {
+/**
+ * Gets chunk_meta versions.
+ * Enforces a strict 60-second cooldown on server calls:
+ * Saves the chunk meta and does NOT recall from server for 60 seconds.
+ * Even on manual trigger / forceRefresh, returns the saved chunk meta during the 60s cooldown.
+ */
+export const getChunkMeta = async (forceRefresh = false): Promise<Record<string, any>> => {
   const nowMs = Date.now();
   const lastFetchTimeStr = safeStorage.getItem('last_chunk_meta_fetch_time');
   const storedFetchTime = lastFetchTimeStr ? parseInt(lastFetchTimeStr, 10) : 0;
   const effectiveLastFetch = Math.max(lastFetchTimeMs, storedFetchTime);
 
-  // Requirement: Keep chunkmeta in local cache for 90 sec to reuse without connecting again with network
-  const isWithin90Sec = !forceRefresh && (nowMs - effectiveLastFetch) < NINETY_SECONDS_MS;
+  const savedMeta = getSavedChunkMeta();
+  const timeSinceLastFetch = nowMs - effectiveLastFetch;
+  const isWithin60Sec = effectiveLastFetch > 0 && timeSinceLastFetch < SIXTY_SECONDS_MS;
 
-  // If we already have memoryCache or local storage cache within 90 seconds, return it immediately without network
-  if (isWithin90Sec) {
-    if (memoryCache) {
-      return memoryCache;
-    }
-    const cachedStr = safeStorage.getItem('cached_chunk_meta_doc');
-    if (cachedStr && cachedStr !== '{}') {
-      try {
-        memoryCache = JSON.parse(cachedStr);
-        return memoryCache;
-      } catch (e) {}
-    }
+  // RULE: 60 sec cooldown: save and don't recall from server for 60 sec,
+  // even on manual trigger use the saved chunk meta!
+  if (savedMeta && isWithin60Sec) {
+    return savedMeta;
   }
 
-  // If forceRefresh is requested, bypass the 90-second and memory caches completely
-  const actualForce = forceRefresh;
-
-  if (actualForce) {
-    chunkMetaPromise = null;
-    memoryCache = null;
-  } else if (memoryCache && !chunkMetaPromise) {
-    if (nowMs - effectiveLastFetch <= SIX_HOURS_MS) {
-      return memoryCache;
-    }
+  // If not forcing refresh, check if savedMeta is still valid under standard policy (within 6 hours / daily check)
+  if (!forceRefresh && savedMeta && !shouldFetchMeta()) {
+    return savedMeta;
   }
 
-  const requiresFetch = actualForce || shouldFetchMeta();
-  
-  if (!requiresFetch) {
-    if (memoryCache) return memoryCache;
-    const cachedStr = safeStorage.getItem('cached_chunk_meta_doc');
-    if (cachedStr && cachedStr !== '{}') {
-      try {
-        memoryCache = JSON.parse(cachedStr);
-        return memoryCache;
-      } catch(e) {}
-    }
-    return memoryCache || {};
-  }
-
+  // Deduplicate concurrent in-flight fetches
   if (chunkMetaPromise) {
-     return chunkMetaPromise;
+    return chunkMetaPromise;
   }
 
+  // Fetch from server: either first load (no saved meta) or 60s cooldown has expired
   chunkMetaPromise = runWithNetwork(() => getDoc(doc(db, 'chunk_meta', 'versions')))
-    .then(snap => snap.exists() ? snap.data() : {})
+    .then(snap => snap.exists() ? (snap.data() || {}) : {})
     .then(data => {
       const now = Date.now();
       lastFetchTimeMs = now;
@@ -201,16 +204,10 @@ export const getChunkMeta = async (forceRefresh = false) => {
       return data;
     })
     .catch(err => {
-      console.error("Error fetching chunk_meta:", err);
+      console.error("Error fetching chunk_meta from server:", err);
       chunkMetaPromise = null;
-      const cachedStr = safeStorage.getItem('cached_chunk_meta_doc');
-      if (cachedStr && cachedStr !== '{}') {
-        try {
-          memoryCache = JSON.parse(cachedStr);
-          return memoryCache;
-        } catch(e) {}
-      }
-      return memoryCache || {};
+      const fallback = getSavedChunkMeta();
+      return fallback || {};
     });
 
   return chunkMetaPromise;

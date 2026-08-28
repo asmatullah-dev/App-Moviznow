@@ -82,7 +82,10 @@ async function exportCatalog() {
     }
 
     // 4. Save output JSON files
+    const nowIso = new Date().toISOString();
     const exportData = {
+      exportedAt: nowIso,
+      version: nowIso,
       content: allContentItems,
       metadata: metadataObj,
       collections: collectionsObj

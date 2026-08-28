@@ -19,6 +19,7 @@ export const IMDB_OTT_TTL_MS = 5 * 24 * 60 * 60 * 1000;         // 5 days
 const ACCESS_TIMESTAMP_PREFIX = 'cache_access_ts_';
 const PROTECTED_KEYS_PREFIXES = [
   'content_cache',
+  'cached_json_catalog_version',
   'chunk_meta_versions',
   'cached_chunk_meta_doc',
   'content_chunk_',

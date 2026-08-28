@@ -39,17 +39,14 @@ export function SyncBanner() {
       setIsInitialLoad(initialLoad);
 
       if (status === 'syncing') {
-        // Safety timeout: if still syncing after 8 seconds (e.g. user missing, disconnected, or unhandled rejection), report error and auto-dismiss
+        // Safety timeout: if still syncing after 25 seconds (e.g. unhandled rejection or hung promise),
+        // gently auto-dismiss the banner without fabricating a false error.
         syncingSafetyTimeout = setTimeout(() => {
-          setSyncStatus('error');
-          setCustomMessage('Refresh failed. Please check connection.');
-          timeoutId = setTimeout(() => {
-            setSyncStatus(null);
-            setUpdatedCount(undefined);
-            setCustomMessage(undefined);
-            setIsInitialLoad(false);
-          }, 3500);
-        }, 8000);
+          setSyncStatus(null);
+          setUpdatedCount(undefined);
+          setCustomMessage(undefined);
+          setIsInitialLoad(false);
+        }, 25000);
       } else if (status === 'success' || status === 'up-to-date' || status === 'error') {
         timeoutId = setTimeout(() => {
           setSyncStatus(null);
