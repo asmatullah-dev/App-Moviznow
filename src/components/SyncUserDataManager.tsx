@@ -10,8 +10,19 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
   if (!currentUserUid) return false;
 
   const nowTime = Date.now();
-  const nowUtc = getUtcVersion();
   const lastSyncKey = `last_user_sync_time_${currentUserUid}`;
+
+  const isManualTrigger = reason === 'manual' || reason === 'catalog_button' || reason === 'user_profile_button';
+  const lastSyncStr = localStorage.getItem(lastSyncKey);
+  const lastSyncTime = lastSyncStr ? parseInt(lastSyncStr, 10) : 0;
+  const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
+
+  if (!isManualTrigger && (nowTime - lastSyncTime < TEN_HOURS_MS)) {
+    // Skip connecting to Firestore. Keep accumulated values in local cache for next sync opportunity.
+    return true;
+  }
+
+  const nowUtc = getUtcVersion();
   const userRef = doc(db, 'users', currentUserUid);
 
   // 1. Flush accumulated time & sessions

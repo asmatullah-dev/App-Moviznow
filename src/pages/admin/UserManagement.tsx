@@ -240,8 +240,6 @@ export default function UserManagement() {
 
     const syncOnMount = async () => {
       try {
-        window.dispatchEvent(new CustomEvent('sync_status', { detail: 'syncing' }));
-        
         // Record initial statuses before refresh
         const initialMap = new Map((allUsers || []).map(u => [u.uid, u.status]));
 
@@ -257,17 +255,9 @@ export default function UserManagement() {
         }
         
         // Delta sync users using chunk_meta (zero reads if up-to-date, or delta reads only)
-        const res = await refreshUsers(true);
-        if (mounted) {
-          if (res.updatedSomething) {
-            window.dispatchEvent(new CustomEvent('sync_status', { detail: 'success' }));
-          } else {
-            window.dispatchEvent(new CustomEvent('sync_status', { detail: 'up-to-date' }));
-          }
-        }
+        await refreshUsers(true);
       } catch (err) {
         console.error("Refresh users failed:", err);
-        if (mounted) window.dispatchEvent(new CustomEvent('sync_status', { detail: 'error' }));
       }
     };
 
@@ -1576,8 +1566,6 @@ export default function UserManagement() {
           <div className="flex gap-2">
             <Button
               onClick={() => {
-                window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'syncing', message: 'Refreshing...' } }));
-                
                 const doSync = async () => {
                    const res = await refreshUsers(true);
                    const pendingStr = safeStorage.getItem('pending_user_updates');
@@ -1592,11 +1580,8 @@ export default function UserManagement() {
                    return res;
                 };
                 
-                doSync().then((res) => {
-                  window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'success', message: 'Refresh successfully' } }));
-                }).catch((err) => {
+                doSync().catch((err) => {
                   console.error("Manual refresh failed:", err);
-                  window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'error', message: 'Sync failed. Will retry automatically.' } }));
                 });
               }}
               variant="ghost"

@@ -47,9 +47,22 @@ export function RefreshAppDataManager() {
       return;
     }
 
-    isRefreshingRef.current = true;
-
     const isManualTrigger = reason === 'catalog_button' || reason === 'user_profile_button' || reason === 'manual';
+
+    if (!isManualTrigger) {
+      const storageKey = `last_unified_10h_refresh_sync_time_v2_${user.uid}`;
+      const lastUnifiedStr = localStorage.getItem(storageKey);
+      const lastUnifiedTime = lastUnifiedStr ? parseInt(lastUnifiedStr, 10) : 0;
+      const now = Date.now();
+      const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
+
+      if (lastUnifiedTime && (now - lastUnifiedTime < TEN_HOURS_MS)) {
+        // Skip connecting to Firestore automatically if 10 hours have not passed
+        return;
+      }
+    }
+
+    isRefreshingRef.current = true;
 
     // Dispatch start toast
     window.dispatchEvent(new CustomEvent('sync_status', {

@@ -287,8 +287,9 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       const lastFetchTimeStr = safeStorage.getItem('last_users_sync_timestamp');
       const lastFetchTime = lastFetchTimeStr ? parseInt(lastFetchTimeStr, 10) : 0;
 
-      // Minimum cooldown between non-forced fetch attempts (15 seconds) to prevent cascading queries
-      if (!force && (now - lastFetchTime < 15 * 1000) && locallyCachedUsers.length > 0) {
+      // Minimum cooldown between non-forced fetch attempts (10 hours) to prevent redundant queries
+      const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
+      if (!force && (now - lastFetchTime < TEN_HOURS_MS) && locallyCachedUsers.length > 0) {
           setLoading(false);
           return { users: locallyCachedUsers, updatedSomething: false };
       }
