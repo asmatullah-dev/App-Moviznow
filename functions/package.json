@@ -1,0 +1,17 @@
+{
+  "name": "moviznow-functions",
+  "version": "1.0.0",
+  "main": "index.js",
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "firebase-functions": "^4.9.0",
+    "firebase-admin": "^12.1.0",
+    "express": "^4.21.2",
+    "cors": "^2.8.5",
+    "axios": "^1.6.8",
+    "cheerio": "^1.0.0-rc.12",
+    "nodemailer": "^9.0.3"
+  }
+}

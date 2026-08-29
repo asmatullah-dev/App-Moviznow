@@ -15,7 +15,8 @@
     "lint": "tsc --noEmit",
     "update-index": "tsx update_search_index.ts",
     "rebuild": "echo 'trigger rebuild'",
-    "reorder-chunks": "tsx scripts/reorder_chunks.ts"
+    "reorder-chunks": "tsx scripts/reorder_chunks.ts",
+    "build:functions": "npx esbuild api/index.ts --bundle --platform=node --format=cjs --outfile=functions/bundle.js --external:firebase-admin --external:express --external:axios --external:cheerio --external:nodemailer --external:canvas-confetti --external:firebase --external:vite && sed -i 's/var __filename = __filename;/ /g' functions/bundle.js && sed -i 's/var __dirname = import_path.default.dirname(__filename);/ /g' functions/bundle.js"
   },
   "dependencies": {
     "@google/genai": "^2.10.0",

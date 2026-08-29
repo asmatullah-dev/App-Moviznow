@@ -10,6 +10,37 @@ import { BUILD_ID, APP_VERSION } from './version';
 const CURRENT_BUILD_ID = BUILD_ID;
 console.log('[Auto-Update] Client running on build ID:', CURRENT_BUILD_ID, 'version:', APP_VERSION);
 
+// Global Fetch Interceptor to route /api traffic to Firebase Functions (Cloudflare bypass)
+const originalFetch = window.fetch;
+try {
+  Object.defineProperty(window, 'fetch', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      return async (...args: any[]) => {
+        let [resource, config] = args;
+        const firebaseApiUrl = import.meta.env.VITE_FIREBASE_API_URL;
+        
+        if (
+          firebaseApiUrl && 
+          typeof resource === 'string' && 
+          resource.startsWith('/api/') && 
+          !resource.includes('version') && 
+          !resource.includes('image-proxy')
+        ) {
+          // Re-route the API call to Firebase instead of Vercel to bypass 10-second timeout & IP blocks
+          const baseUrl = firebaseApiUrl.endsWith('/') ? firebaseApiUrl.slice(0, -1) : firebaseApiUrl;
+          resource = baseUrl + resource;
+        }
+        
+        return originalFetch(resource, config);
+      };
+    }
+  });
+} catch (e) {
+  console.error("Could not override fetch for Firebase API routing:", e);
+}
+
 // Safe reload helper to prevent repeated/rapid reloads (guards with 30s cooldown)
 const triggerAppReload = (reason: string) => {
   const now = Date.now();
