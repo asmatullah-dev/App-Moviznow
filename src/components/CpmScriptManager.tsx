@@ -5,8 +5,7 @@ import { isUserExemptFromAds } from '../utils/adUtils';
 
 // Popunders - Triggered once per session
 const SESSION_CPM_SCRIPTS = [
-  'https://pl31081403.profitableratecpmnetwork.com/f0/27/0b/f0270bbaca005a7be1c664c3c0ae0386.js',
-  'https://pl31081402.profitableratecpmnetwork.com/99/e7/8b/99e78b0792c97e620e43154c137cd1f3.js',
+  'https://commercialhalftime.com/99/e7/8b/99e78b0792c97e620e43154c137cd1f3.js',
 ];
 
 // Page-level Ads (Social Bar, Vignette, Native Banners) - Triggered once per route change (window change)
@@ -37,17 +36,42 @@ export const CpmScriptManager: React.FC = () => {
       return;
     }
 
-    // 1. Handle SESSION-level Ads (Once per session - e.g. Popunders)
-    SESSION_CPM_SCRIPTS.forEach(src => {
-      const sessionKey = `ad_loaded_session_${btoa(src).substring(0, 16)}`;
-      if (!sessionStorage.getItem(sessionKey)) {
+    const loadPopunders = () => {
+      SESSION_CPM_SCRIPTS.forEach(src => {
+        const existing = document.querySelector(`script[src="${src}"]`);
+        if (existing) existing.remove(); // Clean reload
+
         const script = document.createElement('script');
         script.src = src;
         script.async = true;
         document.head.appendChild(script);
-        sessionStorage.setItem(sessionKey, 'true');
+      });
+    };
+
+    // 1. Initial Load (Once when the app opens)
+    loadPopunders();
+
+    // 2. Load after 2 mins of scrolling
+    let hasTriggeredScrollAd = false;
+    let scrollTimeout: NodeJS.Timeout;
+
+    const handleScroll = () => {
+      if (!hasTriggeredScrollAd) {
+        hasTriggeredScrollAd = true;
+        // Start 2 minute timer after first scroll activity
+        scrollTimeout = setTimeout(() => {
+          loadPopunders();
+          console.log('Popunders re-triggered after 2 mins of activity');
+        }, 120000);
       }
-    });
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      if (scrollTimeout) clearTimeout(scrollTimeout);
+    };
   }, [profile]);
 
   // 2. Handle PAGE-level Ads (Once per route change / window change - e.g. Social Bar, Vignettes, Banners)
