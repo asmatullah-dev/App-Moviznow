@@ -1,5 +1,11 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, setPersistence, browserLocalPersistence } from 'firebase/auth';
+import { 
+  getAuth, 
+  setPersistence, 
+  indexedDBLocalPersistence, 
+  browserLocalPersistence, 
+  inMemoryPersistence 
+} from 'firebase/auth';
 import { 
   initializeFirestore, 
   memoryLocalCache, 
@@ -30,6 +36,8 @@ export const db = initializeFirestore(app, {
 }, (appConfig as any).firestoreDatabaseId);
 
 if (typeof window !== 'undefined') {
+  // Purge heavy cached objects (e.g. content_cache, collections_cache, legacy chunks) out of localStorage into IndexedDB
+  safeStorage.purgeQuotaExceeded();
   // Ensure legacy document snapshot caches are removed
   safeStorage.removeItem('profile_doc_snap');
   // Ensure the client recovers from any previously persisted offline state
@@ -45,9 +53,12 @@ export async function runWithNetwork<T>(fn: () => Promise<T>): Promise<T> {
 
 export const auth = getAuth(app);
 if (typeof window !== 'undefined') {
-  setPersistence(auth, browserLocalPersistence).catch((err) => {
-    console.warn('Could not set auth persistence:', err);
-  });
+  setPersistence(auth, indexedDBLocalPersistence)
+    .catch(() => setPersistence(auth, browserLocalPersistence))
+    .catch(() => setPersistence(auth, inMemoryPersistence))
+    .catch((err) => {
+      console.warn('Could not set auth persistence:', err);
+    });
 }
 export const storage = getStorage(app);
 export const messaging = typeof window !== 'undefined' ? getMessaging(app) : null;

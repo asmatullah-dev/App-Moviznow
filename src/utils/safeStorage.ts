@@ -25,12 +25,64 @@ class SafeStorage {
     }
   }
 
+  /**
+   * Migrate huge objects (e.g., content_cache, collections_cache, chunks)
+   * out of localStorage into IndexedDB & Memory to immediately free 3-4MB of localStorage space.
+   */
+  public purgeQuotaExceeded(): void {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    try {
+      const keysToRemove: string[] = [];
+      const heavyPrefixes = [
+        'content_cache',
+        'collections_cache',
+        'cached_all_users',
+        'content_chunk_',
+        'collection_chunk_',
+        'movie_details_',
+        'poster_cache_',
+        'tmdb_images_',
+        'imdb_rating_',
+        'v2_trans_',
+        'thumbnail_'
+      ];
+
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const key = window.localStorage.key(i);
+        if (!key) continue;
+
+        if (heavyPrefixes.some(p => key === p || key.startsWith(p))) {
+          keysToRemove.push(key);
+        }
+      }
+
+      keysToRemove.forEach((k) => {
+        try {
+          const val = window.localStorage.getItem(k);
+          if (val) {
+            this.memoryStorage.set(k, val);
+            this.setItemAsync(k, val).catch(() => {});
+          }
+          window.localStorage.removeItem(k);
+        } catch (e) {}
+      });
+    } catch (e) {}
+  }
+
   // --- Synchronous methods (5MB limit usually) ---
 
   getItem(key: string): string | null {
+    if (this.memoryStorage.has(key)) {
+      return this.memoryStorage.get(key) || null;
+    }
+
     if (this.isAvailable) {
       try {
-        return window.localStorage.getItem(key);
+        const item = window.localStorage.getItem(key);
+        if (item !== null) {
+          this.memoryStorage.set(key, item);
+          return item;
+        }
       } catch (e) {
         return this.memoryStorage.get(key) || null;
       }
@@ -39,15 +91,34 @@ class SafeStorage {
   }
 
   setItem(key: string, value: string): void {
+    // Synchronously update memory storage so instant access always works
+    this.memoryStorage.set(key, value);
+
     if (this.isAvailable) {
+      // Rule: Do NOT store values larger than 150KB in localStorage (e.g., content_cache, collections_cache).
+      // Storing huge objects in localStorage quickly exceeds the 5MB domain quota!
+      if (value.length > 150000) {
+        this.setItemAsync(key, value).catch(() => {});
+        try {
+          window.localStorage.removeItem(key);
+        } catch (e) {}
+        return;
+      }
+
       try {
         window.localStorage.setItem(key, value);
         return;
       } catch (e) {
-        // Fall through to memory storage
+        // QuotaExceededError! Evict heavy/non-critical items from localStorage
+        this.purgeQuotaExceeded();
+        try {
+          window.localStorage.setItem(key, value);
+          return;
+        } catch (retryErr) {
+          // If still failing, memoryStorage is already updated, so app won't crash
+        }
       }
     }
-    this.memoryStorage.set(key, value);
   }
 
   removeItem(key: string): void {

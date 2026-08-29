@@ -24,6 +24,7 @@ import { SyncUserDataManager } from './components/SyncUserDataManager';
 import { RefreshAppDataManager } from './components/RefreshAppDataManager';
 import { AnalyticsTracker } from './components/AnalyticsTracker';
 import { AdSenseScriptManager } from './components/AdSenseScriptManager';
+import { CpmScriptManager } from './components/CpmScriptManager';
 
 // Eager Loaded Core Pages for Instant Initial Render
 import Home from './pages/user/Home';
@@ -310,6 +311,7 @@ export default function App() {
                     <ScrollToTopOrRestore />
                     <AnalyticsTracker />
                     <AdSenseScriptManager />
+                    <CpmScriptManager />
                     <MediaModalController isOpen={isMediaModalOpen} onClose={() => setIsMediaModalOpen(false)} />
                     <Suspense fallback={<LoadingFallback />}>
                       <Routes>
