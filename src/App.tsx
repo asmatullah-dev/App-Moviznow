@@ -25,6 +25,7 @@ import { RefreshAppDataManager } from './components/RefreshAppDataManager';
 import { AnalyticsTracker } from './components/AnalyticsTracker';
 import { AdSenseScriptManager } from './components/AdSenseScriptManager';
 import { CpmScriptManager } from './components/CpmScriptManager';
+import { AdBlockDetector } from './components/AdBlockDetector';
 
 // Eager Loaded Core Pages for Instant Initial Render
 import Home from './pages/user/Home';
@@ -312,6 +313,7 @@ export default function App() {
                     <AnalyticsTracker />
                     <AdSenseScriptManager />
                     <CpmScriptManager />
+                    <AdBlockDetector />
                     <MediaModalController isOpen={isMediaModalOpen} onClose={() => setIsMediaModalOpen(false)} />
                     <Suspense fallback={<LoadingFallback />}>
                       <Routes>
