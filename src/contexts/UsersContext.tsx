@@ -99,6 +99,32 @@ interface UsersContextType {
 
 const UsersContext = createContext<UsersContextType | undefined>(undefined);
 
+const ADMIN_EMAILS = [
+  "asmatn628@gmail.com",
+  "asmatullah9327@gmail.com",
+  "kabirahmaddev@gmail.com",
+  "wamoviesstation@gmail.com"
+];
+
+function isUserPrivileged(user: any, profile: any): boolean {
+  let effectiveProfile = profile;
+  if (!effectiveProfile) {
+    try {
+      const cachedProf = safeStorage.getItem('profile_cache');
+      if (cachedProf) effectiveProfile = JSON.parse(cachedProf);
+    } catch (e) {}
+  }
+  const userEmailLower = user?.email?.toLowerCase() || effectiveProfile?.email?.toLowerCase() || '';
+  const isAdminEmail = ADMIN_EMAILS.includes(userEmailLower);
+  return (
+    isAdminEmail ||
+    effectiveProfile?.role === 'admin' ||
+    effectiveProfile?.role === 'owner' ||
+    effectiveProfile?.role === 'manager' ||
+    effectiveProfile?.role === 'user_manager'
+  );
+}
+
 export function UsersProvider({ children }: { children: React.ReactNode }) {
   const { profile, user, authLoading } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>(() => {
@@ -106,6 +132,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     if (!cached) return [];
     try {
       const parsed: UserProfile[] = JSON.parse(cached);
+      if (!Array.isArray(parsed)) return [];
       const uniqueMap = new Map<string, UserProfile>();
       parsed.forEach(u => {
         if (u && u.uid && !uniqueMap.has(u.uid)) {
@@ -117,10 +144,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       return [];
     }
   });
-  const [loading, setLoading] = useState(() => {
-    const cached = safeStorage.getItem('cached_all_users');
-    return cached ? JSON.parse(cached).length === 0 : true;
-  });
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasPendingChanges, setHasPendingChanges] = useState(() => {
     const pendingStr = safeStorage.getItem('pending_user_updates');
@@ -169,14 +193,13 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
               });
               const loaded = Array.from(uniqueMap.values());
               setUsers(loaded);
-              setLoading(false);
               safeStorage.setItem('cached_all_users', JSON.stringify(loaded));
             }
           } catch (e) {}
         }
       }).catch(() => {});
     }
-  }, []);
+  }, [users.length]);
 
   const updateMultipleUserFields = useCallback((updates: Record<string, Partial<UserProfile>>) => {
     if (Object.keys(updates).length === 0) return;
@@ -312,93 +335,57 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     }
 
     const runFetch = async () => {
-      if (authLoading || !user) {
-          setLoading(false);
-          return { users: [], updatedSomething: false };
-      }
-
+      // 1. Read existing cached users first
       const cachedStr = safeStorage.getItem('cached_all_users');
       let locallyCachedUsers: UserProfile[] = [];
       if (cachedStr) {
-        try { locallyCachedUsers = JSON.parse(cachedStr); } catch (e) {}
-      }
-
-      let effectiveProfile = profile;
-      if (!effectiveProfile) {
         try {
-          const cachedProf = safeStorage.getItem('profile_cache');
-          if (cachedProf) effectiveProfile = JSON.parse(cachedProf);
+          const parsed = JSON.parse(cachedStr);
+          if (Array.isArray(parsed)) locallyCachedUsers = parsed;
         } catch (e) {}
       }
 
-      const userEmailLower = user?.email?.toLowerCase() || effectiveProfile?.email?.toLowerCase() || '';
-      const isAdminEmail = [
-        "asmatn628@gmail.com",
-        "asmatullah9327@gmail.com",
-        "kabirahmaddev@gmail.com",
-        "wamoviesstation@gmail.com"
-      ].includes(userEmailLower);
-      const isPrivilegedUser = isAdminEmail || effectiveProfile?.role === 'admin' || effectiveProfile?.role === 'owner' || effectiveProfile?.role === 'manager' || effectiveProfile?.role === 'user_manager';
-      if (!isPrivilegedUser) {
-          setLoading(false);
-          return { users: locallyCachedUsers, updatedSomething: false };
+      // If state is empty but we have cache, immediately make state available
+      if (locallyCachedUsers.length > 0) {
+        setUsers(prev => prev.length === 0 ? locallyCachedUsers : prev);
+      }
+
+      // Wait if auth is still initializing
+      if (authLoading) {
+        return { users: locallyCachedUsers, updatedSomething: false };
+      }
+
+      const isPrivileged = isUserPrivileged(user, profile);
+      if (!isPrivileged && !user) {
+        setLoading(false);
+        return { users: locallyCachedUsers, updatedSomething: false };
       }
 
       const now = Date.now();
       const lastFetchTimeStr = safeStorage.getItem('last_users_sync_timestamp');
       const lastFetchTime = lastFetchTimeStr ? parseInt(lastFetchTimeStr, 10) : 0;
 
-      // Minimum cooldown between non-forced fetch attempts (10 hours) to prevent redundant queries
-      const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
-      if (!force && (now - lastFetchTime < TEN_HOURS_MS) && locallyCachedUsers.length > 0) {
-          setLoading(false);
-          return { users: locallyCachedUsers, updatedSomething: false };
+      // Minimum cooldown between non-forced fetch attempts (4 hours) to prevent redundant queries
+      const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
+      if (!force && (now - lastFetchTime < FOUR_HOURS_MS) && locallyCachedUsers.length > 0) {
+        setLoading(false);
+        return { users: locallyCachedUsers, updatedSomething: false };
       }
       
-      // For forced calls, allow execution but prevent rapid duplicate triggers (e.g. 400ms debounce)
-      if (force && (now - lastFetchTimestampRef.current < 400) && locallyCachedUsers.length > 0) {
-          setLoading(false);
-          return { users: locallyCachedUsers, updatedSomething: false };
+      // For forced calls, allow execution but prevent rapid duplicate triggers (300ms debounce)
+      if (force && (now - lastFetchTimestampRef.current < 300) && locallyCachedUsers.length > 0) {
+        setLoading(false);
+        return { users: locallyCachedUsers, updatedSomething: false };
       }
       lastFetchTimestampRef.current = now;
 
       if (locallyCachedUsers.length === 0) {
-          setLoading(true);
+        setLoading(true);
       }
       
-      let updatedSomething = false;
-
       try {
-        // 1. Get chunk_meta (server chunk meta from Firestore, protected by strict 60s cooldown)
-        const versions = await getChunkMeta(force);
-        const serverUsersVersion: Record<string, any> = (versions && typeof versions === 'object' && versions.users && typeof versions.users === 'object') ? versions.users : {};
-
-        // 2. Read local chunk meta / mtimes for users
-        let localUsersVersion: Record<string, any> = {};
-        const knownMtimesStr = safeStorage.getItem('sync_user_mtimes');
-        if (knownMtimesStr) {
-          try { localUsersVersion = JSON.parse(knownMtimesStr); } catch (e) {}
-        }
-        if (Object.keys(localUsersVersion).length === 0) {
-          const cachedMetaStr = safeStorage.getItem('cached_chunk_meta_doc');
-          if (cachedMetaStr) {
-            try {
-              const parsed = JSON.parse(cachedMetaStr);
-              if (parsed?.users) localUsersVersion = { ...parsed.users };
-            } catch (e) {}
-          }
-        }
-
-        // Build existing users map from cache
-        const currentUsersMap = new Map<string, UserProfile>();
-        locallyCachedUsers.forEach(u => {
-          if (u && u.uid) {
-            currentUsersMap.set(u.uid, normalizeUserStatusAndExpiry(u));
-          }
-        });
-
-        // If local cache is completely empty, perform initial full load from Firestore
-        if (currentUsersMap.size === 0) {
+        // If force is requested OR local cache is completely empty, perform a full fetch from Firestore
+        if (force || locallyCachedUsers.length === 0) {
           const snap = await runWithNetwork(() => getDocs(collection(db, 'users')));
           const initialMap = new Map<string, UserProfile>();
           const initialMtimes: Record<string, any> = {};
@@ -407,7 +394,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
             const raw = { ...docSnap.data(), uid: docSnap.id } as UserProfile;
             const normalized = normalizeUserStatusAndExpiry(raw);
             initialMap.set(docSnap.id, normalized);
-            initialMtimes[docSnap.id] = serverUsersVersion[docSnap.id] || normalized.updatedAt || getUtcVersion();
+            initialMtimes[docSnap.id] = normalized.updatedAt || getUtcVersion();
           });
 
           // Preserve any uncommitted local pending updates
@@ -433,7 +420,23 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           return { users: initialList, updatedSomething: true };
         }
 
-        // 3. Find changed users by comparing local version against server chunk_meta version
+        // Otherwise (non-forced background sync), check chunk_meta delta
+        const versions = await getChunkMeta(false);
+        const serverUsersVersion: Record<string, any> = (versions && typeof versions === 'object' && versions.users && typeof versions.users === 'object') ? versions.users : {};
+
+        let localUsersVersion: Record<string, any> = {};
+        const knownMtimesStr = safeStorage.getItem('sync_user_mtimes');
+        if (knownMtimesStr) {
+          try { localUsersVersion = JSON.parse(knownMtimesStr); } catch (e) {}
+        }
+
+        const currentUsersMap = new Map<string, UserProfile>();
+        locallyCachedUsers.forEach(u => {
+          if (u && u.uid) {
+            currentUsersMap.set(u.uid, normalizeUserStatusAndExpiry(u));
+          }
+        });
+
         const uidsToFetch = new Set<string>();
         let hadDeletions = false;
 
@@ -448,7 +451,6 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
               currentUsersMap.delete(cleanUid);
               delete localUsersVersion[cleanUid];
               hadDeletions = true;
-              updatedSomething = true;
             }
             continue;
           }
@@ -458,31 +460,12 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
             const localTime = parseVersionTime(localVer);
             const userInLocal = currentUsersMap.get(cleanUid);
 
-            // User must be updated ONLY IF chunk meta has changed:
-            // 1. User doesn't exist locally at all (brand new user created)
-            // 2. Local version is undefined / missing
-            // 3. Server timestamp is newer than local timestamp
-            // 4. Or serverVer !== localVer (version changed)
             if (!userInLocal || localVer === undefined || serverTime > localTime || (localVer !== serverVer && serverTime >= localTime)) {
               uidsToFetch.add(cleanUid);
             }
           }
         }
 
-        // If serverUsersVersion has valid data, check if any local users were deleted on server
-        if (Object.keys(serverUsersVersion).length >= 10) {
-          for (const uid of Array.from(currentUsersMap.keys())) {
-            const serverVer = serverUsersVersion[uid];
-            if (serverVer === undefined || serverVer === -1 || (typeof serverVer === 'object' && (serverVer as any)?.deleted)) {
-              currentUsersMap.delete(uid);
-              delete localUsersVersion[uid];
-              hadDeletions = true;
-              updatedSomething = true;
-            }
-          }
-        }
-
-        // 4. IF NO USERS CHANGED IN CHUNK_META, RETURN IMMEDIATELY (0 FIRESTORE READS)
         if (uidsToFetch.size === 0 && !hadDeletions) {
           let finalUsers = Array.from(currentUsersMap.values());
           const pendingStr = safeStorage.getItem('pending_user_updates');
@@ -505,7 +488,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           return { users: finalUsers, updatedSomething: false };
         }
 
-        // 5. Fetch ONLY the changed users from Firestore
+        // Fetch ONLY the delta changed users from Firestore
         const validUids = Array.from(uidsToFetch);
         if (validUids.length > 0) {
           const chunks: string[][] = [];
@@ -535,23 +518,19 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
               foundUids.add(docSnap.id);
               currentUsersMap.set(docSnap.id, normalized);
               localUsersVersion[docSnap.id] = serverUsersVersion[docSnap.id] || normalized.updatedAt || getUtcVersion();
-              updatedSomething = true;
             });
 
-            // If a requested UID was not returned by Firestore, remove it from local cache
             chunk.forEach(reqUid => {
               if (!foundUids.has(reqUid)) {
                 if (currentUsersMap.has(reqUid)) {
                   currentUsersMap.delete(reqUid);
                   delete localUsersVersion[reqUid];
-                  updatedSomething = true;
                 }
               }
             });
           }
         }
 
-        // 6. Preserve uncommitted local pending updates
         let finalUsers = Array.from(currentUsersMap.values());
         const pendingStr = safeStorage.getItem('pending_user_updates');
         if (pendingStr) {
@@ -566,26 +545,20 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           } catch (e) {}
         }
 
-        // 7. Persist updated cache & local mtimes to both localStorage and IndexedDB
         saveUsersCache(finalUsers, localUsersVersion);
         setUsers(finalUsers);
         safeStorage.setItem('last_users_sync_timestamp', now.toString());
-
-        // Mark as checked in this period
-        const nowChecked = Date.now();
-        const shiftedChecked = new Date(nowChecked + (5 - 7) * 60 * 60 * 1000);
-        const periodChecked = `${shiftedChecked.getUTCFullYear()}-${shiftedChecked.getUTCMonth() + 1}-${shiftedChecked.getUTCDate()}`;
-        safeStorage.setItem('last_chunk_users_check_period', periodChecked);
-
         setLoading(false);
         setError(null);
 
-        return { users: finalUsers, updatedSomething };
+        return { users: finalUsers, updatedSomething: true };
       } catch (err: any) {
         console.error('Error fetching users:', err);
         setError(err.message || 'Failed to fetch users');
         setLoading(false);
-        throw err;
+        
+        // Return existing cached users on error so UI doesn't break
+        return { users: locallyCachedUsers, updatedSomething: false };
       }
     };
 
@@ -596,26 +569,28 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     return p;
   }, [profile, user, authLoading, saveUsersCache]);
 
+  // Clean up on explicit sign out
   useEffect(() => {
-    // Only clear users if not a privileged user.
-    // Do NOT automatically trigger a heavy fetchUsers() full pull at root app boot!
-    // Individual admin pages (like UserManagement) will request users via refreshUsers() on demand.
-    const isPrivilegedUser = profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'manager' || profile?.role === 'user_manager';
-    
-    if (!isPrivilegedUser && !authLoading) {
-      setUsers([]);
-      setLoading(false);
+    if (!user && !authLoading) {
+      const cached = safeStorage.getItem('cached_all_users');
+      // If user signed out completely, clear in-memory users
+      if (!cached) {
+        setUsers([]);
+      }
     }
-  }, [profile?.role, authLoading]);
+  }, [user, authLoading]);
 
   useEffect(() => {
     const handlePendingChanges = () => {
       setHasPendingChanges(true);
       const cached = safeStorage.getItem('cached_all_users');
-      if (cached) setUsers(JSON.parse(cached));
+      if (cached) {
+        try {
+          setUsers(JSON.parse(cached));
+        } catch (e) {}
+      }
     };
     
-    // Using an async wrapper function allows us to cleanly handle the Promise
     const handleForceFlush = () => {
        finalizeUserChanges(true).catch(e => console.error("Force flush error", e));
     };
