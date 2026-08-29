@@ -17,7 +17,7 @@ export default function UserManagers() {
   const { users: allUsers, loading: usersLoading, finalizeUserChanges, hasPendingChanges, updateUserFields } = useUsers();
 
   const [managers, setManagers] = useState<UserProfile[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState(() => sessionStorage.getItem('user_managers_search') || '');
 
   useEffect(() => {
@@ -106,7 +106,7 @@ export default function UserManagers() {
         />
       </div>
 
-      {loading ? (
+      {loading && (!allUsers || allUsers.length === 0) ? (
         <div className="flex justify-center items-center py-20">
           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-emerald-500"></div>
         </div>

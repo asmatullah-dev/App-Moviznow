@@ -77,7 +77,7 @@ export default function UserManagement() {
   const [allContent, setAllContent] = useState<any[]>([]);
   const [contentSearch, setContentSearch] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [isContentPickerOpen, setIsContentPickerOpen] = useState(false);
   const [assignedIds, setAssignedIds] = useState<Set<string>>(new Set());
   const [contentSearchTerm, setContentSearchTerm] = useState('');
@@ -1826,7 +1826,7 @@ export default function UserManagement() {
 
       <div className="flex-1">
 
-      {loading ? (
+      {loading && (!allUsers || allUsers.length === 0) ? (
         <div className="flex justify-center items-center py-20">
           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-emerald-500"></div>
         </div>
