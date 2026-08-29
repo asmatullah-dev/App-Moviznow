@@ -70,21 +70,19 @@ function isCloudflareResponse(response: any) {
 async function fetchWithApi(url: string, timeout = 12000, isVcloud = false) {
   const apiKey = process.env.SCRAPER_API_KEY || "9cd207e5fa77b2c6ef6072a7ea4c4326";
 
-  // Try ScraperAPI first for vcloud
-  if (isVcloud || url.includes("vcloud")) {
-    try {
-      const scraperApiUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
-      const res = await axios.get(scraperApiUrl, {
-        validateStatus: () => true,
-        timeout,
-        maxContentLength: 5242880,
-        maxBodyLength: 5242880,
-      });
-      if (!isCloudflareResponse(res)) return res;
-    } catch (err) {}
-  }
+  // Try ScraperAPI first for all URLs (fastest, ~1s)
+  try {
+    const scraperApiUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
+    const scraperRes = await axios.get(scraperApiUrl, {
+      validateStatus: () => true,
+      timeout,
+      maxContentLength: 5242880,
+      maxBodyLength: 5242880,
+    });
+    if (!isCloudflareResponse(scraperRes)) return scraperRes;
+  } catch (err) {}
 
-  // Try Microlink for non-vcloud
+  // Fallback to Microlink (slower, ~3s)
   try {
     const microlinkUrl = `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`;
     const res = await axios.get(microlinkUrl, {
@@ -95,18 +93,6 @@ async function fetchWithApi(url: string, timeout = 12000, isVcloud = false) {
       const fakeResp = { data: res.data.data.body, status: 200, headers: res.headers };
       if (!isCloudflareResponse(fakeResp)) return fakeResp;
     }
-  } catch (err) {}
-
-  // Fallback to ScraperAPI for all Hubcloud variants if Microlink failed or returned Cloudflare
-  try {
-    const scraperApiUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
-    const scraperRes = await axios.get(scraperApiUrl, {
-      validateStatus: () => true,
-      timeout,
-      maxContentLength: 5242880,
-      maxBodyLength: 5242880,
-    });
-    if (!isCloudflareResponse(scraperRes)) return scraperRes;
   } catch (err) {}
 
   // Fallback to Jina AI Reader
@@ -139,11 +125,6 @@ async function fetchHtmlFallback(url: string, isVcloud = false) {
 
   try {
     response = await fetchWithApi(url, 12000, isVcloud);
-    if (!isCloudflareResponse(response)) return response;
-  } catch (err) {}
-
-  try {
-    response = await fetchWithApi(url, 14000, isVcloud);
   } catch (err) {
     response = { data: "", status: 500, headers: {} };
   }
