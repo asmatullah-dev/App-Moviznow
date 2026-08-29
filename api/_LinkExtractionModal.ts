@@ -68,9 +68,28 @@ function isCloudflareResponse(response: any) {
 }
 
 async function fetchWithApi(url: string, timeout = 12000, isVcloud = false) {
+  // 1. Try our Custom Cloudflare Worker First!
+  try {
+    const workerUrl = `https://hubcl.asmatn628.workers.dev?url=${encodeURIComponent(url)}`;
+    const workerRes = await axios.get(workerUrl, {
+      validateStatus: () => true,
+      timeout: 10000, // Should be fast
+    });
+    
+    // As long as the worker gave us valid HTML that isn't a Cloudflare block, use it.
+    if (workerRes.status === 200 && workerRes.data && typeof workerRes.data === 'string' && workerRes.data.length > 200) {
+      if (!isCloudflareResponse(workerRes)) {
+        return workerRes;
+      }
+    }
+  } catch (err) {
+    console.error("Worker fetch failed, falling back to other APIs:", err);
+  }
+
+  // Fallbacks:
   const apiKey = process.env.SCRAPER_API_KEY || "9cd207e5fa77b2c6ef6072a7ea4c4326";
 
-  // Try ScraperAPI first for vcloud
+  // Try ScraperAPI for vcloud
   if (isVcloud || url.includes("vcloud")) {
     try {
       const scraperApiUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
@@ -129,14 +148,25 @@ async function fetchWithApi(url: string, timeout = 12000, isVcloud = false) {
 async function fetchHtmlFallback(url: string, isVcloud = false) {
   let response;
   
-  // Direct extraction only (no fallback APIs) as requested for testing
-  try {
-    // Increased timeout slightly since we don't have fallbacks
-    response = await fetchDirect(url, 15000);
-    return response;
-  } catch (err) {
-    return { data: "", status: 500, headers: {} };
+  // Vercel IPs are blocked by Cloudflare, so skip direct fetch to save time
+  if (!process.env.VERCEL) {
+    try {
+      response = await fetchDirect(url, 6000);
+      if (!isCloudflareResponse(response)) return response;
+    } catch (err) {}
   }
+
+  try {
+    response = await fetchWithApi(url, 12000, isVcloud);
+    if (!isCloudflareResponse(response)) return response;
+  } catch (err) {}
+
+  try {
+    response = await fetchWithApi(url, 14000, isVcloud);
+  } catch (err) {
+    response = { data: "", status: 500, headers: {} };
+  }
+  return response;
 }
 
 async function fetchHtml(url: string, isVcloud = false, force = false) {
