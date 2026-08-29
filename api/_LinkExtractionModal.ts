@@ -128,10 +128,14 @@ async function fetchWithApi(url: string, timeout = 12000, isVcloud = false) {
 
 async function fetchHtmlFallback(url: string, isVcloud = false) {
   let response;
-  try {
-    response = await fetchDirect(url, 6000);
-    if (!isCloudflareResponse(response)) return response;
-  } catch (err) {}
+  
+  // Vercel IPs are blocked by Cloudflare, so skip direct fetch to save time
+  if (!process.env.VERCEL) {
+    try {
+      response = await fetchDirect(url, 6000);
+      if (!isCloudflareResponse(response)) return response;
+    } catch (err) {}
+  }
 
   try {
     response = await fetchWithApi(url, 12000, isVcloud);
