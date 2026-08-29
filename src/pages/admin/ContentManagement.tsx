@@ -5985,14 +5985,16 @@ export default function ContentManagement() {
                   <FileDown className="w-4 h-4" />
                   Export
                 </button>
-                <button
-                  onClick={() => setIsGithubModalOpen(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-100 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 rounded-lg text-sm font-medium transition-colors"
-                  title="Trigger GitHub Actions JSON Sync Workflow"
-                >
-                  <Github className="w-4 h-4" />
-                  GitHub Sync
-                </button>
+                {profile?.role === "owner" && (
+                  <button
+                    onClick={() => setIsGithubModalOpen(true)}
+                    className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-100 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 rounded-lg text-sm font-medium transition-colors"
+                    title="Trigger GitHub Actions JSON Sync Workflow"
+                  >
+                    <Github className="w-4 h-4" />
+                    GitHub Sync
+                  </button>
+                )}
                 <button
                   onClick={handleManualFirestoreRefresh}
                   disabled={isSyncingFromFirestore}
