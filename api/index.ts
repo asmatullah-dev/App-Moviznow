@@ -212,16 +212,6 @@ async function startServer() {
     res.send("User-agent: Mediapartners-Google\nAllow: /\n\nUser-agent: Google-Adwords-Instant\nAllow: /\n\nUser-agent: *\nAllow: /\nDisallow: /api/\n");
   });
 
-  app.use((req, res, next) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
-    res.setHeader("Access-Control-Allow-Headers", "X-Requested-With, content-type, Authorization");
-    if (req.method === "OPTIONS") {
-      return res.sendStatus(200);
-    }
-    next();
-  });
-
   app.use(express.json({ limit: "50mb" }));
   app.use("/api", translateRouter);
   app.use("/api/email", emailRouter);

@@ -6,23 +6,6 @@ import ErrorBoundary from './components/ErrorBoundary.tsx';
 import './index.css';
 import 'react-lazy-load-image-component/src/effects/blur.css';
 import { BUILD_ID, APP_VERSION } from './version';
-import { getApiBaseUrl } from './utils/apiConfig';
-
-// Global API Fetch Interceptor
-// This ensures ALL /api/ calls are redirected to the Cloud Run backend when running on Vercel
-const originalFetch = window.fetch;
-window.fetch = async (...args) => {
-  let [resource, config] = args;
-  
-  if (typeof resource === 'string' && resource.startsWith('/api/')) {
-    const baseUrl = getApiBaseUrl();
-    if (baseUrl) {
-      resource = `${baseUrl}${resource}`;
-    }
-  }
-  
-  return originalFetch(resource, config);
-};
 
 const CURRENT_BUILD_ID = BUILD_ID;
 console.log('[Auto-Update] Client running on build ID:', CURRENT_BUILD_ID, 'version:', APP_VERSION);

@@ -67,19 +67,83 @@ function isCloudflareResponse(response: any) {
   return false;
 }
 
+async function fetchWithApi(url: string, timeout = 12000, isVcloud = false) {
+  const apiKey = process.env.SCRAPER_API_KEY || "9cd207e5fa77b2c6ef6072a7ea4c4326";
+
+  // Try ScraperAPI first for vcloud
+  if (isVcloud || url.includes("vcloud")) {
+    try {
+      const scraperApiUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
+      const res = await axios.get(scraperApiUrl, {
+        validateStatus: () => true,
+        timeout,
+        maxContentLength: 5242880,
+        maxBodyLength: 5242880,
+      });
+      if (!isCloudflareResponse(res)) return res;
+    } catch (err) {}
+  }
+
+  // Try Microlink for non-vcloud
+  try {
+    const microlinkUrl = `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`;
+    const res = await axios.get(microlinkUrl, {
+      validateStatus: () => true,
+      timeout: Math.min(timeout, 8000),
+    });
+    if (res.data && res.data.data && res.data.data.body && typeof res.data.data.body === "string" && res.data.data.body.length > 200) {
+      const fakeResp = { data: res.data.data.body, status: 200, headers: res.headers };
+      if (!isCloudflareResponse(fakeResp)) return fakeResp;
+    }
+  } catch (err) {}
+
+  // Fallback to ScraperAPI for all Hubcloud variants if Microlink failed or returned Cloudflare
+  try {
+    const scraperApiUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
+    const scraperRes = await axios.get(scraperApiUrl, {
+      validateStatus: () => true,
+      timeout,
+      maxContentLength: 5242880,
+      maxBodyLength: 5242880,
+    });
+    if (!isCloudflareResponse(scraperRes)) return scraperRes;
+  } catch (err) {}
+
+  // Fallback to Jina AI Reader
+  try {
+    const jinaUrl = `https://r.jina.ai/${url}`;
+    const jinaRes = await axios.get(jinaUrl, {
+      headers: { "X-No-Cache": "true" },
+      validateStatus: () => true,
+      timeout: 8000,
+    });
+    if (jinaRes.data && typeof jinaRes.data === "string" && jinaRes.data.length > 100) {
+      const fakeResp = { data: jinaRes.data, status: 200, headers: jinaRes.headers || {} };
+      if (!isCloudflareResponse(fakeResp)) return fakeResp;
+    }
+  } catch (err) {}
+
+  return { data: "", status: 500, headers: {} };
+}
+
 async function fetchHtmlFallback(url: string, isVcloud = false) {
   let response;
   try {
-    response = await fetchDirect(url, 8000);
+    response = await fetchDirect(url, 6000);
     if (!isCloudflareResponse(response)) return response;
   } catch (err) {}
 
   try {
-    response = await fetchDirect(url, 12000);
+    response = await fetchWithApi(url, 12000, isVcloud);
     if (!isCloudflareResponse(response)) return response;
   } catch (err) {}
 
-  return response || { data: "", status: 500, headers: {} };
+  try {
+    response = await fetchWithApi(url, 14000, isVcloud);
+  } catch (err) {
+    response = { data: "", status: 500, headers: {} };
+  }
+  return response;
 }
 
 async function fetchHtml(url: string, isVcloud = false, force = false) {
@@ -287,6 +351,20 @@ async function fetchHtml(url: string, isVcloud = false, force = false) {
             timeout: 5000,
             responseType: "stream",
           });
+
+          // Fallback to scraper for vcloud if direct fails (e.g. 403, 503)
+          if ((checkRes.status === 403 || checkRes.status === 503) && (isVcloud || url.includes("vcloud"))) {
+             if (checkRes.data && typeof checkRes.data.destroy === "function") {
+               checkRes.data.destroy();
+             }
+             const checkUrl = `http://api.scraperapi.com?api_key=${process.env.SCRAPER_API_KEY || "9cd207e5fa77b2c6ef6072a7ea4c4326"}&url=${encodeURIComponent(url)}`;
+             checkRes = await axios.get(checkUrl, {
+               maxRedirects: 0,
+               validateStatus: () => true,
+               timeout: 10000,
+               responseType: "stream",
+             });
+          }
 
           if (checkRes.data && typeof checkRes.data.destroy === "function") {
             checkRes.data.destroy();
@@ -637,43 +715,6 @@ async function fetchHtml(url: string, isVcloud = false, force = false) {
     } catch (e: any) {
       console.error(e);
       res.json({ url: normalizeDomain(req.body.url) });
-    }
-  });
-
-  linkExtractionRouter.get(["/api/hubcloud", "/api/vcloud"], async (req, res) => {
-    try {
-      const url = (req.query.url as string || "").trim();
-      if (!url) {
-        return res.status(400).json({ error: "Valid URL required" });
-      }
-      const isVcloud = url.includes("vcloud") || req.path.includes("vcloud");
-      const force = req.query.force === "true";
-
-      const data = await performExtraction(url, false, 0, isVcloud, force);
-
-      const hits: Array<{ file_name: string; url: string; size?: string | null; is_direct: boolean }> = [];
-      if (data && data.candidates && data.candidates.length > 0) {
-        data.candidates.forEach((c: { text: string; href: string }) => {
-          hits.push({
-            file_name: c.text || data.title || "Download Link",
-            url: c.href,
-            size: data.size || null,
-            is_direct: true,
-          });
-        });
-      } else if (data && data.url && data.url !== url) {
-        hits.push({
-          file_name: data.title || "Stream Link",
-          url: data.url,
-          size: data.size || null,
-          is_direct: true,
-        });
-      }
-
-      return res.json({ hits, found: hits.length });
-    } catch (e: any) {
-      console.error("GET hubcloud/vcloud extraction error:", e);
-      return res.status(500).json({ hits: [], found: 0, error: e.message });
     }
   });
 
