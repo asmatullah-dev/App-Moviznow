@@ -7,10 +7,16 @@ const CPM_SCRIPTS = [
   'https://pl31081402.profitableratecpmnetwork.com/99/e7/8b/99e78b0792c97e620e43154c137cd1f3.js',
 ];
 
-const MONETAG_SCRIPT = {
-  src: 'https://nap5k.com/tag.min.js',
-  zone: '11681684'
-};
+const MONETAG_SCRIPTS = [
+  {
+    src: 'https://nap5k.com/tag.min.js',
+    zone: '11681684'
+  },
+  {
+    src: 'https://n6wxm.com/vignette.min.js',
+    zone: '11681786'
+  }
+];
 
 export const CpmScriptManager: React.FC = () => {
   const { profile } = useAuth();
@@ -27,11 +33,13 @@ export const CpmScriptManager: React.FC = () => {
         }
       });
 
-      // Remove Monetag script if it exists
-      const existingMonetag = document.querySelector(`script[src="${MONETAG_SCRIPT.src}"]`);
-      if (existingMonetag) {
-        existingMonetag.remove();
-      }
+      // Remove Monetag scripts if they exist
+      MONETAG_SCRIPTS.forEach(config => {
+        const existing = document.querySelector(`script[src="${config.src}"]`);
+        if (existing) {
+          existing.remove();
+        }
+      });
       return;
     }
 
@@ -46,15 +54,17 @@ export const CpmScriptManager: React.FC = () => {
       }
     });
 
-    // Load Monetag script for non-exempt users
-    const existingMonetag = document.querySelector(`script[src="${MONETAG_SCRIPT.src}"]`);
-    if (!existingMonetag) {
-      const script = document.createElement('script');
-      script.src = MONETAG_SCRIPT.src;
-      script.dataset.zone = MONETAG_SCRIPT.zone;
-      script.async = true;
-      document.body.appendChild(script);
-    }
+    // Load Monetag scripts for non-exempt users
+    MONETAG_SCRIPTS.forEach(config => {
+      const existing = document.querySelector(`script[src="${config.src}"]`);
+      if (!existing) {
+        const script = document.createElement('script');
+        script.src = config.src;
+        script.dataset.zone = config.zone;
+        script.async = true;
+        document.body.appendChild(script);
+      }
+    });
   }, [profile]);
 
   return null;
