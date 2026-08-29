@@ -68,28 +68,9 @@ function isCloudflareResponse(response: any) {
 }
 
 async function fetchWithApi(url: string, timeout = 12000, isVcloud = false) {
-  // 1. Try our Custom Cloudflare Worker First!
-  try {
-    const workerUrl = `https://hubcl.asmatn628.workers.dev?url=${encodeURIComponent(url)}`;
-    const workerRes = await axios.get(workerUrl, {
-      validateStatus: () => true,
-      timeout: 10000, // Should be fast
-    });
-    
-    // As long as the worker gave us valid HTML that isn't a Cloudflare block, use it.
-    if (workerRes.status === 200 && workerRes.data && typeof workerRes.data === 'string' && workerRes.data.length > 200) {
-      if (!isCloudflareResponse(workerRes)) {
-        return workerRes;
-      }
-    }
-  } catch (err) {
-    console.error("Worker fetch failed, falling back to other APIs:", err);
-  }
-
-  // Fallbacks:
   const apiKey = process.env.SCRAPER_API_KEY || "9cd207e5fa77b2c6ef6072a7ea4c4326";
 
-  // Try ScraperAPI for vcloud
+  // Try ScraperAPI first for vcloud
   if (isVcloud || url.includes("vcloud")) {
     try {
       const scraperApiUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
