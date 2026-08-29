@@ -55,8 +55,8 @@
   ],
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api/index.ts"
+      "source": "/api/:path*",
+      "destination": "https://ais-pre-ztgr34s3xe3g6vxljx3ldl-684080073915.asia-southeast1.run.app/api/:path*"
     },
     {
       "source": "/movie/(.*)",
