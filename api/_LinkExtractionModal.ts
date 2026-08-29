@@ -129,25 +129,14 @@ async function fetchWithApi(url: string, timeout = 12000, isVcloud = false) {
 async function fetchHtmlFallback(url: string, isVcloud = false) {
   let response;
   
-  // Vercel IPs are blocked by Cloudflare, so skip direct fetch to save time
-  if (!process.env.VERCEL) {
-    try {
-      response = await fetchDirect(url, 6000);
-      if (!isCloudflareResponse(response)) return response;
-    } catch (err) {}
-  }
-
+  // Direct extraction only (no fallback APIs) as requested for testing
   try {
-    response = await fetchWithApi(url, 12000, isVcloud);
-    if (!isCloudflareResponse(response)) return response;
-  } catch (err) {}
-
-  try {
-    response = await fetchWithApi(url, 14000, isVcloud);
+    // Increased timeout slightly since we don't have fallbacks
+    response = await fetchDirect(url, 15000);
+    return response;
   } catch (err) {
-    response = { data: "", status: 500, headers: {} };
+    return { data: "", status: 500, headers: {} };
   }
-  return response;
 }
 
 async function fetchHtml(url: string, isVcloud = false, force = false) {
