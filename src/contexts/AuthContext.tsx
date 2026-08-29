@@ -492,8 +492,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         let serverProfile: UserProfile | null = null;
         let docSnap;
 
-        // 7. Verify user UID in Firestore when online and chunk_meta version has changed or profile is missing
-        if (navigator.onLine && (versionChanged || !localProfile)) {
+        // 7. Verify user profile in Firestore when online if force, version changed, 10 hours passed, or profile missing
+        if (navigator.onLine && (force || versionChanged || is10HourSyncPassed || !localProfile)) {
           try {
             docSnap = await runWithNetwork(() => getDoc(userRef));
             if (docSnap.exists()) {
@@ -548,6 +548,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           mergedProfile = {
             ...(localProfile || {}),
             ...serverProfile,
+            role: serverProfile.role || localProfile?.role || 'user',
+            status: serverProfile.status || localProfile?.status || 'pending',
+            expiryDate: serverProfile.expiryDate !== undefined ? serverProfile.expiryDate : localProfile?.expiryDate,
+            permissions: serverProfile.permissions || localProfile?.permissions || [],
+            isUserManager: serverProfile.isUserManager !== undefined ? serverProfile.isUserManager : localProfile?.isUserManager,
+            managedBy: serverProfile.managedBy !== undefined ? serverProfile.managedBy : localProfile?.managedBy,
             favorites:
               safeStorage.getItem("needs_user_sync") === "true" &&
               safeStorage.getItem("pending_favorites_array")
@@ -595,6 +601,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const pendingAll = JSON.parse(pendingUpdatesStr);
             const myPending = pendingAll[currentUser.uid];
             if (myPending) {
+              if (serverProfile) {
+                // Keep server authoritative fields intact
+                delete myPending.role;
+                delete myPending.status;
+                delete myPending.expiryDate;
+                delete myPending.permissions;
+                delete myPending.isUserManager;
+              }
               mergedProfile = { ...mergedProfile, ...myPending };
             }
           } catch (e) {
@@ -942,12 +956,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               } catch (e) {}
             }
 
-            if (mergedProfile) {
-              const normMerged = normalizeUserStatusAndExpiry(mergedProfile);
-              if (normMerged.status === "expired" && serverProfile?.status !== "expired") {
-                updatesToPush.status = "expired";
-              }
-            }
+
             const realKeysToPush = Object.keys(updatesToPush).filter(k => k !== 'lastActive' && k !== 'updatedAt');
             if (realKeysToPush.length > 0) {
               updatesToPush.lastActive = new Date().toISOString();
@@ -1063,11 +1072,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   data.status = "pending";
                   if (mergedProfile) mergedProfile.status = "pending";
                 } else if (data.status === "active") {
-                  updates.status = "expired";
-                  data.status = "expired";
-                  if (mergedProfile) {
-                    mergedProfile.status = "expired";
-                  }
+                  // Active status without explicit expiry date: default to 30 days
+                  const defaultExp = new Date();
+                  defaultExp.setDate(defaultExp.getDate() + 30);
+                  const dateIso = defaultExp.toISOString();
+                  updates.expiryDate = dateIso;
+                  data.expiryDate = dateIso;
+                  if (mergedProfile) mergedProfile.expiryDate = dateIso;
                 }
               }
             } else if (data.expiryDate !== "Lifetime") {
@@ -1177,6 +1188,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
 
           setProfile(data);
+          safeStorage.setItem("profile_cache", JSON.stringify(data));
         } else {
           // Create new user profile
           const userEmailLower = currentUser.email?.toLowerCase();

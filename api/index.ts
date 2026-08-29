@@ -94,6 +94,80 @@ import { tmdbRouter } from "./_tmdb.js";
 import { ordersRouter } from "./_orders.js";
 import { checkAndSendExpiryNotifications, sendMembershipUpdateNotification, sendOrderApprovedNotification } from "./_expiryService.js";
 
+export async function fetchWithVddos(targetUrl: string, customHeaders?: Record<string, string>, timeoutMs = 10000) {
+  const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+  const baseHeaders = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Referer': targetUrl,
+    ...(customHeaders || {})
+  };
+
+  let res = await axios.get(targetUrl, {
+    headers: baseHeaders,
+    httpsAgent,
+    timeout: timeoutMs,
+    maxContentLength: 5 * 1024 * 1024,
+    validateStatus: () => true,
+    maxRedirects: 5
+  });
+
+  let html = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+  let finalUrl = res.request?.res?.responseUrl || targetUrl;
+
+  if (
+    res.status === 202 ||
+    html.includes('vDDoS-zn') ||
+    html.includes('vddos') ||
+    html.includes('w3IncludeHTML')
+  ) {
+    let cookieVal = '';
+    const cookieMatch = html.match(/document\.cookie\s*=\s*['"]([^'"]+)['"]/i);
+    if (cookieMatch) {
+      cookieVal = cookieMatch[1].split(';')[0].trim();
+    }
+    if (res.headers['set-cookie']) {
+      const setCookies = Array.isArray(res.headers['set-cookie']) ? res.headers['set-cookie'] : [res.headers['set-cookie']];
+      const sc = setCookies.map((c) => c.split(';')[0]).join('; ');
+      cookieVal = cookieVal ? cookieVal + '; ' + sc : sc;
+    }
+
+    let redirectUrl = targetUrl;
+    const redirectMatch = html.match(/location\.href\s*=\s*['"]([^'"]+)['"]/i);
+    if (redirectMatch) {
+      redirectUrl = redirectMatch[1];
+      if (redirectUrl.startsWith('http://') && targetUrl.startsWith('https://')) {
+        redirectUrl = redirectUrl.replace('http://', 'https://');
+      }
+    } else if (!targetUrl.includes('?d=1') && !targetUrl.includes('&d=1')) {
+      redirectUrl = targetUrl.includes('?') ? targetUrl + '&d=1' : targetUrl + '?d=1';
+    }
+
+    try {
+      const followRes = await axios.get(redirectUrl, {
+        headers: {
+          ...baseHeaders,
+          ...(cookieVal ? { 'Cookie': cookieVal } : {}),
+          'Referer': targetUrl
+        },
+        httpsAgent,
+        timeout: timeoutMs,
+        maxContentLength: 5 * 1024 * 1024,
+        validateStatus: () => true,
+        maxRedirects: 5
+      });
+
+      html = typeof followRes.data === 'string' ? followRes.data : JSON.stringify(followRes.data);
+      res = followRes;
+      finalUrl = followRes.request?.res?.responseUrl || redirectUrl;
+    } catch (err: any) {
+      console.warn(`[fetchWithVddos] Follow redirect error for ${redirectUrl}:`, err.message);
+    }
+  }
+
+  return { html, status: res.status, finalUrl };
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -136,6 +210,16 @@ async function startServer() {
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=86400");
     res.send("User-agent: Mediapartners-Google\nAllow: /\n\nUser-agent: Google-Adwords-Instant\nAllow: /\n\nUser-agent: *\nAllow: /\nDisallow: /api/\n");
+  });
+
+  app.use((req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
+    res.setHeader("Access-Control-Allow-Headers", "X-Requested-With, content-type, Authorization");
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(200);
+    }
+    next();
   });
 
   app.use(express.json({ limit: "50mb" }));
@@ -1044,12 +1128,12 @@ async function startServer() {
     }
   });
 
-  // FilmyGo Extraction API
+  // FilmyGo / FilmyCab Extraction API
   app.get('/api/filmygo', async (req: express.Request, res: express.Response) => {
     try {
       let { url } = req.query;
       if (!url || typeof url !== 'string' || (!url.trim().startsWith('http') && !url.includes('.'))) {
-        return res.status(400).json({ error: 'Valid FilmyGo URL required' });
+        return res.status(400).json({ error: 'Valid FilmyGo / FilmyCab URL required' });
       }
 
       // Clean URL
@@ -1058,19 +1142,11 @@ async function startServer() {
         targetUrl = 'https://' + targetUrl;
       }
 
-      console.log(`[FilmyGo] Extracting FilesDL links from: ${targetUrl}`);
+      console.log(`[FilmyGo/FilmyCab] Extracting FilesDL links from: ${targetUrl}`);
 
-      const httpsAgent = new https.Agent({ rejectUnauthorized: false });
-      const headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-        'Referer': targetUrl
-      };
-
-      const response = await axios.get(targetUrl, { headers, httpsAgent });
-      const text = response.data;
+      const { html: text, status: initialStatus, finalUrl: resolvedTargetUrl } = await fetchWithVddos(targetUrl);
       const $ = cheerio.load(text);
-      const urlObj = new URL(targetUrl);
+      const urlObj = new URL(resolvedTargetUrl || targetUrl);
 
       const searchParam = urlObj.searchParams.get('to-search') || urlObj.searchParams.get('search') || urlObj.searchParams.get('q') || urlObj.searchParams.get('s') || '';
       const isSearchUrl = targetUrl.includes('site-search.html') || Boolean(searchParam) || urlObj.searchParams.has('to-page') || urlObj.pathname === '/' || urlObj.pathname === '' || urlObj.pathname.endsWith('index.html');
@@ -1272,7 +1348,15 @@ async function startServer() {
         }
       }
 
-      // Recursive multi-hop resolver for FilmyGo gates (e.g. FilmyGo -> LinkMake -> FilesDL -> HubCloud)
+      // Helper to check if URL is a valid HubCloud / mirror link
+      const isHubCloudUrl = (u: string): boolean => {
+        if (!u || typeof u !== 'string') return false;
+        const lower = u.toLowerCase();
+        if (lower.includes("gdflix") || lower.includes("failed") || lower.includes("please check") || lower.includes("cdn-cgi")) return false;
+        return /(?:hubcloud|hubcould|hub-cloud|vcloud\.live|vcloud|hubdrive|mdrive|fastdl|filepress|drivehub)\./i.test(lower);
+      };
+
+      // Recursive multi-hop resolver for FilmyGo / FilmyCab gates (e.g. FilmyGo -> LinkMake -> FilesDL -> HubCloud)
       const visited = new Set<string>();
       visited.add(targetUrl);
 
@@ -1285,24 +1369,22 @@ async function startServer() {
         visited.add(startUrl);
 
         try {
-          const res = await axios.get(startUrl, {
-            headers,
-            httpsAgent,
-            timeout: 10000,
-            maxRedirects: 5,
-            validateStatus: (status) => status < 500,
-          });
-
-          let htmlText = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
-          const finalUrl = res.request?.res?.responseUrl || startUrl;
+          const { html: htmlText, finalUrl: resolvedStartUrl } = await fetchWithVddos(startUrl, undefined, 8000);
+          const finalUrl = resolvedStartUrl || startUrl;
           if (finalUrl && finalUrl !== startUrl) {
             visited.add(finalUrl);
           }
 
           // Direct match for HubCloud / VCloud / HubDrive / Mdrive / FastDL / FilePress
-          const hubMatches = htmlText.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|vcloud|hubdrive|mdrive|fastdl|filepress|drivehub)\.[^"'\s<>\[\]]*/gi);
+          const rawHubMatches: string[] = htmlText.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|vcloud|hubdrive|mdrive|fastdl|filepress|drivehub)\.[^"'\s<>\[\]]*/gi) || [];
+          const hubMatches = rawHubMatches.filter((hubUrl: string) => 
+            !hubUrl.toLowerCase().includes("failed") &&
+            !hubUrl.toLowerCase().includes("gdflix") &&
+            !hubUrl.toLowerCase().includes("please check") &&
+            !hubUrl.includes(" ")
+          );
 
-          if (hubMatches && hubMatches.length > 0) {
+          if (hubMatches.length > 0) {
             const sizeMatch = htmlText.match(/Size:<\/span>\s*<span>([^<]+)<\/span>/i) || 
                               htmlText.match(/Size:\s*([0-9.]+\s*(?:GB|MB|KB))/i) || 
                               htmlText.match(/(\d+(?:\.\d+)?\s*(?:GB|MB|KB))/i);
@@ -1315,17 +1397,15 @@ async function startServer() {
               finalName = finalName.replace(/[\[\]()\-_\s]+$/, "").trim();
             }
 
-            return hubMatches
-              .filter((hubUrl) => !hubUrl.toLowerCase().includes("gdflix"))
-              .map((hubUrl) => ({
-                file_name: finalName || "HubCloud Link",
-                url: normalizeDomain(hubUrl.replace(/&amp;/g, '&')),
-                size,
-                is_direct: true,
-              }));
+            return hubMatches.map((hubUrl) => ({
+              file_name: finalName || "HubCloud Link",
+              url: normalizeDomain(hubUrl.replace(/&amp;/g, '&')),
+              size,
+              is_direct: true,
+            }));
           }
 
-          // Otherwise, parse HTML with Cheerio to find nested linkmake / filesdl / download links
+          // Otherwise, parse HTML with Cheerio to find nested linkmake / intermediate gate links
           const $page = cheerio.load(htmlText);
           const nestedCandidates: Array<{ url: string; label: string }> = [];
 
@@ -1342,9 +1422,9 @@ async function startServer() {
             if (visited.has(href)) return;
 
             const lowerHref = href.toLowerCase();
-            if (lowerHref.includes("gdflix")) return;
+            if (lowerHref.includes("gdflix") || lowerHref.includes("cdn-cgi") || lowerHref.includes("download.php")) return;
 
-            const isTargetHost = href.includes("filmygo.");
+            const isTargetHost = href.includes("filmygo.") || href.includes("filmycab.");
             
             if (isTargetHost && (href === finalUrl || href.includes("site-search") || href.includes("category") || href.includes("contact"))) {
               return;
@@ -1360,8 +1440,7 @@ async function startServer() {
               lowerHref.includes("fastdl") ||
               lowerHref.includes("filepress") ||
               lowerHref.includes("drivehub") ||
-              lowerHref.includes("page-download") ||
-              lowerHref.includes("download")
+              lowerHref.includes("page-download")
             ) {
               let anchorText = $page(el).text().trim() || $page(el).attr("title") || "";
               anchorText = anchorText.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
@@ -1377,6 +1456,7 @@ async function startServer() {
                 else if (lowerAnchor.includes("480p")) resLabel = "Download Now 480p";
                 else if (lowerAnchor.includes("720p")) resLabel = "Download Now 720p";
                 else if (lowerAnchor.includes("1080p")) resLabel = "Download Now 1080p";
+                else if (lowerAnchor.includes("4k") || lowerAnchor.includes("2160p")) resLabel = "Download Now 4K";
 
                 if (resLabel) {
                   if (/\bhindi\b.*?\bline\b/i.test(lowerAnchor) || /\bhindi\b.*?\bline\b/i.test(parentLabel)) {
@@ -1390,12 +1470,12 @@ async function startServer() {
             }
           });
 
-          // Fallback raw regex
+          // Fallback raw regex for gates
           if (nestedCandidates.length === 0) {
             const rawMatches = htmlText.match(/https?:\/\/[^"'\s<>\[\]]*(?:filesdl|linkmake|hubcloud|vcloud|hubdrive|mdrive|fastdl|filepress)[^"'\s<>\[\]]*/gi) || [];
             for (const rawUrl of rawMatches) {
               const cleanUrl = rawUrl.replace(/&amp;/g, '&');
-              if (!visited.has(cleanUrl) && !cleanUrl.toLowerCase().includes("gdflix")) {
+              if (!visited.has(cleanUrl) && !cleanUrl.toLowerCase().includes("gdflix") && !cleanUrl.toLowerCase().includes("failed") && !cleanUrl.toLowerCase().includes("download.php")) {
                 nestedCandidates.push({ url: cleanUrl, label: parentLabel });
               }
             }
@@ -1411,29 +1491,32 @@ async function startServer() {
                 resolveFilmyGoLink(cand.url, cand.label, depth + 1)
               )
             );
-            const flattened = subResults.flat().filter(h => !h.url?.toLowerCase().includes("gdflix"));
+            const flattened = subResults.flat().filter(h => isHubCloudUrl(h.url));
             if (flattened.length > 0) {
               return flattened;
             }
           }
 
-          // Fallback: If no sub-links could be extracted (e.g. 403 Cloudflare challenge or no downstream links),
-          // return the startUrl itself as hit so the link is preserved for the user (unless it is gdflix)!
-          if (startUrl.toLowerCase().includes("gdflix")) return [];
-          return [{
-            file_name: parentLabel || "Download Link",
-            url: startUrl,
-            size: null,
-            is_direct: false,
-          }];
+          // If startUrl itself is a HubCloud URL, return it; otherwise return empty array
+          if (isHubCloudUrl(startUrl)) {
+            return [{
+              file_name: parentLabel || "HubCloud Link",
+              url: normalizeDomain(startUrl),
+              size: null,
+              is_direct: true,
+            }];
+          }
+          return [];
         } catch (e) {
-          if (startUrl.toLowerCase().includes("gdflix")) return [];
-          return [{
-            file_name: parentLabel || "Download Link",
-            url: startUrl,
-            size: null,
-            is_direct: false,
-          }];
+          if (isHubCloudUrl(startUrl)) {
+            return [{
+              file_name: parentLabel || "HubCloud Link",
+              url: normalizeDomain(startUrl),
+              size: null,
+              is_direct: true,
+            }];
+          }
+          return [];
         }
       }
 
@@ -1444,7 +1527,7 @@ async function startServer() {
       );
 
       let finalHits = rawResults.flat().filter((hit, index, self) => 
-        !hit.url?.toLowerCase().includes("gdflix") &&
+        isHubCloudUrl(hit.url) &&
         index === self.findIndex((t) => t.url === hit.url)
       );
 
