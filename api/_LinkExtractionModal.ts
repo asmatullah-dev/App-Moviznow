@@ -640,6 +640,43 @@ async function fetchHtml(url: string, isVcloud = false, force = false) {
     }
   });
 
+  linkExtractionRouter.get(["/api/hubcloud", "/api/vcloud"], async (req, res) => {
+    try {
+      const url = (req.query.url as string || "").trim();
+      if (!url) {
+        return res.status(400).json({ error: "Valid URL required" });
+      }
+      const isVcloud = url.includes("vcloud") || req.path.includes("vcloud");
+      const force = req.query.force === "true";
+
+      const data = await performExtraction(url, false, 0, isVcloud, force);
+
+      const hits: Array<{ file_name: string; url: string; size?: string | null; is_direct: boolean }> = [];
+      if (data && data.candidates && data.candidates.length > 0) {
+        data.candidates.forEach((c: { text: string; href: string }) => {
+          hits.push({
+            file_name: c.text || data.title || "Download Link",
+            url: c.href,
+            size: data.size || null,
+            is_direct: true,
+          });
+        });
+      } else if (data && data.url && data.url !== url) {
+        hits.push({
+          file_name: data.title || "Stream Link",
+          url: data.url,
+          size: data.size || null,
+          is_direct: true,
+        });
+      }
+
+      return res.json({ hits, found: hits.length });
+    } catch (e: any) {
+      console.error("GET hubcloud/vcloud extraction error:", e);
+      return res.status(500).json({ hits: [], found: 0, error: e.message });
+    }
+  });
+
 
   linkExtractionRouter.get('/api/resolve-tg', async (req: any, res: any) => {
     try {
