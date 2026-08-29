@@ -89,7 +89,6 @@ export function normalizeUserStatusAndExpiry(u: UserProfile): UserProfile {
 interface UsersContextType {
   users: UserProfile[];
   loading: boolean;
-  isRefreshing: boolean;
   error: string | null;
   refreshUsers: (force?: boolean) => Promise<{ users: UserProfile[], updatedSomething: boolean }>;
   updateUserFields: (userId: string, fields: Partial<UserProfile>) => void;
@@ -107,7 +106,6 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     if (!cached) return [];
     try {
       const parsed: UserProfile[] = JSON.parse(cached);
-      if (!Array.isArray(parsed)) return [];
       const uniqueMap = new Map<string, UserProfile>();
       parsed.forEach(u => {
         if (u && u.uid && !uniqueMap.has(u.uid)) {
@@ -121,15 +119,8 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
   });
   const [loading, setLoading] = useState(() => {
     const cached = safeStorage.getItem('cached_all_users');
-    if (!cached) return true;
-    try {
-      const parsed = JSON.parse(cached);
-      return !Array.isArray(parsed) || parsed.length === 0;
-    } catch (e) {
-      return true;
-    }
+    return cached ? JSON.parse(cached).length === 0 : true;
   });
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasPendingChanges, setHasPendingChanges] = useState(() => {
     const pendingStr = safeStorage.getItem('pending_user_updates');
@@ -321,7 +312,6 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     }
 
     const runFetch = async () => {
-      setIsRefreshing(true);
       if (authLoading || !user) {
           setLoading(false);
           return { users: [], updatedSomething: false };
@@ -601,7 +591,6 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
 
     const p = runFetch().finally(() => {
       fetchPromiseRef.current = null;
-      setIsRefreshing(false);
     });
     fetchPromiseRef.current = p;
     return p;
@@ -640,7 +629,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
   }, [finalizeUserChanges]);
 
   return (
-    <UsersContext.Provider value={{ users, loading, isRefreshing, error, refreshUsers: fetchUsers, updateUserFields, updateMultipleUserFields, finalizeUserChanges, hasPendingChanges }}>
+    <UsersContext.Provider value={{ users, loading, error, refreshUsers: fetchUsers, updateUserFields, updateMultipleUserFields, finalizeUserChanges, hasPendingChanges }}>
       {children}
     </UsersContext.Provider>
   );

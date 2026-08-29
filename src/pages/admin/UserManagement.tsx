@@ -77,17 +77,7 @@ export default function UserManagement() {
   const [allContent, setAllContent] = useState<any[]>([]);
   const [contentSearch, setContentSearch] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
-  const [loading, setLoading] = useState(() => {
-    const cached = safeStorage.getItem('cached_all_users');
-    if (!cached) return true;
-    try {
-      const parsed = JSON.parse(cached);
-      return !Array.isArray(parsed) || parsed.length === 0;
-    } catch {
-      return true;
-    }
-  });
-  const [isMountRefreshing, setIsMountRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [isContentPickerOpen, setIsContentPickerOpen] = useState(false);
   const [assignedIds, setAssignedIds] = useState<Set<string>>(new Set());
   const [contentSearchTerm, setContentSearchTerm] = useState('');
@@ -253,7 +243,6 @@ export default function UserManagement() {
 
     const syncOnMount = async () => {
       isSyncingOnMountRef.current = true;
-      setIsMountRefreshing(true);
       try {
         window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'syncing', message: 'Refreshing users...' } }));
         
@@ -289,9 +278,6 @@ export default function UserManagement() {
         }
       } finally {
         isSyncingOnMountRef.current = false;
-        if (mounted) {
-          setIsMountRefreshing(false);
-        }
       }
     };
 
@@ -301,8 +287,6 @@ export default function UserManagement() {
     
     return () => {
       mounted = false;
-      isSyncingOnMountRef.current = false;
-      setIsMountRefreshing(false);
 
       // Email notification for Expiry only triggered by admin and owner when exiting User Management tab
       if ((profile?.role === 'admin' || profile?.role === 'owner') && changedToExpiredUidsRef.current.size > 0 && profile?.uid) {
@@ -346,12 +330,8 @@ export default function UserManagement() {
   }, [allUsers, profile, managedByFilter]);
 
   useEffect(() => {
-    if (allUsers && allUsers.length > 0) {
-      setLoading(false);
-    } else {
-      setLoading(usersLoading);
-    }
-  }, [usersLoading, allUsers]);
+    setLoading(usersLoading);
+  }, [usersLoading]);
 
   // Removed unsolicited background auto-update write loop to prevent phantom Firestore writes
 
@@ -1590,12 +1570,6 @@ export default function UserManagement() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
         <div className="flex items-center gap-4">
           <h1 className="text-2xl md:text-3xl font-bold">Membership Management</h1>
-          {(isMountRefreshing || isManualRefreshing) && (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 rounded-full animate-pulse border border-emerald-500/20">
-              <RefreshCw className="w-3 h-3 animate-spin" />
-              Syncing latest...
-            </span>
-          )}
           {managedByFilter && (
             <button
               onClick={() => {
@@ -1650,7 +1624,7 @@ export default function UserManagement() {
               disabled={isManualRefreshing}
               variant="ghost"
               className={`px-3 ${hasPendingChanges ? 'bg-yellow-500/10 text-yellow-600 hover:bg-yellow-500/20' : 'text-zinc-600 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
-              icon={<RefreshCw className={`w-5 h-5 ${(usersLoading || isManualRefreshing || isMountRefreshing) ? 'animate-spin' : ''}`} />}
+              icon={<RefreshCw className={`w-5 h-5 ${(usersLoading || isManualRefreshing) ? 'animate-spin' : ''}`} />}
               title={hasPendingChanges ? "Sync pending changes" : "Refresh users"}
             />
             {(profile?.role === 'admin' || profile?.role === 'owner') && (
