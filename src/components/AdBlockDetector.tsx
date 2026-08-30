@@ -14,40 +14,62 @@ export const AdBlockDetector: React.FC = () => {
     if (isUserExemptFromAds(profile)) return;
 
     const checkAdBlock = async () => {
+      // Small delay to allow scripts to start loading
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      let adBlockDetected = false;
+
+      // 1. Bait Fetch (Google AdSense is the most reliable indicator)
       try {
-        // Attempt to fetch a common ad script URL
-        const response = await fetch('https://www.google-analytics.com/analytics.js', {
+        const response = await fetch('https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js', {
           method: 'HEAD',
           mode: 'no-cors',
           cache: 'no-store',
         });
-        setIsAdBlockActive(false);
       } catch (error) {
-        // If fetch fails, likely blocked by adblocker
-        setIsAdBlockActive(true);
+        adBlockDetected = true;
+      }
+
+      // 2. DOM Check (Verify if specific ad elements are hidden)
+      if (!adBlockDetected) {
+        const bait = document.createElement('div');
+        bait.className = 'pub_300x250 pub_300x250m pub_728x90 text-ad textAd ads-container ad-unit';
+        bait.setAttribute('style', 'position: absolute; left: -9999px; top: -9999px; width: 1px; height: 1px;');
+        document.body.appendChild(bait);
+        
+        // Wait for next frame
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        
+        const styles = window.getComputedStyle(bait);
+        if (styles.display === 'none' || styles.visibility === 'hidden' || bait.offsetHeight === 0) {
+          adBlockDetected = true;
+        }
+        document.body.removeChild(bait);
+      }
+
+      // 3. Verification check: Are our actual ad scripts missing?
+      // Only confirm if at least one of these checks fails AND we aren't seeing any ads
+      if (adBlockDetected) {
+        // If we detected something, double check if ANY CPM script managed to load
+        const scripts = document.querySelectorAll('script');
+        const hasAdScript = Array.from(scripts).some(s => 
+          s.src.includes('profitableratecpmnetwork') || 
+          s.src.includes('nap5k.com') || 
+          s.src.includes('vignette.min.js')
+        );
+        
+        // If we have ad scripts loaded, it's a false positive or partial block, don't show yet
+        if (hasAdScript) {
+          setIsAdBlockActive(false);
+        } else {
+          setIsAdBlockActive(true);
+        }
+      } else {
+        setIsAdBlockActive(false);
       }
     };
 
-    // Also try checking for blocked elements after a short delay
-    const checkElements = () => {
-      const adElement = document.createElement('div');
-      adElement.className = 'ad-banner ads-box ad-placement';
-      adElement.style.position = 'absolute';
-      adElement.style.left = '-9999px';
-      adElement.style.top = '-9999px';
-      document.body.appendChild(adElement);
-
-      const isBlocked = window.getComputedStyle(adElement).display === 'none' || adElement.offsetHeight === 0;
-      if (isBlocked) setIsAdBlockActive(true);
-      
-      document.body.removeChild(adElement);
-    };
-
-    // Run both checks
     checkAdBlock();
-    const timer = setTimeout(checkElements, 2000);
-
-    return () => clearTimeout(timer);
   }, [profile]);
 
   if (!isAdBlockActive || !isVisible) return null;

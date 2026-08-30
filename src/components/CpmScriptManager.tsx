@@ -87,10 +87,10 @@ export const CpmScriptManager: React.FC = () => {
       }
 
       const script = document.createElement('script');
+      script.setAttribute('data-zone', config.zone);
       script.src = config.src;
-      script.dataset.zone = config.zone;
       script.async = true;
-      document.body.appendChild(script);
+      document.head.appendChild(script);
     });
   }, [location.pathname, profile]);
 
