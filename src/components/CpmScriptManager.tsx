@@ -45,6 +45,77 @@ function createDummyWindow(): Window {
   } as unknown as Window;
 }
 
+// Track event listeners added to window / document / body by third-party scripts
+const adScriptRegisteredListeners: {
+  target: EventTarget;
+  type: string;
+  listener: EventListenerOrEventListenerObject;
+  options?: boolean | AddEventListenerOptions;
+}[] = [];
+
+if (typeof window !== 'undefined' && !(window as any).__adShieldEventListenerIntercepted) {
+  (window as any).__adShieldEventListenerIntercepted = true;
+  const originalAddEventListener = EventTarget.prototype.addEventListener;
+
+  EventTarget.prototype.addEventListener = function (type, listener, options) {
+    const isMainTarget =
+      this === window ||
+      this === document ||
+      this === document.body ||
+      this === document.documentElement;
+
+    if (isMainTarget && listener) {
+      adScriptRegisteredListeners.push({
+        target: this,
+        type,
+        listener,
+        options,
+      });
+    }
+
+    return originalAddEventListener.call(this, type, listener, options);
+  };
+
+  // Intercept document.createElement for hidden iframes to ensure iframe.contentWindow.open is patched
+  const originalCreateElement = document.createElement;
+  document.createElement = function (tagName: string, options?: ElementCreationOptions) {
+    const element = originalCreateElement.call(this, tagName, options);
+    if (String(tagName).toLowerCase() === 'iframe') {
+      try {
+        setTimeout(() => {
+          const iframe = element as HTMLIFrameElement;
+          if (iframe.contentWindow) {
+            iframe.contentWindow.open = window.open;
+          }
+        }, 0);
+      } catch (e) {}
+    }
+    return element;
+  };
+}
+
+// Helper to remove all event listeners attached by popunder ad scripts
+function removeAllAdScriptListeners(): void {
+  if (typeof window === 'undefined') return;
+  const originalRemoveEventListener = EventTarget.prototype.removeEventListener;
+
+  adScriptRegisteredListeners.forEach(({ target, type, listener, options }) => {
+    try {
+      originalRemoveEventListener.call(target, type, listener, options);
+    } catch (e) {}
+  });
+
+  adScriptRegisteredListeners.length = 0;
+
+  try {
+    delete (window as any)._pop;
+    delete (window as any)._p;
+    delete (window as any).__pop;
+    delete (window as any).popunder;
+    delete (window as any).commercialhalftime;
+  } catch (e) {}
+}
+
 export const CpmScriptManager: React.FC = () => {
   const { profile } = useAuth();
   const location = useLocation();
@@ -217,6 +288,7 @@ export const CpmScriptManager: React.FC = () => {
         popunderScript.remove();
       }
       document.querySelectorAll(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`).forEach((el) => el.remove());
+      removeAllAdScriptListeners();
     }
   }, [location.pathname, profile, inCooldown]);
 
@@ -270,6 +342,7 @@ export const CpmScriptManager: React.FC = () => {
       // Popunder handling for clicks on app UI (#root):
       if (isPopunderInCooldown()) {
         console.warn('[AdShield] Blocked popunder window.open during 2-minute cooldown:', urlStr);
+        removeAllAdScriptListeners();
         // Synchronously execute the user's desired link/page action on 1st tap!
         executeUserIntendedAction();
         // Return dummy window object so popunder script believes popup succeeded and deactivates itself!
@@ -283,12 +356,13 @@ export const CpmScriptManager: React.FC = () => {
       // 1. Open the popunder FIRST so the browser and ad script register the popunder window successfully
       const popupWindow = originalWindowOpen.call(window, url, target, features);
 
-      // 2. Remove popunder script tag after trigger
+      // 2. Remove popunder script tag & unbind all event listeners immediately after 1 popunder fires!
       const popunderScript = document.querySelector(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`);
       if (popunderScript) {
         popunderScript.remove();
       }
       document.querySelectorAll(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`).forEach((el) => el.remove());
+      removeAllAdScriptListeners();
 
       // 3. Defer main-window SPA navigation slightly so it does NOT close or cancel the popunder window gesture
       setTimeout(() => {
