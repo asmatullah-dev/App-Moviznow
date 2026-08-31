@@ -168,71 +168,6 @@ export async function fetchWithVddos(targetUrl: string, customHeaders?: Record<s
   return { html, status: res.status, finalUrl };
 }
 
-export async function fetchFilesdlWithMicrolink(targetUrl: string, timeoutMs = 12000) {
-  let cleanUrl = targetUrl.trim();
-  if (!cleanUrl.startsWith('http')) {
-    cleanUrl = 'https://' + cleanUrl;
-  }
-
-  const isVercel = Boolean(process.env.VERCEL || process.env.VERCEL_URL || process.env.VERCEL_ENV);
-
-  // Non-Vercel environment: attempt direct fetch first
-  if (!isVercel) {
-    try {
-      console.log(`[FilesDL Direct] Fetching: ${cleanUrl} (Non-Vercel environment)`);
-      const vddosRes = await fetchWithVddos(cleanUrl, undefined, timeoutMs);
-      if (vddosRes && vddosRes.html && vddosRes.html.length > 200 && vddosRes.status === 200) {
-        return { ...vddosRes, source: 'vddos' };
-      }
-    } catch (err: any) {
-      console.warn(`[FilesDL Direct] Error for ${cleanUrl}:`, err.message);
-    }
-  }
-
-  // On Vercel (or as fallback if direct fetch failed): use Microlink API
-  if (isVercel) {
-    // 1. Primary Attempt via Microlink API
-    try {
-      const microlinkUrl = `https://api.microlink.io/?url=${encodeURIComponent(cleanUrl)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`;
-      console.log(`[FilesDL Microlink] Fetching via Microlink (Vercel environment): ${cleanUrl}`);
-      const res = await axios.get(microlinkUrl, {
-        validateStatus: () => true,
-        timeout: timeoutMs,
-      });
-
-      if (res.data && res.data.status === 'success' && res.data.data) {
-        const htmlBody = res.data.data.body;
-        const finalRedirectUrl = res.data.data.url || cleanUrl;
-        if (typeof htmlBody === 'string' && htmlBody.length > 50) {
-          return { html: htmlBody, finalUrl: finalRedirectUrl, status: 200, source: 'microlink' };
-        }
-      }
-    } catch (err: any) {
-      console.warn(`[FilesDL Microlink] Error for ${cleanUrl}:`, err.message);
-    }
-
-    // 2. Secondary Microlink fallback without selector filters
-    try {
-      const microlinkUrl = `https://api.microlink.io/?url=${encodeURIComponent(cleanUrl)}&force=true`;
-      const res = await axios.get(microlinkUrl, {
-        validateStatus: () => true,
-        timeout: timeoutMs,
-      });
-      if (res.data && res.data.status === 'success' && res.data.data) {
-        const dataObj = res.data.data;
-        const jsonStr = JSON.stringify(dataObj);
-        return { html: jsonStr, finalUrl: dataObj.url || cleanUrl, status: 200, source: 'microlink-meta' };
-      }
-    } catch (err: any) {
-      console.warn(`[FilesDL Microlink Meta] Error for ${cleanUrl}:`, err.message);
-    }
-  }
-
-  // Fallback to direct fetchWithVddos
-  const vddosRes = await fetchWithVddos(cleanUrl, undefined, timeoutMs);
-  return { ...vddosRes, source: 'vddos' };
-}
-
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -916,53 +851,41 @@ async function startServer() {
     }
   });
 
-  // FilesDL Extraction API (powered by Microlink API)
+  // FilesDL Extraction API
   app.get('/api/filesdl', async (req: express.Request, res: express.Response) => {
     try {
       let { url } = req.query;
-      if (!url || typeof url !== 'string' || (!url.includes('filesdl') && !url.includes('linkmake') && !url.includes('.'))) {
+      if (!url || typeof url !== 'string' || (!url.includes('filesdl') && !url.includes('linkmake'))) {
         return res.status(400).json({ error: 'Valid filesdl/linkmake URL required' });
       }
 
-      let targetUrl = url.trim();
-      if (!targetUrl.startsWith('http')) {
-        targetUrl = 'https://' + targetUrl;
+      if (!url.startsWith('http')) {
+         url = 'https://' + url;
       }
 
-      console.log(`[FilesDL API] Extracting via Microlink API from: ${targetUrl}`);
-      const { html, status, finalUrl, source } = await fetchFilesdlWithMicrolink(targetUrl, 12000);
-
-      // Extract HubCloud / VCloud / HubDrive / Mdrive / FastDL / FilePress / DriveHub destination links
-      const hubMatches = html.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|vcloud|hubdrive|mdrive|fastdl|filepress|drivehub)\.[^"'\s<>\[\]]*/gi) || [];
-      const cleanMatches = hubMatches
-        .map(u => u.replace(/&amp;/g, '&').trim())
-        .filter(u => !u.toLowerCase().includes('failed') && !u.toLowerCase().includes('gdflix') && !u.toLowerCase().includes('please check') && !u.includes(' '));
-
-      if (cleanMatches.length > 0) {
-        return res.json({
-          url: normalizeDomain(cleanMatches[0]),
-          source,
-          finalUrl,
-          candidates: cleanMatches.map(u => normalizeDomain(u))
-        });
-      }
-
-      // Fallback Cheerio anchor href search
-      const $ = cheerio.load(html);
-      let foundUrl = '';
-      $('a[href]').each((_, el) => {
-        const href = $(el).attr('href') || '';
-        if (/(?:hubcloud|hubcould|hub-cloud|vcloud|hubdrive|mdrive|fastdl|filepress|drivehub)\./i.test(href)) {
-          foundUrl = href.replace(/&amp;/g, '&').trim();
-          return false;
-        }
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Referer': url
+        },
+        signal: AbortSignal.timeout(7000)
       });
-
-      if (foundUrl) {
-        return res.json({ url: normalizeDomain(foundUrl), source, finalUrl });
+      
+      // Try to read text anyway because Cloudflare might return 403 but the HTML might still contain the link or we can extract it
+      const text = await response.text();
+      // Look for HubCloud links
+      const hubcloudMatch = text.match(/https?:\/\/[^"'\s]*(?:hubcloud|hubcould|vcloud\.live|hubdrive)\.[^"'\s]*/i);
+      
+      if (hubcloudMatch) {
+          res.json({ url: normalizeDomain(hubcloudMatch[0]) });
+      } else {
+          if (!response.ok) {
+            throw new Error(`FilesDL returned ${response.status} and no valid link was found in response`);
+          }
+          res.status(404).json({ error: 'No HubCloud link found on FilesDL page' });
       }
-
-      return res.status(404).json({ error: 'No HubCloud link found on FilesDL page', source, status });
     } catch (error: any) {
       console.error('FilesDL extract error:', error);
       res.status(500).json({ error: error.message });
@@ -1436,10 +1359,7 @@ async function startServer() {
         visited.add(startUrl);
 
         try {
-          const isFilesdlUrl = startUrl.toLowerCase().includes("filesdl") || startUrl.toLowerCase().includes("linkmake");
-          const { html: htmlText, finalUrl: resolvedStartUrl } = isFilesdlUrl
-            ? await fetchFilesdlWithMicrolink(startUrl, 10000)
-            : await fetchWithVddos(startUrl, undefined, 8000);
+          const { html: htmlText, finalUrl: resolvedStartUrl } = await fetchWithVddos(startUrl, undefined, 8000);
           const finalUrl = resolvedStartUrl || startUrl;
           if (finalUrl && finalUrl !== startUrl) {
             visited.add(finalUrl);

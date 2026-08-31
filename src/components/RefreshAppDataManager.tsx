@@ -17,7 +17,7 @@ export function RefreshAppDataManager() {
     if (isRefreshingRef.current) return;
 
     // For guest users (unauthenticated), populate content library from static export JSON and skip Firestore network calls!
-    if (!user && !profile) {
+    if (!user) {
       seedStaticExportData();
       localStorage.setItem('last_unified_10h_refresh_sync_time_v2_guest', Date.now().toString());
       if (reason !== 'app_open' && reason !== '10_hour_sync') {
@@ -49,10 +49,8 @@ export function RefreshAppDataManager() {
 
     const isManualTrigger = reason === 'catalog_button' || reason === 'user_profile_button' || reason === 'manual';
 
-    const activeUid = user?.uid || profile?.uid;
-
-    if (!isManualTrigger && activeUid) {
-      const storageKey = `last_unified_10h_refresh_sync_time_v2_${activeUid}`;
+    if (!isManualTrigger) {
+      const storageKey = `last_unified_10h_refresh_sync_time_v2_${user.uid}`;
       const lastUnifiedStr = localStorage.getItem(storageKey);
       const lastUnifiedTime = lastUnifiedStr ? parseInt(lastUnifiedStr, 10) : 0;
       const now = Date.now();
@@ -94,7 +92,7 @@ export function RefreshAppDataManager() {
       }
 
       // 2. Check notifications version
-      if (activeUid) {
+      if (user?.uid) {
         const serverNotifVer = (versions.notifications && typeof versions.notifications === 'object')
           ? versions.notifications.updatedAt || versions.notifications.version || 0
           : (versions.notifications || 0);
@@ -108,10 +106,10 @@ export function RefreshAppDataManager() {
       }
 
       // 3. Check self user version and refresh user profile
-      if (activeUid) {
+      if (user?.uid) {
         const chunkUsersMeta = versions.users || {};
-        const serverUserVer = chunkUsersMeta[activeUid] || 0;
-        const localUserVer = safeStorage.getItem(`profile_version_${activeUid}`) || '0';
+        const serverUserVer = chunkUsersMeta[user.uid] || 0;
+        const localUserVer = safeStorage.getItem(`profile_version_${user.uid}`) || '0';
         const serverUserTime = parseVersionTime(serverUserVer);
         const localUserTime = parseVersionTime(localUserVer);
         if (isManualTrigger || (serverUserTime > 0 && serverUserTime > localUserTime)) {
@@ -147,18 +145,16 @@ export function RefreshAppDataManager() {
       // ==========================================
       // STEP 2: SYNC PENDING USER CHANGES AFTER SUCCESSFUL REFRESH (Sessions, Time, Click History, Content History)
       // ==========================================
-      if (activeUid) {
-        const syncSuccess = await executeSyncUserData(activeUid, profile, reason);
+      if (user?.uid) {
+        const syncSuccess = await executeSyncUserData(user.uid, profile, reason);
         if (!syncSuccess) {
           console.warn("Unified Step 2: Syncing pending changes failed/returned false, but proceeding.");
         }
       }
 
       // Save unified last successful refresh & sync timestamp
-      if (activeUid) {
-        const storageKey = `last_unified_10h_refresh_sync_time_v2_${activeUid}`;
-        localStorage.setItem(storageKey, Date.now().toString());
-      }
+      const storageKey = `last_unified_10h_refresh_sync_time_v2_${user.uid}`;
+      localStorage.setItem(storageKey, Date.now().toString());
 
       // Dispatch single unified completion toast
       if (isManualTrigger) {
@@ -256,11 +252,10 @@ export function RefreshAppDataManager() {
 
   // 10-Hour Unified Refresh & Sync Checker (checked on App Open / mount & resume)
   useEffect(() => {
-    const activeUid = user?.uid || profile?.uid;
-    if (!activeUid) return;
+    if (!user?.uid) return;
 
     const check10HourUnified = () => {
-      const storageKey = `last_unified_10h_refresh_sync_time_v2_${activeUid}`;
+      const storageKey = `last_unified_10h_refresh_sync_time_v2_${user.uid}`;
       const lastUnifiedStr = localStorage.getItem(storageKey);
       const lastUnifiedTime = lastUnifiedStr ? parseInt(lastUnifiedStr, 10) : 0;
       const now = Date.now();
@@ -287,7 +282,7 @@ export function RefreshAppDataManager() {
       clearTimeout(timer);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [user?.uid, profile?.uid]);
+  }, [user?.uid]);
 
   return null;
 }
