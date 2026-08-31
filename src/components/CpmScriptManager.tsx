@@ -3,23 +3,12 @@ import { useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { isUserExemptFromAds, isAdRestrictedRoute, purgeAllAdElements } from '../utils/adUtils';
 
-// Popunder Scripts
-const POPUNDER_SCRIPTS = [
+// Authorized Ad Scripts (CommercialHalftime / Adsterra network)
+const AUTHORIZED_CPM_SCRIPTS = [
+  // Popunder_1
   'https://commercialhalftime.com/99/e7/8b/99e78b0792c97e620e43154c137cd1f3.js',
-];
-
-// Page-level Ads (Monetag MultiTag, Vignette, etc.)
-const PAGE_CPM_SCRIPTS = [
-  {
-    src: 'https://nap5k.com/tag.min.js', // Monetag MultiTag (Social Bar/Native/Popunder)
-    zone: '11681684',
-    type: 'multitag'
-  },
-  {
-    src: 'https://n6wxm.com/vignette.min.js', // Monetag Vignette
-    zone: '11681786',
-    type: 'vignette'
-  }
+  // SocialBar_1
+  'https://commercialhalftime.com/f0/27/0b/f0270bbaca005a7be1c664c3c0ae0386.js',
 ];
 
 export const CpmScriptManager: React.FC = () => {
@@ -36,31 +25,107 @@ export const CpmScriptManager: React.FC = () => {
       return;
     }
 
-    // 1. Inject Popunder Scripts
-    POPUNDER_SCRIPTS.forEach((src) => {
+    // Inject Popunder_1 and SocialBar_1
+    AUTHORIZED_CPM_SCRIPTS.forEach((src) => {
       if (!document.querySelector(`script[src="${src}"]`)) {
         const script = document.createElement('script');
         script.src = src;
         script.async = true;
-        script.setAttribute('data-popunder-script', 'true');
-        document.head.appendChild(script);
-      }
-    });
-
-    // 2. Inject Monetag / CPM Page-Level Scripts
-    PAGE_CPM_SCRIPTS.forEach((config) => {
-      if (!document.querySelector(`script[src="${config.src}"]`)) {
-        const script = document.createElement('script');
-        script.src = config.src;
-        script.async = true;
-        if (config.zone) {
-          script.setAttribute('data-zone', config.zone);
-        }
+        script.setAttribute('data-authorized-ad-script', 'true');
         document.head.appendChild(script);
       }
     });
   }, [location.pathname, profile]);
 
+  // =========================================================================
+  // SEAMLESS CLICK FORWARDING (TWO-CLICK FIX) PROXY
+  // =========================================================================
+  useEffect(() => {
+    let lastCoords = { x: 0, y: 0 };
+    let isForwarding = false;
+
+    const handlePointerDown = (e: MouseEvent | TouchEvent) => {
+      if ('clientX' in e) {
+        lastCoords = { x: e.clientX, y: e.clientY };
+      } else if (e.touches && e.touches[0]) {
+        lastCoords = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      }
+    };
+
+    const handleGlobalClick = (e: MouseEvent) => {
+      if ((e as any).__forwardedByProxy || isForwarding) {
+        return;
+      }
+
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+
+      const isAdOverlay = !target.closest('#root');
+
+      if (isAdOverlay) {
+        const clientX = e.clientX || lastCoords.x;
+        const clientY = e.clientY || lastCoords.y;
+
+        if (!clientX && !clientY) return;
+
+        try {
+          const originalPointerEvents = target.style.pointerEvents;
+          target.style.pointerEvents = 'none';
+          const elementUnderneath = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+          target.style.pointerEvents = originalPointerEvents;
+
+          if (elementUnderneath && elementUnderneath.closest('#root')) {
+            const actionable = (
+              elementUnderneath.closest<HTMLElement>(
+                'a, button, [role="button"], input, select, textarea, [data-clickable], [tabindex]'
+              ) || elementUnderneath
+            );
+
+            if (actionable) {
+              isForwarding = true;
+              
+              setTimeout(() => {
+                try {
+                  const forwardedEvent = new MouseEvent('click', {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window,
+                    clientX,
+                    clientY,
+                    screenX: e.screenX,
+                    screenY: e.screenY,
+                  });
+                  (forwardedEvent as any).__forwardedByProxy = true;
+
+                  actionable.dispatchEvent(forwardedEvent);
+
+                  if (actionable.tagName === 'A' && typeof (actionable as any).click === 'function') {
+                    (actionable as any).click();
+                  }
+                } catch (err) {
+                  console.error('Seamless click forwarding error:', err);
+                } finally {
+                  setTimeout(() => {
+                    isForwarding = false;
+                  }, 100);
+                }
+              }, 40);
+            }
+          }
+        } catch (err) {
+          console.error('Ad overlay detection error:', err);
+        }
+      }
+    };
+
+    window.addEventListener('pointerdown', handlePointerDown, { capture: true, passive: true });
+    window.addEventListener('click', handleGlobalClick, { capture: true });
+
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown, { capture: true });
+      window.removeEventListener('click', handleGlobalClick, { capture: true });
+    };
+  }, []);
+
   return null;
 };
-

@@ -64,9 +64,7 @@ export const AdBlockDetector: React.FC = () => {
         // If we detected something, double check if ANY CPM script managed to load
         const scripts = document.querySelectorAll('script');
         const hasAdScript = Array.from(scripts).some(s => 
-          s.src.includes('profitableratecpmnetwork') || 
-          s.src.includes('nap5k.com') || 
-          s.src.includes('vignette.min.js')
+          s.src.includes('commercialhalftime.com')
         );
         
         // If we have ad scripts loaded, it's a false positive or partial block, don't show yet
