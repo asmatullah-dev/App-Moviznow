@@ -1,5 +1,5 @@
 import { standardizePhone } from "../../contexts/AuthContext";
-import { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   useParams,
   Link,
@@ -3599,10 +3599,10 @@ export default function MovieDetails() {
                           hasFullAccess || allowedSeasons.includes(season.id);
 
                         return (
-                          <div
-                            key={season.id || `season-${sIdx}`}
-                            className={`bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden ${!isAccessible && profile ? "opacity-75" : ""}`}
-                          >
+                          <React.Fragment key={season.id || `season-${sIdx}`}>
+                            <div
+                              className={`bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden ${!isAccessible && profile ? "opacity-75" : ""}`}
+                            >
                             <div className="bg-white/50 dark:bg-zinc-950/50 p-6 border-b border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                               <h3 className="text-xl font-bold">
                                 Season {season.seasonNumber}{" "}
@@ -3782,13 +3782,13 @@ export default function MovieDetails() {
                                                   getLinksArray(ep.links)
                                                     .length > 0,
                                               )
-                                              .map((ep, eIdx) => {
+                                              .map((ep, eIdx, epArr) => {
                                                 const isGenericTitle = /^episode\s+\d+$/i.test(ep.title?.trim() || "");
                                                 return (
-                                                  <div
-                                                    key={ep.id || `ep-${eIdx}`}
-                                                    className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 flex flex-col gap-4"
-                                                  >
+                                                  <React.Fragment key={ep.id || `ep-${eIdx}`}>
+                                                    <div
+                                                      className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 flex flex-col gap-4"
+                                                    >
                                                     <div className="flex flex-col gap-2">
                                                       <div className="flex items-center flex-wrap gap-2">
                                                         <span className="text-emerald-500 font-bold">
@@ -3872,8 +3872,16 @@ export default function MovieDetails() {
                                                       </div>
                                                     )}
                                                   </div>
-                                                );
-                                              })}
+
+                                                  {/* Ad Banner after 10 episodes */}
+                                                  {(eIdx + 1) % 10 === 0 && eIdx + 1 < epArr.length && (
+                                                    <div className="w-full my-4">
+                                                      <AdBanner content={mergedContent} />
+                                                    </div>
+                                                  )}
+                                                </React.Fragment>
+                                              );
+                                            })}
                                             </div>
                                         </div>
                                       )}
@@ -3882,7 +3890,13 @@ export default function MovieDetails() {
                               })()}
                             </div>
                           </div>
-                        );
+
+                          {/* Ad Banner after each season */}
+                          <div className="w-full my-6">
+                            <AdBanner content={mergedContent} />
+                          </div>
+                        </React.Fragment>
+                      );
                       });
                     } catch (e) {
                       console.error("Error parsing series seasons:", e);
