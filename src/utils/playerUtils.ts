@@ -237,19 +237,16 @@ function tryOpenUriWithFallback(primaryUri: string, fallbackUri?: string) {
  */
 export function openInNewTab(url: string) {
   try {
-    const html = `<!DOCTYPE html><html><head><meta name="referrer" content="no-referrer"><meta http-equiv="refresh" content="0;url=${url}"></head><body><script>window.location.replace("${url}");</script></body></html>`;
-    const blob = new Blob([html], { type: 'text/html' });
-    const blobUrl = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = blobUrl;
+    a.href = url;
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
+    a.referrerPolicy = 'no-referrer';
     document.body.appendChild(a);
     a.click();
     setTimeout(() => {
       try {
         document.body.removeChild(a);
-        URL.revokeObjectURL(blobUrl);
       } catch (e) {}
     }, 1000);
   } catch (e) {
