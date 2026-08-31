@@ -65,15 +65,11 @@ export const CpmScriptManager: React.FC = () => {
             const isReactNode = Object.keys(htmlEl).some(key => key.startsWith('__react'));
             if (isReactNode) return;
 
-            // Target likely ad overlays (often absolute/fixed and cover screen)
+            // Target ALL non-app absolute/fixed elements (including social bars, popunder overlays, iframes)
             const style = window.getComputedStyle(htmlEl);
             if (style.position === 'absolute' || style.position === 'fixed') {
-               const rect = htmlEl.getBoundingClientRect();
-               // Popunders usually cover the whole screen, unlike Social Bars / banners
-               if (rect.width > window.innerWidth * 0.5 && rect.height > window.innerHeight * 0.5) {
-                 htmlEl.style.pointerEvents = 'none';
-                 htmlEl.style.display = 'none';
-               }
+              htmlEl.style.pointerEvents = 'none';
+              htmlEl.style.display = 'none';
             }
           });
         }
@@ -113,10 +109,33 @@ export const CpmScriptManager: React.FC = () => {
         if (!clientX && !clientY) return;
 
         try {
-          const originalPointerEvents = target.style.pointerEvents;
-          target.style.pointerEvents = 'none';
+          // Temporarily hide ALL non-root overlays to find the true app element underneath
+          const hiddenElements: { el: HTMLElement, prevEvents: string, prevDisplay: string }[] = [];
+          document.querySelectorAll('body > *:not(#root)').forEach((el) => {
+            const htmlEl = el as HTMLElement;
+            if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'LINK', 'IFRAME'].includes(htmlEl.tagName)) return;
+            if (htmlEl.id === 'omdb-modal-root' || htmlEl.hasAttribute('data-app-portal')) return;
+            const isReactNode = Object.keys(htmlEl).some(key => key.startsWith('__react'));
+            if (isReactNode) return;
+            
+            hiddenElements.push({
+              el: htmlEl,
+              prevEvents: htmlEl.style.pointerEvents,
+              prevDisplay: htmlEl.style.display,
+            });
+            htmlEl.style.pointerEvents = 'none';
+            htmlEl.style.display = 'none'; // Force hide to penetrate all layers
+          });
+
           const elementUnderneath = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
-          target.style.pointerEvents = originalPointerEvents;
+
+          // Restore them (except the clicked target which we want to stay dead)
+          hiddenElements.forEach(({ el, prevEvents, prevDisplay }) => {
+            if (el !== target) {
+              el.style.pointerEvents = prevEvents;
+              el.style.display = prevDisplay;
+            }
+          });
 
           // Schedule cooldown enforcement slightly later so ad network's click handler finishes first
           setTimeout(() => {
@@ -143,6 +162,8 @@ export const CpmScriptManager: React.FC = () => {
                     clientY,
                     screenX: e.screenX,
                     screenY: e.screenY,
+                    button: 0,
+                    buttons: 1,
                   });
                   (forwardedEvent as any).__forwardedByProxy = true;
 

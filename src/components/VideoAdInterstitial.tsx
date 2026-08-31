@@ -103,12 +103,22 @@ export const VideoAdInterstitial: React.FC<VideoAdInterstitialProps> = ({
     }
     iframeTimeoutRef.current = setTimeout(() => {
       setIsLoadingAd(false);
-      if (retryCount < 2) {
-        handleRetryAd(1);
-      } else {
-        setHasAdError(true);
-      }
+      // retryCount is 0 here from the initial load
+      handleRetryAd(1);
     }, 8000);
+
+    return () => {
+      if (iframeTimeoutRef.current) {
+        clearTimeout(iframeTimeoutRef.current);
+      }
+    };
+  }, [isOpen, adUrl, generateAdUrl]);
+
+  // Timer effect: Only start countdown when ad has finished loading and is actually visible
+  useEffect(() => {
+    if (!isOpen || isLoadingAd || hasAdError) {
+      return;
+    }
 
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
@@ -131,13 +141,8 @@ export const VideoAdInterstitial: React.FC<VideoAdInterstitialProps> = ({
       });
     }, 1000);
 
-    return () => {
-      clearInterval(timer);
-      if (iframeTimeoutRef.current) {
-        clearTimeout(iframeTimeoutRef.current);
-      }
-    };
-  }, [isOpen, adUrl, generateAdUrl]);
+    return () => clearInterval(timer);
+  }, [isOpen, isLoadingAd, hasAdError]);
 
   const handleIframeLoad = () => {
     if (iframeTimeoutRef.current) {
