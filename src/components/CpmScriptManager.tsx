@@ -27,6 +27,109 @@ export const CpmScriptManager: React.FC = () => {
   const profileRef = useRef(profile);
   profileRef.current = profile;
 
+  // Ref to track last click coordinates & target for seamless fallback execution
+  const lastClickRef = useRef<{ x: number; y: number; target: HTMLElement | null }>({ x: 0, y: 0, target: null });
+  const isExecutingActionRef = useRef<boolean>(false);
+
+  // Helper to execute user's intended navigation/action if hijacked by ad scripts
+  const executeUserIntendedAction = (fallbackCoords?: { x: number; y: number }, fallbackTarget?: HTMLElement | null) => {
+    if (isExecutingActionRef.current) return;
+    isExecutingActionRef.current = true;
+    setTimeout(() => {
+      isExecutingActionRef.current = false;
+    }, 120);
+
+    const coords = fallbackCoords || lastClickRef.current;
+    let elementUnderneath = fallbackTarget || lastClickRef.current.target;
+
+    // If target is missing or an ad overlay outside #root, locate element at pointer coordinates
+    if (!elementUnderneath || !elementUnderneath.closest('#root')) {
+      if (coords.x > 0 || coords.y > 0) {
+        try {
+          const hiddenElements: { el: HTMLElement; prevEvents: string }[] = [];
+          document.querySelectorAll('body > *:not(#root)').forEach((el) => {
+            const htmlEl = el as HTMLElement;
+            if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'LINK', 'IFRAME'].includes(htmlEl.tagName)) return;
+            if (htmlEl.id === 'omdb-modal-root' || htmlEl.hasAttribute('data-app-portal')) return;
+            const isReactNode = Object.keys(htmlEl).some((key) => key.startsWith('__react'));
+            if (isReactNode) return;
+
+            hiddenElements.push({
+              el: htmlEl,
+              prevEvents: htmlEl.style.pointerEvents,
+            });
+            htmlEl.style.pointerEvents = 'none';
+          });
+
+          elementUnderneath = document.elementFromPoint(coords.x, coords.y) as HTMLElement | null;
+
+          hiddenElements.forEach(({ el, prevEvents }) => {
+            el.style.pointerEvents = prevEvents;
+          });
+        } catch (err) {}
+      }
+    }
+
+    if (!elementUnderneath || !elementUnderneath.closest('#root')) return;
+
+    const actionable =
+      elementUnderneath.closest<HTMLElement>(
+        'a, button, [role="button"], input, select, textarea, [data-clickable], [tabindex]'
+      ) || elementUnderneath;
+
+    if (!actionable) return;
+
+    // 1. Check for direct anchor or parent anchor
+    let anchorEl = actionable.closest<HTMLAnchorElement>('a[href]') || (actionable instanceof HTMLAnchorElement ? actionable : null);
+
+    // 2. If no direct anchor, search parent container card for internal <Link> / <a> tag
+    if (!anchorEl) {
+      const containerCard = elementUnderneath.closest<HTMLElement>('.relative, article, .group, card, li, [data-card], section, main');
+      if (containerCard) {
+        anchorEl = containerCard.querySelector<HTMLAnchorElement>('a[href]');
+      }
+    }
+
+    let internalPath: string | null = null;
+    if (anchorEl && anchorEl.href) {
+      try {
+        const parsed = new URL(anchorEl.href, window.location.href);
+        if (parsed.origin === window.location.origin) {
+          internalPath = parsed.pathname + parsed.search + parsed.hash;
+        }
+      } catch (err) {}
+    }
+
+    // Synchronously execute immediate SPA navigation if internal path is found!
+    if (internalPath && internalPath !== window.location.pathname + window.location.search) {
+      navigateRef.current(internalPath);
+      return;
+    }
+
+    // Dispatch synthetic click event for React click handlers
+    try {
+      const forwardedEvent = new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: coords.x,
+        clientY: coords.y,
+        button: 0,
+        buttons: 1,
+      });
+      (forwardedEvent as any).__forwardedByProxy = true;
+      actionable.dispatchEvent(forwardedEvent);
+
+      if (actionable instanceof HTMLInputElement || actionable instanceof HTMLTextAreaElement || actionable instanceof HTMLSelectElement) {
+        actionable.focus();
+      } else if (actionable instanceof HTMLButtonElement) {
+        actionable.click();
+      }
+    } catch (err) {
+      console.error('Seamless click execution error:', err);
+    }
+  };
+
   // Cooldown timer manager (checks every second)
   useEffect(() => {
     const checkCooldown = () => {
@@ -39,6 +142,29 @@ export const CpmScriptManager: React.FC = () => {
     const interval = setInterval(checkCooldown, 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Continuous Ad Cleanup during Cooldown
+  useEffect(() => {
+    if (inCooldown) {
+      purgeAllAdElements();
+
+      const observer = new MutationObserver(() => {
+        if (isPopunderInCooldown()) {
+          document.querySelectorAll('body > *:not(#root)').forEach((el) => {
+            const htmlEl = el as HTMLElement;
+            if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'LINK', 'IFRAME'].includes(htmlEl.tagName)) return;
+            if (htmlEl.id === 'omdb-modal-root' || htmlEl.hasAttribute('data-app-portal')) return;
+            const isReactNode = Object.keys(htmlEl).some((key) => key.startsWith('__react'));
+            if (isReactNode) return;
+            htmlEl.remove();
+          });
+        }
+      });
+
+      observer.observe(document.body, { childList: true, subtree: false });
+      return () => observer.disconnect();
+    }
+  }, [inCooldown]);
 
   // Inject or clean up ad scripts based on route, exemption, and cooldown
   useEffect(() => {
@@ -115,18 +241,24 @@ export const CpmScriptManager: React.FC = () => {
       // If user is VIP / exempt from ads, block ALL external ad window.open calls completely
       if (isUserExemptFromAds(profileRef.current)) {
         console.warn('[AdShield] Blocked ad window.open for VIP user:', urlStr);
+        executeUserIntendedAction();
         return null;
       }
 
       // External / Ad URL detected:
       if (isPopunderInCooldown()) {
         console.warn('[AdShield] Blocked popunder window.open during 3-minute cooldown:', urlStr);
+        // Synchronously execute the user's desired link/page action on 1st tap!
+        executeUserIntendedAction();
         return null;
       }
 
       // NOT in cooldown - record popunder triggered NOW and allow popup to open!
       recordPopunderTriggered();
       setInCooldown(true);
+
+      // Execute user intended navigation in main window while popunder opens!
+      executeUserIntendedAction();
 
       // Remove popunder script tag immediately after trigger
       const popunderScript = document.querySelector(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`);
@@ -146,15 +278,23 @@ export const CpmScriptManager: React.FC = () => {
   // SEAMLESS 1ST-PRESS ROUTING / CLICK ACTION PROXY
   // =========================================================================
   useEffect(() => {
-    let lastCoords = { x: 0, y: 0 };
     let isForwarding = false;
 
     const handlePointerDown = (e: MouseEvent | TouchEvent) => {
+      let x = 0;
+      let y = 0;
       if ('clientX' in e) {
-        lastCoords = { x: e.clientX, y: e.clientY };
+        x = e.clientX;
+        y = e.clientY;
       } else if (e.touches && e.touches[0]) {
-        lastCoords = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        x = e.touches[0].clientX;
+        y = e.touches[0].clientY;
       }
+      lastClickRef.current = {
+        x,
+        y,
+        target: e.target as HTMLElement | null,
+      };
     };
 
     const handleGlobalClick = (e: MouseEvent) => {
@@ -174,105 +314,11 @@ export const CpmScriptManager: React.FC = () => {
       const isAdOverlay = !target.closest('#root');
 
       if (isAdOverlay) {
-        const clientX = e.clientX || lastCoords.x;
-        const clientY = e.clientY || lastCoords.y;
-
+        const clientX = e.clientX || lastClickRef.current.x;
+        const clientY = e.clientY || lastClickRef.current.y;
         if (!clientX && !clientY) return;
 
-        try {
-          // Temporarily disable pointer events on non-root elements to locate underlying app UI
-          const hiddenElements: { el: HTMLElement; prevEvents: string }[] = [];
-          document.querySelectorAll('body > *:not(#root)').forEach((el) => {
-            const htmlEl = el as HTMLElement;
-            if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'LINK', 'IFRAME'].includes(htmlEl.tagName)) return;
-            if (htmlEl.id === 'omdb-modal-root' || htmlEl.hasAttribute('data-app-portal')) return;
-            const isReactNode = Object.keys(htmlEl).some((key) => key.startsWith('__react'));
-            if (isReactNode) return;
-
-            hiddenElements.push({
-              el: htmlEl,
-              prevEvents: htmlEl.style.pointerEvents,
-            });
-            htmlEl.style.pointerEvents = 'none';
-          });
-
-          const elementUnderneath = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
-
-          // Restore pointer events for elements (e.g. Social Bar widgets)
-          hiddenElements.forEach(({ el, prevEvents }) => {
-            el.style.pointerEvents = prevEvents;
-          });
-
-          if (elementUnderneath && elementUnderneath.closest('#root')) {
-            const actionable =
-              elementUnderneath.closest<HTMLElement>(
-                'a, button, [role="button"], input, select, textarea, [data-clickable], [tabindex]'
-              ) || elementUnderneath;
-
-            if (actionable) {
-              isForwarding = true;
-
-              // 1. Search for direct anchor or parent anchor
-              let anchorEl = actionable.closest<HTMLAnchorElement>('a[href]') || (actionable instanceof HTMLAnchorElement ? actionable : null);
-
-              // 2. If no direct anchor, search parent container card for internal <Link> / <a> tag
-              if (!anchorEl) {
-                const containerCard = elementUnderneath.closest<HTMLElement>('.relative, article, .group, card, li, [data-card], section, main');
-                if (containerCard) {
-                  anchorEl = containerCard.querySelector<HTMLAnchorElement>('a[href]');
-                }
-              }
-
-              let internalPath: string | null = null;
-              if (anchorEl && anchorEl.href) {
-                try {
-                  const parsed = new URL(anchorEl.href, window.location.href);
-                  if (parsed.origin === window.location.origin) {
-                    internalPath = parsed.pathname + parsed.search + parsed.hash;
-                  }
-                } catch (err) {}
-              }
-
-              // Synchronously execute immediate SPA navigation if path is found!
-              if (internalPath && internalPath !== window.location.pathname + window.location.search) {
-                navigateRef.current(internalPath);
-              }
-
-              // Dispatch synthetic click event for React handlers
-              try {
-                const forwardedEvent = new MouseEvent('click', {
-                  bubbles: true,
-                  cancelable: true,
-                  view: window,
-                  clientX,
-                  clientY,
-                  screenX: e.screenX,
-                  screenY: e.screenY,
-                  button: 0,
-                  buttons: 1,
-                });
-                (forwardedEvent as any).__forwardedByProxy = true;
-                actionable.dispatchEvent(forwardedEvent);
-
-                if (!internalPath) {
-                  if (actionable instanceof HTMLInputElement || actionable instanceof HTMLTextAreaElement || actionable instanceof HTMLSelectElement) {
-                    actionable.focus();
-                  } else if (actionable instanceof HTMLButtonElement) {
-                    actionable.click();
-                  }
-                }
-              } catch (err) {
-                console.error('Seamless click execution error:', err);
-              } finally {
-                setTimeout(() => {
-                  isForwarding = false;
-                }, 50);
-              }
-            }
-          }
-        } catch (err) {
-          console.error('Ad overlay detection error:', err);
-        }
+        executeUserIntendedAction({ x: clientX, y: clientY }, target);
       }
     };
 
