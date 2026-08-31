@@ -1005,19 +1005,25 @@ export default function Home({
           ) : (
             <>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6">
-                {paginatedContent.map((content) => (
-                  <ContentCard
-                    key={content.id}
-                    content={content}
-                    profile={profile}
-                    qualities={qualities}
-                    languages={languages}
-                    genres={genres}
-                    onToggleFavorite={handleToggleFavorite}
-                    onToggleWatchLater={handleToggleWatchLater}
-                    selectedYear={selectedYear}
-                    skipLiveRatingFetch={true}
-                  />
+                {paginatedContent.map((content, index) => (
+                  <React.Fragment key={content.id}>
+                    <ContentCard
+                      content={content}
+                      profile={profile}
+                      qualities={qualities}
+                      languages={languages}
+                      genres={genres}
+                      onToggleFavorite={handleToggleFavorite}
+                      onToggleWatchLater={handleToggleWatchLater}
+                      selectedYear={selectedYear}
+                      skipLiveRatingFetch={true}
+                    />
+                    {index === 9 && paginatedContent.length > 10 && (
+                      <div className="col-span-full my-3">
+                        <AdBanner />
+                      </div>
+                    )}
+                  </React.Fragment>
                 ))}
               </div>
 

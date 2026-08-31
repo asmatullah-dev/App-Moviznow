@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
@@ -9,8 +9,8 @@ import { NotificationMenu } from '../../components/NotificationMenu';
 import { UserProfileMenu } from '../../components/UserProfileMenu';
 import { AdminButtons } from '../../components/AdminButtons';
 import { CartButton } from '../../components/CartButton';
-
 import ContentCard from '../../components/ContentCard';
+import { AdBanner } from '../../components/AdBanner';
 
 export default function WatchLater() {
   const { profile, toggleFavorite, toggleWatchLater } = useAuth();
@@ -116,19 +116,30 @@ export default function WatchLater() {
           </div>
         </div>
 
+        {/* Ad Banner below Hero */}
+        <div className="w-full mb-8">
+          <AdBanner />
+        </div>
+
         {/* Content Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6">
-          {watchLaterContent.map((content) => (
-            <ContentCard
-              key={content.id}
-              content={content}
-              profile={profile}
-              qualities={qualities}
-              languages={languages}
-              genres={genres}
-              onToggleFavorite={toggleFavorite}
-              onToggleWatchLater={toggleWatchLater}
-            />
+          {watchLaterContent.map((content, idx) => (
+            <React.Fragment key={content.id}>
+              <ContentCard
+                content={content}
+                profile={profile}
+                qualities={qualities}
+                languages={languages}
+                genres={genres}
+                onToggleFavorite={toggleFavorite}
+                onToggleWatchLater={toggleWatchLater}
+              />
+              {idx === 9 && watchLaterContent.length > 10 && (
+                <div className="col-span-full my-4">
+                  <AdBanner />
+                </div>
+              )}
+            </React.Fragment>
           ))}
         </div>
         
@@ -149,6 +160,13 @@ export default function WatchLater() {
               <Compass className="w-4 h-4" />
               <span>{t('Explore Content')}</span>
             </Link>
+          </div>
+        )}
+
+        {/* Ad Banner at bottom */}
+        {watchLaterContent.length > 0 && (
+          <div className="w-full mt-8">
+            <AdBanner />
           </div>
         )}
       </main>

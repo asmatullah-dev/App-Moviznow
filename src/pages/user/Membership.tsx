@@ -29,6 +29,7 @@ import { motion } from 'motion/react';
 import { Header } from "../../components/Header";
 import { ContactSupportButtons } from "../../components/ContactSupportButtons";
 import { PageTransition } from "../../components/PageTransition";
+import { AdBanner } from "../../components/AdBanner";
 
 export default function Membership() {
   const { settings } = useSettings();
@@ -114,6 +115,11 @@ export default function Membership() {
               </span>
             </div>
           </motion.div>
+
+          {/* Ad Banner below Hero */}
+          <div className="w-full my-4">
+            <AdBanner />
+          </div>
 
           {/* Basic User Plans (With Ads) - FIRST SECTION */}
           <div className="space-y-6">
@@ -377,6 +383,11 @@ export default function Membership() {
                 </motion.button>
               </motion.div>
             </div>
+          </div>
+
+          {/* Ad Banner between basic and VIP */}
+          <div className="w-full my-6">
+            <AdBanner />
           </div>
 
           {/* Membership Group VIP Plans (100% Ad-Free) */}
@@ -665,6 +676,11 @@ export default function Membership() {
               </div>
             </div>
           )}
+
+          {/* Ad Banner above support */}
+          <div className="w-full my-6">
+            <AdBanner />
+          </div>
 
           {/* Support Section */}
           <div className="mt-12 border-t border-zinc-800/80 pt-8">

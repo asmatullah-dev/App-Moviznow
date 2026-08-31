@@ -22,6 +22,7 @@ import { motion } from 'motion/react';
 import { Header } from "../../components/Header";
 import { ContactSupportButtons } from "../../components/ContactSupportButtons";
 import { PageTransition } from "../../components/PageTransition";
+import { AdBanner } from "../../components/AdBanner";
 
 export default function About() {
   const { settings } = useSettings();
@@ -65,6 +66,11 @@ export default function About() {
               {t("Your premium destination for HD movies and web series in Pakistan.")}
             </p>
           </motion.div>
+
+          {/* Ad Banner below Hero */}
+          <div className="w-full my-4">
+            <AdBanner />
+          </div>
 
           {/* 3 Value Pillars */}
           <div className="grid md:grid-cols-3 gap-6">
@@ -152,6 +158,11 @@ export default function About() {
             </div>
           </motion.div>
 
+          {/* Ad Banner between Mission and Why Choose Us */}
+          <div className="w-full my-6">
+            <AdBanner />
+          </div>
+
           {/* Why Choose Us Highlight Grid */}
           <div className="space-y-6">
             <div className="text-center space-y-2">
@@ -196,6 +207,11 @@ export default function About() {
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Ad Banner above support */}
+          <div className="w-full my-6">
+            <AdBanner />
           </div>
 
           {/* Support Section */}

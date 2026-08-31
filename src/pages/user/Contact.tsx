@@ -21,6 +21,7 @@ import { motion } from 'motion/react';
 import { Header } from "../../components/Header";
 import { ContactSupportButtons } from "../../components/ContactSupportButtons";
 import { PageTransition } from "../../components/PageTransition";
+import { AdBanner } from "../../components/AdBanner";
 
 export default function Contact() {
   const { settings } = useSettings();
@@ -76,6 +77,11 @@ export default function Contact() {
               {t("Get in touch with the %APP_NAME% team.").replace("%APP_NAME%", appName)}
             </p>
           </motion.div>
+
+          {/* Ad Banner below Hero */}
+          <div className="w-full my-4">
+            <AdBanner />
+          </div>
 
           {/* Contact Methods Cards */}
           <div className="grid sm:grid-cols-2 gap-6">
@@ -196,6 +202,11 @@ export default function Contact() {
                 </p>
               </div>
             </div>
+          </div>
+
+          {/* Ad Banner above support */}
+          <div className="w-full my-6">
+            <AdBanner />
           </div>
 
           {/* Support Section */}

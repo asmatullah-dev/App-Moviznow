@@ -29,6 +29,7 @@ import { motion } from 'motion/react';
 import { Header } from "../../components/Header";
 import { ContactSupportButtons } from "../../components/ContactSupportButtons";
 import { PageTransition } from "../../components/PageTransition";
+import { AdBanner } from "../../components/AdBanner";
 
 export default function FreeMovies() {
   const { settings } = useSettings();
@@ -150,6 +151,11 @@ export default function FreeMovies() {
               </div>
             </div>
           </motion.div>
+
+          {/* Ad Banner below Hero */}
+          <div className="w-full my-4">
+            <AdBanner />
+          </div>
 
           {/* How It Works (Visual Timeline) */}
           <div className="space-y-6">
@@ -275,6 +281,11 @@ export default function FreeMovies() {
             </div>
           </div>
 
+          {/* Ad Banner between comparison and trending */}
+          <div className="w-full my-6">
+            <AdBanner />
+          </div>
+
           {/* Trending Movies Grid */}
           {trendingMovies.length > 0 && (
             <div className="space-y-6">
@@ -327,6 +338,11 @@ export default function FreeMovies() {
               <MessageCircle className="w-5 h-5 fill-current" />
               <span>{t("Order Now - PKR 50")}</span>
             </motion.button>
+          </div>
+
+          {/* Ad Banner above support */}
+          <div className="w-full my-6">
+            <AdBanner />
           </div>
 
           {/* Support Section */}

@@ -18,6 +18,7 @@ import PaymentMethods from '../../components/PaymentMethods';
 import { useSettings } from '../../contexts/SettingsContext';
 
 import { Role } from '../../types';
+import { AdBanner } from '../../components/AdBanner';
 
 const VIP_PLANS = [
   { id: '1m', name: '1 Month (VIP Ad-Free)', months: 1, price: 300, perMonth: 300, planRole: 'vip' as Role, headerBadge: '', saveBadge: '', popular: false, icon: Zap },
@@ -341,6 +342,10 @@ export default function TopUp() {
             />
           </>
         )}
+
+        <div className="my-6">
+          <AdBanner />
+        </div>
 
         <PreviousOrders />
       </main>
