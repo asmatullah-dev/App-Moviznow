@@ -38,11 +38,52 @@ export const CpmScriptManager: React.FC = () => {
   }, [location.pathname, profile]);
 
   // =========================================================================
-  // SEAMLESS CLICK FORWARDING (TWO-CLICK FIX) PROXY
+  // SEAMLESS CLICK FORWARDING (TWO-CLICK FIX) PROXY & COOLDOWN
   // =========================================================================
   useEffect(() => {
     let lastCoords = { x: 0, y: 0 };
     let isForwarding = false;
+
+    // Enforce 3-minute cooldown by disabling pointer events on ad overlays
+    const POPUNDER_COOLDOWN_MS = 3 * 60 * 1000; 
+    
+    const enforceCooldown = () => {
+      const lastPopunderStr = localStorage.getItem('lastPopunderTime');
+      if (lastPopunderStr) {
+        const lastTime = parseInt(lastPopunderStr, 10);
+        if (Date.now() - lastTime < POPUNDER_COOLDOWN_MS) {
+          // Inside cooldown - disable overlays
+          document.querySelectorAll('body > *:not(#root)').forEach((el) => {
+            const htmlEl = el as HTMLElement;
+            
+            if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'LINK'].includes(htmlEl.tagName)) return;
+
+            // Do not hide known app modals or portal elements
+            if (htmlEl.id === 'omdb-modal-root' || htmlEl.hasAttribute('data-app-portal')) return;
+
+            // Check if it's a React element
+            const isReactNode = Object.keys(htmlEl).some(key => key.startsWith('__react'));
+            if (isReactNode) return;
+
+            // Target likely ad overlays (often absolute/fixed and cover screen)
+            const style = window.getComputedStyle(htmlEl);
+            if (style.position === 'absolute' || style.position === 'fixed') {
+               const rect = htmlEl.getBoundingClientRect();
+               // Popunders usually cover the whole screen, unlike Social Bars / banners
+               if (rect.width > window.innerWidth * 0.5 && rect.height > window.innerHeight * 0.5) {
+                 htmlEl.style.pointerEvents = 'none';
+                 htmlEl.style.display = 'none';
+               }
+            }
+          });
+        }
+      }
+    };
+
+    // Check cooldown periodically to remove any newly injected overlays during cooldown
+    const cooldownInterval = setInterval(enforceCooldown, 1000);
+    const observer = new MutationObserver(() => enforceCooldown());
+    observer.observe(document.body, { childList: true });
 
     const handlePointerDown = (e: MouseEvent | TouchEvent) => {
       if ('clientX' in e) {
@@ -66,6 +107,9 @@ export const CpmScriptManager: React.FC = () => {
         const clientX = e.clientX || lastCoords.x;
         const clientY = e.clientY || lastCoords.y;
 
+        // Immediately set cooldown timestamp when a popunder overlay is clicked
+        localStorage.setItem('lastPopunderTime', Date.now().toString());
+
         if (!clientX && !clientY) return;
 
         try {
@@ -73,6 +117,11 @@ export const CpmScriptManager: React.FC = () => {
           target.style.pointerEvents = 'none';
           const elementUnderneath = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
           target.style.pointerEvents = originalPointerEvents;
+
+          // Schedule cooldown enforcement slightly later so ad network's click handler finishes first
+          setTimeout(() => {
+            enforceCooldown();
+          }, 50);
 
           if (elementUnderneath && elementUnderneath.closest('#root')) {
             const actionable = (
@@ -99,9 +148,10 @@ export const CpmScriptManager: React.FC = () => {
 
                   actionable.dispatchEvent(forwardedEvent);
 
-                  if (actionable.tagName === 'A' && typeof (actionable as any).click === 'function') {
-                    (actionable as any).click();
-                  }
+                  // WE REMOVED actionable.click() HERE!
+                  // actionable.click() on React-Router <Link> tags bypasses the SPA router
+                  // and triggers a native browser navigation, which is why the page was "loading not route"
+                  // and dropping the app state. Dispatching the synthetic-compatible MouseEvent is enough.
                 } catch (err) {
                   console.error('Seamless click forwarding error:', err);
                 } finally {
@@ -121,7 +171,12 @@ export const CpmScriptManager: React.FC = () => {
     window.addEventListener('pointerdown', handlePointerDown, { capture: true, passive: true });
     window.addEventListener('click', handleGlobalClick, { capture: true });
 
+    // Initial check
+    enforceCooldown();
+
     return () => {
+      clearInterval(cooldownInterval);
+      observer.disconnect();
       window.removeEventListener('pointerdown', handlePointerDown, { capture: true });
       window.removeEventListener('click', handleGlobalClick, { capture: true });
     };
