@@ -77,13 +77,6 @@ export function getStaticExportVersion(): string {
  * Checks whether the static export JSON file is newer than the version applied to local cache.
  */
 export function isStaticExportNewer(): boolean {
-  if (typeof window !== 'undefined' && window.performance) {
-    const navEntries = window.performance.getEntriesByType('navigation') as PerformanceNavigationTiming[];
-    if (navEntries.length > 0 && navEntries[0].type === 'reload') {
-      return true; // Force reload on hard refresh as requested
-    }
-  }
-
   const currentVer = getStaticExportVersion();
   const cachedVer = safeStorage.getItem('cached_json_catalog_version');
 
@@ -342,15 +335,21 @@ export function mergeStaticExportDataSafely(): {
   collections: AppCollection[];
   stats: { added: number; updated: number; preserved: number };
 } {
-  // Always use new json files when hard reloads or when version change or deployment change detected
-  // Automatically remove old and use new one. Clear old content cache and chunk keys first.
+  // Load existing dynamic content into memory first
+  const existingData = getCachedContentData(false); // don't include static to only get dynamic? Wait, getting all is better.
+  const existingMap = new Map<string, Content>();
+  
+  if (existingData.contentList) {
+    existingData.contentList.forEach(c => {
+      existingMap.set(c.id, c);
+    });
+  }
+
+  // Clear ONLY static chunks and cache placeholders
   const keys = safeStorage.keys();
   for (const key of keys) {
     if (
-      key.startsWith('content_chunk_') ||
       key.startsWith('static_content_chunk_') ||
-      key.startsWith('movie_chunk_') ||
-      key.startsWith('series_chunk_') ||
       key === 'content_cache' ||
       key === 'cached_reviews_data' ||
       key === 'cached_review_version'
@@ -358,8 +357,6 @@ export function mergeStaticExportDataSafely(): {
       safeStorage.removeItem(key);
     }
   }
-
-  const existingMap = new Map<string, Content>();
 
   const jsonItems = staticContentData as StaticContentItem[];
   let added = 0;
@@ -369,8 +366,14 @@ export function mergeStaticExportDataSafely(): {
   for (const jsonItem of jsonItems) {
     const chunkId = jsonItem.chunkId || (jsonItem.type === 'movie' ? 'movie_chunk_0' : 'series_chunk_0');
     const expandedJson = expandContent({ ...jsonItem, id: jsonItem.id }, chunkId);
+    
+    if (existingMap.has(jsonItem.id)) {
+      updated++;
+    } else {
+      added++;
+    }
+    
     existingMap.set(jsonItem.id, expandedJson);
-    added++;
   }
 
   // Final merged list sorted by order descending (or createdAt)
