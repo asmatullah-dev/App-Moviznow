@@ -5,7 +5,7 @@ import { useSettings } from '../contexts/SettingsContext';
 import { isUserExemptFromAds, isAdRestrictedRoute, purgeAllAdElements } from '../utils/adUtils';
 
 export const AdSenseScriptManager: React.FC = () => {
-  const { profile } = useAuth();
+  const { profile, loading, authLoading } = useAuth();
   const { settings } = useSettings();
   const location = useLocation();
 
@@ -18,8 +18,8 @@ export const AdSenseScriptManager: React.FC = () => {
     const scriptSelector = 'script[src*="adsbygoogle.js"]';
     const existingScript = document.querySelector<HTMLScriptElement>(scriptSelector);
 
-    // If on login page, user is exempt, or ads are disabled, remove AdSense script tag and pause requests
-    if (isLogin || isExempt || provider === 'disabled' || provider === 'interstitial_only') {
+    // If auth or profile is loading, or on login page, or user is exempt, or ads disabled, remove AdSense script tag and pause requests
+    if (loading || authLoading || isLogin || isExempt || provider === 'disabled' || provider === 'interstitial_only') {
       if (existingScript) {
         existingScript.remove();
       }
@@ -50,7 +50,7 @@ export const AdSenseScriptManager: React.FC = () => {
         document.head.appendChild(script);
       }
     }
-  }, [location.pathname, profile, settings?.adProvider, settings?.adSenseClientId]);
+  }, [location.pathname, profile, loading, authLoading, settings?.adProvider, settings?.adSenseClientId]);
 
   return null;
 };

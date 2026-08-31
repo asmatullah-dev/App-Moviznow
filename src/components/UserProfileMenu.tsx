@@ -19,7 +19,7 @@ import { useContent } from '../contexts/ContentContext';
 import { useHaptics } from '../hooks/useHaptics';
 
 export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogoutModal?: () => void }) => {
-  const { profile, logout, refreshProfile, isSyncing } = useAuth();
+  const { profile, loading, authLoading, logout, refreshProfile, isSyncing } = useAuth();
   const { theme, setTheme } = useTheme();
   const { language, setLanguage, t } = useLanguage();
   const { isInstallable, installApp } = usePWA();
@@ -195,7 +195,9 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-1">
-                    <p className="font-extrabold text-sm text-zinc-900 dark:text-white truncate">{profile?.displayName || t('Guest User')}</p>
+                    <p className="font-extrabold text-sm text-zinc-900 dark:text-white truncate">
+                      {!profile && (loading || authLoading) ? t('Loading...') : (profile?.displayName || t('Guest User'))}
+                    </p>
                   </div>
                   <div className="space-y-0.5">
                     {profile?.email && !profile.email.endsWith('@moviznow.com') && (
@@ -213,7 +215,7 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
               
               <div className="flex flex-wrap items-center gap-1.5 mt-2">
                 <span className={clsx("text-[10px] font-extrabold tracking-wider px-2.5 py-0.5 rounded-lg border uppercase shadow-2xs", getRoleColor(role))}>
-                  {!profile ? t('Guest') : getRoleDisplayLabel(role)}
+                  {!profile && (loading || authLoading) ? t('Loading...') : (!profile ? t('Guest') : getRoleDisplayLabel(role))}
                 </span>
                 {role !== 'owner' && (
                   <span className={clsx("text-[10px] font-extrabold tracking-wider px-2.5 py-0.5 rounded-lg border uppercase shadow-2xs", getStatusColor(status))}>
