@@ -87,9 +87,16 @@ export function getPopunderCooldownRemaining(): number {
     const lastTimeStr = localStorage.getItem('lastPopunderTime');
     if (!lastTimeStr) return 0;
     const lastTime = parseInt(lastTimeStr, 10);
-    if (isNaN(lastTime)) return 0;
+    if (isNaN(lastTime)) {
+      localStorage.removeItem('lastPopunderTime');
+      return 0;
+    }
     const remaining = POPUNDER_COOLDOWN_MS - (Date.now() - lastTime);
-    return remaining > 0 ? remaining : 0;
+    if (remaining <= 0) {
+      localStorage.removeItem('lastPopunderTime');
+      return 0;
+    }
+    return remaining;
   } catch (e) {
     return 0;
   }

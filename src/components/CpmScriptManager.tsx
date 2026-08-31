@@ -52,7 +52,7 @@ export const CpmScriptManager: React.FC = () => {
     let socialScript = document.querySelector(`script[src*="f0270bbaca005a7be1c664c3c0ae0386"]`) as HTMLScriptElement | null;
     if (!socialScript) {
       socialScript = document.createElement('script');
-      socialScript.src = SOCIAL_BAR_SCRIPT_SRC;
+      socialScript.src = `${SOCIAL_BAR_SCRIPT_SRC}?_cb=${Date.now()}`;
       socialScript.async = true;
       socialScript.setAttribute('data-authorized-ad-script', 'true');
       document.head.appendChild(socialScript);
