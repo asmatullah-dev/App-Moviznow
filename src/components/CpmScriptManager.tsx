@@ -1,84 +1,174 @@
-import React, { useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { isUserExemptFromAds, isAdRestrictedRoute, purgeAllAdElements } from '../utils/adUtils';
+import {
+  isUserExemptFromAds,
+  isAdRestrictedRoute,
+  purgeAllAdElements,
+  isPopunderInCooldown,
+  getPopunderCooldownRemaining,
+  recordPopunderTriggered,
+  POPUNDER_COOLDOWN_MS,
+} from '../utils/adUtils';
 
 // Authorized Ad Scripts (CommercialHalftime / Adsterra network)
-const AUTHORIZED_CPM_SCRIPTS = [
-  // Popunder_1
-  'https://commercialhalftime.com/99/e7/8b/99e78b0792c97e620e43154c137cd1f3.js',
-  // SocialBar_1
-  'https://commercialhalftime.com/f0/27/0b/f0270bbaca005a7be1c664c3c0ae0386.js',
-];
+const POPUNDER_SCRIPT_SRC = 'https://commercialhalftime.com/99/e7/8b/99e78b0792c97e620e43154c137cd1f3.js';
+const SOCIAL_BAR_SCRIPT_SRC = 'https://commercialhalftime.com/f0/27/0b/f0270bbaca005a7be1c664c3c0ae0386.js';
 
 export const CpmScriptManager: React.FC = () => {
   const { profile } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
 
+  // Track cooldown state reactively
+  const [inCooldown, setInCooldown] = useState<boolean>(isPopunderInCooldown());
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
+
+  // Function to remove any popunder script tag and ad overlays from DOM
+  const purgePopunderAndOverlays = useCallback(() => {
+    if (typeof document === 'undefined') return;
+
+    // 1. Remove popunder script tag
+    const popunderScript = document.querySelector(`script[src="${POPUNDER_SCRIPT_SRC}"]`);
+    if (popunderScript) {
+      popunderScript.remove();
+    }
+
+    // 2. Hide and disable pointer events on all non-root overlays / ad iframes
+    document.querySelectorAll('body > *:not(#root)').forEach((el) => {
+      const htmlEl = el as HTMLElement;
+      if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'LINK'].includes(htmlEl.tagName)) return;
+      if (htmlEl.id === 'omdb-modal-root' || htmlEl.hasAttribute('data-app-portal')) return;
+
+      // Check if it's a React element
+      const isReactNode = Object.keys(htmlEl).some((key) => key.startsWith('__react'));
+      if (isReactNode) return;
+
+      const style = window.getComputedStyle(htmlEl);
+      if (style.position === 'absolute' || style.position === 'fixed') {
+        htmlEl.style.pointerEvents = 'none';
+        htmlEl.style.display = 'none';
+        try {
+          htmlEl.remove();
+        } catch (e) {}
+      }
+    });
+  }, []);
+
+  // Cooldown timer manager
+  useEffect(() => {
+    const checkCooldown = () => {
+      const remaining = getPopunderCooldownRemaining();
+      const active = remaining > 0;
+      setInCooldown(active);
+
+      if (active) {
+        purgePopunderAndOverlays();
+      }
+    };
+
+    checkCooldown();
+    const interval = setInterval(checkCooldown, 1000);
+    return () => clearInterval(interval);
+  }, [purgePopunderAndOverlays]);
+
+  // Inject or clean up ad scripts based on route, exemption, and cooldown
   useEffect(() => {
     const isLogin = isAdRestrictedRoute(location.pathname);
     const isExempt = isUserExemptFromAds(profile);
 
-    // If on restricted route (e.g. login) or user has VIP/Admin/Owner exemption, remove all ads
+    // If on restricted route or user is exempt, purge everything
     if (isLogin || isExempt) {
       purgeAllAdElements();
       return;
     }
 
-    // Inject Popunder_1 and SocialBar_1
-    AUTHORIZED_CPM_SCRIPTS.forEach((src) => {
-      if (!document.querySelector(`script[src="${src}"]`)) {
+    // 1. Social Bar (inject if allowed)
+    if (!document.querySelector(`script[src="${SOCIAL_BAR_SCRIPT_SRC}"]`)) {
+      const script = document.createElement('script');
+      script.src = SOCIAL_BAR_SCRIPT_SRC;
+      script.async = true;
+      script.setAttribute('data-authorized-ad-script', 'true');
+      document.head.appendChild(script);
+    }
+
+    // 2. Popunder: ONLY inject if NOT in cooldown
+    if (!inCooldown && !isPopunderInCooldown()) {
+      if (!document.querySelector(`script[src="${POPUNDER_SCRIPT_SRC}"]`)) {
         const script = document.createElement('script');
-        script.src = src;
+        script.src = POPUNDER_SCRIPT_SRC;
         script.async = true;
         script.setAttribute('data-authorized-ad-script', 'true');
         document.head.appendChild(script);
       }
-    });
-  }, [location.pathname, profile]);
+    } else {
+      // In cooldown - make sure popunder script tag is NOT in document
+      const popunderScript = document.querySelector(`script[src="${POPUNDER_SCRIPT_SRC}"]`);
+      if (popunderScript) {
+        popunderScript.remove();
+      }
+    }
+  }, [location.pathname, profile, inCooldown]);
 
   // =========================================================================
-  // SEAMLESS CLICK FORWARDING (TWO-CLICK FIX) PROXY & COOLDOWN
+  // SAFE WINDOW.OPEN INTERCEPTOR (BLOCKS ADS DURING COOLDOWN, PRESERVES APP URLS)
+  // =========================================================================
+  useEffect(() => {
+    const originalWindowOpen = window.open;
+
+    window.open = function (url?: string | URL, target?: string, features?: string) {
+      const urlStr = String(url || '');
+
+      // Whitelist legitimate app URLs
+      const isAppWhitelisted =
+        !urlStr ||
+        urlStr.startsWith('https://wa.me/') ||
+        urlStr.startsWith('https://api.whatsapp.com') ||
+        urlStr.startsWith('https://t.me/') ||
+        urlStr.includes('telegram.me') ||
+        urlStr.includes('youtube.com') ||
+        urlStr.includes('youtu.be') ||
+        urlStr.startsWith('/') ||
+        urlStr.startsWith(window.location.origin) ||
+        urlStr.startsWith('tel:') ||
+        urlStr.startsWith('mailto:') ||
+        urlStr.startsWith('blob:') ||
+        urlStr.startsWith('data:');
+
+      if (isAppWhitelisted) {
+        return originalWindowOpen.call(window, url, target, features);
+      }
+
+      // It's an external / ad URL
+      if (isPopunderInCooldown()) {
+        console.warn('[AdShield] Blocked popunder window.open during 3-minute cooldown:', urlStr);
+        return null;
+      }
+
+      // Not in cooldown - allow this popunder and immediately start the 3-minute cooldown
+      recordPopunderTriggered();
+      setInCooldown(true);
+      return originalWindowOpen.call(window, url, target, features);
+    };
+
+    return () => {
+      window.open = originalWindowOpen;
+    };
+  }, []);
+
+  // =========================================================================
+  // SEAMLESS CLICK INTERCEPTION & 1ST-CLICK INSTANT ROUTING / ACTION PROXY
   // =========================================================================
   useEffect(() => {
     let lastCoords = { x: 0, y: 0 };
     let isForwarding = false;
 
-    // Enforce 3-minute cooldown by disabling pointer events on ad overlays
-    const POPUNDER_COOLDOWN_MS = 3 * 60 * 1000; 
-    
-    const enforceCooldown = () => {
-      const lastPopunderStr = localStorage.getItem('lastPopunderTime');
-      if (lastPopunderStr) {
-        const lastTime = parseInt(lastPopunderStr, 10);
-        if (Date.now() - lastTime < POPUNDER_COOLDOWN_MS) {
-          // Inside cooldown - disable overlays
-          document.querySelectorAll('body > *:not(#root)').forEach((el) => {
-            const htmlEl = el as HTMLElement;
-            
-            if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'LINK'].includes(htmlEl.tagName)) return;
-
-            // Do not hide known app modals or portal elements
-            if (htmlEl.id === 'omdb-modal-root' || htmlEl.hasAttribute('data-app-portal')) return;
-
-            // Check if it's a React element
-            const isReactNode = Object.keys(htmlEl).some(key => key.startsWith('__react'));
-            if (isReactNode) return;
-
-            // Target ALL non-app absolute/fixed elements (including social bars, popunder overlays, iframes)
-            const style = window.getComputedStyle(htmlEl);
-            if (style.position === 'absolute' || style.position === 'fixed') {
-              htmlEl.style.pointerEvents = 'none';
-              htmlEl.style.display = 'none';
-            }
-          });
-        }
+    const observer = new MutationObserver(() => {
+      if (isPopunderInCooldown()) {
+        purgePopunderAndOverlays();
       }
-    };
-
-    // Check cooldown periodically to remove any newly injected overlays during cooldown
-    const cooldownInterval = setInterval(enforceCooldown, 1000);
-    const observer = new MutationObserver(() => enforceCooldown());
+    });
     observer.observe(document.body, { childList: true });
 
     const handlePointerDown = (e: MouseEvent | TouchEvent) => {
@@ -103,33 +193,39 @@ export const CpmScriptManager: React.FC = () => {
         const clientX = e.clientX || lastCoords.x;
         const clientY = e.clientY || lastCoords.y;
 
-        // Immediately set cooldown timestamp when a popunder overlay is clicked
-        localStorage.setItem('lastPopunderTime', Date.now().toString());
+        // Record cooldown immediately on clicking an ad overlay
+        recordPopunderTriggered();
+        setInCooldown(true);
 
         if (!clientX && !clientY) return;
 
         try {
-          // Temporarily hide ALL non-root overlays to find the true app element underneath
-          const hiddenElements: { el: HTMLElement, prevEvents: string, prevDisplay: string }[] = [];
+          // Deep-pierce: temporarily hide all non-root overlays to reveal true app UI underneath
+          const hiddenElements: { el: HTMLElement; prevEvents: string; prevDisplay: string }[] = [];
           document.querySelectorAll('body > *:not(#root)').forEach((el) => {
             const htmlEl = el as HTMLElement;
             if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'LINK', 'IFRAME'].includes(htmlEl.tagName)) return;
             if (htmlEl.id === 'omdb-modal-root' || htmlEl.hasAttribute('data-app-portal')) return;
-            const isReactNode = Object.keys(htmlEl).some(key => key.startsWith('__react'));
+            const isReactNode = Object.keys(htmlEl).some((key) => key.startsWith('__react'));
             if (isReactNode) return;
-            
+
             hiddenElements.push({
               el: htmlEl,
               prevEvents: htmlEl.style.pointerEvents,
               prevDisplay: htmlEl.style.display,
             });
             htmlEl.style.pointerEvents = 'none';
-            htmlEl.style.display = 'none'; // Force hide to penetrate all layers
+            htmlEl.style.display = 'none';
           });
 
           const elementUnderneath = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
 
-          // Restore them (except the clicked target which we want to stay dead)
+          // Remove the clicked ad overlay permanently
+          try {
+            target.remove();
+          } catch (e) {}
+
+          // Restore other non-ad elements
           hiddenElements.forEach(({ el, prevEvents, prevDisplay }) => {
             if (el !== target) {
               el.style.pointerEvents = prevEvents;
@@ -137,23 +233,36 @@ export const CpmScriptManager: React.FC = () => {
             }
           });
 
-          // Schedule cooldown enforcement slightly later so ad network's click handler finishes first
+          // Schedule cooldown purge
           setTimeout(() => {
-            enforceCooldown();
-          }, 50);
+            purgePopunderAndOverlays();
+          }, 30);
 
           if (elementUnderneath && elementUnderneath.closest('#root')) {
-            const actionable = (
+            const actionable =
               elementUnderneath.closest<HTMLElement>(
                 'a, button, [role="button"], input, select, textarea, [data-clickable], [tabindex]'
-              ) || elementUnderneath
-            );
+              ) || elementUnderneath;
 
             if (actionable) {
               isForwarding = true;
-              
+
+              // Check if actionable is an internal link (<Link> or <a>)
+              const anchorEl = actionable.closest<HTMLAnchorElement>('a') || (actionable instanceof HTMLAnchorElement ? actionable : null);
+              let internalPath: string | null = null;
+
+              if (anchorEl && anchorEl.href) {
+                try {
+                  const parsed = new URL(anchorEl.href, window.location.href);
+                  if (parsed.origin === window.location.origin) {
+                    internalPath = parsed.pathname + parsed.search + parsed.hash;
+                  }
+                } catch (e) {}
+              }
+
               setTimeout(() => {
                 try {
+                  // 1. Dispatch synthetic event for any React state handlers (e.g. setIsClicked, refreshRating)
                   const forwardedEvent = new MouseEvent('click', {
                     bubbles: true,
                     cancelable: true,
@@ -166,21 +275,24 @@ export const CpmScriptManager: React.FC = () => {
                     buttons: 1,
                   });
                   (forwardedEvent as any).__forwardedByProxy = true;
-
                   actionable.dispatchEvent(forwardedEvent);
 
-                  // WE REMOVED actionable.click() HERE!
-                  // actionable.click() on React-Router <Link> tags bypasses the SPA router
-                  // and triggers a native browser navigation, which is why the page was "loading not route"
-                  // and dropping the app state. Dispatching the synthetic-compatible MouseEvent is enough.
+                  // 2. If it is an internal route, execute SPA navigation immediately on 1st click!
+                  if (internalPath && internalPath !== window.location.pathname + window.location.search) {
+                    navigateRef.current(internalPath);
+                  } else if (actionable instanceof HTMLInputElement || actionable instanceof HTMLTextAreaElement || actionable instanceof HTMLSelectElement) {
+                    actionable.focus();
+                  } else if (actionable instanceof HTMLButtonElement) {
+                    actionable.click();
+                  }
                 } catch (err) {
-                  console.error('Seamless click forwarding error:', err);
+                  console.error('Seamless click execution error:', err);
                 } finally {
                   setTimeout(() => {
                     isForwarding = false;
-                  }, 100);
+                  }, 80);
                 }
-              }, 40);
+              }, 30);
             }
           }
         } catch (err) {
@@ -192,16 +304,12 @@ export const CpmScriptManager: React.FC = () => {
     window.addEventListener('pointerdown', handlePointerDown, { capture: true, passive: true });
     window.addEventListener('click', handleGlobalClick, { capture: true });
 
-    // Initial check
-    enforceCooldown();
-
     return () => {
-      clearInterval(cooldownInterval);
       observer.disconnect();
       window.removeEventListener('pointerdown', handlePointerDown, { capture: true });
       window.removeEventListener('click', handleGlobalClick, { capture: true });
     };
-  }, []);
+  }, [purgePopunderAndOverlays]);
 
   return null;
 };

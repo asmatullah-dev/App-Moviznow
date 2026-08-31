@@ -75,6 +75,43 @@ export interface AdContentCheck {
   isFree?: boolean;
 }
 
+// 3-Minute Popunder Cooldown Constant
+export const POPUNDER_COOLDOWN_MS = 3 * 60 * 1000; // 3 minutes in milliseconds
+
+/**
+ * Returns remaining cooldown milliseconds (0 if cooldown has expired or not set).
+ */
+export function getPopunderCooldownRemaining(): number {
+  if (typeof window === 'undefined') return 0;
+  try {
+    const lastTimeStr = localStorage.getItem('lastPopunderTime');
+    if (!lastTimeStr) return 0;
+    const lastTime = parseInt(lastTimeStr, 10);
+    if (isNaN(lastTime)) return 0;
+    const remaining = POPUNDER_COOLDOWN_MS - (Date.now() - lastTime);
+    return remaining > 0 ? remaining : 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
+/**
+ * Checks if popunder ads are currently in the 3-minute cooldown period.
+ */
+export function isPopunderInCooldown(): boolean {
+  return getPopunderCooldownRemaining() > 0;
+}
+
+/**
+ * Records the current timestamp as the start of a 3-minute popunder cooldown.
+ */
+export function recordPopunderTriggered(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem('lastPopunderTime', Date.now().toString());
+  } catch (e) {}
+}
+
 /**
  * Checks if the user or content is exempt from all advertisement displays
  * (Google Auto Ads, AdSense Banners, Video Interstitials, CPM Popunders, Social Ads).
