@@ -7,8 +7,9 @@ import { isUserExemptFromAds, isAdRestrictedRoute } from '../utils/adUtils';
 
 interface AdBannerProps {
   className?: string;
-  content?: { status?: string } | null;
+  content?: { id?: string; status?: string } | null;
   layout?: 'auto' | 'rectangle' | 'leaderboard' | 'skyscraper';
+  refreshKey?: string | number;
 }
 
 interface BannerConfig {
@@ -53,14 +54,17 @@ const BANNER_CONFIGS: Record<string, BannerConfig> = {
 export const AdBanner: React.FC<AdBannerProps> = ({ 
   className = '', 
   content,
-  layout = 'auto'
+  layout = 'auto',
+  refreshKey,
 }) => {
   const { profile } = useAuth();
   const { settings } = useSettings();
   const location = useLocation();
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState<number>(() => {
-    if (typeof window !== 'undefined') return window.innerWidth;
+    if (typeof window !== 'undefined') {
+      return Math.min(window.innerWidth - 32, 1200);
+    }
     return 768;
   });
 
@@ -70,6 +74,12 @@ export const AdBanner: React.FC<AdBannerProps> = ({
 
   useEffect(() => {
     if (!containerRef.current) return;
+
+    // Immediately capture initial container width
+    const currentWidth = containerRef.current.clientWidth;
+    if (currentWidth > 0) {
+      setContainerWidth(currentWidth);
+    }
 
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -128,8 +138,8 @@ export const AdBanner: React.FC<AdBannerProps> = ({
             justify-content: center; 
             align-items: center; 
             background: transparent; 
-            overflow: hidden;
-            width: 100%;
+            overflow: hidden; 
+            width: 100%; 
             height: 100%;
           }
         </style>
@@ -149,6 +159,9 @@ export const AdBanner: React.FC<AdBannerProps> = ({
     </html>
   `;
 
+  // Unique identifier that forces a new fresh ad load on route navigation or content change
+  const bannerInstanceKey = `${selectedConfig.key}-${selectedConfig.width}x${selectedConfig.height}-${location.pathname}-${location.search}-${content?.id || ''}-${refreshKey ?? ''}`;
+
   return (
     <div 
       ref={containerRef}
@@ -161,10 +174,11 @@ export const AdBanner: React.FC<AdBannerProps> = ({
           style={{ minHeight: `${selectedConfig.height}px` }}
         >
           <iframe
-            key={`${selectedConfig.key}-${selectedConfig.width}-${selectedConfig.height}`}
+            key={bannerInstanceKey}
             srcDoc={adHtmlDoc}
             width={selectedConfig.width}
             height={selectedConfig.height}
+            loading="eager"
             title={`${selectedConfig.width}x${selectedConfig.height} Advertisement Banner`}
             className="border-0 overflow-hidden max-w-full"
             scrolling="no"

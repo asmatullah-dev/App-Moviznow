@@ -859,25 +859,28 @@ export default function Home({
 
           {/* Newly Added Section */}
           {!hideScrollingTabs && newlyAddedCollection && (
-            <CollectionRow
-              title={t("Newly Added")}
-              description={newlyAddedCollection.description}
-              icon={
-                <div className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-500 shadow-sm">
-                  <Zap className="w-5 h-5" />
-                </div>
-              }
-              scrollKey="scroll_newly_added"
-              items={newlyAddedItems}
-              isVisible={isNewlyAddedVisible}
-              onToggleVisibility={toggleNewlyAddedVisibility}
-              profile={profile}
-              qualities={qualities}
-              languages={languages}
-              genres={genres}
-              toggleFavorite={handleToggleFavorite}
-              toggleWatchLater={handleToggleWatchLater}
-            />
+            <>
+              <CollectionRow
+                title={t("Newly Added")}
+                description={newlyAddedCollection.description}
+                icon={
+                  <div className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-500 shadow-sm">
+                    <Zap className="w-5 h-5" />
+                  </div>
+                }
+                scrollKey="scroll_newly_added"
+                items={newlyAddedItems}
+                isVisible={isNewlyAddedVisible}
+                onToggleVisibility={toggleNewlyAddedVisibility}
+                profile={profile}
+                qualities={qualities}
+                languages={languages}
+                genres={genres}
+                toggleFavorite={handleToggleFavorite}
+                toggleWatchLater={handleToggleWatchLater}
+              />
+              <AdBanner className="my-6" />
+            </>
           )}
 
           {/* Curated Collections Overview */}
@@ -1124,6 +1127,9 @@ export default function Home({
                   </div>
                 </div>
               )}
+
+              {/* Ad Banner under page selection */}
+              <AdBanner className="mt-8 mb-4" />
             </>
           )}
         </main>

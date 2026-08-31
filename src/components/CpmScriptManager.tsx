@@ -12,7 +12,7 @@ import {
 } from '../utils/adUtils';
 
 // Authorized Ad Scripts (CommercialHalftime / Adsterra network)
-const POPUNDER_SCRIPT_SRC = 'https://commercialhalftime.com/99/e7/8b/99e78b0792c97e620e43154c137cd1f3.js';
+const POPUNDER_SCRIPT_BASE = 'https://commercialhalftime.com/99/e7/8b/99e78b0792c97e620e43154c137cd1f3.js';
 const SOCIAL_BAR_SCRIPT_SRC = 'https://commercialhalftime.com/f0/27/0b/f0270bbaca005a7be1c664c3c0ae0386.js';
 
 export const CpmScriptManager: React.FC = () => {
@@ -29,11 +29,10 @@ export const CpmScriptManager: React.FC = () => {
   const purgePopunderAndOverlays = useCallback(() => {
     if (typeof document === 'undefined') return;
 
-    // 1. Remove popunder script tag
-    const popunderScript = document.querySelector(`script[src="${POPUNDER_SCRIPT_SRC}"]`);
-    if (popunderScript) {
-      popunderScript.remove();
-    }
+    // 1. Remove all popunder script tags
+    document.querySelectorAll(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`).forEach((s) => {
+      s.remove();
+    });
 
     // 2. Hide and disable pointer events on all non-root overlays / ad iframes
     document.querySelectorAll('body > *:not(#root)').forEach((el) => {
@@ -56,7 +55,7 @@ export const CpmScriptManager: React.FC = () => {
     });
   }, []);
 
-  // Cooldown timer manager
+  // Cooldown timer manager (checks every second)
   useEffect(() => {
     const checkCooldown = () => {
       const remaining = getPopunderCooldownRemaining();
@@ -95,19 +94,20 @@ export const CpmScriptManager: React.FC = () => {
 
     // 2. Popunder: ONLY inject if NOT in cooldown
     if (!inCooldown && !isPopunderInCooldown()) {
-      if (!document.querySelector(`script[src="${POPUNDER_SCRIPT_SRC}"]`)) {
+      const existing = document.querySelector(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`);
+      if (!existing) {
         const script = document.createElement('script');
-        script.src = POPUNDER_SCRIPT_SRC;
+        // Add timestamp to ensure fresh evaluation after cooldown
+        script.src = `${POPUNDER_SCRIPT_BASE}?t=${Date.now()}`;
         script.async = true;
         script.setAttribute('data-authorized-ad-script', 'true');
         document.head.appendChild(script);
       }
     } else {
       // In cooldown - make sure popunder script tag is NOT in document
-      const popunderScript = document.querySelector(`script[src="${POPUNDER_SCRIPT_SRC}"]`);
-      if (popunderScript) {
-        popunderScript.remove();
-      }
+      document.querySelectorAll(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`).forEach((s) => {
+        s.remove();
+      });
     }
   }, [location.pathname, profile, inCooldown]);
 
@@ -193,14 +193,18 @@ export const CpmScriptManager: React.FC = () => {
         const clientX = e.clientX || lastCoords.x;
         const clientY = e.clientY || lastCoords.y;
 
-        // Record cooldown immediately on clicking an ad overlay
-        recordPopunderTriggered();
-        setInCooldown(true);
+        const isCurrentlyCooldown = isPopunderInCooldown();
+
+        // If not in cooldown, this click fires the popunder; record cooldown now
+        if (!isCurrentlyCooldown) {
+          recordPopunderTriggered();
+          setInCooldown(true);
+        }
 
         if (!clientX && !clientY) return;
 
         try {
-          // Deep-pierce: temporarily hide all non-root overlays to reveal true app UI underneath
+          // Deep-pierce: temporarily adjust pointerEvents to reveal true app UI underneath
           const hiddenElements: { el: HTMLElement; prevEvents: string; prevDisplay: string }[] = [];
           document.querySelectorAll('body > *:not(#root)').forEach((el) => {
             const htmlEl = el as HTMLElement;
@@ -215,19 +219,17 @@ export const CpmScriptManager: React.FC = () => {
               prevDisplay: htmlEl.style.display,
             });
             htmlEl.style.pointerEvents = 'none';
-            htmlEl.style.display = 'none';
           });
 
           const elementUnderneath = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
 
-          // Remove the clicked ad overlay permanently
-          try {
-            target.remove();
-          } catch (e) {}
-
-          // Restore other non-ad elements
+          // Restore pointer events so ad handler can still process if needed
           hiddenElements.forEach(({ el, prevEvents, prevDisplay }) => {
-            if (el !== target) {
+            if (isCurrentlyCooldown) {
+              el.style.pointerEvents = 'none';
+              el.style.display = 'none';
+              try { el.remove(); } catch (e) {}
+            } else {
               el.style.pointerEvents = prevEvents;
               el.style.display = prevDisplay;
             }
@@ -236,7 +238,7 @@ export const CpmScriptManager: React.FC = () => {
           // Schedule cooldown purge
           setTimeout(() => {
             purgePopunderAndOverlays();
-          }, 30);
+          }, 60);
 
           if (elementUnderneath && elementUnderneath.closest('#root')) {
             const actionable =
@@ -262,7 +264,7 @@ export const CpmScriptManager: React.FC = () => {
 
               setTimeout(() => {
                 try {
-                  // 1. Dispatch synthetic event for any React state handlers (e.g. setIsClicked, refreshRating)
+                  // 1. Dispatch synthetic event for any React state handlers
                   const forwardedEvent = new MouseEvent('click', {
                     bubbles: true,
                     cancelable: true,

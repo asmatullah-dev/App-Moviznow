@@ -17,13 +17,18 @@ import {
   Check,
   Percent,
   TrendingUp,
-  Award
+  Award,
+  Gem,
+  X,
+  CheckCircle2,
+  XCircle,
+  HelpCircle
 } from 'lucide-react';
 import { standardizePhone } from '../../contexts/AuthContext';
 import { Helmet } from 'react-helmet';
 import { Link, useNavigate } from 'react-router-dom';
 import { useContent } from '../../contexts/ContentContext';
-import { Content } from '../../types';
+import { Content, Role } from '../../types';
 import { motion } from 'motion/react';
 
 import { Header } from "../../components/Header";
@@ -31,13 +36,35 @@ import { ContactSupportButtons } from "../../components/ContactSupportButtons";
 import { PageTransition } from "../../components/PageTransition";
 import { AdBanner } from "../../components/AdBanner";
 
+const VIP_PLANS = [
+  { id: '1m', name: '1 Month (VIP Ad-Free)', months: 1, price: 300, perMonth: 300, planRole: 'vip' as Role, headerBadge: '', saveBadge: '', popular: false, icon: Zap },
+  { id: '3m', name: '3 Months (VIP Ad-Free)', months: 3, price: 750, perMonth: 250, planRole: 'vip' as Role, headerBadge: '', saveBadge: 'Save 17%', popular: false, icon: Sparkles },
+  { id: '6m', name: '6 Months (VIP Ad-Free)', months: 6, price: 1400, perMonth: 233, planRole: 'vip' as Role, headerBadge: '', saveBadge: 'Save 22%', popular: false, icon: ShieldCheck },
+  { id: '1y', name: '1 Year (VIP Ad-Free)', months: 12, price: 2600, perMonth: 216, planRole: 'vip' as Role, headerBadge: '🔥 Most Popular', saveBadge: 'Save 28%', popular: true, icon: Crown },
+  { id: '2y', name: '2 Years (VIP Ad-Free)', months: 24, price: 4000, perMonth: 166, planRole: 'vip' as Role, headerBadge: '👑 Mega VIP', saveBadge: 'Save 44%', popular: false, icon: Gem },
+];
+
+const BASIC_PLANS = [
+  { id: 'basic_1m', name: '1 Month (Basic With Ads)', months: 1, price: 50, perMonth: 50, planRole: 'basic' as Role, headerBadge: '📺 RS 50/MO', saveBadge: 'With Ads', popular: true, icon: Zap },
+  { id: 'basic_3m', name: '3 Months (Basic With Ads)', months: 3, price: 140, perMonth: 46, planRole: 'basic' as Role, headerBadge: '', saveBadge: 'Save 7%', popular: false, icon: Sparkles },
+  { id: 'basic_6m', name: '6 Months (Basic With Ads)', months: 6, price: 260, perMonth: 43, planRole: 'basic' as Role, headerBadge: '', saveBadge: 'Save 13%', popular: false, icon: ShieldCheck },
+  { id: 'basic_1y', name: '1 Year (Basic With Ads)', months: 12, price: 500, perMonth: 41, planRole: 'basic' as Role, headerBadge: '🔥 BEST VALUE', saveBadge: 'Save 17%', popular: false, icon: Crown },
+];
+
+const ALL_MEMBERSHIP_PLANS逗 = [...VIP_PLANS, ...BASIC_PLANS];
+
 export default function Membership() {
   const { settings } = useSettings();
   const { t } = useLanguage();
   const navigate = useNavigate();
   const { contentList, collections } = useContent();
   const [trendingMovies, setTrendingMovies] = useState<Content[]>([]);
+  const [selectedTier, setSelectedTier] = useState<'vip' | 'basic'>('basic');
+  const [selectedPlanId, setSelectedPlanId] = useState('basic_1m');
   const appName = settings?.headerText || 'MovizNow';
+
+  const currentPlans = selectedTier === 'vip' ? VIP_PLANS : BASIC_PLANS;
+  const activePlan = [...VIP_PLANS, ...BASIC_PLANS].find(p => p.id === selectedPlanId) || currentPlans[0];
 
   const handleSelectPlan = (planId: string) => {
     navigate('/top-up', { state: { planId } });
@@ -119,6 +146,263 @@ export default function Membership() {
           {/* Ad Banner below Hero */}
           <div className="w-full my-4">
             <AdBanner />
+          </div>
+
+          {/* STARTING MEMBERSHIP PLANS SELECTOR & CLEAR DIFFERENCE TABLES */}
+          <div className="space-y-8">
+            <div className="grid lg:grid-cols-12 gap-8 items-start">
+              {/* Left Column: Interactive Membership Plans Card (as in Top-Up page) */}
+              <div className="lg:col-span-6 bg-zinc-900/90 border border-zinc-800 rounded-3xl p-5 sm:p-7 shadow-2xl backdrop-blur-xl">
+                <div className="flex items-center justify-between mb-5 flex-wrap gap-2">
+                  <h2 className="text-lg font-black flex items-center gap-2 text-white">
+                    <Crown className="w-5 h-5 text-amber-500 fill-amber-500/20" />
+                    <span>{t('Membership Plans')}</span>
+                  </h2>
+                  <span className="text-xs font-black px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-sm">
+                    {activePlan.name}
+                  </span>
+                </div>
+
+                {/* Plan Tier Switcher Tabs */}
+                <div className="grid grid-cols-2 gap-2 p-1.5 bg-zinc-950/80 rounded-2xl mb-5 border border-zinc-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedTier('vip');
+                      if (!VIP_PLANS.some(p => p.id === selectedPlanId)) {
+                        setSelectedPlanId('1m');
+                      }
+                    }}
+                    className={`flex items-center justify-center gap-1.5 py-3 px-3 rounded-xl font-black text-xs sm:text-sm transition-all cursor-pointer ${
+                      selectedTier === 'vip'
+                        ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-lg shadow-amber-500/25'
+                        : 'text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    <Crown className="w-4 h-4" />
+                    <span>VIP User (Ad-Free)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedTier('basic');
+                      if (!BASIC_PLANS.some(p => p.id === selectedPlanId)) {
+                        setSelectedPlanId('basic_1m');
+                      }
+                    }}
+                    className={`flex items-center justify-center gap-1.5 py-3 px-3 rounded-xl font-black text-xs sm:text-sm transition-all cursor-pointer ${
+                      selectedTier === 'basic'
+                        ? 'bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-lg shadow-sky-500/25'
+                        : 'text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    <Zap className="w-4 h-4" />
+                    <span>Basic User (Rs 50/mo)</span>
+                  </button>
+                </div>
+
+                {/* Plan Items List */}
+                <div className="space-y-3 mb-6">
+                  {currentPlans.map((plan) => {
+                    const isSelected = selectedPlanId === plan.id;
+                    const PlanIcon = plan.icon;
+                    const is1Y = plan.id === '1y';
+                    const is2Y = plan.id === '2y';
+
+                    let cardStyle = 'bg-zinc-950/60 border-zinc-800/80 hover:border-zinc-700';
+                    if (isSelected) {
+                      if (is2Y) {
+                        cardStyle = 'bg-gradient-to-r from-rose-950/50 via-purple-950/60 to-amber-950/40 border-purple-500 ring-2 ring-purple-500/40 shadow-xl shadow-purple-500/20';
+                      } else if (is1Y) {
+                        cardStyle = 'bg-gradient-to-r from-amber-950/50 via-orange-950/40 to-amber-950/30 border-amber-500 ring-2 ring-amber-500/40 shadow-lg shadow-amber-500/20';
+                      } else if (selectedTier === 'basic') {
+                        cardStyle = 'bg-gradient-to-r from-sky-950/50 via-blue-950/40 to-sky-950/20 border-emerald-500 ring-2 ring-emerald-500/40 shadow-md shadow-emerald-500/20';
+                      } else {
+                        cardStyle = 'bg-gradient-to-r from-emerald-950/50 via-teal-950/40 to-emerald-950/30 border-emerald-500 ring-2 ring-emerald-500/40 shadow-md shadow-emerald-500/20';
+                      }
+                    }
+
+                    let iconBoxStyle = 'bg-zinc-800/70 text-zinc-400';
+                    if (isSelected || is1Y || is2Y) {
+                      if (is2Y) {
+                        iconBoxStyle = 'bg-gradient-to-tr from-rose-600 via-purple-600 to-amber-500 text-white shadow-md shadow-purple-500/30';
+                      } else if (is1Y) {
+                        iconBoxStyle = 'bg-gradient-to-tr from-amber-500 to-orange-500 text-white shadow-md shadow-amber-500/30';
+                      } else if (selectedTier === 'basic') {
+                        iconBoxStyle = 'bg-gradient-to-tr from-emerald-400 to-teal-500 text-zinc-950 font-black shadow-md shadow-emerald-500/25';
+                      } else {
+                        iconBoxStyle = 'bg-gradient-to-tr from-emerald-500 to-teal-500 text-white shadow-md shadow-emerald-500/25';
+                      }
+                    }
+
+                    return (
+                      <button
+                        key={plan.id}
+                        type="button"
+                        onClick={() => setSelectedPlanId(plan.id)}
+                        className={`relative w-full text-left p-3.5 sm:p-4 rounded-2xl border transition-all active:scale-[0.99] cursor-pointer ${cardStyle}`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shrink-0 transition-all ${iconBoxStyle}`}>
+                            <PlanIcon className="w-5 h-5" />
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                                <span className="font-black text-sm sm:text-base text-white">
+                                  {plan.name}
+                                </span>
+                                {plan.headerBadge && (
+                                  <span className="text-[9px] sm:text-[10px] font-black px-2 py-0.5 rounded-full inline-flex items-center uppercase tracking-wider shrink-0 shadow-sm bg-gradient-to-r from-amber-500 to-orange-500 text-white">
+                                    {plan.headerBadge}
+                                  </span>
+                                )}
+                              </div>
+
+                              <span className="text-sm sm:text-base font-black shrink-0 whitespace-nowrap text-emerald-400">
+                                Rs. {plan.price.toLocaleString()}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                              <p className="text-xs font-bold text-zinc-400">
+                                Rs. {plan.perMonth} <span className="text-[10px] font-normal">/ {t('month')}</span>
+                              </p>
+                              {plan.saveBadge && (
+                                <span className="text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded border whitespace-nowrap inline-flex items-center bg-emerald-500/15 text-emerald-400 border-emerald-500/20">
+                                  {plan.saveBadge}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Instant Action CTA Button */}
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => handleSelectPlan(activePlan.id)}
+                  className={`w-full py-4 rounded-2xl font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl cursor-pointer transition-all ${
+                    selectedTier === 'vip'
+                      ? 'bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-white shadow-amber-500/30'
+                      : 'bg-gradient-to-r from-sky-500 via-blue-600 to-sky-600 text-white shadow-sky-500/30'
+                  }`}
+                >
+                  <span>{t('Subscribe Now')} — Rs. {activePlan.price.toLocaleString()}</span>
+                  <ArrowRight className="w-4 h-4" />
+                </motion.button>
+              </div>
+
+              {/* Right Column: Clear Difference & Comparison Table */}
+              <div className="lg:col-span-6 bg-zinc-900/90 border border-zinc-800 rounded-3xl p-5 sm:p-7 shadow-2xl backdrop-blur-xl space-y-5">
+                <div className="space-y-1">
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>{t('Side-by-Side Comparison')}</span>
+                  </div>
+                  <h3 className="text-xl sm:text-2xl font-black text-white">{t('Clear Difference Between Tiers')}</h3>
+                  <p className="text-xs text-zinc-400 leading-relaxed">
+                    {t('Choose the subscription tier that best matches your watching preferences and budget.')}
+                  </p>
+                </div>
+
+                {/* Comparison Table */}
+                <div className="overflow-x-auto rounded-2xl border border-zinc-800">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-zinc-950/90 border-b border-zinc-800">
+                        <th className="p-3 sm:p-3.5 font-bold text-zinc-400">{t('Features')}</th>
+                        <th className="p-3 sm:p-3.5 font-black text-sky-400 bg-sky-950/30 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <Zap className="w-3.5 h-3.5" />
+                            <span>Basic User</span>
+                          </div>
+                          <span className="text-[10px] font-normal text-zinc-400 block mt-0.5">Rs. 50/mo</span>
+                        </th>
+                        <th className="p-3 sm:p-3.5 font-black text-amber-400 bg-amber-950/30 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <Crown className="w-3.5 h-3.5" />
+                            <span>VIP User</span>
+                          </div>
+                          <span className="text-[10px] font-normal text-amber-300/80 block mt-0.5">Ad-Free</span>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800/60 font-medium">
+                      <tr className="hover:bg-zinc-800/30 transition-colors">
+                        <td className="p-3 sm:p-3.5 text-zinc-300 font-bold">{t('Ads Experience')}</td>
+                        <td className="p-3 sm:p-3.5 text-center text-sky-300 bg-sky-950/15 font-bold">
+                          {t('With Occasional Ads')}
+                        </td>
+                        <td className="p-3 sm:p-3.5 text-center text-emerald-400 bg-amber-950/15 font-black flex-1">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[11px]">
+                            <Check className="w-3 h-3 text-emerald-400" /> 100% Ad-Free
+                          </span>
+                        </td>
+                      </tr>
+                      <tr className="hover:bg-zinc-800/30 transition-colors">
+                        <td className="p-3 sm:p-3.5 text-zinc-300">{t('All Movies & Series')}</td>
+                        <td className="p-3 sm:p-3.5 text-center text-emerald-400 bg-sky-950/15">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 mx-auto" />
+                        </td>
+                        <td className="p-3 sm:p-3.5 text-center text-emerald-400 bg-amber-950/15">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 mx-auto" />
+                        </td>
+                      </tr>
+                      <tr className="hover:bg-zinc-800/30 transition-colors">
+                        <td className="p-3 sm:p-3.5 text-zinc-300">{t('Full HD 1080p Streaming')}</td>
+                        <td className="p-3 sm:p-3.5 text-center text-emerald-400 bg-sky-950/15">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 mx-auto" />
+                        </td>
+                        <td className="p-3 sm:p-3.5 text-center text-emerald-400 bg-amber-950/15">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 mx-auto" />
+                        </td>
+                      </tr>
+                      <tr className="hover:bg-zinc-800/30 transition-colors">
+                        <td className="p-3 sm:p-3.5 text-zinc-300 font-bold">{t('Free Demanding')}</td>
+                        <td className="p-3 sm:p-3.5 text-center text-zinc-500 bg-sky-950/15">
+                          <X className="w-4 h-4 text-zinc-500 mx-auto" />
+                        </td>
+                        <td className="p-3 sm:p-3.5 text-center text-emerald-400 bg-amber-950/15 font-bold">
+                          <span className="inline-flex items-center gap-1 text-[11px] text-amber-300 font-bold">
+                            <Crown className="w-3 h-3 text-amber-400" /> {t('Free Demanding')}
+                          </span>
+                        </td>
+                      </tr>
+                      <tr className="hover:bg-zinc-800/30 transition-colors">
+                        <td className="p-3 sm:p-3.5 text-zinc-300">{t('Instant AI Auto-Approval')}</td>
+                        <td className="p-3 sm:p-3.5 text-center text-emerald-400 bg-sky-950/15">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 mx-auto" />
+                        </td>
+                        <td className="p-3 sm:p-3.5 text-center text-emerald-400 bg-amber-950/15">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 mx-auto" />
+                        </td>
+                      </tr>
+                      <tr className="hover:bg-zinc-800/30 transition-colors">
+                        <td className="p-3 sm:p-3.5 text-zinc-300">{t('WhatsApp Support')}</td>
+                        <td className="p-3 sm:p-3.5 text-center text-zinc-400 bg-sky-950/15">{t('Standard')}</td>
+                        <td className="p-3 sm:p-3.5 text-center text-amber-300 bg-amber-950/15 font-bold">{t('VIP Priority 24/7')}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Quick Benefit Summary */}
+                <div className="p-4 rounded-2xl bg-zinc-950/70 border border-zinc-800/80 flex items-start gap-3">
+                  <Sparkles className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                  <p className="text-xs text-zinc-300 leading-relaxed font-medium">
+                    <span className="font-bold text-white">{t('Pro-Tip:')}</span> {t('If you want completely ad-free watching with free demanding, choose ')}
+                    <span className="text-amber-400 font-bold">{t('VIP User')}</span>. {t('If you are on a budget and do not mind occasional ads, select ')}
+                    <span className="text-sky-400 font-bold">{t('Basic User (Rs 50/mo)')}</span>.
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Basic User Plans (With Ads) - FIRST SECTION */}
