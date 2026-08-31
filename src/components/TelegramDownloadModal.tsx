@@ -6,6 +6,7 @@ import { useModalBehavior } from "../hooks/useModalBehavior";
 import { useLanguage } from "../contexts/LanguageContext";
 import { VideoAdInterstitial } from "./VideoAdInterstitial";
 import { useAuth } from "../contexts/AuthContext";
+import { useSettings } from "../contexts/SettingsContext";
 import { isUserExemptFromAds } from "../utils/adUtils";
 
 interface TelegramDownloadModalProps {
@@ -22,6 +23,7 @@ export function TelegramDownloadModal({
   useModalBehavior(isOpen, onClose);
   const { t } = useLanguage();
   const { profile } = useAuth();
+  const { settings } = useSettings();
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [errorId, setErrorId] = useState<string | null>(null);
   const [adPendingLink, setAdPendingLink] = useState<{ id: string, url: string } | null>(null);
@@ -122,7 +124,7 @@ export function TelegramDownloadModal({
       <VideoAdInterstitial
         isOpen={!!adPendingLink}
         onClose={() => setAdPendingLink(null)}
-        adUrl="https://commercialhalftime.com/htqpa4mty?key=53a3c0b6e7edfce96cd08f0cabe01b54"
+        adUrl={settings?.adVideoUrl || "https://commercialhalftime.com/htqpa4mty?key=53a3c0b6e7edfce96cd08f0cabe01b54"}
         onAdComplete={() => {
           if (adPendingLink) {
             executeResolve(adPendingLink.id, adPendingLink.url);
