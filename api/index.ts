@@ -174,43 +174,61 @@ export async function fetchFilesdlWithMicrolink(targetUrl: string, timeoutMs = 1
     cleanUrl = 'https://' + cleanUrl;
   }
 
-  // 1. Primary Attempt via Microlink API to fetch HTML and bypass Cloudflare/bot protections
-  try {
-    const microlinkUrl = `https://api.microlink.io/?url=${encodeURIComponent(cleanUrl)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`;
-    console.log(`[FilesDL Microlink] Fetching: ${cleanUrl}`);
-    const res = await axios.get(microlinkUrl, {
-      validateStatus: () => true,
-      timeout: timeoutMs,
-    });
+  const isVercel = Boolean(process.env.VERCEL || process.env.VERCEL_URL || process.env.VERCEL_ENV);
 
-    if (res.data && res.data.status === 'success' && res.data.data) {
-      const htmlBody = res.data.data.body;
-      const finalRedirectUrl = res.data.data.url || cleanUrl;
-      if (typeof htmlBody === 'string' && htmlBody.length > 50) {
-        return { html: htmlBody, finalUrl: finalRedirectUrl, status: 200, source: 'microlink' };
+  // Non-Vercel environment: attempt direct fetch first
+  if (!isVercel) {
+    try {
+      console.log(`[FilesDL Direct] Fetching: ${cleanUrl} (Non-Vercel environment)`);
+      const vddosRes = await fetchWithVddos(cleanUrl, undefined, timeoutMs);
+      if (vddosRes && vddosRes.html && vddosRes.html.length > 200 && vddosRes.status === 200) {
+        return { ...vddosRes, source: 'vddos' };
       }
+    } catch (err: any) {
+      console.warn(`[FilesDL Direct] Error for ${cleanUrl}:`, err.message);
     }
-  } catch (err: any) {
-    console.warn(`[FilesDL Microlink] Error for ${cleanUrl}:`, err.message);
   }
 
-  // 2. Secondary Microlink fallback without selector filters
-  try {
-    const microlinkUrl = `https://api.microlink.io/?url=${encodeURIComponent(cleanUrl)}&force=true`;
-    const res = await axios.get(microlinkUrl, {
-      validateStatus: () => true,
-      timeout: timeoutMs,
-    });
-    if (res.data && res.data.status === 'success' && res.data.data) {
-      const dataObj = res.data.data;
-      const jsonStr = JSON.stringify(dataObj);
-      return { html: jsonStr, finalUrl: dataObj.url || cleanUrl, status: 200, source: 'microlink-meta' };
+  // On Vercel (or as fallback if direct fetch failed): use Microlink API
+  if (isVercel) {
+    // 1. Primary Attempt via Microlink API
+    try {
+      const microlinkUrl = `https://api.microlink.io/?url=${encodeURIComponent(cleanUrl)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`;
+      console.log(`[FilesDL Microlink] Fetching via Microlink (Vercel environment): ${cleanUrl}`);
+      const res = await axios.get(microlinkUrl, {
+        validateStatus: () => true,
+        timeout: timeoutMs,
+      });
+
+      if (res.data && res.data.status === 'success' && res.data.data) {
+        const htmlBody = res.data.data.body;
+        const finalRedirectUrl = res.data.data.url || cleanUrl;
+        if (typeof htmlBody === 'string' && htmlBody.length > 50) {
+          return { html: htmlBody, finalUrl: finalRedirectUrl, status: 200, source: 'microlink' };
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[FilesDL Microlink] Error for ${cleanUrl}:`, err.message);
     }
-  } catch (err: any) {
-    console.warn(`[FilesDL Microlink Meta] Error for ${cleanUrl}:`, err.message);
+
+    // 2. Secondary Microlink fallback without selector filters
+    try {
+      const microlinkUrl = `https://api.microlink.io/?url=${encodeURIComponent(cleanUrl)}&force=true`;
+      const res = await axios.get(microlinkUrl, {
+        validateStatus: () => true,
+        timeout: timeoutMs,
+      });
+      if (res.data && res.data.status === 'success' && res.data.data) {
+        const dataObj = res.data.data;
+        const jsonStr = JSON.stringify(dataObj);
+        return { html: jsonStr, finalUrl: dataObj.url || cleanUrl, status: 200, source: 'microlink-meta' };
+      }
+    } catch (err: any) {
+      console.warn(`[FilesDL Microlink Meta] Error for ${cleanUrl}:`, err.message);
+    }
   }
 
-  // 3. Fallback to direct fetchWithVddos
+  // Fallback to direct fetchWithVddos
   const vddosRes = await fetchWithVddos(cleanUrl, undefined, timeoutMs);
   return { ...vddosRes, source: 'vddos' };
 }

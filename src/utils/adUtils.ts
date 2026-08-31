@@ -61,9 +61,27 @@ export function purgeAllAdElements(): void {
       'div[id*="zone_"]',
       'div[id^="ad-"]',
       '.pub_300x250',
+      'div[style*="2147483647"]',
+      'div[style*="z-index: 2147483647"]',
+      'div[style*="z-index: 999999"]',
     ];
     selectors.forEach(sel => {
       document.querySelectorAll(sel).forEach(el => el.remove());
+    });
+
+    // Clean any full-screen overlay divs created by popunder/vignette scripts
+    const allDivs = document.querySelectorAll('div');
+    allDivs.forEach(d => {
+      const style = window.getComputedStyle(d);
+      if (
+        style.position === 'fixed' &&
+        parseInt(style.zIndex, 10) > 10000 &&
+        !d.id.includes('root') &&
+        !d.id.includes('app') &&
+        !d.getAttribute('data-app-element')
+      ) {
+        d.remove();
+      }
     });
   } catch (e) {}
 }
