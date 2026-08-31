@@ -158,7 +158,7 @@ export const CpmScriptManager: React.FC = () => {
     let socialScript = document.querySelector(`script[src*="f0270bbaca005a7be1c664c3c0ae0386"]`) as HTMLScriptElement | null;
     if (!socialScript) {
       socialScript = document.createElement('script');
-      socialScript.src = SOCIAL_BAR_SCRIPT_SRC;
+      socialScript.src = `${SOCIAL_BAR_SCRIPT_SRC}?_cb=${Date.now()}`;
       socialScript.async = true;
       socialScript.setAttribute('data-authorized-ad-script', 'true');
       document.head.appendChild(socialScript);
@@ -166,12 +166,15 @@ export const CpmScriptManager: React.FC = () => {
 
     // 2. Popunder Script Injection: Only when NOT in cooldown
     const activeCooldown = isPopunderInCooldown();
-    let popunderScript = document.querySelector(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`) as HTMLScriptElement | null;
+    let popunderScript = document.querySelector(`script[data-popunder-script="true"]`) as HTMLScriptElement | null;
 
     if (!activeCooldown && !inCooldown) {
       if (!popunderScript) {
+        // Clean up any stale popunder script elements before appending fresh one
+        document.querySelectorAll(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`).forEach((el) => el.remove());
+
         popunderScript = document.createElement('script');
-        popunderScript.src = POPUNDER_SCRIPT_SRC;
+        popunderScript.src = `${POPUNDER_SCRIPT_SRC}?_t=${Date.now()}&_r=${Math.random().toString(36).substring(2)}`;
         popunderScript.async = true;
         popunderScript.setAttribute('data-authorized-ad-script', 'true');
         popunderScript.setAttribute('data-popunder-script', 'true');
@@ -248,8 +251,16 @@ export const CpmScriptManager: React.FC = () => {
       // 1. Open the popunder FIRST so the browser and ad script register the popunder window successfully
       const popupWindow = originalWindowOpen.call(window, url, target, features);
 
-      // 2. Remove popunder script tag after trigger to stop further popunder popups
-      document.querySelectorAll(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`).forEach((el) => el.remove());
+      // 2. Remove popunder script tag after trigger
+      const popunderScript = document.querySelector(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`);
+      if (popunderScript) {
+        popunderScript.remove();
+      }
+
+      // 3. Defer main-window SPA navigation slightly so it does NOT close or cancel the popunder window gesture
+      setTimeout(() => {
+        executeUserIntendedAction();
+      }, 80);
 
       return popupWindow;
     };
