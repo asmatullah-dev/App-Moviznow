@@ -24,6 +24,11 @@ export function GlobalNavigationLoader() {
       }
       setProgress(Math.min(current, 88));
     }, 100);
+
+    // Safety fallback: auto-finish after 1200ms if route transition completes or hangs
+    completeTimerRef.current = setTimeout(() => {
+      finishProgress();
+    }, 1200);
   };
 
   const finishProgress = () => {

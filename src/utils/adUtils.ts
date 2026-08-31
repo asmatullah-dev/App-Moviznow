@@ -127,7 +127,7 @@ export function recordPopunderTriggered(): void {
  * - Admin
  * - Owner
  * - Managers (manager, user_manager, content_manager, editor, isUserManager, permissions)
- * - VIP (Active only - must not be expired or suspended)
+ * - VIP (Role/Plan = 'vip', or isVip = true, unless expired or suspended)
  * - Selected Content (User role/status, or content with selected_content status)
  */
 export function isUserExemptFromAds(
@@ -172,20 +172,31 @@ export function isUserExemptFromAds(
     return true;
   }
 
-  // 5. Active VIP (must not be expired or suspended)
-  const isVipRole = role === 'vip' || Boolean((profile as any).isVip);
+  // 5. VIP Users (Ad-Free)
+  // Comprehensive check for VIP role, planRole, isVip flag, membershipTier, or planName
+  const isVipRole =
+    role === 'vip' ||
+    Boolean((profile as any).isVip) ||
+    Boolean((profile as any).vip) ||
+    (profile as any).planRole === 'vip' ||
+    (profile as any).membershipRole === 'vip' ||
+    (profile as any).membershipTier === 'vip' ||
+    String((profile as any).planName || '').toLowerCase().includes('vip') ||
+    status === 'vip';
+
   if (isVipRole) {
-    if (status === 'expired' || status === 'suspended' || status === 'pending') {
+    // Expired or suspended VIP users are not exempt
+    if (status === 'expired' || status === 'suspended') {
       return false;
     }
 
     if (profile.expiryDate) {
       const expTime = new Date(profile.expiryDate).getTime();
       if (!isNaN(expTime) && expTime <= Date.now()) {
-        return false; // Expired VIP is not exempt
+        return false; // Expired VIP
       }
     }
-    return true; // Active VIP
+    return true; // Active VIP is 100% exempt from ALL ads & popunders
   }
 
   return false;

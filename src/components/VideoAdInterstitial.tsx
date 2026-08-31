@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Timer, ChevronRight, ShieldCheck, RefreshCw, Loader2, AlertCircle } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { isUserExemptFromAds } from '../utils/adUtils';
 
 interface VideoAdInterstitialProps {
   isOpen: boolean;
@@ -15,6 +17,9 @@ export const VideoAdInterstitial: React.FC<VideoAdInterstitialProps> = ({
   onAdComplete,
   adUrl = 'https://commercialhalftime.com/htqpa4mty?key=53a3c0b6e7edfce96cd08f0cabe01b54'
 }) => {
+  const { profile } = useAuth();
+  const isExempt = isUserExemptFromAds(profile);
+
   const [timeLeft, setTimeLeft] = useState(30);
   const [canSkip, setCanSkip] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
@@ -25,6 +30,14 @@ export const VideoAdInterstitial: React.FC<VideoAdInterstitialProps> = ({
   const onAdCompleteRef = useRef(onAdComplete);
   const onCloseRef = useRef(onClose);
   const iframeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Auto bypass video ad immediately if user is VIP / exempt
+  useEffect(() => {
+    if (isOpen && isExempt) {
+      onAdCompleteRef.current?.();
+      onCloseRef.current?.();
+    }
+  }, [isOpen, isExempt]);
 
   // Helper to generate a fresh ad URL with cache-busting / rotation query
   const generateAdUrl = useCallback((baseUrl: string, attempt: number) => {
@@ -171,7 +184,7 @@ export const VideoAdInterstitial: React.FC<VideoAdInterstitialProps> = ({
     }
   };
 
-  if (!isOpen) return null;
+  if (!isOpen || isExempt) return null;
 
   return (
     <AnimatePresence>

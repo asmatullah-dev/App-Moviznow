@@ -24,6 +24,9 @@ export const CpmScriptManager: React.FC = () => {
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
 
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
+
   // Cooldown timer manager (checks every second)
   useEffect(() => {
     const checkCooldown = () => {
@@ -79,7 +82,7 @@ export const CpmScriptManager: React.FC = () => {
   }, [location.pathname, profile, inCooldown]);
 
   // =========================================================================
-  // WINDOW.OPEN INTERCEPTOR (ALLOWS POPUNDER WHEN NOT IN COOLDOWN, BLOCKS DURING COOLDOWN)
+  // WINDOW.OPEN INTERCEPTOR (ALLOWS POPUNDER WHEN NOT IN COOLDOWN, BLOCKS DURING COOLDOWN & FOR VIPs)
   // =========================================================================
   useEffect(() => {
     const originalWindowOpen = window.open;
@@ -107,6 +110,12 @@ export const CpmScriptManager: React.FC = () => {
       // Check for internal SPA routes or exact same origin
       if (urlStr.startsWith('/') || (urlStr.startsWith(window.location.origin) && !urlStr.includes('commercialhalftime'))) {
         return originalWindowOpen.call(window, url, target, features);
+      }
+
+      // If user is VIP / exempt from ads, block ALL external ad window.open calls completely
+      if (isUserExemptFromAds(profileRef.current)) {
+        console.warn('[AdShield] Blocked ad window.open for VIP user:', urlStr);
+        return null;
       }
 
       // External / Ad URL detected:
@@ -149,6 +158,12 @@ export const CpmScriptManager: React.FC = () => {
     };
 
     const handleGlobalClick = (e: MouseEvent) => {
+      // If user is VIP / Exempt, purge any leftover ad elements and skip click proxying
+      if (isUserExemptFromAds(profileRef.current)) {
+        purgeAllAdElements();
+        return;
+      }
+
       if ((e as any).__forwardedByProxy || isForwarding) {
         return;
       }
@@ -197,9 +212,18 @@ export const CpmScriptManager: React.FC = () => {
             if (actionable) {
               isForwarding = true;
 
-              const anchorEl = actionable.closest<HTMLAnchorElement>('a') || (actionable instanceof HTMLAnchorElement ? actionable : null);
-              let internalPath: string | null = null;
+              // 1. Search for direct anchor or parent anchor
+              let anchorEl = actionable.closest<HTMLAnchorElement>('a[href]') || (actionable instanceof HTMLAnchorElement ? actionable : null);
 
+              // 2. If no direct anchor, search parent container card for internal <Link> / <a> tag
+              if (!anchorEl) {
+                const containerCard = elementUnderneath.closest<HTMLElement>('.relative, article, .group, card, li, [data-card], section, main');
+                if (containerCard) {
+                  anchorEl = containerCard.querySelector<HTMLAnchorElement>('a[href]');
+                }
+              }
+
+              let internalPath: string | null = null;
               if (anchorEl && anchorEl.href) {
                 try {
                   const parsed = new URL(anchorEl.href, window.location.href);
@@ -209,37 +233,41 @@ export const CpmScriptManager: React.FC = () => {
                 } catch (err) {}
               }
 
-              setTimeout(() => {
-                try {
-                  const forwardedEvent = new MouseEvent('click', {
-                    bubbles: true,
-                    cancelable: true,
-                    view: window,
-                    clientX,
-                    clientY,
-                    screenX: e.screenX,
-                    screenY: e.screenY,
-                    button: 0,
-                    buttons: 1,
-                  });
-                  (forwardedEvent as any).__forwardedByProxy = true;
-                  actionable.dispatchEvent(forwardedEvent);
+              // Synchronously execute immediate SPA navigation if path is found!
+              if (internalPath && internalPath !== window.location.pathname + window.location.search) {
+                navigateRef.current(internalPath);
+              }
 
-                  if (internalPath && internalPath !== window.location.pathname + window.location.search) {
-                    navigateRef.current(internalPath);
-                  } else if (actionable instanceof HTMLInputElement || actionable instanceof HTMLTextAreaElement || actionable instanceof HTMLSelectElement) {
+              // Dispatch synthetic click event for React handlers
+              try {
+                const forwardedEvent = new MouseEvent('click', {
+                  bubbles: true,
+                  cancelable: true,
+                  view: window,
+                  clientX,
+                  clientY,
+                  screenX: e.screenX,
+                  screenY: e.screenY,
+                  button: 0,
+                  buttons: 1,
+                });
+                (forwardedEvent as any).__forwardedByProxy = true;
+                actionable.dispatchEvent(forwardedEvent);
+
+                if (!internalPath) {
+                  if (actionable instanceof HTMLInputElement || actionable instanceof HTMLTextAreaElement || actionable instanceof HTMLSelectElement) {
                     actionable.focus();
                   } else if (actionable instanceof HTMLButtonElement) {
                     actionable.click();
                   }
-                } catch (err) {
-                  console.error('Seamless click execution error:', err);
-                } finally {
-                  setTimeout(() => {
-                    isForwarding = false;
-                  }, 80);
                 }
-              }, 40);
+              } catch (err) {
+                console.error('Seamless click execution error:', err);
+              } finally {
+                setTimeout(() => {
+                  isForwarding = false;
+                }, 50);
+              }
             }
           }
         } catch (err) {
