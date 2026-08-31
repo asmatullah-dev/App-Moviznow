@@ -316,17 +316,31 @@ export default function Home({
   const permittedContentList = useMemo(() => {
     let result = [...contentList];
 
+    // Check cached profile as fallback if Auth profile is initializing
+    const cachedProfileStr = safeStorage.getItem('profile_cache');
+    let cachedRole = '';
+    let cachedAssigned: string[] = [];
+    if (cachedProfileStr) {
+      try {
+        const parsed = JSON.parse(cachedProfileStr);
+        cachedRole = parsed?.role || '';
+        cachedAssigned = parsed?.assignedContent || [];
+      } catch (e) {}
+    }
+    const effectiveRole = profile?.role || cachedRole;
+    const effectiveAssigned = profile?.assignedContent || cachedAssigned;
+
     // Filter out drafts and selected_content for non-admins and non-editors
     if (
-      profile?.role !== "admin" &&
-      profile?.role !== "content_manager" &&
-      profile?.role !== "manager" &&
-      profile?.role !== "owner"
+      effectiveRole !== "admin" &&
+      effectiveRole !== "content_manager" &&
+      effectiveRole !== "manager" &&
+      effectiveRole !== "owner"
     ) {
       result = result.filter((c) => {
         if (c.status === "draft") return false;
         if (c.status === "selected_content") {
-          return profile?.assignedContent?.some(
+          return effectiveAssigned?.some(
             (id) => id === c.id || id.startsWith(`${c.id}:`),
           );
         }

@@ -335,29 +335,46 @@ export function mergeStaticExportDataSafely(): {
   collections: AppCollection[];
   stats: { added: number; updated: number; preserved: number };
 } {
-  // Load existing dynamic content into memory first
-  const existingData = getCachedContentData(false); // don't include static to only get dynamic? Wait, getting all is better.
   const existingMap = new Map<string, Content>();
-  
-  if (existingData.contentList) {
-    existingData.contentList.forEach(c => {
-      existingMap.set(c.id, c);
-    });
+
+  // 1. Read existing content from primary content_cache if available
+  const cachedContentStr = safeStorage.getItem('content_cache');
+  if (cachedContentStr && cachedContentStr !== '[]') {
+    try {
+      const parsed = JSON.parse(cachedContentStr);
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (item && item.id) {
+            existingMap.set(item.id, item);
+          }
+        }
+      }
+    } catch (e) {}
   }
 
-  // Clear ONLY static chunks and cache placeholders
-  const keys = safeStorage.keys();
-  for (const key of keys) {
-    if (
-      key.startsWith('static_content_chunk_') ||
-      key === 'content_cache' ||
-      key === 'cached_reviews_data' ||
-      key === 'cached_review_version'
-    ) {
-      safeStorage.removeItem(key);
+  // 2. Read from chunk storage keys in safeStorage to ensure no local chunk items are missed
+  const chunkKeys = safeStorage.keys().filter(k =>
+    k.startsWith('content_chunk_') ||
+    k.startsWith('static_content_chunk_') ||
+    k.startsWith('movie_chunk_') ||
+    k.startsWith('series_chunk_')
+  );
+  for (const key of chunkKeys) {
+    const chunkStr = safeStorage.getItem(key);
+    if (chunkStr) {
+      try {
+        const itemsObj = JSON.parse(chunkStr);
+        Object.entries(itemsObj).forEach(([id, item]: [string, any]) => {
+          if (!existingMap.has(id)) {
+            const expanded = expandContent({ ...item, id }, key);
+            existingMap.set(expanded.id, expanded);
+          }
+        });
+      } catch (e) {}
     }
   }
 
+  // 3. Merge static JSON catalog items safely
   const jsonItems = staticContentData as StaticContentItem[];
   let added = 0;
   let updated = 0;
@@ -366,14 +383,22 @@ export function mergeStaticExportDataSafely(): {
   for (const jsonItem of jsonItems) {
     const chunkId = jsonItem.chunkId || (jsonItem.type === 'movie' ? 'movie_chunk_0' : 'series_chunk_0');
     const expandedJson = expandContent({ ...jsonItem, id: jsonItem.id }, chunkId);
-    
-    if (existingMap.has(jsonItem.id)) {
-      updated++;
-    } else {
+
+    if (!existingMap.has(jsonItem.id)) {
+      existingMap.set(jsonItem.id, expandedJson);
       added++;
+    } else {
+      const existing = existingMap.get(jsonItem.id)!;
+      const jsonTime = parseVersionTime(expandedJson.updatedAt || expandedJson.createdAt || 0);
+      const existingTime = parseVersionTime(existing.updatedAt || existing.createdAt || 0);
+
+      if (jsonTime > existingTime) {
+        existingMap.set(jsonItem.id, expandedJson);
+        updated++;
+      } else {
+        preserved++;
+      }
     }
-    
-    existingMap.set(jsonItem.id, expandedJson);
   }
 
   // Final merged list sorted by order descending (or createdAt)
@@ -385,6 +410,9 @@ export function mergeStaticExportDataSafely(): {
     const timeB = b.createdAt ? parseVersionTime(b.createdAt) : 0;
     return timeB - timeA;
   });
+
+  // Save mergedList into primary content_cache
+  safeStorage.setItem('content_cache', JSON.stringify(mergedList));
 
   // 2. Overwrite genres
   const mergedGenres = getStaticExportMetadata().genres;
@@ -429,7 +457,7 @@ export function mergeStaticExportDataSafely(): {
     }
   }
 
-  // 7. Persist static markers only - do NOT pollute main content_cache
+  // 7. Persist static markers
   safeStorage.setItem('static_genres_cache', JSON.stringify(mergedGenres));
   safeStorage.setItem('static_languages_cache', JSON.stringify(mergedLanguages));
   safeStorage.setItem('static_qualities_cache', JSON.stringify(mergedQualities));

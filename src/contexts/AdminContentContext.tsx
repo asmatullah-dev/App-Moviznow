@@ -582,7 +582,15 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
     });
     
-    const isAdminOrEditor = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
+    const cachedProfileStr = safeStorage.getItem('profile_cache');
+    let cachedRole = '';
+    if (cachedProfileStr) {
+      try {
+        cachedRole = JSON.parse(cachedProfileStr)?.role || '';
+      } catch (e) {}
+    }
+    const effectiveRole = profile?.role || cachedRole;
+    const isAdminOrEditor = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(effectiveRole);
     if (!isAdminOrEditor) {
         const sanitized = rawContent.map(c => {
             let minimalSeasons: any[] = [];
