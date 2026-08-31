@@ -127,12 +127,11 @@ export function isUserExemptFromAds(
   profile?: UserProfile | null,
   content?: AdContentCheck | null
 ): boolean {
-  // If content itself is selected_content or free, exempt ads for this content
+  // If content itself is selected_content, exempt ads for this content
   if (content) {
     if (
       content.status === 'selected_content' ||
-      content.type === 'selected_content' ||
-      content.isFree === true
+      content.type === 'selected_content'
     ) {
       return true;
     }

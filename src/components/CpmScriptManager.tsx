@@ -49,7 +49,7 @@ export const CpmScriptManager: React.FC = () => {
     }
 
     // 1. Social Bar: Always inject for non-exempt users on valid routes
-    let socialScript = document.querySelector(`script[src="${SOCIAL_BAR_SCRIPT_SRC}"]`) as HTMLScriptElement | null;
+    let socialScript = document.querySelector(`script[src*="f0270bbaca005a7be1c664c3c0ae0386"]`) as HTMLScriptElement | null;
     if (!socialScript) {
       socialScript = document.createElement('script');
       socialScript.src = SOCIAL_BAR_SCRIPT_SRC;
@@ -60,12 +60,12 @@ export const CpmScriptManager: React.FC = () => {
 
     // 2. Popunder Script Injection: Only when NOT in cooldown
     const activeCooldown = isPopunderInCooldown();
-    let popunderScript = document.querySelector(`script[src="${POPUNDER_SCRIPT_SRC}"]`) as HTMLScriptElement | null;
+    let popunderScript = document.querySelector(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`) as HTMLScriptElement | null;
 
     if (!activeCooldown && !inCooldown) {
       if (!popunderScript) {
         popunderScript = document.createElement('script');
-        popunderScript.src = POPUNDER_SCRIPT_SRC;
+        popunderScript.src = `${POPUNDER_SCRIPT_SRC}?_t=${Date.now()}`;
         popunderScript.async = true;
         popunderScript.setAttribute('data-authorized-ad-script', 'true');
         document.head.appendChild(popunderScript);
@@ -120,7 +120,7 @@ export const CpmScriptManager: React.FC = () => {
       setInCooldown(true);
 
       // Remove popunder script tag immediately after trigger
-      const popunderScript = document.querySelector(`script[src="${POPUNDER_SCRIPT_SRC}"]`);
+      const popunderScript = document.querySelector(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`);
       if (popunderScript) {
         popunderScript.remove();
       }
