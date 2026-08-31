@@ -335,9 +335,24 @@ export function mergeStaticExportDataSafely(): {
   collections: AppCollection[];
   stats: { added: number; updated: number; preserved: number };
 } {
-  const existingData = getCachedContentData();
+  // Always use new json files when hard reloads or when version change or deployment change detected
+  // Automatically remove old and use new one. Clear old content cache and chunk keys first.
+  const keys = safeStorage.keys();
+  for (const key of keys) {
+    if (
+      key.startsWith('content_chunk_') ||
+      key.startsWith('static_content_chunk_') ||
+      key.startsWith('movie_chunk_') ||
+      key.startsWith('series_chunk_') ||
+      key === 'content_cache' ||
+      key === 'cached_reviews_data' ||
+      key === 'cached_review_version'
+    ) {
+      safeStorage.removeItem(key);
+    }
+  }
+
   const existingMap = new Map<string, Content>();
-  existingData.contentList.forEach(item => existingMap.set(item.id, item));
 
   const jsonItems = staticContentData as StaticContentItem[];
   let added = 0;
@@ -347,30 +362,8 @@ export function mergeStaticExportDataSafely(): {
   for (const jsonItem of jsonItems) {
     const chunkId = jsonItem.chunkId || (jsonItem.type === 'movie' ? 'movie_chunk_0' : 'series_chunk_0');
     const expandedJson = expandContent({ ...jsonItem, id: jsonItem.id }, chunkId);
-
-    if (!existingMap.has(jsonItem.id)) {
-      // New item from JSON
-      existingMap.set(jsonItem.id, expandedJson);
-      added++;
-    } else {
-      const existingItem = existingMap.get(jsonItem.id)!;
-      const cachedTime = parseVersionTime(
-        existingItem.updatedAt || existingItem.createdAt || (existingItem as any).upd || (existingItem as any).cre || 0
-      );
-      const jsonTime = parseVersionTime(
-        jsonItem.upd || jsonItem.cre || expandedJson.updatedAt || expandedJson.createdAt || 0
-      );
-
-      if (jsonTime > cachedTime) {
-        // JSON file has newer changes for this item
-        existingMap.set(jsonItem.id, { ...existingItem, ...expandedJson });
-        updated++;
-      } else {
-        // Local cache has newer or same version; protect local changes
-        existingMap.set(jsonItem.id, { ...expandedJson, ...existingItem });
-        preserved++;
-      }
-    }
+    existingMap.set(jsonItem.id, expandedJson);
+    added++;
   }
 
   // Final merged list sorted by order descending (or createdAt)
@@ -383,68 +376,17 @@ export function mergeStaticExportDataSafely(): {
     return timeB - timeA;
   });
 
-  // 2. Safe merge of genres
-  const cachedGenres = getCachedGenres();
-  const genreMap = new Map<string, Genre>();
-  cachedGenres.forEach(g => genreMap.set(g.id, g));
-  const staticGenres = getStaticExportMetadata().genres;
-  staticGenres.forEach(sg => {
-    if (!genreMap.has(sg.id)) {
-      genreMap.set(sg.id, sg);
-    } else {
-      genreMap.set(sg.id, { ...genreMap.get(sg.id)!, ...sg });
-    }
-  });
-  const mergedGenres = Array.from(genreMap.values());
+  // 2. Overwrite genres
+  const mergedGenres = getStaticExportMetadata().genres;
 
-  // 3. Safe merge of languages
-  const cachedLanguages = getCachedLanguages();
-  const languageMap = new Map<string, Language>();
-  cachedLanguages.forEach(l => languageMap.set(l.id, l));
-  const staticLanguages = getStaticExportMetadata().languages;
-  staticLanguages.forEach(sl => {
-    if (!languageMap.has(sl.id)) {
-      languageMap.set(sl.id, sl);
-    } else {
-      languageMap.set(sl.id, { ...languageMap.get(sl.id)!, ...sl });
-    }
-  });
-  const mergedLanguages = Array.from(languageMap.values());
+  // 3. Overwrite languages
+  const mergedLanguages = getStaticExportMetadata().languages;
 
-  // 4. Safe merge of qualities
-  const cachedQualities = getCachedQualities();
-  const qualityMap = new Map<string, Quality>();
-  cachedQualities.forEach(q => qualityMap.set(q.id, q));
-  const staticQualities = getStaticExportMetadata().qualities;
-  staticQualities.forEach(sq => {
-    if (!qualityMap.has(sq.id)) {
-      qualityMap.set(sq.id, sq);
-    } else {
-      qualityMap.set(sq.id, { ...qualityMap.get(sq.id)!, ...sq });
-    }
-  });
-  const mergedQualities = Array.from(qualityMap.values());
+  // 4. Overwrite qualities
+  const mergedQualities = getStaticExportMetadata().qualities;
 
-  // 5. Safe merge of collections
-  const cachedCollections = getCachedCollections();
-  const collectionMap = new Map<string, AppCollection>();
-  cachedCollections.forEach(c => collectionMap.set(c.id, c));
-  const staticCollections = getStaticExportCollections();
-  staticCollections.forEach(sc => {
-    if (!collectionMap.has(sc.id)) {
-      collectionMap.set(sc.id, sc);
-    } else {
-      const existing = collectionMap.get(sc.id)!;
-      const existingTime = parseVersionTime(existing.updatedAt || 0);
-      const staticTime = parseVersionTime(sc.updatedAt || 0);
-      if (staticTime >= existingTime) {
-        collectionMap.set(sc.id, { ...existing, ...sc });
-      }
-    }
-  });
-  const mergedCollections = Array.from(collectionMap.values()).sort(
-    (a, b) => (b.order ?? 0) - (a.order ?? 0)
-  );
+  // 5. Overwrite collections
+  const mergedCollections = getStaticExportCollections();
 
   // 6. Write chunk objects into static storage
   const chunkMap: Record<string, Record<string, any>> = {};
@@ -520,59 +462,9 @@ export function seedStaticExportData(forceOverwrite: boolean = false): void {
       }
     }
 
-    if (isStaticExportNewer() && !forceOverwrite) {
-      mergeStaticExportDataSafely();
-      return;
-    }
-
-    // Force overwrite: write full export data
-    const chunkMap: Record<string, Record<string, any>> = {};
-    const items = staticContentData as StaticContentItem[];
-
-    for (const item of items) {
-      const cId = item.chunkId || (item.type === 'movie' ? 'movie_chunk_0' : 'series_chunk_0');
-      if (!chunkMap[cId]) chunkMap[cId] = {};
-      chunkMap[cId][item.id] = item;
-    }
-
-    const currentVer = getStaticExportVersion();
-    const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
-    let localMeta: Record<string, any> = {};
-    try { localMeta = JSON.parse(localMetaString); } catch (e) {}
-
-    for (const [chunkId, itemsObj] of Object.entries(chunkMap)) {
-      const storageKey = 'static_content_chunk_' + chunkId;
-      safeStorage.setItem(storageKey, JSON.stringify(itemsObj));
-      localMeta[chunkId] = { updatedAt: currentVer, count: Object.keys(itemsObj).length };
-    }
-
-    const itemMap: Record<string, Content> = {};
-    for (const item of items) {
-      const chunkId = item.chunkId || (item.type === 'movie' ? 'movie_chunk_0' : 'series_chunk_0');
-      itemMap[item.id] = expandContent({ ...item, id: item.id }, chunkId);
-    }
-    const sortedList = Object.values(itemMap).sort((a, b) => (b.order ?? 0) - (a.order ?? 0));
-    memoizedContentList = sortedList;
-    
-    // Do NOT write to content_cache directly to keep it pure for Admin management
-
-    if (staticMetadataData.genres) safeStorage.setItem('static_genres_cache', JSON.stringify(staticMetadataData.genres));
-    if (staticMetadataData.languages) safeStorage.setItem('static_languages_cache', JSON.stringify(staticMetadataData.languages));
-    if (staticMetadataData.qualities) safeStorage.setItem('static_qualities_cache', JSON.stringify(staticMetadataData.qualities));
-    if (staticCollectionsData.items) {
-      safeStorage.setItem('static_collection_chunk_collection_chunk_0', JSON.stringify(staticCollectionsData.items));
-      const collList = Object.values(staticCollectionsData.items).sort((a: any, b: any) => (b.order || 0) - (a.order || 0));
-      safeStorage.setItem('static_collections_cache', JSON.stringify(collList));
-    }
-
-    // Do NOT update chunk_meta_versions here either to keep it pure
-
-    safeStorage.setItem('cached_json_catalog_version', currentVer);
-    safeStorage.setItem('last_successful_meta_check', Date.now().toString());
-
-    try {
-      window.dispatchEvent(new CustomEvent('static_content_updated'));
-    } catch (e) {}
+    // Since we want to always use new json files and remove old,
+    // mergeStaticExportDataSafely now wipes cache and sets the new json exactly.
+    mergeStaticExportDataSafely();
   } catch (e) {
     console.error('Error seeding static export data:', e);
   }
