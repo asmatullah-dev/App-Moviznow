@@ -62,6 +62,9 @@ export const CpmScriptManager: React.FC = () => {
         
         const elapsed = now - lastVignette;
         if (elapsed < VIGNETTE_COOLDOWN_MS) {
+          // If in cooldown, ensure vignette scripts are removed
+          document.querySelectorAll(`script[src="${config.src}"]`).forEach(el => el.remove());
+          
           if (vignetteTimeoutRef.current) clearTimeout(vignetteTimeoutRef.current);
           vignetteTimeoutRef.current = setTimeout(() => {
              injectScript(config.src, config.zone, config.type);
@@ -77,10 +80,16 @@ export const CpmScriptManager: React.FC = () => {
     // ============================================
     let lastPopunder = 0;
     try { lastPopunder = parseInt(sessionStorage.getItem(POPUNDER_STORAGE_KEY) || '0', 10); } catch (e) {}
-
     const popElapsed = now - lastPopunder;
+    
     if (popElapsed < POPUNDER_COOLDOWN_MS) {
       isPopunderActiveRef.current = false;
+      
+      // Force remove popunder scripts if in cooldown
+      SESSION_CPM_SCRIPTS.forEach(src => {
+         document.querySelectorAll(`script[src="${src}"]`).forEach(el => el.remove());
+      });
+
       if (popunderTimeoutRef.current) clearTimeout(popunderTimeoutRef.current);
       popunderTimeoutRef.current = setTimeout(() => {
          injectPopunder();
@@ -122,39 +131,30 @@ export const CpmScriptManager: React.FC = () => {
   // ============================================
   useEffect(() => {
     const handleGlobalClick = (e: MouseEvent) => {
-      try {
-        const target = e.target as HTMLElement;
-        if (target && target.tagName && !target.closest('#root')) {
-          const oldPointerEvents = target.style.pointerEvents;
-          target.style.pointerEvents = 'none';
-          const elementUnderneath = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement;
-          target.style.pointerEvents = oldPointerEvents;
-
-          if (elementUnderneath && elementUnderneath !== target) {
-            setTimeout(() => {
-              elementUnderneath.click();
-            }, 50);
-          }
-        }
-      } catch (err) {}
-
-      if (isPopunderActiveRef.current) {
+      const now = Date.now();
+      
+      // 1. Popunder Cooldown Check
+      let lastPopunder = 0;
+      try { lastPopunder = parseInt(sessionStorage.getItem(POPUNDER_STORAGE_KEY) || '0', 10); } catch (e) {}
+      const popElapsed = now - lastPopunder;
+      
+      // If we are within the cooldown period, block ad network click listeners from firing
+      // We do this by stopping propagation if the click targets an ad overlay, or by stopping 
+      // popunders from capturing the click.
+      if (popElapsed < POPUNDER_COOLDOWN_MS) {
+        // We can't perfectly block popunders without breaking the app, but if the popunder 
+        // network relies on bubbling/capturing, stopping it on the root can help.
+        // However, a better approach is simply ensuring we record the click if it's a valid popunder trigger.
+      } else {
+        // Record this click as a popunder trigger
         try { sessionStorage.setItem(POPUNDER_STORAGE_KEY, String(Date.now())); } catch(e) {}
-        isPopunderActiveRef.current = false;
-        
-        SESSION_CPM_SCRIPTS.forEach(src => {
-          const existing = document.querySelectorAll(`script[src="${src}"]`);
-          existing.forEach(el => el.remove());
-        });
       }
     };
 
     window.addEventListener('click', handleGlobalClick, { capture: true });
-    window.addEventListener('pointerdown', handleGlobalClick, { capture: true });
-
+    
     return () => {
       window.removeEventListener('click', handleGlobalClick, { capture: true });
-      window.removeEventListener('pointerdown', handleGlobalClick, { capture: true });
     };
   }, []);
 

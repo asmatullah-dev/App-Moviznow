@@ -77,6 +77,13 @@ export function getStaticExportVersion(): string {
  * Checks whether the static export JSON file is newer than the version applied to local cache.
  */
 export function isStaticExportNewer(): boolean {
+  if (typeof window !== 'undefined' && window.performance) {
+    const navEntries = window.performance.getEntriesByType('navigation') as PerformanceNavigationTiming[];
+    if (navEntries.length > 0 && navEntries[0].type === 'reload') {
+      return true; // Force reload on hard refresh as requested
+    }
+  }
+
   const currentVer = getStaticExportVersion();
   const cachedVer = safeStorage.getItem('cached_json_catalog_version');
 
