@@ -27,83 +27,142 @@ const PAGE_CPM_SCRIPTS = [
 export const CpmScriptManager: React.FC = () => {
   const { profile } = useAuth();
   const location = useLocation();
-  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 1. Session Popunders with 3-minute relaxing cooldown (Never on login page or for exempt users)
+  const popunderTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isPopunderLoadedRef = useRef<boolean>(false);
+
+  // Helper to remove popunder scripts from DOM
+  const removePopunderScripts = () => {
+    SESSION_CPM_SCRIPTS.forEach(src => {
+      const existing = document.querySelectorAll(`script[src="${src}"]`);
+      existing.forEach(el => el.remove());
+    });
+    isPopunderLoadedRef.current = false;
+  };
+
+  // Helper to inject popunder scripts into DOM
+  const injectPopunderScripts = () => {
+    if (isAdRestrictedRoute(window.location.pathname) || isUserExemptFromAds(profile)) {
+      return;
+    }
+    removePopunderScripts(); // clean reload
+
+    SESSION_CPM_SCRIPTS.forEach(src => {
+      const script = document.createElement('script');
+      script.src = src;
+      script.async = true;
+      script.setAttribute('data-popunder-script', 'true');
+      document.head.appendChild(script);
+    });
+    isPopunderLoadedRef.current = true;
+  };
+
+  // 1. Session Popunders with strict 3-minute post-click cooldown
   useEffect(() => {
     const isLogin = isAdRestrictedRoute(location.pathname);
     const isExempt = isUserExemptFromAds(profile);
 
     if (isLogin || isExempt) {
-      // Clean up all scripts if user is on login page or exempt
-      [...SESSION_CPM_SCRIPTS, ...PAGE_CPM_SCRIPTS.map(s => s.src)].forEach(src => {
-        const existing = document.querySelector(`script[src="${src}"]`);
-        if (existing) existing.remove();
-      });
+      removePopunderScripts();
       purgeAllAdElements();
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-        scrollTimeoutRef.current = null;
+      if (popunderTimeoutRef.current) {
+        clearTimeout(popunderTimeoutRef.current);
+        popunderTimeoutRef.current = null;
       }
       return;
     }
 
-    const loadPopundersWithCooldown = (forced = false) => {
-      if (isAdRestrictedRoute(window.location.pathname) || isUserExemptFromAds(profile)) return;
+    const startCooldownTimer = (remainingMs: number) => {
+      removePopunderScripts();
+      purgeAllAdElements();
+
+      if (popunderTimeoutRef.current) {
+        clearTimeout(popunderTimeoutRef.current);
+      }
+
+      popunderTimeoutRef.current = setTimeout(() => {
+        checkAndLoadPopunder();
+      }, remainingMs);
+    };
+
+    const triggerClickCooldown = () => {
+      if (!isPopunderLoadedRef.current) return;
 
       const now = Date.now();
+      try {
+        sessionStorage.setItem(POPUNDER_STORAGE_KEY, String(now));
+      } catch (e) {}
+
+      // Immediately remove popunder script, purge overlay elements and start 3-minute cooldown
+      startCooldownTimer(POPUNDER_COOLDOWN_MS);
+    };
+
+    const checkAndLoadPopunder = () => {
+      if (isAdRestrictedRoute(window.location.pathname) || isUserExemptFromAds(profile)) return;
+
       let lastTrigger = 0;
       try {
         const stored = sessionStorage.getItem(POPUNDER_STORAGE_KEY);
         if (stored) lastTrigger = parseInt(stored, 10) || 0;
       } catch (e) {}
 
-      // Check if 3 minutes relaxing period has passed
-      if (!forced && now - lastTrigger < POPUNDER_COOLDOWN_MS) {
-        return; // Relaxed / throttled
+      const now = Date.now();
+      const elapsed = now - lastTrigger;
+
+      if (lastTrigger > 0 && elapsed < POPUNDER_COOLDOWN_MS) {
+        // Still in 3-minute cooldown period
+        const remaining = POPUNDER_COOLDOWN_MS - elapsed;
+        startCooldownTimer(remaining);
+      } else {
+        // Cooldown passed: inject popunder script so it's active and ready for next click
+        injectPopunderScripts();
       }
-
-      try {
-        sessionStorage.setItem(POPUNDER_STORAGE_KEY, String(now));
-      } catch (e) {}
-
-      SESSION_CPM_SCRIPTS.forEach(src => {
-        const existing = document.querySelector(`script[src="${src}"]`);
-        if (existing) existing.remove(); // Clean reload
-
-        const script = document.createElement('script');
-        script.src = src;
-        script.async = true;
-        document.head.appendChild(script);
-      });
     };
 
-    // Initial check (triggers only if 3 mins have passed since last popunder)
-    loadPopundersWithCooldown();
+    // Initial check on mount / route change
+    checkAndLoadPopunder();
 
-    // Relaxed popunder recurring timer: check every 3 minutes of active browsing
-    const periodicInterval = setInterval(() => {
-      loadPopundersWithCooldown();
-    }, POPUNDER_COOLDOWN_MS);
+    // Intercept clicks to register when popunder is clicked / triggered
+    const handlePopunderTriggerClick = () => {
+      if (isPopunderLoadedRef.current) {
+        setTimeout(() => {
+          triggerClickCooldown();
+        }, 100);
+      }
+    };
+
+    // Intercept window.open calls from popunder script
+    const originalWindowOpen = window.open;
+    window.open = function (...args) {
+      if (isPopunderLoadedRef.current) {
+        triggerClickCooldown();
+      }
+      return originalWindowOpen.apply(this, args);
+    };
+
+    window.addEventListener('click', handlePopunderTriggerClick, { capture: true });
+    window.addEventListener('pointerdown', handlePopunderTriggerClick, { capture: true });
 
     return () => {
-      clearInterval(periodicInterval);
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-        scrollTimeoutRef.current = null;
+      window.open = originalWindowOpen;
+      window.removeEventListener('click', handlePopunderTriggerClick, { capture: true });
+      window.removeEventListener('pointerdown', handlePopunderTriggerClick, { capture: true });
+      if (popunderTimeoutRef.current) {
+        clearTimeout(popunderTimeoutRef.current);
+        popunderTimeoutRef.current = null;
       }
     };
   }, [location.pathname, profile]);
 
-  // 2. Handle PAGE-level Ads (Once per route change, never on login page)
+  // 2. Handle PAGE-level Ads (Social Bar, Vignette, Native Banners)
   useEffect(() => {
     const isLogin = isAdRestrictedRoute(location.pathname);
     const isExempt = isUserExemptFromAds(profile);
 
     if (isLogin || isExempt) {
       PAGE_CPM_SCRIPTS.forEach(config => {
-        const existing = document.querySelector(`script[src="${config.src}"]`);
-        if (existing) existing.remove();
+        const existing = document.querySelectorAll(`script[src="${config.src}"]`);
+        existing.forEach(el => el.remove());
       });
       if (isLogin) {
         purgeAllAdElements();
@@ -113,10 +172,8 @@ export const CpmScriptManager: React.FC = () => {
 
     // For page-level ads on non-login pages, remove and re-inject
     PAGE_CPM_SCRIPTS.forEach(config => {
-      const existing = document.querySelector(`script[src="${config.src}"]`);
-      if (existing) {
-        existing.remove();
-      }
+      const existing = document.querySelectorAll(`script[src="${config.src}"]`);
+      existing.forEach(el => el.remove());
 
       const script = document.createElement('script');
       script.setAttribute('data-zone', config.zone);
@@ -128,4 +185,5 @@ export const CpmScriptManager: React.FC = () => {
 
   return null;
 };
+
 
