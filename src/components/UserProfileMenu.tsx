@@ -367,15 +367,10 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                   <span>{t("Free Movies")}</span>
                   {location.pathname === "/freemovies" && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-sm" />}
                 </Link>
-                <Link to="/membership" onClick={() => setIsOpen(false)} className={clsx("group flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition-all", location.pathname === "/membership" ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 shadow-xs font-bold" : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800/60")}>
-                  <Gift className={clsx("w-4 h-4 transition-transform group-hover:scale-110", location.pathname === "/membership" ? "text-emerald-500" : "text-zinc-400")} /> 
-                  <span>{t("Membership")}</span>
-                  {location.pathname === "/membership" && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-sm" />}
-                </Link>
-                <Link to="/rewards" onClick={() => setIsOpen(false)} className={clsx("group flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition-all", location.pathname === "/rewards" ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 shadow-xs font-bold" : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800/60")}>
-                  <Award className={clsx("w-4 h-4 transition-transform group-hover:scale-110", location.pathname === "/rewards" ? "text-emerald-500" : "text-zinc-400")} /> 
-                  <span>{t("Rewards")}</span>
-                  {location.pathname === "/rewards" && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-sm" />}
+                <Link to="/membership" onClick={() => setIsOpen(false)} className={clsx("group flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition-all", (location.pathname === "/membership" || location.pathname === "/plans") ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 shadow-xs font-bold" : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800/60")}>
+                  <Gift className={clsx("w-4 h-4 transition-transform group-hover:scale-110", (location.pathname === "/membership" || location.pathname === "/plans") ? "text-emerald-500" : "text-zinc-400")} /> 
+                  <span>{t("Membership Plans")}</span>
+                  {(location.pathname === "/membership" || location.pathname === "/plans") && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-sm" />}
                 </Link>
                 <Link to="/reviews" onClick={() => setIsOpen(false)} className={clsx("group flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition-all", location.pathname === "/reviews" ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 shadow-xs font-bold" : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800/60")}>
                   <Star className={clsx("w-4 h-4 transition-transform group-hover:scale-110", location.pathname === "/reviews" ? "text-emerald-500" : "text-zinc-400")} /> 

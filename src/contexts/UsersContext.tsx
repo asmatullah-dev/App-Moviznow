@@ -231,6 +231,20 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     safeStorage.setItem('pending_user_updates', JSON.stringify(pending));
     setHasPendingChanges(true);
     window.dispatchEvent(new CustomEvent('pending_user_updates_changed'));
+
+    // If the currently active logged-in user profile was updated, update profile_cache and dispatch user_profile_updated
+    try {
+      const cachedProfileStr = safeStorage.getItem('profile_cache');
+      if (cachedProfileStr) {
+        const currentProfile = JSON.parse(cachedProfileStr);
+        if (currentProfile?.uid && updates[currentProfile.uid]) {
+          const updatedActiveProfile = normalizeUserStatusAndExpiry({ ...currentProfile, ...updates[currentProfile.uid] });
+          safeStorage.setItem('profile_cache', JSON.stringify(updatedActiveProfile));
+          safeStorage.setItemAsync('profile_cache', JSON.stringify(updatedActiveProfile)).catch(() => {});
+          window.dispatchEvent(new CustomEvent('user_profile_updated', { detail: updatedActiveProfile }));
+        }
+      }
+    } catch (e) {}
   }, [saveUsersCache]);
 
   // Buffer changes locally
@@ -315,6 +329,23 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         Object.assign(knownMtimes, metaUsersUpdate);
         safeStorage.setItem('sync_user_mtimes', JSON.stringify(knownMtimes));
         safeStorage.setItemAsync('sync_user_mtimes', JSON.stringify(knownMtimes)).catch(() => {});
+      } catch (e) {}
+
+      for (const uid of userIds) {
+        safeStorage.setItem(`profile_version_${uid}`, nowSyncUtc);
+      }
+
+      try {
+        const cachedProfileStr = safeStorage.getItem('profile_cache');
+        if (cachedProfileStr) {
+          const currentProfile = JSON.parse(cachedProfileStr);
+          if (currentProfile?.uid && pending[currentProfile.uid]) {
+            const updatedActiveProfile = normalizeUserStatusAndExpiry({ ...currentProfile, ...pending[currentProfile.uid] });
+            safeStorage.setItem('profile_cache', JSON.stringify(updatedActiveProfile));
+            safeStorage.setItemAsync('profile_cache', JSON.stringify(updatedActiveProfile)).catch(() => {});
+            window.dispatchEvent(new CustomEvent('user_profile_updated', { detail: updatedActiveProfile }));
+          }
+        }
       } catch (e) {}
 
       safeStorage.removeItem('pending_user_updates');

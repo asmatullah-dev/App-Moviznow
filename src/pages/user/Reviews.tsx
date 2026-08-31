@@ -165,35 +165,7 @@ export default function Reviews() {
       safeStorage.setItem(CACHE_KEY, JSON.stringify(updatedReviews));
       safeStorage.setItem('has_rated', 'true');
 
-      // Grant +5 days extension reward if not already claimed
-      if (profile && !profile.reviewRewardClaimed) {
-        try {
-          let baseDate = new Date();
-          if (profile.expiryDate && profile.expiryDate !== 'Lifetime') {
-            const parts = profile.expiryDate.split('T')[0].split('-');
-            if (parts.length === 3) {
-              const expDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]), 23, 59, 59, 999);
-              if (expDate > baseDate) baseDate = expDate;
-            }
-          }
-          baseDate.setDate(baseDate.getDate() + 5);
-          const dateStr = baseDate.toISOString().split('T')[0];
-          const updates: any = {
-            reviewRewardClaimed: true,
-            expiryDate: `${dateStr}T23:59:59.999Z`
-          };
-          if (profile.expiryDate !== 'Lifetime') {
-            updates.status = 'active';
-          }
-          await updateUserProfileData(updates);
-          sessionStorage.setItem('reviewRewardClaimed', 'true');
-          triggerConfetti();
-        } catch (err) {
-          console.error("Failed to extend membership for review", err);
-        }
-      } else {
-        triggerConfetti();
-      }
+      triggerConfetti();
 
       if ((window as any).triggerSyncUserData) {
         (window as any).triggerSyncUserData('review_made');
@@ -282,14 +254,6 @@ export default function Reviews() {
                 <p className="text-zinc-300 text-xs sm:text-sm max-w-lg leading-relaxed">
                   {t("See what others are saying about %APP_NAME%").replace("%APP_NAME%", appName)}
                 </p>
-
-                {/* Reward Callout Pill */}
-                {profile && !profile.reviewRewardClaimed && (
-                  <div className="inline-flex items-center gap-2 mt-2 px-3 py-1.5 rounded-xl bg-gradient-to-r from-rose-500/15 via-amber-500/15 to-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-bold animate-pulse">
-                    <Gift className="w-4 h-4 text-amber-400" />
-                    <span>🎁 {t("Submit a Review (+5 Days)")} - {t("Get 5 Days Free Basic Access!")}</span>
-                  </div>
-                )}
               </div>
 
               {/* Right Column: Rating Score Card & Distribution */}
@@ -343,11 +307,11 @@ export default function Reviews() {
             <div className="bg-gradient-to-r from-rose-950/60 via-purple-950/50 to-amber-950/60 border border-rose-500/30 rounded-2xl p-5 sm:p-6 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
               <div className="space-y-1 text-center sm:text-left" dir={language === 'ur' ? 'rtl' : 'ltr'}>
                 <div className="flex items-center justify-center sm:justify-start gap-2">
-                  <Gift className="w-5 h-5 text-amber-400" />
+                  <MessageSquare className="w-5 h-5 text-rose-400" />
                   <h3 className="font-extrabold text-base sm:text-lg text-white">{t("Write a Review")}</h3>
                 </div>
                 <p className="text-xs sm:text-sm text-zinc-300">
-                  {t("Log in to your account to post a review and get +5 Days free membership!")}
+                  {t("Log in to your account to share your feedback and review!")}
                 </p>
               </div>
               <button
@@ -382,14 +346,9 @@ export default function Reviews() {
                     <span>{t("Write a Review")}</span>
                   </h3>
                   <p className="text-xs text-zinc-400 mt-0.5">
-                    {t("Share your honest experience and earn 5 days of free Basic access!")}
+                    {t("Share your honest experience and thoughts with the community!")}
                   </p>
                 </div>
-                {!profile.reviewRewardClaimed && (
-                  <span className="px-3 py-1 rounded-full text-xs font-black bg-gradient-to-r from-amber-500 to-rose-500 text-white shadow-md animate-bounce">
-                    +5 {t('Days')} Basic
-                  </span>
-                )}
               </div>
 
               {/* Star Selection */}

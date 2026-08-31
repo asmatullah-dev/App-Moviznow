@@ -403,10 +403,10 @@ export async function saveContentsToChunks(rawContents: Content[]): Promise<void
  * and registers all affected chunk IDs into pending_chunk_updates.
  * Returns { rebalanced: boolean, rebalancedCount: number, affectedChunkIds: string[] }
  */
-export function rebalanceLocalChunks(): { rebalanced: boolean; rebalancedCount: number; affectedChunkIds: string[] } {
+export function rebalanceLocalChunks(storagePrefix: string = 'admin_'): { rebalanced: boolean; rebalancedCount: number; affectedChunkIds: string[] } {
   // 0. Quick metadata-driven pre-check to bypass loop entirely if no chunk overflows its limit.
   // This avoids loading and parsing large JSON strings when editing or syncing.
-  const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+  const localMetaString = safeStorage.getItem(`${storagePrefix}chunk_meta_versions`) || '{}';
   let localMeta: Record<string, any> = {};
   try { localMeta = JSON.parse(localMetaString); } catch(e) {}
 
@@ -437,7 +437,8 @@ export function rebalanceLocalChunks(): { rebalanced: boolean; rebalancedCount: 
   const processType = (prefix: string, maxSize: number) => {
     // 1. Gather all local chunks for this prefix that actually exist in safeStorage to avoid querying non-existent index ranges
     const chunksMap = new Map<number, { id: string; items: Record<string, any> }>();
-    const keys = safeStorage.keys().filter(k => k.startsWith('content_chunk_' + prefix) || k.startsWith(prefix));
+    const searchPrefix = `${storagePrefix}content_chunk_${prefix}`;
+    const keys = safeStorage.keys().filter(k => k.startsWith(searchPrefix) || k.startsWith(`${storagePrefix}${prefix}`));
     
     for (const key of keys) {
       const match = key.match(/(\d+)$/);
@@ -486,8 +487,8 @@ export function rebalanceLocalChunks(): { rebalanced: boolean; rebalancedCount: 
         affectedChunkIds.add(nextChunk.id);
 
         // Save immediately to local storage
-        safeStorage.setItem(`content_chunk_${currentChunk.id}`, JSON.stringify(currentChunk.items));
-        safeStorage.setItem(`content_chunk_${nextChunk.id}`, JSON.stringify(nextChunk.items));
+        safeStorage.setItem(`${storagePrefix}content_chunk_${currentChunk.id}`, JSON.stringify(currentChunk.items));
+        safeStorage.setItem(`${storagePrefix}content_chunk_${nextChunk.id}`, JSON.stringify(nextChunk.items));
       }
     }
   };
@@ -497,7 +498,7 @@ export function rebalanceLocalChunks(): { rebalanced: boolean; rebalancedCount: 
 
   if (affectedChunkIds.size > 0) {
     // Register affected chunks in pending_chunk_updates
-    const pendingStr = safeStorage.getItem('pending_chunk_updates') || '[]';
+    const pendingStr = safeStorage.getItem(`${storagePrefix}pending_chunk_updates`) || '[]';
     let pendingSet: Set<string>;
     try {
       pendingSet = new Set<string>(JSON.parse(pendingStr));
@@ -505,21 +506,21 @@ export function rebalanceLocalChunks(): { rebalanced: boolean; rebalancedCount: 
       pendingSet = new Set<string>();
     }
     affectedChunkIds.forEach(id => pendingSet.add(id));
-    safeStorage.setItem('pending_chunk_updates', JSON.stringify(Array.from(pendingSet)));
+    safeStorage.setItem(`${storagePrefix}pending_chunk_updates`, JSON.stringify(Array.from(pendingSet)));
 
     // Update chunk_meta_versions
-    const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+    const localMetaString = safeStorage.getItem(`${storagePrefix}chunk_meta_versions`) || '{}';
     let localMeta: Record<string, any> = {};
     try { localMeta = JSON.parse(localMetaString); } catch(e) {}
     const utcNow = getUtcVersion();
     affectedChunkIds.forEach(cid => {
-      const chunkStr = safeStorage.getItem(`content_chunk_${cid}`) || '{}';
+      const chunkStr = safeStorage.getItem(`${storagePrefix}content_chunk_${cid}`) || '{}';
       try {
         const items = JSON.parse(chunkStr);
         localMeta[cid] = { updatedAt: utcNow, count: Object.keys(items).length };
       } catch(e) {}
     });
-    safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+    safeStorage.setItem(`${storagePrefix}chunk_meta_versions`, JSON.stringify(localMeta));
   }
 
   return {
@@ -533,9 +534,9 @@ export function rebalanceLocalChunks(): { rebalanced: boolean; rebalancedCount: 
  * Automatically reconfigures content chunks when syncing/saving to Firestore.
  * Performs balancing locally first, and only writes to Firestore if rebalancing occurred.
  */
-export async function autoRebalanceChunks(): Promise<{ rebalancedCount: number }> {
+export async function autoRebalanceChunks(storagePrefix: string = 'admin_'): Promise<{ rebalancedCount: number }> {
   try {
-    const { rebalanced, rebalancedCount, affectedChunkIds } = rebalanceLocalChunks();
+    const { rebalanced, rebalancedCount, affectedChunkIds } = rebalanceLocalChunks(storagePrefix);
     if (!rebalanced || affectedChunkIds.length === 0) {
       return { rebalancedCount: 0 };
     }
@@ -545,7 +546,7 @@ export async function autoRebalanceChunks(): Promise<{ rebalancedCount: number }
     const utcNow = getUtcVersion();
 
     for (const cid of affectedChunkIds) {
-      const chunkStr = safeStorage.getItem(`content_chunk_${cid}`) || '{}';
+      const chunkStr = safeStorage.getItem(`${storagePrefix}content_chunk_${cid}`) || '{}';
       try {
         const items = JSON.parse(chunkStr);
         batch.set(doc(db, 'content_chunks', cid), { items, updatedAt: serverTimestamp() }, { merge: true });
@@ -570,19 +571,22 @@ export async function autoRebalanceChunks(): Promise<{ rebalancedCount: number }
  */
 export function findLocalChunkForContent(contentId: string): string | null {
   for (let i = 0; i < 50; i++) {
-    const mStr = safeStorage.getItem(`content_chunk_movie_chunk_${i}`);
-    if (mStr && mStr.includes(`"${contentId}"`)) {
-      try {
-        const items = JSON.parse(mStr);
-        if (items[contentId]) return `movie_chunk_${i}`;
-      } catch(e) {}
-    }
-    const sStr = safeStorage.getItem(`content_chunk_series_chunk_${i}`);
-    if (sStr && sStr.includes(`"${contentId}"`)) {
-      try {
-        const items = JSON.parse(sStr);
-        if (items[contentId]) return `series_chunk_${i}`;
-      } catch(e) {}
+    const prefixes = ['content_chunk_', 'admin_content_chunk_', 'static_content_chunk_'];
+    for (const prefix of prefixes) {
+      const mStr = safeStorage.getItem(`${prefix}movie_chunk_${i}`);
+      if (mStr && mStr.includes(`"${contentId}"`)) {
+        try {
+          const items = JSON.parse(mStr);
+          if (items[contentId]) return `movie_chunk_${i}`;
+        } catch(e) {}
+      }
+      const sStr = safeStorage.getItem(`${prefix}series_chunk_${i}`);
+      if (sStr && sStr.includes(`"${contentId}"`)) {
+        try {
+          const items = JSON.parse(sStr);
+          if (items[contentId]) return `series_chunk_${i}`;
+        } catch(e) {}
+      }
     }
   }
   return null;
@@ -591,7 +595,7 @@ export function findLocalChunkForContent(contentId: string): string | null {
 /**
  * Updates specific fields for multiple content items in their respective chunks
  */
-export async function updateContentFieldsInChunks(updates: { id: string, chunkId?: string, fields?: any, [key: string]: any }[]): Promise<void> {
+export async function updateContentFieldsInChunks(updates: { id: string, chunkId?: string, fields?: any, [key: string]: any }[], storagePrefix: string = 'admin_'): Promise<void> {
   const resolvedUpdates = updates.map(u => ({
     ...u,
     chunkId: u.chunkId || findLocalChunkForContent(u.id) || undefined
@@ -679,7 +683,7 @@ export async function deleteContentFromChunk(contentId: string, chunkId?: string
 /**
  * Deletes multiple content items from chunks efficiently
  */
-export async function deleteContentsFromChunks(itemsToRemove: {id: string, chunkId?: string}[]): Promise<void> {
+export async function deleteContentsFromChunks(itemsToRemove: {id: string, chunkId?: string}[], storagePrefix: string = 'admin_'): Promise<void> {
   const resolvedRemovals = itemsToRemove.map(i => ({
     ...i,
     chunkId: i.chunkId || findLocalChunkForContent(i.id) || undefined
@@ -740,10 +744,10 @@ export async function deleteContentsFromChunks(itemsToRemove: {id: string, chunk
   await Promise.all(batches.map(b => b.commit()));
 }
 
-export async function getContentFromChunks(contentId: string): Promise<Content | null> {
+export async function getContentFromChunks(contentId: string, storagePrefix: string = 'admin_'): Promise<Content | null> {
   const localChunkId = findLocalChunkForContent(contentId);
   if (localChunkId) {
-    const chunkStr = safeStorage.getItem(`content_chunk_${localChunkId}`) || safeStorage.getItem(localChunkId);
+    const chunkStr = safeStorage.getItem(`${storagePrefix}content_chunk_${localChunkId}`) || safeStorage.getItem(`${storagePrefix}${localChunkId}`);
     if (chunkStr) {
       try {
         const items = JSON.parse(chunkStr);

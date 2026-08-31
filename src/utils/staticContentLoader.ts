@@ -99,7 +99,7 @@ export function isStaticExportNewer(): boolean {
  * Guarantees zero loading delay on app open by serving from local cache immediately.
  * If cache is completely empty (first run), it bootstraps initial items synchronously.
  */
-export function getCachedContentData(): {
+export function getCachedContentData(includeStatic: boolean = true): {
   contentList: Content[];
   genres: Genre[];
   languages: Language[];
@@ -108,13 +108,13 @@ export function getCachedContentData(): {
   hasCache: boolean;
 } {
   // 1. Try memory cache
-  if (memoizedContentList && memoizedContentList.length > 0) {
+  if (includeStatic && memoizedContentList && memoizedContentList.length > 0) {
     return {
       contentList: memoizedContentList,
-      genres: getCachedGenres(),
-      languages: getCachedLanguages(),
-      qualities: getCachedQualities(),
-      collections: getCachedCollections(),
+      genres: getCachedGenres(includeStatic),
+      languages: getCachedLanguages(includeStatic),
+      qualities: getCachedQualities(includeStatic),
+      collections: getCachedCollections(includeStatic),
       hasCache: true
     };
   }
@@ -125,13 +125,13 @@ export function getCachedContentData(): {
     try {
       const parsed = JSON.parse(cachedContentStr);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        memoizedContentList = parsed;
+        if (includeStatic) memoizedContentList = parsed;
         return {
           contentList: parsed,
-          genres: getCachedGenres(),
-          languages: getCachedLanguages(),
-          qualities: getCachedQualities(),
-          collections: getCachedCollections(),
+          genres: getCachedGenres(includeStatic),
+          languages: getCachedLanguages(includeStatic),
+          qualities: getCachedQualities(includeStatic),
+          collections: getCachedCollections(includeStatic),
           hasCache: true
         };
       }
@@ -143,6 +143,7 @@ export function getCachedContentData(): {
   // 3. Try recovering from chunks in safeStorage
   const chunkKeys = safeStorage.keys().filter(k =>
     k.startsWith('content_chunk_') ||
+    (includeStatic && k.startsWith('static_content_chunk_')) ||
     k.startsWith('movie_chunk_') ||
     k.startsWith('series_chunk_')
   );
@@ -171,10 +172,10 @@ export function getCachedContentData(): {
       safeStorage.setItem('content_cache', JSON.stringify(recoveredList));
       return {
         contentList: recoveredList,
-        genres: getCachedGenres(),
-        languages: getCachedLanguages(),
-        qualities: getCachedQualities(),
-        collections: getCachedCollections(),
+        genres: getCachedGenres(includeStatic),
+        languages: getCachedLanguages(includeStatic),
+        qualities: getCachedQualities(includeStatic),
+        collections: getCachedCollections(includeStatic),
         hasCache: true
       };
     }
@@ -197,10 +198,9 @@ export function getCachedContentData(): {
   const initialList = Object.values(itemMap).sort((a, b) => (b.order ?? 0) - (a.order ?? 0));
   memoizedContentList = initialList;
 
-  // Persist to cache
-  safeStorage.setItem('content_cache', JSON.stringify(initialList));
+  // Persist to static chunks
   for (const [chunkId, itemsObj] of Object.entries(chunkMap)) {
-    safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(itemsObj));
+    safeStorage.setItem('static_content_chunk_' + chunkId, JSON.stringify(itemsObj));
   }
 
   // Persist metadata
@@ -209,36 +209,30 @@ export function getCachedContentData(): {
   const initialQualities = getStaticExportMetadata().qualities;
   const initialCollections = getStaticExportCollections();
 
-  safeStorage.setItem('genres_cache', JSON.stringify(initialGenres));
-  safeStorage.setItem('languages_cache', JSON.stringify(initialLanguages));
-  safeStorage.setItem('qualities_cache', JSON.stringify(initialQualities));
-  safeStorage.setItem('collections_cache', JSON.stringify(initialCollections));
+  safeStorage.setItem('static_genres_cache', JSON.stringify(initialGenres));
+  safeStorage.setItem('static_languages_cache', JSON.stringify(initialLanguages));
+  safeStorage.setItem('static_qualities_cache', JSON.stringify(initialQualities));
+  safeStorage.setItem('static_collections_cache', JSON.stringify(initialCollections));
   if (staticCollectionsData.items) {
-    safeStorage.setItem('local_collection_chunk_collection_chunk_0', JSON.stringify(staticCollectionsData.items));
+    safeStorage.setItem('static_collection_chunk_collection_chunk_0', JSON.stringify(staticCollectionsData.items));
   }
 
   const currentVer = getStaticExportVersion();
   safeStorage.setItem('cached_json_catalog_version', currentVer);
 
-  const localMeta: Record<string, any> = {};
-  Object.entries(chunkMap).forEach(([cid, map]) => {
-    localMeta[cid] = { updatedAt: currentVer, count: Object.keys(map).length };
-  });
-  localMeta.metadata = { updatedAt: currentVer };
-  localMeta.collections = { updatedAt: currentVer };
-  safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+  // We do NOT update the primary chunk_meta_versions here to keep Admin management pure
 
   return {
-    contentList: initialList,
-    genres: initialGenres,
-    languages: initialLanguages,
-    qualities: initialQualities,
-    collections: initialCollections,
-    hasCache: true
+    contentList: includeStatic ? initialList : [],
+    genres: getCachedGenres(includeStatic),
+    languages: getCachedLanguages(includeStatic),
+    qualities: getCachedQualities(includeStatic),
+    collections: getCachedCollections(includeStatic),
+    hasCache: includeStatic ? initialList.length > 0 : false
   };
 }
 
-function getCachedGenres(): Genre[] {
+function getCachedGenres(includeStatic: boolean = true): Genre[] {
   const g = safeStorage.getItem('genres_cache');
   if (g) {
     try {
@@ -246,10 +240,20 @@ function getCachedGenres(): Genre[] {
       if (Array.isArray(parsed) && parsed.length > 0) return parsed;
     } catch (e) {}
   }
-  return getStaticExportMetadata().genres;
+  if (includeStatic) {
+    const sg = safeStorage.getItem('static_genres_cache');
+    if (sg) {
+      try {
+        const parsed = JSON.parse(sg);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {}
+    }
+    return getStaticExportMetadata().genres;
+  }
+  return [];
 }
 
-function getCachedLanguages(): Language[] {
+function getCachedLanguages(includeStatic: boolean = true): Language[] {
   const l = safeStorage.getItem('languages_cache');
   if (l) {
     try {
@@ -257,10 +261,20 @@ function getCachedLanguages(): Language[] {
       if (Array.isArray(parsed) && parsed.length > 0) return parsed;
     } catch (e) {}
   }
-  return getStaticExportMetadata().languages;
+  if (includeStatic) {
+    const sl = safeStorage.getItem('static_languages_cache');
+    if (sl) {
+      try {
+        const parsed = JSON.parse(sl);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {}
+    }
+    return getStaticExportMetadata().languages;
+  }
+  return [];
 }
 
-function getCachedQualities(): Quality[] {
+function getCachedQualities(includeStatic: boolean = true): Quality[] {
   const q = safeStorage.getItem('qualities_cache');
   if (q) {
     try {
@@ -268,10 +282,20 @@ function getCachedQualities(): Quality[] {
       if (Array.isArray(parsed) && parsed.length > 0) return parsed;
     } catch (e) {}
   }
-  return getStaticExportMetadata().qualities;
+  if (includeStatic) {
+    const sq = safeStorage.getItem('static_qualities_cache');
+    if (sq) {
+      try {
+        const parsed = JSON.parse(sq);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {}
+    }
+    return getStaticExportMetadata().qualities;
+  }
+  return [];
 }
 
-function getCachedCollections(): AppCollection[] {
+function getCachedCollections(includeStatic: boolean = true): AppCollection[] {
   const c = safeStorage.getItem('collections_cache');
   if (c) {
     try {
@@ -279,7 +303,17 @@ function getCachedCollections(): AppCollection[] {
       if (Array.isArray(parsed) && parsed.length > 0) return parsed;
     } catch (e) {}
   }
-  return getStaticExportCollections();
+  if (includeStatic) {
+    const sc = safeStorage.getItem('static_collections_cache');
+    if (sc) {
+      try {
+        const parsed = JSON.parse(sc);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {}
+    }
+    return getStaticExportCollections();
+  }
+  return [];
 }
 
 /**
@@ -412,7 +446,7 @@ export function mergeStaticExportDataSafely(): {
     (a, b) => (b.order ?? 0) - (a.order ?? 0)
   );
 
-  // 6. Write chunk objects into local storage
+  // 6. Write chunk objects into static storage
   const chunkMap: Record<string, Record<string, any>> = {};
   for (const item of jsonItems) {
     const chunkId = item.chunkId || (item.type === 'movie' ? 'movie_chunk_0' : 'series_chunk_0');
@@ -420,7 +454,7 @@ export function mergeStaticExportDataSafely(): {
     chunkMap[chunkId][item.id] = item;
   }
   for (const [chunkId, itemsObj] of Object.entries(chunkMap)) {
-    const storageKey = 'content_chunk_' + chunkId;
+    const storageKey = 'static_content_chunk_' + chunkId;
     const existingStr = safeStorage.getItem(storageKey);
     if (!existingStr || existingStr === '{}') {
       safeStorage.setItem(storageKey, JSON.stringify(itemsObj));
@@ -443,12 +477,11 @@ export function mergeStaticExportDataSafely(): {
     }
   }
 
-  // 7. Persist cache
-  safeStorage.setItem('content_cache', JSON.stringify(mergedList));
-  safeStorage.setItem('genres_cache', JSON.stringify(mergedGenres));
-  safeStorage.setItem('languages_cache', JSON.stringify(mergedLanguages));
-  safeStorage.setItem('qualities_cache', JSON.stringify(mergedQualities));
-  safeStorage.setItem('collections_cache', JSON.stringify(mergedCollections));
+  // 7. Persist static markers only - do NOT pollute main content_cache
+  safeStorage.setItem('static_genres_cache', JSON.stringify(mergedGenres));
+  safeStorage.setItem('static_languages_cache', JSON.stringify(mergedLanguages));
+  safeStorage.setItem('static_qualities_cache', JSON.stringify(mergedQualities));
+  safeStorage.setItem('static_collections_cache', JSON.stringify(mergedCollections));
 
   // 8. Update version markers
   const currentVer = getStaticExportVersion();
@@ -460,7 +493,7 @@ export function mergeStaticExportDataSafely(): {
 
   // Dispatch event so any other active views/tabs immediately update
   try {
-    window.dispatchEvent(new CustomEvent('content_updated_locally'));
+    window.dispatchEvent(new CustomEvent('static_content_updated'));
   } catch (e) {}
 
   return {
@@ -508,7 +541,7 @@ export function seedStaticExportData(forceOverwrite: boolean = false): void {
     try { localMeta = JSON.parse(localMetaString); } catch (e) {}
 
     for (const [chunkId, itemsObj] of Object.entries(chunkMap)) {
-      const storageKey = 'content_chunk_' + chunkId;
+      const storageKey = 'static_content_chunk_' + chunkId;
       safeStorage.setItem(storageKey, JSON.stringify(itemsObj));
       localMeta[chunkId] = { updatedAt: currentVer, count: Object.keys(itemsObj).length };
     }
@@ -520,25 +553,25 @@ export function seedStaticExportData(forceOverwrite: boolean = false): void {
     }
     const sortedList = Object.values(itemMap).sort((a, b) => (b.order ?? 0) - (a.order ?? 0));
     memoizedContentList = sortedList;
-    safeStorage.setItem('content_cache', JSON.stringify(sortedList));
+    
+    // Do NOT write to content_cache directly to keep it pure for Admin management
 
-    if (staticMetadataData.genres) safeStorage.setItem('genres_cache', JSON.stringify(staticMetadataData.genres));
-    if (staticMetadataData.languages) safeStorage.setItem('languages_cache', JSON.stringify(staticMetadataData.languages));
-    if (staticMetadataData.qualities) safeStorage.setItem('qualities_cache', JSON.stringify(staticMetadataData.qualities));
+    if (staticMetadataData.genres) safeStorage.setItem('static_genres_cache', JSON.stringify(staticMetadataData.genres));
+    if (staticMetadataData.languages) safeStorage.setItem('static_languages_cache', JSON.stringify(staticMetadataData.languages));
+    if (staticMetadataData.qualities) safeStorage.setItem('static_qualities_cache', JSON.stringify(staticMetadataData.qualities));
     if (staticCollectionsData.items) {
-      safeStorage.setItem('local_collection_chunk_collection_chunk_0', JSON.stringify(staticCollectionsData.items));
+      safeStorage.setItem('static_collection_chunk_collection_chunk_0', JSON.stringify(staticCollectionsData.items));
       const collList = Object.values(staticCollectionsData.items).sort((a: any, b: any) => (b.order || 0) - (a.order || 0));
-      safeStorage.setItem('collections_cache', JSON.stringify(collList));
+      safeStorage.setItem('static_collections_cache', JSON.stringify(collList));
     }
 
-    localMeta.metadata = { updatedAt: currentVer };
-    localMeta.collections = { updatedAt: currentVer };
-    safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+    // Do NOT update chunk_meta_versions here either to keep it pure
+
     safeStorage.setItem('cached_json_catalog_version', currentVer);
     safeStorage.setItem('last_successful_meta_check', Date.now().toString());
 
     try {
-      window.dispatchEvent(new CustomEvent('content_updated_locally'));
+      window.dispatchEvent(new CustomEvent('static_content_updated'));
     } catch (e) {}
   } catch (e) {
     console.error('Error seeding static export data:', e);

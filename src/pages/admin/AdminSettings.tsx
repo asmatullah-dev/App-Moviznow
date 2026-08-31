@@ -885,12 +885,12 @@ export default function AdminSettings() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Sponsor Video File URL (.mp4 direct stream link)</label>
+                  <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Video Ad URL / Smartlink URL</label>
                   <input
                     type="text"
                     value={settings.adVideoUrl || ''}
                     onChange={(e) => setSettings({ ...settings, adVideoUrl: e.target.value })}
-                    placeholder="e.g. https://assets.mixkit.co/.../video.mp4"
+                    placeholder="e.g. https://commercialhalftime.com/htqpa4mty?key=53a3c0b6e7edfce96cd08f0cabe01b54"
                     className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
                   />
                 </div>

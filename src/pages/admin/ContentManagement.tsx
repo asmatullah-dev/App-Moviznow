@@ -749,6 +749,10 @@ export default function ContentManagement() {
   } = useAdminContent();
   const { sendNotification } = useNotifications();
   const [loading, setLoading] = useState(contextLoading);
+
+  useEffect(() => {
+    setLoading(contextLoading);
+  }, [contextLoading]);
   const [isSyncingFromFirestore, setIsSyncingFromFirestore] = useState(false);
   const [isGithubModalOpen, setIsGithubModalOpen] = useState(false);
   const [githubRepo, setGithubRepo] = useState(() => localStorage.getItem("githubRepo") || "");
@@ -795,7 +799,6 @@ export default function ContentManagement() {
   const handleManualFirestoreRefresh = async () => {
     setIsSyncingFromFirestore(true);
     try {
-      seedStaticExportData(true);
       const res = await quickRefreshCatalog(true, undefined, true);
       if (res.updated || res.updatedCount > 0) {
         triggerAlert("Sync Complete", `Updated ${res.updatedCount} items from Firestore based on version changes`, "success");

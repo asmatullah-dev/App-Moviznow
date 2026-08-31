@@ -67,7 +67,7 @@ export default function Membership() {
   return (
     <div className="min-h-screen bg-zinc-950 text-white flex flex-col relative overflow-hidden">
       <Helmet>
-        <title>{appName} - {t("Membership")}</title>
+        <title>{appName} - {t("Membership Plans")}</title>
       </Helmet>
 
       <Header showBackButton={true} />

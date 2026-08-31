@@ -1,13 +1,16 @@
 import React, { useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
-import { isUserExemptFromAds } from '../utils/adUtils';
+import { isUserExemptFromAds, isAdRestrictedRoute, purgeAllAdElements } from '../utils/adUtils';
 
 export const AdSenseScriptManager: React.FC = () => {
   const { profile } = useAuth();
   const { settings } = useSettings();
+  const location = useLocation();
 
   useEffect(() => {
+    const isLogin = isAdRestrictedRoute(location.pathname);
     const isExempt = isUserExemptFromAds(profile);
     const provider = settings?.adProvider || 'both';
     const client = settings?.adSenseClientId || 'ca-pub-3128773545517669';
@@ -15,8 +18,8 @@ export const AdSenseScriptManager: React.FC = () => {
     const scriptSelector = 'script[src*="adsbygoogle.js"]';
     const existingScript = document.querySelector<HTMLScriptElement>(scriptSelector);
 
-    // If user is exempt or ads are disabled, remove the Google AdSense script tag
-    if (isExempt || provider === 'disabled' || provider === 'interstitial_only') {
+    // If on login page, user is exempt, or ads are disabled, remove AdSense script tag and pause requests
+    if (isLogin || isExempt || provider === 'disabled' || provider === 'interstitial_only') {
       if (existingScript) {
         existingScript.remove();
       }
@@ -25,10 +28,13 @@ export const AdSenseScriptManager: React.FC = () => {
           (window as any).adsbygoogle.pauseAdRequests = 1;
         }
       } catch (e) {}
+      if (isLogin) {
+        purgeAllAdElements();
+      }
       return;
     }
 
-    // Otherwise for non-exempt users (basic, pending, trial, guest), load AdSense script
+    // Otherwise for non-exempt users on normal pages, load AdSense script
     if (provider === 'google_adsense' || provider === 'both') {
       try {
         if ((window as any).adsbygoogle) {
@@ -44,7 +50,8 @@ export const AdSenseScriptManager: React.FC = () => {
         document.head.appendChild(script);
       }
     }
-  }, [profile, settings?.adProvider, settings?.adSenseClientId]);
+  }, [location.pathname, profile, settings?.adProvider, settings?.adSenseClientId]);
 
   return null;
 };
+

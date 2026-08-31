@@ -136,104 +136,7 @@ export const standardizePhone = (phone: string) => {
   return digits;
 };
 
-const generateReferralCode = (uid?: string) => {
-  if (uid) {
-    let hash = 0;
-    for (let i = 0; i < uid.length; i++) {
-      const char = uid.charCodeAt(i);
-      hash = (hash << 5) - hash + char;
-      hash = hash & hash;
-    }
-    return Math.abs(hash).toString(36).toUpperCase().padStart(6, 'X').substring(0, 6);
-  }
-  return Math.random().toString(36).substring(2, 8).toUpperCase();
-};
 
-export const ensureSingleAndValidReferralCode = async (uid: string, currentProfileCode?: string): Promise<string> => {
-  const refDocRef = doc(db, "referral", "all");
-  let allCodes: Record<string, string> = {};
-  let allCodeToUid: Record<string, string> = {};
-
-  try {
-    const refDocSnap = await getDoc(refDocRef);
-    if (refDocSnap.exists()) {
-      const refData = refDocSnap.data() || {};
-      allCodes = refData.codes || {};
-      allCodeToUid = refData.codeToUid || {};
-    }
-  } catch (err) {
-    console.error("Failed to read referral/all in ensureSingleAndValidReferralCode:", err);
-  }
-
-  let codeFromAllCodes = allCodes[uid];
-  let chosenCode = codeFromAllCodes;
-
-  if (!chosenCode) {
-    for (const [code, mappedUid] of Object.entries(allCodeToUid)) {
-      if (mappedUid === uid) {
-        chosenCode = code;
-        break;
-      }
-    }
-  }
-
-  if (!chosenCode && currentProfileCode) {
-    const ownerOfCurrent = allCodeToUid[currentProfileCode];
-    if (!ownerOfCurrent || ownerOfCurrent === uid) {
-      chosenCode = currentProfileCode;
-    }
-  }
-
-  if (!chosenCode) {
-    chosenCode = generateReferralCode(uid);
-    let attempt = 0;
-    while (allCodeToUid[chosenCode] && allCodeToUid[chosenCode] !== uid && attempt < 10) {
-      chosenCode = generateReferralCode(uid + "_" + attempt);
-      attempt++;
-    }
-  }
-
-  const duplicateCodesToDelete: string[] = [];
-  for (const [code, mappedUid] of Object.entries(allCodeToUid)) {
-    if (mappedUid === uid && code !== chosenCode) {
-      duplicateCodesToDelete.push(code);
-    }
-  }
-
-  const needsReferralCodesUpdate = allCodes[uid] !== chosenCode;
-  const needsReferralCodeToUidUpdate = allCodeToUid[chosenCode] !== uid;
-  const hasDuplicatesToDelete = duplicateCodesToDelete.length > 0;
-
-  if (needsReferralCodesUpdate || needsReferralCodeToUidUpdate || hasDuplicatesToDelete) {
-    try {
-      const { deleteField, writeBatch } = await import("firebase/firestore");
-      const batch = writeBatch(db);
-
-      const referralUpdates: any = {
-        codes: {
-          [uid]: chosenCode
-        },
-        codeToUid: {
-          [chosenCode]: uid
-        }
-      };
-
-      if (hasDuplicatesToDelete) {
-        duplicateCodesToDelete.forEach((dupCode) => {
-          referralUpdates.codeToUid[dupCode] = deleteField();
-        });
-      }
-
-      batch.set(refDocRef, referralUpdates, { merge: true });
-      await batch.commit();
-      console.log(`Reconciled referral code for user ${uid}. Chosen: ${chosenCode}, Cleared duplicates:`, duplicateCodesToDelete);
-    } catch (e) {
-      console.error("Failed to commit referral reconciliation batch:", e);
-    }
-  }
-
-  return chosenCode;
-};
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(auth.currentUser);
@@ -404,13 +307,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
+    const handleProfileUpdate = (e: Event) => {
+      const customEvent = e as CustomEvent<UserProfile>;
+      if (customEvent.detail && auth.currentUser && customEvent.detail.uid === auth.currentUser.uid) {
+        setProfile(prev => prev ? { ...prev, ...customEvent.detail } : customEvent.detail);
+      }
+    };
+
+    const handlePendingUpdatesChanged = () => {
+      if (auth.currentUser) {
+        try {
+          const pendingStr = safeStorage.getItem("pending_user_updates");
+          if (pendingStr) {
+            const pendingAll = JSON.parse(pendingStr);
+            const myPending = pendingAll[auth.currentUser.uid];
+            if (myPending) {
+              setProfile(prev => prev ? { ...prev, ...myPending } : null);
+            }
+          }
+        } catch (e) {}
+      }
+    };
+
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
     window.addEventListener("app_language_changed", handleLanguageChange);
+    window.addEventListener("user_profile_updated", handleProfileUpdate);
+    window.addEventListener("pending_user_updates_changed", handlePendingUpdatesChanged);
     return () => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
       window.removeEventListener("app_language_changed", handleLanguageChange);
+      window.removeEventListener("user_profile_updated", handleProfileUpdate);
+      window.removeEventListener("pending_user_updates_changed", handlePendingUpdatesChanged);
     };
   }, [profile?.uid]);
 
@@ -649,182 +578,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
-          if (!mergedProfile.referralCode) {
-            mergedProfile.referralCode = generateReferralCode(currentUser.uid);
-            try {
-              const pStr = safeStorage.getItem("pending_user_updates");
-              let pAll = pStr ? JSON.parse(pStr) : {};
-              pAll[currentUser.uid] = pAll[currentUser.uid] || {};
-              pAll[currentUser.uid].referralCode = mergedProfile.referralCode;
-              safeStorage.setItem("pending_user_updates", JSON.stringify(pAll));
-              safeStorage.setItem("needs_user_sync", "true");
-            } catch (e) {
-              console.error("Failed to queue referralCode update", e);
-            }
-          }
+
         }
 
-        // Check and apply referral if available for existing profile
-        if (mergedProfile && !mergedProfile.referredBy && !mergedProfile.hasReceivedReferralReward && navigator.onLine) {
-          const storedRefCode = localStorage.getItem("referral_code");
-          if (storedRefCode) {
-            const userCreatedAt = mergedProfile.createdAt ? new Date(mergedProfile.createdAt) : new Date();
-            const daysSinceJoined = (new Date().getTime() - userCreatedAt.getTime()) / (1000 * 60 * 60 * 24);
-            const isEligibleNewUser = daysSinceJoined <= 3;
 
-            if (isEligibleNewUser) {
-              try {
-                const { doc, collection, query, where, getDocs, limit, writeBatch, getDoc } = await import("firebase/firestore");
-                let foundInviterUid = null;
-
-                // 1. Get the single referral document
-                const refDoc = await getDoc(doc(db, "referral", "all"));
-                if (refDoc.exists()) {
-                  const data = refDoc.data() || {};
-                  const codeToUidMap = data.codeToUid || {};
-                  foundInviterUid = codeToUidMap[storedRefCode];
-                }
-
-                
-
-                if (foundInviterUid && foundInviterUid !== currentUser.uid) {
-                  mergedProfile.referredBy = foundInviterUid;
-                  mergedProfile.signupRewardClaimed = true;
-                  mergedProfile.hasReceivedReferralReward = true;
-                  
-                  // Give the newly referred user 10 days and make them active and role basic
-                  const userUpdatesToPush: any = {
-                    referredBy: foundInviterUid,
-                    signupRewardClaimed: true,
-                    hasReceivedReferralReward: true
-                  };
-                  
-                  if (mergedProfile.expiryDate !== "Lifetime") {
-                    let baseDate = new Date();
-                    if (mergedProfile.expiryDate) {
-                      const currentExp = new Date(mergedProfile.expiryDate);
-                      if (currentExp > baseDate) baseDate = currentExp;
-                    }
-                    baseDate.setDate(baseDate.getDate() + 10);
-                    mergedProfile.expiryDate = baseDate.toISOString();
-                    userUpdatesToPush.expiryDate = mergedProfile.expiryDate;
-                    
-                    mergedProfile.status = "active";
-                    userUpdatesToPush.status = "active";
-                  }
-
-                  if (['user', 'trial', 'selected_content', ''].includes(mergedProfile.role || '')) {
-                    mergedProfile.role = 'basic';
-                    userUpdatesToPush.role = 'basic';
-                  }
-                  
-                  localStorage.removeItem("referral_code");
-                  localStorage.setItem("referral_credit_message", "Your account is credited with 10 Days membership with referral code " + storedRefCode);
-                  
-                  // Write these updates to Firestore immediately
-                  const batch = writeBatch(db);
-                  batch.set(userRef, userUpdatesToPush, { merge: true });
-
-                  // Also add them to the inviter's joins
-                  const displayName = currentUser.displayName || mergedProfile.displayName || currentUser.email || mergedProfile.email || "User";
-                  const email = currentUser.email || mergedProfile.email || "";
-                  const status = (mergedProfile.orders && mergedProfile.orders.length > 0) ? "paid" : "login";
-                  
-                  const { increment } = await import("firebase/firestore");
-                  batch.set(doc(db, "referral", "all"), {
-                    joins: {
-                      [currentUser.uid]: {
-                        uid: currentUser.uid,
-                        code: storedRefCode,
-                        inviterUid: foundInviterUid,
-                        displayName,
-                        email,
-                        status,
-                        createdAt: new Date().toISOString(),
-                        signupClaimed: false,
-                        activationClaimed: false
-                      }
-                    },
-                    stats: {
-                      [foundInviterUid]: {
-                        totalJoined: increment(1)
-                      }
-                    }
-                  }, { merge: true });
-
-                  // Ensure the newly referred user also has their own referral registration in codes map
-                  if (mergedProfile.referralCode) {
-                    batch.set(doc(db, "referral", "all"), {
-                      codes: {
-                        [mergedProfile.uid]: mergedProfile.referralCode
-                      },
-                      codeToUid: {
-                        [mergedProfile.referralCode]: mergedProfile.uid
-                      }
-                    }, { merge: true });
-                  }
-
-                  await batch.commit();
-                  updatedSomething = true;
-                  console.log("Successfully applied referral reward to existing user profile.");
-                }
-              } catch (e) {
-                console.error("Failed to apply referral to existing user:", e);
-              }
-            }
-          }
-        }
-
-        // 5. Referral Inviter Reward Check
-        if (mergedProfile?.referredBy && navigator.onLine) {
-          try {
-            const updates: any = {};
-            let extensionDays = 0;
-
-            // Tier 1: Signup Reward (10 days)
-            // Given immediately when the referred user joins (they are active for 10 days by default)
-            if (!mergedProfile.signupRewardClaimed) {
-              extensionDays += 10;
-              updates.signupRewardClaimed = true;
-            }
-
-            // Tier 2: Activation Reward (10 days)
-            // Given if the user is active AND has at least one order
-            const hasBoughtMembership = (mergedProfile.orders && mergedProfile.orders.length > 0);
-            if (hasBoughtMembership && !mergedProfile.activationRewardClaimed) {
-              extensionDays += 10;
-              updates.activationRewardClaimed = true;
-            }
-
-            if (extensionDays > 0) {
-              let baseDate = new Date();
-              if (mergedProfile.expiryDate && mergedProfile.expiryDate !== 'Lifetime') {
-                const currentExp = new Date(mergedProfile.expiryDate);
-                if (currentExp > baseDate) {
-                  baseDate = currentExp;
-                }
-              }
-              baseDate.setDate(baseDate.getDate() + extensionDays);
-              updates.expiryDate = baseDate.toISOString();
-              updates.status = "active";
-
-              if (['user', 'trial', 'selected_content', ''].includes(mergedProfile.role || '')) {
-                updates.role = 'basic';
-              }
-
-              const { writeBatch} = await import("firebase/firestore");
-              const batch = writeBatch(db);
-              batch.set(userRef, updates, { merge: true });
-              await batch.commit();
-              
-              // Update local profile state
-              Object.assign(mergedProfile, updates);
-              safeStorage.setItem("profile_cache", JSON.stringify(mergedProfile));
-            }
-          } catch (e) {
-            console.error("Failed to process referral rewards", e);
-          }
-        }
 
         // Flush any accumulated seconds before sync
         const cacheKey = `accumulated_time_seconds_${currentUser.uid}`;
@@ -1440,43 +1197,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             console.error("Failed to check for existing accounts:", e);
           }
 
-          // Check for referral
-          const storedRefCode = localStorage.getItem("referral_code");
-          let referredByUid = null;
-          
-          const userCreatedAt = mergedOldData.createdAt ? new Date(mergedOldData.createdAt) : new Date();
-          const daysSinceJoined = (new Date().getTime() - userCreatedAt.getTime()) / (1000 * 60 * 60 * 24);
-          const isEligibleNewUser = daysSinceJoined <= 3;
-
-          if (storedRefCode && !mergedOldData.referredBy && !mergedOldData.hasReceivedReferralReward && isEligibleNewUser) {
-            try {
-              const { doc, collection, query, where, getDocs, limit, writeBatch, getDoc } = await import("firebase/firestore");
-              let foundInviterUid = null;
-
-              // 1. Get the single referral document
-              const refDoc = await getDoc(doc(db, "referral", "all"));
-              if (refDoc.exists()) {
-                const data = refDoc.data() || {};
-                const codeToUidMap = data.codeToUid || {};
-                foundInviterUid = codeToUidMap[storedRefCode];
-              }
-
-              
-
-              if (foundInviterUid && foundInviterUid !== currentUser.uid) {
-                referredByUid = foundInviterUid;
-              }
-            } catch (e) {
-              console.error("Failed to find inviter", e);
-            }
-          }
-
-          const isNewlyReferred = referredByUid && !mergedOldData.referredBy && !mergedOldData.hasReceivedReferralReward;
-
-          if (isNewlyReferred && storedRefCode) {
-            localStorage.setItem("referral_credit_message", "Your account is credited with 5 Days membership with referral code " + storedRefCode);
-          }
-
           let pendingSignupProfile: any = null;
           try {
             const pendingSignupStr = safeStorage.getItem("pending_signup_profile");
@@ -1541,14 +1261,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             phone: resolvedPhone,
             displayName: resolvedDisplayName,
             photoURL: currentUser.photoURL || mergedOldData.photoURL || "",
-            referralCode: mergedOldData.referralCode || generateReferralCode(currentUser.uid),
-            referredBy: referredByUid || mergedOldData.referredBy || null,
-            signupRewardClaimed: isNewlyReferred || mergedOldData.signupRewardClaimed || false,
-            hasReceivedReferralReward: isNewlyReferred || mergedOldData.hasReceivedReferralReward || false,
-            activationRewardClaimed: mergedOldData.activationRewardClaimed || false,
-            notificationRewardClaimed: mergedOldData.notificationRewardClaimed || false,
-            pwaRewardClaimed: mergedOldData.pwaRewardClaimed || false,
-            reviewRewardClaimed: mergedOldData.reviewRewardClaimed || false,
             timeSpent: (mergedOldData.timeSpent || 0) + (localProfile?.timeSpent || 0),
             // Increment session data for the current session, unless it's an owner
             sessionsCount: isOwner
@@ -1561,30 +1273,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               ? "owner"
               : isAdmin
                 ? "admin"
-                : isNewlyReferred
-                  ? "basic"
-                  : mergedOldData.role || defaultRoleToSet,
+                : mergedOldData.role || defaultRoleToSet,
             status:
               isOwner || isAdmin
                 ? "active"
-                : isNewlyReferred
+                : (mergedOldData.expiryDate && (mergedOldData.expiryDate === "Lifetime" || !isUserExpired(mergedOldData.expiryDate)) && mergedOldData.status !== "suspended")
                   ? "active"
-                  : (mergedOldData.expiryDate && (mergedOldData.expiryDate === "Lifetime" || !isUserExpired(mergedOldData.expiryDate)) && mergedOldData.status !== "suspended")
-                    ? "active"
-                    : mergedOldData.status || defaultStatusToSet,
+                  : mergedOldData.status || defaultStatusToSet,
             expiryDate: isOwner
               ? "Lifetime"
-              : isNewlyReferred
-                ? (() => {
-                    let baseDate = new Date();
-                    if (mergedOldData.expiryDate && mergedOldData.expiryDate !== "Lifetime") {
-                      const currentExp = new Date(mergedOldData.expiryDate);
-                      if (currentExp > baseDate) baseDate = currentExp;
-                    }
-                    baseDate.setDate(baseDate.getDate() + 10);
-                    return baseDate.toISOString();
-                  })()
-                : mergedOldData.expiryDate || null,
+              : mergedOldData.expiryDate || null,
             // Ensure we have a creation date
             createdAt: mergedOldData.createdAt || new Date().toISOString(),
             lastActive: new Date().toISOString(),
@@ -1594,10 +1292,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             assignedContent: mergedOldData.assignedContent || [],
             welcomeEmailSent: mergedOldData.welcomeEmailSent || false,
           };
-
-          if (referredByUid) {
-            localStorage.removeItem("referral_code");
-          }
 
           try {
             const pendingUpdatesStr = safeStorage.getItem(
@@ -1622,47 +1316,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const batch = writeBatch(db);
             // Set the new user record
             batch.set(userRef, newProfile);
-
-            if (isNewlyReferred) {
-              const displayName = currentUser.displayName || newProfile.displayName || currentUser.email || newProfile.email || "User";
-              const email = currentUser.email || newProfile.email || "";
-              const status = (newProfile.orders && newProfile.orders.length > 0) ? "paid" : "login";
-              
-              const { increment } = await import("firebase/firestore");
-              // Update the inviter's referral document inside "all"
-              batch.set(doc(db, "referral", "all"), {
-                joins: {
-                  [currentUser.uid]: {
-                    uid: currentUser.uid,
-                    code: storedRefCode,
-                    inviterUid: referredByUid,
-                    displayName,
-                    email,
-                    status,
-                    createdAt: new Date().toISOString(),
-                    signupClaimed: false,
-                    activationClaimed: false
-                  }
-                },
-                stats: {
-                  [referredByUid]: {
-                    totalJoined: increment(1)
-                  }
-                }
-              }, { merge: true });
-            }
-
-            // Also register their own referralCode in the codes map inside "all"
-            if (newProfile.referralCode) {
-              batch.set(doc(db, "referral", "all"), {
-                codes: {
-                  [newProfile.uid]: newProfile.referralCode
-                },
-                codeToUid: {
-                  [newProfile.referralCode]: newProfile.uid
-                }
-              }, { merge: true });
-            }
 
             await batch.commit();
 
@@ -1705,14 +1358,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               const { writeBatch} = await import("firebase/firestore");
               const fbBatch = writeBatch(db);
               fbBatch.set(userRef, newProfile);
-              fbBatch.set(doc(db, "referral", "all"), {
-                codes: {
-                  [newProfile.uid]: newProfile.referralCode
-                },
-                codeToUid: {
-                  [newProfile.referralCode]: newProfile.uid
-                }
-              }, { merge: true });
               await fbBatch.commit();
             } catch (e) {}
           }
@@ -2836,37 +2481,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }, { merge: true });
 
-        if (data.referralCode) {
-          batch.set(doc(db, "referral", "all"), {
-            codes: {
-              [user.uid]: data.referralCode
-            },
-            codeToUid: {
-              [data.referralCode]: user.uid
-            }
-          }, { merge: true });
-        }
-
-        // Propagate status update if they are referred and transitioned to paid
-        const wasPaid = profile?.orders && profile.orders.length > 0;
-        const isPaidNow = data.orders && data.orders.length > 0;
-        const belongsToInviter = profile?.referredBy || data.referredBy;
-        if (belongsToInviter && isPaidNow && !wasPaid) {
-          const { increment } = await import("firebase/firestore");
-          batch.set(doc(db, "referral", "all"), {
-            joins: {
-              [user.uid]: {
-                status: "paid"
-              }
-            },
-            stats: {
-              [belongsToInviter]: {
-                totalPaid: increment(1)
-              }
-            }
-          }, { merge: true });
-        }
-            await batch.commit();
+        await batch.commit();
 
         console.log("Users doc updated successfully.");
       } catch (err: any) {
@@ -2987,33 +2602,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     safeStorage.setItem("needs_user_sync", "true");
   }, [profile, user]);
 
-  useEffect(() => {
-    if (user && profile && navigator.onLine) {
-      const runReconciliation = async () => {
-        try {
-          const reconciledCode = await ensureSingleAndValidReferralCode(user.uid, profile.referralCode);
-          if (reconciledCode !== profile.referralCode) {
-            setProfile((prev) => prev ? { ...prev, referralCode: reconciledCode } : null);
-            const cached = safeStorage.getItem("profile_cache");
-            if (cached) {
-              const parsed = JSON.parse(cached);
-              parsed.referralCode = reconciledCode;
-              safeStorage.setItem("profile_cache", JSON.stringify(parsed));
-            }
-          }
-        } catch (e) {
-          console.error("Referral reconciliation error:", e);
-        }
-      };
-      const sessionReconciledKey = `referral_reconciled_${user.uid}`;
-      if (!sessionStorage.getItem(sessionReconciledKey)) {
-        sessionStorage.setItem(sessionReconciledKey, "true");
-        if (!profile.referralCode) {
-          runReconciliation();
-        }
-      }
-    }
-  }, [user?.uid, profile?.uid]);
+
 
   const normalizedProfile = useMemo(() => {
     if (!profile) return null;

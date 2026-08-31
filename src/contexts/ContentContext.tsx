@@ -39,7 +39,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
   // Background check: only merge if the static export JSON file is newer than the cache
   useEffect(() => {
-    if (isStaticExportNewer()) {
+    const performMerge = () => {
       try {
         const merged = mergeStaticExportDataSafely();
         setContentList(merged.contentList);
@@ -50,8 +50,15 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       } catch (e) {
         console.error("Error safely merging newer JSON export:", e);
       }
+    };
+
+    if (isStaticExportNewer()) {
+      performMerge();
     }
+    
+    window.addEventListener('static_content_updated', performMerge);
     setLoading(false);
+    return () => window.removeEventListener('static_content_updated', performMerge);
   }, []);
 
   // Listen to local content updates (e.g., from Admin or background storage syncs)
@@ -76,8 +83,23 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       if (c) try { setCollections(JSON.parse(c)); } catch(e) {}
     };
 
+    const handleStorageHydrated = () => {
+      const data = getCachedContentData();
+      if (data.contentList.length > 0) {
+        setContentList(data.contentList);
+        setGenres(data.genres);
+        setLanguages(data.languages);
+        setQualities(data.qualities);
+        setCollections(data.collections);
+      }
+    };
+
     window.addEventListener('content_updated_locally', handleLocalUpdate);
-    return () => window.removeEventListener('content_updated_locally', handleLocalUpdate);
+    window.addEventListener('safe_storage_hydrated', handleStorageHydrated);
+    return () => {
+      window.removeEventListener('content_updated_locally', handleLocalUpdate);
+      window.removeEventListener('safe_storage_hydrated', handleStorageHydrated);
+    };
   }, []);
 
   const getContent = async (id: string): Promise<Content | null> => {
@@ -90,7 +112,9 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     // 2. Check in local chunk storage
     const localChunkId = findLocalChunkForContent(id);
     if (localChunkId) {
-      const chunkStr = safeStorage.getItem(`content_chunk_${localChunkId}`) || safeStorage.getItem(localChunkId);
+      const chunkStr = safeStorage.getItem(`content_chunk_${localChunkId}`) || 
+                      safeStorage.getItem(`static_content_chunk_${localChunkId}`) ||
+                      safeStorage.getItem(localChunkId);
       if (chunkStr) {
         try {
           const items = JSON.parse(chunkStr);

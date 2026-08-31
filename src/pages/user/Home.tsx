@@ -190,56 +190,6 @@ export default function Home({
   const [showCatalogFilters, setShowCatalogFilters] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
 
-  const [isReferralBannerDismissed, setIsReferralBannerDismissed] = useState(() => {
-    return sessionStorage.getItem("referral_banner_dismissed") === "true";
-  });
-  const [copiedReferralLink, setCopiedReferralLink] = useState(false);
-
-  const isPendingOrExpiredUser = useMemo(() => {
-    if (!profile) return true;
-    const status = String(profile.status || "");
-    if (status === "pending") return true;
-    if (status === "expired" && profile.expiryDate && !isUserExpired(profile.expiryDate)) {
-      return false;
-    }
-    if (status === "expired") return true;
-    if (profile.expiryDate && profile.expiryDate !== "Lifetime") {
-      if (isUserExpired(profile.expiryDate)) return true;
-    }
-    return false;
-  }, [profile]);
-
-  const referralLink = useMemo(() => {
-    return `${window.location.origin}/?ref=${profile?.referralCode || ""}`;
-  }, [profile?.referralCode]);
-
-  const handleCopyReferralLink = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(referralLink);
-      setCopiedReferralLink(true);
-      setTimeout(() => setCopiedReferralLink(false), 2500);
-    }
-  }, [referralLink]);
-
-  const handleShareReferral = useCallback(async (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const shareData = {
-      title: "MovizNow",
-      text: t("Get 10 days of premium membership for free on MovizNow!"),
-      url: referralLink,
-    };
-    if (navigator.share) {
-      try {
-        await navigator.share(shareData);
-      } catch (err) {}
-    } else {
-      handleCopyReferralLink(e);
-    }
-  }, [referralLink, handleCopyReferralLink, t]);
-
   const [selectedCollection, setSelectedCollection] = useState<AppCollection | null>(() => {
     return memoryStore.get("home_selected_collection") || null;
   });
@@ -720,92 +670,6 @@ export default function Home({
           {/* Guest Access & Pending Status Banner */}
           <GuestAccessBanner className="mb-6" />
 
-          {/* Referral Banner for Pending & Expired Users */}
-          {isPendingOrExpiredUser && !isReferralBannerDismissed && (
-            <div className="relative overflow-hidden bg-gradient-to-r from-rose-950 via-purple-950 to-amber-950 border border-rose-500/30 dark:border-rose-500/40 shadow-xl rounded-2xl sm:rounded-3xl p-4 sm:p-6 mb-8 text-white transition-all">
-              <div className="absolute -top-12 -right-12 w-48 h-48 bg-rose-500/20 blur-3xl rounded-full pointer-events-none" />
-              <div className="absolute -bottom-12 -left-12 w-48 h-48 bg-amber-500/20 blur-3xl rounded-full pointer-events-none" />
-
-              <button
-                onClick={() => {
-                  setIsReferralBannerDismissed(true);
-                  sessionStorage.setItem("referral_banner_dismissed", "true");
-                }}
-                className="absolute top-3 right-3 rtl:right-auto rtl:left-3 p-1.5 text-zinc-400 hover:text-white bg-zinc-800/60 hover:bg-zinc-800 rounded-full transition-colors z-10"
-                title={t("Dismiss")}
-              >
-                <X className="w-4 h-4" />
-              </button>
-
-              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 sm:gap-6 relative z-0">
-                <div className="flex items-start gap-3 sm:gap-4 flex-1 min-w-0">
-                  <div className="p-3 sm:p-4 bg-gradient-to-br from-rose-500 to-amber-500 rounded-2xl shadow-lg shadow-rose-500/20 text-white shrink-0 animate-pulse">
-                    <Gift className="w-6 h-6 sm:w-8 sm:h-8" />
-                  </div>
-                  <div className="space-y-1.5 pr-8 rtl:pr-0 rtl:pl-8 md:pr-0 md:rtl:pl-0" dir={language === "ur" ? "rtl" : "ltr"}>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-extrabold uppercase tracking-wider bg-rose-500/20 border border-rose-500/30 text-rose-300">
-                        {t("Special Referral Offer")}
-                      </span>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold bg-amber-500/20 border border-amber-500/30 text-amber-300 flex items-center gap-1">
-                        <Zap className="w-3 h-3 text-amber-400 fill-amber-400" />
-                        <span>{t("+10 Days Basic")}</span>
-                      </span>
-                    </div>
-                    <h3 className="font-extrabold text-base sm:text-xl text-white tracking-tight leading-snug">
-                      {t("Get 10 Days Free Basic Access!")}
-                    </h3>
-                    <p className="text-zinc-300 text-xs sm:text-sm leading-relaxed max-w-2xl">
-                      {t("Invite friends to MovizNow and unlock 10 days of premium access for both of you!")}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto shrink-0 pt-1 md:pt-0">
-                  <Link
-                    to="/rewards"
-                    className="flex-1 md:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 sm:px-5 sm:py-3 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold rounded-xl text-xs sm:text-sm transition-all shadow-lg shadow-rose-600/25 active:scale-95 text-center"
-                  >
-                    <Gift className="w-4 h-4" />
-                    <span>{t("Invite & Earn 10 Days Free")}</span>
-                  </Link>
-                  <button
-                    onClick={handleShareReferral}
-                    className="flex-1 md:flex-initial flex items-center justify-center gap-2 px-3.5 py-2.5 sm:px-4 sm:py-3 bg-zinc-800/80 hover:bg-zinc-800 border border-zinc-700 text-zinc-200 font-semibold rounded-xl text-xs sm:text-sm transition-all active:scale-95"
-                  >
-                    {copiedReferralLink ? (
-                      <>
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                        <span className="text-emerald-400">{t("Copied!")}</span>
-                      </>
-                    ) : (
-                      <>
-                        <Share2 className="w-4 h-4 text-rose-400" />
-                        <span>{t("Share Offer")}</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Re-open trigger pill if dismissed */}
-          {isPendingOrExpiredUser && isReferralBannerDismissed && (
-            <div className="mb-6 flex justify-end">
-              <button
-                onClick={() => {
-                  setIsReferralBannerDismissed(false);
-                  sessionStorage.removeItem("referral_banner_dismissed");
-                }}
-                className="inline-flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-rose-500/10 via-amber-500/10 to-rose-500/10 border border-rose-500/20 hover:border-rose-500/40 text-rose-400 dark:text-rose-300 rounded-full text-xs font-semibold transition-all shadow-sm hover:scale-105 active:scale-95"
-              >
-                <Gift className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-                <span>🎁 {t("Get 10 Days Free Basic Access!")}</span>
-              </button>
-            </div>
-          )}
-
           {/* Status Banner */}
           {profile?.status === "pending" && (
             <div className="bg-yellow-500/10 border border-yellow-500 text-yellow-600 dark:text-yellow-500 p-4 sm:p-6 rounded-2xl mb-8 flex flex-row items-center justify-between gap-4 sm:gap-8">
@@ -831,12 +695,6 @@ export default function Home({
                   className="flex items-center justify-center gap-1.5 sm:gap-2 bg-yellow-500 text-white dark:text-black px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-yellow-400 transition-all active:scale-95 shadow-lg shadow-yellow-500/20 border border-white/20"
                 >
                   <ShoppingCart className="w-3 h-3 sm:w-5 sm:h-5" /> {t("Cart")}
-                </Link>
-                <Link
-                  to="/rewards"
-                  className="flex items-center justify-center gap-1.5 sm:gap-2 bg-emerald-500 text-white dark:text-black px-3 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl text-xs sm:text-base font-bold hover:bg-emerald-400 transition-all active:scale-95 shadow-lg shadow-emerald-500/20 border border-white/20"
-                >
-                  <Gift className="w-3 h-3 sm:w-5 sm:h-5" /> {t("Rewards")}
                 </Link>
                 {((profile?.status && ["pending", "expired"].includes(profile.status)) ||
                   !(hasUserRated || safeStorage.getItem("has_rated") === "true")) && (

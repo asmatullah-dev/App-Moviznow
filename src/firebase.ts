@@ -36,8 +36,6 @@ export const db = initializeFirestore(app, {
 }, (appConfig as any).firestoreDatabaseId);
 
 if (typeof window !== 'undefined') {
-  // Purge heavy cached objects (e.g. content_cache, collections_cache, legacy chunks) out of localStorage into IndexedDB
-  safeStorage.purgeQuotaExceeded();
   // Ensure legacy document snapshot caches are removed
   safeStorage.removeItem('profile_doc_snap');
   // Ensure the client recovers from any previously persisted offline state

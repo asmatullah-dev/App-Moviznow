@@ -46,7 +46,6 @@ export default function UserManagement() {
   const [sortOrder, setSortOrder] = useState<SortOrder>(() => (sessionStorage.getItem('user_mgmt_sort_order') as any) || 'desc');
   const [filterRole, setFilterRole] = useState<Role | 'all'>(() => (sessionStorage.getItem('user_mgmt_role') as any) || 'all');
   const [filterLanguage, setFilterLanguage] = useState<string>(() => sessionStorage.getItem('user_mgmt_lang') || 'all');
-  const [filterReward, setFilterReward] = useState<string>(() => sessionStorage.getItem('user_mgmt_reward') || 'all');
   const [filterStatus, setFilterStatus] = useState<Status | 'all'>(() => (sessionStorage.getItem('user_mgmt_status') as any) || 'all');
   const [hideAnonymousAndInvalid, setHideAnonymousAndInvalid] = useState(() => {
     const cached = sessionStorage.getItem('user_mgmt_hide_anonymous_invalid');
@@ -60,9 +59,8 @@ export default function UserManagement() {
     sessionStorage.setItem('user_mgmt_role', filterRole);
     sessionStorage.setItem('user_mgmt_status', filterStatus);
     sessionStorage.setItem('user_mgmt_lang', filterLanguage);
-    sessionStorage.setItem('user_mgmt_reward', filterReward);
     sessionStorage.setItem('user_mgmt_hide_anonymous_invalid', hideAnonymousAndInvalid.toString());
-  }, [searchTerm, sortField, sortOrder, filterRole, filterStatus, filterLanguage, filterReward, hideAnonymousAndInvalid]);
+  }, [searchTerm, sortField, sortOrder, filterRole, filterStatus, filterLanguage, hideAnonymousAndInvalid]);
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
   const [isBulkDeleteConfirmOpen, setIsBulkDeleteConfirmOpen] = useState(false);
   const [bulkDeleteValidUids, setBulkDeleteValidUids] = useState<string[]>([]);
@@ -564,64 +562,7 @@ export default function UserManagement() {
       }
 
       if (membershipDateIncreased) {
-        // Change to paid status and automatically send reward to inviter
         updateData.status = 'active'; // ensure user is active since they bought membership
-        
-        const inviterUid = selectedUser.referredBy;
-        if (inviterUid) {
-          try {
-            // Check if activation reward was already claimed
-            if (!selectedUser.activationRewardClaimed) {
-              const inviterData = allUsers.find(u => u.uid === inviterUid);
-              
-              if (inviterData) {
-                let baseDate = new Date();
-                if (inviterData.expiryDate && inviterData.expiryDate !== 'Lifetime') {
-                  const currentExp = new Date(inviterData.expiryDate);
-                  if (currentExp > baseDate) {
-                    baseDate = currentExp;
-                  }
-                }
-                baseDate.setDate(baseDate.getDate() + 10);
-                const newInviterExpiryStr = baseDate.toISOString();
-                
-                const inviterUpdate: any = {
-                  expiryDate: newInviterExpiryStr,
-                  status: 'active'
-                };
-                if (['user', 'trial', 'selected_content', ''].includes(inviterData.role || '')) {
-                  inviterUpdate.role = 'basic';
-                }
-                
-                updateUserFields(inviterUid, inviterUpdate);
-              }
-              
-              // Set the activationClaimed and status = 'paid' on the join record in /referral/all
-              await setDoc(doc(db, 'referral', 'all'), {
-                joins: {
-                  [selectedUser.uid]: {
-                    status: 'paid',
-                    activationClaimed: true
-                  }
-                },
-                stats: {
-                  [inviterUid]: {
-                    totalPaid: increment(1)
-                  }
-                }
-              }, { merge: true });
-              
-              // Also ensure updateData itself marks activationRewardClaimed as true on the user's profile
-              updateData.activationRewardClaimed = true;
-              console.log("Successfully sent 10 days reward to inviter:", inviterUid);
-            }
-          } catch (e) {
-            console.error("Failed to automatically grant referral activation reward:", e);
-          }
-        } else {
-          // If no inviter is present, we still set activationRewardClaimed to true to mark this user as activated/paid
-          updateData.activationRewardClaimed = true;
-        }
       }
 
       const currentEditingId = editingId;
@@ -1282,42 +1223,6 @@ export default function UserManagement() {
     if (filterStatus !== 'all') {
       result = result.filter(u => u.status === filterStatus);
     }
-    if (filterReward !== 'all') {
-      const referredSet = new Set(allUsers.filter(au => au.referredBy).map(au => au.referredBy));
-      if (filterReward === 'notification') {
-        result = result.filter(u => u.notificationRewardClaimed);
-      } else if (filterReward === 'pwa') {
-        result = result.filter(u => u.pwaRewardClaimed);
-      } else if (filterReward === 'review') {
-        result = result.filter(u => u.reviewRewardClaimed);
-      } else if (filterReward === 'referred') {
-        result = result.filter(u => referredSet.has(u.uid));
-      } else if (filterReward === 'joined_referral') {
-        result = result.filter(u => u.hasReceivedReferralReward || u.referredBy);
-      } else if (filterReward === 'active') {
-        result = result.filter(u => u.activationRewardClaimed);
-      } else if (filterReward === 'any_reward') {
-        result = result.filter(u => 
-          u.notificationRewardClaimed || 
-          u.pwaRewardClaimed || 
-          u.reviewRewardClaimed ||
-          u.activationRewardClaimed || 
-          u.hasReceivedReferralReward || 
-          u.referredBy || 
-          referredSet.has(u.uid)
-        );
-      } else if (filterReward === 'none') {
-        result = result.filter(u => 
-          !u.notificationRewardClaimed && 
-          !u.pwaRewardClaimed && 
-          !u.reviewRewardClaimed &&
-          !u.activationRewardClaimed && 
-          !u.hasReceivedReferralReward && 
-          !u.referredBy && 
-          !referredSet.has(u.uid)
-        );
-      }
-    }
 
     // Sort
     result.sort((a, b) => {
@@ -1421,7 +1326,7 @@ export default function UserManagement() {
     });
 
     return result;
-  }, [users, searchTerm, filterRole, filterStatus, filterLanguage, filterReward, sortField, sortOrder, allUsers, hideAnonymousAndInvalid]);
+  }, [users, searchTerm, filterRole, filterStatus, filterLanguage, sortField, sortOrder, allUsers, hideAnonymousAndInvalid]);
 
   const handleAddUser = async () => {
     if (!foundUser && !newUserForm.phone && !newUserForm.email) {
@@ -1735,14 +1640,13 @@ export default function UserManagement() {
               </div>
             )}
             <div className="flex gap-2 flex-1 overflow-x-auto pb-1 md:pb-0 items-center">
-              {(searchTerm || filterRole !== 'all' || filterStatus !== 'all' || filterLanguage !== 'all' || filterReward !== 'all' || sortField !== 'createdAt' || sortOrder !== 'desc' || !hideAnonymousAndInvalid) && (
+              {(searchTerm || filterRole !== 'all' || filterStatus !== 'all' || filterLanguage !== 'all' || sortField !== 'createdAt' || sortOrder !== 'desc' || !hideAnonymousAndInvalid) && (
                 <button
                   onClick={() => {
                     setSearchTerm('');
                     setFilterRole('all');
                     setFilterStatus('all');
                     setFilterLanguage('all');
-                    setFilterReward('all');
                     setSortField('createdAt');
                     setSortOrder('desc');
                     setHideAnonymousAndInvalid(true);
@@ -1782,21 +1686,6 @@ export default function UserManagement() {
                 <option value="active">Active</option>
                 <option value="pending">Pending</option>
                 <option value="expired">Expired</option>
-              </select>
-              <select
-                value={filterReward}
-                onChange={(e) => setFilterReward(e.target.value)}
-                className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 focus:outline-none focus:border-emerald-500 min-w-[120px] text-xs"
-              >
-                <option value="all">All Users</option>
-                <option value="any_reward">All Rewards</option>
-                <option value="none">No Rewards</option>
-                <option value="notification">Notification Reward</option>
-                <option value="pwa">App Install Reward</option>
-                <option value="review">Review Reward</option>
-                <option value="referred">Referred Users</option>
-                <option value="active">Activation Reward</option>
-                <option value="joined_referral">Joined via Referral</option>
               </select>
               <select
                 value={filterLanguage}
@@ -2496,72 +2385,8 @@ export default function UserManagement() {
                       <div className="text-right">
                         <div className="text-zinc-500 text-[10px] uppercase font-bold mb-0.5">Expiry Date</div>
                         <div className="font-bold text-zinc-900 dark:text-white text-sm">{selectedUser.role === 'owner' ? 'Lifetime' : selectedUser.expiryDate ? safeFormat(selectedUser.expiryDate, 'MMM dd, yyyy') : 'N/A'}</div>
-                        {selectedUser.referredBy && (() => {
-                          const inviter = allUsers.find(u => u.uid === selectedUser.referredBy);
-                          return (
-                            <div className="mt-1.5 text-right">
-                              <span className="text-[10px] text-zinc-400 dark:text-zinc-500 block uppercase font-bold">Ref by:</span>
-                              <span className="text-xs font-medium text-indigo-600 dark:text-indigo-400 block">
-                                {inviter 
-                                  ? (inviter.displayName || inviter.phone || inviter.email || 'User') 
-                                  : 'Yes'}
-                              </span>
-                            </div>
-                          );
-                        })()}
                       </div>
                     </div>
-                    {(() => {
-                      const referredUsers = allUsers.filter(u => u.referredBy === selectedUser.uid);
-                      const activatedReferredCount = referredUsers.filter(u => u.activationRewardClaimed).length;
-                      const hasAnyExtension = selectedUser.pwaRewardClaimed || selectedUser.notificationRewardClaimed || selectedUser.reviewRewardClaimed || selectedUser.hasReceivedReferralReward || selectedUser.referredBy || referredUsers.length > 0;
-                      
-                      if (!hasAnyExtension) return null;
-                      
-                      return (
-                        <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800">
-                          <div className="text-zinc-500 text-[10px] uppercase font-bold mb-2">Membership Extensions</div>
-                          <div className="space-y-1.5">
-                            {selectedUser.pwaRewardClaimed && (
-                              <div className="flex justify-between items-center text-xs">
-                                <span className="text-zinc-600 dark:text-zinc-400">App Install Reward</span>
-                                <span className="font-medium text-emerald-600 dark:text-emerald-400">+3 Days</span>
-                              </div>
-                            )}
-                            {selectedUser.notificationRewardClaimed && (
-                              <div className="flex justify-between items-center text-xs">
-                                <span className="text-zinc-600 dark:text-zinc-400">Notification Reward</span>
-                                <span className="font-medium text-emerald-600 dark:text-emerald-400">+3 Days</span>
-                              </div>
-                            )}
-                            {selectedUser.reviewRewardClaimed && (
-                              <div className="flex justify-between items-center text-xs">
-                                <span className="text-zinc-600 dark:text-zinc-400">Review Reward</span>
-                                <span className="font-medium text-emerald-600 dark:text-emerald-400">+5 Days</span>
-                              </div>
-                            )}
-                            {referredUsers.length > 0 && (
-                              <div className="flex justify-between items-center text-xs">
-                                <span className="text-zinc-600 dark:text-zinc-400">Referred {referredUsers.length} User{referredUsers.length !== 1 ? 's' : ''}</span>
-                                <span className="font-medium text-emerald-600 dark:text-emerald-400">+{referredUsers.length * 5} Days</span>
-                              </div>
-                            )}
-                            {activatedReferredCount > 0 && (
-                              <div className="flex justify-between items-center text-xs">
-                                <span className="text-zinc-600 dark:text-zinc-400">{activatedReferredCount} Referral{activatedReferredCount !== 1 ? 's' : ''} Activated</span>
-                                <span className="font-medium text-emerald-600 dark:text-emerald-400">+{activatedReferredCount * 5} Days</span>
-                              </div>
-                            )}
-                            {(selectedUser.hasReceivedReferralReward || selectedUser.referredBy) && (
-                              <div className="flex justify-between items-center text-xs">
-                                <span className="text-zinc-600 dark:text-zinc-400">Joined via Referral</span>
-                                <span className="font-medium text-emerald-600 dark:text-emerald-400">+5 Days</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })()}
 
                     {userReviews[selectedUser.uid] && userReviews[selectedUser.uid].length > 0 && (
                       <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 flex flex-col gap-3">

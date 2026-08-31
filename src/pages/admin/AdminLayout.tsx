@@ -47,7 +47,6 @@ export default function AdminLayout() {
     { id: 'UserManagers', path: '/admin/user-managers', label: 'User Managers', icon: Users },
     { id: 'SelectedContent', path: '/admin/selected-content', label: 'Selected Content Only', icon: Film },
     { id: 'Income', path: '/admin/income', label: 'Income / Earn', icon: DollarSign },
-    { id: 'Referrals', path: '/admin/referrals', label: 'Referrals', icon: Gift },
     { id: 'ErrorLinks', path: '/admin/error-links', label: 'Error Links', icon: AlertTriangle },
     { id: 'ReportedLinks', path: '/admin/reported-links', label: `Reported Links${reportedLinksCount > 0 ? ` (${reportedLinksCount})` : ''}`, icon: AlertTriangle },
     { id: 'Notifications', path: '/admin/notifications', label: 'Notifications', icon: Bell },
@@ -61,9 +60,9 @@ export default function AdminLayout() {
   if (profile?.role === 'content_manager') {
     navItems = allNavItems.filter(item => ['/admin/content'].includes(item.path));
   } else if (profile?.role === 'user_manager') {
-    navItems = allNavItems.filter(item => ['/admin/users', '/admin/referrals'].includes(item.path));
+    navItems = allNavItems.filter(item => ['/admin/users'].includes(item.path));
   } else if (profile?.role === 'manager') {
-    navItems = allNavItems.filter(item => ['/admin/content', '/admin/users', '/admin/referrals'].includes(item.path));
+    navItems = allNavItems.filter(item => ['/admin/content', '/admin/users'].includes(item.path));
   }
 
   // Filter based on hiddenAdminTabs (only for non-owners)

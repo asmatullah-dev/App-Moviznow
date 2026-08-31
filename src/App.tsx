@@ -46,7 +46,6 @@ const VipTrial = lazy(() => import('./pages/user/VipTrial'));
 const TopUp = lazy(() => import('./pages/user/TopUp'));
 const Cart = lazy(() => import('./pages/user/Cart'));
 const Settings = lazy(() => import('./pages/user/Settings'));
-const Rewards = lazy(() => import('./pages/user/Rewards'));
 
 const AdminLayout = lazy(() => import('./pages/admin/AdminLayout'));
 const Analytics = lazy(() => import('./pages/admin/Analytics'));
@@ -65,7 +64,6 @@ const Notifications = lazy(() => import('./pages/admin/Notifications'));
 const MovieRequestsManagement = lazy(() => import('./pages/admin/MovieRequestsManagement'));
 const OrdersManagement = lazy(() => import('./pages/admin/OrdersManagement'));
 const AdminSettings = lazy(() => import('./pages/admin/AdminSettings'));
-const ReferralsManagement = lazy(() => import('./pages/admin/ReferralsManagement'));
 const ContentSync = lazy(() => import('./pages/admin/ContentSync'));
 const InstallApp = lazy(() => import('./pages/InstallApp'));
 const Unsubscribe = lazy(() => import('./pages/Unsubscribe'));
@@ -167,70 +165,6 @@ function AuthLanguageSync() {
   return null;
 }
 
-function ReferralTracker() {
-  const { profile } = useAuth();
-  const { t } = useLanguage();
-  const [alertConfig, setAlertConfig] = useState<{ isOpen: boolean; title: string; message: string } | null>(null);
-
-  useEffect(() => {
-    const successMsg = localStorage.getItem("referral_credit_message");
-    if (successMsg) {
-      setAlertConfig({
-        isOpen: true,
-        title: t('Referral Reward Credited'),
-        message: successMsg
-      });
-      localStorage.removeItem("referral_credit_message");
-    }
-  }, [profile, t]);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const ref = params.get('ref');
-    
-    if (ref) {
-      if (profile) {
-        // Check if user is more than 3 days old
-        const userCreatedAt = profile.createdAt ? new Date(profile.createdAt) : new Date();
-        const now = new Date();
-        const diffTime = Math.abs(now.getTime() - userCreatedAt.getTime());
-        const diffDays = diffTime / (1000 * 60 * 60 * 24);
-
-        if (diffDays > 3) {
-          setAlertConfig({
-            isOpen: true,
-            title: t('Referral Limit'),
-            message: t('This referral offer is only available for new users or new joining only.')
-          });
-          
-          // Clear the ref from URL to prevent showing it again
-          const url = new URL(window.location.href);
-          url.searchParams.delete('ref');
-          window.history.replaceState({}, '', url.pathname);
-          return;
-        }
-      }
-      
-      localStorage.setItem('referral_code', ref);
-    }
-  }, [profile, t]);
-
-  return (
-    <AlertModal
-      isOpen={!!alertConfig?.isOpen}
-      title={alertConfig?.title || ''}
-      message={alertConfig?.message || ''}
-      onClose={() => setAlertConfig(null)}
-    />
-  );
-}
-
-import { usePWA } from './contexts/PWAContext';
-
-function RewardsManager() {
-  return null;
-}
-
 function SyncErrorOverlay() {
   const { t } = useLanguage();
   const [pauseStatus, setPauseStatus] = useState<{ paused: boolean, lastSynced?: string }>({ paused: false });
@@ -300,8 +234,6 @@ export default function App() {
               <NotificationProvider>
                 <CartProvider>
                   <PWAProvider>
-                    <ReferralTracker />
-                    <RewardsManager />
                     <SyncErrorOverlay />
                     <OfflineBanner />
                     <SyncBanner />
@@ -337,7 +269,7 @@ export default function App() {
                         <Route path="/settings" element={<ProtectedRoute requireAuth><Settings /></ProtectedRoute>} />
                         <Route path="/freemovies" element={<ProtectedRoute><FreeMovies /></ProtectedRoute>} />
                         <Route path="/membership" element={<ProtectedRoute><Membership /></ProtectedRoute>} />
-                        <Route path="/rewards" element={<ProtectedRoute requireAuth><Rewards /></ProtectedRoute>} />
+                        <Route path="/plans" element={<ProtectedRoute><Membership /></ProtectedRoute>} />
                         <Route path="/reviews" element={<ProtectedRoute><Reviews /></ProtectedRoute>} />
                         <Route path="/about" element={<ProtectedRoute><About /></ProtectedRoute>} />
                         <Route path="/contact" element={<ProtectedRoute><Contact /></ProtectedRoute>} />
@@ -359,7 +291,6 @@ export default function App() {
                           <Route path="error-links" element={<ErrorLinks />} />
                           <Route path="reported-links" element={<ReportedLinks />} />
                           <Route path="notifications" element={<Notifications />} />
-                          <Route path="referrals" element={<ReferralsManagement />} />
                           <Route path="requests" element={<MovieRequestsManagement />} />
                           <Route path="sync" element={<ContentSync />} />
                           <Route path="settings" element={<AdminSettings />} />

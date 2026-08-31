@@ -1,23 +1,34 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { ShieldAlert, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../contexts/AuthContext';
-import { isUserExemptFromAds } from '../utils/adUtils';
+import { isUserExemptFromAds, isAdRestrictedRoute } from '../utils/adUtils';
 
 export const AdBlockDetector: React.FC = () => {
   const { profile } = useAuth();
+  const location = useLocation();
   const [isAdBlockActive, setIsAdBlockActive] = useState(false);
   const [isVisible, setIsVisible] = useState(true);
 
   useEffect(() => {
-    // Don't run for exempt users
-    if (isUserExemptFromAds(profile)) return;
+    // Don't run on login page or for exempt users
+    if (isUserExemptFromAds(profile) || isAdRestrictedRoute(location.pathname)) {
+      setIsAdBlockActive(false);
+      return;
+    }
 
     const checkAdBlock = async () => {
       // Small delay to allow scripts to start loading
       await new Promise(resolve => setTimeout(resolve, 3000));
 
+      if (isAdRestrictedRoute(window.location.pathname)) {
+        setIsAdBlockActive(false);
+        return;
+      }
+
       let adBlockDetected = false;
+
 
       // 1. Bait Fetch (Google AdSense is the most reliable indicator)
       try {

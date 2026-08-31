@@ -56,7 +56,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   adBannerCtaText: 'Remove Ads (Go VIP)',
   adBannerLink: '/top-up',
   adSkipTimer: 5,
-  adVideoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-popcorn-machine-in-action-close-up-42289-large.mp4',
+  adVideoUrl: 'https://commercialhalftime.com/htqpa4mty?key=53a3c0b6e7edfce96cd08f0cabe01b54',
   adRedirectUrl: 'https://moviznow.app/premium',
   whatsappChannelLink: 'https://whatsapp.com/channel/0029Vb7PxRC9MF96ZZVGdx2n',
 };

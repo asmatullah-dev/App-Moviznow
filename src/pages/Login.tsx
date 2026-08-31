@@ -9,6 +9,7 @@ import { ConfirmationResult } from 'firebase/auth';
 import { UserProfile } from '../types';
 import AlertModal from '../components/AlertModal';
 import { getUserDisplayName } from '../utils/userUtils';
+import { purgeAllAdElements } from '../utils/adUtils';
 
 type LoginStep = 'social' | 'identifier' | 'password' | 'reset-password' | 'create_password';
 
@@ -45,6 +46,13 @@ export default function Login() {
   const [optionalEmail, setOptionalEmail] = useState('');
   const [registeredUser, setRegisteredUser] = useState<UserProfile | null>(null);
   const [wrongPasswordCount, setWrongPasswordCount] = useState(0);
+
+  // Guarantee that no ad network, script, or popunder element runs or displays on the login page
+  useEffect(() => {
+    purgeAllAdElements();
+    const interval = setInterval(purgeAllAdElements, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     if (location.state?.suspended) {

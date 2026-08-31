@@ -1,83 +1,184 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Sparkles, Crown } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
-import { isUserExemptFromAds } from '../utils/adUtils';
+import { isUserExemptFromAds, isAdRestrictedRoute } from '../utils/adUtils';
 
 interface AdBannerProps {
   className?: string;
+  content?: { status?: string } | null;
+  layout?: 'auto' | 'rectangle' | 'leaderboard' | 'skyscraper';
 }
 
-export const AdBanner: React.FC<AdBannerProps> = ({ className = '' }) => {
+interface BannerConfig {
+  key: string;
+  width: number;
+  height: number;
+}
+
+const BANNER_CONFIGS: Record<string, BannerConfig> = {
+  leaderboard_728: {
+    key: 'c3b2330b7c7569593b5ba1ed74955a91',
+    width: 728,
+    height: 90,
+  },
+  banner_468: {
+    key: 'bc46a083398bb54a03b2b6f86fb88623',
+    width: 468,
+    height: 60,
+  },
+  rectangle_300: {
+    key: '37fefa62ab23d5571ac1b29359968b26',
+    width: 300,
+    height: 250,
+  },
+  mobile_320: {
+    key: 'd9dd52f202fb4fca75e8b5bd077aaa3f',
+    width: 320,
+    height: 50,
+  },
+  skyscraper_600: {
+    key: '9e5670b0f9ed7d2ed6a78f099e33e470',
+    width: 160,
+    height: 600,
+  },
+  skyscraper_300: {
+    key: 'a81513835c9bfebc6e68eaf16e9414f0',
+    width: 160,
+    height: 300,
+  },
+};
+
+export const AdBanner: React.FC<AdBannerProps> = ({ 
+  className = '', 
+  content,
+  layout = 'auto'
+}) => {
   const { profile } = useAuth();
   const { settings } = useSettings();
-  const adInitedRef = useRef(false);
+  const location = useLocation();
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(() => {
+    if (typeof window !== 'undefined') return window.innerWidth;
+    return 768;
+  });
 
-  const isExempt = isUserExemptFromAds(profile);
+  const isRestricted = isAdRestrictedRoute(location.pathname);
+  const isExempt = isUserExemptFromAds(profile, content);
   const provider = settings?.adProvider || 'both';
 
   useEffect(() => {
-    if (isExempt || provider === 'disabled') return;
-    if (provider !== 'google_adsense' && provider !== 'both') return;
-    if (adInitedRef.current) return;
+    if (!containerRef.current) return;
 
-    const client = settings?.adSenseClientId || 'ca-pub-3128773545517669';
-    
-    // Check if script already exists
-    const script = document.querySelector(`script[src*="adsbygoogle.js"]`);
-    if (!script) {
-      const newScript = document.createElement('script');
-      newScript.src = `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${client}`;
-      newScript.async = true;
-      newScript.crossOrigin = 'anonymous';
-      document.head.appendChild(newScript);
-    }
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.contentRect.width > 0) {
+          setContainerWidth(entry.contentRect.width);
+        }
+      }
+    });
 
-    try {
-      // @ts-ignore
-      (window.adsbygoogle = window.adsbygoogle || []).push({});
-      adInitedRef.current = true;
-    } catch (e) {
-      console.warn('AdSense push failed (expected in sandbox/preview):', e);
-    }
-  }, [isExempt, provider, settings?.adSenseClientId]);
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
 
-  if (isExempt || provider === 'disabled') {
+  if (isRestricted || isExempt || provider === 'disabled') {
     return null;
   }
 
-  const clientId = settings?.adSenseClientId || 'ca-pub-3940256099942544';
-  const slotId = settings?.adSenseSlotId || '1035133642';
+  // Determine optimal banner configuration based on layout and current width
+  let selectedConfig: BannerConfig = BANNER_CONFIGS.rectangle_300;
+
+  if (layout === 'skyscraper') {
+    selectedConfig = containerWidth >= 400 ? BANNER_CONFIGS.skyscraper_600 : BANNER_CONFIGS.skyscraper_300;
+  } else if (layout === 'leaderboard') {
+    if (containerWidth >= 760) {
+      selectedConfig = BANNER_CONFIGS.leaderboard_728;
+    } else if (containerWidth >= 500) {
+      selectedConfig = BANNER_CONFIGS.banner_468;
+    } else {
+      selectedConfig = BANNER_CONFIGS.mobile_320;
+    }
+  } else {
+    // Auto responsive selection matching container dimensions
+    if (containerWidth >= 760) {
+      selectedConfig = BANNER_CONFIGS.leaderboard_728; // Desktop wide
+    } else if (containerWidth >= 500) {
+      selectedConfig = BANNER_CONFIGS.banner_468; // Tablet / medium
+    } else if (containerWidth >= 330) {
+      selectedConfig = BANNER_CONFIGS.rectangle_300; // Standard Mobile (highest eCPM)
+    } else {
+      selectedConfig = BANNER_CONFIGS.mobile_320; // Small phone slim banner
+    }
+  }
 
   const title = settings?.adBannerTitle || 'MovizNow Premium Sponsor';
   const description = settings?.adBannerDescription || 'Enjoy high quality streaming on Basic Plan. Upgrade to VIP to remove all ads!';
   const ctaText = settings?.adBannerCtaText || 'Remove Ads (Go VIP)';
   const ctaLink = settings?.adBannerLink || '/top-up';
 
+  const adHtmlDoc = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          * { box-sizing: border-box; margin: 0; padding: 0; }
+          body { 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            background: transparent; 
+            overflow: hidden;
+            width: 100%;
+            height: 100%;
+          }
+        </style>
+      </head>
+      <body>
+        <script type="text/javascript">
+          atOptions = {
+            'key' : '${selectedConfig.key}',
+            'format' : 'iframe',
+            'height' : ${selectedConfig.height},
+            'width' : ${selectedConfig.width},
+            'params' : {}
+          };
+        </script>
+        <script type="text/javascript" src="https://commercialhalftime.com/${selectedConfig.key}/invoke.js"></script>
+      </body>
+    </html>
+  `;
+
   return (
-    <div className={`relative overflow-hidden rounded-2xl bg-gradient-to-r from-sky-950/80 via-indigo-950/80 to-purple-950/80 border border-sky-500/30 p-4 shadow-lg text-white my-4 ${className}`}>
+    <div 
+      ref={containerRef}
+      className={`relative overflow-hidden rounded-2xl bg-gradient-to-r from-sky-950/80 via-indigo-950/80 to-purple-950/80 border border-sky-500/30 p-4 shadow-lg text-white my-4 ${className}`}
+    >
       {/* Upper Label Tag */}
-      <div className="absolute top-2 right-2 text-[9px] font-extrabold uppercase px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 tracking-wider">
+      <div className="absolute top-2 right-2 text-[9px] font-extrabold uppercase px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 tracking-wider z-10">
         Sponsored Ad
       </div>
 
       <div className="flex flex-col gap-4">
-        {/* AdSense Unit (Only if adProvider is google_adsense or both) */}
-        {(provider === 'google_adsense' || provider === 'both') && (
-          <div className="w-full overflow-hidden flex justify-center bg-black/10 rounded-xl py-1" style={{ minHeight: '90px' }}>
-            <ins
-              className="adsbygoogle"
-              style={{ display: 'block', width: '100%', minWidth: '250px', maxHeight: '120px' }}
-              data-ad-client={clientId}
-              data-ad-slot={slotId}
-              data-ad-format="horizontal"
-              data-full-width-responsive="true"
-            ></ins>
-          </div>
-        )}
+        {/* Dynamic Responsive Banner Container */}
+        <div 
+          className="w-full overflow-hidden flex justify-center items-center bg-black/20 rounded-xl py-2"
+          style={{ minHeight: `${selectedConfig.height + 16}px` }}
+        >
+          <iframe
+            key={`${selectedConfig.key}-${selectedConfig.width}-${selectedConfig.height}`}
+            srcDoc={adHtmlDoc}
+            width={selectedConfig.width}
+            height={selectedConfig.height}
+            title={`${selectedConfig.width}x${selectedConfig.height} Advertisement Banner`}
+            className="border-0 overflow-hidden max-w-full"
+            scrolling="no"
+          />
+        </div>
 
-        {/* Custom Premium Ad Banner content (Always shown as main or fallback info card) */}
+        {/* Custom Premium Ad Banner content */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-500 flex items-center justify-center shrink-0 shadow-md">

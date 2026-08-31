@@ -102,6 +102,12 @@ import {
   predictOttPlatformWithAI
 } from "../../services/tmdb";
 import ContentCard from "../../components/ContentCard";
+import {
+  playInExternalPlayer,
+  isIOS,
+  normalizeBrowserViewUrl,
+  openInNewTab,
+} from "../../utils/playerUtils";
 
 import { useModalBehavior } from "../../hooks/useModalBehavior";
 import Modal from "../../components/Modal";
@@ -109,6 +115,7 @@ import { useSettings } from "../../contexts/SettingsContext";
 
 import { ContactSupportButtons } from "../../components/ContactSupportButtons";
 import { PageTransition } from "../../components/PageTransition";
+import { VideoAdInterstitial } from "../../components/VideoAdInterstitial";
 
 export default function MovieDetails() {
   const { id } = useParams<{ id: string }>();
@@ -224,62 +231,8 @@ export default function MovieDetails() {
   const [isTrailerSelectionOpen, setIsTrailerSelectionOpen] = useState(false);
   const [showRatePrompt, setShowRatePrompt] = useState(false);
   const [showReportConfirm, setShowReportConfirm] = useState(false);
-  const [hasUserRated, setHasUserRated] = useState<boolean>(() => safeStorage.getItem('has_rated') === 'true' || !!profile?.reviewRewardClaimed);
+  const [hasUserRated, setHasUserRated] = useState<boolean>(() => safeStorage.getItem('has_rated') === 'true');
   const recommendedScrollRef = useRef<HTMLDivElement>(null);
-
-  const [adState, setAdState] = useState<{
-    isPlaying: boolean;
-    timeLeft: number;
-    canSkip: boolean;
-    isMuted: boolean;
-    hasCompleted: boolean;
-  } | null>(null);
-
-  useEffect(() => {
-    let timer: any;
-    if (adState && adState.isPlaying && adState.timeLeft > 0) {
-      timer = setTimeout(() => {
-        setAdState((prev) => {
-          if (!prev) return null;
-          const nextTime = prev.timeLeft - 1;
-          return {
-            ...prev,
-            timeLeft: nextTime,
-            canSkip: nextTime <= 0,
-          };
-        });
-      }, 1000);
-    }
-    return () => clearTimeout(timer);
-  }, [adState]);
-
-  useEffect(() => {
-    if (linkPopup?.isOpen) {
-      const isExempt = isUserExemptFromAds(profile);
-      const provider = settings?.adProvider || 'both';
-      const isAdsActive = settings && provider !== "disabled" && provider !== "google_adsense";
-      
-      if (!isExempt && isAdsActive) {
-        setAdState({
-          isPlaying: true,
-          timeLeft: settings?.adSkipTimer ?? 5,
-          canSkip: false,
-          isMuted: false,
-          hasCompleted: false,
-        });
-      } else {
-        setAdState({
-          isPlaying: false,
-          timeLeft: 0,
-          canSkip: true,
-          isMuted: false,
-          hasCompleted: true,
-        });
-      }
-    } else {
-      setAdState(null);
-    }
-  }, [linkPopup?.isOpen, profile, settings?.adProvider, settings?.adSkipTimer]);
 
   const scrollRecommended = (direction: 'left' | 'right') => {
     if (recommendedScrollRef.current) {
@@ -289,7 +242,7 @@ export default function MovieDetails() {
   };
 
   useEffect(() => {
-    if (safeStorage.getItem('has_rated') === 'true' || profile?.reviewRewardClaimed) {
+    if (safeStorage.getItem('has_rated') === 'true') {
       setHasUserRated(true);
       return;
     }
@@ -309,7 +262,7 @@ export default function MovieDetails() {
         }
       }
     } catch (e) {}
-  }, [profile?.uid, profile?.email, profile?.displayName, profile?.reviewRewardClaimed]);
+  }, [profile?.uid, profile?.email, profile?.displayName]);
   const [sharePreviewModal, setSharePreviewModal] = useState<{
     isOpen: boolean;
     text: string;
@@ -340,6 +293,8 @@ export default function MovieDetails() {
   const [liveRating, setLiveRating] = useState<string | null>(null);
   const [fetchingImdb, setFetchingImdb] = useState(false);
   const [extractingLinkId, setExtractingLinkId] = useState<string | null>(null);
+  const [isVideoAdOpen, setIsVideoAdOpen] = useState(false);
+  const videoAdResolveRef = useRef<((completed: boolean) => void) | null>(null);
 
   useModalBehavior(alertConfig.isOpen, () =>
     setAlertConfig((prev) => ({ ...prev, isOpen: false })),
@@ -1969,10 +1924,6 @@ export default function MovieDetails() {
       }
     } catch (e) {}
 
-    if (linkId !== "sample") {
-      // tracking removed
-    }
-
     if (isOffline) {
       setAlertConfig({
         isOpen: true,
@@ -1982,162 +1933,197 @@ export default function MovieDetails() {
       return;
     }
 
-    let finalUrl = targetUrl;
-    let finalTinyUrl = finalUrl === url ? tinyUrl : undefined;
-    let finalCandidates: { text: string; href: string }[] | undefined;
-    let finalSize: string | undefined;
+    const isExempt = isUserExemptFromAds(profile, mergedContent);
+    const provider = settings?.adProvider || 'both';
+    const isAdsActive = settings && provider !== "disabled" && provider !== "google_adsense";
 
-    const isVcloudHost = targetUrl.includes("vcloud");
-    const isVcloudName = linkName
-      ? linkName.toLowerCase().includes("vcloud")
-      : false;
-    const isVcloud = isVcloudHost || isVcloudName;
+    // Set extracting button animation
+    setExtractingLinkId(targetUrl);
 
-    const isHubcloudRawLink = (u: string) => {
-      if (!u) return false;
-      const l = u.toLowerCase();
-      return (
-        l.includes("hubcloud") ||
-        l.includes("hubcould") ||
-        l.includes("hubdrive") ||
-        l.includes("vcloud")
-      );
-    };
+    // Extraction task that runs in parallel
+    const performExtraction = async (): Promise<{
+      success: boolean;
+      finalUrl: string;
+      finalTinyUrl?: string;
+      finalCandidates?: { text: string; href: string }[];
+      finalSize?: string;
+    }> => {
+      let finalUrl = targetUrl;
+      let finalTinyUrl = finalUrl === url ? tinyUrl : undefined;
+      let finalCandidates: { text: string; href: string }[] | undefined;
+      let finalSize: string | undefined;
 
-    if (isHubcloudRawLink(targetUrl) || isVcloud) {
-      const clickId = targetUrl;
-      setExtractingLinkId(clickId);
+      const isVcloudHost = targetUrl.includes("vcloud");
+      const isVcloudName = linkName
+        ? linkName.toLowerCase().includes("vcloud")
+        : false;
+      const isVcloud = isVcloudHost || isVcloudName;
 
-      let shouldExtract = true;
-      const now = Date.now();
+      const isHubcloudRawLink = (u: string) => {
+        if (!u) return false;
+        const l = u.toLowerCase();
+        return (
+          l.includes("hubcloud") ||
+          l.includes("hubcould") ||
+          l.includes("hubdrive") ||
+          l.includes("vcloud")
+        );
+      };
 
-      let cachedLocal: any = null;
-      try {
-        const cacheStr = localStorage.getItem("hubcloud_extraction_cache");
-        if (cacheStr) {
-          const cacheObj = JSON.parse(cacheStr);
+      if (isHubcloudRawLink(targetUrl) || isVcloud) {
+        let shouldExtract = true;
+        const now = Date.now();
 
-          // Prune old entries (> 10 mins) to prevent localStorage bloat
-          const prunedObj: Record<string, any> = {};
-          let changed = false;
-          for (const key in cacheObj) {
-            if (now - cacheObj[key].timestamp < 600000) {
-              prunedObj[key] = cacheObj[key];
-            } else {
-              changed = true;
+        let cachedLocal: any = null;
+        try {
+          const cacheStr = localStorage.getItem("hubcloud_extraction_cache");
+          if (cacheStr) {
+            const cacheObj = JSON.parse(cacheStr);
+            const prunedObj: Record<string, any> = {};
+            let changed = false;
+            for (const key in cacheObj) {
+              if (now - cacheObj[key].timestamp < 600000) {
+                prunedObj[key] = cacheObj[key];
+              } else {
+                changed = true;
+              }
+            }
+            if (changed) {
+              localStorage.setItem(
+                "hubcloud_extraction_cache",
+                JSON.stringify(prunedObj),
+              );
+            }
+
+            if (prunedObj[url] || prunedObj[targetUrl]) {
+              cachedLocal = prunedObj[url] || prunedObj[targetUrl];
             }
           }
-          if (changed) {
-            localStorage.setItem(
-              "hubcloud_extraction_cache",
-              JSON.stringify(prunedObj),
-            );
-          }
+        } catch (e) {}
 
-          if (prunedObj[url] || prunedObj[targetUrl]) {
-            cachedLocal = prunedObj[url] || prunedObj[targetUrl];
-          }
+        const cached = hubcloudCacheRef.current[targetUrl] || hubcloudCacheRef.current[url] || cachedLocal;
+
+        // If we have a valid cached link within 10 minutes (600,000 ms), use it directly
+        if (cached && now - cached.timestamp < 600000 && cached.url && !isHubcloudRawLink(cached.url)) {
+          shouldExtract = false;
+          finalUrl = cached.url;
+          finalTinyUrl = undefined;
+          finalCandidates = cached.candidates;
+          finalSize = cached.size;
+          hubcloudCacheRef.current[targetUrl] = cached;
         }
-      } catch (e) {}
 
-      const cached = hubcloudCacheRef.current[targetUrl] || hubcloudCacheRef.current[url] || cachedLocal;
+        let extractionFailed = false;
 
-      // If we have a valid cached link within 10 minutes (600,000 ms), use it directly
-      if (cached && now - cached.timestamp < 600000 && cached.url && !isHubcloudRawLink(cached.url)) {
-        shouldExtract = false;
-        finalUrl = cached.url;
-        finalTinyUrl = undefined;
-        finalCandidates = cached.candidates;
-        finalSize = cached.size;
-        hubcloudCacheRef.current[targetUrl] = cached; // Update memory cache
-      }
+        if (shouldExtract) {
+          try {
+            const res = await fetch("/api/hubcloud/direct-link", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ url: targetUrl, isVcloud, forceExtract: isVcloudName }),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (data.url && data.url !== targetUrl && !isHubcloudRawLink(data.url)) {
+                finalUrl = data.url;
+                finalTinyUrl = undefined;
+                finalCandidates = data.candidates;
+                finalSize = data.size;
 
-      let extractionFailed = false;
-
-      if (shouldExtract) {
-        try {
-          const res = await fetch("/api/hubcloud/direct-link", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: targetUrl, isVcloud, forceExtract: isVcloudName }),
-          });
-          if (res.ok) {
-            const data = await res.json();
-            if (data.url && data.url !== targetUrl && !isHubcloudRawLink(data.url)) {
-              finalUrl = data.url;
-              finalTinyUrl = undefined; // Drop the old tinyurl since url changed!
-              finalCandidates = data.candidates;
-              finalSize = data.size;
-
-              // Save to cache (memory and localStorage)
-              const cacheEntry = {
-                url: finalUrl,
-                candidates: finalCandidates,
-                size: finalSize,
-                timestamp: Date.now(),
-              };
-              hubcloudCacheRef.current[targetUrl] = cacheEntry;
-              try {
-                const cacheStr = localStorage.getItem(
-                  "hubcloud_extraction_cache",
-                );
-                const cacheObj = cacheStr ? JSON.parse(cacheStr) : {};
-                cacheObj[targetUrl] = cacheEntry;
-                localStorage.setItem(
-                  "hubcloud_extraction_cache",
-                  JSON.stringify(cacheObj),
-                );
-              } catch (e) {}
+                const cacheEntry = {
+                  url: finalUrl,
+                  candidates: finalCandidates,
+                  size: finalSize,
+                  timestamp: Date.now(),
+                };
+                hubcloudCacheRef.current[targetUrl] = cacheEntry;
+                try {
+                  const cacheStr = localStorage.getItem(
+                    "hubcloud_extraction_cache",
+                  );
+                  const cacheObj = cacheStr ? JSON.parse(cacheStr) : {};
+                  cacheObj[targetUrl] = cacheEntry;
+                  localStorage.setItem(
+                    "hubcloud_extraction_cache",
+                    JSON.stringify(cacheObj),
+                  );
+                } catch (e) {}
+              } else {
+                extractionFailed = true;
+              }
             } else {
               extractionFailed = true;
             }
-          } else {
+          } catch (e) {
+            console.error("Failed to resolve link", e);
             extractionFailed = true;
           }
-        } catch (e) {
-          console.error("Failed to resolve link", e);
-          extractionFailed = true;
         }
+
+        const isStillHubcloud = !finalUrl || finalUrl === targetUrl || isHubcloudRawLink(finalUrl);
+
+        if (extractionFailed || isStillHubcloud) {
+          return { success: false, finalUrl: targetUrl };
+        }
+
+        return {
+          success: true,
+          finalUrl,
+          finalTinyUrl,
+          finalCandidates,
+          finalSize,
+        };
       }
 
-      setExtractingLinkId((prev) => (prev === clickId ? null : prev));
+      return {
+        success: true,
+        finalUrl,
+        finalTinyUrl,
+        finalCandidates,
+        finalSize,
+      };
+    };
 
-      const isStillHubcloud = !finalUrl || finalUrl === targetUrl || isHubcloudRawLink(finalUrl);
+    // Kick off extraction immediately in background
+    const extractionPromise = performExtraction();
 
-      if (extractionFailed || isStillHubcloud) {
-        setAlertConfig({
-          isOpen: true,
-          title: t("Extraction Error"),
-          message: t("Error in extracting links, please try again"),
-        });
+    // If not exempt, show the Video Ad immediately
+    if (!isExempt && isAdsActive) {
+      setIsVideoAdOpen(true);
+      const adPromise = new Promise<boolean>((resolve) => {
+        videoAdResolveRef.current = resolve;
+      });
+
+      const adCompleted = await adPromise;
+      if (!adCompleted) {
+        setExtractingLinkId(null);
         return;
       }
+    }
 
-      setLinkPopup({
+    // Await background extraction completion
+    const extractionResult = await extractionPromise;
+    setExtractingLinkId(null);
+
+    if (!extractionResult.success) {
+      setAlertConfig({
         isOpen: true,
-        url: finalUrl,
-        originalUrl: targetUrl,
-        name: linkName || "Unknown Link",
-        id: linkId || "unknown",
-        isZip,
-        tinyUrl: finalTinyUrl,
-        candidates: finalCandidates,
-        size: finalSize,
-        formattedTitle,
+        title: t("Extraction Error"),
+        message: t("Error in extracting links, please try again"),
       });
       return;
     }
 
     setLinkPopup({
       isOpen: true,
-      url: finalUrl,
+      url: extractionResult.finalUrl,
       originalUrl: targetUrl,
       name: linkName || "Unknown Link",
       id: linkId || "unknown",
       isZip,
-      tinyUrl: finalTinyUrl,
-      candidates: finalCandidates,
-      size: finalSize,
+      tinyUrl: extractionResult.finalTinyUrl,
+      candidates: extractionResult.finalCandidates,
+      size: extractionResult.finalSize,
       formattedTitle,
     });
   };
@@ -2197,191 +2183,71 @@ export default function MovieDetails() {
   ) => {
     if (!linkPopup) return;
 
-    if (profile?.uid) {
-      logEvent("link_click", profile.uid, {
-        contentId: mergedContent.id,
-        contentTitle: mergedContent.title,
-        linkId: linkPopup.id,
-        linkName: linkPopup.name,
-        playerType: player,
-      });
-    }
-
-    trackStreamAndCheckRate();
-
-    let urlToPlay = linkPopup.url;
-
-    const lowerUrl = urlToPlay.toLowerCase();
-    if (
-      lowerUrl.includes("hubcloud") ||
-      lowerUrl.includes("hubcould") ||
-      lowerUrl.includes("hubdrive") ||
-      lowerUrl.includes("vcloud")
-    ) {
-      setAlertConfig({
-        isOpen: true,
-        title: t("Extraction Error"),
-        message: t("Error in extracting links, please try again"),
-      });
-      closeLinkPopup();
-      return;
-    }
-
-    if (!urlToPlay.startsWith("http")) {
-      urlToPlay = "https://" + urlToPlay;
-    }
-
-    if (player === "browser") {
-      let browserUrl = urlToPlay;
-
-      // Pixeldrain hotlink bypass: ensure we use the viewer page (/u/) for browser viewing
-      browserUrl = browserUrl.replace(
-        /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/api\/file\//i,
-        "pixeldrain.dev/u/",
-      );
-      browserUrl = browserUrl.replace(
-        /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/u\//i,
-        "pixeldrain.dev/u/",
-      );
-
-      if (browserUrl.includes("pixeldrain.dev/u/")) {
-        try {
-          const urlObj = new URL(browserUrl);
-          urlObj.search = ""; // Remove query params like ?download=true
-          browserUrl = urlObj.toString();
-        } catch (e) {}
-      }
-
-      const isAndroid = /Android/i.test(navigator.userAgent);
-      if (isAndroid) {
-        try {
-          const urlObj = new URL(browserUrl);
-          const scheme = urlObj.protocol.replace(":", "");
-          const hostAndPath =
-            urlObj.host + urlObj.pathname + urlObj.search + urlObj.hash;
-          const intentUrl = `intent://${hostAndPath}#Intent;scheme=${scheme};action=android.intent.action.VIEW;end`;
-          window.location.href = intentUrl;
-          closeLinkPopup();
-          return;
-        } catch (e) {
-          console.error("Intent parsing failed", e);
-        }
-      }
-
-      // Fallback for non-Android or if intent fails
-      const html = `<!DOCTYPE html><html><head><meta name="referrer" content="no-referrer"><meta http-equiv="refresh" content="0;url=${browserUrl}"></head><body><script>window.location.replace("${browserUrl}");</script></body></html>`;
-      const blob = new Blob([html], { type: "text/html" });
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-
-      closeLinkPopup();
-      return;
-    }
-
-    if (player === "download") {
-      let copyUrl = urlToPlay;
-      const isPixeldrain =
-        copyUrl.includes("pixeldrain.com") ||
-        copyUrl.includes("pixeldrain.dev") ||
-        copyUrl.includes("pixeldrain.net") ||
-        copyUrl.includes("pixel.drain") ||
-        copyUrl.includes("pixeldra.in");
-
-      // We don't use tinyurl anymore as per request
-      /*
-      if (!isPixeldrain) {
-        if (linkPopup.tinyUrl) {
-          copyUrl = linkPopup.tinyUrl;
-        } else {
-          try {
-            const { generateTinyUrl } = await import("../../utils/tinyurl");
-            copyUrl = await generateTinyUrl(copyUrl, false);
-          } catch (e) {
-            console.error("Failed to generate tinyurl on the fly", e);
-          }
-        }
-      }
-      */
-
-      navigator.clipboard
-        .writeText(copyUrl)
-        .then(() => {
-          setAlertConfig({
-            isOpen: true,
-            title: "Link Copied!",
-            message: "The link has been copied to your clipboard.",
-          });
-        })
-        .catch((err) => {
-          console.error("Failed to copy", err);
-          setAlertConfig({
-            isOpen: true,
-            title: "Copy Failed",
-            message: "Could not copy link. Please copy it manually: " + copyUrl,
-          });
+    const executeAction = async () => {
+      if (profile?.uid) {
+        logEvent("link_click", profile.uid, {
+          contentId: mergedContent.id,
+          contentTitle: mergedContent.title,
+          linkId: linkPopup.id,
+          linkName: linkPopup.name,
+          playerType: player,
         });
+      }
+
+      trackStreamAndCheckRate();
+
+      let urlToPlay = linkPopup.url;
+
+      const lowerUrl = urlToPlay.toLowerCase();
+      if (
+        lowerUrl.includes("hubcloud") ||
+        lowerUrl.includes("hubcould") ||
+        lowerUrl.includes("hubdrive") ||
+        lowerUrl.includes("vcloud")
+      ) {
+        setAlertConfig({
+          isOpen: true,
+          title: t("Extraction Error"),
+          message: t("Error in extracting links, please try again"),
+        });
+        closeLinkPopup();
+        return;
+      }
+
+      if (player === "download") {
+        let copyUrl = urlToPlay;
+        navigator.clipboard
+          .writeText(copyUrl)
+          .then(() => {
+            setAlertConfig({
+              isOpen: true,
+              title: "Link Copied!",
+              message: "The link has been copied to your clipboard.",
+            });
+          })
+          .catch((err) => {
+            console.error("Failed to copy", err);
+            setAlertConfig({
+              isOpen: true,
+              title: "Copy Failed",
+              message: "Could not copy link. Please copy it manually: " + copyUrl,
+            });
+          });
+        closeLinkPopup();
+        return;
+      }
+
+      // Launch player (VLC, MX Player, or Generic) on iOS, Android, or Desktop
+      playInExternalPlayer({
+        player,
+        url: urlToPlay,
+        title: linkPopup.formattedTitle || mergedContent.title,
+      });
+
       closeLinkPopup();
-      return;
-    }
+    };
 
-    // For video players, we need the raw file API endpoint, not the viewer page
-    let videoUrl = urlToPlay;
-    if (player === "vlc" || player === "mx" || player === "generic") {
-      videoUrl = videoUrl.replace(
-        /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/u\//i,
-        "pixeldrain.dev/api/file/",
-      );
-      videoUrl = videoUrl.replace(
-        /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/api\/file\//i,
-        "pixeldrain.dev/api/file/",
-      );
-
-      if (videoUrl.includes("pixeldrain.dev/api/file/")) {
-        try {
-          const urlObj = new URL(videoUrl);
-          urlObj.search = ""; // Remove query params
-          videoUrl = urlObj.toString();
-        } catch (e) {}
-      }
-    }
-
-    try {
-      const urlObj = new URL(videoUrl);
-      const scheme = urlObj.protocol.replace(":", "");
-      const hostAndPath =
-        urlObj.host + urlObj.pathname + urlObj.search + urlObj.hash;
-      const title = encodeURIComponent(
-        linkPopup.formattedTitle || mergedContent.title,
-      );
-
-      let intentUrl = "";
-      if (player === "vlc") {
-        intentUrl = `intent://${hostAndPath}#Intent;scheme=${scheme};package=org.videolan.vlc;type=video/*;S.title=${title};end`;
-      } else if (player === "mx") {
-        intentUrl = `intent://${hostAndPath}#Intent;scheme=${scheme};package=com.mxtech.videoplayer.ad;type=video/*;S.title=${title};end`;
-      } else {
-        intentUrl = `intent://${hostAndPath}#Intent;scheme=${scheme};action=android.intent.action.VIEW;type=video/*;end`;
-      }
-
-      window.location.href = intentUrl;
-    } catch (e) {
-      console.error("Invalid URL for external player", e);
-      const a = document.createElement("a");
-      a.href = videoUrl;
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    }
-
-    closeLinkPopup();
+    executeAction();
   };
 
   const handleReportLink = async () => {
@@ -2477,61 +2343,47 @@ export default function MovieDetails() {
   const handlePlayDirectly = async () => {
     if (!linkPopup) return;
 
-    if (profile?.uid) {
-      logEvent("link_click", profile.uid, {
-        contentId: mergedContent.id,
-        contentTitle: mergedContent.title,
-        linkId: linkPopup.id,
-        linkName: linkPopup.name,
-      });
-    }
+    const executeAction = async () => {
+      if (profile?.uid) {
+        logEvent("link_click", profile.uid, {
+          contentId: mergedContent.id,
+          contentTitle: mergedContent.title,
+          linkId: linkPopup.id,
+          linkName: linkPopup.name,
+        });
+      }
 
-    trackStreamAndCheckRate();
+      trackStreamAndCheckRate();
 
-    let url = linkPopup.url;
+      let url = linkPopup.url;
 
-    const lowerUrl = url.toLowerCase();
-    if (
-      lowerUrl.includes("hubcloud") ||
-      lowerUrl.includes("hubcould") ||
-      lowerUrl.includes("hubdrive") ||
-      lowerUrl.includes("vcloud")
-    ) {
-      setAlertConfig({
-        isOpen: true,
-        title: t("Extraction Error"),
-        message: t("Error in extracting links, please try again"),
-      });
+      const lowerUrl = url.toLowerCase();
+      if (
+        lowerUrl.includes("hubcloud") ||
+        lowerUrl.includes("hubcould") ||
+        lowerUrl.includes("hubdrive") ||
+        lowerUrl.includes("vcloud")
+      ) {
+        setAlertConfig({
+          isOpen: true,
+          title: t("Extraction Error"),
+          message: t("Error in extracting links, please try again"),
+        });
+        closeLinkPopup();
+        return;
+      }
+
+      if (!url.startsWith("http")) {
+        url = "https://" + url;
+      }
+
+      const browserUrl = normalizeBrowserViewUrl(url);
+      openInNewTab(browserUrl);
+
       closeLinkPopup();
-      return;
-    }
+    };
 
-    if (!url.startsWith("http")) {
-      url = "https://" + url;
-    }
-
-    // Pixeldrain hotlink bypass: ensure we use the viewer page (/u/) for browser viewing
-    url = url.replace(
-      /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/api\/file\//i,
-      "pixeldrain.dev/u/",
-    );
-    url = url.replace(
-      /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/u\//i,
-      "pixeldrain.dev/u/",
-    );
-
-    if (url.includes("pixeldrain.dev/u/")) {
-      try {
-        const urlObj = new URL(url);
-        urlObj.search = ""; // Remove query params like ?download=true
-        url = urlObj.toString();
-      } catch (e) {}
-    }
-
-    // We no longer normalize HubCloud domains to .cx to support dynamic domains
-    window.open(url, "_blank", "noopener,noreferrer");
-
-    closeLinkPopup();
+    executeAction();
   };
 
   const contentGenres = genres
@@ -2807,7 +2659,26 @@ export default function MovieDetails() {
   };
 
   return (
-    <div className="min-h-screen bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white pb-20 transition-colors duration-300">
+    <>
+      <VideoAdInterstitial
+        isOpen={isVideoAdOpen}
+        onClose={() => {
+          setIsVideoAdOpen(false);
+          if (videoAdResolveRef.current) {
+            videoAdResolveRef.current(false);
+            videoAdResolveRef.current = null;
+          }
+        }}
+        onAdComplete={() => {
+          setIsVideoAdOpen(false);
+          if (videoAdResolveRef.current) {
+            videoAdResolveRef.current(true);
+            videoAdResolveRef.current = null;
+          }
+        }}
+        adUrl={settings?.adVideoUrl || "https://commercialhalftime.com/htqpa4mty?key=53a3c0b6e7edfce96cd08f0cabe01b54"}
+      />
+      <div className="min-h-screen bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white pb-20 transition-colors duration-300">
       <Helmet>
         <title>{title}</title>
         <meta name="description" content={description} />
@@ -3043,7 +2914,7 @@ export default function MovieDetails() {
                   </a>
                 )}
                 
-                {((!profile || profile?.status === 'pending' || profile?.status === 'expired') || !(hasUserRated || safeStorage.getItem('has_rated') === 'true' || profile?.reviewRewardClaimed)) && (
+                {((!profile || profile?.status === 'pending' || profile?.status === 'expired') || !(hasUserRated || safeStorage.getItem('has_rated') === 'true')) && (
                   <Link
                     to="/reviews"
                     className="bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 px-5 py-3.5 text-sm sm:text-base rounded-2xl font-bold flex items-center gap-2 transition-all hover:opacity-90 active:scale-95 shadow-lg"
@@ -3170,15 +3041,6 @@ export default function MovieDetails() {
                         : t("You do not have permission to access links for this content.")}
                 </p>
                 <div className="flex flex-wrap gap-3">
-                  {isPending && (
-                    <Link
-                      to="/rewards"
-                      className="inline-flex items-center gap-2 bg-emerald-500 text-white px-6 py-3 text-sm sm:text-base rounded-xl font-bold hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20"
-                    >
-                      <Gift className="w-5 h-5" />
-                      {t('Rewards')}
-                    </Link>
-                  )}
                   {settings?.isAdminContactEnabled !== false && (
                     <button
                       onClick={() => {
@@ -3683,7 +3545,7 @@ export default function MovieDetails() {
             <GuestAccessBanner className="my-6" />
 
             {/* Ad Banner for Basic Users */}
-            <AdBanner className="my-6" />
+            <AdBanner className="my-6" content={mergedContent} />
 
             {/* Links Section */}
             <section className="space-y-6">
@@ -4124,78 +3986,6 @@ export default function MovieDetails() {
               className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 max-w-md w-full relative shadow-2xl overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
-              {adState?.isPlaying ? (
-                <div className="absolute inset-0 bg-zinc-950 flex flex-col justify-between z-30 p-6 text-white animate-fade-in">
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-[10px] font-extrabold uppercase bg-amber-500 text-black px-2 py-0.5 rounded-md tracking-wider">
-                      Sponsor Video Ad
-                    </span>
-                    <span className="text-xs text-zinc-400 font-medium">
-                      {adState.timeLeft > 0 ? `Skip in ${adState.timeLeft}s` : 'Ad Ready to Skip'}
-                    </span>
-                  </div>
-
-                  {/* Video Player */}
-                  <div className="relative flex-1 flex items-center justify-center bg-black rounded-xl overflow-hidden border border-zinc-800 my-2">
-                    <video
-                      src={settings?.adVideoUrl || 'https://assets.mixkit.co/videos/preview/mixkit-popcorn-machine-in-action-close-up-42289-large.mp4'}
-                      autoPlay
-                      playsInline
-                      muted={adState.isMuted}
-                      className="w-full h-full object-cover"
-                      onEnded={() => setAdState(prev => prev ? { ...prev, timeLeft: 0, canSkip: true } : null)}
-                    />
-                    
-                    {/* Sound Control Icon */}
-                    <button
-                      type="button"
-                      onClick={() => setAdState(prev => prev ? { ...prev, isMuted: !prev.isMuted } : null)}
-                      className="absolute bottom-3 right-3 p-2 bg-black/60 rounded-full hover:bg-black/80 transition-colors border border-white/10"
-                    >
-                      {adState.isMuted ? <VolumeX className="w-4 h-4 text-white" /> : <Volume2 className="w-4 h-4 text-white" />}
-                    </button>
-                  </div>
-
-                  {/* Promotion Description and CTA */}
-                  <div className="mt-3 space-y-4">
-                    <div>
-                      <h4 className="font-extrabold text-sm text-white line-clamp-1">
-                        {settings?.adBannerTitle || 'MovizNow Premium Sponsor'}
-                      </h4>
-                      <p className="text-xs text-zinc-400 mt-0.5 line-clamp-2 leading-relaxed">
-                        {settings?.adBannerDescription || 'Enjoy high quality premium streaming on MovizNow.'}
-                      </p>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3 pt-1">
-                      <a
-                        href={settings?.adRedirectUrl || 'https://moviznow.app/premium'}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-white hover:bg-zinc-100 text-black font-extrabold text-xs tracking-wide shadow-md transition-all active:scale-95 text-center"
-                      >
-                        Visit Sponsor
-                        <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-                      </a>
-
-                      <button
-                        type="button"
-                        onClick={() => setAdState(prev => prev ? { ...prev, isPlaying: false, hasCompleted: true } : null)}
-                        disabled={!adState.canSkip}
-                        className={clsx(
-                          "px-4 py-2.5 rounded-xl font-extrabold text-xs tracking-wide transition-all shadow-md text-center flex items-center justify-center",
-                          adState.canSkip 
-                            ? "bg-emerald-500 hover:bg-emerald-600 text-white cursor-pointer active:scale-95" 
-                            : "bg-zinc-800 text-zinc-500 cursor-not-allowed border border-zinc-700/50"
-                        )}
-                      >
-                        {adState.canSkip ? 'Skip Ad' : `Skip in ${adState.timeLeft}s`}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-
               <button
                 onClick={closeLinkPopup}
                 className="absolute top-5 right-5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors p-1 rounded-full hover:bg-zinc-200 dark:hover:bg-zinc-800"
@@ -4961,5 +4751,6 @@ export default function MovieDetails() {
         }}
       />
     </div>
+    </>
   );
 }

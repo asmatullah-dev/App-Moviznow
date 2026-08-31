@@ -4,6 +4,9 @@ import { X, ExternalLink, Loader2, Download } from "lucide-react";
 import { Content } from "../types";
 import { useModalBehavior } from "../hooks/useModalBehavior";
 import { useLanguage } from "../contexts/LanguageContext";
+import { VideoAdInterstitial } from "./VideoAdInterstitial";
+import { useAuth } from "../contexts/AuthContext";
+import { isUserExemptFromAds } from "../utils/adUtils";
 
 interface TelegramDownloadModalProps {
   isOpen: boolean;
@@ -18,12 +21,14 @@ export function TelegramDownloadModal({
 }: TelegramDownloadModalProps) {
   useModalBehavior(isOpen, onClose);
   const { t } = useLanguage();
+  const { profile } = useAuth();
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [errorId, setErrorId] = useState<string | null>(null);
+  const [adPendingLink, setAdPendingLink] = useState<{ id: string, url: string } | null>(null);
 
   if (!isOpen || !content) return null;
 
-  const handleResolve = async (id: string, url: string) => {
+  const executeResolve = async (id: string, url: string) => {
     setResolvingId(id);
     setErrorId(null);
     try {
@@ -45,6 +50,16 @@ export function TelegramDownloadModal({
       alert(t("An error occurred predicting Telegram link"));
     } finally {
       setResolvingId(null);
+    }
+  };
+
+  const handleResolve = (id: string, url: string) => {
+    const isExempt = isUserExemptFromAds(profile, content);
+    
+    if (!isExempt) {
+      setAdPendingLink({ id, url });
+    } else {
+      executeResolve(id, url);
     }
   };
 
@@ -103,7 +118,19 @@ export function TelegramDownloadModal({
   const seasons = getSeasons();
 
   return (
-    <AnimatePresence>
+    <>
+      <VideoAdInterstitial
+        isOpen={!!adPendingLink}
+        onClose={() => setAdPendingLink(null)}
+        adUrl="https://commercialhalftime.com/htqpa4mty?key=53a3c0b6e7edfce96cd08f0cabe01b54"
+        onAdComplete={() => {
+          if (adPendingLink) {
+            executeResolve(adPendingLink.id, adPendingLink.url);
+            setAdPendingLink(null);
+          }
+        }}
+      />
+      <AnimatePresence>
       {isOpen && (
         <>
           <motion.div
@@ -209,5 +236,6 @@ export function TelegramDownloadModal({
         </>
       )}
     </AnimatePresence>
-  );
+  </>
+);
 }

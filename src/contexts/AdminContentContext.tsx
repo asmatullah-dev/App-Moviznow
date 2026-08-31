@@ -15,7 +15,7 @@ import { db, runWithNetwork } from '../firebase';
 import { safeStorage } from '../utils/safeStorage';
 import { expandContent, CONTENT_CHUNK_MOVIE_SIZE, CONTENT_CHUNK_SERIES_SIZE } from '../utils/chunkUtils';
 import { getUtcVersion, parseVersionTime } from '../utils/chunkMeta';
-import { seedStaticExportData, getStaticExportContent } from '../utils/staticContentLoader';
+import { seedStaticExportData, getStaticExportContent, getCachedContentData } from '../utils/staticContentLoader';
 import { useAuth } from './AuthContext';
 import { useUsers } from './UsersContext';
 import { Content, Genre, Language, Quality, Collection as AppCollection } from '../types';
@@ -120,17 +120,17 @@ export function isContentDataEqual(existing: any, updated: any): boolean {
 
 export const checkHasPendingChanges = (): boolean => {
   try {
-    const chunkUpdates = safeStorage.getItem('pending_chunk_updates');
+    const chunkUpdates = safeStorage.getItem('admin_pending_chunk_updates');
     if (chunkUpdates && chunkUpdates !== '[]') {
       const arr = JSON.parse(chunkUpdates);
       if (Array.isArray(arr) && arr.length > 0) return true;
     }
-    const collUpdates = safeStorage.getItem('pending_collection_updates');
+    const collUpdates = safeStorage.getItem('admin_pending_collection_updates');
     if (collUpdates && collUpdates !== '[]') {
       const arr = JSON.parse(collUpdates);
       if (Array.isArray(arr) && arr.length > 0) return true;
     }
-    const metaUpdates = safeStorage.getItem('pending_metadata_updates');
+    const metaUpdates = safeStorage.getItem('admin_pending_metadata_updates');
     if (metaUpdates === 'true') return true;
   } catch (e) {}
   return false;
@@ -141,57 +141,86 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
   const { users: allUsers, finalizeUserChanges } = useUsers();
 
   const [contentList, setContentList] = useState<Content[]>(() => {
-    const cached = safeStorage.getItem('content_cache');
+    const cached = safeStorage.getItem('admin_content_cache') || safeStorage.getItem('content_cache');
     return cached ? JSON.parse(cached) : [];
   });
   const [genres, setGenres] = useState<Genre[]>(() => {
-    const cached = safeStorage.getItem('genres_cache');
+    const cached = safeStorage.getItem('admin_genres_cache') || safeStorage.getItem('genres_cache');
     return cached ? JSON.parse(cached).sort((a: any, b: any) => (a.order || 999) - (b.order || 999)) : [];
   });
   const [languages, setLanguages] = useState<Language[]>(() => {
-    const cached = safeStorage.getItem('languages_cache');
+    const cached = safeStorage.getItem('admin_languages_cache') || safeStorage.getItem('languages_cache');
     return cached ? JSON.parse(cached).sort((a: any, b: any) => (a.order || 999) - (b.order || 999)) : [];
   });
   const [qualities, setQualities] = useState<Quality[]>(() => {
-    const cached = safeStorage.getItem('qualities_cache');
+    const cached = safeStorage.getItem('admin_qualities_cache') || safeStorage.getItem('qualities_cache');
     return cached ? JSON.parse(cached).sort((a: any, b: any) => (a.order || 999) - (b.order || 999)) : [];
   });
   const [collections, setCollections] = useState<AppCollection[]>(() => {
-    const cached = safeStorage.getItem('collections_cache');
+    const cached = safeStorage.getItem('admin_collections_cache') || safeStorage.getItem('collections_cache');
     return cached ? JSON.parse(cached) : [];
   });
   const [loading, setLoading] = useState(() => {
-    return !safeStorage.getItem('content_cache') || !safeStorage.getItem('collections_cache');
+    const hasC = safeStorage.getItem('admin_content_cache') || safeStorage.getItem('content_cache');
+    return !hasC;
   });
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
-  
-  const hasLoadedRef = useRef(false);
 
   useEffect(() => {
-    if (hasLoadedRef.current) return;
-    hasLoadedRef.current = true;
-    
-    // Seed static content export immediately if local cache is empty or incomplete
-    const contentCache = safeStorage.getItem('content_cache');
-    const localMeta = safeStorage.getItem('chunk_meta_versions');
-    if (!contentCache || contentCache === '[]' || !localMeta) {
-      seedStaticExportData();
-    }
+    let isMounted = true;
 
-    // Initial sync from local storage for IMMEDIATE UI feedback
-    refreshContentFromLocal();
-    refreshCollectionsFromLocal();
-    
-    // Load auxiliary from cache
-    const g = safeStorage.getItem('genres_cache');
-    if (g) setGenres(JSON.parse(g));
-    const l = safeStorage.getItem('languages_cache');
-    if (l) setLanguages(JSON.parse(l));
-    const q = safeStorage.getItem('qualities_cache');
-    if (q) setQualities(JSON.parse(q));
-    
-    setLoading(false);
-  }, []);
+    const hydrateAndLoad = async () => {
+      // 1. Wait for safeStorage IndexedDB hydration
+      await safeStorage.whenHydrated();
+      if (!isMounted) return;
+
+      // 2. Initial sync from local storage for IMMEDIATE UI feedback
+      refreshContentFromLocal();
+      refreshCollectionsFromLocal();
+
+      // 3. Load auxiliary from cache
+      const g = safeStorage.getItem('admin_genres_cache') || safeStorage.getItem('genres_cache');
+      if (g) try { setGenres(JSON.parse(g).sort((a: any, b: any) => (a.order || 999) - (b.order || 999))); } catch(e) {}
+      const l = safeStorage.getItem('admin_languages_cache') || safeStorage.getItem('languages_cache');
+      if (l) try { setLanguages(JSON.parse(l).sort((a: any, b: any) => (a.order || 999) - (b.order || 999))); } catch(e) {}
+      const q = safeStorage.getItem('admin_qualities_cache') || safeStorage.getItem('qualities_cache');
+      if (q) try { setQualities(JSON.parse(q).sort((a: any, b: any) => (a.order || 999) - (b.order || 999))); } catch(e) {}
+
+      // 4. Seed static export if unauthenticated / guest
+      const isAdminOrEditor = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
+      if (!isAdminOrEditor && !user) {
+        const contentCache = safeStorage.getItem('admin_content_cache');
+        const localMeta = safeStorage.getItem('admin_chunk_meta_versions');
+        if (!contentCache || contentCache === '[]' || !localMeta) {
+          seedStaticExportData();
+          refreshContentFromLocal();
+        }
+      }
+
+      setLoading(false);
+
+      // 5. Automatic background sync from Firestore for authenticated users / admins
+      if (isAdminOrEditor || user) {
+        syncWithServer(false).catch(err => console.warn('Auto background sync on mount:', err));
+      }
+    };
+
+    hydrateAndLoad();
+
+    const handleStorageHydrated = () => {
+      if (isMounted) {
+        refreshContentFromLocal();
+        refreshCollectionsFromLocal();
+      }
+    };
+
+    window.addEventListener('safe_storage_hydrated', handleStorageHydrated);
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener('safe_storage_hydrated', handleStorageHydrated);
+    };
+  }, [profile?.role, user?.uid]);
 
   useEffect(() => {
     refreshContentFromLocal();
@@ -255,10 +284,10 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     if (!coll1 || !coll2) return;
 
     // Persist changes locally (synchronously to avoid race conditions with multiple clicks)
-    const pendingIds = new Set(JSON.parse(safeStorage.getItem('pending_collection_updates') || '[]'));
+    const pendingIds = new Set(JSON.parse(safeStorage.getItem('admin_pending_collection_updates') || '[]'));
     
     [coll1, coll2].forEach(coll => {
-        const keys = safeStorage.keys().filter(k => k.startsWith('local_collection_chunk_'));
+        const keys = safeStorage.keys().filter(k => k.startsWith('admin_collection_chunk_'));
         for (const key of keys) {
             const chunkStr = safeStorage.getItem(key);
             if (chunkStr && chunkStr.includes(`"${coll.id}"`)) {
@@ -266,22 +295,22 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                 if (items[coll.id]) {
                     items[coll.id] = coll;
                     safeStorage.setItem(key, JSON.stringify(items));
-                    pendingIds.add(key.replace('local_collection_chunk_', ''));
+                    pendingIds.add(key.replace('admin_collection_chunk_', ''));
                     break;
                 }
             }
         }
     });
 
-    const allCached = JSON.parse(safeStorage.getItem('collections_cache') || '[]');
+    const allCached = JSON.parse(safeStorage.getItem('admin_collections_cache') || '[]');
     [coll1, coll2].forEach(coll => {
         const idx = allCached.findIndex((c: any) => c.id === coll.id);
         if (idx !== -1) allCached[idx] = coll;
         else allCached.push(coll);
     });
     
-    safeStorage.setItem('collections_cache', JSON.stringify(allCached.sort((a: any, b: any) => (b.order || 0) - (a.order || 0))));
-    safeStorage.setItem('pending_collection_updates', JSON.stringify(Array.from(pendingIds)));
+    safeStorage.setItem('admin_collections_cache', JSON.stringify(allCached.sort((a: any, b: any) => (b.order || 0) - (a.order || 0))));
+    safeStorage.setItem('admin_pending_collection_updates', JSON.stringify(Array.from(pendingIds)));
     setHasPendingChanges(true);
   };
 
@@ -292,9 +321,9 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     const { rebalanceLocalChunks } = await import('../utils/chunkUtils');
     rebalanceLocalChunks();
 
-    const contentPendingStr = safeStorage.getItem('pending_chunk_updates');
-    const collectionPendingStr = safeStorage.getItem('pending_collection_updates');
-    const metadataPending = safeStorage.getItem('pending_metadata_updates') === 'true';
+    const contentPendingStr = safeStorage.getItem('admin_pending_chunk_updates');
+    const collectionPendingStr = safeStorage.getItem('admin_pending_collection_updates');
+    const metadataPending = safeStorage.getItem('admin_pending_metadata_updates') === 'true';
 
     let pendingChunkIds: string[] = [];
     let pendingCollChunkIds: string[] = [];
@@ -304,8 +333,8 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             const uniqueIds = Array.from(new Set(rawIds));
             // Filter out content chunks that are identical to the last known server state to minimize Firestore writes
             pendingChunkIds = uniqueIds.filter(cid => {
-                const currentChunkStr = safeStorage.getItem('content_chunk_' + cid) || safeStorage.getItem(cid);
-                const syncedStr = safeStorage.getItem('synced_content_chunk_' + cid);
+                const currentChunkStr = safeStorage.getItem('admin_content_chunk_' + cid);
+                const syncedStr = safeStorage.getItem('admin_synced_content_chunk_' + cid);
                 if (syncedStr && currentChunkStr === syncedStr) {
                     console.log(`Bypassing write for content chunk ${cid} - matches server state`);
                     return false;
@@ -320,8 +349,8 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             const uniqueIds = Array.from(new Set(rawIds));
             // Filter out collection chunks that are identical to the last known server state to minimize Firestore writes
             pendingCollChunkIds = uniqueIds.filter(cid => {
-                const currentChunkStr = safeStorage.getItem('local_collection_chunk_' + cid);
-                const syncedStr = safeStorage.getItem('synced_collection_chunk_' + cid);
+                const currentChunkStr = safeStorage.getItem('admin_collection_chunk_' + cid);
+                const syncedStr = safeStorage.getItem('admin_synced_collection_chunk_' + cid);
                 if (syncedStr && currentChunkStr === syncedStr) {
                     console.log(`Bypassing write for collection chunk ${cid} - matches server state`);
                     return false;
@@ -332,10 +361,10 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     } catch(e) {}
     
     if (pendingChunkIds.length === 0 && pendingCollChunkIds.length === 0 && !metadataPending) {
-        safeStorage.removeItem('pending_chunk_updates');
-        safeStorage.removeItem('pending_item_updates');
-        safeStorage.removeItem('pending_collection_updates');
-        safeStorage.removeItem('pending_metadata_updates');
+        safeStorage.removeItem('admin_pending_chunk_updates');
+        safeStorage.removeItem('admin_pending_item_updates');
+        safeStorage.removeItem('admin_pending_collection_updates');
+        safeStorage.removeItem('admin_pending_metadata_updates');
         setHasPendingChanges(false);
         return;
     }
@@ -360,7 +389,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         // Handle content chunks
         if (pendingChunkIds.length > 0) {
             for (const cid of pendingChunkIds) {
-                const chunkStr = safeStorage.getItem('content_chunk_' + cid) || safeStorage.getItem(cid);
+                const chunkStr = safeStorage.getItem('admin_content_chunk_' + cid);
                 if (chunkStr) {
                     const parsedItems = JSON.parse(chunkStr);
                     addBatchOp((batch) => {
@@ -371,7 +400,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                     });
                     
                     // Update the last known synced reference
-                    safeStorage.setItem('synced_content_chunk_' + cid, chunkStr);
+                    safeStorage.setItem('admin_synced_content_chunk_' + cid, chunkStr);
                     
                     versionsUpdate[cid] = {
                         updatedAt: utcNow,
@@ -384,7 +413,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         // Handle collection chunks
         if (pendingCollChunkIds.length > 0) {
             for (const cid of pendingCollChunkIds) {
-                const chunkStr = safeStorage.getItem('local_collection_chunk_' + cid);
+                const chunkStr = safeStorage.getItem('admin_collection_chunk_' + cid);
                 if (chunkStr) {
                     addBatchOp((batch) => {
                         batch.set(doc(db, 'collection_chunks', cid), {
@@ -394,13 +423,13 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                     });
 
                     // Update the last known synced reference
-                    safeStorage.setItem('synced_collection_chunk_' + cid, chunkStr);
+                    safeStorage.setItem('admin_synced_collection_chunk_' + cid, chunkStr);
                 }
             }
             
             // Calculate true max index across all local collection chunks to avoid resetting latestChunkId to a lower value and losing collections
             let maxCollIndex = 0;
-            const collectionKeys = safeStorage.keys().filter(key => key.startsWith('local_collection_chunk_'));
+            const collectionKeys = safeStorage.keys().filter(key => key.startsWith('admin_collection_chunk_'));
             for (const key of collectionKeys) {
                 const match = key.match(/(\d+)$/);
                 if (match) {
@@ -415,9 +444,9 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         }
 
         if (metadataPending) {
-            const mGenres = JSON.parse(safeStorage.getItem('genres_cache') || '[]');
-            const mLanguages = JSON.parse(safeStorage.getItem('languages_cache') || '[]');
-            const mQualities = JSON.parse(safeStorage.getItem('qualities_cache') || '[]');
+            const mGenres = JSON.parse(safeStorage.getItem('admin_genres_cache') || '[]');
+            const mLanguages = JSON.parse(safeStorage.getItem('admin_languages_cache') || '[]');
+            const mQualities = JSON.parse(safeStorage.getItem('admin_qualities_cache') || '[]');
             
             addBatchOp((batch) => {
                 batch.set(doc(db, 'content_chunks', 'metadata'), {
@@ -439,7 +468,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
 
         await Promise.all(batches.map(b => b.commit()));
         
-        const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+        const localMetaString = safeStorage.getItem('admin_chunk_meta_versions') || '{}';
         let localMeta: Record<string, any> = {};
         try { localMeta = JSON.parse(localMetaString); } catch(e) {}
 
@@ -450,12 +479,12 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             }
         }
 
-        safeStorage.removeItem('pending_chunk_updates');
-        safeStorage.removeItem('pending_item_updates');
-        safeStorage.removeItem('pending_collection_updates');
-        safeStorage.removeItem('pending_metadata_updates');
+        safeStorage.removeItem('admin_pending_chunk_updates');
+        safeStorage.removeItem('admin_pending_item_updates');
+        safeStorage.removeItem('admin_pending_collection_updates');
+        safeStorage.removeItem('admin_pending_metadata_updates');
 
-        safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+        safeStorage.setItem('admin_chunk_meta_versions', JSON.stringify(localMeta));
         const { updateChunkMetaLocalCache } = await import('../utils/chunkMeta');
         updateChunkMetaLocalCache(versionsUpdate);
 
@@ -488,15 +517,9 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
   }, [contentList, allUsers]);
 
   const refreshContentFromLocal = () => {
-    const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
-    let localMeta: Record<string, any> = {};
-    try { localMeta = JSON.parse(localMetaString); } catch(e) {}
-    
     const rawContentMap: Record<string, Content> = {};
     const chunkKeys = safeStorage.keys().filter(k => 
-        k.startsWith('content_chunk_') || 
-        k.startsWith('movie_chunk_') || 
-        k.startsWith('series_chunk_')
+        k.startsWith('admin_content_chunk_')
     );
 
     for (const key of chunkKeys) {
@@ -504,14 +527,53 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         if (chunkStr) {
             try {
                 const items = JSON.parse(chunkStr);
+                const cid = key.replace('admin_content_chunk_', '');
                 Object.entries(items).forEach(([id, item]: [string, any]) => {
-                    const expanded = expandContent({ ...item, id }, key);
+                    const expanded = expandContent({ ...item, id }, cid);
                     rawContentMap[expanded.id] = expanded;
                 });
             } catch(e) {}
         }
     }
-    const rawContent = Object.values(rawContentMap);
+
+    // Fallback 1: If no admin chunks found yet, check admin_content_cache or content_cache
+    if (Object.keys(rawContentMap).length === 0) {
+      const cachedContent = safeStorage.getItem('admin_content_cache') || safeStorage.getItem('content_cache');
+      if (cachedContent && cachedContent !== '[]') {
+        try {
+          const parsed = JSON.parse(cachedContent);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            parsed.forEach((c: Content) => {
+              if (c && c.id) rawContentMap[c.id] = c;
+            });
+          }
+        } catch (e) {}
+      }
+    }
+
+    // Fallback 2: Check general content chunk keys (content_chunk_ / movie_chunk_ / series_chunk_)
+    if (Object.keys(rawContentMap).length === 0) {
+      const fallbackChunkKeys = safeStorage.keys().filter(k => 
+        k.startsWith('content_chunk_') || k.startsWith('static_content_chunk_') || k.startsWith('movie_chunk_') || k.startsWith('series_chunk_')
+      );
+      for (const key of fallbackChunkKeys) {
+        const chunkStr = safeStorage.getItem(key);
+        if (chunkStr) {
+          try {
+            const items = JSON.parse(chunkStr);
+            const cid = key.replace('content_chunk_', '').replace('static_content_chunk_', '');
+            Object.entries(items).forEach(([id, item]: [string, any]) => {
+              const expanded = expandContent({ ...item, id }, cid);
+              rawContentMap[expanded.id] = expanded;
+            });
+            // Replicate under admin_content_chunk_ for rapid future reads
+            safeStorage.setItem('admin_content_chunk_' + cid, chunkStr);
+          } catch(e) {}
+        }
+      }
+    }
+
+    let rawContent = Object.values(rawContentMap);
     rawContent.sort((a, b) => {
         // Use order if explicitly set, otherwise use createdAt for newest-first (reverse order)
         if (a.order !== undefined && b.order !== undefined) {
@@ -536,17 +598,21 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             return { ...c, movieLinks: undefined, seasons: minimalSeasons.length > 0 ? JSON.stringify(minimalSeasons) : undefined, _isMinimal: true } as Content;
         });
         setContentList(sanitized);
-        safeStorage.setItem('content_cache', JSON.stringify(sanitized));
+        if (sanitized.length > 0) {
+          safeStorage.setItem('admin_content_cache', JSON.stringify(sanitized));
+        }
     } else {
         setContentList(rawContent);
-        safeStorage.setItem('content_cache', JSON.stringify(rawContent));
+        if (rawContent.length > 0) {
+          safeStorage.setItem('admin_content_cache', JSON.stringify(rawContent));
+        }
     }
     window.dispatchEvent(new CustomEvent('content_updated_locally'));
   };
 
   const refreshCollectionsFromLocal = () => {
     let allCollections: AppCollection[] = [];
-    const keys = safeStorage.keys().filter(k => k.startsWith('local_collection_chunk_'));
+    const keys = safeStorage.keys().filter(k => k.startsWith('admin_collection_chunk_'));
     
     for (const key of keys) {
         const chunkStr = safeStorage.getItem(key);
@@ -558,10 +624,40 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             } catch(e) {}
         }
     }
+
+    // Fallback: check admin_collections_cache or general collections_cache / collection_chunk_
+    if (allCollections.length === 0) {
+      const cachedCollStr = safeStorage.getItem('admin_collections_cache') || safeStorage.getItem('collections_cache');
+      if (cachedCollStr && cachedCollStr !== '[]') {
+        try {
+          const parsed = JSON.parse(cachedCollStr);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            allCollections = parsed;
+          }
+        } catch(e) {}
+      }
+
+      if (allCollections.length === 0) {
+        const fallbackKeys = safeStorage.keys().filter(k => k.startsWith('collection_chunk_'));
+        for (const key of fallbackKeys) {
+          const chunkStr = safeStorage.getItem(key);
+          if (chunkStr) {
+            try {
+              const items = JSON.parse(chunkStr);
+              const chunkList = Object.values(items) as AppCollection[];
+              allCollections = [...allCollections, ...chunkList];
+              safeStorage.setItem('admin_' + key, chunkStr);
+            } catch(e) {}
+          }
+        }
+      }
+    }
     
     const sorted = allCollections.sort((a, b) => (b.order || 0) - (a.order || 0));
     setCollections(sorted);
-    safeStorage.setItem('collections_cache', JSON.stringify(sorted));
+    if (sorted.length > 0) {
+      safeStorage.setItem('admin_collections_cache', JSON.stringify(sorted));
+    }
     return sorted;
   };
 
@@ -583,7 +679,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     }
     const isAdmin = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
 
-    const localContentBeforeSync = safeStorage.getItem('content_cache');
+    const localContentBeforeSync = safeStorage.getItem('admin_content_cache');
     let localItemCountBeforeSync = 0;
     try {
         const parsed = JSON.parse(localContentBeforeSync || '[]');
@@ -601,13 +697,13 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         }
     } catch(e) { console.error("Error fetching chunk_meta", e); }
 
-    let localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+    let localMetaString = safeStorage.getItem('admin_chunk_meta_versions') || '{}';
     let localMeta: Record<string, any> = {};
     try { localMeta = JSON.parse(localMetaString); } catch(e) {}
     
     // Process chunks
     const chunksToFetch: string[] = [];
-    const pendingStr = safeStorage.getItem('pending_chunk_updates') || '[]';
+    const pendingStr = safeStorage.getItem('admin_pending_chunk_updates') || '[]';
     const pendingChunkIds = new Set(JSON.parse(pendingStr));
 
     for (const [chunkId, versionMeta] of Object.entries(versions)) {
@@ -615,7 +711,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
 
         const serverVersionTime = parseVersionTime(versionMeta);
         const localVersionTime = parseVersionTime(localMeta[chunkId]);
-        const hasData = !!safeStorage.getItem('content_chunk_' + chunkId);
+        const hasData = !!safeStorage.getItem('admin_content_chunk_' + chunkId);
         
         if (!hasData || !localVersionTime || localVersionTime < serverVersionTime) {
             chunksToFetch.push(chunkId);
@@ -623,7 +719,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     }
     
     if (chunksToFetch.length > 0) {
-        const pendingItemsMapStr = safeStorage.getItem('pending_item_updates') || '{}';
+        const pendingItemsMapStr = safeStorage.getItem('admin_pending_item_updates') || '{}';
         const pendingItemsMap = JSON.parse(pendingItemsMapStr);
 
         await Promise.all(chunksToFetch.map(async (chunkId) => {
@@ -631,7 +727,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                 const chunkDoc = await getDoc(doc(db, 'content_chunks', chunkId));
                 if (chunkDoc.exists()) {
                     let items = chunkDoc.data().items || {};
-                    const localChunkStr = safeStorage.getItem('content_chunk_' + chunkId);
+                    const localChunkStr = safeStorage.getItem('admin_content_chunk_' + chunkId);
                     const localItems: Record<string, any> = localChunkStr ? JSON.parse(localChunkStr) : {};
 
                     // Count updated content items (added or modified). DO NOT count deleted contents!
@@ -664,13 +760,13 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                         // So we can just use items natively.
                     }
                     
-                    safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(items));
-                    safeStorage.setItem('synced_content_chunk_' + chunkId, JSON.stringify(items));
+                    safeStorage.setItem('admin_content_chunk_' + chunkId, JSON.stringify(items));
+                    safeStorage.setItem('admin_synced_content_chunk_' + chunkId, JSON.stringify(items));
                     localMeta[chunkId] = typeof versions[chunkId] === 'object' ? versions[chunkId] : { updatedAt: versions[chunkId], count: Object.keys(items).length };
                 }
             } catch(e) { console.error(e); }
         }));
-        safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+        safeStorage.setItem('admin_chunk_meta_versions', JSON.stringify(localMeta));
     }
     
     // Always refresh content to catch any changes
@@ -682,9 +778,9 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         let metadataMeta = versions.metadata;
         const metadataVersionTime = parseVersionTime(metadataMeta);
         const localMetaVersionTime = parseVersionTime(localMeta.metadata);
-        const genresCacheStr = safeStorage.getItem('genres_cache');
+        const genresCacheStr = safeStorage.getItem('admin_genres_cache');
         const hasMetadata = !!genresCacheStr && genresCacheStr !== '[]';
-        const hasPendingMetadata = !!safeStorage.getItem('pending_metadata_updates');
+        const hasPendingMetadata = !!safeStorage.getItem('admin_pending_metadata_updates');
         
         if (!hasPendingMetadata && (!hasMetadata || !localMetaVersionTime || localMetaVersionTime < metadataVersionTime)) {
             try {
@@ -696,9 +792,9 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                     let chunksLanguages = data.languages || [];
                     let chunksQualities = data.qualities || [];
 
-                    const localGenres = JSON.parse(safeStorage.getItem('genres_cache') || '[]');
-                    const localLanguages = JSON.parse(safeStorage.getItem('languages_cache') || '[]');
-                    const localQualities = JSON.parse(safeStorage.getItem('qualities_cache') || '[]');
+                    const localGenres = JSON.parse(safeStorage.getItem('admin_genres_cache') || '[]');
+                    const localLanguages = JSON.parse(safeStorage.getItem('admin_languages_cache') || '[]');
+                    const localQualities = JSON.parse(safeStorage.getItem('admin_qualities_cache') || '[]');
 
                     const mergeArrays = (local: any[], server: any[]) => {
                         const merged = [...local];
@@ -714,12 +810,12 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                     chunksLanguages = mergeArrays(localLanguages, chunksLanguages);
                     chunksQualities = mergeArrays(localQualities, chunksQualities);
 
-                    safeStorage.setItem('genres_cache', JSON.stringify(chunksGenres));
-                    safeStorage.setItem('languages_cache', JSON.stringify(chunksLanguages));
-                    safeStorage.setItem('qualities_cache', JSON.stringify(chunksQualities));
+                    safeStorage.setItem('admin_genres_cache', JSON.stringify(chunksGenres));
+                    safeStorage.setItem('admin_languages_cache', JSON.stringify(chunksLanguages));
+                    safeStorage.setItem('admin_qualities_cache', JSON.stringify(chunksQualities));
                     if (metadataMeta) {
                         localMeta.metadata = typeof metadataMeta === 'object' ? metadataMeta : { updatedAt: metadataMeta };
-                        safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+                        safeStorage.setItem('admin_chunk_meta_versions', JSON.stringify(localMeta));
                     }
                     setGenres([...chunksGenres].sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
                     setLanguages([...chunksLanguages].sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
@@ -737,7 +833,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         const latestCollChunkId = (collectionsMeta && typeof collectionsMeta === 'object' ? collectionsMeta.latestChunkId : null) || 'collection_chunk_0';
         latestCollChunkIdRef.current = latestCollChunkId;
 
-        if (!safeStorage.getItem('collections_cache') || !localCollectionsVersionTime || localCollectionsVersionTime < collectionsVersionTime) {
+        if (!safeStorage.getItem('admin_collections_cache') || !localCollectionsVersionTime || localCollectionsVersionTime < collectionsVersionTime) {
             let allCollections: AppCollection[] = [];
             
             const matchIndex = latestCollChunkId.match(/(\d+)$/);
@@ -758,18 +854,18 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                     const items = res.cDoc.data().items || {};
                     const chunkList = Object.values(items) as AppCollection[];
                     allCollections = [...allCollections, ...chunkList];
-                    safeStorage.setItem('local_collection_chunk_' + res.cid, JSON.stringify(items));
-                    safeStorage.setItem('synced_collection_chunk_' + res.cid, JSON.stringify(items));
+                    safeStorage.setItem('admin_collection_chunk_' + res.cid, JSON.stringify(items));
+                    safeStorage.setItem('admin_synced_collection_chunk_' + res.cid, JSON.stringify(items));
                 }
             }
             
             const sorted = allCollections.sort((a, b) => (b.order || 0) - (a.order || 0));
             setCollections(sorted);
-            safeStorage.setItem('collections_cache', JSON.stringify(sorted));
+            safeStorage.setItem('admin_collections_cache', JSON.stringify(sorted));
             
             if (collectionsMeta) {
                 localMeta.collections = typeof collectionsMeta === 'object' ? collectionsMeta : { updatedAt: collectionsMeta };
-                safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+                safeStorage.setItem('admin_chunk_meta_versions', JSON.stringify(localMeta));
             }
             updatedSomething = true;
         }
@@ -804,7 +900,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     }
 
     const now = Date.now();
-    const lastSuccessfulMetaCheckStr = safeStorage.getItem('last_successful_meta_check');
+    const lastSuccessfulMetaCheckStr = safeStorage.getItem('admin_last_successful_meta_check');
     const lastSuccessfulMetaCheck = lastSuccessfulMetaCheckStr ? parseInt(lastSuccessfulMetaCheckStr) : 0;
     
     // "turn off running app if data not read and not get or last read data is more that 30 hours passed then pause app and show last updated data"
@@ -835,11 +931,11 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     const checkPeriod = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
 
     // Period check to avoid redundant auto-checks
-    const lastCheckPeriod = safeStorage.getItem('last_meta_check_period');
+    const lastCheckPeriod = safeStorage.getItem('admin_last_meta_check_period');
     
     // Always refresh if first login / never successfully synced
-    const hasCompletedSync = safeStorage.getItem('has_completed_initial_sync');
-    const localContent = safeStorage.getItem('content_cache');
+    const hasCompletedSync = safeStorage.getItem('admin_has_completed_initial_sync');
+    const localContent = safeStorage.getItem('admin_content_cache');
     let localItemCount = 0;
     try {
         const parsed = JSON.parse(localContent || '[]');
@@ -908,9 +1004,9 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     }
     
     // Record that we checked in this period
-    safeStorage.setItem('last_meta_check_period', checkPeriod);
-    safeStorage.setItem('last_successful_meta_check', Date.now().toString());
-    safeStorage.setItem('has_completed_initial_sync', 'true');
+    safeStorage.setItem('admin_last_meta_check_period', checkPeriod);
+    safeStorage.setItem('admin_last_successful_meta_check', Date.now().toString());
+    safeStorage.setItem('admin_has_completed_initial_sync', 'true');
 
     if (isInitialLoadDone || (isLibraryEmpty && updatedSomething)) {
         window.dispatchEvent(new CustomEvent('sync_status', {
@@ -958,11 +1054,11 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         return { updated: false, updatedCount: 0, message: 'Catalog loaded from static export file', isRelaxed: true, isInitialLoad: false };
     }
 
-    const LAST_QUICK_REFRESH_KEY = 'last_catalog_quick_refresh_time';
+    const LAST_QUICK_REFRESH_KEY = 'admin_last_catalog_quick_refresh_time';
     const now = Date.now();
 
     // Check if library is currently empty
-    const localContentBefore = safeStorage.getItem('content_cache');
+    const localContentBefore = safeStorage.getItem('admin_content_cache');
     let localCountBefore = 0;
     try {
       const parsed = JSON.parse(localContentBefore || '[]');
@@ -1030,7 +1126,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       safeStorage.setItem('cached_chunk_meta_doc', JSON.stringify(versions));
       safeStorage.setItem('last_chunk_meta_fetch_time', now.toString());
 
-      const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+      const localMetaString = safeStorage.getItem('admin_chunk_meta_versions') || '{}';
       let localMeta: Record<string, any> = {};
       try { localMeta = JSON.parse(localMetaString); } catch(e) {}
 
@@ -1042,7 +1138,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         const serverVersion = typeof versionMeta === 'object' ? (versionMeta as any).updatedAt : versionMeta;
         const localV = localMeta[chunkId];
         const localVersion = typeof localV === 'object' ? localV.updatedAt : localV;
-        const hasData = !!safeStorage.getItem('content_chunk_' + chunkId);
+        const hasData = !!safeStorage.getItem('admin_content_chunk_' + chunkId);
 
         const serverVersionTime = parseVersionTime(serverVersion);
         const localVersionTime = parseVersionTime(localVersion);
@@ -1058,7 +1154,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             const chunkDoc = await runWithNetwork(() => getDoc(doc(db, 'content_chunks', chunkId)));
             if (chunkDoc.exists()) {
               const items = chunkDoc.data().items || {};
-              const localChunkStr = safeStorage.getItem('content_chunk_' + chunkId);
+              const localChunkStr = safeStorage.getItem('admin_content_chunk_' + chunkId);
               let localItems: Record<string, any> = {};
               if (localChunkStr) {
                 try { localItems = JSON.parse(localChunkStr); } catch(e) {}
@@ -1076,7 +1172,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                 }
               }
 
-              safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(items));
+              safeStorage.setItem('admin_content_chunk_' + chunkId, JSON.stringify(items));
               localMeta[chunkId] = typeof versions[chunkId] === 'object'
                 ? versions[chunkId]
                 : { updatedAt: versions[chunkId], count: Object.keys(items).length };
@@ -1086,7 +1182,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             console.error(`Error fetching chunk ${chunkId}:`, err);
           }
         }));
-        safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+        safeStorage.setItem('admin_chunk_meta_versions', JSON.stringify(localMeta));
         refreshContentFromLocal();
       }
 
@@ -1095,7 +1191,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       const metadataVersion = metadataMeta ? (typeof metadataMeta === 'object' ? metadataMeta.updatedAt : metadataMeta) : 0;
       const localMetaV = localMeta.metadata;
       const localMetaVersion = typeof localMetaV === 'object' ? localMetaV.updatedAt : localMetaV;
-      const genresCacheStr = safeStorage.getItem('genres_cache');
+      const genresCacheStr = safeStorage.getItem('admin_genres_cache');
       const hasMetadata = !!genresCacheStr && genresCacheStr !== '[]';
 
       const metadataVersionTime = parseVersionTime(metadataVersion);
@@ -1110,12 +1206,12 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             const chunksLanguages = data.languages || [];
             const chunksQualities = data.qualities || [];
 
-            safeStorage.setItem('genres_cache', JSON.stringify(chunksGenres));
-            safeStorage.setItem('languages_cache', JSON.stringify(chunksLanguages));
-            safeStorage.setItem('qualities_cache', JSON.stringify(chunksQualities));
+            safeStorage.setItem('admin_genres_cache', JSON.stringify(chunksGenres));
+            safeStorage.setItem('admin_languages_cache', JSON.stringify(chunksLanguages));
+            safeStorage.setItem('admin_qualities_cache', JSON.stringify(chunksQualities));
             if (metadataVersion) {
               localMeta.metadata = metadataVersion;
-              safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+              safeStorage.setItem('admin_chunk_meta_versions', JSON.stringify(localMeta));
             }
             setGenres([...chunksGenres].sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
             setLanguages([...chunksLanguages].sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
@@ -1131,7 +1227,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       const collectionsMeta = versions.collections;
       const collectionsVersion = (collectionsMeta && typeof collectionsMeta === 'object' ? collectionsMeta.updatedAt : collectionsMeta) || 0;
       const localCollectionsVersion = localMeta.collections || 0;
-      const hasCollectionsCache = !!safeStorage.getItem('collections_cache');
+      const hasCollectionsCache = !!safeStorage.getItem('admin_collections_cache');
 
       const collectionsVersionTime = parseVersionTime(collectionsVersion);
       const localCollectionsVersionTime = parseVersionTime(localCollectionsVersion);
@@ -1158,15 +1254,15 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
               const items = res.cDoc.data().items || {};
               const chunkList = Object.values(items) as AppCollection[];
               allCollections = [...allCollections, ...chunkList];
-              safeStorage.setItem('local_collection_chunk_' + res.cid, JSON.stringify(items));
-              safeStorage.setItem('synced_collection_chunk_' + res.cid, JSON.stringify(items));
+              safeStorage.setItem('admin_collection_chunk_' + res.cid, JSON.stringify(items));
+              safeStorage.setItem('admin_synced_collection_chunk_' + res.cid, JSON.stringify(items));
             }
           }
           const sorted = allCollections.sort((a, b) => (b.order || 0) - (a.order || 0));
           setCollections(sorted);
-          safeStorage.setItem('collections_cache', JSON.stringify(sorted));
+          safeStorage.setItem('admin_collections_cache', JSON.stringify(sorted));
           localMeta.collections = collectionsVersion;
-          safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+          safeStorage.setItem('admin_chunk_meta_versions', JSON.stringify(localMeta));
           updatedSomething = true;
         } catch (e) {
           console.error("Error fetching collection chunks:", e);
@@ -1279,21 +1375,21 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     }
 
     if (isNewItem && isAdminOrEditor) {
-      const createdStr = safeStorage.getItem('pending_created_items') || '[]';
+      const createdStr = safeStorage.getItem('admin_pending_created_items') || '[]';
       const createdSet = new Set(JSON.parse(createdStr));
       createdSet.add(content.id);
-      safeStorage.setItem('pending_created_items', JSON.stringify(Array.from(createdSet)));
+      safeStorage.setItem('admin_pending_created_items', JSON.stringify(Array.from(createdSet)));
     }
 
     const { cleanContentForChunk } = await import('../utils/chunkUtils');
     const minified = cleanContentForChunk(content);
     let chunkId = content.chunkId;
-    const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+    const localMetaString = safeStorage.getItem('admin_chunk_meta_versions') || '{}';
     let localMeta: Record<string, any> = {};
     try { localMeta = JSON.parse(localMetaString); } catch(e) {}
     if (!chunkId) {
         for (const cid of Object.keys(localMeta)) {
-            const chunkStr = safeStorage.getItem('content_chunk_' + cid);
+            const chunkStr = safeStorage.getItem('admin_content_chunk_' + cid);
             if (chunkStr && chunkStr.includes(`"${content.id}"`)) {
                 chunkId = cid;
                 break;
@@ -1313,8 +1409,8 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
 
     // Scan only other chunk keys to ensure the item is removed from any previous chunk it might have been in
     const otherChunkKeys = safeStorage.keys().filter(key => {
-        const isChunk = key.startsWith('content_chunk_') || key.startsWith('movie_chunk_') || key.startsWith('series_chunk_');
-        return isChunk && key !== 'content_chunk_' + chunkId && key !== chunkId;
+        const isChunk = key.startsWith('admin_content_chunk_');
+        return isChunk && key !== 'admin_content_chunk_' + chunkId;
     });
 
     otherChunkKeys.forEach(key => {
@@ -1327,18 +1423,18 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                     safeStorage.setItem(key, JSON.stringify(items));
                     // Mark this old chunk as needing sync too
                     // Extract actual chunk ID from key (handling both legacy and new formats)
-                    const cid = key.startsWith('content_chunk_') ? key.replace('content_chunk_', '') : key;
+                    const cid = key.replace('admin_content_chunk_', '');
                     
-                    const pendingStr = safeStorage.getItem('pending_chunk_updates') || '[]';
+                    const pendingStr = safeStorage.getItem('admin_pending_chunk_updates') || '[]';
                     const pendingIds = new Set(JSON.parse(pendingStr));
                     pendingIds.add(cid);
-                    safeStorage.setItem('pending_chunk_updates', JSON.stringify(Array.from(pendingIds)));
+                    safeStorage.setItem('admin_pending_chunk_updates', JSON.stringify(Array.from(pendingIds)));
 
-                    const pendingItemsStr = safeStorage.getItem('pending_item_updates') || '{}';
+                    const pendingItemsStr = safeStorage.getItem('admin_pending_item_updates') || '{}';
                     const pendingItemsMap = JSON.parse(pendingItemsStr);
                     if (!pendingItemsMap[cid]) pendingItemsMap[cid] = [];
                     if (!pendingItemsMap[cid].includes(content.id)) pendingItemsMap[cid].push(content.id);
-                    safeStorage.setItem('pending_item_updates', JSON.stringify(pendingItemsMap));
+                    safeStorage.setItem('admin_pending_item_updates', JSON.stringify(pendingItemsMap));
                     
                     const utcNow = getUtcVersion();
                     localMeta[cid] = { updatedAt: utcNow, count: Object.keys(items).length };
@@ -1347,29 +1443,29 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         }
     });
 
-    const chunkStr = safeStorage.getItem('content_chunk_' + chunkId) || '{}';
+    const chunkStr = safeStorage.getItem('admin_content_chunk_' + chunkId) || '{}';
     const chunkItems = JSON.parse(chunkStr);
     delete chunkItems[content.id];
     // Always written first
     const newChunkItems = { [content.id]: minified, ...chunkItems };
-    safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(newChunkItems));
+    safeStorage.setItem('admin_content_chunk_' + chunkId, JSON.stringify(newChunkItems));
     
     // Update local metadata immediately so refreshContentFromLocal can find the new version/chunk
     const utcNowSave = getUtcVersion();
     localMeta[chunkId] = { updatedAt: utcNowSave, count: Object.keys(newChunkItems).length };
-    safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+    safeStorage.setItem('admin_chunk_meta_versions', JSON.stringify(localMeta));
 
     if (isAdminOrEditor) {
-        const pendingStr = safeStorage.getItem('pending_chunk_updates') || '[]';
+        const pendingStr = safeStorage.getItem('admin_pending_chunk_updates') || '[]';
         const pendingIds = new Set(JSON.parse(pendingStr));
         pendingIds.add(chunkId);
-        safeStorage.setItem('pending_chunk_updates', JSON.stringify(Array.from(pendingIds)));
+        safeStorage.setItem('admin_pending_chunk_updates', JSON.stringify(Array.from(pendingIds)));
 
-        const pendingItemsStr = safeStorage.getItem('pending_item_updates') || '{}';
+        const pendingItemsStr = safeStorage.getItem('admin_pending_item_updates') || '{}';
         const pendingItemsMap = JSON.parse(pendingItemsStr);
         if (!pendingItemsMap[chunkId]) pendingItemsMap[chunkId] = [];
         if (!pendingItemsMap[chunkId].includes(content.id)) pendingItemsMap[chunkId].push(content.id);
-        safeStorage.setItem('pending_item_updates', JSON.stringify(pendingItemsMap));
+        safeStorage.setItem('admin_pending_item_updates', JSON.stringify(pendingItemsMap));
 
         setHasPendingChanges(checkHasPendingChanges());
     }
@@ -1379,7 +1475,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         if (idx !== -1) newList[idx] = { ...content, chunkId };
         else newList.push({ ...content, chunkId });
         const sorted = newList.sort((a, b) => (b.order || 0) - (a.order || 0));
-        safeStorage.setItem('content_cache', JSON.stringify(sorted));
+        safeStorage.setItem('admin_content_cache', JSON.stringify(sorted));
         window.dispatchEvent(new CustomEvent('content_updated_locally'));
         return sorted;
     });
@@ -1430,7 +1526,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     const chunkUpdates: Record<string, typeof meaningfulUpdates> = {};
 
     let localMeta: Record<string, any> = {};
-    const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+    const localMetaString = safeStorage.getItem('admin_chunk_meta_versions') || '{}';
     try { localMeta = JSON.parse(localMetaString); } catch(e) {}
 
     for (const update of meaningfulUpdates) {
@@ -1440,7 +1536,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         }
         if (!chunkId) {
             for (const cid of Object.keys(localMeta)) {
-                const chunkStr = safeStorage.getItem('content_chunk_' + cid);
+                const chunkStr = safeStorage.getItem('admin_content_chunk_' + cid);
                 if (chunkStr && chunkStr.includes(`"${update.id}"`)) {
                     chunkId = cid;
                     break;
@@ -1457,7 +1553,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     }
 
     for (const chunkId of Object.keys(chunkUpdates)) {
-        const chunkStr = safeStorage.getItem('content_chunk_' + chunkId);
+        const chunkStr = safeStorage.getItem('admin_content_chunk_' + chunkId);
         if (chunkStr) {
             const items = JSON.parse(chunkStr);
             const chunkSpecificUpdates = chunkUpdates[chunkId];
@@ -1481,7 +1577,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                 }
             });
 
-            safeStorage.setItem('content_chunk_' + chunkId, JSON.stringify(items));
+            safeStorage.setItem('admin_content_chunk_' + chunkId, JSON.stringify(items));
             // Update local metadata immediately
             const utcNowChunk = getUtcVersion();
             localMeta[chunkId] = { updatedAt: utcNowChunk, count: Object.keys(items).length };
@@ -1489,15 +1585,15 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     }
     
     // Save metadata back
-    safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+    safeStorage.setItem('admin_chunk_meta_versions', JSON.stringify(localMeta));
 
     if (isAdminOrEditor && affectedChunkIds.size > 0) {
-        const pendingStr = safeStorage.getItem('pending_chunk_updates') || '[]';
+        const pendingStr = safeStorage.getItem('admin_pending_chunk_updates') || '[]';
         const pendingIds = new Set(JSON.parse(pendingStr));
         affectedChunkIds.forEach(cid => pendingIds.add(cid));
-        safeStorage.setItem('pending_chunk_updates', JSON.stringify(Array.from(pendingIds)));
+        safeStorage.setItem('admin_pending_chunk_updates', JSON.stringify(Array.from(pendingIds)));
 
-        const pendingItemsStr = safeStorage.getItem('pending_item_updates') || '{}';
+        const pendingItemsStr = safeStorage.getItem('admin_pending_item_updates') || '{}';
         const pendingItemsMap = JSON.parse(pendingItemsStr);
         Object.keys(chunkUpdates).forEach(cid => {
             if (!pendingItemsMap[cid]) pendingItemsMap[cid] = [];
@@ -1505,7 +1601,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                 if (!pendingItemsMap[cid].includes(u.id)) pendingItemsMap[cid].push(u.id);
             });
         });
-        safeStorage.setItem('pending_item_updates', JSON.stringify(pendingItemsMap));
+        safeStorage.setItem('admin_pending_item_updates', JSON.stringify(pendingItemsMap));
 
         setHasPendingChanges(checkHasPendingChanges());
     }
@@ -1516,7 +1612,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             const idx = next.findIndex(c => c.id === u.id);
             if (idx !== -1) next[idx] = { ...next[idx], ...u.fields };
         });
-        safeStorage.setItem('content_cache', JSON.stringify(next));
+        safeStorage.setItem('admin_content_cache', JSON.stringify(next));
         window.dispatchEvent(new CustomEvent('content_updated_locally'));
         return next;
     });
@@ -1534,10 +1630,10 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     const idsToDelete = new Set(items.map(i => i.id));
 
     let localMeta: Record<string, any> = {};
-    const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+    const localMetaString = safeStorage.getItem('admin_chunk_meta_versions') || '{}';
     try { localMeta = JSON.parse(localMetaString); } catch(e) {}
 
-    const createdStr = safeStorage.getItem('pending_created_items') || '[]';
+    const createdStr = safeStorage.getItem('admin_pending_created_items') || '[]';
     const createdSet = new Set(JSON.parse(createdStr));
     let createdSetChanged = false;
 
@@ -1548,17 +1644,15 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         }
     }
     if (createdSetChanged) {
-        safeStorage.setItem('pending_created_items', JSON.stringify(Array.from(createdSet)));
+        safeStorage.setItem('admin_pending_created_items', JSON.stringify(Array.from(createdSet)));
     }
 
     const affectedChunkIds = new Set<string>();
 
-    // Scan ALL local storage chunk keys to thoroughly purge deleted items from local storage
+    // Scan ALL admin local storage chunk keys to thoroughly purge deleted items
     const allStorageKeys = safeStorage.keys();
     const chunkKeys = allStorageKeys.filter(k => 
-        k.startsWith('content_chunk_') || 
-        k.startsWith('movie_chunk_') || 
-        k.startsWith('series_chunk_')
+        k.startsWith('admin_content_chunk_')
     );
 
     for (const key of chunkKeys) {
@@ -1575,7 +1669,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             }
             if (modified) {
                 safeStorage.setItem(key, JSON.stringify(chunkItems));
-                const cid = key.startsWith('content_chunk_') ? key.replace('content_chunk_', '') : key;
+                const cid = key.replace('admin_content_chunk_', '');
                 affectedChunkIds.add(cid);
                 const utcNowDel = getUtcVersion();
                 localMeta[cid] = { updatedAt: utcNowDel, count: Object.keys(chunkItems).length };
@@ -1591,15 +1685,15 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         }
     }
 
-    safeStorage.setItem('chunk_meta_versions', JSON.stringify(localMeta));
+    safeStorage.setItem('admin_chunk_meta_versions', JSON.stringify(localMeta));
 
     if (isAdminOrEditor && affectedChunkIds.size > 0) {
-        const pendingStr = safeStorage.getItem('pending_chunk_updates') || '[]';
+        const pendingStr = safeStorage.getItem('admin_pending_chunk_updates') || '[]';
         const pendingIds = new Set(JSON.parse(pendingStr));
         affectedChunkIds.forEach(cid => pendingIds.add(cid));
-        safeStorage.setItem('pending_chunk_updates', JSON.stringify(Array.from(pendingIds)));
+        safeStorage.setItem('admin_pending_chunk_updates', JSON.stringify(Array.from(pendingIds)));
 
-        const pendingItemsStr = safeStorage.getItem('pending_item_updates') || '{}';
+        const pendingItemsStr = safeStorage.getItem('admin_pending_item_updates') || '{}';
         const pendingItemsMap = JSON.parse(pendingItemsStr);
         affectedChunkIds.forEach(cid => {
             if (!pendingItemsMap[cid]) pendingItemsMap[cid] = [];
@@ -1607,13 +1701,13 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                 if (!pendingItemsMap[cid].includes(id)) pendingItemsMap[cid].push(id);
             });
         });
-        safeStorage.setItem('pending_item_updates', JSON.stringify(pendingItemsMap));
+        safeStorage.setItem('admin_pending_item_updates', JSON.stringify(pendingItemsMap));
     }
 
-    // Immediately remove from contentList state & content_cache
+    // Immediately remove from contentList state & admin_content_cache
     setContentList(prev => {
         const next = prev.filter(c => !idsToDelete.has(c.id));
-        safeStorage.setItem('content_cache', JSON.stringify(next));
+        safeStorage.setItem('admin_content_cache', JSON.stringify(next));
         window.dispatchEvent(new CustomEvent('content_updated_locally'));
         return next;
     });
@@ -1621,9 +1715,9 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     const hasPending = checkHasPendingChanges();
     setHasPendingChanges(hasPending);
     if (!hasPending) {
-        safeStorage.removeItem('pending_chunk_updates');
-        safeStorage.removeItem('pending_item_updates');
-        safeStorage.removeItem('pending_created_items');
+        safeStorage.removeItem('admin_pending_chunk_updates');
+        safeStorage.removeItem('admin_pending_item_updates');
+        safeStorage.removeItem('admin_pending_created_items');
     }
 
     // Directly delete from Firestore chunks for non-admin/editor users (admins and editors use pending changes)
@@ -1639,7 +1733,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
 
   const updateAuxiliaryCollection = async (type: 'genre' | 'language' | 'quality', items: any[]) => {
     if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
-    const cacheKey = type === 'quality' ? 'qualities_cache' : `${type}s_cache`;
+    const cacheKey = `admin_${type === 'quality' ? 'qualities_cache' : `${type}s_cache`}`;
     
     // items should already correctly have their 'order' values adjusted by the caller
     safeStorage.setItem(cacheKey, JSON.stringify(items));
@@ -1647,7 +1741,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     if (type === 'language') setLanguages(items);
     if (type === 'quality') setQualities(items);
     
-    safeStorage.setItem('pending_metadata_updates', 'true');
+    safeStorage.setItem('admin_pending_metadata_updates', 'true');
     setHasPendingChanges(checkHasPendingChanges());
   };
 
@@ -1680,7 +1774,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     // Use local storage exclusively to find the chunk - avoid SLOW Firestore lookups in loop
     for (let i = 0; i <= latestIndex; i++) {
         const cid = COLLECTION_CHUNK_PREFIX + i;
-        const localStr = safeStorage.getItem('local_collection_chunk_' + cid);
+        const localStr = safeStorage.getItem('admin_collection_chunk_' + cid);
         if (localStr) {
             const items = JSON.parse(localStr);
             if (items[updatedColl.id]) {
@@ -1696,7 +1790,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         // Find if it was recently added and not yet in a chunk list (but somehow has an ID)
         // Default to latest chunk
         chunkId = COLLECTION_CHUNK_PREFIX + latestIndex;
-        const localStr = safeStorage.getItem('local_collection_chunk_' + chunkId) || '{}';
+        const localStr = safeStorage.getItem('admin_collection_chunk_' + chunkId) || '{}';
         const items = JSON.parse(localStr);
         
         if (Object.keys(items).length >= COLLECTION_CHUNK_SIZE) {
@@ -1711,20 +1805,20 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     }
 
     // Save updated chunk back to local storage
-    safeStorage.setItem('local_collection_chunk_' + chunkId, JSON.stringify(chunkItems));
+    safeStorage.setItem('admin_collection_chunk_' + chunkId, JSON.stringify(chunkItems));
     
     // Update collections cache for persistence across reloads
-    const allCached = JSON.parse(safeStorage.getItem('collections_cache') || '[]');
+    const allCached = JSON.parse(safeStorage.getItem('admin_collections_cache') || '[]');
     const idx = allCached.findIndex((c: any) => c.id === updatedColl.id);
     if (idx !== -1) allCached[idx] = updatedColl;
     else allCached.push(updatedColl);
-    safeStorage.setItem('collections_cache', JSON.stringify(allCached.sort((a: any, b: any) => (b.order || 0) - (a.order || 0))));
+    safeStorage.setItem('admin_collections_cache', JSON.stringify(allCached.sort((a: any, b: any) => (b.order || 0) - (a.order || 0))));
 
     // Mark as pending
-    const pendingStr = safeStorage.getItem('pending_collection_updates') || '[]';
+    const pendingStr = safeStorage.getItem('admin_pending_collection_updates') || '[]';
     const pendingIds = new Set(JSON.parse(pendingStr));
     pendingIds.add(chunkId);
-    safeStorage.setItem('pending_collection_updates', JSON.stringify(Array.from(pendingIds)));
+    safeStorage.setItem('admin_pending_collection_updates', JSON.stringify(Array.from(pendingIds)));
     setHasPendingChanges(true);
   };
 
@@ -1746,12 +1840,12 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     
     // Update local state
     setCollections(prev => prev.filter(c => c.id !== id));
-    const allCached = JSON.parse(safeStorage.getItem('collections_cache') || '[]');
-    safeStorage.setItem('collections_cache', JSON.stringify(allCached.filter((c: any) => c.id !== id)));
+    const allCached = JSON.parse(safeStorage.getItem('admin_collections_cache') || '[]');
+    safeStorage.setItem('admin_collections_cache', JSON.stringify(allCached.filter((c: any) => c.id !== id)));
 
     // Find and update chunk locally
     let foundChunkId: string | null = null;
-    const keys = safeStorage.keys().filter(k => k.startsWith('local_collection_chunk_'));
+    const keys = safeStorage.keys().filter(k => k.startsWith('admin_collection_chunk_'));
     for (const key of keys) {
         const chunkStr = safeStorage.getItem(key);
         if (chunkStr) {
@@ -1759,24 +1853,24 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             if (items[id]) {
                 delete items[id];
                 safeStorage.setItem(key, JSON.stringify(items));
-                foundChunkId = key.replace('local_collection_chunk_', '');
+                foundChunkId = key.replace('admin_collection_chunk_', '');
                 break;
             }
         }
     }
 
     if (foundChunkId) {
-        const pendingStr = safeStorage.getItem('pending_collection_updates') || '[]';
+        const pendingStr = safeStorage.getItem('admin_pending_collection_updates') || '[]';
         const pendingIds = new Set(JSON.parse(pendingStr));
         pendingIds.add(foundChunkId);
-        safeStorage.setItem('pending_collection_updates', JSON.stringify(Array.from(pendingIds)));
+        safeStorage.setItem('admin_pending_collection_updates', JSON.stringify(Array.from(pendingIds)));
         setHasPendingChanges(true);
     }
   };
 
   const addAuxiliaryItem = async (type: 'genre' | 'language' | 'quality', item: any) => {
     if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
-    const cacheKey = type === 'quality' ? 'qualities_cache' : `${type}s_cache`;
+    const cacheKey = `admin_${type === 'quality' ? 'qualities_cache' : `${type}s_cache`}`;
     let current = JSON.parse(safeStorage.getItem(cacheKey) || '[]');
     const newItem = { ...item, id: item.id || Date.now().toString() };
     current.push(newItem);
@@ -1786,13 +1880,13 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     if (type === 'language') setLanguages(current);
     if (type === 'quality') setQualities(current);
     
-    safeStorage.setItem('pending_metadata_updates', 'true');
+    safeStorage.setItem('admin_pending_metadata_updates', 'true');
     setHasPendingChanges(true);
   };
 
   const updateAuxiliaryItem = async (type: 'genre' | 'language' | 'quality', id: string, updates: any) => {
     if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
-    const cacheKey = type === 'quality' ? 'qualities_cache' : `${type}s_cache`;
+    const cacheKey = `admin_${type === 'quality' ? 'qualities_cache' : `${type}s_cache`}`;
     let current = JSON.parse(safeStorage.getItem(cacheKey) || '[]');
     const idx = current.findIndex((i: any) => i.id === id);
     if (idx !== -1) {
@@ -1803,14 +1897,14 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         if (type === 'language') setLanguages(current);
         if (type === 'quality') setQualities(current);
         
-        safeStorage.setItem('pending_metadata_updates', 'true');
+        safeStorage.setItem('admin_pending_metadata_updates', 'true');
         setHasPendingChanges(true);
     }
   };
 
   const deleteAuxiliaryItem = async (type: 'genre' | 'language' | 'quality', id: string) => {
     if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
-    const cacheKey = type === 'quality' ? 'qualities_cache' : `${type}s_cache`;
+    const cacheKey = `admin_${type === 'quality' ? 'qualities_cache' : `${type}s_cache`}`;
     let current = JSON.parse(safeStorage.getItem(cacheKey) || '[]');
     current = current.filter((i: any) => i.id !== id);
     
@@ -1819,7 +1913,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     if (type === 'language') setLanguages(current);
     if (type === 'quality') setQualities(current);
     
-    safeStorage.setItem('pending_metadata_updates', 'true');
+    safeStorage.setItem('admin_pending_metadata_updates', 'true');
     setHasPendingChanges(true);
   };
 
@@ -1834,11 +1928,11 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     if (isFull) return item;
     let chunkId = item.chunkId;
     if (!chunkId) {
-        const localMetaString = safeStorage.getItem('chunk_meta_versions') || '{}';
+        const localMetaString = safeStorage.getItem('admin_chunk_meta_versions') || '{}';
         let localMeta: Record<string, any> = {};
         try { localMeta = JSON.parse(localMetaString); } catch(e) {}
         for (const cid of Object.keys(localMeta)) {
-            const chunkStr = safeStorage.getItem('content_chunk_' + cid);
+            const chunkStr = safeStorage.getItem('admin_content_chunk_' + cid);
             if (chunkStr && chunkStr.includes(`"${id}"`)) {
                 chunkId = cid;
                 break;
@@ -1847,16 +1941,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     }
     if (!chunkId) return item;
     try {
-      let chunkStr = safeStorage.getItem('content_chunk_' + chunkId);
-      if (!chunkStr) {
-         const staticItems = getStaticExportContent();
-         const staticItem = staticItems.find(s => s.id === id);
-         if (staticItem) {
-             const expanded = expandContent({ ...staticItem, id }, chunkId || 'movie_chunk_0');
-             expanded.order = item.order;
-             return expanded;
-         }
-      }
+      let chunkStr = safeStorage.getItem('admin_content_chunk_' + chunkId);
       if (chunkStr) {
          const items = JSON.parse(chunkStr);
          if (items[id]) {
