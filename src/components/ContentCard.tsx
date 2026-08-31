@@ -2,7 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { Link, useNavigate } from 'react-router-dom';
 
-import { Heart, Clock, ShoppingCart, Play, X, Lock, Star } from 'lucide-react';
+import { Heart, Clock, ShoppingCart, Play, X, Lock, Star, Loader2 } from 'lucide-react';
 import { Content, Quality, Language, Genre } from '../types';
 import { formatContentTitle, getContrastColor, getOttBadgeConfig } from '../utils/contentUtils';
 import { OttBadge } from './OttBadge';
@@ -233,10 +233,17 @@ const ContentCard = React.memo(({
             }}
           />
           
-          {/* Subtle Dark Vignette & Play Indicator on hover */}
-          <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/90 via-zinc-950/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center">
+          {/* Subtle Dark Vignette & Play/Loading Indicator */}
+          <div className={clsx(
+            "absolute inset-0 bg-gradient-to-t from-zinc-950/90 via-zinc-950/40 to-transparent transition-opacity duration-200 flex items-center justify-center",
+            isClicked ? "opacity-100 bg-zinc-950/60 backdrop-blur-[2px]" : "opacity-0 group-hover:opacity-100"
+          )}>
             <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-400 text-white flex items-center justify-center shadow-lg shadow-emerald-500/40 transform scale-75 group-hover:scale-100 transition-transform duration-200">
-              <Play className="w-5 h-5 sm:w-6 sm:h-6 fill-current translate-x-0.5" />
+              {isClicked ? (
+                <Loader2 className="w-5 h-5 sm:w-6 sm:h-6 animate-spin text-white" />
+              ) : (
+                <Play className="w-5 h-5 sm:w-6 sm:h-6 fill-current translate-x-0.5" />
+              )}
             </div>
           </div>
 

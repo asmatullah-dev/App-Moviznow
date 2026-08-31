@@ -97,13 +97,23 @@ function CatchAllRedirect() {
   return null;
 }
 
+import { GlobalNavigationLoader } from './components/GlobalNavigationLoader';
+
 const LoadingFallback = () => (
-  <div className="min-h-screen bg-white dark:bg-zinc-950 transition-colors duration-300 flex flex-col items-center justify-center gap-6">
+  <div className="min-h-screen bg-white dark:bg-zinc-950 transition-colors duration-300 flex flex-col items-center justify-center gap-6 p-4">
     <div className="flex flex-col items-center animate-pulse">
-      <img src="/Blacklogo.svg" alt="Logo" className="w-auto h-32 block dark:hidden" />
-      <img src="/Whitelogo.svg" alt="Logo" className="w-auto h-32 hidden dark:block" />
+      <img src="/Blacklogo.svg" alt="Logo" className="w-auto h-24 block dark:hidden object-contain" />
+      <img src="/Whitelogo.svg" alt="Logo" className="w-auto h-24 hidden dark:block object-contain" />
     </div>
-    <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />
+    <div className="flex flex-col items-center gap-3">
+      <div className="relative flex items-center justify-center">
+        <div className="w-10 h-10 rounded-full border-3 border-emerald-500/20 dark:border-emerald-500/10 animate-ping absolute"></div>
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-500 relative z-10" />
+      </div>
+      <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400 animate-pulse">
+        Loading...
+      </p>
+    </div>
   </div>
 );
 
@@ -240,6 +250,7 @@ export default function App() {
                     <RefreshAppDataManager />
                     <SystemNotificationWrapper />
                     <BrowserRouter>
+                    <GlobalNavigationLoader />
                     <ScrollToTopOrRestore />
                     <AnalyticsTracker />
                     <AdSenseScriptManager />

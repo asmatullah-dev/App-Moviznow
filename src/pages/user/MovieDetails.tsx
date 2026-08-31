@@ -1638,23 +1638,6 @@ export default function MovieDetails() {
     refreshProfile,
   ]);
 
-  if (loading || profileLoading || isManualRefreshing || (contentLoading && !mergedContent)) {
-    return (
-      <div className="min-h-screen bg-white dark:bg-zinc-950 flex flex-col items-center justify-center p-4 gap-6 transition-colors duration-300">
-        <div className="flex flex-col items-center animate-pulse">
-          <img src="/Blacklogo.svg" alt="Logo" className="w-auto h-24 block dark:hidden object-contain" />
-          <img src="/Whitelogo.svg" alt="Logo" className="w-auto h-24 hidden dark:block object-contain" />
-        </div>
-        <div className="flex flex-col items-center gap-3">
-          <div className="animate-spin rounded-full h-10 w-10 border-3 border-emerald-500 border-t-transparent"></div>
-          <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400 animate-pulse">
-            {isManualRefreshing ? t("Refreshing content...") : t("Loading details...")}
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   const isAuthorized = mergedContent
     ? profile?.role === "admin" ||
       profile?.role === "owner" ||
@@ -1664,21 +1647,8 @@ export default function MovieDetails() {
     : false;
 
   if (!mergedContent || !isAuthorized) {
-    if (contentLoading) {
-      return (
-        <div className="min-h-screen bg-white dark:bg-zinc-950 flex flex-col items-center justify-center p-4 gap-6 transition-colors duration-300">
-          <div className="flex flex-col items-center animate-pulse">
-            <img src="/Blacklogo.svg" alt="Logo" className="w-auto h-24 block dark:hidden object-contain" />
-            <img src="/Whitelogo.svg" alt="Logo" className="w-auto h-24 hidden dark:block object-contain" />
-          </div>
-          <div className="flex flex-col items-center gap-3">
-            <div className="animate-spin rounded-full h-10 w-10 border-3 border-emerald-500 border-t-transparent"></div>
-            <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400 animate-pulse">
-              {t("Loading details...")}
-            </p>
-          </div>
-        </div>
-      );
+    if (contentLoading || loading || profileLoading || isManualRefreshing) {
+      return null;
     }
     return (
       <div className="min-h-screen bg-white dark:bg-zinc-950 flex flex-col items-center justify-center text-zinc-900 dark:text-white p-4">
