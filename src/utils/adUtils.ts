@@ -75,8 +75,8 @@ export interface AdContentCheck {
   isFree?: boolean;
 }
 
-// 3-Minute Popunder Cooldown Constant
-export const POPUNDER_COOLDOWN_MS = 3 * 60 * 1000; // 3 minutes in milliseconds
+// 2-Minute Popunder Cooldown Constant
+export const POPUNDER_COOLDOWN_MS = 2 * 60 * 1000; // 2 minutes in milliseconds
 
 /**
  * Returns remaining cooldown milliseconds (0 if cooldown has expired or not set).
@@ -103,14 +103,14 @@ export function getPopunderCooldownRemaining(): number {
 }
 
 /**
- * Checks if popunder ads are currently in the 3-minute cooldown period.
+ * Checks if popunder ads are currently in the 2-minute cooldown period.
  */
 export function isPopunderInCooldown(): boolean {
   return getPopunderCooldownRemaining() > 0;
 }
 
 /**
- * Records the current timestamp as the start of a 3-minute popunder cooldown.
+ * Records the current timestamp as the start of a 2-minute popunder cooldown.
  */
 export function recordPopunderTriggered(): void {
   if (typeof window === 'undefined') return;

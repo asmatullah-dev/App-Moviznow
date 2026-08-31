@@ -143,29 +143,6 @@ export const CpmScriptManager: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Continuous Ad Cleanup during Cooldown
-  useEffect(() => {
-    if (inCooldown) {
-      purgeAllAdElements();
-
-      const observer = new MutationObserver(() => {
-        if (isPopunderInCooldown()) {
-          document.querySelectorAll('body > *:not(#root)').forEach((el) => {
-            const htmlEl = el as HTMLElement;
-            if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'LINK', 'IFRAME'].includes(htmlEl.tagName)) return;
-            if (htmlEl.id === 'omdb-modal-root' || htmlEl.hasAttribute('data-app-portal')) return;
-            const isReactNode = Object.keys(htmlEl).some((key) => key.startsWith('__react'));
-            if (isReactNode) return;
-            htmlEl.remove();
-          });
-        }
-      });
-
-      observer.observe(document.body, { childList: true, subtree: false });
-      return () => observer.disconnect();
-    }
-  }, [inCooldown]);
-
   // Inject or clean up ad scripts based on route, exemption, and cooldown
   useEffect(() => {
     const isLogin = isAdRestrictedRoute(location.pathname);
@@ -181,7 +158,7 @@ export const CpmScriptManager: React.FC = () => {
     let socialScript = document.querySelector(`script[src*="f0270bbaca005a7be1c664c3c0ae0386"]`) as HTMLScriptElement | null;
     if (!socialScript) {
       socialScript = document.createElement('script');
-      socialScript.src = `${SOCIAL_BAR_SCRIPT_SRC}?_cb=${Date.now()}`;
+      socialScript.src = SOCIAL_BAR_SCRIPT_SRC;
       socialScript.async = true;
       socialScript.setAttribute('data-authorized-ad-script', 'true');
       document.head.appendChild(socialScript);
@@ -194,21 +171,23 @@ export const CpmScriptManager: React.FC = () => {
     if (!activeCooldown && !inCooldown) {
       if (!popunderScript) {
         popunderScript = document.createElement('script');
-        popunderScript.src = `${POPUNDER_SCRIPT_SRC}?_t=${Date.now()}`;
+        popunderScript.src = POPUNDER_SCRIPT_SRC;
         popunderScript.async = true;
         popunderScript.setAttribute('data-authorized-ad-script', 'true');
+        popunderScript.setAttribute('data-popunder-script', 'true');
         document.head.appendChild(popunderScript);
       }
     } else {
-      // In cooldown - remove popunder script tag so no extra popunder triggers
+      // In cooldown - remove ONLY popunder script tags so no extra popunder triggers
       if (popunderScript) {
         popunderScript.remove();
       }
+      document.querySelectorAll(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`).forEach((el) => el.remove());
     }
   }, [location.pathname, profile, inCooldown]);
 
   // =========================================================================
-  // WINDOW.OPEN INTERCEPTOR (ALLOWS POPUNDER WHEN NOT IN COOLDOWN, BLOCKS DURING COOLDOWN & FOR VIPs)
+  // WINDOW.OPEN INTERCEPTOR (ALLOWS POPUNDER WHEN NOT IN COOLDOWN, ALLOWS SOCIAL ADS, BLOCKS POPUNDERS DURING COOLDOWN & FOR VIPs)
   // =========================================================================
   useEffect(() => {
     const originalWindowOpen = window.open;
@@ -245,28 +224,34 @@ export const CpmScriptManager: React.FC = () => {
         return null;
       }
 
-      // External / Ad URL detected:
+      // Determine if click originated from an app element (#root) vs an external Social Ad widget outside #root
+      const lastTarget = lastClickRef.current.target;
+      const isClickOnAppRoot = !lastTarget || Boolean(lastTarget.closest('#root'));
+
+      // If click was directly on a Social Bar / Social Ad widget outside #root, ALLOW it!
+      if (!isClickOnAppRoot) {
+        return originalWindowOpen.call(window, url, target, features);
+      }
+
+      // Popunder handling for clicks on app UI (#root):
       if (isPopunderInCooldown()) {
-        console.warn('[AdShield] Blocked popunder window.open during 3-minute cooldown:', urlStr);
+        console.warn('[AdShield] Blocked popunder window.open during 2-minute cooldown:', urlStr);
         // Synchronously execute the user's desired link/page action on 1st tap!
         executeUserIntendedAction();
         return null;
       }
 
-      // NOT in cooldown - record popunder triggered NOW and allow popup to open!
+      // NOT in cooldown & click was on #root: record popunder triggered NOW and allow popup to open!
       recordPopunderTriggered();
       setInCooldown(true);
 
-      // Execute user intended navigation in main window while popunder opens!
-      executeUserIntendedAction();
+      // 1. Open the popunder FIRST so the browser and ad script register the popunder window successfully
+      const popupWindow = originalWindowOpen.call(window, url, target, features);
 
-      // Remove popunder script tag immediately after trigger
-      const popunderScript = document.querySelector(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`);
-      if (popunderScript) {
-        popunderScript.remove();
-      }
+      // 2. Remove popunder script tag after trigger to stop further popunder popups
+      document.querySelectorAll(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`).forEach((el) => el.remove());
 
-      return originalWindowOpen.call(window, url, target, features);
+      return popupWindow;
     };
 
     return () => {
@@ -278,8 +263,6 @@ export const CpmScriptManager: React.FC = () => {
   // SEAMLESS 1ST-PRESS ROUTING / CLICK ACTION PROXY
   // =========================================================================
   useEffect(() => {
-    let isForwarding = false;
-
     const handlePointerDown = (e: MouseEvent | TouchEvent) => {
       let x = 0;
       let y = 0;
@@ -304,21 +287,8 @@ export const CpmScriptManager: React.FC = () => {
         return;
       }
 
-      if ((e as any).__forwardedByProxy || isForwarding) {
+      if ((e as any).__forwardedByProxy) {
         return;
-      }
-
-      const target = e.target as HTMLElement | null;
-      if (!target) return;
-
-      const isAdOverlay = !target.closest('#root');
-
-      if (isAdOverlay) {
-        const clientX = e.clientX || lastClickRef.current.x;
-        const clientY = e.clientY || lastClickRef.current.y;
-        if (!clientX && !clientY) return;
-
-        executeUserIntendedAction({ x: clientX, y: clientY }, target);
       }
     };
 
