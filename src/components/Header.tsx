@@ -31,7 +31,7 @@ export function Header({
   showBackButton = false,
 }: HeaderProps) {
   const { settings } = useSettings();
-  const { profile, loading, authLoading } = useAuth();
+  const { profile } = useAuth();
   const { isInstallable, installApp } = usePWA();
   const { t } = useLanguage();
   const navigate = useNavigate();
@@ -106,7 +106,7 @@ export function Header({
           <AdminButtons profile={profile} />
           <NotificationMenu />
           <CartButton />
-          {!profile && !loading && !authLoading && (
+          {!profile && (
             <Link
               to="/login"
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500 hover:bg-emerald-600 text-black dark:text-zinc-950 font-extrabold text-xs shadow-md shadow-emerald-500/20 active:scale-95 transition-all shrink-0"

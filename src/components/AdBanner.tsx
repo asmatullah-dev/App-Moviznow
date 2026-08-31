@@ -55,7 +55,7 @@ export const AdBanner: React.FC<AdBannerProps> = ({
   content,
   layout = 'auto'
 }) => {
-  const { profile, loading, authLoading } = useAuth();
+  const { profile } = useAuth();
   const { settings } = useSettings();
   const location = useLocation();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -83,7 +83,7 @@ export const AdBanner: React.FC<AdBannerProps> = ({
     return () => observer.disconnect();
   }, []);
 
-  if (loading || authLoading || isRestricted || isExempt || provider === 'disabled') {
+  if (isRestricted || isExempt || provider === 'disabled') {
     return null;
   }
 

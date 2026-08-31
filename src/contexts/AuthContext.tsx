@@ -138,37 +138,55 @@ export const standardizePhone = (phone: string) => {
 
 
 
-const getInitialProfile = (): UserProfile | null => {
-  try {
-    const cached = safeStorage.getItem("profile_cache") || (typeof window !== 'undefined' ? window.localStorage.getItem("profile_cache") : null);
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (parsed && typeof parsed === "object" && parsed.uid) {
-        return normalizeUserStatusAndExpiry(parsed);
-      }
-    }
-    const lastUid = safeStorage.getItem("last_active_uid") || (typeof window !== 'undefined' ? window.localStorage.getItem("last_active_uid") : null);
-    if (lastUid) {
-      const cachedUsersStr = safeStorage.getItem("cached_all_users") || (typeof window !== 'undefined' ? window.localStorage.getItem("cached_all_users") : null);
-      if (cachedUsersStr) {
-        const list = JSON.parse(cachedUsersStr);
-        if (Array.isArray(list)) {
-          const found = list.find((u: any) => u && u.uid === lastUid);
-          if (found && found.uid) {
-            return normalizeUserStatusAndExpiry(found);
-          }
-        }
-      }
-    }
-  } catch (e) {}
-  return null;
-};
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(auth.currentUser);
-  const [profile, setProfile] = useState<UserProfile | null>(() => getInitialProfile());
-  const [loading, setLoading] = useState(() => (getInitialProfile() ? false : true));
-  const [authLoading, setAuthLoading] = useState(() => (auth.currentUser || getInitialProfile() ? false : true));
+  const [profile, setProfile] = useState<UserProfile | null>(() => {
+    const cached = safeStorage.getItem("profile_cache");
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (parsed && typeof parsed === "object" && parsed.uid) {
+          const timestampStr = safeStorage.getItem("profile_cache_timestamp");
+          if (timestampStr) {
+            const timestamp = parseInt(timestampStr, 10);
+            const now = Date.now();
+            if (now - timestamp <= 7 * 24 * 60 * 60 * 1000) {
+              return normalizeUserStatusAndExpiry(parsed);
+            }
+          }
+          return normalizeUserStatusAndExpiry(parsed);
+        }
+      } catch (e) {
+        return null;
+      }
+    }
+    return null;
+  });
+  const [loading, setLoading] = useState(() => {
+    const cached = safeStorage.getItem("profile_cache");
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (parsed && typeof parsed === "object" && parsed.uid) {
+          return false;
+        }
+      } catch (e) {}
+    }
+    return true;
+  });
+  const [authLoading, setAuthLoading] = useState(() => {
+    if (auth.currentUser) return false;
+    const cached = safeStorage.getItem("profile_cache");
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (parsed && typeof parsed === "object" && parsed.uid) {
+          return false;
+        }
+      } catch (e) {}
+    }
+    return true;
+  });
   const [error, setError] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -1400,12 +1418,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setAuthLoading(false);
 
       if (currentUser) {
-        safeStorage.setItem("last_active_uid", currentUser.uid);
-        if (typeof window !== 'undefined') window.localStorage.setItem("last_active_uid", currentUser.uid);
-
         const userRef = doc(db, "users", currentUser.uid);
         // Load profile immediately from local cache
-        const cachedProfileStr = safeStorage.getItem("profile_cache") || (typeof window !== 'undefined' ? window.localStorage.getItem("profile_cache") : null);
+        const cachedProfileStr = safeStorage.getItem("profile_cache");
         let hasValidCachedProfile = false;
         if (cachedProfileStr) {
           try {
@@ -1423,24 +1438,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 safeStorage.setItem("profile_cache", JSON.stringify(normCachedP));
               }
               hasValidCachedProfile = true;
-            }
-          } catch (e) {}
-        }
-
-        if (!hasValidCachedProfile) {
-          try {
-            const cachedUsersStr = safeStorage.getItem("cached_all_users") || (typeof window !== 'undefined' ? window.localStorage.getItem("cached_all_users") : null);
-            if (cachedUsersStr) {
-              const list = JSON.parse(cachedUsersStr);
-              if (Array.isArray(list)) {
-                const found = list.find((u: any) => u && u.uid === currentUser.uid);
-                if (found && found.uid) {
-                  const normFound = normalizeUserStatusAndExpiry(found);
-                  setProfile(normFound);
-                  safeStorage.setItem("profile_cache", JSON.stringify(normFound));
-                  hasValidCachedProfile = true;
-                }
-              }
             }
           } catch (e) {}
         }

@@ -13,7 +13,7 @@ const POPUNDER_SCRIPTS = [
 ];
 
 export const CpmScriptManager: React.FC = () => {
-  const { profile, loading, authLoading } = useAuth();
+  const { profile } = useAuth();
   const location = useLocation();
 
   const cooldownTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -30,7 +30,7 @@ export const CpmScriptManager: React.FC = () => {
 
   // Helper to inject strictly only the single popunder script into DOM
   const injectAdScripts = () => {
-    if (loading || authLoading || isAdRestrictedRoute(window.location.pathname) || isUserExemptFromAds(profile)) {
+    if (isAdRestrictedRoute(window.location.pathname) || isUserExemptFromAds(profile)) {
       return;
     }
 
@@ -47,17 +47,6 @@ export const CpmScriptManager: React.FC = () => {
   };
 
   useEffect(() => {
-    // CRITICAL: If auth or profile state is initializing/loading on app startup or reload, DO NOT inject ad scripts!
-    if (loading || authLoading) {
-      removeAdScriptsAndOverlays();
-      (window as any).__POPUNDER_COOLDOWN_ACTIVE__ = true;
-      if (cooldownTimeoutRef.current) {
-        clearTimeout(cooldownTimeoutRef.current);
-        cooldownTimeoutRef.current = null;
-      }
-      return;
-    }
-
     const isLogin = isAdRestrictedRoute(location.pathname);
     const isExempt = isUserExemptFromAds(profile);
 
@@ -180,7 +169,7 @@ export const CpmScriptManager: React.FC = () => {
         cooldownTimeoutRef.current = null;
       }
     };
-  }, [location.pathname, profile, loading, authLoading]);
+  }, [location.pathname, profile]);
 
   return null;
 };
