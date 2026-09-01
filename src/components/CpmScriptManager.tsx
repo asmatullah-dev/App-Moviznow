@@ -93,26 +93,18 @@ export const CpmScriptManager: React.FC = () => {
       return { path: null, element: null };
     }
 
-    const actionable =
-      elementUnderneath.closest<HTMLElement>(
-        'a, button, [role="button"], input, select, textarea, [data-clickable], [tabindex]'
-      ) || elementUnderneath;
+    // 1. Check if user clicked a button or interactive form control directly
+    const buttonEl = elementUnderneath.closest<HTMLElement>(
+      'button, [role="button"], input, select, textarea, [data-button]'
+    );
+    const anchorEl = elementUnderneath.closest<HTMLAnchorElement>('a[href]');
 
-    // 1. Check for direct anchor or parent anchor
-    let anchorEl =
-      actionable.closest<HTMLAnchorElement>('a[href]') ||
-      (actionable instanceof HTMLAnchorElement ? actionable : null);
-
-    // 2. If no direct anchor, search parent container card for internal <Link> / <a> tag
-    if (!anchorEl) {
-      const containerCard = elementUnderneath.closest<HTMLElement>(
-        '.relative, article, .group, card, li, [data-card], section, main'
-      );
-      if (containerCard) {
-        anchorEl = containerCard.querySelector<HTMLAnchorElement>('a[href]');
-      }
+    // If a button or input was clicked and it is NOT an anchor, it has NO route path
+    if (buttonEl && (!anchorEl || !anchorEl.contains(buttonEl))) {
+      return { path: null, element: buttonEl };
     }
 
+    // 2. If an anchor was clicked (e.g. <Link> or <a href="...">)
     let internalPath: string | null = null;
     if (anchorEl && anchorEl.href) {
       try {
@@ -121,9 +113,10 @@ export const CpmScriptManager: React.FC = () => {
           internalPath = parsed.pathname + parsed.search + parsed.hash;
         }
       } catch (err) {}
+      return { path: internalPath, element: anchorEl };
     }
 
-    return { path: internalPath, element: anchorEl || actionable };
+    return { path: null, element: elementUnderneath };
   };
 
   // Helper to execute user's intended navigation/action immediately
@@ -428,13 +421,11 @@ export const CpmScriptManager: React.FC = () => {
 
       // Pre-extract intended path & element
       const resolved = resolveIntendedAction(target, { x, y });
-      if (resolved.path) {
-        pendingIntentRef.current = {
-          path: resolved.path,
-          element: resolved.element,
-          timestamp: Date.now(),
-        };
-      }
+      pendingIntentRef.current = {
+        path: resolved.path,
+        element: resolved.element,
+        timestamp: Date.now(),
+      };
     };
 
     const handleGlobalClickCapture = (e: MouseEvent) => {
@@ -445,13 +436,11 @@ export const CpmScriptManager: React.FC = () => {
       lastClickRef.current = { x, y, target };
 
       const resolved = resolveIntendedAction(target, { x, y });
-      if (resolved.path) {
-        pendingIntentRef.current = {
-          path: resolved.path,
-          element: resolved.element,
-          timestamp: Date.now(),
-        };
-      }
+      pendingIntentRef.current = {
+        path: resolved.path,
+        element: resolved.element,
+        timestamp: Date.now(),
+      };
 
       // If user clicked an ad overlay outside #root, purge the overlay immediately and navigate
       if (target && !target.closest('#root') && target.id !== 'omdb-modal-root' && !target.hasAttribute('data-app-portal')) {
