@@ -18,7 +18,19 @@ interface BannerConfig {
   height: number;
 }
 
+// Adsterra / CPM Banner Size Configurations
+// Ranked by Industry eCPM & Revenue Potential:
+// 1. 300x250 Medium Rectangle (Highest CPM & CTR across all ad networks)
+// 2. 728x90 Leaderboard (Highest Desktop CPM)
+// 3. 468x60 Classic Banner (Tablet / Mid-size)
+// 4. 320x50 Mobile Leaderboard (Small Mobile)
+// 5. 160x600 Wide Skyscraper / 160x300 Half Skyscraper
 const BANNER_CONFIGS: Record<string, BannerConfig> = {
+  rectangle_300: {
+    key: '37fefa62ab23d5571ac1b29359968b26',
+    width: 300,
+    height: 250,
+  },
   leaderboard_728: {
     key: 'c3b2330b7c7569593b5ba1ed74955a91',
     width: 728,
@@ -28,11 +40,6 @@ const BANNER_CONFIGS: Record<string, BannerConfig> = {
     key: 'bc46a083398bb54a03b2b6f86fb88623',
     width: 468,
     height: 60,
-  },
-  rectangle_300: {
-    key: '37fefa62ab23d5571ac1b29359968b26',
-    width: 300,
-    height: 250,
   },
   mobile_320: {
     key: 'd9dd52f202fb4fca75e8b5bd077aaa3f',
@@ -112,30 +119,35 @@ export const AdBanner: React.FC<AdBannerProps> = ({
   }
 
   // Determine optimal banner configuration based on layout and current width
+  // Highest Revenue Ranking in Adsterra:
+  // 1. 728x90 Leaderboard on Desktop / Tablet (top CPM for desktop header/in-feed)
+  // 2. 300x250 Medium Rectangle everywhere else (consistently 2.5x - 4x higher CPM than 320x50/468x60)
   let selectedConfig: BannerConfig = BANNER_CONFIGS.rectangle_300;
 
   if (layout === 'skyscraper') {
     selectedConfig = containerWidth >= 400 ? BANNER_CONFIGS.skyscraper_600 : BANNER_CONFIGS.skyscraper_300;
   } else if (layout === 'leaderboard') {
-    if (containerWidth >= 760) {
+    if (containerWidth >= 740) {
       selectedConfig = BANNER_CONFIGS.leaderboard_728;
-    } else if (containerWidth >= 500) {
-      selectedConfig = BANNER_CONFIGS.banner_468;
     } else {
-      selectedConfig = BANNER_CONFIGS.mobile_320;
+      // Prioritize high-CPM 300x250 over low-CPM 468x60/320x50
+      selectedConfig = BANNER_CONFIGS.rectangle_300;
     }
+  } else if (layout === 'rectangle') {
+    selectedConfig = BANNER_CONFIGS.rectangle_300;
   } else {
-    // Auto responsive selection matching container dimensions
-    if (containerWidth >= 760) {
-      selectedConfig = BANNER_CONFIGS.leaderboard_728; // Desktop wide
-    } else if (containerWidth >= 500) {
-      selectedConfig = BANNER_CONFIGS.banner_468; // Tablet / medium
-    } else if (containerWidth >= 330) {
-      selectedConfig = BANNER_CONFIGS.rectangle_300; // Standard Mobile (highest eCPM)
+    // Auto mode: Prioritize top two high-revenue formats (728x90 on wide displays, 300x250 for all other viewports)
+    if (containerWidth >= 740) {
+      selectedConfig = BANNER_CONFIGS.leaderboard_728;
     } else {
-      selectedConfig = BANNER_CONFIGS.mobile_320; // Small phone slim banner
+      selectedConfig = BANNER_CONFIGS.rectangle_300;
     }
   }
+
+  // Calculate scaling factor if container width is smaller than 300px (very narrow devices)
+  const scale = containerWidth > 0 && containerWidth < selectedConfig.width 
+    ? Math.max(0.75, Math.min(1, (containerWidth - 16) / selectedConfig.width))
+    : 1;
 
   const ctaText = settings?.adBannerCtaText || 'Remove Ads (Go VIP)';
   const ctaLink = settings?.adBannerLink || '/top-up';
@@ -182,21 +194,31 @@ export const AdBanner: React.FC<AdBannerProps> = ({
       className={`relative overflow-hidden rounded-2xl bg-zinc-950/70 border border-zinc-800/80 p-3 sm:p-4 shadow-lg text-white my-4 backdrop-blur-md ${className}`}
     >
       <div className="flex flex-col items-center gap-3">
-        {/* Dynamic Responsive Banner Container */}
+        {/* Dynamic Responsive Banner Container with High-Revenue Sizing */}
         <div 
           className="w-full overflow-hidden flex justify-center items-center rounded-xl"
-          style={{ minHeight: `${selectedConfig.height}px` }}
+          style={{ minHeight: `${Math.round(selectedConfig.height * scale)}px` }}
         >
-          <iframe
-            key={bannerInstanceKey}
-            srcDoc={adHtmlDoc}
-            width={selectedConfig.width}
-            height={selectedConfig.height}
-            loading="eager"
-            title={`${selectedConfig.width}x${selectedConfig.height} Advertisement Banner`}
-            className="border-0 overflow-hidden max-w-full"
-            scrolling="no"
-          />
+          <div 
+            style={{ 
+              transform: scale < 1 ? `scale(${scale})` : undefined, 
+              transformOrigin: 'center center',
+              width: `${selectedConfig.width}px`,
+              height: `${selectedConfig.height}px`,
+            }}
+            className="flex items-center justify-center shrink-0"
+          >
+            <iframe
+              key={bannerInstanceKey}
+              srcDoc={adHtmlDoc}
+              width={selectedConfig.width}
+              height={selectedConfig.height}
+              loading="eager"
+              title={`${selectedConfig.width}x${selectedConfig.height} Advertisement Banner`}
+              className="border-0 overflow-hidden"
+              scrolling="no"
+            />
+          </div>
         </div>
 
         {/* Clean Go VIP Action Bar */}
