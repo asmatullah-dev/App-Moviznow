@@ -21,29 +21,42 @@ export function purgeAllAdElements(): void {
 
   // 1. Remove all ad network scripts (AdSense, Monetag, Adsterra/commercialhalftime, CPM networks)
   const adScriptPatterns = [
-    'adsbygoogle.js',
     'commercialhalftime.com',
     'nap5k.com',
     'n6wxm.com',
+    'workdeadlinededicate.com',
     'profitableratecpmnetwork',
     'monetag',
     'adsterra',
+    'adsbygoogle.js',
+    '99e78b0792c97e620e43154c137cd1f3',
   ];
 
   try {
     const scripts = document.querySelectorAll('script');
     scripts.forEach(s => {
-      if (adScriptPatterns.some(pattern => s.src && s.src.includes(pattern))) {
+      const src = s.src || '';
+      if (adScriptPatterns.some(pattern => src.includes(pattern))) {
         s.remove();
       }
     });
+    // Remove scripts with the data attribute
+    document.querySelectorAll('script[data-popunder-script="true"]').forEach(el => el.remove());
+    document.querySelectorAll('script[data-authorized-ad-script="true"]').forEach(el => el.remove());
   } catch (e) {}
 
-  // 2. Pause AdSense requests
+  // 2. Clear potential global variables that ad scripts use
   try {
-    if ((window as any).adsbygoogle) {
-      (window as any).adsbygoogle.pauseAdRequests = 1;
-    }
+    const globalsToClear = [
+      '_pop', '_pop_config', '_pop_script', 'adsbygoogle', 
+      'CommercialHalftime', 'Adsterra', 'Monetag', 
+      '__p_scr', '__p_config'
+    ];
+    globalsToClear.forEach(g => {
+      if ((window as any)[g]) {
+        try { (window as any)[g] = undefined; } catch (err) {}
+      }
+    });
   } catch (e) {}
 
   // 3. Remove injected Monetag / Popunder / Vignette / AdSense overlay or container elements
@@ -60,6 +73,7 @@ export function purgeAllAdElements(): void {
       'div[id*="monetag"]',
       'div[id*="zone_"]',
       'div[id^="ad-"]',
+      'div[id^="popunder-"]',
       '.pub_300x250',
     ];
     selectors.forEach(sel => {
