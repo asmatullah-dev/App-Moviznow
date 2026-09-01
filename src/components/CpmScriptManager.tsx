@@ -165,7 +165,7 @@ export const CpmScriptManager: React.FC = () => {
     }
   };
 
-  // Cooldown timer manager (checks every second)
+  // Cooldown timer manager (checks every second & on storage changes)
   useEffect(() => {
     const checkCooldown = () => {
       const remaining = getPopunderCooldownRemaining();
@@ -175,7 +175,11 @@ export const CpmScriptManager: React.FC = () => {
 
     checkCooldown();
     const interval = setInterval(checkCooldown, 1000);
-    return () => clearInterval(interval);
+    window.addEventListener('storage', checkCooldown);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('storage', checkCooldown);
+    };
   }, []);
 
   // Continuous Ad Cleanup during Cooldown
@@ -254,11 +258,13 @@ export const CpmScriptManager: React.FC = () => {
         popunderScript.remove();
       }
       document.querySelectorAll(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`).forEach((el) => el.remove());
-      // Also purge globals specifically related to popunder
+      // Also purge globals specifically related to popunder, but NOT generic ones that social bar might use
       try {
         const globals = ['_pop', '_pop_config', '_pop_script', '__p_scr', '__p_config'];
         globals.forEach(g => {
-          if ((window as any)[g]) (window as any)[g] = undefined;
+          try {
+            if ((window as any)[g]) delete (window as any)[g];
+          } catch (e) {}
         });
       } catch (e) {}
     }

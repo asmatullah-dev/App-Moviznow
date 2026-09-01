@@ -20,8 +20,9 @@ export function purgeAllAdElements(): void {
   if (typeof document === 'undefined') return;
 
   // 1. Remove all ad network scripts (AdSense, Monetag, Adsterra/commercialhalftime, CPM networks)
+  // BE CAREFUL: Do not block Social Bar (f0270bbaca005a7be1c664c3c0ae0386.js)
   const adScriptPatterns = [
-    'commercialhalftime.com',
+    '99e78b0792c97e620e43154c137cd1f3', // Specific Popunder ID
     'nap5k.com',
     'n6wxm.com',
     'workdeadlinededicate.com',
@@ -29,14 +30,14 @@ export function purgeAllAdElements(): void {
     'monetag',
     'adsterra',
     'adsbygoogle.js',
-    '99e78b0792c97e620e43154c137cd1f3',
   ];
 
   try {
     const scripts = document.querySelectorAll('script');
     scripts.forEach(s => {
       const src = s.src || '';
-      if (adScriptPatterns.some(pattern => src.includes(pattern))) {
+      // If it matches a known popunder pattern AND is NOT the social bar
+      if (adScriptPatterns.some(pattern => src.includes(pattern)) && !src.includes('f0270bbaca005a7be1c664c3c0ae0386')) {
         s.remove();
       }
     });
@@ -86,10 +87,16 @@ export function purgeAllAdElements(): void {
     });
 
     // Aggressive Overlay Killer: Remove any fixed/absolute div outside #root that covers a large area
+    // Do NOT remove Social Bar containers (usually have high z-index but specific classes or IDs)
     const allDivs = document.querySelectorAll('body > div:not(#root):not(#omdb-modal-root)');
     allDivs.forEach((el) => {
       const htmlEl = el as HTMLElement;
       if (htmlEl.hasAttribute('data-app-portal')) return;
+      
+      // Keep Social Bar container if identifiable (often contains 'social' or specific network markers)
+      const id = htmlEl.id || '';
+      const className = htmlEl.className || '';
+      if (id.includes('social') || className.includes('social') || id.includes('pro-') || className.includes('pro-')) return;
       
       const style = window.getComputedStyle(htmlEl);
       const isFixed = style.position === 'fixed' || style.position === 'absolute';
