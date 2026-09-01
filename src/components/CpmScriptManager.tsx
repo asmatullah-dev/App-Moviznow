@@ -183,19 +183,27 @@ export const CpmScriptManager: React.FC = () => {
     }
 
     // 2. Popunder Script Injection
-    const popunderScript = document.querySelector(`script[data-popunder-script="true"]`) as HTMLScriptElement | null;
+    const injectPopunder = () => {
+      const popunderScript = document.querySelector(`script[data-popunder-script="true"]`) as HTMLScriptElement | null;
 
-    if (!popunderScript) {
-      // Clean up any stale popunder script elements before appending fresh one
-      document.querySelectorAll(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`).forEach((el) => el.remove());
+      if (!popunderScript) {
+        // Clean up any stale popunder script elements before appending fresh one
+        document.querySelectorAll(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`).forEach((el) => el.remove());
 
-      const newPopunderScript = document.createElement('script');
-      newPopunderScript.src = `${POPUNDER_SCRIPT_SRC}?_t=${Date.now()}&_r=${Math.random().toString(36).substring(2)}`;
-      newPopunderScript.async = true;
-      newPopunderScript.setAttribute('data-authorized-ad-script', 'true');
-      newPopunderScript.setAttribute('data-popunder-script', 'true');
-      document.head.appendChild(newPopunderScript);
-    }
+        const newPopunderScript = document.createElement('script');
+        newPopunderScript.src = `${POPUNDER_SCRIPT_SRC}?_t=${Date.now()}&_r=${Math.random().toString(36).substring(2)}`;
+        newPopunderScript.async = true;
+        newPopunderScript.setAttribute('data-authorized-ad-script', 'true');
+        newPopunderScript.setAttribute('data-popunder-script', 'true');
+        document.head.appendChild(newPopunderScript);
+      }
+    };
+
+    injectPopunder();
+
+    // Periodically check and re-inject if missing (since we remove it after trigger for no-cooldown)
+    const interval = setInterval(injectPopunder, 2000);
+    return () => clearInterval(interval);
   }, [location.pathname, profile]);
 
   // =========================================================================
@@ -245,14 +253,21 @@ export const CpmScriptManager: React.FC = () => {
         return originalWindowOpen.call(window, url, target, features);
       }
 
-      // Popunder handling for clicks on app UI (#root):
+      // NOT in cooldown: Open the popunder
       
-      // Execute user intended navigation in main window IMMEDIATELY
-      // This ensures the 1st click handles BOTH the ad and the app action
-      executeUserIntendedAction();
+      // 1. Open the popunder FIRST so the browser and ad script register the popunder window successfully
+      const popupWindow = originalWindowOpen.call(window, url, target, features);
 
-      // Open the popunder
-      return originalWindowOpen.call(window, url, target, features);
+      // 2. Remove the old popunder script tag so it can be re-injected for the next click (no cooldown)
+      document.querySelectorAll(`script[data-popunder-script="true"]`).forEach(el => el.remove());
+      document.querySelectorAll(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`).forEach(el => el.remove());
+
+      // 3. Defer main-window SPA navigation slightly so it does NOT close or cancel the popunder window gesture
+      setTimeout(() => {
+        executeUserIntendedAction();
+      }, 100);
+
+      return popupWindow || createDummyWindow();
     };
 
     return () => {
