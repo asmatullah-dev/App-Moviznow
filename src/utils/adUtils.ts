@@ -41,9 +41,8 @@ export function purgeAllAdElements(): void {
         s.remove();
       }
     });
-    // Remove scripts with the data attribute
+    // Remove scripts with the popunder data attribute or ad network scripts
     document.querySelectorAll('script[data-popunder-script="true"]').forEach(el => el.remove());
-    document.querySelectorAll('script[data-authorized-ad-script="true"]').forEach(el => el.remove());
   } catch (e) {}
 
   // 2. Clear potential global variables that ad scripts use
@@ -132,21 +131,66 @@ export interface AdContentCheck {
 export const POPUNDER_COOLDOWN_MS = 2 * 60 * 1000; // 2 minutes in milliseconds
 
 /**
+ * Checks if a given URL is a legitimate user action / whitelisted external service
+ * (WhatsApp, Telegram, YouTube, tel, mailto, blob, internal routes, etc.)
+ */
+export function isAppWhitelistedUrl(rawUrl?: string | URL | null): boolean {
+  if (!rawUrl) return false;
+  const urlStr = String(rawUrl).trim();
+  if (!urlStr || urlStr === '#' || urlStr === 'javascript:void(0)' || urlStr === 'javascript:;') {
+    return false;
+  }
+
+  // Internal routes
+  if (urlStr.startsWith('/') || (typeof window !== 'undefined' && urlStr.startsWith(window.location.origin))) {
+    return true;
+  }
+
+  const lower = urlStr.toLowerCase();
+  return (
+    lower.startsWith('https://wa.me/') ||
+    lower.startsWith('https://api.whatsapp.com') ||
+    lower.startsWith('https://whatsapp.com') ||
+    lower.startsWith('https://www.whatsapp.com') ||
+    lower.startsWith('https://t.me/') ||
+    lower.includes('telegram.me') ||
+    lower.includes('telegram.org') ||
+    lower.includes('youtube.com') ||
+    lower.includes('youtu.be') ||
+    lower.startsWith('tel:') ||
+    lower.startsWith('mailto:') ||
+    lower.startsWith('sms:') ||
+    lower.startsWith('blob:') ||
+    lower.startsWith('data:')
+  );
+}
+
+/**
  * Returns remaining cooldown milliseconds (0 if cooldown has expired or not set).
  */
 export function getPopunderCooldownRemaining(): number {
   if (typeof window === 'undefined') return 0;
   try {
+    let lastTime = 0;
     const lastTimeStr = localStorage.getItem('lastPopunderTime');
-    if (!lastTimeStr) return 0;
-    const lastTime = parseInt(lastTimeStr, 10);
-    if (isNaN(lastTime)) {
-      localStorage.removeItem('lastPopunderTime');
+    if (lastTimeStr) {
+      lastTime = parseInt(lastTimeStr, 10);
+    }
+    
+    // In-memory fallback
+    const memTime = (window as any).__LAST_POPUNDER_TIME__;
+    if (typeof memTime === 'number' && memTime > lastTime) {
+      lastTime = memTime;
+    }
+
+    if (!lastTime || isNaN(lastTime)) {
       return 0;
     }
+
     const remaining = POPUNDER_COOLDOWN_MS - (Date.now() - lastTime);
     if (remaining <= 0) {
       localStorage.removeItem('lastPopunderTime');
+      delete (window as any).__LAST_POPUNDER_TIME__;
       return 0;
     }
     return remaining;
@@ -168,7 +212,13 @@ export function isPopunderInCooldown(): boolean {
 export function recordPopunderTriggered(): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem('lastPopunderTime', Date.now().toString());
+    const now = Date.now();
+    localStorage.setItem('lastPopunderTime', now.toString());
+    (window as any).__LAST_POPUNDER_TIME__ = now;
+    // Broadcast event across all components in current window
+    try {
+      window.dispatchEvent(new CustomEvent('popunder_cooldown_update', { detail: { timestamp: now } }));
+    } catch (err) {}
   } catch (e) {}
 }
 

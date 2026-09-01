@@ -8,29 +8,12 @@ import {
   isPopunderInCooldown,
   getPopunderCooldownRemaining,
   recordPopunderTriggered,
+  isAppWhitelistedUrl,
 } from '../utils/adUtils';
 
 // Authorized Ad Scripts (CommercialHalftime / Adsterra network)
 const POPUNDER_SCRIPT_SRC = 'https://commercialhalftime.com/99/e7/8b/99e78b0792c97e620e43154c137cd1f3.js';
 const SOCIAL_BAR_SCRIPT_SRC = 'https://commercialhalftime.com/f0/27/0b/f0270bbaca005a7be1c664c3c0ae0386.js';
-
-// Helper to recognize ad URLs
-function isAdUrl(urlStr: string): boolean {
-  if (!urlStr) return false;
-  const lower = urlStr.toLowerCase();
-  return (
-    lower.includes('commercialhalftime.com') ||
-    lower.includes('workdeadlinededicate.com') ||
-    lower.includes('nap5k.com') ||
-    lower.includes('n6wxm.com') ||
-    lower.includes('profitableratecpm') ||
-    lower.includes('adsterra') ||
-    lower.includes('monetag') ||
-    lower.includes('by1zps7h9h') ||
-    lower.includes('htqpa4mty') ||
-    lower.includes('kscas=')
-  );
-}
 
 // Helper to create a fake window object that tricks ad scripts into thinking the popunder opened
 function createDummyWindow(): Window {
@@ -171,58 +154,48 @@ export const CpmScriptManager: React.FC = () => {
     }
   };
 
-  // Cooldown timer manager (checks every second & on storage changes)
+  // Cooldown manager: listens to storage, custom events, visibility, and 1s timer
   useEffect(() => {
-    const checkCooldown = () => {
+    const updateCooldownStatus = () => {
       const remaining = getPopunderCooldownRemaining();
       const active = remaining > 0;
       setInCooldown(active);
     };
 
-    checkCooldown();
-    const interval = setInterval(checkCooldown, 1000);
-    window.addEventListener('storage', checkCooldown);
+    updateCooldownStatus();
+    const interval = setInterval(updateCooldownStatus, 1000);
+
+    const handleCustomUpdate = () => {
+      updateCooldownStatus();
+    };
+
+    window.addEventListener('storage', updateCooldownStatus);
+    window.addEventListener('popunder_cooldown_update', handleCustomUpdate);
+    window.addEventListener('focus', updateCooldownStatus);
+    document.addEventListener('visibilitychange', updateCooldownStatus);
+
     return () => {
       clearInterval(interval);
-      window.removeEventListener('storage', checkCooldown);
+      window.removeEventListener('storage', updateCooldownStatus);
+      window.removeEventListener('popunder_cooldown_update', handleCustomUpdate);
+      window.removeEventListener('focus', updateCooldownStatus);
+      document.removeEventListener('visibilitychange', updateCooldownStatus);
     };
   }, []);
 
-  // Continuous Ad & Overlay Cleanup during Cooldown and on Window Focus (e.g. after returning from Popunder)
+  // Continuous Ad Cleanup during Cooldown & on Window Focus
   useEffect(() => {
-    const handleWindowFocus = () => {
-      const cd = isPopunderInCooldown();
-      setInCooldown(cd);
-      if (cd || isUserExemptFromAds(profileRef.current)) {
-        purgeAllAdElements();
-      }
-    };
-
-    window.addEventListener('focus', handleWindowFocus);
-    document.addEventListener('visibilitychange', handleWindowFocus);
-
-    return () => {
-      window.removeEventListener('focus', handleWindowFocus);
-      document.removeEventListener('visibilitychange', handleWindowFocus);
-    };
-  }, []);
-
-  // Continuous Ad Cleanup during Cooldown
-  useEffect(() => {
-    if (inCooldown) {
-      // Immediate cleanup
+    if (inCooldown || isUserExemptFromAds(profile)) {
       purgeAllAdElements();
 
-      // Faster cleanup during cooldown to handle any background script re-injections
       const interval = setInterval(() => {
-        if (isPopunderInCooldown()) {
+        if (isPopunderInCooldown() || isUserExemptFromAds(profileRef.current)) {
           purgeAllAdElements();
         }
       }, 1000);
 
-      // Mutation observer to kill new overlays immediately
       const observer = new MutationObserver((mutations) => {
-        if (isPopunderInCooldown()) {
+        if (isPopunderInCooldown() || isUserExemptFromAds(profileRef.current)) {
           let shouldPurge = false;
           mutations.forEach((m) => {
             if (m.addedNodes.length > 0) shouldPurge = true;
@@ -238,7 +211,7 @@ export const CpmScriptManager: React.FC = () => {
         observer.disconnect();
       };
     }
-  }, [inCooldown]);
+  }, [inCooldown, profile]);
 
   // Inject or clean up ad scripts based on route, exemption, and cooldown
   useEffect(() => {
@@ -251,7 +224,7 @@ export const CpmScriptManager: React.FC = () => {
       return;
     }
 
-    // 1. Social Bar: Always inject for non-exempt users on valid routes
+    // 1. Social Bar: Inject for non-exempt users on valid routes
     let socialScript = document.querySelector(
       `script[src*="f0270bbaca005a7be1c664c3c0ae0386"]`
     ) as HTMLScriptElement | null;
@@ -271,7 +244,6 @@ export const CpmScriptManager: React.FC = () => {
 
     if (!activeCooldown && !inCooldown) {
       if (!popunderScript) {
-        // Clean up any stale popunder script elements before appending fresh one
         document.querySelectorAll(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`).forEach((el) => el.remove());
 
         const newPopunderScript = document.createElement('script');
@@ -287,7 +259,6 @@ export const CpmScriptManager: React.FC = () => {
         popunderScript.remove();
       }
       document.querySelectorAll(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`).forEach((el) => el.remove());
-      // Also purge globals specifically related to popunder
       try {
         const globals = ['_pop', '_pop_config', '_pop_script', '__p_scr', '__p_config'];
         globals.forEach((g) => {
@@ -300,7 +271,7 @@ export const CpmScriptManager: React.FC = () => {
   }, [location.pathname, profile, inCooldown]);
 
   // =========================================================================
-  // WINDOW.OPEN INTERCEPTOR
+  // WINDOW.OPEN INTERCEPTOR (AIRTIGHT COOLDOWN ENFORCER)
   // =========================================================================
   useEffect(() => {
     const originalWindowOpen = window.open;
@@ -308,63 +279,42 @@ export const CpmScriptManager: React.FC = () => {
     window.open = function (url?: string | URL, target?: string, features?: string) {
       const urlStr = String(url || '').trim();
 
-      // Whitelist legitimate app URLs
-      const isAppWhitelisted =
-        urlStr.startsWith('https://wa.me/') ||
-        urlStr.startsWith('https://api.whatsapp.com') ||
-        urlStr.startsWith('https://t.me/') ||
-        urlStr.includes('telegram.me') ||
-        urlStr.includes('youtube.com') ||
-        urlStr.includes('youtu.be') ||
-        urlStr.startsWith('tel:') ||
-        urlStr.startsWith('mailto:') ||
-        urlStr.startsWith('blob:') ||
-        urlStr.startsWith('data:');
-
-      if (isAppWhitelisted) {
+      // If legitimate app URL (WhatsApp, Telegram, YouTube, tel, internal SPA route), allow immediately!
+      if (isAppWhitelistedUrl(urlStr)) {
         return originalWindowOpen.call(window, url, target, features);
       }
 
-      // Check for internal SPA routes or exact same origin
-      if (urlStr.startsWith('/') || (urlStr.startsWith(window.location.origin) && !urlStr.includes('commercialhalftime'))) {
-        return originalWindowOpen.call(window, url, target, features);
-      }
-
-      // If user is VIP / exempt from ads, block ALL external ad window.open calls completely
+      // Check if user is VIP / exempt from ads: BLOCK completely
       if (isUserExemptFromAds(profileRef.current)) {
         executeUserIntendedAction();
         return createDummyWindow();
       }
 
-      // Determine if click originated from an app element (#root) vs an external Social Ad widget outside #root
+      // If click was directly on a Social Bar / Social Ad widget outside #root, ALLOW it!
       const lastTarget = lastClickRef.current.target;
       const isClickOnAppRoot = !lastTarget || Boolean(lastTarget.closest('#root'));
-
-      // If click was directly on a Social Bar / Social Ad widget outside #root, ALLOW it!
       if (!isClickOnAppRoot) {
         return originalWindowOpen.call(window, url, target, features);
       }
 
-      // Popunder handling for clicks on app UI (#root):
+      // POPUNDER COOLDOWN CHECK:
       if (isPopunderInCooldown()) {
-        // Synchronously execute the user's desired link/page action on 1st tap!
+        // In 2-minute cooldown: Block popunder, execute app navigation, return dummy window!
         executeUserIntendedAction();
-        // Return dummy window object so popunder script believes popup succeeded and deactivates itself!
         return createDummyWindow();
       }
 
-      // NOT in cooldown & click was on #root: record popunder triggered NOW and allow popup to open!
+      // NOT in cooldown: Trigger cooldown NOW (starts 2-minute timer in localStorage + memory)
       recordPopunderTriggered();
       setInCooldown(true);
 
-      // Force an immediate purge of the ad script tag and overlays
+      // Immediately purge popunder elements so subsequent clicks are clean
       purgeAllAdElements();
 
-      // Execute user intended navigation in main window IMMEDIATELY
-      // This ensures the 1st click handles BOTH the ad and the app action
+      // Execute user intended navigation in main window IMMEDIATELY on this same 1st tap!
       executeUserIntendedAction();
 
-      // Open the popunder
+      // Open the single authorized popunder
       return originalWindowOpen.call(window, url, target, features);
     };
 
@@ -373,46 +323,93 @@ export const CpmScriptManager: React.FC = () => {
     };
   }, []);
 
-  // Intercept anchor.click and form.submit for ad URLs during cooldown
+  // =========================================================================
+  // ANCHOR.CLICK, DISPATCH_EVENT & FORM.SUBMIT INTERCEPTORS
+  // Prevents ad scripts from bypassing window.open via dynamic <a> or <form>
+  // =========================================================================
   useEffect(() => {
     const originalAnchorClick = HTMLAnchorElement.prototype.click;
     const originalFormSubmit = HTMLFormElement.prototype.submit;
+    const originalDispatchEvent = EventTarget.prototype.dispatchEvent;
 
     HTMLAnchorElement.prototype.click = function () {
       const href = this.href || '';
+      
+      // If it's a whitelisted app action (WhatsApp, Telegram, YouTube, internal route), allow
+      if (isAppWhitelistedUrl(href)) {
+        return originalAnchorClick.apply(this, arguments as any);
+      }
+
       const isExempt = isUserExemptFromAds(profileRef.current);
       const inCd = isPopunderInCooldown();
 
-      if ((isExempt || inCd) && isAdUrl(href)) {
+      // External ad URL:
+      if (isExempt || inCd) {
+        // Block during cooldown or for exempt users!
         executeUserIntendedAction();
         return;
       }
+
+      // NOT in cooldown: record cooldown now and allow this one click
+      recordPopunderTriggered();
+      setInCooldown(true);
+      purgeAllAdElements();
+      executeUserIntendedAction();
 
       return originalAnchorClick.apply(this, arguments as any);
     };
 
     HTMLFormElement.prototype.submit = function () {
       const action = this.action || '';
+      if (isAppWhitelistedUrl(action)) {
+        return originalFormSubmit.apply(this, arguments as any);
+      }
+
       const isExempt = isUserExemptFromAds(profileRef.current);
       const inCd = isPopunderInCooldown();
 
-      if ((isExempt || inCd) && isAdUrl(action)) {
+      if (isExempt || inCd) {
         executeUserIntendedAction();
         return;
       }
 
+      recordPopunderTriggered();
+      setInCooldown(true);
+      purgeAllAdElements();
+      executeUserIntendedAction();
+
       return originalFormSubmit.apply(this, arguments as any);
+    };
+
+    EventTarget.prototype.dispatchEvent = function (event: Event) {
+      if (this instanceof HTMLAnchorElement && event.type === 'click') {
+        const href = this.href || '';
+        if (!isAppWhitelistedUrl(href)) {
+          const isExempt = isUserExemptFromAds(profileRef.current);
+          const inCd = isPopunderInCooldown();
+          if (isExempt || inCd) {
+            executeUserIntendedAction();
+            return false;
+          }
+          recordPopunderTriggered();
+          setInCooldown(true);
+          purgeAllAdElements();
+          executeUserIntendedAction();
+        }
+      }
+      return originalDispatchEvent.apply(this, arguments as any);
     };
 
     return () => {
       HTMLAnchorElement.prototype.click = originalAnchorClick;
       HTMLFormElement.prototype.submit = originalFormSubmit;
+      EventTarget.prototype.dispatchEvent = originalDispatchEvent;
     };
   }, []);
 
   // =========================================================================
   // GUARANTEED 1ST-CLICK NAVIGATION & INTENT PRESERVER (CAPTURE PHASE)
-  // Fixes the two-click issue where ad scripts prevent navigation on 1st press
+  // Ensures instant app response & cleans up click-jack overlays during cooldown
   // =========================================================================
   useEffect(() => {
     const handlePointerDown = (e: MouseEvent | TouchEvent) => {
@@ -480,7 +477,6 @@ export const CpmScriptManager: React.FC = () => {
         setTimeout(() => {
           const currentLoc = window.location.pathname + window.location.search + window.location.hash;
           if (currentLoc !== targetPath && pendingIntentRef.current.path === targetPath) {
-            // Navigation was blocked/prevented by an ad script! Force the navigation NOW!
             if (!isNavigatingRef.current) {
               isNavigatingRef.current = true;
               navigateRef.current(targetPath);
