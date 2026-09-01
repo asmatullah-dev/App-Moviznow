@@ -86,33 +86,37 @@ export function purgeAllAdElements(): void {
       });
     });
 
-    // Aggressive Overlay Killer: Remove any fixed/absolute div outside #root that covers a large area
+    // Aggressive Overlay & Click-Catcher Killer: Remove any fixed/absolute elements outside #root that cover the screen or catch clicks
     // Do NOT remove Social Bar containers (usually have high z-index but specific classes or IDs)
-    const allDivs = document.querySelectorAll('body > div:not(#root):not(#omdb-modal-root)');
-    allDivs.forEach((el) => {
+    const allOutsideElements = document.querySelectorAll('body > *:not(#root):not(script):not(style):not(#omdb-modal-root)');
+    allOutsideElements.forEach((el) => {
       const htmlEl = el as HTMLElement;
-      if (htmlEl.hasAttribute('data-app-portal')) return;
+      if (htmlEl.hasAttribute('data-app-portal') || htmlEl.id === 'omdb-modal-root') return;
       
       // Keep Social Bar container if identifiable (often contains 'social' or specific network markers)
-      const id = htmlEl.id || '';
-      const className = htmlEl.className || '';
+      const id = (htmlEl.id || '').toLowerCase();
+      const className = (typeof htmlEl.className === 'string' ? htmlEl.className : '').toLowerCase();
       if (id.includes('social') || className.includes('social') || id.includes('pro-') || className.includes('pro-')) return;
       
-      const style = window.getComputedStyle(htmlEl);
-      const isFixed = style.position === 'fixed' || style.position === 'absolute';
-      const zIndex = parseInt(style.zIndex, 10);
-      
-      if (isFixed && (zIndex > 100 || zIndex === 2147483647)) {
-        const width = htmlEl.offsetWidth;
-        const height = htmlEl.offsetHeight;
-        const screenWidth = window.innerWidth;
-        const screenHeight = window.innerHeight;
+      try {
+        const style = window.getComputedStyle(htmlEl);
+        const isFixed = style.position === 'fixed' || style.position === 'absolute';
+        const zIndex = parseInt(style.zIndex, 10);
         
-        // If it covers more than 50% of the screen width and height
-        if (width > screenWidth * 0.5 && height > screenHeight * 0.5) {
-          htmlEl.remove();
+        // Remove transparent click catchers (e.g. opacity 0, or high z-index overlays)
+        const opacity = parseFloat(style.opacity);
+        if (isFixed && (zIndex > 50 || zIndex === 2147483647 || isNaN(zIndex))) {
+          const width = htmlEl.offsetWidth || window.innerWidth;
+          const height = htmlEl.offsetHeight || window.innerHeight;
+          const screenWidth = window.innerWidth;
+          const screenHeight = window.innerHeight;
+          
+          // If it covers more than 30% of the screen or is a transparent overlay
+          if ((width > screenWidth * 0.3 && height > screenHeight * 0.3) || (opacity < 0.1 && width > 100 && height > 100)) {
+            htmlEl.remove();
+          }
         }
-      }
+      } catch (err) {}
     });
   } catch (e) {}
 }

@@ -60,32 +60,33 @@ export const CpmScriptManager: React.FC = () => {
 
   // Ref to track last click coordinates & target for seamless fallback execution
   const lastClickRef = useRef<{ x: number; y: number; target: HTMLElement | null }>({ x: 0, y: 0, target: null });
-  const isExecutingActionRef = useRef<boolean>(false);
+  const pendingIntentRef = useRef<{ path: string | null; element: HTMLElement | null; timestamp: number }>({
+    path: null,
+    element: null,
+    timestamp: 0,
+  });
+  const isNavigatingRef = useRef<boolean>(false);
 
-  // Helper to execute user's intended navigation/action if hijacked by ad scripts
-  const executeUserIntendedAction = (fallbackCoords?: { x: number; y: number }, fallbackTarget?: HTMLElement | null) => {
-    if (isExecutingActionRef.current) return;
-    isExecutingActionRef.current = true;
-    setTimeout(() => {
-      isExecutingActionRef.current = false;
-    }, 120);
-
+  // Helper to extract the intended actionable element & internal URL from click/target
+  const resolveIntendedAction = (
+    explicitTarget?: HTMLElement | null,
+    fallbackCoords?: { x: number; y: number }
+  ): { path: string | null; element: HTMLElement | null } => {
     const coords = fallbackCoords || lastClickRef.current;
-    let elementUnderneath = fallbackTarget || lastClickRef.current.target;
+    let elementUnderneath = explicitTarget || lastClickRef.current.target;
 
-    // If target is missing or an ad overlay outside #root, locate element at pointer coordinates
+    // If target is missing or an ad overlay outside #root, locate element at pointer coordinates inside #root
     if (!elementUnderneath || !elementUnderneath.closest('#root')) {
       if (coords.x > 0 || coords.y > 0) {
         try {
-          // Identify all potential overlay candidates outside #root
-          const overlays = Array.from(document.querySelectorAll('body > *:not(#root):not(script):not(style)'))
-            .filter(el => {
-              const htmlEl = el as HTMLElement;
-              if (htmlEl.id === 'omdb-modal-root' || htmlEl.hasAttribute('data-app-portal')) return false;
-              // Check for full-screen or high z-index elements
-              const style = window.getComputedStyle(htmlEl);
-              return style.position === 'fixed' || parseInt(style.zIndex) > 1000;
-            }) as HTMLElement[];
+          const overlays = Array.from(
+            document.querySelectorAll('body > *:not(#root):not(script):not(style):not(#omdb-modal-root)')
+          ).filter((el) => {
+            const htmlEl = el as HTMLElement;
+            if (htmlEl.hasAttribute('data-app-portal')) return false;
+            const style = window.getComputedStyle(htmlEl);
+            return style.position === 'fixed' || style.position === 'absolute' || parseInt(style.zIndex, 10) > 50;
+          }) as HTMLElement[];
 
           const hiddenElements: { el: HTMLElement; prevEvents: string }[] = [];
           overlays.forEach((el) => {
@@ -105,21 +106,25 @@ export const CpmScriptManager: React.FC = () => {
       }
     }
 
-    if (!elementUnderneath || !elementUnderneath.closest('#root')) return;
+    if (!elementUnderneath || !elementUnderneath.closest('#root')) {
+      return { path: null, element: null };
+    }
 
     const actionable =
       elementUnderneath.closest<HTMLElement>(
         'a, button, [role="button"], input, select, textarea, [data-clickable], [tabindex]'
       ) || elementUnderneath;
 
-    if (!actionable) return;
-
     // 1. Check for direct anchor or parent anchor
-    let anchorEl = actionable.closest<HTMLAnchorElement>('a[href]') || (actionable instanceof HTMLAnchorElement ? actionable : null);
+    let anchorEl =
+      actionable.closest<HTMLAnchorElement>('a[href]') ||
+      (actionable instanceof HTMLAnchorElement ? actionable : null);
 
     // 2. If no direct anchor, search parent container card for internal <Link> / <a> tag
     if (!anchorEl) {
-      const containerCard = elementUnderneath.closest<HTMLElement>('.relative, article, .group, card, li, [data-card], section, main');
+      const containerCard = elementUnderneath.closest<HTMLElement>(
+        '.relative, article, .group, card, li, [data-card], section, main'
+      );
       if (containerCard) {
         anchorEl = containerCard.querySelector<HTMLAnchorElement>('a[href]');
       }
@@ -135,33 +140,34 @@ export const CpmScriptManager: React.FC = () => {
       } catch (err) {}
     }
 
-    // Synchronously execute immediate SPA navigation if internal path is found!
-    if (internalPath && internalPath !== window.location.pathname + window.location.search) {
-      navigateRef.current(internalPath);
-      return;
+    return { path: internalPath, element: anchorEl || actionable };
+  };
+
+  // Helper to execute user's intended navigation/action immediately
+  const executeUserIntendedAction = (
+    fallbackCoords?: { x: number; y: number },
+    fallbackTarget?: HTMLElement | null
+  ) => {
+    const { path, element } = resolveIntendedAction(fallbackTarget, fallbackCoords);
+
+    if (path) {
+      const currentLoc = window.location.pathname + window.location.search + window.location.hash;
+      if (path !== currentLoc) {
+        if (!isNavigatingRef.current) {
+          isNavigatingRef.current = true;
+          navigateRef.current(path);
+          setTimeout(() => {
+            isNavigatingRef.current = false;
+          }, 150);
+        }
+        return;
+      }
     }
 
-    // Dispatch synthetic click event for React click handlers
-    try {
-      const forwardedEvent = new MouseEvent('click', {
-        bubbles: true,
-        cancelable: true,
-        view: window,
-        clientX: coords.x,
-        clientY: coords.y,
-        button: 0,
-        buttons: 1,
-      });
-      (forwardedEvent as any).__forwardedByProxy = true;
-      actionable.dispatchEvent(forwardedEvent);
-
-      if (actionable instanceof HTMLInputElement || actionable instanceof HTMLTextAreaElement || actionable instanceof HTMLSelectElement) {
-        actionable.focus();
-      } else if (actionable instanceof HTMLButtonElement) {
-        actionable.click();
-      }
-    } catch (err) {
-      console.error('Seamless click execution error:', err);
+    if (element && element instanceof HTMLButtonElement) {
+      try {
+        element.click();
+      } catch (e) {}
     }
   };
 
@@ -182,6 +188,25 @@ export const CpmScriptManager: React.FC = () => {
     };
   }, []);
 
+  // Continuous Ad & Overlay Cleanup during Cooldown and on Window Focus (e.g. after returning from Popunder)
+  useEffect(() => {
+    const handleWindowFocus = () => {
+      const cd = isPopunderInCooldown();
+      setInCooldown(cd);
+      if (cd || isUserExemptFromAds(profileRef.current)) {
+        purgeAllAdElements();
+      }
+    };
+
+    window.addEventListener('focus', handleWindowFocus);
+    document.addEventListener('visibilitychange', handleWindowFocus);
+
+    return () => {
+      window.removeEventListener('focus', handleWindowFocus);
+      document.removeEventListener('visibilitychange', handleWindowFocus);
+    };
+  }, []);
+
   // Continuous Ad Cleanup during Cooldown
   useEffect(() => {
     if (inCooldown) {
@@ -193,7 +218,7 @@ export const CpmScriptManager: React.FC = () => {
         if (isPopunderInCooldown()) {
           purgeAllAdElements();
         }
-      }, 1000); // Every 1 second
+      }, 1000);
 
       // Mutation observer to kill new overlays immediately
       const observer = new MutationObserver((mutations) => {
@@ -227,7 +252,9 @@ export const CpmScriptManager: React.FC = () => {
     }
 
     // 1. Social Bar: Always inject for non-exempt users on valid routes
-    let socialScript = document.querySelector(`script[src*="f0270bbaca005a7be1c664c3c0ae0386"]`) as HTMLScriptElement | null;
+    let socialScript = document.querySelector(
+      `script[src*="f0270bbaca005a7be1c664c3c0ae0386"]`
+    ) as HTMLScriptElement | null;
     if (!socialScript) {
       socialScript = document.createElement('script');
       socialScript.src = `${SOCIAL_BAR_SCRIPT_SRC}?_cb=${Date.now()}`;
@@ -238,7 +265,9 @@ export const CpmScriptManager: React.FC = () => {
 
     // 2. Popunder Script Injection: Only when NOT in cooldown
     const activeCooldown = isPopunderInCooldown();
-    const popunderScript = document.querySelector(`script[data-popunder-script="true"]`) as HTMLScriptElement | null;
+    const popunderScript = document.querySelector(
+      `script[data-popunder-script="true"]`
+    ) as HTMLScriptElement | null;
 
     if (!activeCooldown && !inCooldown) {
       if (!popunderScript) {
@@ -258,10 +287,10 @@ export const CpmScriptManager: React.FC = () => {
         popunderScript.remove();
       }
       document.querySelectorAll(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`).forEach((el) => el.remove());
-      // Also purge globals specifically related to popunder, but NOT generic ones that social bar might use
+      // Also purge globals specifically related to popunder
       try {
         const globals = ['_pop', '_pop_config', '_pop_script', '__p_scr', '__p_config'];
-        globals.forEach(g => {
+        globals.forEach((g) => {
           try {
             if ((window as any)[g]) delete (window as any)[g];
           } catch (e) {}
@@ -271,7 +300,7 @@ export const CpmScriptManager: React.FC = () => {
   }, [location.pathname, profile, inCooldown]);
 
   // =========================================================================
-  // WINDOW.OPEN INTERCEPTOR (ALLOWS POPUNDER WHEN NOT IN COOLDOWN, ALLOWS SOCIAL ADS, BLOCKS POPUNDERS DURING COOLDOWN & FOR VIPs)
+  // WINDOW.OPEN INTERCEPTOR
   // =========================================================================
   useEffect(() => {
     const originalWindowOpen = window.open;
@@ -303,7 +332,6 @@ export const CpmScriptManager: React.FC = () => {
 
       // If user is VIP / exempt from ads, block ALL external ad window.open calls completely
       if (isUserExemptFromAds(profileRef.current)) {
-        console.warn('[AdShield] Blocked ad window.open for VIP user:', urlStr);
         executeUserIntendedAction();
         return createDummyWindow();
       }
@@ -319,7 +347,6 @@ export const CpmScriptManager: React.FC = () => {
 
       // Popunder handling for clicks on app UI (#root):
       if (isPopunderInCooldown()) {
-        console.warn('[AdShield] Blocked popunder window.open during 2-minute cooldown:', urlStr);
         // Synchronously execute the user's desired link/page action on 1st tap!
         executeUserIntendedAction();
         // Return dummy window object so popunder script believes popup succeeded and deactivates itself!
@@ -329,8 +356,8 @@ export const CpmScriptManager: React.FC = () => {
       // NOT in cooldown & click was on #root: record popunder triggered NOW and allow popup to open!
       recordPopunderTriggered();
       setInCooldown(true);
-      
-      // Force an immediate purge of the ad script tag and globals
+
+      // Force an immediate purge of the ad script tag and overlays
       purgeAllAdElements();
 
       // Execute user intended navigation in main window IMMEDIATELY
@@ -357,7 +384,6 @@ export const CpmScriptManager: React.FC = () => {
       const inCd = isPopunderInCooldown();
 
       if ((isExempt || inCd) && isAdUrl(href)) {
-        console.warn('[AdShield] Blocked popunder anchor.click during cooldown:', href);
         executeUserIntendedAction();
         return;
       }
@@ -371,7 +397,6 @@ export const CpmScriptManager: React.FC = () => {
       const inCd = isPopunderInCooldown();
 
       if ((isExempt || inCd) && isAdUrl(action)) {
-        console.warn('[AdShield] Blocked popunder form.submit during cooldown:', action);
         executeUserIntendedAction();
         return;
       }
@@ -386,7 +411,8 @@ export const CpmScriptManager: React.FC = () => {
   }, []);
 
   // =========================================================================
-  // SEAMLESS 1ST-PRESS ROUTING / CLICK ACTION PROXY
+  // GUARANTEED 1ST-CLICK NAVIGATION & INTENT PRESERVER (CAPTURE PHASE)
+  // Fixes the two-click issue where ad scripts prevent navigation on 1st press
   // =========================================================================
   useEffect(() => {
     const handlePointerDown = (e: MouseEvent | TouchEvent) => {
@@ -399,34 +425,84 @@ export const CpmScriptManager: React.FC = () => {
         x = e.touches[0].clientX;
         y = e.touches[0].clientY;
       }
-      lastClickRef.current = {
-        x,
-        y,
-        target: e.target as HTMLElement | null,
-      };
+
+      const target = e.target as HTMLElement | null;
+      lastClickRef.current = { x, y, target };
+
+      // Pre-extract intended path & element
+      const resolved = resolveIntendedAction(target, { x, y });
+      if (resolved.path) {
+        pendingIntentRef.current = {
+          path: resolved.path,
+          element: resolved.element,
+          timestamp: Date.now(),
+        };
+      }
     };
 
-    const handleGlobalClick = (e: MouseEvent) => {
-      // If user is VIP / Exempt, purge any leftover ad elements and skip click proxying
-      if (isUserExemptFromAds(profileRef.current)) {
-        purgeAllAdElements();
-        return;
+    const handleGlobalClickCapture = (e: MouseEvent) => {
+      const x = e.clientX;
+      const y = e.clientY;
+      const target = e.target as HTMLElement | null;
+
+      lastClickRef.current = { x, y, target };
+
+      const resolved = resolveIntendedAction(target, { x, y });
+      if (resolved.path) {
+        pendingIntentRef.current = {
+          path: resolved.path,
+          element: resolved.element,
+          timestamp: Date.now(),
+        };
       }
 
-      if ((e as any).__forwardedByProxy) {
-        return;
+      // If user clicked an ad overlay outside #root, purge the overlay immediately and navigate
+      if (target && !target.closest('#root') && target.id !== 'omdb-modal-root' && !target.hasAttribute('data-app-portal')) {
+        const id = (target.id || '').toLowerCase();
+        const className = (typeof target.className === 'string' ? target.className : '').toLowerCase();
+        const isSocialBar = id.includes('social') || className.includes('social') || id.includes('pro-') || className.includes('pro-');
+
+        if (!isSocialBar && isPopunderInCooldown()) {
+          try {
+            target.remove();
+          } catch (err) {}
+          if (resolved.path) {
+            executeUserIntendedAction({ x, y }, target);
+          }
+        }
+      }
+
+      // Post-Click Microtask Verification:
+      // If the user clicked an internal link, verify if React Router navigated.
+      // If an ad script prevented default / cancelled navigation, force the navigation immediately!
+      if (resolved.path) {
+        const targetPath = resolved.path;
+        setTimeout(() => {
+          const currentLoc = window.location.pathname + window.location.search + window.location.hash;
+          if (currentLoc !== targetPath && pendingIntentRef.current.path === targetPath) {
+            // Navigation was blocked/prevented by an ad script! Force the navigation NOW!
+            if (!isNavigatingRef.current) {
+              isNavigatingRef.current = true;
+              navigateRef.current(targetPath);
+              setTimeout(() => {
+                isNavigatingRef.current = false;
+              }, 150);
+            }
+          }
+        }, 16);
       }
     };
 
     window.addEventListener('pointerdown', handlePointerDown, { capture: true, passive: true });
-    window.addEventListener('click', handleGlobalClick, { capture: true });
+    window.addEventListener('touchstart', handlePointerDown, { capture: true, passive: true });
+    window.addEventListener('click', handleGlobalClickCapture, { capture: true });
 
     return () => {
       window.removeEventListener('pointerdown', handlePointerDown, { capture: true });
-      window.removeEventListener('click', handleGlobalClick, { capture: true });
+      window.removeEventListener('touchstart', handlePointerDown, { capture: true });
+      window.removeEventListener('click', handleGlobalClickCapture, { capture: true });
     };
   }, []);
 
   return null;
 };
-
