@@ -77,7 +77,35 @@ export function purgeAllAdElements(): void {
       '.pub_300x250',
     ];
     selectors.forEach(sel => {
-      document.querySelectorAll(sel).forEach(el => el.remove());
+      document.querySelectorAll(sel).forEach(el => {
+        const htmlEl = el as HTMLElement;
+        if (!htmlEl.closest('#root') && htmlEl.id !== 'omdb-modal-root') {
+          htmlEl.remove();
+        }
+      });
+    });
+
+    // Aggressive Overlay Killer: Remove any fixed/absolute div outside #root that covers a large area
+    const allDivs = document.querySelectorAll('body > div:not(#root):not(#omdb-modal-root)');
+    allDivs.forEach((el) => {
+      const htmlEl = el as HTMLElement;
+      if (htmlEl.hasAttribute('data-app-portal')) return;
+      
+      const style = window.getComputedStyle(htmlEl);
+      const isFixed = style.position === 'fixed' || style.position === 'absolute';
+      const zIndex = parseInt(style.zIndex, 10);
+      
+      if (isFixed && (zIndex > 100 || zIndex === 2147483647)) {
+        const width = htmlEl.offsetWidth;
+        const height = htmlEl.offsetHeight;
+        const screenWidth = window.innerWidth;
+        const screenHeight = window.innerHeight;
+        
+        // If it covers more than 50% of the screen width and height
+        if (width > screenWidth * 0.5 && height > screenHeight * 0.5) {
+          htmlEl.remove();
+        }
+      }
     });
   } catch (e) {}
 }

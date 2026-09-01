@@ -77,19 +77,23 @@ export const CpmScriptManager: React.FC = () => {
     if (!elementUnderneath || !elementUnderneath.closest('#root')) {
       if (coords.x > 0 || coords.y > 0) {
         try {
-          const hiddenElements: { el: HTMLElement; prevEvents: string }[] = [];
-          document.querySelectorAll('body > *:not(#root)').forEach((el) => {
-            const htmlEl = el as HTMLElement;
-            if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'LINK', 'IFRAME'].includes(htmlEl.tagName)) return;
-            if (htmlEl.id === 'omdb-modal-root' || htmlEl.hasAttribute('data-app-portal')) return;
-            const isReactNode = Object.keys(htmlEl).some((key) => key.startsWith('__react'));
-            if (isReactNode) return;
+          // Identify all potential overlay candidates outside #root
+          const overlays = Array.from(document.querySelectorAll('body > *:not(#root):not(script):not(style)'))
+            .filter(el => {
+              const htmlEl = el as HTMLElement;
+              if (htmlEl.id === 'omdb-modal-root' || htmlEl.hasAttribute('data-app-portal')) return false;
+              // Check for full-screen or high z-index elements
+              const style = window.getComputedStyle(htmlEl);
+              return style.position === 'fixed' || parseInt(style.zIndex) > 1000;
+            }) as HTMLElement[];
 
+          const hiddenElements: { el: HTMLElement; prevEvents: string }[] = [];
+          overlays.forEach((el) => {
             hiddenElements.push({
-              el: htmlEl,
-              prevEvents: htmlEl.style.pointerEvents,
+              el,
+              prevEvents: el.style.pointerEvents,
             });
-            htmlEl.style.pointerEvents = 'none';
+            el.style.pointerEvents = 'none';
           });
 
           elementUnderneath = document.elementFromPoint(coords.x, coords.y) as HTMLElement | null;
@@ -180,14 +184,30 @@ export const CpmScriptManager: React.FC = () => {
       // Immediate cleanup
       purgeAllAdElements();
 
-      // Periodic cleanup during cooldown to handle any background script re-injections
+      // Faster cleanup during cooldown to handle any background script re-injections
       const interval = setInterval(() => {
         if (isPopunderInCooldown()) {
           purgeAllAdElements();
         }
-      }, 5000); // Every 5 seconds
+      }, 1000); // Every 1 second
 
-      return () => clearInterval(interval);
+      // Mutation observer to kill new overlays immediately
+      const observer = new MutationObserver((mutations) => {
+        if (isPopunderInCooldown()) {
+          let shouldPurge = false;
+          mutations.forEach((m) => {
+            if (m.addedNodes.length > 0) shouldPurge = true;
+          });
+          if (shouldPurge) purgeAllAdElements();
+        }
+      });
+
+      observer.observe(document.body, { childList: true });
+
+      return () => {
+        clearInterval(interval);
+        observer.disconnect();
+      };
     }
   }, [inCooldown]);
 
@@ -307,22 +327,12 @@ export const CpmScriptManager: React.FC = () => {
       // Force an immediate purge of the ad script tag and globals
       purgeAllAdElements();
 
-      // 1. Open the popunder FIRST so the browser and ad script register the popunder window successfully
-      const popupWindow = originalWindowOpen.call(window, url, target, features);
+      // Execute user intended navigation in main window IMMEDIATELY
+      // This ensures the 1st click handles BOTH the ad and the app action
+      executeUserIntendedAction();
 
-      // 2. Remove popunder script tag after trigger
-      const popunderScript = document.querySelector(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`);
-      if (popunderScript) {
-        popunderScript.remove();
-      }
-      document.querySelectorAll(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`).forEach((el) => el.remove());
-
-      // 3. Defer main-window SPA navigation slightly so it does NOT close or cancel the popunder window gesture
-      setTimeout(() => {
-        executeUserIntendedAction();
-      }, 80);
-
-      return popupWindow || createDummyWindow();
+      // Open the popunder
+      return originalWindowOpen.call(window, url, target, features);
     };
 
     return () => {
