@@ -52,13 +52,19 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
+    let timeoutId: NodeJS.Timeout | null = null;
     if (isStaticExportNewer()) {
-      performMerge();
+      timeoutId = setTimeout(() => {
+        performMerge();
+      }, 100);
     }
     
     window.addEventListener('static_content_updated', performMerge);
     setLoading(false);
-    return () => window.removeEventListener('static_content_updated', performMerge);
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      window.removeEventListener('static_content_updated', performMerge);
+    };
   }, []);
 
   // Listen to local content updates (e.g., from Admin or background storage syncs)

@@ -16,7 +16,6 @@ import {
 import { db } from "../../firebase";
 import { safeStorage } from "../../utils/safeStorage";
 import { minifyContent } from "../../utils/chunkUtils";
-import { seedStaticExportData } from "../../utils/staticContentLoader";
 import {
   collection,
   addDoc,
@@ -6478,12 +6477,13 @@ export default function ContentManagement() {
                 "All changes have been synced to the server successfully.",
             });
             setIsSyncConfirmOpen(false);
-          } catch (error) {
+          } catch (error: any) {
+            console.error("Error syncing content changes:", error);
             setAlertConfig({
               isOpen: true,
               title: "Sync Failed",
               message:
-                "An error occurred while syncing changes. Please try again.",
+                error?.message ? `Failed to sync changes: ${error.message}` : "An error occurred while syncing changes. Please try again.",
             });
           } finally {
             setIsSyncing(false);

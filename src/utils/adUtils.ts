@@ -125,27 +125,47 @@ export interface AdContentCheck {
 }
 
 // 2-Minute Popunder Cooldown Constant
-export const POPUNDER_COOLDOWN_MS = 0; // Disabled
+export const POPUNDER_COOLDOWN_MS = 2 * 60 * 1000; // 2 minutes in milliseconds
 
 /**
- * Returns remaining cooldown milliseconds (always 0).
+ * Returns remaining cooldown milliseconds (0 if cooldown has expired or not set).
  */
 export function getPopunderCooldownRemaining(): number {
-  return 0;
+  if (typeof window === 'undefined') return 0;
+  try {
+    const lastTimeStr = localStorage.getItem('lastPopunderTime');
+    if (!lastTimeStr) return 0;
+    const lastTime = parseInt(lastTimeStr, 10);
+    if (isNaN(lastTime)) {
+      localStorage.removeItem('lastPopunderTime');
+      return 0;
+    }
+    const remaining = POPUNDER_COOLDOWN_MS - (Date.now() - lastTime);
+    if (remaining <= 0) {
+      localStorage.removeItem('lastPopunderTime');
+      return 0;
+    }
+    return remaining;
+  } catch (e) {
+    return 0;
+  }
 }
 
 /**
- * Checks if popunder ads are currently in a cooldown period (always false).
+ * Checks if popunder ads are currently in the 2-minute cooldown period.
  */
 export function isPopunderInCooldown(): boolean {
-  return false;
+  return getPopunderCooldownRemaining() > 0;
 }
 
 /**
- * No-op.
+ * Records the current timestamp as the start of a 2-minute popunder cooldown.
  */
 export function recordPopunderTriggered(): void {
-  // No-op
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem('lastPopunderTime', Date.now().toString());
+  } catch (e) {}
 }
 
 /**

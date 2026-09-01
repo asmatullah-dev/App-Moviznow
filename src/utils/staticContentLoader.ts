@@ -22,8 +22,6 @@ let memoizedJsonVersion: string | null = null;
 
 /**
  * Calculates a unique, reliable version string for the static export JSON file.
- * Evaluates explicit version/exportedAt properties or calculates the latest
- * timestamp across metadata, collections, and content items.
  */
 export function getStaticExportVersion(): string {
   if (memoizedJsonVersion) return memoizedJsonVersion;
@@ -96,8 +94,7 @@ export function isStaticExportNewer(): boolean {
 
 /**
  * Returns cached content, metadata, and collections synchronously.
- * Guarantees zero loading delay on app open by serving from local cache immediately.
- * If cache is completely empty (first run), it bootstraps initial items synchronously.
+ * Guarantees zero loading delay on app open by serving from local cache or in-memory bundle immediately.
  */
 export function getCachedContentData(includeStatic: boolean = true): {
   contentList: Content[];
@@ -107,7 +104,7 @@ export function getCachedContentData(includeStatic: boolean = true): {
   collections: AppCollection[];
   hasCache: boolean;
 } {
-  // 1. Try memory cache
+  // 1. Try in-memory cache for instant zero-computation return
   if (includeStatic && memoizedContentList && memoizedContentList.length > 0) {
     return {
       contentList: memoizedContentList,
@@ -136,53 +133,11 @@ export function getCachedContentData(includeStatic: boolean = true): {
         };
       }
     } catch (e) {
-      console.warn('Failed to parse cached content, attempting chunk recovery:', e);
+      console.warn('Failed to parse cached content:', e);
     }
   }
 
-  // 3. Try recovering from chunks in safeStorage
-  const chunkKeys = safeStorage.keys().filter(k =>
-    k.startsWith('content_chunk_') ||
-    (includeStatic && k.startsWith('static_content_chunk_')) ||
-    k.startsWith('movie_chunk_') ||
-    k.startsWith('series_chunk_')
-  );
-
-  if (chunkKeys.length > 0) {
-    const rawContentMap: Record<string, Content> = {};
-    for (const key of chunkKeys) {
-      const chunkStr = safeStorage.getItem(key);
-      if (chunkStr) {
-        try {
-          const items = JSON.parse(chunkStr);
-          Object.entries(items).forEach(([id, item]: [string, any]) => {
-            const expanded = expandContent({ ...item, id }, key);
-            rawContentMap[expanded.id] = expanded;
-          });
-        } catch (e) {}
-      }
-    }
-
-    const recoveredList = Object.values(rawContentMap).sort(
-      (a, b) => (b.order ?? 0) - (a.order ?? 0)
-    );
-
-    if (recoveredList.length > 0) {
-      memoizedContentList = recoveredList;
-      safeStorage.setItem('content_cache', JSON.stringify(recoveredList));
-      return {
-        contentList: recoveredList,
-        genres: getCachedGenres(includeStatic),
-        languages: getCachedLanguages(includeStatic),
-        qualities: getCachedQualities(includeStatic),
-        collections: getCachedCollections(includeStatic),
-        hasCache: true
-      };
-    }
-  }
-
-  // 4. Cache is completely empty (brand new installation / first launch)
-  // Seed synchronously so the first frame renders immediately without a loading spinner!
+  // 3. Cache empty on first launch: build in-memory list directly from unifiedData (0ms freeze)
   const items = staticContentData as StaticContentItem[];
   const itemMap: Record<string, Content> = {};
   const chunkMap: Record<string, Record<string, any>> = {};
@@ -198,29 +153,24 @@ export function getCachedContentData(includeStatic: boolean = true): {
   const initialList = Object.values(itemMap).sort((a, b) => (b.order ?? 0) - (a.order ?? 0));
   memoizedContentList = initialList;
 
-  // Persist to static chunks
-  for (const [chunkId, itemsObj] of Object.entries(chunkMap)) {
-    safeStorage.setItem('static_content_chunk_' + chunkId, JSON.stringify(itemsObj));
-  }
-
-  // Persist metadata
-  const initialGenres = getStaticExportMetadata().genres;
-  const initialLanguages = getStaticExportMetadata().languages;
-  const initialQualities = getStaticExportMetadata().qualities;
-  const initialCollections = getStaticExportCollections();
-
-  safeStorage.setItem('static_genres_cache', JSON.stringify(initialGenres));
-  safeStorage.setItem('static_languages_cache', JSON.stringify(initialLanguages));
-  safeStorage.setItem('static_qualities_cache', JSON.stringify(initialQualities));
-  safeStorage.setItem('static_collections_cache', JSON.stringify(initialCollections));
-  if (staticCollectionsData.items) {
-    safeStorage.setItem('static_collection_chunk_collection_chunk_0', JSON.stringify(staticCollectionsData.items));
-  }
-
-  const currentVer = getStaticExportVersion();
-  safeStorage.setItem('cached_json_catalog_version', currentVer);
-
-  // We do NOT update the primary chunk_meta_versions here to keep Admin management pure
+  // Persist to safeStorage asynchronously in the background so the initial UI paints without lag
+  setTimeout(() => {
+    try {
+      safeStorage.setItem('content_cache', JSON.stringify(initialList));
+      for (const [chunkId, itemsObj] of Object.entries(chunkMap)) {
+        safeStorage.setItem('static_content_chunk_' + chunkId, JSON.stringify(itemsObj));
+      }
+      safeStorage.setItem('static_genres_cache', JSON.stringify(getStaticExportMetadata().genres));
+      safeStorage.setItem('static_languages_cache', JSON.stringify(getStaticExportMetadata().languages));
+      safeStorage.setItem('static_qualities_cache', JSON.stringify(getStaticExportMetadata().qualities));
+      safeStorage.setItem('static_collections_cache', JSON.stringify(getStaticExportCollections()));
+      if (staticCollectionsData.items) {
+        safeStorage.setItem('static_collection_chunk_collection_chunk_0', JSON.stringify(staticCollectionsData.items));
+      }
+      const currentVer = getStaticExportVersion();
+      safeStorage.setItem('cached_json_catalog_version', currentVer);
+    } catch (e) {}
+  }, 100);
 
   return {
     contentList: includeStatic ? initialList : [],
@@ -317,15 +267,10 @@ function getCachedCollections(includeStatic: boolean = true): AppCollection[] {
 }
 
 /**
- * Safely merges a newer static export JSON file into the existing local cache.
- * Rules:
- * 1. If an item exists in the JSON file and does not exist in cache: add it.
- * 2. If an item exists in both: compare timestamps.
- *    - If JSON item timestamp is newer: update cached item.
- *    - If local item timestamp is newer or equal: preserve local item (protects local edits).
- * 3. If an item exists in cache and NOT in JSON file: PRESERVE it (never deletes local items).
- * 4. Merges metadata and collections safely.
- * 5. Updates chunk storage, content_cache, and cached_json_catalog_version.
+ * Safely merges a newer static export JSON file into the user catalog cache.
+ * STRICT ISOLATION:
+ * - Never modifies, overwrites, or merges any admin_* storage keys or admin chunk data.
+ * - Merges static catalog smoothly into content_cache and static_content_chunk_*.
  */
 export function mergeStaticExportDataSafely(): {
   contentList: Content[];
@@ -352,12 +297,10 @@ export function mergeStaticExportDataSafely(): {
     } catch (e) {}
   }
 
-  // 2. Read from chunk storage keys in safeStorage to ensure no local chunk items are missed
+  // 2. Read only from static_content_chunk_ or standard content_chunk_ (strictly avoiding admin_* keys)
   const chunkKeys = safeStorage.keys().filter(k =>
-    k.startsWith('content_chunk_') ||
-    k.startsWith('static_content_chunk_') ||
-    k.startsWith('movie_chunk_') ||
-    k.startsWith('series_chunk_')
+    (k.startsWith('static_content_chunk_') || k.startsWith('content_chunk_') || k.startsWith('movie_chunk_') || k.startsWith('series_chunk_')) &&
+    !k.startsWith('admin_')
   );
   for (const key of chunkKeys) {
     const chunkStr = safeStorage.getItem(key);
@@ -411,67 +354,40 @@ export function mergeStaticExportDataSafely(): {
     return timeB - timeA;
   });
 
-  // Save mergedList into primary content_cache
-  safeStorage.setItem('content_cache', JSON.stringify(mergedList));
-
-  // 2. Overwrite genres
   const mergedGenres = getStaticExportMetadata().genres;
-
-  // 3. Overwrite languages
   const mergedLanguages = getStaticExportMetadata().languages;
-
-  // 4. Overwrite qualities
   const mergedQualities = getStaticExportMetadata().qualities;
-
-  // 5. Overwrite collections
   const mergedCollections = getStaticExportCollections();
 
-  // 6. Write chunk objects into static storage
-  const chunkMap: Record<string, Record<string, any>> = {};
-  for (const item of jsonItems) {
-    const chunkId = item.chunkId || (item.type === 'movie' ? 'movie_chunk_0' : 'series_chunk_0');
-    if (!chunkMap[chunkId]) chunkMap[chunkId] = {};
-    chunkMap[chunkId][item.id] = item;
-  }
-  for (const [chunkId, itemsObj] of Object.entries(chunkMap)) {
-    const storageKey = 'static_content_chunk_' + chunkId;
-    const existingStr = safeStorage.getItem(storageKey);
-    if (!existingStr || existingStr === '{}') {
-      safeStorage.setItem(storageKey, JSON.stringify(itemsObj));
-    } else {
-      try {
-        const existing = JSON.parse(existingStr);
-        let modified = false;
-        for (const [id, staticItem] of Object.entries(itemsObj)) {
-          if (!existing[id] || JSON.stringify(existing[id]) !== JSON.stringify(staticItem)) {
-            existing[id] = staticItem;
-            modified = true;
-          }
-        }
-        if (modified) {
-          safeStorage.setItem(storageKey, JSON.stringify(existing));
-        }
-      } catch (e) {
-        safeStorage.setItem(storageKey, JSON.stringify(itemsObj));
-      }
-    }
-  }
-
-  // 7. Persist static markers
-  safeStorage.setItem('static_genres_cache', JSON.stringify(mergedGenres));
-  safeStorage.setItem('static_languages_cache', JSON.stringify(mergedLanguages));
-  safeStorage.setItem('static_qualities_cache', JSON.stringify(mergedQualities));
-  safeStorage.setItem('static_collections_cache', JSON.stringify(mergedCollections));
-
-  // 8. Update version markers
-  const currentVer = getStaticExportVersion();
-  safeStorage.setItem('cached_json_catalog_version', currentVer);
-  safeStorage.setItem('last_successful_meta_check', Date.now().toString());
-
-  // Update memory cache
+  // Update memory cache immediately
   memoizedContentList = mergedList;
 
-  // Dispatch event so any other active views/tabs immediately update
+  // Persist merged cache and static metadata in non-blocking background queue
+  setTimeout(() => {
+    try {
+      safeStorage.setItem('content_cache', JSON.stringify(mergedList));
+      safeStorage.setItem('static_genres_cache', JSON.stringify(mergedGenres));
+      safeStorage.setItem('static_languages_cache', JSON.stringify(mergedLanguages));
+      safeStorage.setItem('static_qualities_cache', JSON.stringify(mergedQualities));
+      safeStorage.setItem('static_collections_cache', JSON.stringify(mergedCollections));
+
+      const chunkMap: Record<string, Record<string, any>> = {};
+      for (const item of jsonItems) {
+        const chunkId = item.chunkId || (item.type === 'movie' ? 'movie_chunk_0' : 'series_chunk_0');
+        if (!chunkMap[chunkId]) chunkMap[chunkId] = {};
+        chunkMap[chunkId][item.id] = item;
+      }
+      for (const [chunkId, itemsObj] of Object.entries(chunkMap)) {
+        safeStorage.setItem('static_content_chunk_' + chunkId, JSON.stringify(itemsObj));
+      }
+
+      const currentVer = getStaticExportVersion();
+      safeStorage.setItem('cached_json_catalog_version', currentVer);
+      safeStorage.setItem('last_successful_meta_check', Date.now().toString());
+    } catch (e) {}
+  }, 50);
+
+  // Dispatch event so any active views update seamlessly
   try {
     window.dispatchEvent(new CustomEvent('static_content_updated'));
   } catch (e) {}
@@ -487,21 +403,16 @@ export function mergeStaticExportDataSafely(): {
 }
 
 /**
- * Legacy compatibility wrapper: seeds static data only when forced or when
- * the cache is not populated, and safely merges if newer.
+ * Legacy compatibility wrapper: seeds static data only when needed without blocking the device.
  */
 export function seedStaticExportData(forceOverwrite: boolean = false): void {
   try {
-    // If not forcing overwrite and static export is not newer, skip if cache exists
     if (!forceOverwrite && !isStaticExportNewer()) {
-      const hasCache = !!safeStorage.getItem('content_cache') || !!safeStorage.getItem('chunk_meta_versions');
+      const hasCache = !!safeStorage.getItem('content_cache');
       if (hasCache) {
         return;
       }
     }
-
-    // Since we want to always use new json files and remove old,
-    // mergeStaticExportDataSafely now wipes cache and sets the new json exactly.
     mergeStaticExportDataSafely();
   } catch (e) {
     console.error('Error seeding static export data:', e);

@@ -15,7 +15,6 @@ import { db, runWithNetwork } from '../firebase';
 import { safeStorage } from '../utils/safeStorage';
 import { expandContent, CONTENT_CHUNK_MOVIE_SIZE, CONTENT_CHUNK_SERIES_SIZE } from '../utils/chunkUtils';
 import { getUtcVersion, parseVersionTime } from '../utils/chunkMeta';
-import { seedStaticExportData, getStaticExportContent, getCachedContentData } from '../utils/staticContentLoader';
 import { useAuth } from './AuthContext';
 import { useUsers } from './UsersContext';
 import { Content, Genre, Language, Quality, Collection as AppCollection } from '../types';
@@ -186,21 +185,12 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       const q = safeStorage.getItem('admin_qualities_cache') || safeStorage.getItem('qualities_cache');
       if (q) try { setQualities(JSON.parse(q).sort((a: any, b: any) => (a.order || 999) - (b.order || 999))); } catch(e) {}
 
-      // 4. Seed static export if unauthenticated / guest
-      const isAdminOrEditor = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
-      if (!isAdminOrEditor && !user) {
-        const contentCache = safeStorage.getItem('admin_content_cache');
-        const localMeta = safeStorage.getItem('admin_chunk_meta_versions');
-        if (!contentCache || contentCache === '[]' || !localMeta) {
-          seedStaticExportData();
-          refreshContentFromLocal();
-        }
-      }
-
+      // 4. Guest / non-admin: keep admin state clean and light without polluting with static JSON
       setLoading(false);
 
-      // 5. Automatic background sync from Firestore for authenticated users / admins
-      if (isAdminOrEditor || user) {
+      // 5. Automatic background sync from Firestore for authenticated admins
+      const isAdminOrEditor = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
+      if (isAdminOrEditor && user) {
         syncWithServer(false).catch(err => console.warn('Auto background sync on mount:', err));
       }
     };
@@ -387,6 +377,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         };
 
         // Handle content chunks
+        const syncedContentToSave: Record<string, string> = {};
         if (pendingChunkIds.length > 0) {
             for (const cid of pendingChunkIds) {
                 const chunkStr = safeStorage.getItem('admin_content_chunk_' + cid);
@@ -399,8 +390,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                         }); // Overwrite document for massive speedups and proper item deletes
                     });
                     
-                    // Update the last known synced reference
-                    safeStorage.setItem('admin_synced_content_chunk_' + cid, chunkStr);
+                    syncedContentToSave[cid] = chunkStr;
                     
                     versionsUpdate[cid] = {
                         updatedAt: utcNow,
@@ -411,6 +401,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         }
 
         // Handle collection chunks
+        const syncedCollToSave: Record<string, string> = {};
         if (pendingCollChunkIds.length > 0) {
             for (const cid of pendingCollChunkIds) {
                 const chunkStr = safeStorage.getItem('admin_collection_chunk_' + cid);
@@ -422,8 +413,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                         }); // Overwrite document for massive speedups and proper item deletes
                     });
 
-                    // Update the last known synced reference
-                    safeStorage.setItem('admin_synced_collection_chunk_' + cid, chunkStr);
+                    syncedCollToSave[cid] = chunkStr;
                 }
             }
             
@@ -466,7 +456,17 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             batch.set(doc(db, 'chunk_meta', 'versions'), versionsUpdate, { merge: true });
         });
 
-        await Promise.all(batches.map(b => b.commit()));
+        for (const b of batches) {
+            await runWithNetwork(() => b.commit());
+        }
+
+        // Only save synced cache references after commits succeed
+        for (const [cid, chunkStr] of Object.entries(syncedContentToSave)) {
+            safeStorage.setItem('admin_synced_content_chunk_' + cid, chunkStr);
+        }
+        for (const [cid, chunkStr] of Object.entries(syncedCollToSave)) {
+            safeStorage.setItem('admin_synced_collection_chunk_' + cid, chunkStr);
+        }
         
         const localMetaString = safeStorage.getItem('admin_chunk_meta_versions') || '{}';
         let localMeta: Record<string, any> = {};
@@ -536,9 +536,9 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         }
     }
 
-    // Fallback 1: If no admin chunks found yet, check admin_content_cache or content_cache
+    // Fallback 1: If no admin chunks found yet, check admin_content_cache
     if (Object.keys(rawContentMap).length === 0) {
-      const cachedContent = safeStorage.getItem('admin_content_cache') || safeStorage.getItem('content_cache');
+      const cachedContent = safeStorage.getItem('admin_content_cache');
       if (cachedContent && cachedContent !== '[]') {
         try {
           const parsed = JSON.parse(cachedContent);
@@ -551,23 +551,22 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       }
     }
 
-    // Fallback 2: Check general content chunk keys (content_chunk_ / movie_chunk_ / series_chunk_)
+    // Fallback 2: Check general Firestore content chunk keys (content_chunk_ / movie_chunk_ / series_chunk_)
     if (Object.keys(rawContentMap).length === 0) {
       const fallbackChunkKeys = safeStorage.keys().filter(k => 
-        k.startsWith('content_chunk_') || k.startsWith('static_content_chunk_') || k.startsWith('movie_chunk_') || k.startsWith('series_chunk_')
+        (k.startsWith('content_chunk_') || k.startsWith('movie_chunk_') || k.startsWith('series_chunk_')) &&
+        !k.startsWith('static_')
       );
       for (const key of fallbackChunkKeys) {
         const chunkStr = safeStorage.getItem(key);
         if (chunkStr) {
           try {
             const items = JSON.parse(chunkStr);
-            const cid = key.replace('content_chunk_', '').replace('static_content_chunk_', '');
+            const cid = key.replace('content_chunk_', '');
             Object.entries(items).forEach(([id, item]: [string, any]) => {
               const expanded = expandContent({ ...item, id }, cid);
               rawContentMap[expanded.id] = expanded;
             });
-            // Replicate under admin_content_chunk_ for rapid future reads
-            safeStorage.setItem('admin_content_chunk_' + cid, chunkStr);
           } catch(e) {}
         }
       }
@@ -670,9 +669,8 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
   };
 
   const syncWithServer = async (force: boolean = false): Promise<{ updatedSomething: boolean; updatedContentCount: number; isInitialLoad?: boolean }> => {
-    // Guest user bypass: use static content export without Firestore
+    // Non-admin / unauthenticated bypass
     if (!profile && !user) {
-        seedStaticExportData();
         refreshContentFromLocal();
         refreshCollectionsFromLocal();
         setLoading(false);
@@ -898,9 +896,8 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         return { updated: false, updatedContentCount: 0, isInitialLoad: false };
     }
 
-    // Guest user bypass: use static content export without Firestore
+    // Non-admin / unauthenticated bypass
     if (!profile && !user) {
-        seedStaticExportData();
         refreshContentFromLocal();
         refreshCollectionsFromLocal();
         setLoading(false);
@@ -1053,13 +1050,12 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
   };
 
   const quickRefreshCatalog = async (manual: boolean = false, prefetchedVersions?: Record<string, any>, forceAdminSync: boolean = false): Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean; isInitialLoad?: boolean }> => {
-    // Non-admin or standard browsing bypass: use static content export without Firestore unless explicitly forced by Admin
+    // Non-admin or standard browsing bypass: do not perform admin firestore sync
     if (!forceAdminSync) {
-        seedStaticExportData();
         refreshContentFromLocal();
         refreshCollectionsFromLocal();
         setLoading(false);
-        return { updated: false, updatedCount: 0, message: 'Catalog loaded from static export file', isRelaxed: true, isInitialLoad: false };
+        return { updated: false, updatedCount: 0, message: 'Catalog loaded from local cache', isRelaxed: true, isInitialLoad: false };
     }
 
     const LAST_QUICK_REFRESH_KEY = 'admin_last_catalog_quick_refresh_time';
