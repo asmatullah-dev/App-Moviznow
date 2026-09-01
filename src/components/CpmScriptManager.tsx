@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import React, { useEffect, useState, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import {
   isUserExemptFromAds,
@@ -14,192 +14,128 @@ import {
 const POPUNDER_SCRIPT_SRC = 'https://commercialhalftime.com/99/e7/8b/99e78b0792c97e620e43154c137cd1f3.js';
 const SOCIAL_BAR_SCRIPT_SRC = 'https://commercialhalftime.com/f0/27/0b/f0270bbaca005a7be1c664c3c0ae0386.js';
 
-let globalProfile: any = null;
-
-// Helper to recognize ad URLs
-function isAdUrl(urlStr: string): boolean {
-  if (!urlStr) return false;
-  const lower = urlStr.toLowerCase();
-  return (
-    lower.includes('commercialhalftime.com') ||
-    lower.includes('workdeadlinededicate.com') ||
-    lower.includes('nap5k.com') ||
-    lower.includes('n6wxm.com') ||
-    lower.includes('profitableratecpm') ||
-    lower.includes('adsterra') ||
-    lower.includes('monetag') ||
-    lower.includes('by1zps7h9h') ||
-    lower.includes('htqpa4mty') ||
-    lower.includes('kscas=')
-  );
-}
-
-// Helper to create a fake window object that tricks ad scripts into thinking the popunder opened
-function createDummyWindow(): Window {
-  return {
-    closed: false,
-    focus: () => {},
-    blur: () => {},
-    close: () => {},
-    postMessage: () => {},
-    location: { href: '' },
-    document: { write: () => {} },
-  } as unknown as Window;
-}
-
-/**
- * Removes popunder script elements and ad overlays without touching app event listeners.
- */
-function removePopunderScriptsAndOverlays(): void {
-  if (typeof document === 'undefined') return;
-
-  // 1. Remove popunder script elements from DOM
-  try {
-    document.querySelectorAll('script[src*="99e78b0792c97e620e43154c137cd1f3"]').forEach((el) => el.remove());
-    document.querySelectorAll('script[data-popunder-script="true"]').forEach((el) => el.remove());
-  } catch (e) {}
-
-  // 2. Clear ad-script global objects so cached scripts deactivate
-  try {
-    const emptyObj = {};
-    (window as any)._pop = emptyObj;
-    (window as any)._p = emptyObj;
-    (window as any).__pop = emptyObj;
-    (window as any).popunder = emptyObj;
-  } catch (e) {}
-
-  // 3. Remove any ad overlays created outside #root
-  try {
-    if (document.body) {
-      document.body.querySelectorAll('div, ins, iframe, a').forEach((el) => {
-        const htmlEl = el as HTMLElement;
-        if (htmlEl.id === 'root' || htmlEl.closest('#root')) return;
-        if (htmlEl.id === 'omdb-modal-root' || htmlEl.hasAttribute('data-app-portal')) return;
-        if (htmlEl.hasAttribute('data-authorized-ad-script')) return;
-
-        // Allow Social Bar elements
-        const isSocialBar =
-          htmlEl.id?.includes('social') ||
-          htmlEl.className?.includes('social') ||
-          Boolean(htmlEl.querySelector('script[src*="f0270bbaca005a7be1c664c3c0ae0386"]'));
-        if (isSocialBar) return;
-
-        const style = window.getComputedStyle(htmlEl);
-        const isFixedFull = style.position === 'fixed' && parseInt(style.zIndex, 10) > 100;
-        const isAdLink = htmlEl.tagName === 'A' && (htmlEl as HTMLAnchorElement).target === '_blank' && isAdUrl((htmlEl as HTMLAnchorElement).href);
-        const isAdIframe = htmlEl.tagName === 'IFRAME' && isAdUrl((htmlEl as HTMLIFrameElement).src);
-
-        if (isFixedFull || isAdLink || isAdIframe) {
-          htmlEl.remove();
-        }
-      });
-    }
-  } catch (e) {}
-}
-
-// SETUP TOP-LEVEL WINDOW.OPEN & AD SCRIPT INTERCEPTORS ONCE
-if (typeof window !== 'undefined' && !(window as any).__adShieldGlobalSetup) {
-  (window as any).__adShieldGlobalSetup = true;
-
-  const nativeWindowOpen = window.open;
-
-  window.open = function (url?: string | URL, target?: string, features?: string) {
-    const urlStr = String(url || '').trim();
-
-    // Whitelist legitimate app URLs (WhatsApp, Telegram, YouTube, tel, mailto, blob, etc.)
-    const isAppWhitelisted =
-      urlStr.startsWith('https://wa.me/') ||
-      urlStr.startsWith('https://api.whatsapp.com') ||
-      urlStr.startsWith('https://t.me/') ||
-      urlStr.includes('telegram.me') ||
-      urlStr.includes('youtube.com') ||
-      urlStr.includes('youtu.be') ||
-      urlStr.startsWith('tel:') ||
-      urlStr.startsWith('mailto:') ||
-      urlStr.startsWith('blob:') ||
-      urlStr.startsWith('data:');
-
-    if (isAppWhitelisted) {
-      return nativeWindowOpen.call(window, url, target, features);
-    }
-
-    // Allow internal app route navigations or same-origin window.open
-    if (urlStr.startsWith('/') || (urlStr.startsWith(window.location.origin) && !urlStr.includes('commercialhalftime'))) {
-      return nativeWindowOpen.call(window, url, target, features);
-    }
-
-    // VIP / Exempt users -> Block external ad popups completely
-    if (isUserExemptFromAds(globalProfile)) {
-      console.warn('[AdShield] Blocked ad window.open for VIP user:', urlStr);
-      return createDummyWindow();
-    }
-
-    // In 2-Minute Cooldown -> Block popunder window.open completely
-    if (isPopunderInCooldown()) {
-      console.warn('[AdShield] Blocked popunder window.open during 2-minute cooldown:', urlStr);
-      removePopunderScriptsAndOverlays();
-      return createDummyWindow();
-    }
-
-    // NOT in cooldown -> Trigger popunder NOW and enter 2-minute cooldown!
-    recordPopunderTriggered();
-    removePopunderScriptsAndOverlays();
-
-    const popupWindow = nativeWindowOpen.call(window, url, target, features);
-    return popupWindow || createDummyWindow();
-  };
-
-  // Intercept anchor.click and form.submit for ad URLs during cooldown
-  const originalAnchorClick = HTMLAnchorElement.prototype.click;
-  const originalFormSubmit = HTMLFormElement.prototype.submit;
-
-  HTMLAnchorElement.prototype.click = function () {
-    const href = this.href || '';
-    const isExempt = isUserExemptFromAds(globalProfile);
-    const inCd = isPopunderInCooldown();
-
-    if ((isExempt || inCd) && isAdUrl(href)) {
-      console.warn('[AdShield] Blocked ad anchor.click during cooldown:', href);
-      removePopunderScriptsAndOverlays();
-      return;
-    }
-
-    return originalAnchorClick.apply(this, arguments as any);
-  };
-
-  HTMLFormElement.prototype.submit = function () {
-    const action = this.action || '';
-    const isExempt = isUserExemptFromAds(globalProfile);
-    const inCd = isPopunderInCooldown();
-
-    if ((isExempt || inCd) && isAdUrl(action)) {
-      console.warn('[AdShield] Blocked ad form.submit during cooldown:', action);
-      removePopunderScriptsAndOverlays();
-      return;
-    }
-
-    return originalFormSubmit.apply(this, arguments as any);
-  };
-}
-
 export const CpmScriptManager: React.FC = () => {
   const { profile } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
 
   // Track cooldown state reactively
   const [inCooldown, setInCooldown] = useState<boolean>(isPopunderInCooldown());
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
 
-  globalProfile = profile;
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
 
-  // Monitor cooldown status every second
+  // Ref to track last click coordinates & target for seamless fallback execution
+  const lastClickRef = useRef<{ x: number; y: number; target: HTMLElement | null }>({ x: 0, y: 0, target: null });
+  const isExecutingActionRef = useRef<boolean>(false);
+
+  // Helper to execute user's intended navigation/action if hijacked by ad scripts
+  const executeUserIntendedAction = (fallbackCoords?: { x: number; y: number }, fallbackTarget?: HTMLElement | null) => {
+    if (isExecutingActionRef.current) return;
+    isExecutingActionRef.current = true;
+    setTimeout(() => {
+      isExecutingActionRef.current = false;
+    }, 120);
+
+    const coords = fallbackCoords || lastClickRef.current;
+    let elementUnderneath = fallbackTarget || lastClickRef.current.target;
+
+    // If target is missing or an ad overlay outside #root, locate element at pointer coordinates
+    if (!elementUnderneath || !elementUnderneath.closest('#root')) {
+      if (coords.x > 0 || coords.y > 0) {
+        try {
+          const hiddenElements: { el: HTMLElement; prevEvents: string }[] = [];
+          document.querySelectorAll('body > *:not(#root)').forEach((el) => {
+            const htmlEl = el as HTMLElement;
+            if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'LINK', 'IFRAME'].includes(htmlEl.tagName)) return;
+            if (htmlEl.id === 'omdb-modal-root' || htmlEl.hasAttribute('data-app-portal')) return;
+            const isReactNode = Object.keys(htmlEl).some((key) => key.startsWith('__react'));
+            if (isReactNode) return;
+
+            hiddenElements.push({
+              el: htmlEl,
+              prevEvents: htmlEl.style.pointerEvents,
+            });
+            htmlEl.style.pointerEvents = 'none';
+          });
+
+          elementUnderneath = document.elementFromPoint(coords.x, coords.y) as HTMLElement | null;
+
+          hiddenElements.forEach(({ el, prevEvents }) => {
+            el.style.pointerEvents = prevEvents;
+          });
+        } catch (err) {}
+      }
+    }
+
+    if (!elementUnderneath || !elementUnderneath.closest('#root')) return;
+
+    const actionable =
+      elementUnderneath.closest<HTMLElement>(
+        'a, button, [role="button"], input, select, textarea, [data-clickable], [tabindex]'
+      ) || elementUnderneath;
+
+    if (!actionable) return;
+
+    // 1. Check for direct anchor or parent anchor
+    let anchorEl = actionable.closest<HTMLAnchorElement>('a[href]') || (actionable instanceof HTMLAnchorElement ? actionable : null);
+
+    // 2. If no direct anchor, search parent container card for internal <Link> / <a> tag
+    if (!anchorEl) {
+      const containerCard = elementUnderneath.closest<HTMLElement>('.relative, article, .group, card, li, [data-card], section, main');
+      if (containerCard) {
+        anchorEl = containerCard.querySelector<HTMLAnchorElement>('a[href]');
+      }
+    }
+
+    let internalPath: string | null = null;
+    if (anchorEl && anchorEl.href) {
+      try {
+        const parsed = new URL(anchorEl.href, window.location.href);
+        if (parsed.origin === window.location.origin) {
+          internalPath = parsed.pathname + parsed.search + parsed.hash;
+        }
+      } catch (err) {}
+    }
+
+    // Synchronously execute immediate SPA navigation if internal path is found!
+    if (internalPath && internalPath !== window.location.pathname + window.location.search) {
+      navigateRef.current(internalPath);
+      return;
+    }
+
+    // Dispatch synthetic click event for React click handlers
+    try {
+      const forwardedEvent = new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: coords.x,
+        clientY: coords.y,
+        button: 0,
+        buttons: 1,
+      });
+      (forwardedEvent as any).__forwardedByProxy = true;
+      actionable.dispatchEvent(forwardedEvent);
+
+      if (actionable instanceof HTMLInputElement || actionable instanceof HTMLTextAreaElement || actionable instanceof HTMLSelectElement) {
+        actionable.focus();
+      } else if (actionable instanceof HTMLButtonElement) {
+        actionable.click();
+      }
+    } catch (err) {
+      console.error('Seamless click execution error:', err);
+    }
+  };
+
+  // Cooldown timer manager (checks every second)
   useEffect(() => {
     const checkCooldown = () => {
       const remaining = getPopunderCooldownRemaining();
       const active = remaining > 0;
       setInCooldown(active);
-      if (active) {
-        removePopunderScriptsAndOverlays();
-      }
     };
 
     checkCooldown();
@@ -207,22 +143,41 @@ export const CpmScriptManager: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Manage ad script insertion/removal
+  // Continuous Ad Cleanup during Cooldown
+  useEffect(() => {
+    if (inCooldown) {
+      purgeAllAdElements();
+
+      const observer = new MutationObserver(() => {
+        if (isPopunderInCooldown()) {
+          document.querySelectorAll('body > *:not(#root)').forEach((el) => {
+            const htmlEl = el as HTMLElement;
+            if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'LINK', 'IFRAME'].includes(htmlEl.tagName)) return;
+            if (htmlEl.id === 'omdb-modal-root' || htmlEl.hasAttribute('data-app-portal')) return;
+            const isReactNode = Object.keys(htmlEl).some((key) => key.startsWith('__react'));
+            if (isReactNode) return;
+            htmlEl.remove();
+          });
+        }
+      });
+
+      observer.observe(document.body, { childList: true, subtree: false });
+      return () => observer.disconnect();
+    }
+  }, [inCooldown]);
+
+  // Inject or clean up ad scripts based on route, exemption, and cooldown
   useEffect(() => {
     const isLogin = isAdRestrictedRoute(location.pathname);
     const isExempt = isUserExemptFromAds(profile);
-    const activeCooldown = isPopunderInCooldown();
 
-    // If on login route, exempt, or in cooldown -> clean up popunder scripts
-    if (isLogin || isExempt || activeCooldown || inCooldown) {
-      if (isLogin || isExempt) {
-        purgeAllAdElements();
-      }
-      removePopunderScriptsAndOverlays();
+    // If on restricted route or user is exempt, purge everything
+    if (isLogin || isExempt) {
+      purgeAllAdElements();
       return;
     }
 
-    // 1. Social Bar: Inject for non-exempt users on valid routes
+    // 1. Social Bar: Always inject for non-exempt users on valid routes
     let socialScript = document.querySelector(`script[src*="f0270bbaca005a7be1c664c3c0ae0386"]`) as HTMLScriptElement | null;
     if (!socialScript) {
       socialScript = document.createElement('script');
@@ -232,19 +187,160 @@ export const CpmScriptManager: React.FC = () => {
       document.head.appendChild(socialScript);
     }
 
-    // 2. Popunder Script: Inject ONLY when NOT in cooldown
+    // 2. Popunder Script Injection: Only when NOT in cooldown
+    const activeCooldown = isPopunderInCooldown();
     let popunderScript = document.querySelector(`script[data-popunder-script="true"]`) as HTMLScriptElement | null;
-    if (!popunderScript) {
-      removePopunderScriptsAndOverlays();
 
-      popunderScript = document.createElement('script');
-      popunderScript.src = `${POPUNDER_SCRIPT_SRC}?_t=${Date.now()}&_r=${Math.random().toString(36).substring(2)}`;
-      popunderScript.async = true;
-      popunderScript.setAttribute('data-authorized-ad-script', 'true');
-      popunderScript.setAttribute('data-popunder-script', 'true');
-      document.head.appendChild(popunderScript);
+    if (!activeCooldown && !inCooldown) {
+      if (!popunderScript) {
+        // Clean up any stale popunder script elements before appending fresh one
+        document.querySelectorAll(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`).forEach((el) => el.remove());
+
+        popunderScript = document.createElement('script');
+        popunderScript.src = `${POPUNDER_SCRIPT_SRC}?_t=${Date.now()}&_r=${Math.random().toString(36).substring(2)}`;
+        popunderScript.async = true;
+        popunderScript.setAttribute('data-authorized-ad-script', 'true');
+        popunderScript.setAttribute('data-popunder-script', 'true');
+        document.head.appendChild(popunderScript);
+      }
+    } else {
+      // In cooldown - remove popunder script tag so no extra popunder triggers
+      if (popunderScript) {
+        popunderScript.remove();
+      }
+      document.querySelectorAll(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`).forEach((el) => el.remove());
     }
   }, [location.pathname, profile, inCooldown]);
 
+  // =========================================================================
+  // WINDOW.OPEN INTERCEPTOR (ALLOWS POPUNDER WHEN NOT IN COOLDOWN, BLOCKS DURING COOLDOWN & FOR VIPs)
+  // =========================================================================
+  useEffect(() => {
+    const originalWindowOpen = window.open;
+
+    window.open = function (url?: string | URL, target?: string, features?: string) {
+      const urlStr = String(url || '').trim();
+
+      // Whitelist legitimate app URLs
+      const isAppWhitelisted =
+        urlStr.startsWith('https://wa.me/') ||
+        urlStr.startsWith('https://api.whatsapp.com') ||
+        urlStr.startsWith('https://t.me/') ||
+        urlStr.includes('telegram.me') ||
+        urlStr.includes('youtube.com') ||
+        urlStr.includes('youtu.be') ||
+        urlStr.startsWith('tel:') ||
+        urlStr.startsWith('mailto:') ||
+        urlStr.startsWith('blob:') ||
+        urlStr.startsWith('data:');
+
+      if (isAppWhitelisted) {
+        return originalWindowOpen.call(window, url, target, features);
+      }
+
+      // Check for internal SPA routes or exact same origin
+      if (urlStr.startsWith('/') || (urlStr.startsWith(window.location.origin) && !urlStr.includes('commercialhalftime'))) {
+        return originalWindowOpen.call(window, url, target, features);
+      }
+
+      // If user is VIP / exempt from ads, block ALL external ad window.open calls completely
+      if (isUserExemptFromAds(profileRef.current)) {
+        console.warn('[AdShield] Blocked ad window.open for VIP user:', urlStr);
+        executeUserIntendedAction();
+        return null;
+      }
+
+      // External / Ad URL detected:
+      if (isPopunderInCooldown()) {
+        console.warn('[AdShield] Blocked popunder window.open during 2-minute cooldown:', urlStr);
+        // Synchronously execute the user's desired link/page action on 1st tap!
+        executeUserIntendedAction();
+        return null;
+      }
+
+      // NOT in cooldown - record popunder triggered NOW and allow popup to open!
+      recordPopunderTriggered();
+      setInCooldown(true);
+
+      // 1. Open the popunder FIRST so the browser and ad script register the popunder window successfully
+      const popupWindow = originalWindowOpen.call(window, url, target, features);
+
+      // 2. Remove popunder script tag after trigger
+      const popunderScript = document.querySelector(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`);
+      if (popunderScript) {
+        popunderScript.remove();
+      }
+
+      // 3. Defer main-window SPA navigation slightly so it does NOT close or cancel the popunder window gesture
+      setTimeout(() => {
+        executeUserIntendedAction();
+      }, 80);
+
+      return popupWindow;
+    };
+
+    return () => {
+      window.open = originalWindowOpen;
+    };
+  }, []);
+
+  // =========================================================================
+  // SEAMLESS 1ST-PRESS ROUTING / CLICK ACTION PROXY
+  // =========================================================================
+  useEffect(() => {
+    let isForwarding = false;
+
+    const handlePointerDown = (e: MouseEvent | TouchEvent) => {
+      let x = 0;
+      let y = 0;
+      if ('clientX' in e) {
+        x = e.clientX;
+        y = e.clientY;
+      } else if (e.touches && e.touches[0]) {
+        x = e.touches[0].clientX;
+        y = e.touches[0].clientY;
+      }
+      lastClickRef.current = {
+        x,
+        y,
+        target: e.target as HTMLElement | null,
+      };
+    };
+
+    const handleGlobalClick = (e: MouseEvent) => {
+      // If user is VIP / Exempt, purge any leftover ad elements and skip click proxying
+      if (isUserExemptFromAds(profileRef.current)) {
+        purgeAllAdElements();
+        return;
+      }
+
+      if ((e as any).__forwardedByProxy || isForwarding) {
+        return;
+      }
+
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+
+      const isAdOverlay = !target.closest('#root');
+
+      if (isAdOverlay) {
+        const clientX = e.clientX || lastClickRef.current.x;
+        const clientY = e.clientY || lastClickRef.current.y;
+        if (!clientX && !clientY) return;
+
+        executeUserIntendedAction({ x: clientX, y: clientY }, target);
+      }
+    };
+
+    window.addEventListener('pointerdown', handlePointerDown, { capture: true, passive: true });
+    window.addEventListener('click', handleGlobalClick, { capture: true });
+
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown, { capture: true });
+      window.removeEventListener('click', handleGlobalClick, { capture: true });
+    };
+  }, []);
+
   return null;
 };
+
