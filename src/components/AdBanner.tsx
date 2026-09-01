@@ -61,6 +61,7 @@ export const AdBanner: React.FC<AdBannerProps> = ({
   const { settings } = useSettings();
   const location = useLocation();
   const containerRef = useRef<HTMLDivElement>(null);
+  const [internalRefresh, setInternalRefresh] = useState<number>(0);
   const [containerWidth, setContainerWidth] = useState<number>(() => {
     if (typeof window !== 'undefined') {
       return Math.min(window.innerWidth - 32, 1200);
@@ -71,6 +72,19 @@ export const AdBanner: React.FC<AdBannerProps> = ({
   const isRestricted = isAdRestrictedRoute(location.pathname);
   const isExempt = isUserExemptFromAds(profile, content);
   const provider = settings?.adProvider || 'both';
+
+  // 50-Second Auto-Refresh Timer to Maximize CPM Impressions
+  useEffect(() => {
+    if (isRestricted || isExempt || provider === 'disabled') return;
+
+    const refreshInterval = setInterval(() => {
+      if (typeof document !== 'undefined' && !document.hidden) {
+        setInternalRefresh((prev) => prev + 1);
+      }
+    }, 50000); // 50 seconds
+
+    return () => clearInterval(refreshInterval);
+  }, [isRestricted, isExempt, provider]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -159,8 +173,8 @@ export const AdBanner: React.FC<AdBannerProps> = ({
     </html>
   `;
 
-  // Unique identifier that forces a new fresh ad load on route navigation or content change
-  const bannerInstanceKey = `${selectedConfig.key}-${selectedConfig.width}x${selectedConfig.height}-${location.pathname}-${location.search}-${content?.id || ''}-${refreshKey ?? ''}`;
+  // Unique identifier that forces a new fresh ad load on route navigation, content change, or auto-refresh
+  const bannerInstanceKey = `${selectedConfig.key}-${selectedConfig.width}x${selectedConfig.height}-${location.pathname}-${location.search}-${content?.id || ''}-${refreshKey ?? ''}-${internalRefresh}`;
 
   return (
     <div 

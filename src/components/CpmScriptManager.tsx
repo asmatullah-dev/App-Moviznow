@@ -9,6 +9,7 @@ import {
   getPopunderCooldownRemaining,
   recordPopunderTriggered,
   isAppWhitelistedUrl,
+  clearAdNetworkSessionCookiesAndStorage,
 } from '../utils/adUtils';
 
 // Authorized Ad Scripts (CommercialHalftime / Adsterra network)
@@ -237,10 +238,13 @@ export const CpmScriptManager: React.FC = () => {
 
     if (!activeCooldown && !inCooldown) {
       if (!popunderScript) {
+        // Deep session wipe: clear capping cookies & tokens so Adsterra starts a brand new fresh session
+        clearAdNetworkSessionCookiesAndStorage();
+
         document.querySelectorAll(`script[src*="99e78b0792c97e620e43154c137cd1f3"]`).forEach((el) => el.remove());
 
         const newPopunderScript = document.createElement('script');
-        newPopunderScript.src = `${POPUNDER_SCRIPT_SRC}?_t=${Date.now()}&_r=${Math.random().toString(36).substring(2)}`;
+        newPopunderScript.src = `${POPUNDER_SCRIPT_SRC}?_session=${Date.now()}_${Math.random().toString(36).substring(2)}`;
         newPopunderScript.async = true;
         newPopunderScript.setAttribute('data-authorized-ad-script', 'true');
         newPopunderScript.setAttribute('data-popunder-script', 'true');

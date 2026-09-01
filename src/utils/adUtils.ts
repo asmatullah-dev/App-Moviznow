@@ -127,8 +127,91 @@ export interface AdContentCheck {
   isFree?: boolean;
 }
 
-// 2-Minute Popunder Cooldown Constant
-export const POPUNDER_COOLDOWN_MS = 2 * 60 * 1000; // 2 minutes in milliseconds
+// 3-Minute Popunder Cooldown Constant (Max Revenue Cycle)
+export const POPUNDER_COOLDOWN_MS = 3 * 60 * 1000; // 3 minutes in milliseconds
+
+/**
+ * Thoroughly clears Adsterra and CPM network capping cookies, localStorage tokens,
+ * and sessionStorage items to ensure fresh session initialization after cooldown.
+ */
+export function clearAdNetworkSessionCookiesAndStorage(): void {
+  if (typeof window === 'undefined') return;
+
+  // 1. Clear Ad Network Cookies from document.cookie
+  try {
+    const cookies = document.cookie ? document.cookie.split(';') : [];
+    const hostname = window.location.hostname;
+    const hostParts = hostname.split('.');
+    const rootDomain = hostParts.length > 1 ? hostParts.slice(-2).join('.') : hostname;
+
+    const adCookiePatterns = [
+      '_pop', 'pl_', '_pl', '_pst', '__pst', 'pst', 'cpm', '99e78b', 'f0270b', 
+      'commercial', 'adsterra', 'zone', 'cap', 'freq', 'monetag'
+    ];
+
+    cookies.forEach((c) => {
+      const eqPos = c.indexOf('=');
+      const name = eqPos > -1 ? c.substr(0, eqPos).trim() : c.trim();
+      const lowerName = name.toLowerCase();
+
+      // Ensure we don't clear app tokens
+      if (lowerName.includes('token') || lowerName.includes('auth') || lowerName.includes('user') || lowerName.includes('session_id')) {
+        return;
+      }
+
+      if (adCookiePatterns.some((pattern) => lowerName.includes(pattern))) {
+        // Expire cookie across paths and domain variations
+        document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+        document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=${hostname}`;
+        document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=.${hostname}`;
+        if (rootDomain !== hostname) {
+          document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=.${rootDomain}`;
+        }
+      }
+    });
+  } catch (e) {}
+
+  // 2. Clear Ad Network LocalStorage & SessionStorage keys
+  try {
+    const adStoragePatterns = ['_pop', 'pl_', '_pl', '_pst', '__pst', 'cpm', 'commercial', 'adsterra', 'zone_', 'monetag'];
+
+    // SessionStorage
+    for (let i = sessionStorage.length - 1; i >= 0; i--) {
+      const key = sessionStorage.key(i);
+      if (key && adStoragePatterns.some((p) => key.toLowerCase().includes(p))) {
+        sessionStorage.removeItem(key);
+      }
+    }
+
+    // LocalStorage (preserve lastPopunderTime)
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (
+        key &&
+        key !== 'lastPopunderTime' &&
+        adStoragePatterns.some((p) => key.toLowerCase().includes(p))
+      ) {
+        localStorage.removeItem(key);
+      }
+    }
+  } catch (e) {}
+
+  // 3. Clear window globals
+  try {
+    const globals = [
+      '_pop', '_pop_config', '_pop_script', '__p_scr', '__p_config',
+      'CommercialHalftime', 'Adsterra', 'Monetag', '_pl', '_pst'
+    ];
+    globals.forEach((g) => {
+      try {
+        if ((window as any)[g]) {
+          delete (window as any)[g];
+          (window as any)[g] = undefined;
+        }
+      } catch (err) {}
+    });
+  } catch (e) {}
+}
 
 /**
  * Checks if a given URL is a legitimate user action / whitelisted external service
