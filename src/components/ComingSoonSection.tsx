@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Calendar,
   Film,
@@ -20,7 +21,11 @@ import {
   Maximize2,
   Download,
   Languages,
-  RotateCcw
+  RotateCcw,
+  Link,
+  Copy,
+  Check,
+  ArrowRight
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -51,6 +56,8 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className 
   const { t, language, translate } = useLanguage();
   const { vibrate } = useHaptics();
   const { contentList, qualities } = useContent();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const comingSoonScrollRef = useRef<HTMLDivElement>(null);
 
   const [filter, setFilter] = useState<'all' | 'movie' | 'tv'>('all');
   const [items, setItems] = useState<TMDBUpcomingItem[]>([]);
@@ -87,7 +94,64 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className 
   const [isLightboxImageLoading, setIsLightboxImageLoading] = useState(true);
 
   // Section Visibility state
-  const [isVisible, setIsVisible] = useState(() => safeStorage.getItem('home_coming_soon_visible') !== 'false');
+  const [isVisible, setIsVisible] = useState(() => safeStorage.getItem('home_coming_soon_visible') === 'true');
+
+  const [showShareMenu, setShowShareMenu] = useState(false);
+  const [copiedFull, setCopiedFull] = useState(false);
+  const [copiedMin, setCopiedMin] = useState(false);
+  const [copiedRow, setCopiedRow] = useState(false);
+
+  const isComingSoonViewAllOpen = searchParams.get('view_all') === 'coming_soon' || searchParams.get('v') === 'cs';
+
+  // Restore scroll position when modal opens
+  useEffect(() => {
+    if (isComingSoonViewAllOpen) {
+      document.body.style.overflow = "hidden";
+      const timer = setTimeout(() => {
+        if (comingSoonScrollRef.current) {
+          const savedScroll = sessionStorage.getItem("view_all_scroll_coming_soon");
+          if (savedScroll) {
+            comingSoonScrollRef.current.scrollTop = parseInt(savedScroll, 10);
+          }
+        }
+      }, 100);
+      return () => {
+        document.body.style.overflow = "";
+        clearTimeout(timer);
+      };
+    }
+  }, [isComingSoonViewAllOpen]);
+
+  const getCollectionUrl = (minimize: boolean) => {
+    return "https://MovizNow.com/?v=cs";
+  };
+
+  const copyToClipboard = async (minimize: boolean) => {
+    const url = getCollectionUrl(minimize);
+    try {
+      await navigator.clipboard.writeText(url);
+      if (minimize) {
+        setCopiedMin(true);
+        setTimeout(() => setCopiedMin(false), 2000);
+      } else {
+        setCopiedFull(true);
+        setTimeout(() => setCopiedFull(false), 2000);
+      }
+    } catch (err) {
+      console.error("Failed to copy url: ", err);
+    }
+  };
+
+  const handleDirectShare = async () => {
+    const url = getCollectionUrl(true);
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedRow(true);
+      setTimeout(() => setCopiedRow(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy url: ", err);
+    }
+  };
 
   const toggleVisibility = () => {
     setIsVisible(prev => {
@@ -533,6 +597,32 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className 
             )}
           </AnimatePresence>
 
+          <button
+            onClick={handleDirectShare}
+            className="p-1.5 sm:p-2 rounded-lg bg-zinc-100 dark:bg-zinc-900/90 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 shrink-0"
+            title={t("Copy Share Link")}
+          >
+            {copiedRow ? (
+              <>
+                <Check className="w-4 h-4 text-emerald-500" />
+                <span className="text-[10px] font-bold text-emerald-500 pr-0.5">{t("Copied!")}</span>
+              </>
+            ) : (
+              <Share2 className="w-4 h-4" />
+            )}
+          </button>
+
+          <button
+            onClick={() => {
+              const updated = new URLSearchParams(searchParams);
+              updated.set("view_all", "coming_soon");
+              setSearchParams(updated);
+            }}
+            className="px-3 py-1.5 rounded-lg text-xs font-bold text-amber-500 bg-amber-500/10 hover:bg-amber-500/20 transition-all border border-amber-500/20 cursor-pointer active:scale-95 whitespace-nowrap font-sans"
+          >
+            {t('View All')}
+          </button>
+
           <div className="flex items-center bg-zinc-100 dark:bg-zinc-900/90 p-0.5 sm:p-1 rounded-xl border border-zinc-200/80 dark:border-zinc-800">
             <button
               id="coming-soon-refresh-btn"
@@ -598,7 +688,7 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className 
                   className="flex overflow-x-auto gap-3 sm:gap-4 pb-4 snap-x snap-mandatory flex-nowrap hide-scrollbar"
                   style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
         >
-          {visibleItems.map((item) => {
+          {visibleItems.slice(0, 5).map((item) => {
             const daysLeft = item.hasOttDate && item.releaseDate ? getDaysUntilRelease(item.releaseDate) : null;
             const ottBadge = getOttBadgeConfig(item.ottPlatform);
             const typeLabel = item.type === 'movie' ? 'Movie' : 'Series';
@@ -710,6 +800,25 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className 
               </div>
             );
           })}
+          {visibleItems.length > 5 && (
+            <div className="shrink-0 flex items-center justify-center pr-4 snap-start h-full self-center">
+              <button
+                onClick={() => {
+                  const updated = new URLSearchParams(searchParams);
+                  updated.set("view_all", "coming_soon");
+                  setSearchParams(updated);
+                }}
+                className="group flex flex-col items-center gap-2 p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 hover:border-amber-500/50 hover:bg-amber-500/5 transition-all cursor-pointer active:scale-95"
+              >
+                <div className="w-10 h-10 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center group-hover:bg-amber-500/20 transition-colors">
+                  <ArrowRight className="w-5 h-5 text-zinc-400 group-hover:text-amber-500 transition-colors" />
+                </div>
+                <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 group-hover:text-amber-500 uppercase tracking-wider">
+                  {t("View All")}
+                </span>
+              </button>
+            </div>
+          )}
         </ScrollableRow>
               )}
             </div>
@@ -720,7 +829,7 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className 
       {/* Upcoming Detail & Media Modal */}
       <AnimatePresence>
         {selectedItem && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-4 overflow-y-auto bg-black/85 backdrop-blur-md">
+          <div className="fixed inset-0 z-[120] flex items-center justify-center p-2.5 sm:p-4 overflow-y-auto bg-black/85 backdrop-blur-md">
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -978,7 +1087,7 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className 
       {/* FULLSCREEN TRAILER PLAYER MODAL */}
       <AnimatePresence>
         {isPlayingTrailer && selectedItem && (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/95 backdrop-blur-xl p-3 sm:p-6">
+          <div className="fixed inset-0 z-[140] flex items-center justify-center bg-black/95 backdrop-blur-xl p-3 sm:p-6">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -1054,7 +1163,7 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className 
       <AnimatePresence>
         {fullscreenImageIndex !== null && allModalImages[fullscreenImageIndex] && (
           <div
-            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/95 backdrop-blur-lg p-2 sm:p-6 select-none"
+            className="fixed inset-0 z-[130] flex items-center justify-center bg-black/95 backdrop-blur-lg p-2 sm:p-6 select-none"
             onTouchStart={handleTouchStart}
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
@@ -1176,6 +1285,170 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className 
                   ))}
                 </div>
               )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Coming Soon View All Modal Grid */}
+      <AnimatePresence>
+        {isComingSoonViewAllOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              transition={{ duration: 0.25, ease: "easeOut" }}
+              className="relative w-full max-w-7xl h-[90vh] bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl overflow-hidden flex flex-col shadow-2xl"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between p-5 sm:p-6 border-b border-zinc-200/80 dark:border-zinc-800/80 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 sm:p-2.5 rounded-xl bg-gradient-to-tr from-amber-500/20 to-orange-500/10 border border-amber-500/30 text-amber-500 shadow-sm shrink-0">
+                    <Calendar className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-black text-zinc-900 dark:text-white flex items-center gap-2">
+                      {t('Coming Soon')}
+                      <span className="text-xs font-bold text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+                        {visibleItems.length} {t("items")}
+                      </span>
+                    </h2>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+                      {t('Upcoming digital & OTT releases starting from today')}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => {
+                      const updated = new URLSearchParams(searchParams);
+                      updated.delete("view_all");
+                      updated.delete("v");
+                      setSearchParams(updated);
+                    }}
+                    className="p-2 rounded-full bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 transition-colors cursor-pointer"
+                    title={t("Close")}
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Grid content */}
+              <div
+                ref={comingSoonScrollRef}
+                onScroll={(e) => {
+                  sessionStorage.setItem("view_all_scroll_coming_soon", e.currentTarget.scrollTop.toString());
+                }}
+                className="flex-1 overflow-y-auto p-5 sm:p-6 custom-scrollbar"
+              >
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-5 pb-6">
+                  {visibleItems.map((item) => {
+                    const daysLeft = item.hasOttDate && item.releaseDate ? getDaysUntilRelease(item.releaseDate) : null;
+                    const typeLabel = item.type === 'movie' ? 'Movie' : 'Series';
+
+                    return (
+                      <div
+                        key={`${item.type}-${item.id}`}
+                        onClick={() => handleOpenItem(item)}
+                        className="group relative flex flex-col h-full rounded-xl overflow-hidden bg-white dark:bg-zinc-900 border border-zinc-200/90 dark:border-zinc-800/90 hover:border-amber-500/50 dark:hover:border-amber-500/50 shadow-sm hover:shadow-xl hover:shadow-amber-500/10 transition-all duration-300 cursor-pointer transform-gpu"
+                      >
+                        {/* Poster Thumbnail */}
+                        <div className="relative aspect-[2/3] w-full overflow-hidden bg-zinc-100 dark:bg-zinc-950">
+                          {item.posterPath ? (
+                            <img
+                              src={getOptimizedImageUrl(item.posterPath, 342)}
+                              alt={item.title}
+                              loading="lazy"
+                              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex flex-col items-center justify-center text-zinc-400 bg-zinc-800/40 p-2 text-center">
+                              <Film className="w-8 h-8 mb-2 opacity-30" />
+                              <span className="text-[10px] font-medium">{t('No Poster')}</span>
+                            </div>
+                          )}
+
+                          {/* Gradient Overlay */}
+                          <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/25 to-transparent opacity-85 group-hover:opacity-95 transition-opacity" />
+
+                          {/* Top Left: Star Rating Badge */}
+                          {item.voteAverage > 0 && (
+                            <div className="absolute top-2 left-2 z-10 pointer-events-none">
+                              <div className="flex items-center gap-1 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg bg-black/85 text-yellow-400 border border-yellow-500/40 backdrop-blur-md shadow-lg">
+                                <Star className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-yellow-400 text-yellow-400 shrink-0" />
+                                <span className="font-black text-xs sm:text-sm text-amber-300 dark:text-yellow-400 leading-none">
+                                  {item.voteAverage.toFixed(1)}
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Top Right: Type Badge & OTT Platform Label */}
+                          <div className="absolute top-2 right-2 flex flex-col items-end gap-1 z-10 pointer-events-none">
+                            <span
+                              className={clsx(
+                                "px-2 py-0.5 rounded-md font-extrabold uppercase tracking-wider text-white shadow-md border border-white/20 text-[9px] sm:text-[10px]",
+                                item.type === 'movie' ? 'bg-blue-600' : 'bg-purple-600'
+                              )}
+                            >
+                              {typeLabel}
+                            </span>
+                            {item.ottPlatform ? (
+                              <OttBadge platform={item.ottPlatform} />
+                            ) : (
+                              <span className="px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-black/75 text-amber-400 border border-amber-500/30 backdrop-blur-md flex items-center gap-1">
+                                <Tv2 className="w-2.5 h-2.5" />
+                                OTT
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Hover indicator */}
+                          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 backdrop-blur-[2px]">
+                            <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-amber-500 to-orange-400 text-black flex items-center justify-center shadow-lg shadow-amber-500/40 transform group-hover:scale-110 transition-transform">
+                              <Play className="w-5 h-5 fill-current ml-0.5" />
+                            </div>
+                          </div>
+
+                          {/* OTT Release Date & Countdown at Bottom of Poster */}
+                          <div className="absolute bottom-2 left-2 right-2 flex flex-col gap-0.5 pointer-events-none">
+                            {daysLeft && (
+                              <span className="text-[9px] sm:text-[10px] font-extrabold uppercase tracking-wide text-amber-300 drop-shadow-md flex items-center gap-1">
+                                <Sparkles className="w-2.5 h-2.5" />
+                                {daysLeft}
+                              </span>
+                            )}
+                            <div className="flex items-center gap-1 text-[11px] sm:text-xs font-bold text-white drop-shadow-md">
+                              <Calendar className="w-3 h-3 text-amber-400 shrink-0" />
+                              <span className="truncate">
+                                {item.hasOttDate && item.releaseDate
+                                  ? `OTT: ${formatReleaseDate(item.releaseDate)}`
+                                  : t('OTT Date TBA')}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Card Info */}
+                        <div className="p-3 flex-1 flex flex-col justify-between">
+                          <div>
+                            <h3 className="font-bold text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 line-clamp-1 group-hover:text-amber-500 transition-colors">
+                              {item.title}
+                            </h3>
+                            {item.genres && item.genres.length > 0 && (
+                              <p className="text-[10px] text-zinc-500 dark:text-zinc-400 line-clamp-1 mt-0.5 font-medium">
+                                {item.genres.slice(0, 2).join(' • ')}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </motion.div>
           </div>
         )}

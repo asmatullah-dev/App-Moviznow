@@ -20,6 +20,7 @@ import {
   Tv,
   Sparkles,
   RefreshCw,
+  FolderOpen,
 } from "lucide-react";
 
 import { AdBanner } from "../../components/AdBanner";
@@ -52,6 +53,7 @@ import { CollectionRow } from "../../components/home/CollectionRow";
 import { CuratedCollectionsOverview } from "../../components/home/CuratedCollectionsOverview";
 import { HomeCategoryChips } from "../../components/home/HomeCategoryChips";
 import { CollectionModal } from "../../components/home/CollectionModal";
+import { CollectionsGridModal } from "../../components/home/CollectionsGridModal";
 import { fetchReviewsFromChunks } from "../../utils/chunkUtils";
 import { APP_VERSION } from "../../version";
 
@@ -79,7 +81,7 @@ export default function Home({
   } = useContent();
   const { t, language } = useLanguage();
   const { settings } = useSettings();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const location = useLocation();
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
@@ -207,6 +209,40 @@ export default function Home({
       memoryStore.set("home_selected_collection", selectedCollection);
     } else {
       memoryStore.delete("home_selected_collection");
+    }
+  }, [selectedCollection]);
+
+  // Sync selectedCollection with searchParams "c"
+  useEffect(() => {
+    const colId = searchParams.get("c");
+    if (colId && collections && collections.length > 0) {
+      const found = collections.find((c) => c.id === colId);
+      if (found && (!selectedCollection || selectedCollection.id !== found.id)) {
+        setSelectedCollection(found);
+      }
+    } else if (selectedCollection && !colId) {
+      const isVirtual = ["scroll_trending", "scroll_newly_added", "coming_soon", "trending_now", "newly_added"].includes(selectedCollection.id);
+      if (!isVirtual) {
+        setSelectedCollection(null);
+      }
+    }
+  }, [searchParams, collections]);
+
+  useEffect(() => {
+    const updated = new URLSearchParams(searchParams);
+    if (selectedCollection) {
+      const isVirtual = ["scroll_trending", "scroll_newly_added", "coming_soon", "trending_now", "newly_added"].includes(selectedCollection.id);
+      if (!isVirtual) {
+        if (updated.get("c") !== selectedCollection.id) {
+          updated.set("c", selectedCollection.id);
+          setSearchParams(updated, { replace: true });
+        }
+      }
+    } else {
+      if (updated.has("c")) {
+        updated.delete("c");
+        setSearchParams(updated, { replace: true });
+      }
     }
   }, [selectedCollection]);
 
@@ -362,9 +398,9 @@ export default function Home({
     });
   }, [recentlyViewed, contentMap]);
   const [isRecentVisible, setIsRecentVisible] = useState(() => safeStorage.getItem("home_recent_visible") !== "false");
-  const [isTrendingRowVisible, setIsTrendingRowVisible] = useState(() => safeStorage.getItem("home_trending_row_visible") !== "false");
-  const [isNewlyAddedVisible, setIsNewlyAddedVisible] = useState(() => safeStorage.getItem("home_newly_added_visible") !== "false");
-  const [isCollectionsVisible, setIsCollectionsVisible] = useState(() => safeStorage.getItem("home_collections_visible") !== "false");
+  const [isTrendingRowVisible, setIsTrendingRowVisible] = useState(() => safeStorage.getItem("home_trending_row_visible") === "true");
+  const [isNewlyAddedVisible, setIsNewlyAddedVisible] = useState(() => safeStorage.getItem("home_newly_added_visible") === "true");
+  const [isCollectionsVisible, setIsCollectionsVisible] = useState(() => safeStorage.getItem("home_collections_visible") === "true");
 
   const toggleRecentVisibility = useCallback(() => {
     setIsRecentVisible((prev) => {
@@ -490,6 +526,56 @@ export default function Home({
   const sortedGenres = useMemo(() => [...genres].sort((a, b) => a.name.localeCompare(b.name)), [genres]);
   const sortedLanguages = useMemo(() => [...languages].sort((a, b) => a.name.localeCompare(b.name)), [languages]);
   const sortedQualities = useMemo(() => [...qualities].sort((a, b) => a.name.localeCompare(b.name)), [qualities]);
+
+  const matchedCollections = useMemo(() => {
+    if (!debouncedSearch.trim()) return [];
+    const query = debouncedSearch.toLowerCase();
+    
+    // Virtual collections
+    const virtuals = [
+      {
+        id: "trending",
+        title: t("Trending Now"),
+        description: t("Trending movies and shows updated live"),
+        isVirtual: true,
+        scrollKey: "trending",
+        raw: undefined as any
+      },
+      {
+        id: "newly_added",
+        title: t("Newly Added"),
+        description: t("Recently uploaded premium high-definition titles"),
+        isVirtual: true,
+        scrollKey: "newly_added",
+        raw: undefined as any
+      },
+      {
+        id: "coming_soon",
+        title: t("Coming Soon"),
+        description: t("Upcoming digital & OTT releases starting from today"),
+        isVirtual: true,
+        scrollKey: "coming_soon",
+        raw: undefined as any
+      }
+    ];
+
+    // Custom collections
+    const customCols = (collections || []).map(col => ({
+      id: col.id,
+      title: col.title,
+      description: col.description || t("Custom curated content pack"),
+      isVirtual: false,
+      scrollKey: col.id,
+      raw: col
+    }));
+
+    const allCols = [...virtuals, ...customCols];
+    
+    return allCols.filter(
+      col => col.title.toLowerCase().includes(query) || 
+             (col.description && col.description.toLowerCase().includes(query))
+    );
+  }, [debouncedSearch, collections, t]);
 
   const filteredAndSortedContent = useMemo(() => {
     let result = [...permittedContentList];
@@ -892,6 +978,11 @@ export default function Home({
               isVisible={isCollectionsVisible}
               onToggleVisibility={toggleCollectionsVisibility}
               onSelectCollection={setSelectedCollection}
+              onViewAll={() => {
+                const updated = new URLSearchParams(searchParams);
+                updated.set("view_all", "collections");
+                setSearchParams(updated);
+              }}
             />
           )}
 
@@ -982,6 +1073,49 @@ export default function Home({
           </AnimatePresence>
 
           {/* Grid */}
+          {matchedCollections.length > 0 && (
+            <div className="mb-8" id="matched-collections-section">
+              <h3 className="text-sm font-extrabold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 mb-4 flex items-center gap-2">
+                <FolderOpen className="w-4 h-4" />
+                {t("Matching Collections")} ({matchedCollections.length})
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {matchedCollections.map((col) => (
+                  <div
+                    key={col.id}
+                    onClick={() => {
+                      vibrate(50);
+                      if (col.isVirtual) {
+                        const updated = new URLSearchParams(searchParams);
+                        updated.set("view_all", col.scrollKey);
+                        setSearchParams(updated);
+                      } else {
+                        setSelectedCollection(col.raw);
+                      }
+                    }}
+                    className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200/85 dark:border-zinc-800/80 hover:border-emerald-500/50 dark:hover:border-emerald-500/50 hover:shadow-lg transition-all cursor-pointer flex flex-col justify-between group"
+                  >
+                    <div>
+                      <h4 className="font-black text-sm text-zinc-900 dark:text-white group-hover:text-emerald-500 transition-colors flex items-center gap-2">
+                        {col.title}
+                        <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-500 uppercase border border-emerald-500/20">
+                          {col.isVirtual ? t("Curated") : t("Playlist")}
+                        </span>
+                      </h4>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1.5 font-medium line-clamp-2 leading-relaxed">
+                        {col.description}
+                      </p>
+                    </div>
+                    <div className="mt-4 flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                      <span>{t("Explore Collection")}</span>
+                      <ChevronRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {loading ? (
             <div className="flex justify-center items-center py-12">
               <div className="w-6 h-6 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin"></div>
@@ -1245,6 +1379,19 @@ export default function Home({
         genres={genres}
         toggleFavorite={handleToggleFavorite}
         toggleWatchLater={handleToggleWatchLater}
+      />
+
+      <CollectionsGridModal
+        isOpen={searchParams.get("view_all") === "collections"}
+        onClose={() => {
+          const updated = new URLSearchParams(searchParams);
+          updated.delete("view_all");
+          setSearchParams(updated);
+        }}
+        collections={otherCollections}
+        contentMap={contentMap}
+        defaultAppImage={settings?.defaultAppImage}
+        onSelectCollection={setSelectedCollection}
       />
     </div>
   );

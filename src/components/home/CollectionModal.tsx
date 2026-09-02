@@ -1,5 +1,5 @@
-import React, { useMemo } from "react";
-import { X, Film } from "lucide-react";
+import React, { useMemo, useState } from "react";
+import { X, Film, Share2, Check } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Collection as AppCollection, Content, Genre, Language, Quality } from "../../types";
 import ContentCard from "../ContentCard";
@@ -37,6 +37,19 @@ export const CollectionModal: React.FC<CollectionModalProps> = React.memo(({
   toggleWatchLater,
 }) => {
   const { t } = useLanguage();
+  const [copied, setCopied] = useState(false);
+
+  const handleShare = async () => {
+    if (!collection) return;
+    const url = `https://MovizNow.com?c=${collection.id}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy collection link: ", err);
+    }
+  };
 
   const sortedItems = useMemo(() => {
     if (!collection) return [];
@@ -98,6 +111,23 @@ export const CollectionModal: React.FC<CollectionModalProps> = React.memo(({
                 <option value="newest">{t("Newest First")}</option>
                 <option value="az">{t("A-Z")}</option>
               </select>
+              <button
+                onClick={handleShare}
+                className="p-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg text-zinc-600 dark:text-zinc-300 transition-all flex items-center justify-center gap-1.5 active:scale-95 border border-zinc-200 dark:border-zinc-700 text-xs font-semibold cursor-pointer h-[32px]"
+                title={t("Share Collection")}
+              >
+                {copied ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-500" />
+                    <span className="text-emerald-500 hidden sm:inline">{t("Copied!")}</span>
+                  </>
+                ) : (
+                  <>
+                    <Share2 className="w-3.5 h-3.5 text-zinc-400" />
+                    <span className="hidden sm:inline">{t("Share")}</span>
+                  </>
+                )}
+              </button>
               <button
                 onClick={onClose}
                 className="p-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-full text-zinc-500 dark:text-zinc-300 transition-colors cursor-pointer"

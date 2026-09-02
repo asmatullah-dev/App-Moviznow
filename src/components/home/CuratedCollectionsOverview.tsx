@@ -1,5 +1,5 @@
 import React from "react";
-import { Sparkles, ChevronUp, ChevronDown } from "lucide-react";
+import { Sparkles, ChevronUp, ChevronDown, ArrowRight } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Collection as AppCollection, Content } from "../../types";
 import { ScrollableRow } from "../ScrollableRow";
@@ -14,6 +14,7 @@ interface CuratedCollectionsOverviewProps {
   isVisible: boolean;
   onToggleVisibility: () => void;
   onSelectCollection: (col: AppCollection) => void;
+  onViewAll?: () => void;
 }
 
 export const CuratedCollectionsOverview: React.FC<CuratedCollectionsOverviewProps> = React.memo(({
@@ -23,6 +24,7 @@ export const CuratedCollectionsOverview: React.FC<CuratedCollectionsOverviewProp
   isVisible,
   onToggleVisibility,
   onSelectCollection,
+  onViewAll,
 }) => {
   const { vibrate } = useHaptics();
   const { t } = useLanguage();
@@ -63,7 +65,7 @@ export const CuratedCollectionsOverview: React.FC<CuratedCollectionsOverviewProp
                 className="flex overflow-x-auto gap-4 pb-4 snap-x snap-mandatory flex-nowrap hide-scrollbar"
                 style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
               >
-                {collections.map((collection) => {
+                {collections.slice(0, 5).map((collection) => {
                   const firstContentId = collection.contentIds[0];
                   const firstContent = contentMap.get(firstContentId);
                   const posterUrl = firstContent?.posterUrl || defaultAppImage;
@@ -108,6 +110,21 @@ export const CuratedCollectionsOverview: React.FC<CuratedCollectionsOverviewProp
                     </button>
                   );
                 })}
+                {collections.length > 5 && (
+                  <div className="shrink-0 flex items-center justify-center pr-4 snap-start h-full self-center">
+                    <button
+                      onClick={onViewAll}
+                      className="group flex flex-col items-center gap-2 p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 hover:border-purple-500/50 hover:bg-purple-500/5 transition-all cursor-pointer active:scale-95"
+                    >
+                      <div className="w-10 h-10 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center group-hover:bg-purple-500/20 transition-colors">
+                        <ArrowRight className="w-5 h-5 text-zinc-400 group-hover:text-purple-500 transition-colors" />
+                      </div>
+                      <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 group-hover:text-purple-500 uppercase tracking-wider">
+                        {t("View All")}
+                      </span>
+                    </button>
+                  </div>
+                )}
               </ScrollableRow>
             </div>
           </motion.div>
