@@ -384,6 +384,17 @@ export default function Membership() {
                         </td>
                       </tr>
                       <tr className="hover:bg-zinc-800/30 transition-colors">
+                        <td className="p-3 sm:p-3.5 text-zinc-300 font-bold">{t('Offline Access')}</td>
+                        <td className="p-3 sm:p-3.5 text-center text-zinc-500 bg-sky-950/15">
+                          <X className="w-4 h-4 text-zinc-500 mx-auto" />
+                        </td>
+                        <td className="p-3 sm:p-3.5 text-center text-emerald-400 bg-amber-950/15 font-bold">
+                          <span className="inline-flex items-center gap-1 text-[11px] text-amber-300 font-bold">
+                            <Crown className="w-3 h-3 text-amber-400" /> {t('Accessible')}
+                          </span>
+                        </td>
+                      </tr>
+                      <tr className="hover:bg-zinc-800/30 transition-colors">
                         <td className="p-3 sm:p-3.5 text-zinc-300">{t('WhatsApp Support')}</td>
                         <td className="p-3 sm:p-3.5 text-center text-zinc-400 bg-sky-950/15">{t('Standard')}</td>
                         <td className="p-3 sm:p-3.5 text-center text-amber-300 bg-amber-950/15 font-bold">{t('VIP Priority 24/7')}</td>

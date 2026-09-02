@@ -1,4 +1,4 @@
-import { linkExtractionRouter } from "./_LinkExtractionModal.js";
+import { linkExtractionRouter, getCachedHubcloudData, setCachedHubcloudData, parseSeasonEpisode, parseHubcloudHtmlTitle, fetchHtml } from "./_LinkExtractionModal.js";
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -114,6 +114,28 @@ export async function fetchWithVddos(targetUrl: string, customHeaders?: Record<s
 
   let html = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
   let finalUrl = res.request?.res?.responseUrl || targetUrl;
+
+  const isCf = (status: number, htmlStr: string) => {
+    if (status === 403 || status === 503) return true;
+    const lower = (htmlStr || '').toLowerCase();
+    return lower.includes("<title>just a moment</title>") ||
+           lower.includes("<title>cloudflare") ||
+           lower.includes("challenges.cloudflare.com") ||
+           lower.includes("enable javascript and cookies") ||
+           lower.includes("checking your browser");
+  };
+
+  if (isCf(res.status, html)) {
+    try {
+      console.log(`[fetchWithVddos] Cloudflare detected for ${targetUrl}. Falling back to fetchHtml helper.`);
+      const bypassRes = await fetchHtml(targetUrl, false, true);
+      if (bypassRes && bypassRes.data && !isCf(bypassRes.status, bypassRes.data)) {
+        return { html: bypassRes.data, status: bypassRes.status, finalUrl: targetUrl };
+      }
+    } catch (err: any) {
+      console.warn(`[fetchWithVddos] Cloudflare bypass fallback failed:`, err.message);
+    }
+  }
 
   if (
     res.status === 202 ||
@@ -1114,6 +1136,760 @@ async function startServer() {
       return res.json({ is_search: false, hits, found: hits.length });
     } catch (error: any) {
       console.error('MoviesDrive extract error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+function rot13(str: string): string {
+  return str.replace(/[a-zA-Z]/g, (char) => {
+    const code = char.charCodeAt(0) + 13;
+    const max = char <= 'Z' ? 90 : 122;
+    return String.fromCharCode(max >= code ? code : code - 26);
+  });
+}
+
+function decodeGreenmountPayload(payload: string): string | null {
+  try {
+    let curr = Buffer.from(payload, 'base64').toString('utf-8');
+
+    if (!curr.startsWith('{') && !curr.startsWith('eyJ')) {
+      try {
+        const decoded = Buffer.from(curr, 'base64').toString('utf-8');
+        curr = decoded;
+      } catch(e) {}
+    }
+
+    if (!curr.startsWith('{') && !curr.startsWith('eyJ')) {
+      curr = rot13(curr);
+    }
+
+    if (curr.startsWith('eyJ')) {
+      curr = Buffer.from(curr, 'base64').toString('utf-8');
+    }
+
+    if (!curr.startsWith('{')) {
+      try {
+        const alt = rot13(curr);
+        if (alt.startsWith('{')) curr = alt;
+        else if (alt.startsWith('eyJ')) curr = Buffer.from(alt, 'base64').toString('utf-8');
+      } catch(e) {}
+    }
+
+    const json = JSON.parse(curr);
+    if (json && json.o) {
+      let target = json.o;
+      if (target.startsWith('http')) return target;
+
+      try {
+        let dec = Buffer.from(target, 'base64').toString('utf-8');
+        if (dec.startsWith('http')) return dec;
+        dec = rot13(dec);
+        if (dec.startsWith('http')) return dec;
+      } catch(e) {}
+
+      try {
+        let dec = rot13(target);
+        if (dec.startsWith('http')) return dec;
+        dec = Buffer.from(dec, 'base64').toString('utf-8');
+        if (dec.startsWith('http')) return dec;
+      } catch(e) {}
+    }
+  } catch(e) {
+    console.error('Greenmount decode failed:', e);
+  }
+  return null;
+}
+
+// Helper to fetch and parse HubCloud titles/metadata and save in cache
+async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
+  if (!url) return null;
+  let cached = getCachedHubcloudData(url);
+  if (cached && !force) {
+    console.log(`[fetchAndCacheHubcloud] Found cached data for: ${url}`);
+    return cached;
+  }
+
+  try {
+    console.log(`[fetchAndCacheHubcloud] Fetching HubCloud page: ${url}`);
+    const isVcloud = url.includes("vcloud");
+    const response = await fetchHtml(url, isVcloud, force);
+    if (!response || !response.data) return null;
+
+    const $ = cheerio.load(response.data);
+    const parsedMeta = parseHubcloudHtmlTitle($, response.data);
+
+    let sizeStr =
+      $('td:contains("File Size")').next('td').text() ||
+      $('li:contains("File Size") i').text() ||
+      $('li:contains("File Size")').text() ||
+      $('li:contains("Size") i').text() ||
+      $('li:contains("Size")').text();
+    sizeStr = sizeStr.replace("File Size", "").replace("Size", "").trim();
+
+    let size = "";
+    let unit = "";
+    if (sizeStr) {
+      const parts = sizeStr.split(" ");
+      if (parts.length >= 2) {
+        let num = parseFloat(parts[0]);
+        unit = parts[1].toUpperCase();
+
+        if (!isNaN(num)) {
+          // Convert from Hubcloud's Base-1024 to our Base-1000
+          const multiplier =
+            unit === "GB"
+              ? (1024 * 1024 * 1024) / (1000 * 1000 * 1000)
+              : unit === "MB"
+                ? (1024 * 1024) / (1000 * 1000)
+                : unit === "KB"
+                  ? 1024 / 1000
+                  : 1;
+          num = num * multiplier;
+          size =
+            num >= 100
+              ? num.toFixed(0)
+              : num >= 10
+                ? num.toFixed(1)
+                : num.toFixed(2);
+          size = size.replace(/\.00$/, "").replace(/\.0$/, "");
+        } else {
+          size = parts[0];
+        }
+      } else {
+        size = sizeStr;
+      }
+    }
+
+    const title = parsedMeta.clean_title || parsedMeta.original_title || "";
+    
+    const isCloudflare =
+      title.toLowerCase().includes("just a moment") ||
+      title.toLowerCase().includes("cloudflare") ||
+      title.toLowerCase().includes("ddos protection") ||
+      response.status === 403 ||
+      response.status === 503;
+
+    const isNotFound =
+      response.status === 404 || title.toLowerCase().includes("not found") || title.toLowerCase().includes("file not found");
+    const isWorking = !isNotFound;
+
+    const responseData = {
+      size,
+      unit,
+      title: title.trim(),
+      original_title: parsedMeta.original_title,
+      season: parsedMeta.season,
+      episode: parsedMeta.episode,
+      seasonEpLabel: parsedMeta.seasonEpLabel,
+      quality: parsedMeta.quality,
+      shortQuality: parsedMeta.shortQuality,
+      isWorking,
+      isNotFound,
+    };
+
+    if (isWorking && !isNotFound && title && !isCloudflare) {
+      console.log(`[fetchAndCacheHubcloud] Successfully fetched & caching HubCloud meta for: ${url} (Title: ${responseData.title})`);
+      setCachedHubcloudData(url, responseData);
+    }
+    return responseData;
+  } catch (err: any) {
+    console.error(`[fetchAndCacheHubcloud] Error fetching HubCloud link ${url}:`, err.message);
+    return null;
+  }
+}
+
+  // HDHub4U Extraction & Catalog API
+  app.get('/api/hdhub4u', async (req: express.Request, res: express.Response) => {
+    try {
+      let { url } = req.query;
+      if (!url || typeof url !== 'string' || (!url.trim().startsWith('http') && !url.includes('.'))) {
+        return res.status(400).json({ error: 'Valid HDHub4U URL required' });
+      }
+
+      let targetUrl = url.trim().replace(/[:\s]+$/, '');
+      if (!targetUrl.startsWith('http')) {
+        targetUrl = 'https://' + targetUrl;
+      }
+
+      console.log(`[HDHub4U] Extracting from: ${targetUrl}`);
+
+      const { html: text, status: initialStatus, finalUrl: resolvedTargetUrl } = await fetchWithVddos(targetUrl);
+      const $ = cheerio.load(text);
+      const urlObj = new URL(resolvedTargetUrl || targetUrl);
+
+      const searchQuery = urlObj.searchParams.get('s') || urlObj.searchParams.get('search') || urlObj.searchParams.get('q') || urlObj.searchParams.get('to-search') || '';
+      const isSearchOrCatalogUrl = 
+        Boolean(searchQuery) || 
+        urlObj.pathname === '/' || 
+        urlObj.pathname === '' || 
+        urlObj.pathname.includes('search.html') || 
+        urlObj.pathname.includes('search.php') || 
+        urlObj.pathname.includes('/search') || 
+        urlObj.pathname.includes('/page/') || 
+        urlObj.pathname.includes('/category/') || 
+        urlObj.pathname.includes('/genre/') || 
+        urlObj.pathname.includes('/tag/');
+
+      if (isSearchOrCatalogUrl) {
+        console.log(`[HDHub4U] Search/catalog page detected: ${targetUrl}`);
+        
+        const postsMap = new Map<string, { title: string; image?: string }>();
+
+        const getImgSrc = (imgEl: any): string => {
+          if (!imgEl || imgEl.length === 0) return "";
+          let src =
+            imgEl.attr("data-src") ||
+            imgEl.attr("data-original") ||
+            imgEl.attr("data-lazy-src") ||
+            imgEl.attr("data-cfsrc") ||
+            imgEl.attr("src") ||
+            "";
+          if (!src) {
+            const srcset = imgEl.attr("srcset") || imgEl.attr("data-srcset");
+            if (srcset) {
+              src = srcset.split(",")[0].trim().split(" ")[0];
+            }
+          }
+          return src || "";
+        };
+
+        const effectiveHost = urlObj.hostname;
+
+        $("a[href]").each((_, el) => {
+          let rawHref = $(el).attr("href") || "";
+          if (!rawHref || rawHref.startsWith("#") || rawHref.startsWith("javascript:")) return;
+
+          try {
+            const fullUrl = new URL(rawHref, targetUrl).href;
+            const u = new URL(fullUrl);
+            const uHost = u.hostname.toLowerCase();
+            const isTargetDomain = uHost.includes("hdhub") || uHost === effectiveHost || uHost.endsWith(effectiveHost.replace(/^www\./, ''));
+            if (!isTargetDomain) return;
+
+            const path = u.pathname;
+            if (path === "/" || path === "" || path.includes("/category/") || path.includes("/genre/") || path.includes("/tag/") || path.includes("/page/") || path.includes("search.html") || path.includes("search.php")) return;
+            if (/\.(jpg|jpeg|png|gif|webp|css|js|xml|svg|zip|rar|mkv|mp4)$/i.test(path)) return;
+            if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how-to|howto|faq|terms|sitemap|report)/i.test(path)) return;
+
+            let title = $(el).text().trim() || $(el).attr("title") || $(el).attr("aria-label") || $(el).find("img").attr("alt") || "";
+            let image = getImgSrc($(el).find("img"));
+            
+            const container = $(el).closest("article, .post, .entry, .card, .post-item, .sh-movie-item, .recent-movies, figure, .item, li, div[class*='post'], div[class*='movie'], div[class*='item']");
+            
+            if (!title || title.length < 3 || /^(read more|download|watch|click|link)/i.test(title)) {
+              if (container.length > 0) {
+                title = container.find("h1, h2, h3, h4, .entry-title, .post-title, .title, .entry-header, figcaption, strong, b").first().text().trim();
+              }
+            }
+            if (!title || title.length < 3 || /^(read more|download|watch|click|link)/i.test(title)) {
+              title = $(el).parent().text().trim() || $(el).closest("div").text().trim();
+            }
+
+            // Fallback to URL pathname slug if HTML title text is missing or useless
+            if (!title || title.length < 3 || /^(read more|download|watch|click|link)/i.test(title)) {
+              const cleanSlug = path.replace(/^\/|\/$/g, '').split('/').pop() || '';
+              if (cleanSlug && cleanSlug.length > 3) {
+                title = cleanSlug.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+              }
+            }
+
+            if (!image) {
+              image = getImgSrc(container.find("img"));
+            }
+            if (!image) {
+              image = getImgSrc($(el).parent().find("img")) || getImgSrc($(el).prev("img")) || getImgSrc($(el).next("img"));
+            }
+            if (image) {
+              try { image = new URL(image, targetUrl).href; } catch(e) {}
+            }
+            title = title.replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+            if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how to|site search|search|faq|terms|sitemap|report|help)/i.test(title)) return;
+
+            if (title && title.length > 3) {
+              if (!postsMap.has(fullUrl)) {
+                postsMap.set(fullUrl, { title, image: image || undefined });
+              } else {
+                const existing = postsMap.get(fullUrl)!;
+                if (title.length > existing.title.length && !/(home|page|category|read more)/i.test(title)) {
+                  existing.title = title;
+                }
+                if (image && !existing.image) {
+                  existing.image = image;
+                }
+              }
+            }
+          } catch(e) {}
+        });
+
+        const posts = Array.from(postsMap.entries()).map(([postUrl, data]) => ({
+          title: data.title,
+          url: postUrl,
+          image: data.image
+        }));
+
+        return res.json({ is_search: true, posts, found: posts.length });
+      }
+
+      // Helper to extract granular quality details (e.g. 720p 10Bit HEVC vs 720p x264 vs 1080p 10Bit HEVC)
+      const parseDetailedQuality = (text: string): { qualityLabel: string; shortQuality: string } => {
+        if (!text) return { qualityLabel: "", shortQuality: "" };
+
+        const resMatch = text.match(/\b(2160p|4k|1080p|720p|480p)\b/i);
+        let shortQuality = "";
+        let resStr = "";
+        if (resMatch) {
+          const rawRes = resMatch[1].toLowerCase();
+          if (rawRes === "4k" || rawRes === "2160p") {
+            shortQuality = "2160p";
+            resStr = rawRes === "4k" ? "4K" : "2160P";
+          } else {
+            shortQuality = rawRes;
+            resStr = rawRes.toUpperCase();
+          }
+        }
+
+        const is10Bit = /\b10-?bit\b/i.test(text);
+        const isHevc = /\b(hevc|x265|h265)\b/i.test(text);
+        const isX264 = /\b(x264|h264|avc)\b/i.test(text);
+
+        let codecStr = "";
+        if (is10Bit && isHevc) {
+          codecStr = "10Bit HEVC";
+        } else if (isHevc) {
+          codecStr = "HEVC";
+        } else if (isX264) {
+          codecStr = "x264";
+        } else if (is10Bit) {
+          codecStr = "10Bit";
+        }
+
+        let qualityLabel = "";
+        if (resStr && codecStr) {
+          qualityLabel = `${resStr} ${codecStr}`;
+        } else if (resStr) {
+          qualityLabel = resStr;
+        } else if (codecStr) {
+          qualityLabel = codecStr;
+        }
+
+        return { qualityLabel, shortQuality };
+      };
+
+      // Content Page Extraction (Single Movie/Series page)
+      console.log(`[HDHub4U] Parsing content page: ${targetUrl}`);
+
+      const pageTitle = $("h1, h2, .entry-title, .post-title").first().text().replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+
+      const hbData = new Map<string, { label: string; quality?: string; shortQuality?: string }>();
+
+      $("a[href]").each((_, el) => {
+        const rawHref = $(el).attr("href") || "";
+        if (!rawHref || rawHref.startsWith("#") || rawHref.startsWith("javascript:")) return;
+
+        let fullHref = "";
+        try {
+          fullHref = new URL(rawHref, targetUrl).href;
+        } catch(e) {
+          fullHref = rawHref;
+        }
+
+        const lowerHref = fullHref.toLowerCase();
+        // Per user request: DO NOT find out hubdrive from HDHub4U page, only find hblinks from HDHub4U page then find hubcloud from hblinks.
+        if (lowerHref.includes("hubdrive")) return;
+
+        const isDownloadLink = 
+          lowerHref.includes("hblinks") || 
+          lowerHref.includes("hublinks") || 
+          lowerHref.includes("greenmountmotors") || 
+          lowerHref.includes("gadgetsweat") || 
+          lowerHref.includes("techyblogs") || 
+          lowerHref.includes("modulocertificado") ||
+          lowerHref.includes("?id=") ||
+          lowerHref.includes("?go=") ||
+          lowerHref.includes("?link=") ||
+          lowerHref.includes("/download/") ||
+          lowerHref.includes("/link/") ||
+          lowerHref.includes("/go/") ||
+          lowerHref.includes("hubcloud") || 
+          lowerHref.includes("vcloud") ||
+          /maxbutton|btn|download/i.test($(el).attr("class") || "") ||
+          /\b(download|480p|720p|1080p|2160p|4k|hevc|x264|10bit|zip|pack|episode|ep)\b/i.test($(el).text() + " " + $(el).parent().text());
+
+        if (!isDownloadLink) return;
+
+        if (fullHref === targetUrl || lowerHref.includes("/category/") || lowerHref.includes("/genre/") || lowerHref.includes("/tag/") || lowerHref.includes("/page/") || lowerHref.includes("search.html") || lowerHref.includes("search.php")) return;
+        if (/\.(jpg|jpeg|png|gif|webp|css|js|xml|svg)$/i.test(fullHref)) return;
+        if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how-to|howto|faq|terms|sitemap|report)/i.test(lowerHref)) return;
+
+        let anchorText = $(el).text().trim();
+        let contextText = "";
+
+        const parentTag = $(el).closest("p, h1, h2, h3, h4, h5, div, li, strong");
+        if (parentTag.length > 0) {
+          contextText = parentTag.text().trim();
+        }
+        
+        const prevBlock = $(el).parent().prev("p, h1, h2, h3, h4, div, strong");
+        if (prevBlock.length > 0) {
+          contextText = (prevBlock.text().trim() + " " + contextText).trim();
+        }
+
+        const fullContext = (contextText + " " + anchorText).replace(/\s+/g, " ");
+
+        const { qualityLabel, shortQuality } = parseDetailedQuality(fullContext);
+
+        let label = anchorText || qualityLabel || "Download Link";
+        if (pageTitle && !label.toLowerCase().includes(pageTitle.toLowerCase().slice(0, 10))) {
+          if (qualityLabel) {
+            label = `${pageTitle} [${qualityLabel}]`;
+          } else {
+            label = `${pageTitle} - ${label}`;
+          }
+        }
+
+        label = label.replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+
+        if (!hbData.has(fullHref)) {
+          hbData.set(fullHref, { label, quality: qualityLabel, shortQuality });
+        }
+      });
+
+      if (hbData.size === 0) {
+        return res.json({ is_search: false, hits: [], found: 0 });
+      }
+
+      const hits: any[] = [];
+      const seenUrls = new Set<string>();
+
+      await Promise.all(
+        Array.from(hbData.entries()).map(async ([linkUrl, meta]) => {
+          try {
+            // Check cache for existing HubCloud info
+            let cachedHb = getCachedHubcloudData(linkUrl);
+
+            // If the link itself is already a direct hubcloud / vcloud link
+            if (
+              (linkUrl.includes("hubcloud") || linkUrl.includes("vcloud")) &&
+              !linkUrl.includes("hubdrive")
+            ) {
+              if (!cachedHb) {
+                cachedHb = await fetchAndCacheHubcloud(linkUrl);
+              }
+              if (cachedHb && (cachedHb.isNotFound || !cachedHb.isWorking)) {
+                console.log(`[HDHub4U] Skipping dead/broken direct HubCloud link: ${linkUrl}`);
+                return;
+              }
+              if (!seenUrls.has(linkUrl)) {
+                seenUrls.add(linkUrl);
+                let fileName = cachedHb?.original_title || cachedHb?.title || meta.label;
+                const sizeVal = cachedHb?.size ? `${cachedHb.size} ${cachedHb.unit || ''}`.trim() : null;
+                const seasonEp = cachedHb?.seasonEpLabel || parseSeasonEpisode(fileName).seasonEpLabel;
+
+                if (/^\[?\s*\d{3,4}p?\s*\]?$/i.test(fileName.trim()) || fileName.trim().length < 6) {
+                  if (pageTitle) {
+                    fileName = `${pageTitle} ${seasonEp || ''} [${meta.shortQuality || meta.quality || 'Direct'}]`.replace(/\s+/g, ' ').trim();
+                  }
+                }
+
+                hits.push({
+                  file_name: fileName,
+                  url: linkUrl,
+                  size: sizeVal,
+                  quality: cachedHb?.quality || meta.shortQuality || meta.quality,
+                  season: cachedHb?.season,
+                  episode: cachedHb?.episode,
+                  seasonEpLabel: seasonEp,
+                  is_direct: true
+                });
+              }
+              return;
+            }
+
+            let resolvedHblinksUrl: string | null = null;
+
+            if (linkUrl.includes("hblinks") || linkUrl.includes("hublinks")) {
+              resolvedHblinksUrl = linkUrl;
+            } else {
+              // It's a redirector (e.g. greenmountmotors.com/?id=...)
+              console.log(`[HDHub4U] Resolving redirector URL: ${linkUrl}`);
+              const { html: redirHtml, finalUrl } = await fetchWithVddos(linkUrl, { 'Referer': targetUrl }, 7000);
+              
+              if (redirHtml) {
+                const payloadMatch = redirHtml.match(/s\(['"]o['"],\s*['"]([^'"]+)['"]/);
+                if (payloadMatch && payloadMatch[1]) {
+                  resolvedHblinksUrl = decodeGreenmountPayload(payloadMatch[1]);
+                  console.log(`[HDHub4U] Decoded greenmount payload -> ${resolvedHblinksUrl}`);
+                }
+
+                if (!resolvedHblinksUrl) {
+                  const directHbMatch = redirHtml.match(/https?:\/\/[^"'\s<>\[\]]*(?:hblinks|hublinks)[^"'\s<>\[\]]*/i);
+                  if (directHbMatch) {
+                    resolvedHblinksUrl = directHbMatch[0];
+                  }
+                }
+              }
+
+              if (!resolvedHblinksUrl && finalUrl && (finalUrl.includes("hblinks") || finalUrl.includes("hublinks"))) {
+                resolvedHblinksUrl = finalUrl;
+              }
+            }
+
+            if (!resolvedHblinksUrl) {
+              console.log(`[HDHub4U] Could not resolve hblinks URL from redirector ${linkUrl}`);
+              return;
+            }
+
+            // Now fetch the hblinks page and extract HubCloud links with quality and episode metadata!
+            console.log(`[HDHub4U] Fetching hblinks page: ${resolvedHblinksUrl}`);
+            const { html: hbHtml } = await fetchWithVddos(resolvedHblinksUrl, undefined, 7000);
+            if (!hbHtml) return;
+
+            const $hb = cheerio.load(hbHtml);
+            const sizeMatch = hbHtml.match(/\[?(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\]?/i) || hbHtml.match(/Size:\s*([^<]+)/i);
+            const globalSize = sizeMatch ? (sizeMatch[1] || sizeMatch[2]).toUpperCase() : null;
+
+            const hbLinksToProcess: Array<{ url: string; el: any; anchorText: string; contextText: string }> = [];
+            $hb("a[href]").each((_, hbEl) => {
+              const hbRawHref = $hb(hbEl).attr("href") || "";
+              if (!hbRawHref || hbRawHref.startsWith("#") || hbRawHref.startsWith("javascript:")) return;
+
+              let hbCleanUrl = "";
+              try {
+                hbCleanUrl = new URL(hbRawHref, resolvedHblinksUrl).href;
+              } catch(e) {
+                hbCleanUrl = hbRawHref;
+              }
+
+              hbCleanUrl = hbCleanUrl.replace(/&amp;/g, '&');
+              const lowerHbUrl = hbCleanUrl.toLowerCase();
+
+              if (
+                (lowerHbUrl.includes("hubcloud") || lowerHbUrl.includes("vcloud")) &&
+                !lowerHbUrl.includes("hubdrive")
+              ) {
+                const hbAnchorText = $hb(hbEl).text().trim();
+                const hbParent = $hb(hbEl).closest("p, h1, h2, h3, h4, h5, div, li, td, tr, strong");
+                let hbParentText = hbParent.length > 0 ? hbParent.text().trim() : "";
+                const hbPrevBlock = $hb(hbEl).parent().prev("p, h1, h2, h3, h4, div, strong");
+                if (hbPrevBlock.length > 0) {
+                  hbParentText = (hbPrevBlock.text().trim() + " " + hbParentText).trim();
+                }
+                const hbFullContext = (hbParentText + " " + hbAnchorText).replace(/\s+/g, " ");
+
+                hbLinksToProcess.push({
+                  url: hbCleanUrl,
+                  el: hbEl,
+                  anchorText: hbAnchorText,
+                  contextText: hbFullContext
+                });
+              }
+            });
+
+            // Process links sequentially or in parallel with async/await
+            const extractedFromHb: Array<{ url: string; label: string; quality?: string; shortQuality?: string; ep?: number; seasonEpLabel?: string; size?: string | null }> = [];
+
+            await Promise.all(
+              hbLinksToProcess.map(async (item) => {
+                let cachedItem = getCachedHubcloudData(item.url);
+                if (!cachedItem) {
+                  cachedItem = await fetchAndCacheHubcloud(item.url);
+                }
+                if (cachedItem && (cachedItem.isNotFound || !cachedItem.isWorking)) {
+                  console.log(`[HDHub4U] Skipping dead/broken nested HubCloud link: ${item.url}`);
+                  return;
+                }
+
+                const { qualityLabel: hbQualityLabel, shortQuality: hbShortQuality } = parseDetailedQuality(item.contextText);
+                const finalQualityLabel = cachedItem?.quality || hbQualityLabel || meta.quality || "";
+                const finalShortQuality = cachedItem?.shortQuality || hbShortQuality || meta.shortQuality || "";
+
+                const seData = parseSeasonEpisode(cachedItem?.original_title || cachedItem?.title || item.contextText);
+                let epNum = cachedItem?.episode !== undefined ? cachedItem.episode : seData.episode;
+                let seasonNum = cachedItem?.season !== undefined ? cachedItem.season : seData.season;
+
+                let itemLabel = cachedItem?.original_title || cachedItem?.title || "";
+                if (!itemLabel) {
+                  const rawFilenameMatch = item.contextText.match(/([a-zA-Z0-9._\-\s\[\]()]+?\.(?:mkv|mp4|avi|webm))/i);
+                  if (rawFilenameMatch && rawFilenameMatch[1].length > 6) {
+                    itemLabel = rawFilenameMatch[1].trim();
+                  } else {
+                    const cleanAnchor = item.anchorText.replace(/^download\s*/i, "").replace(/hubcloud/gi, "").replace(/vcloud/gi, "").trim();
+                    if (cleanAnchor && cleanAnchor.length > 3 && !/^(download|link|click|server)/i.test(cleanAnchor)) {
+                      itemLabel = cleanAnchor;
+                    } else {
+                      itemLabel = meta.label;
+                    }
+                  }
+                }
+
+                itemLabel = itemLabel.replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+                if (!itemLabel || itemLabel.length < 3) itemLabel = meta.label;
+
+                const seasonEpStr = cachedItem?.seasonEpLabel || seData.seasonEpLabel || (epNum !== undefined ? `Ep ${epNum}` : "");
+
+                if (/^\[?\s*\d{3,4}p?\s*\]?$/i.test(itemLabel.trim()) || itemLabel.trim().length < 6) {
+                  if (pageTitle) {
+                    itemLabel = `${pageTitle} ${seasonEpStr} [${finalQualityLabel}]`.replace(/\s+/g, ' ').trim();
+                  }
+                }
+
+                if (seasonEpStr && !itemLabel.toLowerCase().includes(seasonEpStr.toLowerCase())) {
+                  if (!/S\d+E\d+/i.test(itemLabel) && !/Ep\s*\d+/i.test(itemLabel)) {
+                    itemLabel = `${itemLabel} - ${seasonEpStr}`;
+                  }
+                }
+
+                if (finalQualityLabel && !itemLabel.toUpperCase().includes(finalQualityLabel.toUpperCase())) {
+                  itemLabel = `${itemLabel} [${finalQualityLabel}]`;
+                }
+
+                extractedFromHb.push({
+                  url: item.url,
+                  label: itemLabel,
+                  quality: finalQualityLabel,
+                  shortQuality: finalShortQuality,
+                  ep: epNum,
+                  seasonEpLabel: seasonEpStr,
+                  size: cachedItem?.size ? `${cachedItem.size} ${cachedItem.unit || ''}`.trim() : globalSize
+                });
+              })
+            );
+
+            if (extractedFromHb.length > 0) {
+              extractedFromHb.forEach(item => {
+                if (!seenUrls.has(item.url)) {
+                  seenUrls.add(item.url);
+                  hits.push({
+                    file_name: item.label,
+                    url: item.url,
+                    size: item.size || globalSize,
+                    quality: item.shortQuality || item.quality,
+                    ep: item.ep,
+                    seasonEpLabel: item.seasonEpLabel,
+                    is_direct: true
+                  });
+                }
+              });
+            } else {
+              // Extract ONLY HubCloud / vCloud links, strictly excluding HubDrive per user directive
+              const hubcloudMatches = hbHtml.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|vcloud)[^"'\s<>\[\]]*/gi);
+
+              if (hubcloudMatches && hubcloudMatches.length > 0) {
+                const uniqueHubUrls: string[] = Array.from(new Set<string>(hubcloudMatches.map((u: string) => u.replace(/&amp;/g, '&'))))
+                  .filter((u: string) => !u.includes("hubdrive") && !seenUrls.has(u));
+
+                await Promise.all(
+                  uniqueHubUrls.map(async (cleanHubUrl: string) => {
+                    seenUrls.add(cleanHubUrl);
+                    let cachedHb = getCachedHubcloudData(cleanHubUrl);
+                    if (!cachedHb) {
+                      cachedHb = await fetchAndCacheHubcloud(cleanHubUrl);
+                    }
+                    if (cachedHb && (cachedHb.isNotFound || !cachedHb.isWorking)) {
+                      console.log(`[HDHub4U] Skipping dead/broken fallback HubCloud link: ${cleanHubUrl}`);
+                      return;
+                    }
+                    hits.push({
+                      file_name: cachedHb?.original_title || cachedHb?.title || meta.label,
+                      url: cleanHubUrl,
+                      size: cachedHb?.size ? `${cachedHb.size} ${cachedHb.unit || ''}`.trim() : globalSize,
+                      quality: cachedHb?.quality || meta.shortQuality || meta.quality,
+                      season: cachedHb?.season,
+                      episode: cachedHb?.episode,
+                      seasonEpLabel: cachedHb?.seasonEpLabel,
+                      is_direct: true
+                    });
+                  })
+                );
+              }
+            }
+          } catch(e) {
+            console.error(`[HDHub4U] Failed resolving link ${linkUrl}:`, e);
+          }
+        })
+      );
+
+      // Deduplicate hits to avoid "too much contents" (e.g. duplicate files or mirror links)
+      const uniqueHits: any[] = [];
+      const seenFileAndSize = new Set<string>();
+      const seenPaths = new Set<string>();
+
+      for (const hit of hits) {
+        let pathKey = "";
+        try {
+          const uObj = new URL(hit.url);
+          if (uObj.pathname && uObj.pathname.length > 5) {
+            pathKey = uObj.pathname.toLowerCase();
+          }
+        } catch (e) {}
+
+        if (pathKey && seenPaths.has(pathKey)) {
+          console.log(`[HDHub4U] Skipping duplicate hit by URL path: ${hit.url}`);
+          continue;
+        }
+
+        if (hit.file_name) {
+          const cleanName = hit.file_name.trim().toLowerCase().replace(/\s+/g, ' ');
+          const sizeStr = (hit.size || "").trim().toLowerCase();
+          const fileKey = sizeStr ? `${cleanName}||${sizeStr}` : cleanName;
+
+          if (seenFileAndSize.has(fileKey)) {
+            console.log(`[HDHub4U] Skipping duplicate hit by file name/size: ${hit.file_name} (${hit.size || 'No Size'})`);
+            continue;
+          }
+          seenFileAndSize.add(fileKey);
+        }
+
+        if (pathKey) {
+          seenPaths.add(pathKey);
+        }
+        uniqueHits.push(hit);
+      }
+
+      // Arrange episodes in order 1,2,3... and group by quality (480p, 720p, 1080p, 2160p)
+      uniqueHits.sort((a, b) => {
+        const textA = `${a.file_name || ''} ${a.url || ''}`;
+        const textB = `${b.file_name || ''} ${b.url || ''}`;
+
+        const getEp = (item: any, text: string) => {
+          if (item.ep !== undefined) return item.ep;
+          const m = text.match(/\b(?:episode|ep|e)\s*[-_]?\s*(\d{1,3})\b/i) || text.match(/\b(\d{1,3})\s*(?:st|nd|rd|th)?\s*episode\b/i);
+          return m ? parseInt(m[1], 10) : undefined;
+        };
+
+        const getQualityWeight = (item: any, text: string) => {
+          const q = (item.quality || text).toLowerCase();
+          if (q.includes('480p')) return 1;
+          if (q.includes('720p')) return 2;
+          if (q.includes('1080p')) return 3;
+          if (q.includes('2160p') || q.includes('4k')) return 4;
+          return 0;
+        };
+
+        const epA = getEp(a, textA);
+        const epB = getEp(b, textB);
+
+        // 1. Arrange episodes in numerical order 1, 2, 3...
+        if (epA !== undefined && epB !== undefined && epA !== epB) {
+          return epA - epB;
+        }
+        if (epA !== undefined && epB === undefined) return -1;
+        if (epA === undefined && epB !== undefined) return 1;
+
+        // 2. Group by quality (480p, 720p, 1080p, 2160p)
+        const qA = getQualityWeight(a, textA);
+        const qB = getQualityWeight(b, textB);
+        if (qA !== qB) {
+          return qA - qB;
+        }
+
+        // 3. Natural numeric comparison
+        return (a.file_name || '').localeCompare(b.file_name || '', undefined, { numeric: true, sensitivity: 'base' });
+      });
+
+      return res.json({ is_search: false, hits: uniqueHits, found: uniqueHits.length });
+    } catch (error: any) {
+      console.error('HDHub4U extract error:', error);
       res.status(500).json({ error: error.message });
     }
   });

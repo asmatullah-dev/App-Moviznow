@@ -127,8 +127,8 @@ export interface AdContentCheck {
   isFree?: boolean;
 }
 
-// 3-Minute Popunder Cooldown Constant (Max Revenue Cycle)
-export const POPUNDER_COOLDOWN_MS = 3 * 60 * 1000; // 3 minutes in milliseconds
+// 30-Second Popunder Cooldown Constant (Maximized Click Frequency & Revenue)
+export const POPUNDER_COOLDOWN_MS = 30 * 1000; // 30 seconds in milliseconds
 
 /**
  * Thoroughly clears Adsterra and CPM network capping cookies, localStorage tokens,

@@ -7,11 +7,248 @@ export const linkExtractionRouter = Router();
 
 const extractionCache = new Map<string, { data: any, timestamp: number }>();
 const inFlightRequests = new Map<string, Promise<any>>();
-const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
+const CACHE_TTL = 30 * 60 * 1000; // 30 minutes cache
 
 const htmlCache = new Map<string, { data: any, status: number, headers: any, timestamp: number }>();
 const inFlightHtmlRequests = new Map<string, Promise<any>>();
-const HTML_CACHE_TTL = 10 * 60 * 1000;
+const HTML_CACHE_TTL = 30 * 60 * 1000; // 30 minutes HTML cache
+
+export function getCachedHubcloudData(url: string) {
+  if (!url) return null;
+  const normalizedUrl = normalizeDomain(url);
+  const cached = extractionCache.get(`extract_${url}`) || 
+                 extractionCache.get(`extract_${normalizedUrl}`) ||
+                 extractionCache.get(`direct_${url}_false`) ||
+                 extractionCache.get(`direct_${url}_true`) ||
+                 extractionCache.get(`direct_${normalizedUrl}_false`) ||
+                 extractionCache.get(`direct_${normalizedUrl}_true`);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data;
+  }
+  return null;
+}
+
+export function setCachedHubcloudData(url: string, data: any) {
+  if (!url || !data) return;
+  const normalizedUrl = normalizeDomain(url);
+  const item = { data, timestamp: Date.now() };
+  extractionCache.set(`extract_${url}`, item);
+  extractionCache.set(`extract_${normalizedUrl}`, item);
+  extractionCache.set(`direct_${url}_false`, item);
+  extractionCache.set(`direct_${normalizedUrl}_false`, item);
+}
+
+export function parseSeasonEpisode(text: string): {
+  season?: number;
+  episode?: number | string;
+  seasonEpLabel?: string;
+} {
+  if (!text) return {};
+  
+  const clean = text.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').trim();
+
+  // Pattern 1: S01E02 / S1E2 / S01.E02 / S01_E02 / S01-E02
+  let m = clean.match(/\bS(\d{1,2})\s*[-._]?\s*E(\d{1,3})\b/i);
+  if (m) {
+    const s = parseInt(m[1], 10);
+    const e = parseInt(m[2], 10);
+    const sStr = s < 10 ? `S0${s}` : `S${s}`;
+    const eStr = e < 10 ? `E0${e}` : `E${e}`;
+    return { season: s, episode: e, seasonEpLabel: `${sStr}${eStr}` };
+  }
+
+  // Pattern 2: Season 1 Episode 2 / Season 01 Ep 02
+  m = clean.match(/\bSeason\s*[-._]?\s*(\d{1,2})\s*[-._]?\s*(?:Episode|Ep)\s*[-._]?\s*(\d{1,3})\b/i);
+  if (m) {
+    const s = parseInt(m[1], 10);
+    const e = parseInt(m[2], 10);
+    const sStr = s < 10 ? `S0${s}` : `S${s}`;
+    const eStr = e < 10 ? `E0${e}` : `E${e}`;
+    return { season: s, episode: e, seasonEpLabel: `${sStr}${eStr}` };
+  }
+
+  // Pattern 3: S01 Ep 01-10 or S01E01-E10
+  m = clean.match(/\bS(\d{1,2})\s*[-._]?\s*(?:E|Ep|Episodes?)\s*[-._]?\s*(\d{1,3})\s*[-~to]+\s*(?:E|Ep)?\s*(\d{1,3})\b/i);
+  if (m) {
+    const s = parseInt(m[1], 10);
+    const eStart = parseInt(m[2], 10);
+    const eEnd = parseInt(m[3], 10);
+    const sStr = s < 10 ? `S0${s}` : `S${s}`;
+    return { season: s, episode: `${eStart}-${eEnd}`, seasonEpLabel: `${sStr} Ep ${eStart}-${eEnd}` };
+  }
+
+  // Pattern 4: Season only: S01 or Season 1
+  let season: number | undefined;
+  let sMatch = clean.match(/\bS(\d{1,2})\b/i) || clean.match(/\bSeason\s*[-._]?\s*(\d{1,2})\b/i);
+  if (sMatch) {
+    season = parseInt(sMatch[1], 10);
+  }
+
+  // Pattern 5: Episode only: E02 or Ep 02 or Episode 2
+  let episode: number | string | undefined;
+  let eMatch = clean.match(/\b(?:Episode|Ep|E)\s*[-._]?\s*(\d{1,3})\b/i) || clean.match(/\b(\d{1,3})\s*(?:st|nd|rd|th)?\s*Episode\b/i);
+  if (eMatch) {
+    episode = parseInt(eMatch[1], 10);
+  }
+
+  if (season !== undefined && episode !== undefined) {
+    const sStr = season < 10 ? `S0${season}` : `S${season}`;
+    const eNum = typeof episode === 'number' ? (episode < 10 ? `E0${episode}` : `E${episode}`) : `Ep ${episode}`;
+    return { season, episode, seasonEpLabel: `${sStr}${eNum}` };
+  } else if (season !== undefined) {
+    const sStr = season < 10 ? `S0${season}` : `S${season}`;
+    return { season, episode: undefined, seasonEpLabel: sStr };
+  } else if (episode !== undefined) {
+    const eNum = typeof episode === 'number' ? (episode < 10 ? `E0${episode}` : `E${episode}`) : `Ep ${episode}`;
+    return { season: undefined, episode, seasonEpLabel: eNum };
+  }
+
+  return {};
+}
+
+export function isGenericTitle(str: string): boolean {
+  if (!str) return true;
+  const s = str.trim().toLowerCase();
+  if (s.length < 3) return true;
+  if (/^\[?\s*(?:download|direct download|direct|hubcloud|vcloud|link|server|click|fast server|gdrive|stream|watch|480p?|720p?|1080p?|2160p?|4k|direct link)\s*\]?$/i.test(s)) return true;
+  if (/^(direct|download|hubcloud|vcloud)\s*\[?\s*\d{3,4}p?\s*\]?$/i.test(s)) return true;
+  if (/^\[?\s*\d{3,4}p?\s*\]?$/i.test(s)) return true;
+  if (/just a moment|cloudflare|ddos protection|attention required/i.test(s)) return true;
+  return false;
+}
+
+export function parseDetailedQuality(text: string): { qualityLabel: string; shortQuality: string } {
+  if (!text) return { qualityLabel: "", shortQuality: "" };
+
+  const resMatch = text.match(/\b(2160p|4k|1080p|720p|480p)\b/i);
+  let shortQuality = "";
+  let resStr = "";
+  if (resMatch) {
+    const rawRes = resMatch[1].toLowerCase();
+    if (rawRes === "4k" || rawRes === "2160p") {
+      shortQuality = "2160p";
+      resStr = rawRes === "4k" ? "4K" : "2160P";
+    } else {
+      shortQuality = rawRes;
+      resStr = rawRes.toUpperCase();
+    }
+  }
+
+  const is10Bit = /\b10-?bit\b/i.test(text);
+  const isHevc = /\b(hevc|x265|h265)\b/i.test(text);
+  const isX264 = /\b(x264|h264|avc)\b/i.test(text);
+
+  let codecStr = "";
+  if (is10Bit && isHevc) {
+    codecStr = "10Bit HEVC";
+  } else if (isHevc) {
+    codecStr = "HEVC";
+  } else if (isX264) {
+    codecStr = "x264";
+  } else if (is10Bit) {
+    codecStr = "10Bit";
+  }
+
+  let qualityLabel = "";
+  if (resStr && codecStr) {
+    qualityLabel = `${resStr} ${codecStr}`;
+  } else if (resStr) {
+    qualityLabel = resStr;
+  } else if (codecStr) {
+    qualityLabel = codecStr;
+  }
+
+  return { qualityLabel, shortQuality };
+}
+
+export function parseHubcloudHtmlTitle($: cheerio.CheerioAPI, htmlData: string): {
+  original_title: string;
+  clean_title: string;
+  season?: number;
+  episode?: number | string;
+  seasonEpLabel?: string;
+  quality?: string;
+  shortQuality?: string;
+} {
+  let rawTitle = "";
+
+  if ($) {
+    const filenameElements = [
+      $('.file-name, #file-name, .filename, #filename, [class*="filename"], [class*="file-name"]'),
+      $('td:contains("File Name"), td:contains("Filename")').next('td'),
+      $('li:contains("File Name"), li:contains("Filename")'),
+      $('div:contains("File Name:"), p:contains("File Name:"), span:contains("File Name:")'),
+      $('strong:contains("File Name:"), b:contains("File Name:")'),
+      $('.card-header'),
+      $('.card-title'),
+      $('h1'),
+      $('h2'),
+      $('h3'),
+      $('title')
+    ];
+
+    for (const element of filenameElements) {
+      if (element && element.length > 0) {
+        element.each((_, el) => {
+          let text = $(el).text().trim();
+          if (text.includes(':')) {
+            const parts = text.split(':');
+            text = parts.slice(1).join(':').trim();
+          }
+          if (text && !isGenericTitle(text)) {
+            if (!rawTitle || (isGenericTitle(rawTitle) && !isGenericTitle(text)) || (text.length > rawTitle.length && !isGenericTitle(text))) {
+              rawTitle = text;
+            }
+          }
+        });
+      }
+      if (rawTitle && !isGenericTitle(rawTitle) && rawTitle.length > 8) {
+        break;
+      }
+    }
+  }
+
+  if ((!rawTitle || isGenericTitle(rawTitle)) && htmlData) {
+    const fnMatch = htmlData.match(/(?:file\s*name|filename|title|name)\s*[:=]\s*["']?([^"'\n\r<>{}]+)["']?/i) ||
+                    htmlData.match(/class=["']?(?:file-name|filename|card-header|card-title)["']?[^>]*>([^<]+)</i) ||
+                    htmlData.match(/([a-zA-Z0-9._\-\s\[\]()]{6,}\.(?:mkv|mp4|avi|webm|zip|rar))/i);
+    if (fnMatch && fnMatch[1] && !isGenericTitle(fnMatch[1])) {
+      rawTitle = fnMatch[1].trim();
+    }
+  }
+
+  if (!rawTitle) {
+    rawTitle = "";
+  }
+
+  let original_title = rawTitle.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+
+  let clean_title = original_title
+    .replace(/https?:\/\/[^\s]+/gi, "")
+    .replace(/(?:hubcloud\.club|hubcloud\.ink|hubcloud\.foo|hubcloud\.best|hubcloud\.lol|hubcloud\.online|hubcloud|moviesdrive|hubdrive|vcloud\.live|vcloud|skymovies|mdrive|filmygo|filesdl|linkmake)(?:\s*-\s*|\s*\|\s*|\s*:\s*)?/gi, "")
+    .replace(/^download\s*/i, "")
+    .replace(/\s*-\s*download$/i, "")
+    .replace(/\s*-\s*hubcloud$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!clean_title || isGenericTitle(clean_title)) {
+    clean_title = original_title;
+  }
+
+  const { season, episode, seasonEpLabel } = parseSeasonEpisode(original_title || clean_title);
+  const { qualityLabel, shortQuality } = parseDetailedQuality(original_title || clean_title || htmlData);
+
+  return {
+    original_title,
+    clean_title,
+    season,
+    episode,
+    seasonEpLabel,
+    quality: qualityLabel,
+    shortQuality
+  };
+}
 
 setInterval(() => {
   const now = Date.now();
@@ -150,7 +387,7 @@ async function fetchHtmlFallback(url: string, isVcloud = false) {
   return response;
 }
 
-async function fetchHtml(url: string, isVcloud = false, force = false) {
+export async function fetchHtml(url: string, isVcloud = false, force = false) {
   const cacheKey = url;
   const cached = htmlCache.get(cacheKey);
   if (!force && cached && Date.now() - cached.timestamp < HTML_CACHE_TTL) {
@@ -263,8 +500,8 @@ async function fetchHtml(url: string, isVcloud = false, force = false) {
           }
         }
 
-        let title = $("title").text() || $(".card-header").text() || $(".card-title").text() || $("h1").first().text() || "";
-        title = title.replace(/hubcloud/gi, "").replace(/moviesdrive/gi, "").replace(/hubdrive/gi, "").replace(/vcloud/gi, "").replace(/skymovies/gi, "").replace(/mdrive/gi, "").replace(/filmygo/gi, "").trim();
+        const parsedMeta = parseHubcloudHtmlTitle($, response.data || "");
+        let title = parsedMeta.clean_title || parsedMeta.original_title || "";
         
         const isCloudflare =
           title.toLowerCase().includes("just a moment") ||
@@ -291,6 +528,10 @@ async function fetchHtml(url: string, isVcloud = false, force = false) {
           size,
           unit,
           title: title.trim(),
+          original_title: parsedMeta.original_title,
+          season: parsedMeta.season,
+          episode: parsedMeta.episode,
+          seasonEpLabel: parsedMeta.seasonEpLabel,
           isWorking,
           isNotFound,
         };
@@ -304,6 +545,7 @@ async function fetchHtml(url: string, isVcloud = false, force = false) {
           !responseData.title.toLowerCase().includes("just a moment");
 
         if (isSuccessful) {
+          setCachedHubcloudData(url, responseData);
           extractionCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
         }
 
@@ -622,32 +864,31 @@ async function fetchHtml(url: string, isVcloud = false, force = false) {
          }
       }
 
-      let extractedTitle = "";
-      if ($) {
-        extractedTitle = $("title").text() || $(".card-header").text() || $(".card-title").text() || $("h1").first().text() || "";
-      }
-      if (!extractedTitle && $2) {
-        extractedTitle = $2("title").text() || $2(".card-header").text() || $2(".card-title").text() || $2("h1").first().text() || "";
-      }
-      if (extractedTitle) {
-        extractedTitle = extractedTitle
-          .replace(/hubcloud/gi, "")
-          .replace(/moviesdrive/gi, "")
-          .replace(/hubdrive/gi, "")
-          .replace(/vcloud/gi, "")
-          .replace(/skymovies/gi, "")
-          .replace(/mdrive/gi, "")
-          .replace(/filmygo/gi, "")
-          .replace(/download/gi, "")
-          .trim();
-      }
+      const htmlBody = active$ ? active$.html() : "";
+      const parsedMeta = parseHubcloudHtmlTitle(active$, htmlBody || "");
+      let extractedTitle = parsedMeta.clean_title || parsedMeta.original_title || "";
 
-      return {
+      const finalExtractedData = {
         url: normalizeDomain(workingLink),
         candidates: returnCandidates,
         size: sizeInfo,
         title: extractedTitle || undefined,
+        original_title: parsedMeta.original_title || undefined,
+        season: parsedMeta.season,
+        episode: parsedMeta.episode,
+        seasonEpLabel: parsedMeta.seasonEpLabel,
+        quality: parsedMeta.quality,
+        shortQuality: parsedMeta.shortQuality,
       };
+
+      if (finalExtractedData.title || finalExtractedData.original_title) {
+        setCachedHubcloudData(url, finalExtractedData);
+        if (workingLink && workingLink !== url) {
+          setCachedHubcloudData(workingLink, finalExtractedData);
+        }
+      }
+
+      return finalExtractedData;
     } catch (e: any) {
       if (e.isAxiosError && e.message.includes('maxContentLength exceed') || e.message.includes('maxContentLength')) {
         let finalUrl = url;

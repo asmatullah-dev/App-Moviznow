@@ -27,8 +27,91 @@ import {
   ExternalLink,
   Film,
   Globe,
-  Loader2 as LoaderIcon
+  Loader2 as LoaderIcon,
+  CheckSquare,
+  SlidersHorizontal
 } from "lucide-react";
+
+export function sortHitsByEpisodeAndQuality(hits: any[]) {
+  return [...hits].sort((a, b) => {
+    const textA = `${a.file_name || ''} ${a.quality || ''} ${a.url || ''}`;
+    const textB = `${b.file_name || ''} ${b.quality || ''} ${b.url || ''}`;
+
+    const getEp = (item: any, text: string) => {
+      if (item.ep !== undefined) return item.ep;
+      const m = text.match(/\b(?:episode|ep|e)\s*[-_]?\s*(\d{1,3})\b/i) || text.match(/\b(\d{1,3})\s*(?:st|nd|rd|th)?\s*episode\b/i);
+      return m ? parseInt(m[1], 10) : undefined;
+    };
+
+    const getQualityWeight = (item: any, text: string) => {
+      const q = (item.quality || text).toLowerCase();
+      if (q.includes('480p')) return 1;
+      if (q.includes('720p')) return 2;
+      if (q.includes('1080p')) return 3;
+      if (q.includes('2160p') || q.includes('4k')) return 4;
+      return 0;
+    };
+
+    const epA = getEp(a, textA);
+    const epB = getEp(b, textB);
+
+    // 1. Primary sort: Episode number ascending (1, 2, 3...)
+    if (epA !== undefined && epB !== undefined && epA !== epB) {
+      return epA - epB;
+    }
+    if (epA !== undefined && epB === undefined) return -1;
+    if (epA === undefined && epB !== undefined) return 1;
+
+    // 2. Secondary sort: Quality ascending (480p, 720p, 1080p, 2160p)
+    const qA = getQualityWeight(a, textA);
+    const qB = getQualityWeight(b, textB);
+    if (qA !== qB) {
+      return qA - qB;
+    }
+
+    // 3. Natural numeric comparison
+    return (a.file_name || '').localeCompare(b.file_name || '', undefined, { numeric: true, sensitivity: 'base' });
+  });
+}
+
+export function sortResultsByEpisodeAndQuality(results: any[]) {
+  return [...results].sort((a, b) => {
+    const textA = `${a.fileName || ''} ${a.qualityLabel || ''} ${a.url || ''} ${a.finalUrl || ''}`;
+    const textB = `${b.fileName || ''} ${b.qualityLabel || ''} ${b.url || ''} ${b.finalUrl || ''}`;
+
+    const getEp = (item: any, text: string) => {
+      if (item.episode !== undefined) return item.episode;
+      const m = text.match(/\b(?:episode|ep|e)\s*[-_]?\s*(\d{1,3})\b/i) || text.match(/\b(\d{1,3})\s*(?:st|nd|rd|th)?\s*episode\b/i);
+      return m ? parseInt(m[1], 10) : undefined;
+    };
+
+    const getQualityWeight = (item: any, text: string) => {
+      const q = (item.qualityLabel || text).toLowerCase();
+      if (q.includes('480p')) return 1;
+      if (q.includes('720p')) return 2;
+      if (q.includes('1080p')) return 3;
+      if (q.includes('2160p') || q.includes('4k')) return 4;
+      return 0;
+    };
+
+    const epA = getEp(a, textA);
+    const epB = getEp(b, textB);
+
+    if (epA !== undefined && epB !== undefined && epA !== epB) {
+      return epA - epB;
+    }
+    if (epA !== undefined && epB === undefined) return -1;
+    if (epA === undefined && epB !== undefined) return 1;
+
+    const qA = getQualityWeight(a, textA);
+    const qB = getQualityWeight(b, textB);
+    if (qA !== qB) {
+      return qA - qB;
+    }
+
+    return (a.fileName || a.url || '').localeCompare(b.fileName || b.url || '', undefined, { numeric: true, sensitivity: 'base' });
+  });
+}
 import { QualityLinks, Language, Quality, LinkDef, Content } from '../types';
 import { useAdminContent } from '../contexts/AdminContentContext';
 import { 
@@ -48,7 +131,9 @@ import {
   getSkymoviesDomain,
   setSkymoviesDomain,
   getFilmygoDomain,
-  setFilmygoDomain
+  setFilmygoDomain,
+  getHdhub4uDomain,
+  setHdhub4uDomain
 } from '../utils/domains';
 
 export const isMissingPixeldrain = (r: { url?: string; candidates?: Array<{ text: string; href: string }> } | null | undefined): boolean => {
@@ -771,11 +856,13 @@ export const LinkCheckerModal: React.FC<Props> = ({
   const [moviesdriveDomainInput, setMoviesdriveDomainInput] = useState(() => getMoviesdriveDomain());
   const [skymoviesDomainInput, setSkymoviesDomainInput] = useState(() => getSkymoviesDomain());
   const [filmygoDomainInput, setFilmygoDomainInput] = useState(() => getFilmygoDomain());
+  const [hdhubDomainInput, setHdhubDomainInput] = useState(() => getHdhub4uDomain());
 
   const handleSaveDomains = () => {
     if (moviesdriveDomainInput) setMoviesdriveDomain(moviesdriveDomainInput);
     if (skymoviesDomainInput) setSkymoviesDomain(skymoviesDomainInput);
     if (filmygoDomainInput) setFilmygoDomain(filmygoDomainInput);
+    if (hdhubDomainInput) setHdhub4uDomain(hdhubDomainInput);
     setShowDomainSettings(false);
   };
   const [input, setInput] = useState(initialInput);
@@ -817,12 +904,67 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
   // MDrive Scraper State
   const [mdriveUrl, setMdriveUrl] = useState<string | null>(null);
-  const [mdriveResults, setMdriveResults] = useState<any[]>([]);
+  const [mdriveResults, setMdriveResultsState] = useState<any[]>([]);
+  const setMdriveResults = (hits: any[]) => {
+    setMdriveResultsState(sortHitsByEpisodeAndQuality(hits));
+  };
   const [mdriveLoading, setMdriveLoading] = useState(false);
   const [mdriveError, setMdriveError] = useState<string | null>(null);
   const [mdriveSelectedIndices, setMdriveSelectedIndices] = useState<Set<number>>(new Set());
   const [mdriveExtractingDirect, setMdriveExtractingDirect] = useState<Record<number, boolean>>({});
   const processedExtractionsRef = React.useRef<Set<string>>(new Set());
+
+  // Quality Filtering & Quick Selection State
+  const [showQuickSelect, setShowQuickSelect] = useState(false);
+  const [qualityFilter, setQualityFilter] = useState<'all' | '480p' | '720p' | '1080p' | '2160p'>('all');
+
+  const qualityCounts = useMemo(() => {
+    const counts = { '480p': 0, '720p': 0, '1080p': 0, '2160p': 0, 'other': 0 };
+    mdriveResults.forEach(item => {
+      const text = `${item.file_name || ''} ${item.quality || ''} ${item.url || ''}`.toLowerCase();
+      if (text.includes('480p')) counts['480p']++;
+      else if (text.includes('720p')) counts['720p']++;
+      else if (text.includes('1080p')) counts['1080p']++;
+      else if (text.includes('2160p') || text.includes('4k')) counts['2160p']++;
+      else counts['other']++;
+    });
+    return counts;
+  }, [mdriveResults]);
+
+  const selectAllOfQuality = (quality?: '480p' | '720p' | '1080p' | '2160p') => {
+    if (!quality) {
+      setMdriveSelectedIndices(new Set(mdriveResults.keys()));
+      return;
+    }
+    const next = new Set(mdriveSelectedIndices);
+    mdriveResults.forEach((item, idx) => {
+      const text = `${item.file_name || ''} ${item.quality || ''} ${item.url || ''}`.toLowerCase();
+      let matches = false;
+      if (quality === '480p' && text.includes('480p')) matches = true;
+      if (quality === '720p' && text.includes('720p')) matches = true;
+      if (quality === '1080p' && text.includes('1080p')) matches = true;
+      if (quality === '2160p' && (text.includes('2160p') || text.includes('4k'))) matches = true;
+
+      if (matches) {
+        next.add(idx);
+      }
+    });
+    setMdriveSelectedIndices(next);
+  };
+
+  const filteredMdriveResults = useMemo(() => {
+    if (qualityFilter === 'all') return mdriveResults.map((item, originalIndex) => ({ item, originalIndex }));
+    return mdriveResults
+      .map((item, originalIndex) => ({ item, originalIndex }))
+      .filter(({ item }) => {
+        const text = `${item.file_name || ''} ${item.quality || ''} ${item.url || ''}`.toLowerCase();
+        if (qualityFilter === '480p') return text.includes('480p');
+        if (qualityFilter === '720p') return text.includes('720p');
+        if (qualityFilter === '1080p') return text.includes('1080p');
+        if (qualityFilter === '2160p') return text.includes('2160p') || text.includes('4k');
+        return true;
+      });
+  }, [mdriveResults, qualityFilter]);
 
   // MoviesDrive Search Results & Pagination State
   const [moviesdriveSearchUrl, setMoviesdriveSearchUrl] = useState<string | null>(null);
@@ -847,6 +989,10 @@ export const LinkCheckerModal: React.FC<Props> = ({
   const [showFilmygoSearchInput, setShowFilmygoSearchInput] = useState<boolean>(false);
   const [filmygoSearchTerm, setFilmygoSearchTerm] = useState<string>("");
 
+  // Direct HDHub4U Search Input State
+  const [showHdhubSearchInput, setShowHdhubSearchInput] = useState<boolean>(false);
+  const [hdhubSearchTerm, setHdhubSearchTerm] = useState<string>("");
+
   React.useEffect(() => {
     setSkymoviesVisibleLimit(50);
   }, [moviesdriveSearchPosts, moviesdriveSearchUrl]);
@@ -855,16 +1001,22 @@ export const LinkCheckerModal: React.FC<Props> = ({
     const mdDomain = getMoviesdriveDomain();
     const skyDomain = getSkymoviesDomain();
     const filmyDomain = getFilmygoDomain();
-    if (!moviesdriveSearchUrl) return { query: "", page: 1, origin: mdDomain, isSkyMovies: false, isFilmygo: false };
+    const hdhubDomain = getHdhub4uDomain();
+    if (!moviesdriveSearchUrl) return { query: "", page: 1, origin: mdDomain, isSkyMovies: false, isFilmygo: false, isHdhub4u: false };
     try {
       const u = new URL(moviesdriveSearchUrl);
       const isSky = u.hostname.includes("skymovies") || u.origin === skyDomain;
       const isFilmy = u.hostname.includes("filmygo") || u.origin === filmyDomain;
+      const isHdhub = u.hostname.includes("hdhub4u") || u.origin === hdhubDomain;
       const q = u.searchParams.get("to-search") || u.searchParams.get("search") || u.searchParams.get("q") || u.searchParams.get("s") || "";
-      const p = parseInt(u.searchParams.get("to-page") || u.searchParams.get("page") || u.searchParams.get("p") || u.searchParams.get("pg") || "1", 10) || 1;
-      return { query: q, page: p, origin: u.origin || (isFilmy ? filmyDomain : isSky ? skyDomain : mdDomain), isSkyMovies: isSky, isFilmygo: isFilmy };
+      let p = parseInt(u.searchParams.get("to-page") || u.searchParams.get("page") || u.searchParams.get("p") || u.searchParams.get("pg") || "1", 10) || 1;
+      if (isHdhub && !u.searchParams.get("page") && !u.searchParams.get("p")) {
+        const pageMatch = u.pathname.match(/\/page\/(\d+)/i);
+        if (pageMatch) p = parseInt(pageMatch[1], 10);
+      }
+      return { query: q, page: p, origin: u.origin || (isHdhub ? hdhubDomain : isFilmy ? filmyDomain : isSky ? skyDomain : mdDomain), isSkyMovies: isSky, isFilmygo: isFilmy, isHdhub4u: isHdhub };
     } catch {
-      return { query: "", page: 1, origin: mdDomain, isSkyMovies: false, isFilmygo: false };
+      return { query: "", page: 1, origin: mdDomain, isSkyMovies: false, isFilmygo: false, isHdhub4u: false };
     }
   }, [moviesdriveSearchUrl]);
 
@@ -1299,7 +1451,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
   const handleMoviesdrivePageChange = async (targetPage: number) => {
     if (targetPage < 1 || !moviesdriveSearchUrl) return;
-    const { query, origin, isSkyMovies, isFilmygo } = moviesdrivePageInfo;
+    const { query, origin, isSkyMovies, isFilmygo, isHdhub4u } = moviesdrivePageInfo;
     let newUrl = "";
     let endpoint = "";
     if (isSkyMovies) {
@@ -1312,6 +1464,15 @@ export const LinkCheckerModal: React.FC<Props> = ({
         newUrl = `${origin}/?to-page=${targetPage}`;
       }
       endpoint = `/api/filmygo?url=${encodeURIComponent(newUrl)}`;
+    } else if (isHdhub4u) {
+      if (query) {
+        newUrl = targetPage === 1 
+          ? `${origin}/search.html?q=${encodeURIComponent(query)}` 
+          : `${origin}/search.html?q=${encodeURIComponent(query)}&page=${targetPage}`;
+      } else {
+        newUrl = `${origin}/page/${targetPage}/`;
+      }
+      endpoint = `/api/hdhub4u?url=${encodeURIComponent(newUrl)}`;
     } else {
       newUrl = `${origin}/search.html?q=${encodeURIComponent(query)}&page=${targetPage}`;
       endpoint = `/api/moviesdrive?url=${encodeURIComponent(newUrl)}`;
@@ -1375,6 +1536,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
     setShowMoviesdriveSearchInput(false);
     setShowSkymoviesSearchInput(false);
     setShowFilmygoSearchInput(false);
+    setShowHdhubSearchInput(false);
     setMoviesdriveSearchTerm("");
     setTimeout(() => {
       handleCheck(undefined, targetUrl, 0, true);
@@ -1405,6 +1567,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
     setShowSkymoviesSearchInput(false);
     setShowMoviesdriveSearchInput(false);
     setShowFilmygoSearchInput(false);
+    setShowHdhubSearchInput(false);
     setSkymoviesSearchTerm("");
     setTimeout(() => {
       handleCheck(undefined, targetUrl, 0, true);
@@ -1435,7 +1598,39 @@ export const LinkCheckerModal: React.FC<Props> = ({
     setShowFilmygoSearchInput(false);
     setShowMoviesdriveSearchInput(false);
     setShowSkymoviesSearchInput(false);
+    setShowHdhubSearchInput(false);
     setFilmygoSearchTerm("");
+    setTimeout(() => {
+      handleCheck(undefined, targetUrl, 0, true);
+    }, 100);
+  };
+
+  const executeHdhubSearch = (query: string) => {
+    const trimmed = query.trim();
+    const domain = getHdhub4uDomain();
+    let targetUrl = "";
+    if (!trimmed) {
+      targetUrl = `${domain}/`;
+    } else if (!trimmed.startsWith("http")) {
+      targetUrl = `${domain}/search.html?q=${encodeURIComponent(trimmed)}`;
+    } else {
+      targetUrl = trimmed;
+    }
+
+    // Clear cache & active search overlays for fresh search
+    processedExtractionsRef.current.delete(normalizeUrl(targetUrl));
+    processedExtractionsRef.current.delete(targetUrl);
+    setMoviesdriveSearchUrl(null);
+    setMoviesdriveSearchPosts([]);
+    setAllAccumulatedPosts(new Map());
+    setMoviesdriveSelectedUrls(new Set());
+
+    setInput(targetUrl);
+    setShowHdhubSearchInput(false);
+    setShowMoviesdriveSearchInput(false);
+    setShowSkymoviesSearchInput(false);
+    setShowFilmygoSearchInput(false);
+    setHdhubSearchTerm("");
     setTimeout(() => {
       handleCheck(undefined, targetUrl, 0, true);
     }, 100);
@@ -1615,16 +1810,40 @@ export const LinkCheckerModal: React.FC<Props> = ({
       });
       const data = await res.json();
       
-      if (data.size || data.url) {
-        setMdriveResults(prev => {
+      if (data.size || data.url || data.title || data.original_title) {
+        setMdriveResultsState(prev => {
           const next = [...prev];
-          // We DO NOT update the url to data.url per user request, just grab the size
-          next[index] = { ...next[index], size: data.size || item.size };
+          const currentItem = next[index];
+          let hubcloudName = data.original_title || data.title || currentItem.file_name;
+
+          if (hubcloudName && typeof hubcloudName === 'string') {
+            const lowerTitle = hubcloudName.toLowerCase();
+            if (!lowerTitle.includes('cloudflare') && !lowerTitle.includes('unknown') && !lowerTitle.includes('timeout') && !lowerTitle.includes('just a moment')) {
+              let cleanTitle = hubcloudName.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+              cleanTitle = cleanTitle.replace(/\[?\s*\d+(?:\.\d+)?\s*(?:GB|MB|KB)\s*\]?/gi, '').trim();
+
+              const qualityLabel = data.quality || currentItem.quality || '';
+              if (qualityLabel && !cleanTitle.toUpperCase().includes(qualityLabel.toUpperCase())) {
+                cleanTitle = `${cleanTitle} [${qualityLabel}]`;
+              }
+              hubcloudName = cleanTitle;
+            }
+          }
+
+          next[index] = { 
+            ...currentItem, 
+            size: data.size || currentItem.size,
+            file_name: hubcloudName || currentItem.file_name,
+            quality: data.quality || currentItem.quality,
+            season: data.season || currentItem.season,
+            episode: data.episode || currentItem.episode,
+            seasonEpLabel: data.seasonEpLabel || currentItem.seasonEpLabel
+          };
           return next;
         });
       }
     } catch (err) {
-      console.error('Failed to extract size:', err);
+      console.error('Failed to extract direct hubcloud info:', err);
     } finally {
       setMdriveExtractingDirect(prev => ({ ...prev, [index]: false }));
     }
@@ -1765,6 +1984,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
     const mdDomain = getMoviesdriveDomain();
     const skyDomain = getSkymoviesDomain();
     const filmyDomain = getFilmygoDomain();
+    const hdhubDomain = getHdhub4uDomain();
 
     // 1. Identify all extractable links
     const extractableLinks = currentLinks.filter(u => {
@@ -1774,10 +1994,11 @@ export const LinkCheckerModal: React.FC<Props> = ({
         normU.includes('filesdl.in') || normU.includes('filesdl.top') || normU.includes('filesdl.') || normU.includes('linkmake.') ||
         normU.includes('mdrive.lol') || normU.includes('mdrvie.lol') ||
         normU.includes('moviesdrives.') || normU.includes('moviesdrive.') ||
-        normU.includes('filmygo.') || normU.includes('skymovies') ||
+        normU.includes('filmygo.') || normU.includes('skymovies') || normU.includes('hdhub4u') ||
         (mdDomain && normU.includes(normalizeUrl(mdDomain))) ||
         (skyDomain && normU.includes(normalizeUrl(skyDomain))) ||
-        (filmyDomain && normU.includes(normalizeUrl(filmyDomain)));
+        (filmyDomain && normU.includes(normalizeUrl(filmyDomain))) ||
+        (hdhubDomain && normU.includes(normalizeUrl(hdhubDomain)));
 
       return isExtractableHost && 
         !processedExtractionsRef.current.has(u) && 
@@ -1813,6 +2034,12 @@ export const LinkCheckerModal: React.FC<Props> = ({
               if (!res.ok) throw new Error('FilmyGo fetch failed');
               const data = await res.json();
               return { type: 'filmygo', original: targetUrl, data };
+            } else if (normUrl.includes('hdhub4u') || (hdhubDomain && normUrl.includes(normalizeUrl(hdhubDomain)))) {
+              const res = await fetch(`/api/hdhub4u?url=${encodeURIComponent(normUrl)}`, { signal: controller.signal });
+              clearTimeout(timer);
+              if (!res.ok) throw new Error('HDHub4U fetch failed');
+              const data = await res.json();
+              return { type: 'hdhub4u', original: targetUrl, data };
             } else if (normUrl.includes('skymovies') || (skyDomain && normUrl.includes(normalizeUrl(skyDomain)))) {
               const res = await fetch(`/api/skymovieshd?url=${encodeURIComponent(normUrl)}`, { signal: controller.signal });
               clearTimeout(timer);
@@ -1867,8 +2094,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
               replaceOriginalUrl(res.original, res.extracted);
               console.log("Auto-replacement successful:", { from: res.original, to: res.extracted });
             }
-          } else if (res.type === 'mdrive' || res.type === 'moviesdrive' || res.type === 'filmygo' || res.type === 'skymovieshd') {
-            if ((res.type === 'moviesdrive' || res.type === 'skymovieshd' || res.type === 'filmygo') && res.data?.is_search) {
+          } else if (res.type === 'mdrive' || res.type === 'moviesdrive' || res.type === 'filmygo' || res.type === 'skymovieshd' || res.type === 'hdhub4u') {
+            if ((res.type === 'moviesdrive' || res.type === 'skymovieshd' || res.type === 'filmygo' || res.type === 'hdhub4u') && res.data?.is_search) {
               markProcessed(res.original);
               if (Array.isArray(res.data?.posts) && res.data.posts.length > 0) {
                 setMoviesdriveSearchUrl(res.original);
@@ -1892,7 +2119,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
                 pausedForUI = true;
                 break;
               } else {
-                setError(`No matching contents found on ${res.type === 'skymovieshd' ? 'SkyMoviesHD' : res.type === 'filmygo' ? 'FilmyGo' : 'MoviesDrive'}.`);
+                setError(`No matching contents found on ${res.type === 'skymovieshd' ? 'SkyMoviesHD' : res.type === 'filmygo' ? 'FilmyGo' : res.type === 'hdhub4u' ? 'HDHub4U' : 'MoviesDrive'}.`);
+                pausedForUI = true;
+                break;
               }
             }
 
@@ -2072,21 +2301,23 @@ export const LinkCheckerModal: React.FC<Props> = ({
         confidenceScore: Math.max(0, 100 - (buildMismatchWarnings(r, allResults, languages, qualities).length * 18)),
       }));
 
+      const sortedFinal = sortResultsByEpisodeAndQuality(finalResults);
+
       setResults(prev => {
         if (onlyUrls?.length) {
           const keep = prev.filter((r) => !onlyUrls.includes(r.url));
-          const merged = [...keep, ...finalResults];
+          const merged = sortResultsByEpisodeAndQuality([...keep, ...sortedFinal]);
           return merged.map(r => ({
             ...r,
             mismatchWarnings: buildMismatchWarnings(r, merged, languages, qualities),
             confidenceScore: Math.max(0, 100 - (buildMismatchWarnings(r, merged, languages, qualities).length * 18)),
           }));
         }
-        return finalResults;
+        return sortedFinal;
       });
 
       if (onResults) {
-        onResults(finalResults);
+        onResults(sortedFinal);
       }
     } catch (e: any) {
       setError(e?.message || "Unknown error while checking links.");
@@ -2699,8 +2930,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-1">
                       <div>
                         <h3 className="text-lg font-bold flex items-center gap-2 text-zinc-900 dark:text-white">
-                          <Search className={`w-5 h-5 ${moviesdrivePageInfo.isSkyMovies ? "text-purple-500" : moviesdrivePageInfo.isFilmygo ? "text-emerald-500" : "text-indigo-500"}`} />
-                          {moviesdrivePageInfo.isSkyMovies ? "SkyMoviesHD Search Page Contents" : moviesdrivePageInfo.isFilmygo ? "FilmyGo Search Page Contents" : "MoviesDrive Search Page Contents"}
+                          <Search className={`w-5 h-5 ${moviesdrivePageInfo.isSkyMovies ? "text-purple-500" : moviesdrivePageInfo.isFilmygo ? "text-emerald-500" : moviesdrivePageInfo.isHdhub4u ? "text-sky-500" : "text-indigo-500"}`} />
+                          {moviesdrivePageInfo.isSkyMovies ? "SkyMoviesHD Search Page Contents" : moviesdrivePageInfo.isFilmygo ? "FilmyGo Search Page Contents" : moviesdrivePageInfo.isHdhub4u ? "HDHub4U Search Page Contents" : "MoviesDrive Search Page Contents"}
                         </h3>
                         <p className="text-xs text-zinc-500 mt-0.5">
                           Found {moviesdriveSearchPosts.length} contents on this search page. Select the items you want to scrape.
@@ -2819,7 +3050,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                             <ChevronLeft className="w-3.5 h-3.5" />
                             Prev
                           </button>
-                          <span className={`text-xs font-bold px-3 py-1.5 rounded-xl border ${moviesdrivePageInfo.isFilmygo ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" : "bg-indigo-500/10 text-indigo-500 border-indigo-500/20"}`}>
+                          <span className={`text-xs font-bold px-3 py-1.5 rounded-xl border ${moviesdrivePageInfo.isFilmygo ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" : moviesdrivePageInfo.isHdhub4u ? "bg-sky-500/10 text-sky-500 border-sky-500/20" : "bg-indigo-500/10 text-indigo-500 border-indigo-500/20"}`}>
                             Page {moviesdrivePageInfo.page}
                           </span>
                           <button
@@ -3066,6 +3297,18 @@ export const LinkCheckerModal: React.FC<Props> = ({
                           Fetch Sizes
                         </button>
                         <button 
+                          type="button"
+                          onClick={() => setShowQuickSelect(prev => !prev)}
+                          className={`text-xs font-bold px-3 py-1 rounded-lg transition-all flex items-center gap-1.5 ${
+                            showQuickSelect 
+                              ? "text-cyan-500 bg-cyan-500/15 border border-cyan-500/30" 
+                              : "text-zinc-600 dark:text-zinc-400 bg-zinc-200/80 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700"
+                          }`}
+                        >
+                          <SlidersHorizontal className="w-3.5 h-3.5" />
+                          {showQuickSelect ? "Hide Quick Select" : "Quick Select"}
+                        </button>
+                        <button 
                           onClick={() => {
                             if (mdriveResults.length > 0 && mdriveSelectedIndices.size === mdriveResults.length) {
                               setMdriveSelectedIndices(new Set());
@@ -3090,6 +3333,132 @@ export const LinkCheckerModal: React.FC<Props> = ({
                       </div>
                     </div>
 
+                    {/* Quality Quick Selection & Filter Bar */}
+                    {showQuickSelect && (
+                      <div className="flex flex-col gap-3 p-3 bg-zinc-100 dark:bg-zinc-900/80 rounded-2xl border border-zinc-200 dark:border-zinc-800 animate-in fade-in duration-200">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                            <CheckSquare className="w-4 h-4 text-cyan-500" />
+                            <span>Quick Select:</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => selectAllOfQuality()}
+                              className="px-2.5 py-1 text-xs font-bold rounded-lg bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white transition"
+                            >
+                              Select All ({mdriveResults.length})
+                            </button>
+
+                            {qualityCounts['480p'] > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => selectAllOfQuality('480p')}
+                                className="px-2.5 py-1 text-xs font-bold rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 border border-amber-500/30 transition flex items-center gap-1"
+                              >
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                                Select All 480p ({qualityCounts['480p']})
+                              </button>
+                            )}
+
+                            {qualityCounts['720p'] > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => selectAllOfQuality('720p')}
+                                className="px-2.5 py-1 text-xs font-bold rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 transition flex items-center gap-1"
+                              >
+                                <span className="w-1.5 h-1.5 rounded-full bg-cyan-500"></span>
+                                Select All 720p ({qualityCounts['720p']})
+                              </button>
+                            )}
+
+                            {qualityCounts['1080p'] > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => selectAllOfQuality('1080p')}
+                                className="px-2.5 py-1 text-xs font-bold rounded-lg bg-purple-500/15 hover:bg-purple-500/25 text-purple-600 dark:text-purple-400 border border-purple-500/30 transition flex items-center gap-1"
+                              >
+                                <span className="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
+                                Select All 1080p ({qualityCounts['1080p']})
+                              </button>
+                            )}
+
+                            {qualityCounts['2160p'] > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => selectAllOfQuality('2160p')}
+                                className="px-2.5 py-1 text-xs font-bold rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 transition flex items-center gap-1"
+                              >
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                Select All 4K ({qualityCounts['2160p']})
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => setMdriveSelectedIndices(new Set())}
+                              className="px-2.5 py-1 text-xs font-bold rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/20 transition"
+                            >
+                              Deselect All
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Quality Group Filter Tabs */}
+                        {(qualityCounts['480p'] > 0 || qualityCounts['720p'] > 0 || qualityCounts['1080p'] > 0 || qualityCounts['2160p'] > 0) && (
+                          <div className="flex items-center gap-1 pt-2 border-t border-zinc-200 dark:border-zinc-800 text-xs font-bold overflow-x-auto custom-scrollbar">
+                            <span className="text-zinc-400 text-[11px] mr-1 uppercase tracking-wider shrink-0 flex items-center gap-1">
+                              <SlidersHorizontal className="w-3 h-3" />
+                              Group Filter:
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setQualityFilter('all')}
+                              className={`px-2.5 py-1 rounded-lg transition shrink-0 ${qualityFilter === 'all' ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm border border-zinc-200 dark:border-zinc-700' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+                            >
+                              All ({mdriveResults.length})
+                            </button>
+                            {qualityCounts['480p'] > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setQualityFilter('480p')}
+                                className={`px-2.5 py-1 rounded-lg transition shrink-0 ${qualityFilter === '480p' ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-bold' : 'text-zinc-500 hover:text-amber-500'}`}
+                              >
+                                480p ({qualityCounts['480p']})
+                              </button>
+                            )}
+                            {qualityCounts['720p'] > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setQualityFilter('720p')}
+                                className={`px-2.5 py-1 rounded-lg transition shrink-0 ${qualityFilter === '720p' ? 'bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 font-bold' : 'text-zinc-500 hover:text-cyan-500'}`}
+                              >
+                                720p ({qualityCounts['720p']})
+                              </button>
+                            )}
+                            {qualityCounts['1080p'] > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setQualityFilter('1080p')}
+                                className={`px-2.5 py-1 rounded-lg transition shrink-0 ${qualityFilter === '1080p' ? 'bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/30 font-bold' : 'text-zinc-500 hover:text-purple-500'}`}
+                              >
+                                1080p ({qualityCounts['1080p']})
+                              </button>
+                            )}
+                            {qualityCounts['2160p'] > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setQualityFilter('2160p')}
+                                className={`px-2.5 py-1 rounded-lg transition shrink-0 ${qualityFilter === '2160p' ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 font-bold' : 'text-zinc-500 hover:text-emerald-500'}`}
+                              >
+                                4K ({qualityCounts['2160p']})
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {mdriveLoading ? (
                       <div className="py-20 flex flex-col items-center justify-center gap-4">
                         <LoaderIcon className="w-10 h-10 text-cyan-500 animate-spin" />
@@ -3102,7 +3471,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                       </div>
                     ) : (
                       <div className="grid gap-2 max-h-[50vh] overflow-y-auto custom-scrollbar pr-2">
-                        {mdriveResults.map((item, i) => (
+                        {filteredMdriveResults.map(({ item, originalIndex: i }) => (
                           <div 
                             key={i}
                             className={`group p-4 rounded-2xl border transition-all cursor-pointer flex items-center gap-4 ${
@@ -3129,9 +3498,17 @@ export const LinkCheckerModal: React.FC<Props> = ({
                             <div className="flex-1 min-w-0">
                               {(() => {
                                 const locTag = getLocationTag({ fileName: item.file_name, url: item.url });
+                                const text = `${item.file_name || ''} ${item.quality || ''} ${item.url || ''}`.toLowerCase();
+                                let qBadge = null;
+                                if (text.includes('480p')) qBadge = <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 shrink-0">480p</span>;
+                                else if (text.includes('720p')) qBadge = <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 shrink-0">720p</span>;
+                                else if (text.includes('1080p')) qBadge = <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/30 shrink-0">1080p</span>;
+                                else if (text.includes('2160p') || text.includes('4k')) qBadge = <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 shrink-0">4K</span>;
+
                                 return (
                                   <>
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      {qBadge}
                                       {locTag && (
                                         <span className="px-2 py-0.5 rounded text-[11px] font-mono font-extrabold bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 border border-indigo-500/30 shrink-0">
                                           {locTag}
@@ -3424,6 +3801,34 @@ export const LinkCheckerModal: React.FC<Props> = ({
                   </form>
                 )}
 
+                {/* HDHub4U Direct Search Input Bar */}
+                {showHdhubSearchInput && (
+                  <form 
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      executeHdhubSearch(hdhubSearchTerm);
+                    }}
+                    className="flex items-center gap-2 p-3 bg-orange-500/10 border border-orange-500/30 rounded-2xl animate-in fade-in slide-in-from-top-2 duration-200"
+                  >
+                    <Search className="w-4 h-4 text-orange-500 shrink-0 ml-1" />
+                    <input
+                      type="text"
+                      placeholder={`Search title or leave empty for Home page (${getHdhub4uDomain()})...`}
+                      value={hdhubSearchTerm}
+                      onChange={(e) => setHdhubSearchTerm(e.target.value)}
+                      className="flex-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-1.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none focus:border-orange-500 font-medium"
+                      autoFocus
+                    />
+                    <button
+                      type="submit"
+                      className="px-4 py-1.5 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs transition shadow-sm flex items-center gap-1.5 shrink-0"
+                    >
+                      <Search className="w-3.5 h-3.5" />
+                      Search HDHub4U
+                    </button>
+                  </form>
+                )}
+
                 {/* Domain Configuration Panel */}
                 {showDomainSettings && (
                   <div className="p-4 bg-amber-500/5 border border-amber-500/20 rounded-2xl space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
@@ -3439,7 +3844,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                         <X className="w-4 h-4" />
                       </button>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1">MoviesDrive Domain</label>
                         <input
@@ -3470,6 +3875,16 @@ export const LinkCheckerModal: React.FC<Props> = ({
                           className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-amber-500 font-mono"
                         />
                       </div>
+                      <div>
+                        <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1">HDHub4U Domain</label>
+                        <input
+                          type="text"
+                          value={hdhubDomainInput}
+                          onChange={(e) => setHdhubDomainInput(e.target.value)}
+                          placeholder="https://new5.hdhub4u.cl"
+                          className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-amber-500 font-mono"
+                        />
+                      </div>
                     </div>
                     <div className="flex justify-end gap-2 pt-1">
                       <button
@@ -3478,6 +3893,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                           setMoviesdriveDomainInput("https://new6.moviesdrives.my");
                           setSkymoviesDomainInput("https://skymovieshd.ceo");
                           setFilmygoDomainInput("https://filmygo.online");
+                          setHdhubDomainInput("https://new5.hdhub4u.cl");
                         }}
                         className="px-3 py-1 text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition"
                       >
@@ -3505,6 +3921,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                         setShowMoviesdriveSearchInput(prev => !prev);
                         setShowSkymoviesSearchInput(false);
                         setShowFilmygoSearchInput(false);
+                        setShowHdhubSearchInput(false);
                       }
                     }} 
                     className="inline-flex items-center justify-center rounded-xl border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 px-3.5 py-1.5 text-xs font-bold text-indigo-500 dark:text-indigo-400 gap-1.5 transition-colors shadow-sm"
@@ -3521,6 +3938,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                         setShowSkymoviesSearchInput(prev => !prev);
                         setShowMoviesdriveSearchInput(false);
                         setShowFilmygoSearchInput(false);
+                        setShowHdhubSearchInput(false);
                       }
                     }} 
                     className="inline-flex items-center justify-center rounded-xl border border-purple-500/30 bg-purple-500/10 hover:bg-purple-500/20 px-3.5 py-1.5 text-xs font-bold text-purple-500 dark:text-purple-400 gap-1.5 transition-colors shadow-sm"
@@ -3537,6 +3955,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                         setShowFilmygoSearchInput(prev => !prev);
                         setShowMoviesdriveSearchInput(false);
                         setShowSkymoviesSearchInput(false);
+                        setShowHdhubSearchInput(false);
                       }
                     }} 
                     className="inline-flex items-center justify-center rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 px-3.5 py-1.5 text-xs font-bold text-emerald-500 dark:text-emerald-400 gap-1.5 transition-colors shadow-sm"
@@ -3544,11 +3963,29 @@ export const LinkCheckerModal: React.FC<Props> = ({
                   >
                     <Search className="h-3.5 w-3.5" /> Search FilmyGo
                   </button>
+                  <button 
+                    onClick={() => {
+                      const trimmedInput = input.trim();
+                      if (trimmedInput && !trimmedInput.startsWith("http")) {
+                        executeHdhubSearch(trimmedInput);
+                      } else {
+                        setShowHdhubSearchInput(prev => !prev);
+                        setShowMoviesdriveSearchInput(false);
+                        setShowSkymoviesSearchInput(false);
+                        setShowFilmygoSearchInput(false);
+                      }
+                    }} 
+                    className="inline-flex items-center justify-center rounded-xl border border-orange-500/30 bg-orange-500/10 hover:bg-orange-500/20 px-3.5 py-1.5 text-xs font-bold text-orange-500 dark:text-orange-400 gap-1.5 transition-colors shadow-sm"
+                    title="Toggle HDHub4U search bar or search text"
+                  >
+                    <Search className="h-3.5 w-3.5" /> Search HDHub4U
+                  </button>
                   <button
                     onClick={() => {
                       setMoviesdriveDomainInput(getMoviesdriveDomain());
                       setSkymoviesDomainInput(getSkymoviesDomain());
                       setFilmygoDomainInput(getFilmygoDomain());
+                      setHdhubDomainInput(getHdhub4uDomain());
                       setShowDomainSettings(prev => !prev);
                     }}
                     className="inline-flex items-center justify-center rounded-xl border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 px-3.5 py-1.5 text-xs font-bold text-amber-600 dark:text-amber-400 gap-1.5 transition-colors shadow-sm"
