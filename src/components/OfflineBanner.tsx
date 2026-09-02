@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
-import { WifiOff, Crown } from 'lucide-react';
+import { WifiOff, Crown, LogIn } from 'lucide-react';
 import { safeStorage } from '../utils/safeStorage';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 
 export function OfflineBanner() {
   const { t } = useLanguage();
-  const { profile } = useAuth();
+  const { profile, loading } = useAuth();
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [hasCache, setHasCache] = useState(false);
 
@@ -32,12 +32,51 @@ export function OfflineBanner() {
   }, []);
 
   if (isOnline) return null;
+  if (loading) return null; // Avoid blocking while loading profile status
 
-  // Check if user has a restricted offline role
+  // Anyone who is NOT an authorized VIP/Admin/Owner/Manager role is restricted from offline access (this includes Guest/unauthenticated users)
+  const isLoggedIn = !!profile?.uid;
   const userRole = profile?.role;
-  const isRestrictedRole = userRole && ['basic', 'trial', 'selected_content', 'user'].includes(userRole);
+  const isAuthorizedRole = userRole && ['vip', 'owner', 'admin', 'manager', 'content_manager', 'user_manager'].includes(userRole);
+  const isRestrictedRole = !isAuthorizedRole;
 
   if (isRestrictedRole) {
+    if (!isLoggedIn) {
+      return (
+        <div className="fixed inset-0 z-[9999] bg-zinc-950 flex flex-col items-center justify-center p-6 text-center">
+          <div className="relative mb-6">
+            <div className="absolute inset-0 bg-blue-500/20 blur-2xl rounded-full scale-150 animate-pulse" />
+            <div className="relative bg-blue-500/10 p-6 rounded-full border border-blue-500/30">
+              <LogIn className="w-16 h-16 text-blue-400" />
+            </div>
+          </div>
+          <h2 className="text-2xl sm:text-3xl font-black text-white mb-3 tracking-tight">
+            {t('Login to access offline')}
+          </h2>
+          <p className="text-zinc-400 max-w-md text-sm leading-relaxed mb-8">
+            {t('Please connect to the internet and login to enjoy offline access.')}
+          </p>
+          <div className="flex flex-col sm:flex-row gap-4 w-full max-w-xs justify-center">
+            <button 
+              onClick={() => {
+                window.location.href = '/login';
+              }}
+              className="w-full bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-6 py-3.5 rounded-xl font-bold hover:opacity-90 transition-opacity text-sm uppercase tracking-wider cursor-pointer shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2"
+            >
+              <LogIn className="w-4 h-4 text-white" />
+              {t('Login to Access')}
+            </button>
+            <button 
+              onClick={() => window.location.reload()}
+              className="w-full bg-zinc-900 border border-zinc-800 text-zinc-300 px-6 py-3.5 rounded-xl font-medium hover:bg-zinc-800 transition-colors text-sm cursor-pointer"
+            >
+              {t('Try Reconnecting')}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="fixed inset-0 z-[9999] bg-zinc-950 flex flex-col items-center justify-center p-6 text-center">
         <div className="relative mb-6">
@@ -47,15 +86,24 @@ export function OfflineBanner() {
           </div>
         </div>
         <h2 className="text-2xl sm:text-3xl font-black text-white mb-3 tracking-tight">
-          {t('Offline Access is a VIP Feature')}
+          {t('Buy VIP membership to access offline')}
         </h2>
         <p className="text-zinc-400 max-w-md text-sm leading-relaxed mb-8">
-          {t('You are currently offline. Offline Access is exclusive to VIP members. Please connect to the internet to continue using the app or upgrade to a VIP plan.')}
+          {t('Offline Access is a premium feature exclusive to VIP members. Please connect to the internet and buy a VIP membership to enjoy uninterrupted offline access.')}
         </p>
         <div className="flex flex-col sm:flex-row gap-4 w-full max-w-xs justify-center">
           <button 
+            onClick={() => {
+              window.location.href = '/membership';
+            }}
+            className="w-full bg-gradient-to-r from-amber-500 to-orange-600 text-white px-6 py-3.5 rounded-xl font-bold hover:opacity-90 transition-opacity text-sm uppercase tracking-wider cursor-pointer shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2"
+          >
+            <Crown className="w-4 h-4 text-white" />
+            {t('Buy VIP Membership')}
+          </button>
+          <button 
             onClick={() => window.location.reload()}
-            className="w-full bg-gradient-to-r from-amber-500 to-orange-600 text-white px-6 py-3.5 rounded-xl font-bold hover:opacity-90 transition-opacity text-sm uppercase tracking-wider cursor-pointer shadow-lg shadow-amber-500/20"
+            className="w-full bg-zinc-900 border border-zinc-800 text-zinc-300 px-6 py-3.5 rounded-xl font-medium hover:bg-zinc-800 transition-colors text-sm cursor-pointer"
           >
             {t('Try Reconnecting')}
           </button>
