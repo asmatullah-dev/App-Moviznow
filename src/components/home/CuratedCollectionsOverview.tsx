@@ -3,7 +3,7 @@ import { Sparkles, ChevronUp, ChevronDown, ArrowRight } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Collection as AppCollection, Content } from "../../types";
 import { ScrollableRow } from "../ScrollableRow";
-import { getOptimizedImageUrl } from "../../utils/imageUtils";
+import { LazyPosterImage } from "../LazyPosterImage";
 import { useHaptics } from "../../hooks/useHaptics";
 import { useLanguage } from "../../contexts/LanguageContext";
 
@@ -44,7 +44,7 @@ export const CuratedCollectionsOverview: React.FC<CuratedCollectionsOverviewProp
         </div>
         <button
           onClick={onToggleVisibility}
-          className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 transition-colors"
+          className="p-2 rounded-lg hover:bg-zinc-100 dark:bg-zinc-900 hover:dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 transition-colors"
           title={isVisible ? t("Collapse Collections") : t("Expand Collections")}
         >
           {isVisible ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
@@ -65,10 +65,17 @@ export const CuratedCollectionsOverview: React.FC<CuratedCollectionsOverviewProp
                 className="flex overflow-x-auto gap-4 pb-4 snap-x snap-mandatory flex-nowrap hide-scrollbar"
                 style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
               >
-                {collections.slice(0, 5).map((collection) => {
-                  const firstContentId = collection.contentIds[0];
-                  const firstContent = contentMap.get(firstContentId);
-                  const posterUrl = firstContent?.posterUrl || defaultAppImage;
+                {collections.map((collection) => {
+                  let posterUrl = defaultAppImage;
+                  if (collection.contentIds && collection.contentIds.length > 0) {
+                    for (const cid of collection.contentIds) {
+                      const item = contentMap.get(cid);
+                      if (item?.posterUrl) {
+                        posterUrl = item.posterUrl;
+                        break;
+                      }
+                    }
+                  }
 
                   return (
                     <button
@@ -81,22 +88,23 @@ export const CuratedCollectionsOverview: React.FC<CuratedCollectionsOverviewProp
                     >
                       {posterUrl ? (
                         <div className="absolute inset-0">
-                          <img
-                            src={getOptimizedImageUrl(posterUrl, 342)}
+                          <LazyPosterImage
+                            src={posterUrl}
+                            fallbackSrc={defaultAppImage}
                             alt={collection.title}
-                            loading="lazy"
-                            decoding="async"
+                            targetWidth={342}
+                            containerClassName="absolute inset-0"
                             className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
                           />
-                          <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/60 to-zinc-950/30 group-hover:via-zinc-950/40 transition-colors duration-200" />
+                          <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/60 to-zinc-950/30 group-hover:via-zinc-950/40 transition-colors duration-200 pointer-events-none" />
                         </div>
                       ) : (
                         <div className="absolute inset-0 bg-gradient-to-br from-purple-900/40 to-zinc-900" />
                       )}
 
-                      <div className="relative z-10 p-4 h-full flex flex-col justify-end">
+                      <div className="relative z-10 p-4 h-full flex flex-col justify-end pointer-events-none">
                         <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/30 w-fit mb-2 backdrop-blur-md">
-                          Collection
+                          Collection ({collection.contentIds?.length || 0})
                         </span>
                         <h3 className="text-white font-extrabold text-left drop-shadow-md line-clamp-2 text-sm sm:text-base leading-snug">
                           {collection.title}
@@ -110,7 +118,7 @@ export const CuratedCollectionsOverview: React.FC<CuratedCollectionsOverviewProp
                     </button>
                   );
                 })}
-                {collections.length > 5 && (
+                {collections.length > 3 && onViewAll && (
                   <div className="shrink-0 flex items-center justify-center pr-4 snap-start h-full self-center">
                     <button
                       onClick={onViewAll}

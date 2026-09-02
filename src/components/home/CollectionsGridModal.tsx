@@ -3,7 +3,7 @@ import { X, FolderOpen } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Collection as AppCollection, Content } from "../../types";
 import { useLanguage } from "../../contexts/LanguageContext";
-import { getOptimizedImageUrl } from "../../utils/imageUtils";
+import { LazyPosterImage } from "../LazyPosterImage";
 
 interface CollectionsGridModalProps {
   isOpen: boolean;
@@ -59,9 +59,17 @@ export const CollectionsGridModal: React.FC<CollectionsGridModalProps> = ({
             <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 pb-6">
                 {collections.map((collection) => {
-                  const firstContentId = collection.contentIds[0];
-                  const firstContent = contentMap.get(firstContentId);
-                  const posterUrl = firstContent?.posterUrl || defaultAppImage;
+                  let posterUrl = defaultAppImage;
+                  if (collection.contentIds && collection.contentIds.length > 0) {
+                    for (const cid of collection.contentIds) {
+                      const item = contentMap.get(cid);
+                      if (item?.posterUrl) {
+                        posterUrl = item.posterUrl;
+                        break;
+                      }
+                    }
+                  }
+
                   return (
                     <button
                       key={collection.id}
@@ -73,20 +81,23 @@ export const CollectionsGridModal: React.FC<CollectionsGridModalProps> = ({
                     >
                       {posterUrl ? (
                         <div className="absolute inset-0">
-                          <img
-                            src={getOptimizedImageUrl(posterUrl, 500)}
+                          <LazyPosterImage
+                            src={posterUrl}
+                            fallbackSrc={defaultAppImage}
                             alt={collection.title}
+                            targetWidth={500}
+                            containerClassName="absolute inset-0"
                             className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                           />
-                          <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/40 to-transparent opacity-80 group-hover:opacity-90 transition-opacity" />
+                          <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/40 to-transparent opacity-80 group-hover:opacity-90 transition-opacity pointer-events-none" />
                         </div>
                       ) : (
                         <div className="absolute inset-0 bg-gradient-to-br from-purple-900/40 to-zinc-900" />
                       )}
 
-                      <div className="relative z-10 p-5 h-full flex flex-col justify-end">
+                      <div className="relative z-10 p-5 h-full flex flex-col justify-end pointer-events-none">
                         <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/30 w-fit mb-2 backdrop-blur-md">
-                          Collection
+                          Collection ({collection.contentIds?.length || 0})
                         </span>
                         <h3 className="text-white font-extrabold text-left text-lg line-clamp-1 drop-shadow-md">
                           {collection.title}

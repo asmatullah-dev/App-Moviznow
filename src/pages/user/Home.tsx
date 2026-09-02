@@ -212,39 +212,63 @@ export default function Home({
     }
   }, [selectedCollection]);
 
-  // Sync selectedCollection with searchParams "c"
+  const handleSelectCollection = useCallback((col: AppCollection) => {
+    vibrate(50);
+    setSelectedCollection(col);
+    const updated = new URLSearchParams(searchParams);
+    updated.set("c", col.id);
+    setSearchParams(updated, { replace: true });
+  }, [vibrate, searchParams, setSearchParams]);
+
+  const handleCloseCollection = useCallback(() => {
+    const prevId = selectedCollection?.id;
+    setSelectedCollection(null);
+    setCollectionSort("default");
+    const updated = new URLSearchParams(searchParams);
+    if (updated.has("c")) {
+      updated.delete("c");
+    }
+    if (prevId && updated.get("v") === prevId) {
+      updated.delete("v");
+    }
+    if (prevId && updated.get("view_all") === prevId) {
+      updated.delete("view_all");
+    }
+    setSearchParams(updated, { replace: true });
+  }, [selectedCollection, searchParams, setSearchParams]);
+
+  // Sync selectedCollection with searchParams "c" or direct custom collection "v" / "view_all"
   useEffect(() => {
-    const colId = searchParams.get("c");
-    if (colId && collections && collections.length > 0) {
-      const found = collections.find((c) => c.id === colId);
-      if (found && (!selectedCollection || selectedCollection.id !== found.id)) {
-        setSelectedCollection(found);
+    const cParam = searchParams.get("c");
+    const vParam = searchParams.get("v");
+    const viewAllParam = searchParams.get("view_all");
+
+    // Virtual keys handled by CollectionRow or ComingSoonSection
+    const virtualKeys = ["tr", "na", "cs", "trending", "newly_added", "scroll_trending", "scroll_newly_added", "coming_soon"];
+
+    let targetColId: string | null = null;
+    if (cParam && !virtualKeys.includes(cParam)) {
+      targetColId = cParam;
+    } else if (vParam && !virtualKeys.includes(vParam) && !["collections", "col", "all"].includes(vParam)) {
+      targetColId = vParam;
+    } else if (viewAllParam && !virtualKeys.includes(viewAllParam) && !["collections", "col", "all"].includes(viewAllParam)) {
+      targetColId = viewAllParam;
+    }
+
+    if (targetColId && collections && collections.length > 0) {
+      const found = collections.find((col) => col.id === targetColId || col.id?.toLowerCase() === targetColId?.toLowerCase());
+      if (found) {
+        if (!selectedCollection || selectedCollection.id !== found.id) {
+          setSelectedCollection(found);
+        }
       }
-    } else if (selectedCollection && !colId) {
+    } else if (selectedCollection && !targetColId) {
       const isVirtual = ["scroll_trending", "scroll_newly_added", "coming_soon", "trending_now", "newly_added"].includes(selectedCollection.id);
       if (!isVirtual) {
         setSelectedCollection(null);
       }
     }
   }, [searchParams, collections]);
-
-  useEffect(() => {
-    const updated = new URLSearchParams(searchParams);
-    if (selectedCollection) {
-      const isVirtual = ["scroll_trending", "scroll_newly_added", "coming_soon", "trending_now", "newly_added"].includes(selectedCollection.id);
-      if (!isVirtual) {
-        if (updated.get("c") !== selectedCollection.id) {
-          updated.set("c", selectedCollection.id);
-          setSearchParams(updated, { replace: true });
-        }
-      }
-    } else {
-      if (updated.has("c")) {
-        updated.delete("c");
-        setSearchParams(updated, { replace: true });
-      }
-    }
-  }, [selectedCollection]);
 
   // Sync filters and page to sessionStorage
   useEffect(() => {
@@ -267,37 +291,8 @@ export default function Home({
     currentPage,
   ]);
 
-  const trendingCollection = useMemo(
-    () =>
-      collections.find(
-        (c) =>
-          c.title.toLowerCase() === "trending" &&
-          (c.contentIds?.length || 0) >= 2,
-      ),
-    [collections],
-  );
-  const newlyAddedCollection = useMemo(
-    () =>
-      collections.find(
-        (c) =>
-          c.title.toLowerCase() === "newly added" &&
-          (c.contentIds?.length || 0) >= 2,
-      ),
-    [collections],
-  );
-  const otherCollections = useMemo(
-    () =>
-      collections.filter(
-        (c) =>
-          c.title.toLowerCase() !== "trending" &&
-          c.title.toLowerCase() !== "newly added" &&
-          (c.contentIds?.length || 0) >= 2,
-      ),
-    [collections],
-  );
-
   useModalBehavior(isLogoutModalOpen, () => setIsLogoutModalOpen(false));
-  useModalBehavior(!!selectedCollection, () => setSelectedCollection(null));
+  useModalBehavior(!!selectedCollection, handleCloseCollection);
 
   const clearFilters = useCallback(() => {
     vibrate(50);
@@ -391,6 +386,84 @@ export default function Home({
     return new Map(permittedContentList.map((c) => [c.id, c]));
   }, [permittedContentList]);
 
+  const trendingCollection = useMemo(() => {
+    const found = collections.find(
+      (c) =>
+        (c.id === "71aWpZf98jb7zG6gtmgwG0" ||
+         c.id === "7R6Mc6ofAVfe5XSK3PMR" ||
+         c.id === "trending" ||
+         c.title.toLowerCase() === "trending" ||
+         c.title.toLowerCase() === "trending now") &&
+        (c.contentIds?.length || 0) >= 2,
+    );
+    if (found) return found;
+
+    const topIds = permittedContentList.slice(0, 20).map((c) => c.id);
+    if (topIds.length >= 2) {
+      return {
+        id: "scroll_trending",
+        title: "Trending Now",
+        description: "Trending movies and shows updated live",
+        contentIds: topIds,
+        order: 9999,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+    }
+    return null;
+  }, [collections, permittedContentList]);
+
+  const newlyAddedCollection = useMemo(() => {
+    const found = collections.find(
+      (c) =>
+        (c.id === "99gpp9l0t5nhv" ||
+         c.id === "aWpZf98jb7zG6gtmgwG0" ||
+         c.id === "newly_added" ||
+         c.title.toLowerCase() === "newly added") &&
+        (c.contentIds?.length || 0) >= 2,
+    );
+    if (found) return found;
+
+    const latestSorted = [...permittedContentList]
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+      .slice(0, 20)
+      .map((c) => c.id);
+    if (latestSorted.length >= 2) {
+      return {
+        id: "scroll_newly_added",
+        title: "Newly Added",
+        description: "Recently uploaded premium high-definition titles",
+        contentIds: latestSorted,
+        order: 9998,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+    }
+    return null;
+  }, [collections, permittedContentList]);
+
+  const otherCollections = useMemo(
+    () =>
+      collections
+        .filter(
+          (c) =>
+            c.id !== "71aWpZf98jb7zG6gtmgwG0" &&
+            c.id !== "7R6Mc6ofAVfe5XSK3PMR" &&
+            c.id !== "99gpp9l0t5nhv" &&
+            c.id !== "aWpZf98jb7zG6gtmgwG0" &&
+            c.id !== "trending" &&
+            c.id !== "newly_added" &&
+            c.id !== "scroll_trending" &&
+            c.id !== "scroll_newly_added" &&
+            c.title.toLowerCase() !== "trending" &&
+            c.title.toLowerCase() !== "trending now" &&
+            c.title.toLowerCase() !== "newly added" &&
+            (c.contentIds?.length || 0) >= 1,
+        )
+        .sort((a, b) => (a.order ?? 99) - (b.order ?? 99)),
+    [collections],
+  );
+
   const enrichedRecentlyViewed = useMemo(() => {
     return recentlyViewed.map((item) => {
       const full = contentMap.get(item.id);
@@ -398,9 +471,9 @@ export default function Home({
     });
   }, [recentlyViewed, contentMap]);
   const [isRecentVisible, setIsRecentVisible] = useState(() => safeStorage.getItem("home_recent_visible") !== "false");
-  const [isTrendingRowVisible, setIsTrendingRowVisible] = useState(() => safeStorage.getItem("home_trending_row_visible") === "true");
-  const [isNewlyAddedVisible, setIsNewlyAddedVisible] = useState(() => safeStorage.getItem("home_newly_added_visible") === "true");
-  const [isCollectionsVisible, setIsCollectionsVisible] = useState(() => safeStorage.getItem("home_collections_visible") === "true");
+  const [isTrendingRowVisible, setIsTrendingRowVisible] = useState(() => safeStorage.getItem("home_trending_row_visible") !== "false");
+  const [isNewlyAddedVisible, setIsNewlyAddedVisible] = useState(() => safeStorage.getItem("home_newly_added_visible") !== "false");
+  const [isCollectionsVisible, setIsCollectionsVisible] = useState(() => safeStorage.getItem("home_collections_visible") !== "false");
 
   const toggleRecentVisibility = useCallback(() => {
     setIsRecentVisible((prev) => {
@@ -921,7 +994,16 @@ export default function Home({
           )}
 
           {/* Trending Section */}
-          {!hideScrollingTabs && trendingCollection && (
+          {(!hideScrollingTabs ||
+            searchParams.get("v") === "tr" ||
+            searchParams.get("v") === "trending" ||
+            searchParams.get("v") === "scroll_trending" ||
+            searchParams.get("view_all") === "tr" ||
+            searchParams.get("view_all") === "trending" ||
+            searchParams.get("view_all") === "scroll_trending" ||
+            searchParams.get("c") === "tr" ||
+            searchParams.get("c") === "trending" ||
+            searchParams.get("c") === "scroll_trending") && trendingCollection && (
             <CollectionRow
               title={t("Trending Now")}
               description={trendingCollection.description}
@@ -932,7 +1014,18 @@ export default function Home({
               }
               scrollKey="scroll_trending"
               items={trendingItems}
-              isVisible={isTrendingRowVisible}
+              isVisible={
+                isTrendingRowVisible ||
+                searchParams.get("v") === "tr" ||
+                searchParams.get("v") === "trending" ||
+                searchParams.get("v") === "scroll_trending" ||
+                searchParams.get("view_all") === "tr" ||
+                searchParams.get("view_all") === "trending" ||
+                searchParams.get("view_all") === "scroll_trending" ||
+                searchParams.get("c") === "tr" ||
+                searchParams.get("c") === "trending" ||
+                searchParams.get("c") === "scroll_trending"
+              }
               onToggleVisibility={toggleTrendingRowVisibility}
               profile={profile}
               qualities={qualities}
@@ -944,7 +1037,16 @@ export default function Home({
           )}
 
           {/* Newly Added Section */}
-          {!hideScrollingTabs && newlyAddedCollection && (
+          {(!hideScrollingTabs ||
+            searchParams.get("v") === "na" ||
+            searchParams.get("v") === "newly_added" ||
+            searchParams.get("v") === "scroll_newly_added" ||
+            searchParams.get("view_all") === "na" ||
+            searchParams.get("view_all") === "newly_added" ||
+            searchParams.get("view_all") === "scroll_newly_added" ||
+            searchParams.get("c") === "na" ||
+            searchParams.get("c") === "newly_added" ||
+            searchParams.get("c") === "scroll_newly_added") && newlyAddedCollection && (
             <>
               <CollectionRow
                 title={t("Newly Added")}
@@ -956,7 +1058,18 @@ export default function Home({
                 }
                 scrollKey="scroll_newly_added"
                 items={newlyAddedItems}
-                isVisible={isNewlyAddedVisible}
+                isVisible={
+                  isNewlyAddedVisible ||
+                  searchParams.get("v") === "na" ||
+                  searchParams.get("v") === "newly_added" ||
+                  searchParams.get("v") === "scroll_newly_added" ||
+                  searchParams.get("view_all") === "na" ||
+                  searchParams.get("view_all") === "newly_added" ||
+                  searchParams.get("view_all") === "scroll_newly_added" ||
+                  searchParams.get("c") === "na" ||
+                  searchParams.get("c") === "newly_added" ||
+                  searchParams.get("c") === "scroll_newly_added"
+                }
                 onToggleVisibility={toggleNewlyAddedVisibility}
                 profile={profile}
                 qualities={qualities}
@@ -977,7 +1090,7 @@ export default function Home({
               defaultAppImage={settings?.defaultAppImage}
               isVisible={isCollectionsVisible}
               onToggleVisibility={toggleCollectionsVisibility}
-              onSelectCollection={setSelectedCollection}
+              onSelectCollection={handleSelectCollection}
               onViewAll={() => {
                 const updated = new URLSearchParams(searchParams);
                 updated.set("view_all", "collections");
@@ -1090,7 +1203,7 @@ export default function Home({
                         updated.set("view_all", col.scrollKey);
                         setSearchParams(updated);
                       } else {
-                        setSelectedCollection(col.raw);
+                        handleSelectCollection(col.raw);
                       }
                     }}
                     className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200/85 dark:border-zinc-800/80 hover:border-emerald-500/50 dark:hover:border-emerald-500/50 hover:shadow-lg transition-all cursor-pointer flex flex-col justify-between group"
@@ -1364,10 +1477,7 @@ export default function Home({
       {/* Collection Modal */}
       <CollectionModal
         collection={selectedCollection}
-        onClose={() => {
-          setSelectedCollection(null);
-          setCollectionSort("default");
-        }}
+        onClose={handleCloseCollection}
         collectionSort={collectionSort}
         setCollectionSort={setCollectionSort}
         scrollRef={collectionScrollRef}
@@ -1382,16 +1492,22 @@ export default function Home({
       />
 
       <CollectionsGridModal
-        isOpen={searchParams.get("view_all") === "collections"}
+        isOpen={
+          searchParams.get("view_all") === "collections" ||
+          searchParams.get("v") === "collections" ||
+          searchParams.get("v") === "col" ||
+          searchParams.get("v") === "all"
+        }
         onClose={() => {
           const updated = new URLSearchParams(searchParams);
           updated.delete("view_all");
+          updated.delete("v");
           setSearchParams(updated);
         }}
         collections={otherCollections}
         contentMap={contentMap}
         defaultAppImage={settings?.defaultAppImage}
-        onSelectCollection={setSelectedCollection}
+        onSelectCollection={handleSelectCollection}
       />
     </div>
   );

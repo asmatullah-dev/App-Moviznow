@@ -7,6 +7,7 @@ import { Content, Quality, Language, Genre } from '../types';
 import { formatContentTitle, getContrastColor, getOttBadgeConfig } from '../utils/contentUtils';
 import { OttBadge } from './OttBadge';
 import { getOptimizedImageUrl, getImageSrcSet } from '../utils/imageUtils';
+import { LazyPosterImage } from './LazyPosterImage';
 import { clsx } from 'clsx';
 import { useCart } from '../contexts/CartContext';
 import { useSettings } from '../contexts/SettingsContext';
@@ -218,19 +219,12 @@ const ContentCard = React.memo(({
           className="absolute inset-0 z-10" aria-label={`View details for ${content.title}`} />
         
         <div className="relative aspect-[2/3] w-full bg-zinc-100 dark:bg-zinc-800 block overflow-hidden">
-          <img
-            src={optimizedPoster}
+          <LazyPosterImage
+            src={rawPoster}
+            fallbackSrc={defaultFallbackImage}
             alt={content.title}
-            loading="lazy"
-            decoding="async"
+            targetWidth={isSmall ? 185 : 342}
             className="w-full h-full object-cover transition-transform duration-200 ease-out group-hover:scale-105"
-            referrerPolicy="no-referrer"
-            onError={(e) => {
-              const target = e.currentTarget as HTMLImageElement;
-              if (target.src !== defaultFallbackImage) {
-                target.src = defaultFallbackImage;
-              }
-            }}
           />
           
           {/* Subtle Dark Vignette & Play/Loading Indicator */}

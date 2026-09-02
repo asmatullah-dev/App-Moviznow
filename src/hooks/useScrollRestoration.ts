@@ -30,16 +30,17 @@ export function useScrollRestoration<T extends HTMLElement>(key: string, isWindo
   }, [key, isWindow, ready]);
 
   useEffect(() => {
-    let timeoutId: any;
+    let rafId: number | null = null;
     const handleScroll = () => {
-      if (timeoutId) clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
         if (isWindow) {
           globalScrollState.set(key, window.scrollY);
         } else if (ref.current) {
           globalScrollState.set(key, ref.current.scrollLeft);
         }
-      }, 100);
+      });
     };
 
     const target = isWindow ? window : ref.current;
@@ -51,7 +52,7 @@ export function useScrollRestoration<T extends HTMLElement>(key: string, isWindo
       if (target) {
         target.removeEventListener('scroll', handleScroll);
       }
-      if (timeoutId) clearTimeout(timeoutId);
+      if (rafId) cancelAnimationFrame(rafId);
     };
   }, [key, isWindow]);
 

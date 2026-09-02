@@ -39,31 +39,27 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
   // Background check: only merge if the static export JSON file is newer than the cache
   useEffect(() => {
-    const performMerge = () => {
-      try {
-        const merged = mergeStaticExportDataSafely();
-        setContentList(merged.contentList);
-        setGenres(merged.genres);
-        setLanguages(merged.languages);
-        setQualities(merged.qualities);
-        setCollections(merged.collections);
-      } catch (e) {
-        console.error("Error safely merging newer JSON export:", e);
-      }
-    };
-
     let timeoutId: NodeJS.Timeout | null = null;
     if (isStaticExportNewer()) {
       timeoutId = setTimeout(() => {
-        performMerge();
-      }, 100);
+        try {
+          const merged = mergeStaticExportDataSafely();
+          if (merged.stats.added > 0 || merged.stats.updated > 0) {
+            setContentList(merged.contentList);
+            setGenres(merged.genres);
+            setLanguages(merged.languages);
+            setQualities(merged.qualities);
+            setCollections(merged.collections);
+          }
+        } catch (e) {
+          console.error("Error safely merging newer JSON export:", e);
+        }
+      }, 500);
     }
     
-    window.addEventListener('static_content_updated', performMerge);
     setLoading(false);
     return () => {
       if (timeoutId) clearTimeout(timeoutId);
-      window.removeEventListener('static_content_updated', performMerge);
     };
   }, []);
 

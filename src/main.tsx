@@ -190,7 +190,7 @@ if (typeof window !== 'undefined') {
     startX = e.clientX;
     startY = e.clientY;
     hasMovedSignificant = false;
-  });
+  }, { passive: true });
 
   document.addEventListener('mousemove', (e: MouseEvent) => {
     if (mouseStartTime > 0) {
@@ -200,7 +200,7 @@ if (typeof window !== 'undefined') {
         hasMovedSignificant = true;
       }
     }
-  });
+  }, { passive: true });
 
   document.addEventListener('mouseup', (e: MouseEvent) => {
     const elapsed = Date.now() - mouseStartTime;
@@ -215,7 +215,7 @@ if (typeof window !== 'undefined') {
         }
       }, 10);
     }
-  });
+  }, { passive: true });
 
   // Clear selections on any double click as well to prevent double-click selection
   document.addEventListener('dblclick', (e: MouseEvent) => {
@@ -225,6 +225,6 @@ if (typeof window !== 'undefined') {
         selection.removeAllRanges();
       }
     }
-  });
+  }, { passive: true });
 }
 

@@ -47,9 +47,37 @@ export const CollectionRow: React.FC<CollectionRowProps> = React.memo(({
   const [copiedMin, setCopiedMin] = useState(false);
   const [copiedRow, setCopiedRow] = useState(false);
 
-  const isViewAllOpen = searchParams.get("view_all") === scrollKey ||
-                        (scrollKey === "trending" && searchParams.get("v") === "tr") ||
-                        (scrollKey === "newly_added" && searchParams.get("v") === "na");
+  const isTrending = scrollKey === "scroll_trending" || scrollKey === "trending";
+  const isNewlyAdded = scrollKey === "scroll_newly_added" || scrollKey === "newly_added";
+
+  const viewAllParam = searchParams.get("view_all");
+  const vParam = searchParams.get("v");
+  const cParam = searchParams.get("c");
+
+  const isViewAllOpen =
+    viewAllParam === scrollKey ||
+    (isTrending && (
+      viewAllParam === "trending" ||
+      viewAllParam === "scroll_trending" ||
+      viewAllParam === "tr" ||
+      vParam === "tr" ||
+      vParam === "trending" ||
+      vParam === "scroll_trending" ||
+      cParam === "tr" ||
+      cParam === "trending" ||
+      cParam === "scroll_trending"
+    )) ||
+    (isNewlyAdded && (
+      viewAllParam === "newly_added" ||
+      viewAllParam === "scroll_newly_added" ||
+      viewAllParam === "na" ||
+      vParam === "na" ||
+      vParam === "newly_added" ||
+      vParam === "scroll_newly_added" ||
+      cParam === "na" ||
+      cParam === "newly_added" ||
+      cParam === "scroll_newly_added"
+    ));
 
   // Restore scroll position when modal opens
   useEffect(() => {
@@ -81,6 +109,12 @@ export const CollectionRow: React.FC<CollectionRowProps> = React.memo(({
     const updated = new URLSearchParams(searchParams);
     updated.delete("view_all");
     updated.delete("v");
+    if (isTrending && (updated.get("c") === "tr" || updated.get("c") === "trending" || updated.get("c") === "scroll_trending")) {
+      updated.delete("c");
+    }
+    if (isNewlyAdded && (updated.get("c") === "na" || updated.get("c") === "newly_added" || updated.get("c") === "scroll_newly_added")) {
+      updated.delete("c");
+    }
     setSearchParams(updated);
   };
 

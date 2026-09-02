@@ -71,14 +71,17 @@ export function getStaticExportVersion(): string {
   return memoizedJsonVersion;
 }
 
+let isMergingStatic = false;
+
 /**
  * Checks whether the static export JSON file is newer than the version applied to local cache.
  */
 export function isStaticExportNewer(): boolean {
+  if (isMergingStatic) return false;
   const currentVer = getStaticExportVersion();
   const cachedVer = safeStorage.getItem('cached_json_catalog_version');
 
-  if (!cachedVer) return true;
+  if (!cachedVer) return false; // Handled directly on init synchronously
   if (cachedVer === currentVer) return false;
 
   const currTime = parseVersionTime(currentVer);
@@ -104,6 +107,8 @@ export function getCachedContentData(includeStatic: boolean = true): {
   collections: AppCollection[];
   hasCache: boolean;
 } {
+  const currentVer = getStaticExportVersion();
+
   // 1. Try in-memory cache for instant zero-computation return
   if (includeStatic && memoizedContentList && memoizedContentList.length > 0) {
     return {
@@ -152,6 +157,7 @@ export function getCachedContentData(includeStatic: boolean = true): {
 
   const initialList = Object.values(itemMap).sort((a, b) => (b.order ?? 0) - (a.order ?? 0));
   memoizedContentList = initialList;
+  safeStorage.setItem('cached_json_catalog_version', currentVer);
 
   // Persist to safeStorage asynchronously in the background so the initial UI paints without lag
   setTimeout(() => {
@@ -167,8 +173,6 @@ export function getCachedContentData(includeStatic: boolean = true): {
       if (staticCollectionsData.items) {
         safeStorage.setItem('static_collection_chunk_collection_chunk_0', JSON.stringify(staticCollectionsData.items));
       }
-      const currentVer = getStaticExportVersion();
-      safeStorage.setItem('cached_json_catalog_version', currentVer);
     } catch (e) {}
   }, 100);
 
@@ -280,126 +284,137 @@ export function mergeStaticExportDataSafely(): {
   collections: AppCollection[];
   stats: { added: number; updated: number; preserved: number };
 } {
-  const existingMap = new Map<string, Content>();
+  if (isMergingStatic) {
+    return {
+      contentList: memoizedContentList || [],
+      genres: getStaticExportMetadata().genres,
+      languages: getStaticExportMetadata().languages,
+      qualities: getStaticExportMetadata().qualities,
+      collections: getStaticExportCollections(),
+      stats: { added: 0, updated: 0, preserved: 0 }
+    };
+  }
 
-  // 1. Read existing content from primary content_cache if available
-  const cachedContentStr = safeStorage.getItem('content_cache');
-  if (cachedContentStr && cachedContentStr !== '[]') {
-    try {
-      const parsed = JSON.parse(cachedContentStr);
-      if (Array.isArray(parsed)) {
-        for (const item of parsed) {
-          if (item && item.id) {
-            existingMap.set(item.id, item);
+  isMergingStatic = true;
+  try {
+    const existingMap = new Map<string, Content>();
+
+    // 1. Read existing content from primary content_cache if available
+    const cachedContentStr = safeStorage.getItem('content_cache');
+    if (cachedContentStr && cachedContentStr !== '[]') {
+      try {
+        const parsed = JSON.parse(cachedContentStr);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            if (item && item.id) {
+              existingMap.set(item.id, item);
+            }
           }
         }
-      }
-    } catch (e) {}
-  }
-
-  // 2. Read only from static_content_chunk_ or standard content_chunk_ (strictly avoiding admin_* keys)
-  const chunkKeys = safeStorage.keys().filter(k =>
-    (k.startsWith('static_content_chunk_') || k.startsWith('content_chunk_') || k.startsWith('movie_chunk_') || k.startsWith('series_chunk_')) &&
-    !k.startsWith('admin_')
-  );
-  for (const key of chunkKeys) {
-    const chunkStr = safeStorage.getItem(key);
-    if (chunkStr) {
-      try {
-        const itemsObj = JSON.parse(chunkStr);
-        Object.entries(itemsObj).forEach(([id, item]: [string, any]) => {
-          if (!existingMap.has(id)) {
-            const expanded = expandContent({ ...item, id }, key);
-            existingMap.set(expanded.id, expanded);
-          }
-        });
       } catch (e) {}
     }
-  }
 
-  // 3. Merge static JSON catalog items safely
-  const jsonItems = staticContentData as StaticContentItem[];
-  let added = 0;
-  let updated = 0;
-  let preserved = 0;
+    // 2. Read only from static_content_chunk_ or standard content_chunk_ (strictly avoiding admin_* keys)
+    const chunkKeys = safeStorage.keys().filter(k =>
+      (k.startsWith('static_content_chunk_') || k.startsWith('content_chunk_') || k.startsWith('movie_chunk_') || k.startsWith('series_chunk_')) &&
+      !k.startsWith('admin_')
+    );
+    for (const key of chunkKeys) {
+      const chunkStr = safeStorage.getItem(key);
+      if (chunkStr) {
+        try {
+          const itemsObj = JSON.parse(chunkStr);
+          Object.entries(itemsObj).forEach(([id, item]: [string, any]) => {
+            if (!existingMap.has(id)) {
+              const expanded = expandContent({ ...item, id }, key);
+              existingMap.set(expanded.id, expanded);
+            }
+          });
+        } catch (e) {}
+      }
+    }
 
-  for (const jsonItem of jsonItems) {
-    const chunkId = jsonItem.chunkId || (jsonItem.type === 'movie' ? 'movie_chunk_0' : 'series_chunk_0');
-    const expandedJson = expandContent({ ...jsonItem, id: jsonItem.id }, chunkId);
+    // 3. Merge static JSON catalog items safely
+    const jsonItems = staticContentData as StaticContentItem[];
+    let added = 0;
+    let updated = 0;
+    let preserved = 0;
 
-    if (!existingMap.has(jsonItem.id)) {
-      existingMap.set(jsonItem.id, expandedJson);
-      added++;
-    } else {
-      const existing = existingMap.get(jsonItem.id)!;
-      const jsonTime = parseVersionTime(expandedJson.updatedAt || expandedJson.createdAt || 0);
-      const existingTime = parseVersionTime(existing.updatedAt || existing.createdAt || 0);
+    for (const jsonItem of jsonItems) {
+      const chunkId = jsonItem.chunkId || (jsonItem.type === 'movie' ? 'movie_chunk_0' : 'series_chunk_0');
+      const expandedJson = expandContent({ ...jsonItem, id: jsonItem.id }, chunkId);
 
-      if (jsonTime > existingTime) {
+      if (!existingMap.has(jsonItem.id)) {
         existingMap.set(jsonItem.id, expandedJson);
-        updated++;
+        added++;
       } else {
-        preserved++;
+        const existing = existingMap.get(jsonItem.id)!;
+        const jsonTime = parseVersionTime(expandedJson.updatedAt || expandedJson.createdAt || 0);
+        const existingTime = parseVersionTime(existing.updatedAt || existing.createdAt || 0);
+
+        if (jsonTime > existingTime) {
+          existingMap.set(jsonItem.id, expandedJson);
+          updated++;
+        } else {
+          preserved++;
+        }
       }
     }
+
+    // Final merged list sorted by order descending (or createdAt)
+    const mergedList = Array.from(existingMap.values()).sort((a, b) => {
+      if (a.order !== undefined && b.order !== undefined) {
+        return (b.order ?? 0) - (a.order ?? 0);
+      }
+      const timeA = a.createdAt ? parseVersionTime(a.createdAt) : 0;
+      const timeB = b.createdAt ? parseVersionTime(b.createdAt) : 0;
+      return timeB - timeA;
+    });
+
+    const mergedGenres = getStaticExportMetadata().genres;
+    const mergedLanguages = getStaticExportMetadata().languages;
+    const mergedQualities = getStaticExportMetadata().qualities;
+    const mergedCollections = getStaticExportCollections();
+
+    // Update memory cache immediately
+    memoizedContentList = mergedList;
+
+    // Persist merged cache and static metadata in non-blocking background queue
+    setTimeout(() => {
+      try {
+        safeStorage.setItem('content_cache', JSON.stringify(mergedList));
+        safeStorage.setItem('static_genres_cache', JSON.stringify(mergedGenres));
+        safeStorage.setItem('static_languages_cache', JSON.stringify(mergedLanguages));
+        safeStorage.setItem('static_qualities_cache', JSON.stringify(mergedQualities));
+        safeStorage.setItem('static_collections_cache', JSON.stringify(mergedCollections));
+
+        const chunkMap: Record<string, Record<string, any>> = {};
+        for (const item of jsonItems) {
+          const chunkId = item.chunkId || (item.type === 'movie' ? 'movie_chunk_0' : 'series_chunk_0');
+          if (!chunkMap[chunkId]) chunkMap[chunkId] = {};
+          chunkMap[chunkId][item.id] = item;
+        }
+        for (const [chunkId, itemsObj] of Object.entries(chunkMap)) {
+          safeStorage.setItem('static_content_chunk_' + chunkId, JSON.stringify(itemsObj));
+        }
+
+        const currentVer = getStaticExportVersion();
+        safeStorage.setItem('cached_json_catalog_version', currentVer);
+        safeStorage.setItem('last_successful_meta_check', Date.now().toString());
+      } catch (e) {}
+    }, 50);
+
+    return {
+      contentList: mergedList,
+      genres: mergedGenres,
+      languages: mergedLanguages,
+      qualities: mergedQualities,
+      collections: mergedCollections,
+      stats: { added, updated, preserved }
+    };
+  } finally {
+    isMergingStatic = false;
   }
-
-  // Final merged list sorted by order descending (or createdAt)
-  const mergedList = Array.from(existingMap.values()).sort((a, b) => {
-    if (a.order !== undefined && b.order !== undefined) {
-      return (b.order ?? 0) - (a.order ?? 0);
-    }
-    const timeA = a.createdAt ? parseVersionTime(a.createdAt) : 0;
-    const timeB = b.createdAt ? parseVersionTime(b.createdAt) : 0;
-    return timeB - timeA;
-  });
-
-  const mergedGenres = getStaticExportMetadata().genres;
-  const mergedLanguages = getStaticExportMetadata().languages;
-  const mergedQualities = getStaticExportMetadata().qualities;
-  const mergedCollections = getStaticExportCollections();
-
-  // Update memory cache immediately
-  memoizedContentList = mergedList;
-
-  // Persist merged cache and static metadata in non-blocking background queue
-  setTimeout(() => {
-    try {
-      safeStorage.setItem('content_cache', JSON.stringify(mergedList));
-      safeStorage.setItem('static_genres_cache', JSON.stringify(mergedGenres));
-      safeStorage.setItem('static_languages_cache', JSON.stringify(mergedLanguages));
-      safeStorage.setItem('static_qualities_cache', JSON.stringify(mergedQualities));
-      safeStorage.setItem('static_collections_cache', JSON.stringify(mergedCollections));
-
-      const chunkMap: Record<string, Record<string, any>> = {};
-      for (const item of jsonItems) {
-        const chunkId = item.chunkId || (item.type === 'movie' ? 'movie_chunk_0' : 'series_chunk_0');
-        if (!chunkMap[chunkId]) chunkMap[chunkId] = {};
-        chunkMap[chunkId][item.id] = item;
-      }
-      for (const [chunkId, itemsObj] of Object.entries(chunkMap)) {
-        safeStorage.setItem('static_content_chunk_' + chunkId, JSON.stringify(itemsObj));
-      }
-
-      const currentVer = getStaticExportVersion();
-      safeStorage.setItem('cached_json_catalog_version', currentVer);
-      safeStorage.setItem('last_successful_meta_check', Date.now().toString());
-    } catch (e) {}
-  }, 50);
-
-  // Dispatch event so any active views update seamlessly
-  try {
-    window.dispatchEvent(new CustomEvent('static_content_updated'));
-  } catch (e) {}
-
-  return {
-    contentList: mergedList,
-    genres: mergedGenres,
-    languages: mergedLanguages,
-    qualities: mergedQualities,
-    collections: mergedCollections,
-    stats: { added, updated, preserved }
-  };
 }
 
 /**
@@ -437,7 +452,10 @@ export function getStaticExportMetadata(): {
 
 export function getStaticExportCollections(): AppCollection[] {
   if (staticCollectionsData.items) {
-    return (Object.values(staticCollectionsData.items) as AppCollection[]).sort((a: any, b: any) => (b.order || 0) - (a.order || 0));
+    return (Object.entries(staticCollectionsData.items) as [string, any][]).map(([key, val]) => ({
+      ...val,
+      id: val.id || key,
+    })).sort((a: any, b: any) => (b.order || 0) - (a.order || 0));
   }
   return [];
 }

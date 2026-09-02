@@ -36,13 +36,19 @@ export const ScrollableRow = React.forwardRef<HTMLDivElement, ScrollableRowProps
       [forwardedRef, internalRef]
     );
 
+    const rafIdRef = useRef<number | null>(null);
+
     const checkScrollButtons = useCallback(() => {
-      const el = containerRef.current;
-      if (!el) return;
-      const left = el.scrollLeft > 10;
-      const right = el.scrollLeft < el.scrollWidth - el.clientWidth - 10;
-      setCanScrollLeft(prev => prev !== left ? left : prev);
-      setCanScrollRight(prev => prev !== right ? right : prev);
+      if (rafIdRef.current) return;
+      rafIdRef.current = requestAnimationFrame(() => {
+        rafIdRef.current = null;
+        const el = containerRef.current;
+        if (!el) return;
+        const left = el.scrollLeft > 10;
+        const right = el.scrollLeft < el.scrollWidth - el.clientWidth - 10;
+        setCanScrollLeft(prev => prev !== left ? left : prev);
+        setCanScrollRight(prev => prev !== right ? right : prev);
+      });
     }, []);
 
     useEffect(() => {
@@ -51,9 +57,10 @@ export const ScrollableRow = React.forwardRef<HTMLDivElement, ScrollableRowProps
 
       checkScrollButtons();
       el.addEventListener('scroll', checkScrollButtons, { passive: true });
-      window.addEventListener('resize', checkScrollButtons);
+      window.addEventListener('resize', checkScrollButtons, { passive: true });
 
       return () => {
+        if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
         el.removeEventListener('scroll', checkScrollButtons);
         window.removeEventListener('resize', checkScrollButtons);
       };
