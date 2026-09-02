@@ -10,7 +10,7 @@ import {
 import { Helmet } from "react-helmet-async";
 
 import { AdBanner } from "../../components/AdBanner";
-import { isUserExemptFromAds } from "../../utils/adUtils";
+import { isUserExemptFromAds, registerAppWhitelistedUrl } from "../../utils/adUtils";
 import { GuestAccessBanner } from "../../components/GuestAccessBanner";
 import { Content, QualityLinks, Season, Trailer } from "../../types";
 import { Translate } from "../../components/Translate";
@@ -1790,10 +1790,11 @@ export default function MovieDetails() {
       const res = await fetch(`/api/resolve-tg?url=${encodeURIComponent(targetUrl)}`);
       const data = await res.json();
       if (res.ok && data.url) {
+        registerAppWhitelistedUrl(data.url);
         if (data.url.startsWith("tg://")) {
           window.location.href = data.url;
         } else {
-          window.open(data.url, "_blank") || (window.location.href = data.url);
+          openInNewTab(data.url);
         }
       } else {
         setAlertConfig({
@@ -2166,10 +2167,51 @@ export default function MovieDetails() {
     }
   };
 
-  const handlePlayExternal = async (
+  const handlePlayExternal = (
     player: "vlc" | "mx" | "generic" | "download" | "browser",
   ) => {
     if (!linkPopup) return;
+
+    let urlToPlay = linkPopup.url;
+
+    const lowerUrl = urlToPlay.toLowerCase();
+    if (
+      lowerUrl.includes("hubcloud") ||
+      lowerUrl.includes("hubcould") ||
+      lowerUrl.includes("hubdrive") ||
+      lowerUrl.includes("vcloud")
+    ) {
+      setAlertConfig({
+        isOpen: true,
+        title: t("Extraction Error"),
+        message: t("Error in extracting links, please try again"),
+      });
+      closeLinkPopup();
+      return;
+    }
+
+    if (player === "download") {
+      let copyUrl = urlToPlay;
+      registerAppWhitelistedUrl(copyUrl);
+      navigator.clipboard
+        .writeText(copyUrl)
+        .catch((err) => {
+          console.error("Failed to copy", err);
+        });
+
+      // Open the download link directly in a new tab / browser download manager
+      openInNewTab(copyUrl);
+      closeLinkPopup();
+    } else {
+      // Launch player (VLC, MX Player, or Generic) on iOS, Android, or Desktop
+      playInExternalPlayer({
+        player,
+        url: urlToPlay,
+        title: linkPopup.formattedTitle || mergedContent.title,
+      });
+
+      closeLinkPopup();
+    }
 
     const executeAction = async () => {
       if (profile?.uid) {
@@ -2183,56 +2225,6 @@ export default function MovieDetails() {
       }
 
       trackStreamAndCheckRate();
-
-      let urlToPlay = linkPopup.url;
-
-      const lowerUrl = urlToPlay.toLowerCase();
-      if (
-        lowerUrl.includes("hubcloud") ||
-        lowerUrl.includes("hubcould") ||
-        lowerUrl.includes("hubdrive") ||
-        lowerUrl.includes("vcloud")
-      ) {
-        setAlertConfig({
-          isOpen: true,
-          title: t("Extraction Error"),
-          message: t("Error in extracting links, please try again"),
-        });
-        closeLinkPopup();
-        return;
-      }
-
-      if (player === "download") {
-        let copyUrl = urlToPlay;
-        navigator.clipboard
-          .writeText(copyUrl)
-          .then(() => {
-            setAlertConfig({
-              isOpen: true,
-              title: "Link Copied!",
-              message: "The link has been copied to your clipboard.",
-            });
-          })
-          .catch((err) => {
-            console.error("Failed to copy", err);
-            setAlertConfig({
-              isOpen: true,
-              title: "Copy Failed",
-              message: "Could not copy link. Please copy it manually: " + copyUrl,
-            });
-          });
-        closeLinkPopup();
-        return;
-      }
-
-      // Launch player (VLC, MX Player, or Generic) on iOS, Android, or Desktop
-      playInExternalPlayer({
-        player,
-        url: urlToPlay,
-        title: linkPopup.formattedTitle || mergedContent.title,
-      });
-
-      closeLinkPopup();
     };
 
     executeAction();
@@ -2328,8 +2320,35 @@ export default function MovieDetails() {
     }
   };
 
-  const handlePlayDirectly = async () => {
+  const handlePlayDirectly = () => {
     if (!linkPopup) return;
+
+    let url = linkPopup.url;
+
+    const lowerUrl = url.toLowerCase();
+    if (
+      lowerUrl.includes("hubcloud") ||
+      lowerUrl.includes("hubcould") ||
+      lowerUrl.includes("hubdrive") ||
+      lowerUrl.includes("vcloud")
+    ) {
+      setAlertConfig({
+        isOpen: true,
+        title: t("Extraction Error"),
+        message: t("Error in extracting links, please try again"),
+      });
+      closeLinkPopup();
+      return;
+    }
+
+    if (!url.startsWith("http")) {
+      url = "https://" + url;
+    }
+
+    const browserUrl = normalizeBrowserViewUrl(url);
+    openInNewTab(browserUrl);
+
+    closeLinkPopup();
 
     const executeAction = async () => {
       if (profile?.uid) {
@@ -2342,33 +2361,6 @@ export default function MovieDetails() {
       }
 
       trackStreamAndCheckRate();
-
-      let url = linkPopup.url;
-
-      const lowerUrl = url.toLowerCase();
-      if (
-        lowerUrl.includes("hubcloud") ||
-        lowerUrl.includes("hubcould") ||
-        lowerUrl.includes("hubdrive") ||
-        lowerUrl.includes("vcloud")
-      ) {
-        setAlertConfig({
-          isOpen: true,
-          title: t("Extraction Error"),
-          message: t("Error in extracting links, please try again"),
-        });
-        closeLinkPopup();
-        return;
-      }
-
-      if (!url.startsWith("http")) {
-        url = "https://" + url;
-      }
-
-      const browserUrl = normalizeBrowserViewUrl(url);
-      openInNewTab(browserUrl);
-
-      closeLinkPopup();
     };
 
     executeAction();

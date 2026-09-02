@@ -7,7 +7,8 @@ import { useLanguage } from "../contexts/LanguageContext";
 import { VideoAdInterstitial } from "./VideoAdInterstitial";
 import { useAuth } from "../contexts/AuthContext";
 import { useSettings } from "../contexts/SettingsContext";
-import { isUserExemptFromAds } from "../utils/adUtils";
+import { isUserExemptFromAds, registerAppWhitelistedUrl } from "../utils/adUtils";
+import { openInNewTab } from "../utils/playerUtils";
 
 interface TelegramDownloadModalProps {
   isOpen: boolean;
@@ -37,10 +38,11 @@ export function TelegramDownloadModal({
       const res = await fetch(`/api/resolve-tg?url=${encodeURIComponent(url)}`);
       const data = await res.json();
       if (res.ok && data.url) {
+        registerAppWhitelistedUrl(data.url);
         if (data.url.startsWith("tg://")) {
           window.location.href = data.url;
         } else {
-          window.open(data.url, "_blank") || (window.location.href = data.url);
+          openInNewTab(data.url);
         }
       } else {
         setErrorId(id);

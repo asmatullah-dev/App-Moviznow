@@ -213,9 +213,30 @@ export function clearAdNetworkSessionCookiesAndStorage(): void {
   } catch (e) {}
 }
 
+// Runtime dynamic whitelist set for explicit app action URLs (downloads, streams, external players)
+const dynamicWhitelistedUrls = new Set<string>();
+
+/**
+ * Dynamically registers a URL as a legitimate user action, bypassing ad popunder interception.
+ */
+export function registerAppWhitelistedUrl(rawUrl?: string | URL | null): void {
+  if (!rawUrl) return;
+  const urlStr = String(rawUrl).trim();
+  if (urlStr) {
+    dynamicWhitelistedUrls.add(urlStr);
+    dynamicWhitelistedUrls.add(urlStr.toLowerCase());
+    try {
+      const u = new URL(urlStr);
+      dynamicWhitelistedUrls.add(u.href);
+      dynamicWhitelistedUrls.add(u.href.toLowerCase());
+      dynamicWhitelistedUrls.add((u.origin + u.pathname).toLowerCase());
+    } catch (e) {}
+  }
+}
+
 /**
  * Checks if a given URL is a legitimate user action / whitelisted external service
- * (WhatsApp, Telegram, YouTube, tel, mailto, blob, internal routes, etc.)
+ * (WhatsApp, Telegram, YouTube, tel, mailto, blob, internal routes, streaming/download hosts, etc.)
  */
 export function isAppWhitelistedUrl(rawUrl?: string | URL | null): boolean {
   if (!rawUrl) return false;
@@ -230,7 +251,40 @@ export function isAppWhitelistedUrl(rawUrl?: string | URL | null): boolean {
   }
 
   const lower = urlStr.toLowerCase();
-  return (
+
+  // Check dynamically registered URLs first
+  if (dynamicWhitelistedUrls.has(urlStr) || dynamicWhitelistedUrls.has(lower)) {
+    return true;
+  }
+
+  for (const whitelisted of dynamicWhitelistedUrls) {
+    if (whitelisted && (lower.includes(whitelisted) || whitelisted.includes(lower))) {
+      return true;
+    }
+  }
+
+  // Custom player URI schemes and protocols
+  if (
+    lower.startsWith('vlc:') ||
+    lower.startsWith('vlc-x-callback:') ||
+    lower.startsWith('intent:') ||
+    lower.startsWith('mxplayer:') ||
+    lower.startsWith('mx:') ||
+    lower.startsWith('nplayer:') ||
+    lower.startsWith('kmplayer:') ||
+    lower.startsWith('playit:') ||
+    lower.startsWith('tg:') ||
+    lower.startsWith('tel:') ||
+    lower.startsWith('mailto:') ||
+    lower.startsWith('sms:') ||
+    lower.startsWith('blob:') ||
+    lower.startsWith('data:')
+  ) {
+    return true;
+  }
+
+  // Known messaging & social platforms
+  if (
     lower.startsWith('https://wa.me/') ||
     lower.startsWith('https://api.whatsapp.com') ||
     lower.startsWith('https://whatsapp.com') ||
@@ -239,13 +293,64 @@ export function isAppWhitelistedUrl(rawUrl?: string | URL | null): boolean {
     lower.includes('telegram.me') ||
     lower.includes('telegram.org') ||
     lower.includes('youtube.com') ||
-    lower.includes('youtu.be') ||
-    lower.startsWith('tel:') ||
-    lower.startsWith('mailto:') ||
-    lower.startsWith('sms:') ||
-    lower.startsWith('blob:') ||
-    lower.startsWith('data:')
-  );
+    lower.includes('youtu.be')
+  ) {
+    return true;
+  }
+
+  // Known streaming & file hosts
+  if (
+    lower.includes('pixeldrain') ||
+    lower.includes('pixel.drain') ||
+    lower.includes('pixeldra.in') ||
+    lower.includes('hubcloud') ||
+    lower.includes('hubcould') ||
+    lower.includes('hubdrive') ||
+    lower.includes('vcloud') ||
+    lower.includes('drive.google.com') ||
+    lower.includes('docs.google.com') ||
+    lower.includes('mega.nz') ||
+    lower.includes('mega.io') ||
+    lower.includes('mediafire.com') ||
+    lower.includes('terabox') ||
+    lower.includes('1024tera') ||
+    lower.includes('4funbox') ||
+    lower.includes('mirrobox') ||
+    lower.includes('momoin') ||
+    lower.includes('fast2upload') ||
+    lower.includes('gdtot') ||
+    lower.includes('katdrive') ||
+    lower.includes('filepress') ||
+    lower.includes('streamtape') ||
+    lower.includes('doodstream') ||
+    lower.includes('mixdrop') ||
+    lower.includes('fembed') ||
+    lower.includes('streamwish') ||
+    lower.includes('filemoon') ||
+    lower.includes('vidhide') ||
+    lower.includes('streamhub') ||
+    lower.includes('dropgalaxy') ||
+    lower.includes('upfiles') ||
+    lower.includes('sendcm') ||
+    lower.includes('gofile') ||
+    lower.includes('workupload') ||
+    lower.includes('hxfile')
+  ) {
+    return true;
+  }
+
+  // Direct media extensions or download paths
+  if (
+    /\.(mp4|mkv|avi|mov|webm|flv|m3u8|mp3|aac|zip|rar|7z|iso|tar|gz)(\?|$)/i.test(lower) ||
+    lower.includes('/api/file/') ||
+    lower.includes('/u/') ||
+    lower.includes('download=') ||
+    lower.includes('stream=')
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 /**

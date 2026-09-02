@@ -3,6 +3,8 @@
  * Handles iOS (iPhone/iPad), Android, and Desktop deep-linking for VLC, MX Player, and system video players.
  */
 
+import { registerAppWhitelistedUrl } from './adUtils';
+
 export interface PlayerLaunchOptions {
   player: 'vlc' | 'mx' | 'generic' | 'browser' | 'download';
   url: string;
@@ -96,7 +98,9 @@ export function normalizeBrowserViewUrl(rawUrl: string): string {
  * Opens the video URL in the selected external media player based on user OS/platform.
  */
 export function playInExternalPlayer({ player, url, title }: PlayerLaunchOptions): { success: boolean; schemeUrl?: string } {
+  registerAppWhitelistedUrl(url);
   const directVideoUrl = normalizeDirectStreamUrl(url);
+  registerAppWhitelistedUrl(directVideoUrl);
   const encodedTitle = encodeURIComponent(title || 'Video Stream');
   const onIOS = isIOS();
   const onAndroid = isAndroid();
@@ -153,10 +157,10 @@ export function playInExternalPlayer({ player, url, title }: PlayerLaunchOptions
     // 3. Generic "Play in Video Player"
     if (player === 'generic') {
       if (onIOS) {
-        // On iOS, generic tries VLC first if available, otherwise direct stream in native iOS player
-        const vlcIosUrl = `vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(directVideoUrl)}`;
-        tryOpenUriWithFallback(vlcIosUrl, directVideoUrl);
-        return { success: true, schemeUrl: vlcIosUrl };
+        // On iOS, generic should stream directly in the native Safari video player
+        // because tryOpenUriWithFallback gets blocked by Safari's popup blocker.
+        window.location.href = directVideoUrl;
+        return { success: true, schemeUrl: directVideoUrl };
       } else if (onAndroid) {
         const intentUrl = `intent://${hostAndPath}#Intent;scheme=${scheme};action=android.intent.action.VIEW;type=video/*;end`;
         window.location.href = intentUrl;
@@ -236,20 +240,34 @@ function tryOpenUriWithFallback(primaryUri: string, fallbackUri?: string) {
  * Opens a URL in a new clean window / tab with no-referrer headers.
  */
 export function openInNewTab(url: string) {
+  if (!url) return;
+  registerAppWhitelistedUrl(url);
+
+  let newWindow: Window | null = null;
   try {
-    const a = document.createElement('a');
-    a.href = url;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    a.referrerPolicy = 'no-referrer';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => {
-      try {
-        document.body.removeChild(a);
-      } catch (e) {}
-    }, 1000);
+    // Using window.open directly inside a user event handler
+    newWindow = window.open(url, '_blank', 'noopener,noreferrer');
   } catch (e) {
-    window.open(url, '_blank', 'noopener,noreferrer');
+    console.warn('window.open error:', e);
+  }
+
+  if (!newWindow) {
+    // Fallback to programmatic anchor click or direct location navigation if popups are blocked
+    try {
+      const a = document.createElement('a');
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.referrerPolicy = 'no-referrer';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try {
+          document.body.removeChild(a);
+        } catch (e) {}
+      }, 1000);
+    } catch (e) {
+      window.location.href = url;
+    }
   }
 }
