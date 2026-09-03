@@ -53,13 +53,22 @@ export function minifyContent(content: any): any {
     if (key === 'movieLinks') {
         const val = value as any;
         if (!val || val === '[]' || (Array.isArray(val) && val.length === 0) || content.type === 'series') continue;
-        const parsed = typeof val === 'string' ? JSON.parse(val) : val;
+        let parsed: any[] = [];
+        if (typeof val === 'string') {
+            try { parsed = JSON.parse(val); } catch(e) { parsed = []; }
+        } else if (Array.isArray(val)) {
+            parsed = val;
+        }
         minified[FIELD_MAP[key] || key] = parsed.map((l: any) => {
              const ml: any = {};
-             if (l.url) ml.ur = l.url;
-             if (l.name) ml.nm = l.name;
-             if (l.size) ml.sz = l.size;
-             if (l.unit) ml.un = l.unit;
+             const url = l.url || l.ur;
+             if (url) ml.ur = url;
+             const name = l.name || l.nm;
+             if (name) ml.nm = name;
+             const size = l.size || l.sz;
+             if (size) ml.sz = size;
+             const unit = l.unit || l.un;
+             if (unit) ml.un = unit;
              return ml;
         });
         continue;
@@ -71,50 +80,80 @@ export function minifyContent(content: any): any {
         const val = value as any;
         if (!val || val === '[]' || (Array.isArray(val) && val.length === 0)) continue;
         
-        let parsedSeasons = typeof val === 'string' ? JSON.parse(val) : val;
+        let parsedSeasons: any[] = [];
+        if (typeof val === 'string') {
+            try { parsedSeasons = JSON.parse(val); } catch(e) { parsedSeasons = []; }
+        } else if (Array.isArray(val)) {
+            parsedSeasons = val;
+        }
         const minSeasons = parsedSeasons.map((s: any) => {
-            const ms: any = { sn: s.seasonNumber };
-            if (s.title) ms.ti = s.title;
-            if (s.year) ms.yea = s.year;
-            if (s.trailerUrl) ms.trai = s.trailerUrl;
-            if (s.isFullSeasonMKV) ms.fsm = 1;
-            if (s.folderLink) ms.fl = s.folderLink;
-            if (s.episodes && s.episodes.length > 0) {
-               ms.eps = s.episodes.map((e: any) => {
-                   const me: any = { en: e.episodeNumber };
-                   if (e.title) me.ti = e.title;
-                   if (e.description) me.de = e.description;
-                   if (e.duration) me.du = e.duration;
-                   if (e.links && e.links.length > 0) {
-                       me.lks = e.links.map((l: any) => {
+            const seasonNum = s.seasonNumber !== undefined ? s.seasonNumber : s.sn;
+            const ms: any = { sn: seasonNum };
+            const title = s.title || s.ti;
+            if (title) ms.ti = title;
+            const year = s.year || s.yea;
+            if (year) ms.yea = year;
+            const trailerUrl = s.trailerUrl || s.trai;
+            if (trailerUrl) ms.trai = trailerUrl;
+            if (s.isFullSeasonMKV || s.fsm) ms.fsm = 1;
+            const folderLink = s.folderLink || s.fl;
+            if (folderLink) ms.fl = folderLink;
+            const episodes = s.episodes || s.eps;
+            if (episodes && Array.isArray(episodes) && episodes.length > 0) {
+               ms.eps = episodes.map((e: any) => {
+                   const epNum = e.episodeNumber !== undefined ? e.episodeNumber : e.en;
+                   const me: any = { en: epNum };
+                   const epTitle = e.title || e.ti;
+                   if (epTitle) me.ti = epTitle;
+                   const epDesc = e.description || e.de;
+                   if (epDesc) me.de = epDesc;
+                   const epDur = e.duration || e.du;
+                   if (epDur) me.du = epDur;
+                   const links = e.links || e.lks;
+                   if (links && Array.isArray(links) && links.length > 0) {
+                       me.lks = links.map((l: any) => {
                            const ml: any = {};
-                           if (l.url) ml.ur = l.url;
-                           if (l.name) ml.nm = l.name;
-                           if (l.size) ml.sz = l.size;
-                           if (l.unit) ml.un = l.unit;
+                           const url = l.url || l.ur;
+                           if (url) ml.ur = url;
+                           const name = l.name || l.nm;
+                           if (name) ml.nm = name;
+                           const size = l.size || l.sz;
+                           if (size) ml.sz = size;
+                           const unit = l.unit || l.un;
+                           if (unit) ml.un = unit;
                            return ml;
                        });
                    }
                    return me;
                });
             }
-            if (s.zipLinks && s.zipLinks.length > 0) {
-                 ms.zl = s.zipLinks.map((l: any) => {
+            const zipLinks = s.zipLinks || s.zl;
+            if (zipLinks && Array.isArray(zipLinks) && zipLinks.length > 0) {
+                 ms.zl = zipLinks.map((l: any) => {
                      const ml: any = {};
-                     if (l.url) ml.ur = l.url;
-                     if (l.name) ml.nm = l.name;
-                     if (l.size) ml.sz = l.size;
-                     if (l.unit) ml.un = l.unit;
+                     const url = l.url || l.ur;
+                     if (url) ml.ur = url;
+                     const name = l.name || l.nm;
+                     if (name) ml.nm = name;
+                     const size = l.size || l.sz;
+                     if (size) ml.sz = size;
+                     const unit = l.unit || l.un;
+                     if (unit) ml.un = unit;
                      return ml;
                  });
             }
-            if (s.mkvLinks && s.mkvLinks.length > 0) {
-                 ms.ml = s.mkvLinks.map((l: any) => {
+            const mkvLinks = s.mkvLinks || s.ml;
+            if (mkvLinks && Array.isArray(mkvLinks) && mkvLinks.length > 0) {
+                 ms.ml = mkvLinks.map((l: any) => {
                      const ml: any = {};
-                     if (l.url) ml.ur = l.url;
-                     if (l.name) ml.nm = l.name;
-                     if (l.size) ml.sz = l.size;
-                     if (l.unit) ml.un = l.unit;
+                     const url = l.url || l.ur;
+                     if (url) ml.ur = url;
+                     const name = l.name || l.nm;
+                     if (name) ml.nm = name;
+                     const size = l.size || l.sz;
+                     if (size) ml.sz = size;
+                     const unit = l.unit || l.un;
+                     if (unit) ml.un = unit;
                      return ml;
                  });
             }
@@ -154,9 +193,14 @@ export function expandContent(minified: any, chunkId?: string): Content {
     const longKey = REVERSE_FIELD_MAP[key] || key;
     
     if (longKey === 'movieLinks') {
-        const minLinks = typeof value === 'string' ? JSON.parse(value) : value as any[];
+        let minLinks: any[] = [];
+        if (typeof value === 'string') {
+            try { minLinks = JSON.parse(value); } catch(e) { minLinks = []; }
+        } else if (Array.isArray(value)) {
+            minLinks = value;
+        }
         expanded[longKey] = JSON.stringify(minLinks.map((ml: any) => {
-            const l: any = { url: ml.ur || ml.url };
+            const l: any = { url: ml.ur || ml.url || '' };
             if (ml.nm || ml.name) l.name = ml.nm || ml.name;
             if (ml.sz || ml.size) l.size = ml.sz || ml.size;
             if (ml.un || ml.unit) l.unit = ml.un || ml.unit;
@@ -166,23 +210,32 @@ export function expandContent(minified: any, chunkId?: string): Content {
     }
 
     if (longKey === 'seasons') {
-        const minSeasons = value as any[];
-        const expandedSeasons = minSeasons.map((ms: any) => {
-            const s: any = { id: `s${ms.sn}`, seasonNumber: ms.sn };
-            if (ms.ti) s.title = ms.ti;
-            if (ms.yea) s.year = ms.yea;
-            if (ms.trai) s.trailerUrl = ms.trai;
-            if (ms.fsm) s.isFullSeasonMKV = true;
-            if (ms.fl) s.folderLink = ms.fl;
-            if (ms.eps) {
-                s.episodes = ms.eps.map((me: any) => {
-                    const e: any = { id: `e${me.en}`, episodeNumber: me.en };
-                    if (me.ti) e.title = me.ti;
-                    if (me.de) e.description = me.de;
-                    if (me.du) e.duration = me.du;
-                    if (me.lks) {
-                        e.links = me.lks.map((ml: any) => {
-                            const l: any = { url: ml.ur || ml.url };
+        let parsedSeasons: any[] = [];
+        if (typeof value === 'string') {
+            try { parsedSeasons = JSON.parse(value); } catch(e) { parsedSeasons = []; }
+        } else if (Array.isArray(value)) {
+            parsedSeasons = value;
+        }
+        const expandedSeasons = parsedSeasons.map((ms: any) => {
+            const seasonNum = ms.sn !== undefined ? ms.sn : ms.seasonNumber;
+            const s: any = { id: `s${seasonNum}`, seasonNumber: seasonNum };
+            if (ms.ti || ms.title) s.title = ms.ti || ms.title;
+            if (ms.yea || ms.year) s.year = ms.yea || ms.year;
+            if (ms.trai || ms.trailerUrl) s.trailerUrl = ms.trai || ms.trailerUrl;
+            if (ms.fsm || ms.isFullSeasonMKV) s.isFullSeasonMKV = true;
+            if (ms.fl || ms.folderLink) s.folderLink = ms.fl || ms.folderLink;
+            const epsList = ms.eps || ms.episodes;
+            if (epsList && Array.isArray(epsList) && epsList.length > 0) {
+                s.episodes = epsList.map((me: any) => {
+                    const epNum = me.en !== undefined ? me.en : me.episodeNumber;
+                    const e: any = { id: `e${epNum}`, episodeNumber: epNum };
+                    if (me.ti || me.title) e.title = me.ti || me.title;
+                    if (me.de || me.description) e.description = me.de || me.description;
+                    if (me.du || me.duration) e.duration = me.du || me.duration;
+                    const lksList = me.lks || me.links;
+                    if (lksList && Array.isArray(lksList) && lksList.length > 0) {
+                        e.links = lksList.map((ml: any) => {
+                            const l: any = { url: ml.ur || ml.url || '' };
                             if (ml.nm || ml.name) l.name = ml.nm || ml.name;
                             if (ml.sz || ml.size) l.size = ml.sz || ml.size;
                             if (ml.un || ml.unit) l.unit = ml.un || ml.unit;
@@ -192,18 +245,20 @@ export function expandContent(minified: any, chunkId?: string): Content {
                     return e;
                 });
             }
-            if (ms.zl) {
-                s.zipLinks = ms.zl.map((ml: any) => {
-                    const l: any = { url: ml.ur || ml.url };
+            const zlList = ms.zl || ms.zipLinks;
+            if (zlList && Array.isArray(zlList) && zlList.length > 0) {
+                s.zipLinks = zlList.map((ml: any) => {
+                    const l: any = { url: ml.ur || ml.url || '' };
                     if (ml.nm || ml.name) l.name = ml.nm || ml.name;
                     if (ml.sz || ml.size) l.size = ml.sz || ml.size;
                     if (ml.un || ml.unit) l.unit = ml.un || ml.unit;
                     return l;
                 });
             }
-            if (ms.ml) {
-                s.mkvLinks = ms.ml.map((ml: any) => {
-                    const l: any = { url: ml.ur || ml.url };
+            const mlList = ms.ml || ms.mkvLinks;
+            if (mlList && Array.isArray(mlList) && mlList.length > 0) {
+                s.mkvLinks = mlList.map((ml: any) => {
+                    const l: any = { url: ml.ur || ml.url || '' };
                     if (ml.nm || ml.name) l.name = ml.nm || ml.name;
                     if (ml.sz || ml.size) l.size = ml.sz || ml.size;
                     if (ml.un || ml.unit) l.unit = ml.un || ml.unit;
@@ -227,6 +282,74 @@ export function expandContent(minified: any, chunkId?: string): Content {
     }
   }
   return expanded as Content;
+}
+
+/**
+ * Finds the optimal chunk ID for inserting a new content item without overflowing chunk capacity.
+ * Selects the highest existing chunk that has room, or allocates the next chunk index if all are full.
+ */
+export function findBestChunkForNewContent(type: 'movie' | 'series', storagePrefix: string = 'admin_'): string {
+  const prefix = type === 'movie' ? 'movie_chunk_' : 'series_chunk_';
+  const maxSize = type === 'movie' ? CONTENT_CHUNK_MOVIE_SIZE : CONTENT_CHUNK_SERIES_SIZE;
+
+  const localMetaString = safeStorage.getItem(`${storagePrefix}chunk_meta_versions`) || '{}';
+  let localMeta: Record<string, any> = {};
+  try { localMeta = JSON.parse(localMetaString); } catch(e) {}
+
+  // Find all existing chunk indices for this prefix
+  const chunkIndices: number[] = [];
+  
+  // 1. Check localMeta
+  for (const cid of Object.keys(localMeta)) {
+    if (cid.startsWith(prefix)) {
+      const idx = parseInt(cid.replace(prefix, ''), 10);
+      if (!isNaN(idx) && !chunkIndices.includes(idx)) chunkIndices.push(idx);
+    }
+  }
+
+  // 2. Also check keys in safeStorage
+  const searchPrefix = `${storagePrefix}content_chunk_${prefix}`;
+  const keys = safeStorage.keys().filter(k => k.startsWith(searchPrefix) || k.startsWith(`${storagePrefix}${prefix}`));
+  for (const k of keys) {
+    const match = k.match(/(\d+)$/);
+    if (match) {
+      const idx = parseInt(match[1], 10);
+      if (!isNaN(idx) && !chunkIndices.includes(idx)) {
+        chunkIndices.push(idx);
+      }
+    }
+  }
+
+  if (chunkIndices.length === 0) {
+    return `${prefix}0`;
+  }
+
+  chunkIndices.sort((a, b) => a - b);
+  const highestIdx = chunkIndices[chunkIndices.length - 1];
+
+  // Check the chunk count of each chunk from highest index to lowest
+  for (let i = chunkIndices.length - 1; i >= 0; i--) {
+    const idx = chunkIndices[i];
+    const cid = `${prefix}${idx}`;
+    let count = 0;
+    
+    // Check localMeta first
+    if (localMeta[cid]) {
+      count = typeof localMeta[cid] === 'number' ? localMeta[cid] : (localMeta[cid].count || 0);
+    } else {
+      const chunkStr = safeStorage.getItem(`${storagePrefix}content_chunk_${cid}`);
+      if (chunkStr) {
+        try { count = Object.keys(JSON.parse(chunkStr)).length; } catch(e) {}
+      }
+    }
+
+    if (count < maxSize) {
+      return cid;
+    }
+  }
+
+  // All existing chunks are full, allocate the next index
+  return `${prefix}${highestIdx + 1}`;
 }
 
 function registerChunkUpdates(chunkIds: string[], batch: WriteBatch, sizes?: Record<string, number>) {

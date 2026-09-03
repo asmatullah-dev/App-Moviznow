@@ -15,20 +15,22 @@ export function isAdRestrictedRoute(pathname?: string): boolean {
 
 /**
  * Remove all injected ad scripts and network elements from the DOM.
+ * @param purgeSocialBar Defaults to true. When true, forcefully removes Social Bar scripts and widgets.
  */
-export function purgeAllAdElements(): void {
+export function purgeAllAdElements(purgeSocialBar: boolean = true): void {
   if (typeof document === 'undefined') return;
 
-  // 1. Remove all ad network scripts (AdSense, Monetag, Adsterra/commercialhalftime, CPM networks)
-  // BE CAREFUL: Do not block Social Bar (f0270bbaca005a7be1c664c3c0ae0386.js)
+  // 1. Remove all ad network scripts (AdSense, Monetag, Adsterra/commercialhalftime, CPM networks, Social Bar)
   const adScriptPatterns = [
     '99e78b0792c97e620e43154c137cd1f3', // Specific Popunder ID
+    'f0270bbaca005a7be1c664c3c0ae0386', // Social bar script ID
     'nap5k.com',
     'n6wxm.com',
     'workdeadlinededicate.com',
     'profitableratecpmnetwork',
     'monetag',
     'adsterra',
+    'commercialhalftime',
     'adsbygoogle.js',
   ];
 
@@ -36,13 +38,44 @@ export function purgeAllAdElements(): void {
     const scripts = document.querySelectorAll('script');
     scripts.forEach(s => {
       const src = s.src || '';
-      // If it matches a known popunder pattern AND is NOT the social bar
-      if (adScriptPatterns.some(pattern => src.includes(pattern)) && !src.includes('f0270bbaca005a7be1c664c3c0ae0386')) {
-        s.remove();
+      if (!src) {
+        // Remove inline ad scripts
+        const content = s.textContent || '';
+        if (
+          content.includes('f0270bbaca005a7be1c664c3c0ae0386') ||
+          content.includes('99e78b0792c97e620e43154c137cd1f3') ||
+          content.includes('commercialhalftime') ||
+          content.includes('adsterra') ||
+          content.includes('monetag')
+        ) {
+          s.remove();
+        }
+        return;
+      }
+
+      if (purgeSocialBar) {
+        if (adScriptPatterns.some(pattern => src.includes(pattern))) {
+          s.remove();
+        }
+      } else {
+        // If explicitly NOT purging social bar (e.g. cooldown only for regular users), skip social bar
+        if (
+          adScriptPatterns.some(pattern => src.includes(pattern)) &&
+          !src.includes('f0270bbaca005a7be1c664c3c0ae0386')
+        ) {
+          s.remove();
+        }
       }
     });
-    // Remove scripts with the popunder data attribute or ad network scripts
+
+    // Remove scripts with data attributes
     document.querySelectorAll('script[data-popunder-script="true"]').forEach(el => el.remove());
+    document.querySelectorAll('script[data-authorized-ad-script="true"]').forEach(el => {
+      const src = el.getAttribute('src') || '';
+      if (purgeSocialBar || !src.includes('f0270bbaca005a7be1c664c3c0ae0386')) {
+        el.remove();
+      }
+    });
   } catch (e) {}
 
   // 2. Clear potential global variables that ad scripts use
@@ -50,21 +83,26 @@ export function purgeAllAdElements(): void {
     const globalsToClear = [
       '_pop', '_pop_config', '_pop_script', 'adsbygoogle', 
       'CommercialHalftime', 'Adsterra', 'Monetag', 
-      '__p_scr', '__p_config'
+      '__p_scr', '__p_config', '_sb', '_socialBar', '_social'
     ];
     globalsToClear.forEach(g => {
       if ((window as any)[g]) {
-        try { (window as any)[g] = undefined; } catch (err) {}
+        try {
+          delete (window as any)[g];
+        } catch (err) {
+          (window as any)[g] = undefined;
+        }
       }
     });
   } catch (e) {}
 
-  // 3. Remove injected Monetag / Popunder / Vignette / AdSense overlay or container elements
+  // 3. Remove injected Monetag / Popunder / Vignette / AdSense / Social Bar overlay or container elements
   try {
     const selectors = [
       'ins.adsbygoogle',
       'div[id^="google_ads_iframe"]',
       'iframe[src*="commercialhalftime"]',
+      'iframe[src*="adsterra"]',
       'iframe[src*="nap5k"]',
       'iframe[src*="n6wxm"]',
       'iframe[id*="google_ads"]',
@@ -76,41 +114,59 @@ export function purgeAllAdElements(): void {
       'div[id^="popunder-"]',
       '.pub_300x250',
     ];
+
+    if (purgeSocialBar) {
+      selectors.push(
+        'div[id*="social"]',
+        'div[class*="social"]',
+        'div[id*="pro-"]',
+        'div[class*="pro-"]',
+        'div[id*="pro_"]',
+        'div[class*="pro_"]',
+        'div[id*="adsterra"]',
+        'div[class*="adsterra"]',
+        'iframe[src*="f0270bbaca005a7be1c664c3c0ae0386"]'
+      );
+    }
+
     selectors.forEach(sel => {
       document.querySelectorAll(sel).forEach(el => {
         const htmlEl = el as HTMLElement;
-        if (!htmlEl.closest('#root') && htmlEl.id !== 'omdb-modal-root') {
+        if (!htmlEl.closest('#root') && htmlEl.id !== 'omdb-modal-root' && !htmlEl.hasAttribute('data-app-portal')) {
           htmlEl.remove();
         }
       });
     });
 
-    // Aggressive Overlay & Click-Catcher Killer: Remove any fixed/absolute elements outside #root that cover the screen or catch clicks
-    // Do NOT remove Social Bar containers (usually have high z-index but specific classes or IDs)
+    // Aggressive Overlay & Click-Catcher Killer: Remove any fixed/absolute elements outside #root
     const allOutsideElements = document.querySelectorAll('body > *:not(#root):not(script):not(style):not(#omdb-modal-root)');
     allOutsideElements.forEach((el) => {
       const htmlEl = el as HTMLElement;
       if (htmlEl.hasAttribute('data-app-portal') || htmlEl.id === 'omdb-modal-root') return;
       
-      // Keep Social Bar container if identifiable (often contains 'social' or specific network markers)
       const id = (htmlEl.id || '').toLowerCase();
       const className = (typeof htmlEl.className === 'string' ? htmlEl.className : '').toLowerCase();
-      if (id.includes('social') || className.includes('social') || id.includes('pro-') || className.includes('pro-')) return;
+      const isSocialBar = id.includes('social') || className.includes('social') || id.includes('pro-') || className.includes('pro-') || id.includes('adsterra') || className.includes('adsterra');
+
+      if (isSocialBar) {
+        if (purgeSocialBar) {
+          try { htmlEl.remove(); } catch (err) {}
+        }
+        return;
+      }
       
       try {
         const style = window.getComputedStyle(htmlEl);
         const isFixed = style.position === 'fixed' || style.position === 'absolute';
         const zIndex = parseInt(style.zIndex, 10);
-        
-        // Remove transparent click catchers (e.g. opacity 0, or high z-index overlays)
         const opacity = parseFloat(style.opacity);
+
         if (isFixed && (zIndex > 50 || zIndex === 2147483647 || isNaN(zIndex))) {
           const width = htmlEl.offsetWidth || window.innerWidth;
           const height = htmlEl.offsetHeight || window.innerHeight;
           const screenWidth = window.innerWidth;
           const screenHeight = window.innerHeight;
           
-          // If it covers more than 30% of the screen or is a transparent overlay
           if ((width > screenWidth * 0.3 && height > screenHeight * 0.3) || (opacity < 0.1 && width > 100 && height > 100)) {
             htmlEl.remove();
           }
@@ -437,14 +493,22 @@ export function isUserExemptFromAds(
 
   if (!profile) return false;
 
-  const role = (profile.role || '').toLowerCase();
-  const status = (profile.status || '').toLowerCase();
+  const role = (profile.role || '').toLowerCase().trim();
+  const status = (profile.status || '').toLowerCase().trim();
 
   // 1. Owner
   if (role === 'owner') return true;
 
-  // 2. Admin
-  if (role === 'admin') return true;
+  // 2. Admin (checks role, status, isAdmin, is_admin, admin)
+  if (
+    role === 'admin' ||
+    status === 'admin' ||
+    Boolean((profile as any).isAdmin) ||
+    Boolean((profile as any).is_admin) ||
+    Boolean((profile as any).admin)
+  ) {
+    return true;
+  }
 
   // 3. Managers (all variations)
   if (
@@ -467,13 +531,16 @@ export function isUserExemptFromAds(
   // Comprehensive check for VIP role, planRole, isVip flag, membershipTier, or planName
   const isVipRole =
     role === 'vip' ||
+    status === 'vip' ||
     Boolean((profile as any).isVip) ||
+    Boolean((profile as any).isVIP) ||
+    Boolean((profile as any).is_vip) ||
     Boolean((profile as any).vip) ||
     (profile as any).planRole === 'vip' ||
     (profile as any).membershipRole === 'vip' ||
     (profile as any).membershipTier === 'vip' ||
     String((profile as any).planName || '').toLowerCase().includes('vip') ||
-    status === 'vip';
+    String((profile as any).plan || '').toLowerCase().includes('vip');
 
   if (isVipRole) {
     // Expired or suspended VIP users are not exempt

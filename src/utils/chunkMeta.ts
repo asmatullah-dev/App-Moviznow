@@ -170,9 +170,8 @@ export const getChunkMeta = async (forceRefresh = false): Promise<Record<string,
   const timeSinceLastFetch = nowMs - effectiveLastFetch;
   const isWithin60Sec = effectiveLastFetch > 0 && timeSinceLastFetch < SIXTY_SECONDS_MS;
 
-  // RULE: 60 sec cooldown: save and don't recall from server for 60 sec,
-  // even on manual trigger use the saved chunk meta!
-  if (savedMeta && isWithin60Sec) {
+  // RULE: 60 sec cooldown for background checks. If forceRefresh is explicitly requested, bypass cooldown.
+  if (!forceRefresh && savedMeta && isWithin60Sec) {
     return savedMeta;
   }
 

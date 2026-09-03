@@ -49,8 +49,8 @@ export default function Login() {
 
   // Guarantee that no ad network, script, or popunder element runs or displays on the login page
   useEffect(() => {
-    purgeAllAdElements();
-    const interval = setInterval(purgeAllAdElements, 1000);
+    purgeAllAdElements(true);
+    const interval = setInterval(() => purgeAllAdElements(true), 1000);
     return () => clearInterval(interval);
   }, []);
 
@@ -84,6 +84,12 @@ export default function Login() {
 
   useEffect(() => {
     if (user && profile) {
+      // Instantly purge all ad scripts and social ads upon login
+      purgeAllAdElements(true);
+      try {
+        window.dispatchEvent(new Event('moviz_auth_state_changed'));
+      } catch (e) {}
+
       // If user is suspended, don't redirect to home, just show error
       if (profile.status === 'suspended') {
         setCustomError("Your account has been suspended. Please contact admin.");

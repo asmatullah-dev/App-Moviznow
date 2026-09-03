@@ -179,32 +179,40 @@ export const CpmScriptManager: React.FC = () => {
 
   // Continuous Ad Cleanup during Cooldown & on Window Focus
   useEffect(() => {
-    if (inCooldown || isUserExemptFromAds(profile)) {
-      purgeAllAdElements();
+    const checkAndPurge = () => {
+      const isExempt = isUserExemptFromAds(profileRef.current);
+      const isLogin = isAdRestrictedRoute(window.location.pathname);
+      if (isExempt || isLogin) {
+        purgeAllAdElements(true); // Purge everything including social bar!
+      } else if (isPopunderInCooldown()) {
+        purgeAllAdElements(false); // Cooldown for popunders only for non-exempt users
+      }
+    };
 
-      const interval = setInterval(() => {
-        if (isPopunderInCooldown() || isUserExemptFromAds(profileRef.current)) {
-          purgeAllAdElements();
-        }
-      }, 1000);
+    checkAndPurge();
 
-      const observer = new MutationObserver((mutations) => {
-        if (isPopunderInCooldown() || isUserExemptFromAds(profileRef.current)) {
-          let shouldPurge = false;
-          mutations.forEach((m) => {
-            if (m.addedNodes.length > 0) shouldPurge = true;
-          });
-          if (shouldPurge) purgeAllAdElements();
-        }
+    const interval = setInterval(checkAndPurge, 1000);
+
+    const observer = new MutationObserver((mutations) => {
+      let shouldCheck = false;
+      mutations.forEach((m) => {
+        if (m.addedNodes.length > 0) shouldCheck = true;
       });
+      if (shouldCheck) checkAndPurge();
+    });
 
-      observer.observe(document.body, { childList: true });
+    observer.observe(document.body, { childList: true });
 
-      return () => {
-        clearInterval(interval);
-        observer.disconnect();
-      };
-    }
+    // Listen to custom auth events to purge instantly upon login / state change
+    window.addEventListener('moviz_auth_state_changed', checkAndPurge);
+    window.addEventListener('storage', checkAndPurge);
+
+    return () => {
+      clearInterval(interval);
+      observer.disconnect();
+      window.removeEventListener('moviz_auth_state_changed', checkAndPurge);
+      window.removeEventListener('storage', checkAndPurge);
+    };
   }, [inCooldown, profile]);
 
   // Inject or clean up ad scripts based on route, exemption, and cooldown
@@ -212,9 +220,9 @@ export const CpmScriptManager: React.FC = () => {
     const isLogin = isAdRestrictedRoute(location.pathname);
     const isExempt = isUserExemptFromAds(profile);
 
-    // If on restricted route or user is exempt, purge everything
+    // If on restricted route or user is exempt, purge everything (including Social Bar)
     if (isLogin || isExempt) {
-      purgeAllAdElements();
+      purgeAllAdElements(true);
       return;
     }
 
@@ -306,7 +314,7 @@ export const CpmScriptManager: React.FC = () => {
       setInCooldown(true);
 
       // Immediately purge popunder elements so subsequent clicks are clean
-      purgeAllAdElements();
+      purgeAllAdElements(false);
 
       // Execute user intended navigation in main window IMMEDIATELY on this same 1st tap!
       executeUserIntendedAction();
@@ -343,6 +351,7 @@ export const CpmScriptManager: React.FC = () => {
       // External ad URL:
       if (isExempt || inCd) {
         // Block during cooldown or for exempt users!
+        if (isExempt) purgeAllAdElements(true);
         executeUserIntendedAction();
         return;
       }
@@ -350,7 +359,7 @@ export const CpmScriptManager: React.FC = () => {
       // NOT in cooldown: record cooldown now and allow this one click
       recordPopunderTriggered();
       setInCooldown(true);
-      purgeAllAdElements();
+      purgeAllAdElements(false);
       executeUserIntendedAction();
 
       return originalAnchorClick.apply(this, arguments as any);
@@ -366,13 +375,14 @@ export const CpmScriptManager: React.FC = () => {
       const inCd = isPopunderInCooldown();
 
       if (isExempt || inCd) {
+        if (isExempt) purgeAllAdElements(true);
         executeUserIntendedAction();
         return;
       }
 
       recordPopunderTriggered();
       setInCooldown(true);
-      purgeAllAdElements();
+      purgeAllAdElements(false);
       executeUserIntendedAction();
 
       return originalFormSubmit.apply(this, arguments as any);
@@ -385,12 +395,13 @@ export const CpmScriptManager: React.FC = () => {
           const isExempt = isUserExemptFromAds(profileRef.current);
           const inCd = isPopunderInCooldown();
           if (isExempt || inCd) {
+            if (isExempt) purgeAllAdElements(true);
             executeUserIntendedAction();
             return false;
           }
           recordPopunderTriggered();
           setInCooldown(true);
-          purgeAllAdElements();
+          purgeAllAdElements(false);
           executeUserIntendedAction();
         }
       }

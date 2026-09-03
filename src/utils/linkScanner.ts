@@ -66,7 +66,17 @@ export function normalizeUrl(input: string) {
       host === "pixel.drain" ||
       host === "pixeldra.in";
 
-    if (isPixeldrain) {
+    const isHubcloudOrVcloudOrHubdrive = 
+      host.includes("hubcloud") || 
+      host.includes("vcloud") || 
+      host.includes("hubdrive");
+
+    if (isHubcloudOrVcloudOrHubdrive) {
+      const eVal = url.searchParams.get("e");
+      url.search = eVal ? `?e=${eVal}` : "";
+      url.hash = "";
+      return url.toString().replace(/\/$/, "");
+    } else if (isPixeldrain) {
       // Pixeldrain conversion
       const fileIdMatch = url.pathname.match(/\/(?:u|api\/file)\/([^/?#]+)/i);
       const listIdMatch = url.pathname.match(/\/(?:l|api\/list)\/([^/?#]+)/i);
@@ -108,7 +118,17 @@ export function normalizeUrl(input: string) {
       trimmed.includes("pixel.drain/") ||
       trimmed.includes("pixeldra.in/");
 
-    if (isPixeldrain) {
+    if (trimmed.includes("hubcloud") || trimmed.includes("vcloud") || trimmed.includes("hubdrive")) {
+      const eMatch = trimmed.match(/[?&]e=([^&#\s]+)/);
+      const qIdx = trimmed.indexOf("?");
+      if (qIdx !== -1) trimmed = trimmed.substring(0, qIdx);
+      const hIdx = trimmed.indexOf("#");
+      if (hIdx !== -1) trimmed = trimmed.substring(0, hIdx);
+      trimmed = trimmed.replace(/\/$/, "");
+      if (eMatch) {
+        trimmed += `?e=${eMatch[1]}`;
+      }
+    } else if (isPixeldrain) {
       trimmed = trimmed.replace(/\?download$/i, "");
       trimmed = trimmed.replace(/\/api\/file\//i, "/u/");
       trimmed = trimmed.replace(/\/api\/list\//i, "/l/");
@@ -188,8 +208,8 @@ export function extractFilenameFromUrl(url: string): string | undefined {
 
 export function normalizeCodec(v?: string) {
   if (!v) return undefined;
-  const s = v.toUpperCase().replace(/\./g, "").replace(/\s+/g, "");
-  if (s === "H265" || s === "X265" || s === "HEVC") return "HEVC";
+  const s = v.toUpperCase().replace(/[\.\-\s_]/g, "");
+  if (s === "H265" || s === "X265" || s === "HEVC" || s === "10BIT" || s === "10BITX265" || s === "HEVC10" || s === "10B") return "HEVC";
   return undefined;
 }
 
@@ -294,7 +314,7 @@ export function detectMetadataForLink(
   const quality = formatQuality(qualityMatch);
 
   const codec = normalizeCodec(
-    lower.match(/\b(x265|x264|h\.265|h\.264|hevc|av1)\b/i)?.[1],
+    lower.match(/\b(x265|x264|h[\.\-_]?265|h[\.\-_]?264|hevc|10bit|10-bit|av1)\b/i)?.[1],
   );
 
   const audio = (() => {
@@ -567,7 +587,7 @@ export function detectFromFilename(
   const quality = formatQuality(qualityMatch);
 
   const codec = normalizeCodec(
-    source.match(/\b(x265|x264|h\.265|h\.264|hevc|av1)\b/i)?.[1],
+    source.match(/\b(x265|x264|h[\.\-_]?265|h[\.\-_]?264|hevc|10bit|10-bit|av1)\b/i)?.[1],
   );
 
   const audio = (() => {

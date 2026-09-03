@@ -28,8 +28,8 @@ export const AdSenseScriptManager: React.FC = () => {
           (window as any).adsbygoogle.pauseAdRequests = 1;
         }
       } catch (e) {}
-      if (isLogin) {
-        purgeAllAdElements();
+      if (isLogin || isExempt) {
+        purgeAllAdElements(true);
       }
       return;
     }

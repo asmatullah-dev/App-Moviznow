@@ -177,6 +177,26 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       refreshContentFromLocal();
       refreshCollectionsFromLocal();
 
+      // Check if local content cache has items; if empty, seed from static export data
+      const currentListStr = safeStorage.getItem('admin_content_cache');
+      let currentListCount = 0;
+      try {
+        currentListCount = JSON.parse(currentListStr || '[]').length;
+      } catch(e) {}
+
+      if (currentListCount === 0) {
+        try {
+          const { seedStaticExportData } = await import('../utils/staticContentLoader');
+          seedStaticExportData();
+          if (isMounted) {
+            refreshContentFromLocal();
+            refreshCollectionsFromLocal();
+          }
+        } catch (e) {
+          console.error("Failed to seed fallback static content:", e);
+        }
+      }
+
       // 3. Load auxiliary from cache
       const g = safeStorage.getItem('admin_genres_cache') || safeStorage.getItem('genres_cache');
       if (g) try { setGenres(JSON.parse(g).sort((a: any, b: any) => (a.order || 999) - (b.order || 999))); } catch(e) {}
@@ -363,7 +383,8 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         const batches: any[] = [writeBatch(db)];
         let opCount = 0;
         const addBatchOp = (fn: (b: any) => void) => {
-            if (opCount >= 450) {
+            // Keep batches small (max 5 large documents) to ensure fast, concurrent commits
+            if (opCount >= 5) {
                 batches.push(writeBatch(db));
                 opCount = 0;
             }
@@ -456,9 +477,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             batch.set(doc(db, 'chunk_meta', 'versions'), versionsUpdate, { merge: true });
         });
 
-        for (const b of batches) {
-            await runWithNetwork(() => b.commit());
-        }
+        await Promise.all(batches.map(b => runWithNetwork(() => b.commit())));
 
         // Only save synced cache references after commits succeed
         for (const [cid, chunkStr] of Object.entries(syncedContentToSave)) {
@@ -518,27 +537,55 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
 
   const refreshContentFromLocal = () => {
     const rawContentMap: Record<string, Content> = {};
-    const chunkKeys = safeStorage.keys().filter(k => 
-        k.startsWith('admin_content_chunk_')
-    );
+    const seenChunkIds = new Set<string>();
 
-    for (const key of chunkKeys) {
-        const chunkStr = safeStorage.getItem(key);
-        if (chunkStr) {
-            try {
-                const items = JSON.parse(chunkStr);
-                const cid = key.replace('admin_content_chunk_', '');
-                Object.entries(items).forEach(([id, item]: [string, any]) => {
-                    const expanded = expandContent({ ...item, id }, cid);
-                    rawContentMap[expanded.id] = expanded;
-                });
-            } catch(e) {}
+    const allKeys = safeStorage.keys();
+    for (const key of allKeys) {
+        let cid = '';
+        if (key.startsWith('admin_content_chunk_')) {
+            cid = key.replace('admin_content_chunk_', '');
+        } else if (key.startsWith('content_chunk_') && !key.startsWith('content_chunk_metadata')) {
+            cid = key.replace('content_chunk_', '');
+        } else if ((key.startsWith('movie_chunk_') || key.startsWith('series_chunk_')) && !key.startsWith('static_')) {
+            cid = key;
+        }
+
+        if (cid && (cid.startsWith('movie_chunk_') || cid.startsWith('series_chunk_'))) {
+            seenChunkIds.add(cid);
         }
     }
 
-    // Fallback 1: If no admin chunks found yet, check admin_content_cache
+    for (const cid of seenChunkIds) {
+        const chunkStr = safeStorage.getItem('admin_content_chunk_' + cid) || 
+                         safeStorage.getItem('content_chunk_' + cid) || 
+                         safeStorage.getItem(cid);
+        if (chunkStr) {
+            try {
+                const items = JSON.parse(chunkStr);
+                if (items && typeof items === 'object') {
+                    Object.entries(items).forEach(([id, item]: [string, any]) => {
+                        try {
+                            const expanded = expandContent({ ...item, id }, cid);
+                            rawContentMap[expanded.id] = expanded;
+                        } catch(err) {
+                            console.warn(`Failed to expand item ${id} in chunk ${cid}:`, err);
+                            rawContentMap[id] = { ...(item as any), id, chunkId: cid };
+                        }
+                    });
+                }
+                // Ensure it's cached under admin_content_chunk_
+                if (!safeStorage.getItem('admin_content_chunk_' + cid)) {
+                    safeStorage.setItem('admin_content_chunk_' + cid, chunkStr);
+                }
+            } catch(e) {
+                console.error(`Error parsing chunk ${cid}:`, e);
+            }
+        }
+    }
+
+    // Fallback: If no chunks found yet, check admin_content_cache or content_cache
     if (Object.keys(rawContentMap).length === 0) {
-      const cachedContent = safeStorage.getItem('admin_content_cache');
+      const cachedContent = safeStorage.getItem('admin_content_cache') || safeStorage.getItem('content_cache');
       if (cachedContent && cachedContent !== '[]') {
         try {
           const parsed = JSON.parse(cachedContent);
@@ -551,27 +598,6 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       }
     }
 
-    // Fallback 2: Check general Firestore content chunk keys (content_chunk_ / movie_chunk_ / series_chunk_)
-    if (Object.keys(rawContentMap).length === 0) {
-      const fallbackChunkKeys = safeStorage.keys().filter(k => 
-        (k.startsWith('content_chunk_') || k.startsWith('movie_chunk_') || k.startsWith('series_chunk_')) &&
-        !k.startsWith('static_')
-      );
-      for (const key of fallbackChunkKeys) {
-        const chunkStr = safeStorage.getItem(key);
-        if (chunkStr) {
-          try {
-            const items = JSON.parse(chunkStr);
-            const cid = key.replace('content_chunk_', '');
-            Object.entries(items).forEach(([id, item]: [string, any]) => {
-              const expanded = expandContent({ ...item, id }, cid);
-              rawContentMap[expanded.id] = expanded;
-            });
-          } catch(e) {}
-        }
-      }
-    }
-
     let rawContent = Object.values(rawContentMap);
     rawContent.sort((a, b) => {
         // Use order if explicitly set, otherwise use createdAt for newest-first (reverse order)
@@ -581,38 +607,10 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
     });
     
-    const cachedProfileStr = safeStorage.getItem('profile_cache');
-    let cachedRole = '';
-    if (cachedProfileStr) {
-      try {
-        cachedRole = JSON.parse(cachedProfileStr)?.role || '';
-      } catch (e) {}
-    }
-    const effectiveRole = profile?.role || cachedRole;
-    const isAdminOrEditor = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(effectiveRole);
-    if (!isAdminOrEditor) {
-        const sanitized = rawContent.map(c => {
-            let minimalSeasons: any[] = [];
-            if (c.seasons) {
-              try {
-                const parsed = Array.isArray(c.seasons) ? c.seasons : JSON.parse(c.seasons as string);
-                minimalSeasons = parsed.map((s: any) => ({
-                  seasonNumber: s.seasonNumber,
-                  episodes: s.episodes && s.episodes.length > 0 ? [{ episodeNumber: s.episodes[s.episodes.length - 1].episodeNumber }] : []
-                }));
-              } catch(err) {}
-            }
-            return { ...c, movieLinks: undefined, seasons: minimalSeasons.length > 0 ? JSON.stringify(minimalSeasons) : undefined, _isMinimal: true } as Content;
-        });
-        setContentList(sanitized);
-        if (sanitized.length > 0) {
-          safeStorage.setItem('admin_content_cache', JSON.stringify(sanitized));
-        }
-    } else {
-        setContentList(rawContent);
-        if (rawContent.length > 0) {
-          safeStorage.setItem('admin_content_cache', JSON.stringify(rawContent));
-        }
+    // In AdminContentContext, maintain complete content including links and seasons
+    setContentList(rawContent);
+    if (rawContent.length > 0) {
+      safeStorage.setItem('admin_content_cache', JSON.stringify(rawContent));
     }
     window.dispatchEvent(new CustomEvent('content_updated_locally'));
   };
@@ -1147,21 +1145,43 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         const serverVersionTime = parseVersionTime(serverVersion);
         const localVersionTime = parseVersionTime(localVersion);
 
-        if (!hasData || !localVersionTime || localVersionTime < serverVersionTime) {
+        if (manual || forceAdminSync || !hasData || !localVersionTime || localVersionTime < serverVersionTime) {
           chunksToFetch.push(chunkId);
         }
       }
 
       if (chunksToFetch.length > 0) {
+        const pendingStr = safeStorage.getItem('admin_pending_chunk_updates') || '[]';
+        const pendingChunkIds = new Set(JSON.parse(pendingStr));
+        const pendingItemsMapStr = safeStorage.getItem('admin_pending_item_updates') || '{}';
+        let pendingItemsMap: Record<string, any> = {};
+        try { pendingItemsMap = JSON.parse(pendingItemsMapStr); } catch(e) {}
+
         await Promise.all(chunksToFetch.map(async (chunkId) => {
           try {
             const chunkDoc = await runWithNetwork(() => getDoc(doc(db, 'content_chunks', chunkId)));
             if (chunkDoc.exists()) {
-              const items = chunkDoc.data().items || {};
+              let items = chunkDoc.data().items || {};
               const localChunkStr = safeStorage.getItem('admin_content_chunk_' + chunkId);
               let localItems: Record<string, any> = {};
               if (localChunkStr) {
                 try { localItems = JSON.parse(localChunkStr); } catch(e) {}
+              }
+
+              // Preserve any pending uncommitted local changes
+              if (pendingChunkIds.has(chunkId)) {
+                const itemIds = pendingItemsMap[chunkId];
+                if (Array.isArray(itemIds) && itemIds.length > 0) {
+                  for (const itemId of itemIds) {
+                    if (localItems[itemId]) {
+                      items[itemId] = localItems[itemId];
+                    } else {
+                      delete items[itemId];
+                    }
+                  }
+                } else {
+                  items = { ...items, ...localItems };
+                }
               }
 
               // Count added or modified content items (do not count deleted)
@@ -1177,6 +1197,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
               }
 
               safeStorage.setItem('admin_content_chunk_' + chunkId, JSON.stringify(items));
+              safeStorage.setItem('admin_synced_content_chunk_' + chunkId, JSON.stringify(items));
               localMeta[chunkId] = typeof versions[chunkId] === 'object'
                 ? versions[chunkId]
                 : { updatedAt: versions[chunkId], count: Object.keys(items).length };
@@ -1201,7 +1222,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       const metadataVersionTime = parseVersionTime(metadataVersion);
       const localMetaVersionTime = parseVersionTime(localMetaVersion);
 
-      if (!hasMetadata || !localMetaVersionTime || localMetaVersionTime < metadataVersionTime) {
+      if (manual || !hasMetadata || !localMetaVersionTime || localMetaVersionTime < metadataVersionTime) {
         try {
           const metaDoc = await getDoc(doc(db, 'content_chunks', 'metadata'));
           if (metaDoc.exists()) {
@@ -1236,7 +1257,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       const collectionsVersionTime = parseVersionTime(collectionsVersion);
       const localCollectionsVersionTime = parseVersionTime(localCollectionsVersion);
 
-      if (!hasCollectionsCache || !localCollectionsVersionTime || localCollectionsVersionTime < collectionsVersionTime) {
+      if (manual || !hasCollectionsCache || !localCollectionsVersionTime || localCollectionsVersionTime < collectionsVersionTime) {
         try {
           const latestCollChunkId = (collectionsMeta && typeof collectionsMeta === 'object' ? collectionsMeta.latestChunkId : null) || 'collection_chunk_0';
           const matchIndex = latestCollChunkId.match(/(\d+)$/);
@@ -1401,10 +1422,8 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         }
     }
     if (!chunkId) {
-        const prefix = content.type === 'movie' ? 'movie_chunk_' : 'series_chunk_';
-        // Assigning new/unedited content to first chunk initially without chunk size checking.
-        // Chunk sizes are strictly verified and rebalanced during sync (finalizeChanges -> autoRebalanceChunks).
-        chunkId = `${prefix}0`;
+        const { findBestChunkForNewContent } = await import('../utils/chunkUtils');
+        chunkId = findBestChunkForNewContent(content.type, 'admin_');
         if (!localMeta[chunkId]) {
             const utcNow = getUtcVersion();
             localMeta[chunkId] = { updatedAt: utcNow, count: 0 };

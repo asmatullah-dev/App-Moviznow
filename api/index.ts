@@ -94,6 +94,46 @@ import { tmdbRouter } from "./_tmdb.js";
 import { ordersRouter } from "./_orders.js";
 import { checkAndSendExpiryNotifications, sendMembershipUpdateNotification, sendOrderApprovedNotification } from "./_expiryService.js";
 
+export function isCloudflareHtml(status: number, htmlStr: string): boolean {
+  if (status === 403 || status === 503) return true;
+  const lower = (htmlStr || '').toLowerCase();
+  return lower.includes("<title>just a moment</title>") ||
+         lower.includes("<title>cloudflare") ||
+         lower.includes("challenges.cloudflare.com") ||
+         lower.includes("enable javascript and cookies") ||
+         lower.includes("checking your browser");
+}
+
+function solveVddosCookieFromHtml(html: string): string | null {
+  const aMatch = html.match(/a=toNumbers\(["']([a-f0-9]+)["']\)/i);
+  const bMatch = html.match(/b=toNumbers\(["']([a-f0-9]+)["']\)/i);
+  const cMatch = html.match(/c=toNumbers\(["']([a-f0-9]+)["']\)/i);
+  const cookieNameMatch = html.match(/document\.cookie\s*=\s*["'](vDDoS-[0-9a-zA-Z_-]+)=/i);
+
+  if (aMatch && bMatch && cMatch) {
+    const aHex = aMatch[1];
+    const bHex = bMatch[1];
+    const cHex = cMatch[1];
+    const cookieName = cookieNameMatch ? cookieNameMatch[1] : "vDDoS-99";
+
+    const key = Buffer.from(aHex, 'hex');
+    const iv = Buffer.from(bHex, 'hex');
+    const ciphertext = Buffer.from(cHex, 'hex');
+
+    const decipher = crypto.createDecipheriv('aes-128-cbc', key, iv);
+    decipher.setAutoPadding(false);
+    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+
+    let hexVal = "";
+    for (let i = 0; i < decrypted.length; i++) {
+      hexVal += (decrypted[i] < 16 ? "0" : "") + decrypted[i].toString(16);
+    }
+    hexVal = hexVal.toLowerCase();
+    return `${cookieName}=${hexVal}`;
+  }
+  return null;
+}
+
 export async function fetchWithVddos(targetUrl: string, customHeaders?: Record<string, string>, timeoutMs = 10000) {
   const httpsAgent = new https.Agent({ rejectUnauthorized: false });
   const baseHeaders = {
@@ -115,21 +155,11 @@ export async function fetchWithVddos(targetUrl: string, customHeaders?: Record<s
   let html = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
   let finalUrl = res.request?.res?.responseUrl || targetUrl;
 
-  const isCf = (status: number, htmlStr: string) => {
-    if (status === 403 || status === 503) return true;
-    const lower = (htmlStr || '').toLowerCase();
-    return lower.includes("<title>just a moment</title>") ||
-           lower.includes("<title>cloudflare") ||
-           lower.includes("challenges.cloudflare.com") ||
-           lower.includes("enable javascript and cookies") ||
-           lower.includes("checking your browser");
-  };
-
-  if (isCf(res.status, html)) {
+  if (isCloudflareHtml(res.status, html)) {
     try {
       console.log(`[fetchWithVddos] Cloudflare detected for ${targetUrl}. Falling back to fetchHtml helper.`);
       const bypassRes = await fetchHtml(targetUrl, false, true);
-      if (bypassRes && bypassRes.data && !isCf(bypassRes.status, bypassRes.data)) {
+      if (bypassRes && bypassRes.data && !isCloudflareHtml(bypassRes.status, bypassRes.data)) {
         return { html: bypassRes.data, status: bypassRes.status, finalUrl: targetUrl };
       }
     } catch (err: any) {
@@ -141,12 +171,15 @@ export async function fetchWithVddos(targetUrl: string, customHeaders?: Record<s
     res.status === 202 ||
     html.includes('vDDoS-zn') ||
     html.includes('vddos') ||
-    html.includes('w3IncludeHTML')
+    html.includes('w3IncludeHTML') ||
+    html.includes('toNumbers')
   ) {
-    let cookieVal = '';
-    const cookieMatch = html.match(/document\.cookie\s*=\s*['"]([^'"]+)['"]/i);
-    if (cookieMatch) {
-      cookieVal = cookieMatch[1].split(';')[0].trim();
+    let cookieVal = solveVddosCookieFromHtml(html) || '';
+    if (!cookieVal) {
+      const cookieMatch = html.match(/document\.cookie\s*=\s*['"]([^'"]+)['"]/i);
+      if (cookieMatch) {
+        cookieVal = cookieMatch[1].split(';')[0].trim();
+      }
     }
     if (res.headers['set-cookie']) {
       const setCookies = Array.isArray(res.headers['set-cookie']) ? res.headers['set-cookie'] : [res.headers['set-cookie']];
@@ -1313,9 +1346,12 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
 
       console.log(`[HDHub4U] Extracting from: ${targetUrl}`);
 
-      const { html: text, status: initialStatus, finalUrl: resolvedTargetUrl } = await fetchWithVddos(targetUrl);
-      const $ = cheerio.load(text);
-      const urlObj = new URL(resolvedTargetUrl || targetUrl);
+      let urlObj: URL;
+      try {
+        urlObj = new URL(targetUrl);
+      } catch (e) {
+        urlObj = new URL('https://new5.hdhub4u.cl');
+      }
 
       const searchQuery = urlObj.searchParams.get('s') || urlObj.searchParams.get('search') || urlObj.searchParams.get('q') || urlObj.searchParams.get('to-search') || '';
       const isSearchOrCatalogUrl = 
@@ -1332,8 +1368,6 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
 
       if (isSearchOrCatalogUrl) {
         console.log(`[HDHub4U] Search/catalog page detected: ${targetUrl}`);
-        
-        const postsMap = new Map<string, { title: string; image?: string }>();
 
         const getImgSrc = (imgEl: any): string => {
           if (!imgEl || imgEl.length === 0) return "";
@@ -1353,82 +1387,128 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
           return src || "";
         };
 
-        const effectiveHost = urlObj.hostname;
+        const parsePostsFromHtml = (htmlText: string, currentTargetUrl: string) => {
+          const $ = cheerio.load(htmlText);
+          const postsMap = new Map<string, { title: string; image?: string }>();
+          const currObj = new URL(currentTargetUrl);
+          const effectiveHost = currObj.hostname;
 
-        $("a[href]").each((_, el) => {
-          let rawHref = $(el).attr("href") || "";
-          if (!rawHref || rawHref.startsWith("#") || rawHref.startsWith("javascript:")) return;
+          $("a[href]").each((_, el) => {
+            let rawHref = $(el).attr("href") || "";
+            if (!rawHref || rawHref.startsWith("#") || rawHref.startsWith("javascript:")) return;
 
-          try {
-            const fullUrl = new URL(rawHref, targetUrl).href;
-            const u = new URL(fullUrl);
-            const uHost = u.hostname.toLowerCase();
-            const isTargetDomain = uHost.includes("hdhub") || uHost === effectiveHost || uHost.endsWith(effectiveHost.replace(/^www\./, ''));
-            if (!isTargetDomain) return;
+            try {
+              const fullUrl = new URL(rawHref, currentTargetUrl).href;
+              const u = new URL(fullUrl);
+              const uHost = u.hostname.toLowerCase();
+              const isTargetDomain = uHost.includes("hdhub") || uHost === effectiveHost || uHost.endsWith(effectiveHost.replace(/^www\./, ''));
+              if (!isTargetDomain) return;
 
-            const path = u.pathname;
-            if (path === "/" || path === "" || path.includes("/category/") || path.includes("/genre/") || path.includes("/tag/") || path.includes("/page/") || path.includes("search.html") || path.includes("search.php")) return;
-            if (/\.(jpg|jpeg|png|gif|webp|css|js|xml|svg|zip|rar|mkv|mp4)$/i.test(path)) return;
-            if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how-to|howto|faq|terms|sitemap|report)/i.test(path)) return;
+              const path = u.pathname;
+              if (path === "/" || path === "" || path.includes("/category/") || path.includes("/genre/") || path.includes("/tag/") || path.includes("/page/") || path.includes("search.html") || path.includes("search.php") || path.includes("/search/")) return;
+              if (/\.(jpg|jpeg|png|gif|webp|css|js|xml|svg|zip|rar|mkv|mp4)$/i.test(path)) return;
+              if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how-to|howto|faq|terms|sitemap|report)/i.test(path)) return;
 
-            let title = $(el).text().trim() || $(el).attr("title") || $(el).attr("aria-label") || $(el).find("img").attr("alt") || "";
-            let image = getImgSrc($(el).find("img"));
-            
-            const container = $(el).closest("article, .post, .entry, .card, .post-item, .sh-movie-item, .recent-movies, figure, .item, li, div[class*='post'], div[class*='movie'], div[class*='item']");
-            
-            if (!title || title.length < 3 || /^(read more|download|watch|click|link)/i.test(title)) {
-              if (container.length > 0) {
-                title = container.find("h1, h2, h3, h4, .entry-title, .post-title, .title, .entry-header, figcaption, strong, b").first().text().trim();
-              }
-            }
-            if (!title || title.length < 3 || /^(read more|download|watch|click|link)/i.test(title)) {
-              title = $(el).parent().text().trim() || $(el).closest("div").text().trim();
-            }
-
-            // Fallback to URL pathname slug if HTML title text is missing or useless
-            if (!title || title.length < 3 || /^(read more|download|watch|click|link)/i.test(title)) {
-              const cleanSlug = path.replace(/^\/|\/$/g, '').split('/').pop() || '';
-              if (cleanSlug && cleanSlug.length > 3) {
-                title = cleanSlug.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-              }
-            }
-
-            if (!image) {
-              image = getImgSrc(container.find("img"));
-            }
-            if (!image) {
-              image = getImgSrc($(el).parent().find("img")) || getImgSrc($(el).prev("img")) || getImgSrc($(el).next("img"));
-            }
-            if (image) {
-              try { image = new URL(image, targetUrl).href; } catch(e) {}
-            }
-            title = title.replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
-            if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how to|site search|search|faq|terms|sitemap|report|help)/i.test(title)) return;
-
-            if (title && title.length > 3) {
-              if (!postsMap.has(fullUrl)) {
-                postsMap.set(fullUrl, { title, image: image || undefined });
-              } else {
-                const existing = postsMap.get(fullUrl)!;
-                if (title.length > existing.title.length && !/(home|page|category|read more)/i.test(title)) {
-                  existing.title = title;
-                }
-                if (image && !existing.image) {
-                  existing.image = image;
+              let title = $(el).text().trim() || $(el).attr("title") || $(el).attr("aria-label") || $(el).find("img").attr("alt") || "";
+              let image = getImgSrc($(el).find("img"));
+              
+              const container = $(el).closest("article, .post, .entry, .card, .post-item, .sh-movie-item, .recent-movies, figure, .item, li, div[class*='post'], div[class*='movie'], div[class*='item']");
+              
+              if (!title || title.length < 3 || /^(read more|download|watch|click|link)/i.test(title)) {
+                if (container.length > 0) {
+                  title = container.find("h1, h2, h3, h4, .entry-title, .post-title, .title, .entry-header, figcaption, strong, b").first().text().trim();
                 }
               }
+              if (!title || title.length < 3 || /^(read more|download|watch|click|link)/i.test(title)) {
+                title = $(el).parent().text().trim() || $(el).closest("div").text().trim();
+              }
+
+              if (!title || title.length < 3 || /^(read more|download|watch|click|link)/i.test(title)) {
+                const cleanSlug = path.replace(/^\/|\/$/g, '').split('/').pop() || '';
+                if (cleanSlug && cleanSlug.length > 3) {
+                  title = cleanSlug.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+                }
+              }
+
+              if (!image) {
+                image = getImgSrc(container.find("img"));
+              }
+              if (!image) {
+                image = getImgSrc($(el).parent().find("img")) || getImgSrc($(el).prev("img")) || getImgSrc($(el).next("img"));
+              }
+              if (image) {
+                try { image = new URL(image, currentTargetUrl).href; } catch(e) {}
+              }
+              title = title.replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+              if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how to|site search|search|faq|terms|sitemap|report|help|join our group)/i.test(title)) return;
+
+              if (title && title.length > 3) {
+                if (!postsMap.has(fullUrl)) {
+                  postsMap.set(fullUrl, { title, image: image || undefined });
+                } else {
+                  const existing = postsMap.get(fullUrl)!;
+                  if (title.length > existing.title.length && !/(home|page|category|read more)/i.test(title)) {
+                    existing.title = title;
+                  }
+                  if (image && !existing.image) {
+                    existing.image = image;
+                  }
+                }
+              }
+            } catch(e) {}
+          });
+
+          return Array.from(postsMap.entries()).map(([postUrl, data]) => ({
+            title: data.title,
+            url: postUrl,
+            image: data.image
+          }));
+        };
+
+        // Handle search query with candidate fallback list
+        if (searchQuery) {
+          const cleanQ = searchQuery.trim();
+          const slug = cleanQ.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+          const origin = urlObj.origin;
+
+          const searchCandidates = [
+            `${origin}/search/${encodeURIComponent(slug)}/`,
+            `${origin}/?s=${encodeURIComponent(cleanQ)}`,
+            `${origin}/search.html?q=${encodeURIComponent(cleanQ)}`,
+            `https://new5.hdhub4u.cl/search/${encodeURIComponent(slug)}/`,
+            `https://new1.hdhub4u.cl/search/${encodeURIComponent(slug)}/`,
+            `https://hdhub4u.boo/search/${encodeURIComponent(slug)}/`
+          ];
+
+          for (const candUrl of searchCandidates) {
+            console.log(`[HDHub4U] Trying search candidate: ${candUrl}`);
+            try {
+              const { html: candHtml, status: candStatus } = await fetchWithVddos(candUrl);
+              if (candStatus === 200 && candHtml && !isCloudflareHtml(candStatus, candHtml)) {
+                const foundPosts = parsePostsFromHtml(candHtml, candUrl);
+                if (foundPosts.length > 0) {
+                  console.log(`[HDHub4U] Successfully found ${foundPosts.length} posts using: ${candUrl}`);
+                  return res.json({ is_search: true, posts: foundPosts, found: foundPosts.length });
+                }
+              }
+            } catch (err: any) {
+              console.log(`[HDHub4U] Candidate ${candUrl} error: ${err.message}`);
             }
-          } catch(e) {}
-        });
+          }
+        }
 
-        const posts = Array.from(postsMap.entries()).map(([postUrl, data]) => ({
-          title: data.title,
-          url: postUrl,
-          image: data.image
-        }));
+        // Standard fetch fallback for catalog / category / page URLs
+        const { html: text, status: initialStatus } = await fetchWithVddos(targetUrl);
+        if (text && !isCloudflareHtml(initialStatus, text)) {
+          const posts = parsePostsFromHtml(text, targetUrl);
+          return res.json({ is_search: true, posts, found: posts.length });
+        }
 
-        return res.json({ is_search: true, posts, found: posts.length });
+        return res.json({ is_search: true, posts: [], found: 0 });
       }
+
+      const { html: text, status: initialStatus, finalUrl: resolvedTargetUrl } = await fetchWithVddos(targetUrl);
+      const $ = cheerio.load(text);
 
       // Helper to extract granular quality details (e.g. 720p 10Bit HEVC vs 720p x264 vs 1080p 10Bit HEVC)
       const parseDetailedQuality = (text: string): { qualityLabel: string; shortQuality: string } => {
@@ -1593,7 +1673,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
 
                 hits.push({
                   file_name: fileName,
-                  url: linkUrl,
+                  url: normalizeDomain(linkUrl),
                   size: sizeVal,
                   quality: cachedHb?.quality || meta.shortQuality || meta.quality,
                   season: cachedHb?.season,
@@ -1761,7 +1841,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
                   seenUrls.add(item.url);
                   hits.push({
                     file_name: item.label,
-                    url: item.url,
+                    url: normalizeDomain(item.url),
                     size: item.size || globalSize,
                     quality: item.shortQuality || item.quality,
                     ep: item.ep,
@@ -1791,7 +1871,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
                     }
                     hits.push({
                       file_name: cachedHb?.original_title || cachedHb?.title || meta.label,
-                      url: cleanHubUrl,
+                      url: normalizeDomain(cleanHubUrl),
                       size: cachedHb?.size ? `${cachedHb.size} ${cachedHb.unit || ''}`.trim() : globalSize,
                       quality: cachedHb?.quality || meta.shortQuality || meta.quality,
                       season: cachedHb?.season,
@@ -2327,6 +2407,188 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       res.json({ hits: finalHits, found: finalHits.length });
     } catch (error: any) {
       console.error('FilmyGo extract error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // FilmyFly Extraction & Search API
+  app.get('/api/filmyfly', async (req: express.Request, res: express.Response) => {
+    try {
+      let { url, search } = req.query;
+      let targetUrl = typeof url === 'string' ? url.trim() : '';
+      let queryStr = typeof search === 'string' ? search.trim() : '';
+
+      if (!targetUrl && queryStr) {
+        targetUrl = `https://filmyfly.green/search.html?search=${encodeURIComponent(queryStr)}`;
+      }
+
+      if (!targetUrl) {
+        return res.status(400).json({ error: 'Valid FilmyFly URL or search query required' });
+      }
+
+      if (!targetUrl.startsWith('http')) {
+        targetUrl = 'https://' + targetUrl;
+      }
+
+      console.log(`[FilmyFly] Processing request for: ${targetUrl}`);
+
+      let isSearch = false;
+      try {
+        const urlObj = new URL(targetUrl);
+        isSearch = targetUrl.includes('search.html') || targetUrl.includes('?search=') || urlObj.searchParams.has('search') || urlObj.pathname === '/' || urlObj.pathname === '' || urlObj.pathname.endsWith('index.html');
+      } catch (e) {
+        isSearch = targetUrl.includes('search.html') || targetUrl.includes('?search=');
+      }
+
+      if (isSearch) {
+        console.log(`[FilmyFly] Search / catalog query: ${targetUrl}`);
+        const { html: searchHtml } = await fetchWithVddos(targetUrl, { 'Referer': 'https://filmyfly.green/' });
+        const $ = cheerio.load(searchHtml || '');
+
+        const postsMap = new Map<string, { title: string; url: string; image?: string }>();
+
+        $("a[href]").each((_, el) => {
+          const href = $(el).attr("href") || "";
+          if (href.includes("/movie/") || href.includes("movie/")) {
+            let fullUrl = href;
+            try { fullUrl = new URL(href, targetUrl).href; } catch(e) {}
+            
+            let title = $(el).text().trim() || $(el).attr("title") || "";
+            const container = $(el).closest("div, p, li, article, td");
+            let image = $(el).find("img").attr("src") || container.find("img").attr("src") || "";
+
+            if (image && !image.startsWith("http")) {
+              try { image = new URL(image, targetUrl).href; } catch(e) {}
+            }
+
+            if (title && title.length > 3 && !title.toLowerCase().includes("homepage") && !title.toLowerCase().includes("how to download")) {
+              if (!postsMap.has(fullUrl)) {
+                postsMap.set(fullUrl, { title, url: fullUrl, image: image || undefined });
+              }
+            }
+          }
+        });
+
+        const posts = Array.from(postsMap.values());
+        return res.json({ is_search: true, posts, found: posts.length });
+      }
+
+      // Catalog / Movie Page or Direct Linkmake / FilesDL extraction
+      console.log(`[FilmyFly] Extracting content/movie page: ${targetUrl}`);
+      const { html: movieHtml } = await fetchWithVddos(targetUrl, { 'Referer': 'https://filmyfly.green/' });
+      const $movie = cheerio.load(movieHtml || '');
+
+      const pageTitle = $movie("title").text().replace(/».*$/, "").trim() || $movie("h1, h2, .movie-title").first().text().trim() || "FilmyFly Content";
+      let poster = $movie(".poster img, .movie-img img, img[src*='poster'], img[src*='movie'], img[src*='webp']").first().attr("src") || "";
+
+      if (poster && !poster.startsWith("http")) {
+        try { poster = new URL(poster, targetUrl).href; } catch(e) {}
+      }
+
+      // Extract Linkmake URL from page if present
+      let linkmakeUrl = "";
+      $movie("a[href]").each((_, el) => {
+        const href = $movie(el).attr("href") || "";
+        if (href.includes("linkmake") && href.includes("/view/")) {
+          linkmakeUrl = href;
+        }
+      });
+
+      if (!linkmakeUrl) {
+        const match = (movieHtml || "").match(/https?:\/\/[^"'\s<>\[\]]*linkmake\.in\/view\/[a-zA-Z0-9_-]+/i);
+        if (match) linkmakeUrl = match[0];
+      }
+
+      let startGateUrl = linkmakeUrl;
+      if (!startGateUrl && (targetUrl.includes("linkmake.in") || targetUrl.includes("filesdl"))) {
+        startGateUrl = targetUrl;
+      }
+
+      const hits: Array<{ file_name: string; url: string; size: string | null; quality?: string; shortQuality?: string; is_direct: boolean }> = [];
+
+      if (startGateUrl) {
+        console.log(`[FilmyFly] Processing gate URL: ${startGateUrl}`);
+        const { html: gateHtml } = await fetchWithVddos(startGateUrl, { 'Referer': targetUrl });
+        const $gate = cheerio.load(gateHtml || '');
+
+        const qualityLinks: Array<{ label: string; filesdlUrl: string }> = [];
+
+        $gate("a[href]").each((_, el) => {
+          const href = $gate(el).attr("href") || "";
+          const text = $gate(el).text().trim() || "Download Option";
+          if (href.includes("filesdl") || href.includes("cloud") || href.includes("drive")) {
+            let fullFilesdl = href;
+            try { fullFilesdl = new URL(href, startGateUrl).href; } catch(e) {}
+            qualityLinks.push({ label: text, filesdlUrl: fullFilesdl });
+          }
+        });
+
+        if (qualityLinks.length === 0) {
+          const matches = (gateHtml || "").match(/https?:\/\/[^"'\s<>\[\]]*filesdl\.[^"'\s<>\[\]]*/gi) || [];
+          matches.forEach(m => {
+            qualityLinks.push({ label: "Download Option", filesdlUrl: m });
+          });
+        }
+
+        console.log(`[FilmyFly] Found ${qualityLinks.length} FilesDL quality links`);
+
+        const seenHubUrls = new Set<string>();
+
+        await Promise.all(
+          qualityLinks.map(async (q) => {
+            try {
+              const { html: filesdlHtml } = await fetchWithVddos(q.filesdlUrl, { 'Referer': startGateUrl });
+              const $filesdl = cheerio.load(filesdlHtml || '');
+
+              let hubcloudUrl = "";
+              $filesdl("a[href]").each((_, el) => {
+                const href = $filesdl(el).attr("href") || "";
+                if (href.includes("hubcloud") || href.includes("vcloud") || href.includes("hubdrive")) {
+                  hubcloudUrl = href;
+                }
+              });
+
+              if (!hubcloudUrl) {
+                const match = (filesdlHtml || "").match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|vcloud|hubdrive)\.[^"'\s<>\[\]]*/i);
+                if (match) hubcloudUrl = match[0];
+              }
+
+              if (hubcloudUrl && !seenHubUrls.has(hubcloudUrl)) {
+                seenHubUrls.add(hubcloudUrl);
+
+                let cachedItem = getCachedHubcloudData(hubcloudUrl);
+                if (!cachedItem) {
+                  cachedItem = await fetchAndCacheHubcloud(hubcloudUrl);
+                }
+
+                const hitTitle = cachedItem?.original_title || cachedItem?.title || `${pageTitle} [${q.label}]`;
+                const hitSize = cachedItem?.size ? `${cachedItem.size} ${cachedItem.unit || ''}`.trim() : null;
+
+                hits.push({
+                  file_name: hitTitle,
+                  url: normalizeDomain(hubcloudUrl),
+                  size: hitSize,
+                  quality: cachedItem?.quality || q.label,
+                  shortQuality: cachedItem?.shortQuality,
+                  is_direct: true
+                });
+              }
+            } catch (err: any) {
+              console.error(`[FilmyFly] Error resolving FilesDL link ${q.filesdlUrl}:`, err.message);
+            }
+          })
+        );
+      }
+
+      return res.json({
+        is_search: false,
+        title: pageTitle,
+        poster,
+        hits,
+        found: hits.length
+      });
+    } catch (error: any) {
+      console.error('[FilmyFly] Endpoint error:', error);
       res.status(500).json({ error: error.message });
     }
   });
