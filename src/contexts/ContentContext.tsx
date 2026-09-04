@@ -96,10 +96,21 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
+    const handleCollectionsUpdated = (e: any) => {
+      if (e && e.detail && Array.isArray(e.detail)) {
+        setCollections(e.detail);
+      } else {
+        const c = safeStorage.getItem('collections_cache');
+        if (c) try { setCollections(JSON.parse(c)); } catch(e) {}
+      }
+    };
+
     window.addEventListener('content_updated_locally', handleLocalUpdate);
+    window.addEventListener('collections_updated_locally', handleCollectionsUpdated);
     window.addEventListener('safe_storage_hydrated', handleStorageHydrated);
     return () => {
       window.removeEventListener('content_updated_locally', handleLocalUpdate);
+      window.removeEventListener('collections_updated_locally', handleCollectionsUpdated);
       window.removeEventListener('safe_storage_hydrated', handleStorageHydrated);
     };
   }, []);

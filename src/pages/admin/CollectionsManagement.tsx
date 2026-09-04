@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, Edit2, Save, X, Layers, Film, ChevronUp, ChevronDown, Loader2, TrendingUp, Zap, Clock } from 'lucide-react';
+import { Plus, Trash2, Edit2, Save, X, Layers, Film, ChevronUp, ChevronDown, Loader2, TrendingUp, Zap, Clock, RotateCcw } from 'lucide-react';
 import { Collection as AppCollection, Content } from '../../types';
 import { useAdminContent } from '../../contexts/AdminContentContext';
 import { Button } from '../../components/Button';
@@ -17,7 +17,8 @@ export default function CollectionsManagement() {
     deleteCollection, 
     finalizeChanges, 
     hasPendingChanges,
-    reorderCollections
+    reorderCollections,
+    reloadCollectionsFromStaticJson
   } = useAdminContent();
   const [isEditing, setIsEditing] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{ title: string; description: string; contentIds: string[] }>({ title: '', description: '', contentIds: [] });
@@ -25,6 +26,8 @@ export default function CollectionsManagement() {
   const [contentSearch, setContentSearch] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isReloading, setIsReloading] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   
   const hasPendingRef = useRef(hasPendingChanges);
   useEffect(() => {
@@ -124,6 +127,20 @@ export default function CollectionsManagement() {
     await reorderCollections(curr.id, next.id);
   };
 
+  const handleReloadFromJson = async () => {
+    setIsReloading(true);
+    try {
+      const reloaded = await reloadCollectionsFromStaticJson(true);
+      setStatusMessage(`Successfully loaded ${reloaded.length} collections from JSON export and purged outdated cache.`);
+      setTimeout(() => setStatusMessage(null), 5000);
+    } catch (e) {
+      console.error('Failed to reload collections from JSON:', e);
+      setStatusMessage('Error loading collections from JSON export.');
+    } finally {
+      setIsReloading(false);
+    }
+  };
+
   const searchResults = contentSearch.length > 2 
     ? contentList.filter(c => 
         (c.title?.toLowerCase().includes(contentSearch.toLowerCase())) &&
@@ -146,6 +163,16 @@ export default function CollectionsManagement() {
           </div>
         </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={handleReloadFromJson}
+              disabled={isReloading}
+              title="Purge old collection cache and reload all collections from static catalog JSON"
+              className="bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all active:scale-95 text-xs font-semibold border border-zinc-200 dark:border-zinc-700 disabled:opacity-50"
+            >
+              <RotateCcw className={`w-3.5 h-3.5 ${isReloading ? 'animate-spin text-purple-500' : ''}`} />
+              <span className="hidden sm:inline">Reset from JSON</span>
+            </button>
+
             {hasPendingChanges && (
               <Button
                 onClick={async () => {
@@ -173,6 +200,15 @@ export default function CollectionsManagement() {
             </button>
           </div>
       </div>
+
+      {statusMessage && (
+        <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 px-4 py-2.5 rounded-xl text-xs font-medium flex items-center justify-between">
+          <span>{statusMessage}</span>
+          <button onClick={() => setStatusMessage(null)} className="opacity-70 hover:opacity-100">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-6">
         {collections.map((collection, index) => (

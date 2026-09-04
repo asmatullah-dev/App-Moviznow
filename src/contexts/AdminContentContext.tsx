@@ -19,6 +19,7 @@ import { useAuth } from './AuthContext';
 import { useUsers } from './UsersContext';
 import { Content, Genre, Language, Quality, Collection as AppCollection } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
+import { resetCollectionsFromStaticJson, getStaticExportCollections } from '../utils/staticContentLoader';
 
 interface AdminContentContextType {
   contentList: Content[];
@@ -46,6 +47,7 @@ interface AdminContentContextType {
   hasPendingChanges: boolean;
   checkForUpdates: (force?: boolean) => Promise<{ updated: boolean; updatedContentCount: number; isInitialLoad?: boolean }>;
   quickRefreshCatalog: (manual?: boolean, prefetchedVersions?: Record<string, any>, forceAdminSync?: boolean) => Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean; isInitialLoad?: boolean }>;
+  reloadCollectionsFromStaticJson: (markPendingSync?: boolean) => Promise<AppCollection[]>;
 }
 
 const AdminContentContext = createContext<AdminContentContextType | undefined>(undefined);
@@ -157,7 +159,13 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
   });
   const [collections, setCollections] = useState<AppCollection[]>(() => {
     const cached = safeStorage.getItem('admin_collections_cache') || safeStorage.getItem('collections_cache');
-    return cached ? JSON.parse(cached) : [];
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {}
+    }
+    return getStaticExportCollections();
   });
   const [loading, setLoading] = useState(() => {
     const hasC = safeStorage.getItem('admin_content_cache') || safeStorage.getItem('content_cache');
@@ -224,11 +232,22 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       }
     };
 
+    const handleCollectionsUpdated = (e: any) => {
+      if (!isMounted) return;
+      if (e && e.detail && Array.isArray(e.detail)) {
+        setCollections(e.detail);
+      } else {
+        refreshCollectionsFromLocal();
+      }
+    };
+
     window.addEventListener('safe_storage_hydrated', handleStorageHydrated);
+    window.addEventListener('collections_updated_locally', handleCollectionsUpdated);
 
     return () => {
       isMounted = false;
       window.removeEventListener('safe_storage_hydrated', handleStorageHydrated);
+      window.removeEventListener('collections_updated_locally', handleCollectionsUpdated);
     };
   }, [profile?.role, user?.uid]);
 
@@ -322,6 +341,15 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     safeStorage.setItem('admin_collections_cache', JSON.stringify(allCached.sort((a: any, b: any) => (b.order || 0) - (a.order || 0))));
     safeStorage.setItem('admin_pending_collection_updates', JSON.stringify(Array.from(pendingIds)));
     setHasPendingChanges(true);
+  };
+
+  const reloadCollectionsFromStaticJson = async (markPendingSync: boolean = true) => {
+    const fresh = resetCollectionsFromStaticJson(markPendingSync);
+    setCollections(fresh);
+    if (markPendingSync) {
+      setHasPendingChanges(true);
+    }
+    return fresh;
   };
 
   const finalizeChanges = async () => {
@@ -654,6 +682,14 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
               safeStorage.setItem('admin_' + key, chunkStr);
             } catch(e) {}
           }
+        }
+      }
+
+      // If still empty, fall back directly to static export JSON
+      if (allCollections.length === 0) {
+        allCollections = getStaticExportCollections();
+        if (allCollections.length > 0) {
+          resetCollectionsFromStaticJson(false);
         }
       }
     }
@@ -1985,7 +2021,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         updateOrder, getContent, saveContent, deleteContent, updateContentFields, deleteMultipleContents, 
         updateAuxiliaryCollection, addCollection, updateCollection, deleteCollection, reorderCollections,
         addAuxiliaryItem, updateAuxiliaryItem, deleteAuxiliaryItem, finalizeChanges, hasPendingChanges, checkForUpdates,
-        quickRefreshCatalog
+        quickRefreshCatalog, reloadCollectionsFromStaticJson
     }}>
       {children}
     </AdminContentContext.Provider>

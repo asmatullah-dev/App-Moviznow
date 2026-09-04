@@ -249,7 +249,102 @@ function getCachedQualities(includeStatic: boolean = true): Quality[] {
   return [];
 }
 
+/**
+ * Purges all old collection data from cache (safeStorage & localStorage)
+ * and initializes the fresh collections list directly from the static export JSON.
+ */
+export function resetCollectionsFromStaticJson(markPendingSync: boolean = false): AppCollection[] {
+  try {
+    // 1. Delete all old collection-related keys from safeStorage
+    const allKeys = safeStorage.keys();
+    for (const key of allKeys) {
+      if (
+        key === 'collections_cache' ||
+        key === 'admin_collections_cache' ||
+        key === 'static_collections_cache' ||
+        key === 'admin_pending_collection_updates' ||
+        key.startsWith('collection_chunk_') ||
+        key.startsWith('admin_collection_chunk_') ||
+        key.startsWith('admin_synced_collection_chunk_') ||
+        key.startsWith('static_collection_chunk_')
+      ) {
+        safeStorage.removeItem(key);
+      }
+    }
+
+    // 2. Also clear from localStorage directly
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        const lsKeys = Object.keys(localStorage);
+        for (const k of lsKeys) {
+          if (
+            k === 'collections_cache' ||
+            k === 'admin_collections_cache' ||
+            k === 'static_collections_cache' ||
+            k === 'admin_pending_collection_updates' ||
+            k.startsWith('collection_chunk_') ||
+            k.startsWith('admin_collection_chunk_') ||
+            k.startsWith('admin_synced_collection_chunk_') ||
+            k.startsWith('static_collection_chunk_')
+          ) {
+            localStorage.removeItem(k);
+          }
+        }
+      } catch (e) {}
+    }
+
+    // 3. Extract fresh collections list from static export JSON
+    const newCollections = getStaticExportCollections();
+    const chunkItems: Record<string, any> = {};
+    for (const col of newCollections) {
+      chunkItems[col.id] = col;
+    }
+
+    const collJson = JSON.stringify(newCollections);
+    const chunkJson = JSON.stringify(chunkItems);
+
+    // 4. Save new collections to cache
+    safeStorage.setItem('collections_cache', collJson);
+    safeStorage.setItem('static_collections_cache', collJson);
+    safeStorage.setItem('admin_collections_cache', collJson);
+
+    safeStorage.setItem('collection_chunk_0', chunkJson);
+    safeStorage.setItem('admin_collection_chunk_collection_chunk_0', chunkJson);
+    safeStorage.setItem('static_collection_chunk_collection_chunk_0', chunkJson);
+
+    if (markPendingSync) {
+      safeStorage.setItem('admin_pending_collection_updates', JSON.stringify(['collection_chunk_0']));
+    } else {
+      safeStorage.setItem('admin_synced_collection_chunk_collection_chunk_0', chunkJson);
+    }
+
+    const collUpd = staticCollectionsData?.updatedAt;
+    const verTime = collUpd ? parseVersionTime(collUpd) : Date.now();
+    safeStorage.setItem('cached_json_collections_version', verTime.toString());
+
+    // 5. Dispatch events to notify UI and active contexts
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('collections_updated_locally', { detail: newCollections }));
+      window.dispatchEvent(new CustomEvent('content_updated_locally'));
+    }
+
+    return newCollections;
+  } catch (e) {
+    console.error('Error resetting collections from static JSON:', e);
+    return getStaticExportCollections();
+  }
+}
+
 function getCachedCollections(includeStatic: boolean = true): AppCollection[] {
+  const collUpd = staticCollectionsData?.updatedAt;
+  const staticTime = collUpd ? parseVersionTime(collUpd) : 0;
+  const cachedCollTime = parseInt(safeStorage.getItem('cached_json_collections_version') || '0', 10);
+
+  // If static JSON has a newer collection timestamp or cached version is not set, purge old collection cache & reload fresh!
+  if (staticTime > 0 && (!cachedCollTime || staticTime > cachedCollTime)) {
+    return resetCollectionsFromStaticJson(false);
+  }
+
   const c = safeStorage.getItem('collections_cache');
   if (c) {
     try {
@@ -265,7 +360,7 @@ function getCachedCollections(includeStatic: boolean = true): AppCollection[] {
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       } catch (e) {}
     }
-    return getStaticExportCollections();
+    return resetCollectionsFromStaticJson(false);
   }
   return [];
 }
@@ -386,7 +481,24 @@ export function mergeStaticExportDataSafely(): {
         safeStorage.setItem('static_genres_cache', JSON.stringify(mergedGenres));
         safeStorage.setItem('static_languages_cache', JSON.stringify(mergedLanguages));
         safeStorage.setItem('static_qualities_cache', JSON.stringify(mergedQualities));
-        safeStorage.setItem('static_collections_cache', JSON.stringify(mergedCollections));
+        
+        const mergedCollJson = JSON.stringify(mergedCollections);
+        safeStorage.setItem('static_collections_cache', mergedCollJson);
+        safeStorage.setItem('collections_cache', mergedCollJson);
+        safeStorage.setItem('admin_collections_cache', mergedCollJson);
+
+        const collChunkItems: Record<string, any> = {};
+        for (const col of mergedCollections) {
+          collChunkItems[col.id] = col;
+        }
+        const collChunkJson = JSON.stringify(collChunkItems);
+        safeStorage.setItem('collection_chunk_0', collChunkJson);
+        safeStorage.setItem('admin_collection_chunk_collection_chunk_0', collChunkJson);
+        safeStorage.setItem('static_collection_chunk_collection_chunk_0', collChunkJson);
+        
+        const collUpd = staticCollectionsData?.updatedAt;
+        const verTime = collUpd ? parseVersionTime(collUpd) : Date.now();
+        safeStorage.setItem('cached_json_collections_version', verTime.toString());
 
         const chunkMap: Record<string, Record<string, any>> = {};
         for (const item of jsonItems) {
