@@ -1560,7 +1560,15 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
 
       const pageTitle = $("h1, h2, .entry-title, .post-title").first().text().replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
 
-      const hbData = new Map<string, { label: string; quality?: string; shortQuality?: string }>();
+      const hbData = new Map<string, {
+        label: string;
+        quality?: string;
+        shortQuality?: string;
+        season?: number | string;
+        episode?: number | string;
+        seasonEpLabel?: string;
+        fullContext?: string;
+      }>();
 
       $("a[href]").each((_, el) => {
         const rawHref = $(el).attr("href") || "";
@@ -1574,8 +1582,20 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         }
 
         const lowerHref = fullHref.toLowerCase();
-        // Per user request: DO NOT find out hubdrive from HDHub4U page, only find hblinks from HDHub4U page then find hubcloud from hblinks.
-        if (lowerHref.includes("hubdrive")) return;
+        let uObj: URL | null = null;
+        try {
+          uObj = new URL(fullHref);
+        } catch (e) {}
+
+        // Skip internal HDHub4U domain links (navigation, category, tags, and especially related posts at bottom)
+        let targetHost = "";
+        try {
+          targetHost = new URL(targetUrl).hostname;
+        } catch (e) {}
+        if (uObj && (uObj.hostname === targetHost || uObj.hostname.includes("hdhub4u"))) return;
+        if (lowerHref.includes("whatsapp.com") || lowerHref.includes("t.me") || lowerHref.includes("telegram") || lowerHref.includes("imdb.com") || lowerHref.includes("catimages.org")) return;
+        if (/\.(jpg|jpeg|png|gif|webp|css|js|xml|svg)$/i.test(fullHref)) return;
+        if (/(contact|dmca|about|privacy|disclaimer|login|register|request|how-to|howto|faq|terms|sitemap|report)/i.test(lowerHref)) return;
 
         const isDownloadLink = 
           lowerHref.includes("hblinks") || 
@@ -1592,14 +1612,14 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
           lowerHref.includes("/go/") ||
           lowerHref.includes("hubcloud") || 
           lowerHref.includes("vcloud") ||
+          lowerHref.includes("hubdrive") ||
+          lowerHref.includes("hubcdn") ||
           /maxbutton|btn|download/i.test($(el).attr("class") || "") ||
           /\b(download|480p|720p|1080p|2160p|4k|hevc|x264|10bit|zip|pack|episode|ep)\b/i.test($(el).text() + " " + $(el).parent().text());
 
         if (!isDownloadLink) return;
 
         if (fullHref === targetUrl || lowerHref.includes("/category/") || lowerHref.includes("/genre/") || lowerHref.includes("/tag/") || lowerHref.includes("/page/") || lowerHref.includes("search.html") || lowerHref.includes("search.php")) return;
-        if (/\.(jpg|jpeg|png|gif|webp|css|js|xml|svg)$/i.test(fullHref)) return;
-        if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how-to|howto|faq|terms|sitemap|report)/i.test(lowerHref)) return;
 
         let anchorText = $(el).text().trim();
         let contextText = "";
@@ -1614,9 +1634,19 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
           contextText = (prevBlock.text().trim() + " " + contextText).trim();
         }
 
-        const fullContext = (contextText + " " + anchorText).replace(/\s+/g, " ");
+        // Look for preceding episode header if this is an episode section (e.g. <h4>EPiSODE 1</h4>)
+        let epHeader = "";
+        const prevEpHeading = parentTag.prevAll("h1, h2, h3, h4, h5, p, strong").filter((_, h) => {
+          return /\bep(?:isode)?\s*\d+/i.test($(h).text());
+        }).first();
+        if (prevEpHeading.length > 0) {
+          epHeader = prevEpHeading.text().trim();
+        }
+
+        const fullContext = (epHeader + " " + contextText + " " + anchorText).replace(/\s+/g, " ").trim();
 
         const { qualityLabel, shortQuality } = parseDetailedQuality(fullContext);
+        const seInfo = parseSeasonEpisode(fullContext);
 
         let label = anchorText || qualityLabel || "Download Link";
         if (pageTitle && !label.toLowerCase().includes(pageTitle.toLowerCase().slice(0, 10))) {
@@ -1630,7 +1660,15 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         label = label.replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
 
         if (!hbData.has(fullHref)) {
-          hbData.set(fullHref, { label, quality: qualityLabel, shortQuality });
+          hbData.set(fullHref, {
+            label,
+            quality: qualityLabel,
+            shortQuality,
+            season: seInfo.season,
+            episode: seInfo.episode,
+            seasonEpLabel: seInfo.seasonEpLabel,
+            fullContext
+          });
         }
       });
 
@@ -1678,6 +1716,66 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
                   quality: cachedHb?.quality || meta.shortQuality || meta.quality,
                   season: cachedHb?.season,
                   episode: cachedHb?.episode,
+                  seasonEpLabel: seasonEp,
+                  is_direct: true
+                });
+              }
+              return;
+            }
+
+            // If the link is HubDrive, fetch HubDrive page to extract the HubCloud link inside it.
+            // This ensures the final returned URL is HubCloud, NOT HubDrive (strictly complying with user constraints while enabling all episode extractions).
+            if (linkUrl.includes("hubdrive")) {
+              console.log(`[HDHub4U] Resolving HubDrive link to HubCloud: ${linkUrl}`);
+              const { html: hdHtml } = await fetchWithVddos(linkUrl, { 'Referer': targetUrl }, 7000);
+              if (!hdHtml) return;
+
+              const $hd = cheerio.load(hdHtml);
+              const hdTitle = $hd('title').text().replace(/^HubDrive\s*\|\s*/i, '').trim();
+              let hubcloudLink: string | null = null;
+              $hd('a[href*="hubcloud"]').each((_, a) => {
+                const h = $hd(a).attr('href');
+                if (h && !h.includes('/tg/go') && !h.includes('/admin') && !hubcloudLink) {
+                  hubcloudLink = h;
+                }
+              });
+
+              if (!hubcloudLink) {
+                console.log(`[HDHub4U] No HubCloud link found on HubDrive page: ${linkUrl}`);
+                return;
+              }
+
+              let cachedHb = getCachedHubcloudData(hubcloudLink);
+              if (!cachedHb) {
+                cachedHb = await fetchAndCacheHubcloud(hubcloudLink);
+              }
+              if (cachedHb && (cachedHb.isNotFound || !cachedHb.isWorking)) {
+                console.log(`[HDHub4U] Skipping dead/broken HubCloud link from HubDrive: ${hubcloudLink}`);
+                return;
+              }
+
+              if (!seenUrls.has(hubcloudLink)) {
+                seenUrls.add(hubcloudLink);
+                const seData = parseSeasonEpisode(cachedHb?.original_title || cachedHb?.title || hdTitle || (meta as any).fullContext || meta.label);
+                const qData = parseDetailedQuality(cachedHb?.quality || hdTitle || (meta as any).fullContext || meta.label);
+
+                let fileName = cachedHb?.original_title || cachedHb?.title || hdTitle || meta.label;
+                const sizeVal = cachedHb?.size ? `${cachedHb.size} ${cachedHb.unit || ''}`.trim() : null;
+                const seasonEp = cachedHb?.seasonEpLabel || seData.seasonEpLabel || (meta as any).seasonEpLabel;
+
+                if (/^\[?\s*\d{3,4}p?\s*\]?$/i.test(fileName.trim()) || fileName.trim().length < 6) {
+                  if (pageTitle) {
+                    fileName = `${pageTitle} ${seasonEp || ''} [${meta.shortQuality || meta.quality || 'Direct'}]`.replace(/\s+/g, ' ').trim();
+                  }
+                }
+
+                hits.push({
+                  file_name: fileName,
+                  url: normalizeDomain(hubcloudLink),
+                  size: sizeVal,
+                  quality: cachedHb?.quality || qData.qualityLabel || meta.shortQuality || meta.quality,
+                  season: cachedHb?.season !== undefined ? cachedHb.season : seData.season !== undefined ? seData.season : (meta as any).season,
+                  episode: cachedHb?.episode !== undefined ? cachedHb.episode : seData.episode !== undefined ? seData.episode : (meta as any).episode,
                   seasonEpLabel: seasonEp,
                   is_direct: true
                 });

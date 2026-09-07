@@ -107,11 +107,11 @@ export function SyncBanner() {
       if (isInitialLoad || customMessage === 'Loaded All Contents Successfully') {
         return t('Loaded All Contents Successfully');
       }
-      if (updatedCount && updatedCount > 0) {
-        return `${updatedCount} ${t('content updated')}`;
-      }
       if (customMessage && customMessage !== '0 items updated' && customMessage !== '0 content updated') {
         return t(customMessage);
+      }
+      if (updatedCount && updatedCount > 0) {
+        return `${updatedCount} ${t('content updated')}`;
       }
       return t('Refresh successfully');
     }

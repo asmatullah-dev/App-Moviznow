@@ -366,6 +366,47 @@ function getCachedCollections(includeStatic: boolean = true): AppCollection[] {
 }
 
 /**
+ * Formats toast message when a new JSON file is updated:
+ * - Shows how many contents are updated and how many added
+ * - Does not show deleted number
+ * - Does not show if updated or added is 0 (omits 0 counts, and returns null if both are 0)
+ */
+export function formatContentUpdateToast(added: number, updated: number): string | null {
+  if (added <= 0 && updated <= 0) return null;
+
+  const parts: string[] = [];
+  if (added > 0) {
+    parts.push(`${added} ${added === 1 ? 'content' : 'contents'} added`);
+  }
+  if (updated > 0) {
+    parts.push(`${updated} ${updated === 1 ? 'content' : 'contents'} updated`);
+  }
+
+  return parts.join(', ');
+}
+
+function isContentDifferent(existing: Content, fresh: Content): boolean {
+  if (existing.title !== fresh.title) return true;
+  if (existing.type !== fresh.type) return true;
+  if (existing.year !== fresh.year) return true;
+  if (existing.posterUrl !== fresh.posterUrl) return true;
+  if (existing.trailerUrl !== fresh.trailerUrl) return true;
+  if (existing.description !== fresh.description) return true;
+  if (existing.order !== fresh.order) return true;
+  if (existing.qualityId !== fresh.qualityId) return true;
+  if (existing.secondTitle !== fresh.secondTitle) return true;
+  if (existing.status !== fresh.status) return true;
+  if (existing.imdbRating !== fresh.imdbRating) return true;
+  if (existing.movieLinks !== fresh.movieLinks) return true;
+  if (existing.seasons !== fresh.seasons) return true;
+  if (existing.fullSeasonZip !== fresh.fullSeasonZip) return true;
+  if (existing.fullSeasonMkv !== fresh.fullSeasonMkv) return true;
+  if (JSON.stringify(existing.genreIds || []) !== JSON.stringify(fresh.genreIds || [])) return true;
+  if (JSON.stringify(existing.languageIds || []) !== JSON.stringify(fresh.languageIds || [])) return true;
+  return false;
+}
+
+/**
  * Safely merges a newer static export JSON file into the user catalog cache.
  * STRICT ISOLATION:
  * - Never modifies, overwrites, or merges any admin_* storage keys or admin chunk data.
@@ -447,7 +488,7 @@ export function mergeStaticExportDataSafely(): {
         const jsonTime = parseVersionTime(expandedJson.updatedAt || expandedJson.createdAt || 0);
         const existingTime = parseVersionTime(existing.updatedAt || existing.createdAt || 0);
 
-        if (jsonTime > existingTime) {
+        if (jsonTime > existingTime || isContentDifferent(existing, expandedJson)) {
           existingMap.set(jsonItem.id, expandedJson);
           updated++;
         } else {

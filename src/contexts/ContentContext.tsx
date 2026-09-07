@@ -5,7 +5,8 @@ import {
   mergeStaticExportDataSafely,
   getStaticExportContent,
   getStaticExportMetadata,
-  getStaticExportCollections
+  getStaticExportCollections,
+  formatContentUpdateToast
 } from '../utils/staticContentLoader';
 import { Content, Genre, Language, Quality, Collection as AppCollection } from '../types';
 import { expandContent, findLocalChunkForContent } from '../utils/chunkUtils';
@@ -50,6 +51,16 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
             setLanguages(merged.languages);
             setQualities(merged.qualities);
             setCollections(merged.collections);
+
+            const toastMessage = formatContentUpdateToast(merged.stats.added, merged.stats.updated);
+            if (toastMessage) {
+              window.dispatchEvent(new CustomEvent('sync_status', {
+                detail: {
+                  status: 'success',
+                  message: toastMessage
+                }
+              }));
+            }
           }
         } catch (e) {
           console.error("Error safely merging newer JSON export:", e);
@@ -161,7 +172,18 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       setLanguages(merged.languages);
       setQualities(merged.qualities);
       setCollections(merged.collections);
-      return { updated: true, updatedCount: merged.contentList.length, message: 'Catalog updated' };
+
+      const toastMessage = formatContentUpdateToast(merged.stats.added, merged.stats.updated);
+      if (toastMessage) {
+        window.dispatchEvent(new CustomEvent('sync_status', {
+          detail: {
+            status: 'success',
+            message: toastMessage
+          }
+        }));
+      }
+
+      return { updated: true, updatedCount: merged.contentList.length, message: toastMessage || 'Catalog updated' };
     }
     return { updated: false, updatedCount: 0, message: 'Up to date' };
   };

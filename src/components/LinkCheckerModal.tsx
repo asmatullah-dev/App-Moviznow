@@ -29,20 +29,159 @@ import {
   Globe,
   Loader2 as LoaderIcon,
   CheckSquare,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Tv,
+  Package,
+  Layers
 } from "lucide-react";
+
+export function getItemEpisodeInfo(item: any): {
+  isEpisode: boolean;
+  epNumber?: number;
+  seasonNumber?: number;
+  label: string;
+  isPack: boolean;
+} {
+  if (!item) return { isEpisode: false, label: '', isPack: false };
+
+  const text = `${item.file_name || item.fileName || ''} ${item.quality || item.qualityLabel || ''} ${item.seasonEpLabel || ''} ${item.url || item.finalUrl || ''} ${item.fullContext || ''}`.toLowerCase();
+  
+  const isPack = Boolean(
+    item.isFullSeasonZIP ||
+    item.isFullSeasonMKV ||
+    /\b(pack|zip|batch|complete|all\s*episodes|full\s*season)\b/i.test(text) ||
+    (/\bseason\s*\d+\b/i.test(text) && !/\b(?:episode|ep|e)\s*[-_.]?\s*\d+\b/i.test(text) && !/\b\d+\s*(?:st|nd|rd|th)?\s*episode\b/i.test(text))
+  );
+
+  let epNumber: number | undefined = undefined;
+  if (!isPack) {
+    if (item.episode !== undefined && item.episode !== null && item.episode !== '') {
+      const parsed = parseInt(String(item.episode), 10);
+      if (!isNaN(parsed)) epNumber = parsed;
+    }
+    if (epNumber === undefined && item.ep !== undefined && item.ep !== null && item.ep !== '') {
+      const parsed = parseInt(String(item.ep), 10);
+      if (!isNaN(parsed)) epNumber = parsed;
+    }
+    if (epNumber === undefined) {
+      const m = text.match(/\b(?:episode|ep|e)\s*[-_.]?\s*0*(\d{1,3})\b/i) || text.match(/\b0*(\d{1,3})\s*(?:st|nd|rd|th)?\s*episode\b/i);
+      if (m) epNumber = parseInt(m[1], 10);
+    }
+  }
+
+  let seasonNumber: number | undefined = undefined;
+  if (item.season !== undefined && item.season !== null && item.season !== '') {
+    const parsed = parseInt(String(item.season), 10);
+    if (!isNaN(parsed)) seasonNumber = parsed;
+  }
+  if (seasonNumber === undefined) {
+    const sMatch = text.match(/\b(?:season|s)\s*[-_.]?\s*0*(\d{1,2})\b/i);
+    if (sMatch) seasonNumber = parseInt(sMatch[1], 10);
+  }
+
+  const isEpisode = !isPack && epNumber !== undefined;
+
+  let label = '';
+  if (isEpisode) {
+    label = seasonNumber !== undefined ? `S${String(seasonNumber).padStart(2, '0')}E${String(epNumber).padStart(2, '0')}` : `Episode ${epNumber}`;
+  } else if (isPack) {
+    label = seasonNumber !== undefined ? `Season ${seasonNumber} Complete Pack` : 'Complete Season Pack';
+  } else {
+    label = 'Movie / Video';
+  }
+
+  return { isEpisode, epNumber, seasonNumber, label, isPack };
+}
+
+export type QualityCategory = '720p' | '1080p' | '480p' | '2160p' | 'Other';
+
+export const QUALITY_ORDER: QualityCategory[] = ['720p', '1080p', '480p', '2160p', 'Other'];
+
+export const QUALITY_LABELS: Record<QualityCategory, string> = {
+  '720p': '720p HD',
+  '1080p': '1080p Full HD',
+  '480p': '480p SD',
+  '2160p': '4K / 2160p UHD',
+  'Other': 'Other Quality'
+};
+
+export const QUALITY_COLORS: Record<QualityCategory, { badge: string; border: string; bg: string; text: string; buttonBg: string; buttonText: string }> = {
+  '720p': {
+    badge: 'bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border-cyan-500/30',
+    border: 'border-cyan-500/30',
+    bg: 'bg-cyan-500/5',
+    text: 'text-cyan-600 dark:text-cyan-400',
+    buttonBg: 'bg-cyan-500/15 hover:bg-cyan-500/25 border-cyan-500/30',
+    buttonText: 'text-cyan-600 dark:text-cyan-400'
+  },
+  '1080p': {
+    badge: 'bg-purple-500/20 text-purple-600 dark:text-purple-400 border-purple-500/30',
+    border: 'border-purple-500/30',
+    bg: 'bg-purple-500/5',
+    text: 'text-purple-600 dark:text-purple-400',
+    buttonBg: 'bg-purple-500/15 hover:bg-purple-500/25 border-purple-500/30',
+    buttonText: 'text-purple-600 dark:text-purple-400'
+  },
+  '480p': {
+    badge: 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/30',
+    border: 'border-amber-500/30',
+    bg: 'bg-amber-500/5',
+    text: 'text-amber-600 dark:text-amber-400',
+    buttonBg: 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/30',
+    buttonText: 'text-amber-600 dark:text-amber-400'
+  },
+  '2160p': {
+    badge: 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
+    border: 'border-emerald-500/30',
+    bg: 'bg-emerald-500/5',
+    text: 'text-emerald-600 dark:text-emerald-400',
+    buttonBg: 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/30',
+    buttonText: 'text-emerald-600 dark:text-emerald-400'
+  },
+  'Other': {
+    badge: 'bg-zinc-500/20 text-zinc-600 dark:text-zinc-400 border-zinc-500/30',
+    border: 'border-zinc-200 dark:border-zinc-800',
+    bg: 'bg-zinc-500/5',
+    text: 'text-zinc-600 dark:text-zinc-400',
+    buttonBg: 'bg-zinc-200/50 dark:bg-zinc-800/50 hover:bg-zinc-200 dark:hover:bg-zinc-800 border-zinc-300 dark:border-zinc-700',
+    buttonText: 'text-zinc-700 dark:text-zinc-300'
+  }
+};
+
+export function getItemQualityCategory(item: any): QualityCategory {
+  if (!item) return 'Other';
+  const text = `${item.quality || ''} ${item.qualityLabel || ''} ${item.file_name || ''} ${item.fileName || ''} ${item.url || ''} ${item.finalUrl || ''} ${item.locationTag || ''}`.toLowerCase();
+  if (text.includes('2160p') || text.includes('4k')) return '2160p';
+  if (text.includes('1080p')) return '1080p';
+  if (text.includes('720p')) return '720p';
+  if (text.includes('480p')) return '480p';
+  return 'Other';
+}
 
 export function sortHitsByEpisodeAndQuality(hits: any[]) {
   return [...hits].sort((a, b) => {
+    const infoA = getItemEpisodeInfo(a);
+    const infoB = getItemEpisodeInfo(b);
+
+    // 1. Season Packs first
+    if (infoA.isPack && !infoB.isPack) return -1;
+    if (!infoA.isPack && infoB.isPack) return 1;
+
+    // 2. Episodes sorted by season ascending, then episode ascending
+    if (infoA.isEpisode && infoB.isEpisode) {
+      if (infoA.seasonNumber !== undefined && infoB.seasonNumber !== undefined && infoA.seasonNumber !== infoB.seasonNumber) {
+        return infoA.seasonNumber - infoB.seasonNumber;
+      }
+      if (infoA.epNumber !== undefined && infoB.epNumber !== undefined && infoA.epNumber !== infoB.epNumber) {
+        return infoA.epNumber - infoB.epNumber;
+      }
+    }
+    if (infoA.isEpisode && !infoB.isEpisode) return -1;
+    if (!infoA.isEpisode && infoB.isEpisode) return 1;
+
+    // 3. Quality ascending (480p, 720p, 1080p, 2160p)
     const textA = `${a.file_name || ''} ${a.quality || ''} ${a.url || ''}`;
     const textB = `${b.file_name || ''} ${b.quality || ''} ${b.url || ''}`;
-
-    const getEp = (item: any, text: string) => {
-      if (item.ep !== undefined) return item.ep;
-      const m = text.match(/\b(?:episode|ep|e)\s*[-_]?\s*(\d{1,3})\b/i) || text.match(/\b(\d{1,3})\s*(?:st|nd|rd|th)?\s*episode\b/i);
-      return m ? parseInt(m[1], 10) : undefined;
-    };
-
     const getQualityWeight = (item: any, text: string) => {
       const q = (item.quality || text).toLowerCase();
       if (q.includes('480p')) return 1;
@@ -51,39 +190,35 @@ export function sortHitsByEpisodeAndQuality(hits: any[]) {
       if (q.includes('2160p') || q.includes('4k')) return 4;
       return 0;
     };
-
-    const epA = getEp(a, textA);
-    const epB = getEp(b, textB);
-
-    // 1. Primary sort: Episode number ascending (1, 2, 3...)
-    if (epA !== undefined && epB !== undefined && epA !== epB) {
-      return epA - epB;
-    }
-    if (epA !== undefined && epB === undefined) return -1;
-    if (epA === undefined && epB !== undefined) return 1;
-
-    // 2. Secondary sort: Quality ascending (480p, 720p, 1080p, 2160p)
     const qA = getQualityWeight(a, textA);
     const qB = getQualityWeight(b, textB);
-    if (qA !== qB) {
-      return qA - qB;
-    }
+    if (qA !== qB) return qA - qB;
 
-    // 3. Natural numeric comparison
     return (a.file_name || '').localeCompare(b.file_name || '', undefined, { numeric: true, sensitivity: 'base' });
   });
 }
 
 export function sortResultsByEpisodeAndQuality(results: any[]) {
   return [...results].sort((a, b) => {
+    const infoA = getItemEpisodeInfo(a);
+    const infoB = getItemEpisodeInfo(b);
+
+    if (infoA.isPack && !infoB.isPack) return -1;
+    if (!infoA.isPack && infoB.isPack) return 1;
+
+    if (infoA.isEpisode && infoB.isEpisode) {
+      if (infoA.seasonNumber !== undefined && infoB.seasonNumber !== undefined && infoA.seasonNumber !== infoB.seasonNumber) {
+        return infoA.seasonNumber - infoB.seasonNumber;
+      }
+      if (infoA.epNumber !== undefined && infoB.epNumber !== undefined && infoA.epNumber !== infoB.epNumber) {
+        return infoA.epNumber - infoB.epNumber;
+      }
+    }
+    if (infoA.isEpisode && !infoB.isEpisode) return -1;
+    if (!infoA.isEpisode && infoB.isEpisode) return 1;
+
     const textA = `${a.fileName || ''} ${a.qualityLabel || ''} ${a.url || ''} ${a.finalUrl || ''}`;
     const textB = `${b.fileName || ''} ${b.qualityLabel || ''} ${b.url || ''} ${b.finalUrl || ''}`;
-
-    const getEp = (item: any, text: string) => {
-      if (item.episode !== undefined) return item.episode;
-      const m = text.match(/\b(?:episode|ep|e)\s*[-_]?\s*(\d{1,3})\b/i) || text.match(/\b(\d{1,3})\s*(?:st|nd|rd|th)?\s*episode\b/i);
-      return m ? parseInt(m[1], 10) : undefined;
-    };
 
     const getQualityWeight = (item: any, text: string) => {
       const q = (item.qualityLabel || text).toLowerCase();
@@ -93,15 +228,6 @@ export function sortResultsByEpisodeAndQuality(results: any[]) {
       if (q.includes('2160p') || q.includes('4k')) return 4;
       return 0;
     };
-
-    const epA = getEp(a, textA);
-    const epB = getEp(b, textB);
-
-    if (epA !== undefined && epB !== undefined && epA !== epB) {
-      return epA - epB;
-    }
-    if (epA !== undefined && epB === undefined) return -1;
-    if (epA === undefined && epB !== undefined) return 1;
 
     const qA = getQualityWeight(a, textA);
     const qB = getQualityWeight(b, textB);
@@ -1006,6 +1132,161 @@ export const LinkCheckerModal: React.FC<Props> = ({
         return true;
       });
   }, [mdriveResults, qualityFilter]);
+
+  // Episode & Pack Grouping State
+  const [contentTypeFilter, setContentTypeFilter] = useState<'all' | 'episodes' | 'packs'>('all');
+  const [episodeGroupingMode, setEpisodeGroupingMode] = useState<'quality' | 'episode'>('quality');
+
+  const parsedMdriveGroups = useMemo(() => {
+    const packs: { item: any; originalIndex: number; info: ReturnType<typeof getItemEpisodeInfo>; qualityCat: QualityCategory }[] = [];
+    const episodesMap = new Map<number, { item: any; originalIndex: number; info: ReturnType<typeof getItemEpisodeInfo>; qualityCat: QualityCategory }[]>();
+    const episodesByQuality = new Map<QualityCategory, { item: any; originalIndex: number; info: ReturnType<typeof getItemEpisodeInfo>; qualityCat: QualityCategory }[]>();
+    const others: { item: any; originalIndex: number; info: ReturnType<typeof getItemEpisodeInfo>; qualityCat: QualityCategory }[] = [];
+
+    QUALITY_ORDER.forEach(q => episodesByQuality.set(q, []));
+
+    mdriveResults.forEach((item, originalIndex) => {
+      const info = getItemEpisodeInfo(item);
+      const qualityCat = getItemQualityCategory(item);
+      const entry = { item, originalIndex, info, qualityCat };
+
+      if (info.isPack) {
+        packs.push(entry);
+      } else if (info.isEpisode && info.epNumber !== undefined) {
+        const epList = episodesMap.get(info.epNumber) || [];
+        epList.push(entry);
+        episodesMap.set(info.epNumber, epList);
+
+        const qList = episodesByQuality.get(qualityCat) || [];
+        qList.push(entry);
+        episodesByQuality.set(qualityCat, qList);
+      } else {
+        others.push(entry);
+      }
+    });
+
+    // Sort episodes inside each quality group by episode number ascending, then season
+    episodesByQuality.forEach(list => {
+      list.sort((a, b) => {
+        if (a.info.seasonNumber !== undefined && b.info.seasonNumber !== undefined && a.info.seasonNumber !== b.info.seasonNumber) {
+          return a.info.seasonNumber - b.info.seasonNumber;
+        }
+        if (a.info.epNumber !== undefined && b.info.epNumber !== undefined && a.info.epNumber !== b.info.epNumber) {
+          return a.info.epNumber - b.info.epNumber;
+        }
+        return (a.item.file_name || '').localeCompare(b.item.file_name || '', undefined, { numeric: true });
+      });
+    });
+
+    const sortedEpKeys = Array.from(episodesMap.keys()).sort((a, b) => a - b);
+    const totalEpisodesCount = sortedEpKeys.reduce((acc, k) => acc + (episodesMap.get(k)?.length || 0), 0);
+    const activeQualityCategories = QUALITY_ORDER.filter(q => (episodesByQuality.get(q)?.length || 0) > 0);
+
+    return {
+      packs,
+      episodesMap,
+      episodesByQuality,
+      activeQualityCategories,
+      sortedEpKeys,
+      others,
+      totalPacksCount: packs.length,
+      totalEpisodesCount,
+      hasEpisodes: totalEpisodesCount > 0
+    };
+  }, [mdriveResults]);
+
+  const toggleQualityEpisodesSelection = (qCat: QualityCategory) => {
+    const qList = (parsedMdriveGroups.episodesByQuality.get(qCat) || []).filter(({ item }) => {
+      if (qualityFilter === 'all') return true;
+      const text = `${item.file_name || ''} ${item.quality || ''} ${item.url || ''}`.toLowerCase();
+      if (qualityFilter === '480p') return text.includes('480p');
+      if (qualityFilter === '720p') return text.includes('720p');
+      if (qualityFilter === '1080p') return text.includes('1080p');
+      if (qualityFilter === '2160p') return text.includes('2160p') || text.includes('4k');
+      return true;
+    });
+
+    const allQSelected = qList.length > 0 && qList.every(({ originalIndex }) => mdriveSelectedIndices.has(originalIndex));
+    setMdriveSelectedIndices(prev => {
+      const next = new Set(prev);
+      if (allQSelected) {
+        qList.forEach(({ originalIndex }) => next.delete(originalIndex));
+      } else {
+        qList.forEach(({ originalIndex }) => next.add(originalIndex));
+      }
+      return next;
+    });
+  };
+
+  const selectAllEpisodes = () => {
+    const next = new Set(mdriveSelectedIndices);
+    const epIndices: number[] = [];
+    parsedMdriveGroups.sortedEpKeys.forEach(k => {
+      const list = parsedMdriveGroups.episodesMap.get(k) || [];
+      list.forEach(({ originalIndex, item }) => {
+        const text = `${item.file_name || ''} ${item.quality || ''} ${item.url || ''}`.toLowerCase();
+        let matches = true;
+        if (qualityFilter === '480p') matches = text.includes('480p');
+        if (qualityFilter === '720p') matches = text.includes('720p');
+        if (qualityFilter === '1080p') matches = text.includes('1080p');
+        if (qualityFilter === '2160p') matches = text.includes('2160p') || text.includes('4k');
+        if (matches) epIndices.push(originalIndex);
+      });
+    });
+
+    const allSelected = epIndices.length > 0 && epIndices.every(idx => next.has(idx));
+    if (allSelected) {
+      epIndices.forEach(idx => next.delete(idx));
+    } else {
+      epIndices.forEach(idx => next.add(idx));
+    }
+    setMdriveSelectedIndices(next);
+  };
+
+  const selectAllPacks = () => {
+    const next = new Set(mdriveSelectedIndices);
+    const packIndices: number[] = [];
+    parsedMdriveGroups.packs.forEach(({ originalIndex, item }) => {
+      const text = `${item.file_name || ''} ${item.quality || ''} ${item.url || ''}`.toLowerCase();
+      let matches = true;
+      if (qualityFilter === '480p') matches = text.includes('480p');
+      if (qualityFilter === '720p') matches = text.includes('720p');
+      if (qualityFilter === '1080p') matches = text.includes('1080p');
+      if (qualityFilter === '2160p') matches = text.includes('2160p') || text.includes('4k');
+      if (matches) packIndices.push(originalIndex);
+    });
+
+    const allSelected = packIndices.length > 0 && packIndices.every(idx => next.has(idx));
+    if (allSelected) {
+      packIndices.forEach(idx => next.delete(idx));
+    } else {
+      packIndices.forEach(idx => next.add(idx));
+    }
+    setMdriveSelectedIndices(next);
+  };
+
+  const toggleEpisodeSelection = (epNum: number) => {
+    const epLinks = (parsedMdriveGroups.episodesMap.get(epNum) || []).filter(({ item }) => {
+      if (qualityFilter === 'all') return true;
+      const text = `${item.file_name || ''} ${item.quality || ''} ${item.url || ''}`.toLowerCase();
+      if (qualityFilter === '480p') return text.includes('480p');
+      if (qualityFilter === '720p') return text.includes('720p');
+      if (qualityFilter === '1080p') return text.includes('1080p');
+      if (qualityFilter === '2160p') return text.includes('2160p') || text.includes('4k');
+      return true;
+    });
+
+    const allEpSelected = epLinks.length > 0 && epLinks.every(({ originalIndex }) => mdriveSelectedIndices.has(originalIndex));
+    setMdriveSelectedIndices(prev => {
+      const next = new Set(prev);
+      if (allEpSelected) {
+        epLinks.forEach(({ originalIndex }) => next.delete(originalIndex));
+      } else {
+        epLinks.forEach(({ originalIndex }) => next.add(originalIndex));
+      }
+      return next;
+    });
+  };
 
   // MoviesDrive Search Results & Pagination State
   const [moviesdriveSearchUrl, setMoviesdriveSearchUrl] = useState<string | null>(null);
@@ -3066,6 +3347,130 @@ export const LinkCheckerModal: React.FC<Props> = ({
     return items;
   }, [results, resolveLocationAndMetadata]);
 
+  const [checkedEpisodeGroupingMode, setCheckedEpisodeGroupingMode] = useState<'quality' | 'episode'>('quality');
+
+  const parsedSortedGroups = useMemo(() => {
+    type EnrichedEntry = (typeof sortedResults)[0] & {
+      info: ReturnType<typeof getItemEpisodeInfo>;
+      qualityCat: QualityCategory;
+    };
+
+    const packs: EnrichedEntry[] = [];
+    const episodesMap = new Map<number, EnrichedEntry[]>();
+    const episodesByQuality = new Map<QualityCategory, EnrichedEntry[]>();
+    const others: EnrichedEntry[] = [];
+
+    QUALITY_ORDER.forEach(q => episodesByQuality.set(q, []));
+
+    sortedResults.forEach((entry) => {
+      const info = getItemEpisodeInfo({ ...entry.result, locationTag: entry.locationTag });
+      const qualityCat = getItemQualityCategory({ ...entry.result, locationTag: entry.locationTag });
+      const enrichedEntry: EnrichedEntry = { ...entry, info, qualityCat };
+
+      if (info.isPack) {
+        packs.push(enrichedEntry);
+      } else if (info.isEpisode && info.epNumber !== undefined) {
+        const epList = episodesMap.get(info.epNumber) || [];
+        epList.push(enrichedEntry);
+        episodesMap.set(info.epNumber, epList);
+
+        const qList = episodesByQuality.get(qualityCat) || [];
+        qList.push(enrichedEntry);
+        episodesByQuality.set(qualityCat, qList);
+      } else {
+        others.push(enrichedEntry);
+      }
+    });
+
+    // Sort items inside each quality group by episode number ascending, then season
+    episodesByQuality.forEach(list => {
+      list.sort((a, b) => {
+        if (a.info.seasonNumber !== undefined && b.info.seasonNumber !== undefined && a.info.seasonNumber !== b.info.seasonNumber) {
+          return a.info.seasonNumber - b.info.seasonNumber;
+        }
+        if (a.info.epNumber !== undefined && b.info.epNumber !== undefined && a.info.epNumber !== b.info.epNumber) {
+          return a.info.epNumber - b.info.epNumber;
+        }
+        return (a.result.fileName || a.result.url || '').localeCompare(b.result.fileName || b.result.url || '', undefined, { numeric: true });
+      });
+    });
+
+    const sortedEpKeys = Array.from(episodesMap.keys()).sort((a, b) => a - b);
+    const hasEpisodes = sortedEpKeys.length > 0;
+    const activeQualityCategories = QUALITY_ORDER.filter(q => (episodesByQuality.get(q)?.length || 0) > 0);
+
+    return {
+      packs,
+      episodesMap,
+      episodesByQuality,
+      activeQualityCategories,
+      sortedEpKeys,
+      others,
+      hasEpisodes,
+      totalEpisodesCount: sortedEpKeys.reduce((acc, k) => acc + (episodesMap.get(k)?.length || 0), 0)
+    };
+  }, [sortedResults]);
+
+  const toggleCheckedEpisodeSelection = (epNum: number) => {
+    const epUrls = (parsedSortedGroups.episodesMap.get(epNum) || []).map(e => e.result.url);
+    const allSel = epUrls.length > 0 && epUrls.every(u => selectedUrls.has(u));
+    setSelectedUrls(prev => {
+      const next = new Set(prev);
+      if (allSel) {
+        epUrls.forEach(u => next.delete(u));
+      } else {
+        epUrls.forEach(u => next.add(u));
+      }
+      return next;
+    });
+  };
+
+  const toggleCheckedQualitySelection = (qCat: QualityCategory) => {
+    const qUrls = (parsedSortedGroups.episodesByQuality.get(qCat) || []).map(e => e.result.url);
+    const allSel = qUrls.length > 0 && qUrls.every(u => selectedUrls.has(u));
+    setSelectedUrls(prev => {
+      const next = new Set(prev);
+      if (allSel) {
+        qUrls.forEach(u => next.delete(u));
+      } else {
+        qUrls.forEach(u => next.add(u));
+      }
+      return next;
+    });
+  };
+
+  const selectAllCheckedEpisodes = () => {
+    const epUrls: string[] = [];
+    parsedSortedGroups.sortedEpKeys.forEach(k => {
+      const list = parsedSortedGroups.episodesMap.get(k) || [];
+      list.forEach(e => epUrls.push(e.result.url));
+    });
+    const allSel = epUrls.length > 0 && epUrls.every(u => selectedUrls.has(u));
+    setSelectedUrls(prev => {
+      const next = new Set(prev);
+      if (allSel) {
+        epUrls.forEach(u => next.delete(u));
+      } else {
+        epUrls.forEach(u => next.add(u));
+      }
+      return next;
+    });
+  };
+
+  const toggleCheckedPacksSelection = () => {
+    const packUrls = parsedSortedGroups.packs.map(e => e.result.url);
+    const allSel = packUrls.length > 0 && packUrls.every(u => selectedUrls.has(u));
+    setSelectedUrls(prev => {
+      const next = new Set(prev);
+      if (allSel) {
+        packUrls.forEach(u => next.delete(u));
+      } else {
+        packUrls.forEach(u => next.add(u));
+      }
+      return next;
+    });
+  };
+
   return (
     <AnimatePresence>
       {isOpen ? (
@@ -3515,6 +3920,28 @@ export const LinkCheckerModal: React.FC<Props> = ({
                               Select All ({mdriveResults.length})
                             </button>
 
+                            {parsedMdriveGroups.hasEpisodes && (
+                              <button
+                                type="button"
+                                onClick={selectAllEpisodes}
+                                className="px-2.5 py-1 text-xs font-bold rounded-lg bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 transition flex items-center gap-1.5"
+                              >
+                                <Tv className="w-3.5 h-3.5" />
+                                Select All Episodes ({parsedMdriveGroups.totalEpisodesCount})
+                              </button>
+                            )}
+
+                            {parsedMdriveGroups.totalPacksCount > 0 && (
+                              <button
+                                type="button"
+                                onClick={selectAllPacks}
+                                className="px-2.5 py-1 text-xs font-bold rounded-lg bg-purple-500/15 hover:bg-purple-500/25 text-purple-600 dark:text-purple-400 border border-purple-500/30 transition flex items-center gap-1.5"
+                              >
+                                <Package className="w-3.5 h-3.5" />
+                                Select All Packs ({parsedMdriveGroups.totalPacksCount})
+                              </button>
+                            )}
+
                             {qualityCounts['480p'] > 0 && (
                               <button
                                 type="button"
@@ -3522,7 +3949,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                                 className="px-2.5 py-1 text-xs font-bold rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 border border-amber-500/30 transition flex items-center gap-1"
                               >
                                 <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                                Select All 480p ({qualityCounts['480p']})
+                                480p ({qualityCounts['480p']})
                               </button>
                             )}
 
@@ -3533,7 +3960,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                                 className="px-2.5 py-1 text-xs font-bold rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 transition flex items-center gap-1"
                               >
                                 <span className="w-1.5 h-1.5 rounded-full bg-cyan-500"></span>
-                                Select All 720p ({qualityCounts['720p']})
+                                720p ({qualityCounts['720p']})
                               </button>
                             )}
 
@@ -3544,7 +3971,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                                 className="px-2.5 py-1 text-xs font-bold rounded-lg bg-purple-500/15 hover:bg-purple-500/25 text-purple-600 dark:text-purple-400 border border-purple-500/30 transition flex items-center gap-1"
                               >
                                 <span className="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
-                                Select All 1080p ({qualityCounts['1080p']})
+                                1080p ({qualityCounts['1080p']})
                               </button>
                             )}
 
@@ -3555,7 +3982,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                                 className="px-2.5 py-1 text-xs font-bold rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 transition flex items-center gap-1"
                               >
                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                                Select All 4K ({qualityCounts['2160p']})
+                                4K ({qualityCounts['2160p']})
                               </button>
                             )}
 
@@ -3569,58 +3996,94 @@ export const LinkCheckerModal: React.FC<Props> = ({
                           </div>
                         </div>
 
-                        {/* Quality Group Filter Tabs */}
-                        {(qualityCounts['480p'] > 0 || qualityCounts['720p'] > 0 || qualityCounts['1080p'] > 0 || qualityCounts['2160p'] > 0) && (
-                          <div className="flex items-center gap-1 pt-2 border-t border-zinc-200 dark:border-zinc-800 text-xs font-bold overflow-x-auto custom-scrollbar">
-                            <span className="text-zinc-400 text-[11px] mr-1 uppercase tracking-wider shrink-0 flex items-center gap-1">
-                              <SlidersHorizontal className="w-3 h-3" />
-                              Group Filter:
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => setQualityFilter('all')}
-                              className={`px-2.5 py-1 rounded-lg transition shrink-0 ${qualityFilter === 'all' ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm border border-zinc-200 dark:border-zinc-700' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
-                            >
-                              All ({mdriveResults.length})
-                            </button>
-                            {qualityCounts['480p'] > 0 && (
+                        {/* View Mode and Quality Group Filter Tabs */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-zinc-200 dark:border-zinc-800 text-xs font-bold">
+                          {parsedMdriveGroups.hasEpisodes && (
+                            <div className="flex items-center gap-1 overflow-x-auto custom-scrollbar">
+                              <span className="text-zinc-400 text-[11px] mr-1 uppercase tracking-wider shrink-0 flex items-center gap-1">
+                                <Layers className="w-3 h-3" />
+                                View:
+                              </span>
                               <button
                                 type="button"
-                                onClick={() => setQualityFilter('480p')}
-                                className={`px-2.5 py-1 rounded-lg transition shrink-0 ${qualityFilter === '480p' ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-bold' : 'text-zinc-500 hover:text-amber-500'}`}
+                                onClick={() => setContentTypeFilter('all')}
+                                className={`px-2.5 py-1 rounded-lg transition shrink-0 ${contentTypeFilter === 'all' ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm border border-zinc-200 dark:border-zinc-700' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
                               >
-                                480p ({qualityCounts['480p']})
+                                All ({mdriveResults.length})
                               </button>
-                            )}
-                            {qualityCounts['720p'] > 0 && (
                               <button
                                 type="button"
-                                onClick={() => setQualityFilter('720p')}
-                                className={`px-2.5 py-1 rounded-lg transition shrink-0 ${qualityFilter === '720p' ? 'bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 font-bold' : 'text-zinc-500 hover:text-cyan-500'}`}
+                                onClick={() => setContentTypeFilter('episodes')}
+                                className={`px-2.5 py-1 rounded-lg transition shrink-0 flex items-center gap-1 ${contentTypeFilter === 'episodes' ? 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 font-bold' : 'text-zinc-500 hover:text-indigo-500'}`}
                               >
-                                720p ({qualityCounts['720p']})
+                                <Tv className="w-3 h-3" />
+                                Episodes ({parsedMdriveGroups.totalEpisodesCount})
                               </button>
-                            )}
-                            {qualityCounts['1080p'] > 0 && (
+                              {parsedMdriveGroups.totalPacksCount > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setContentTypeFilter('packs')}
+                                  className={`px-2.5 py-1 rounded-lg transition shrink-0 flex items-center gap-1 ${contentTypeFilter === 'packs' ? 'bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/30 font-bold' : 'text-zinc-500 hover:text-purple-500'}`}
+                                >
+                                  <Package className="w-3 h-3" />
+                                  Packs ({parsedMdriveGroups.totalPacksCount})
+                                </button>
+                              )}
+                            </div>
+                          )}
+
+                          {(qualityCounts['480p'] > 0 || qualityCounts['720p'] > 0 || qualityCounts['1080p'] > 0 || qualityCounts['2160p'] > 0) && (
+                            <div className="flex items-center gap-1 overflow-x-auto custom-scrollbar">
+                              <span className="text-zinc-400 text-[11px] mr-1 uppercase tracking-wider shrink-0 flex items-center gap-1">
+                                <SlidersHorizontal className="w-3 h-3" />
+                                Quality:
+                              </span>
                               <button
                                 type="button"
-                                onClick={() => setQualityFilter('1080p')}
-                                className={`px-2.5 py-1 rounded-lg transition shrink-0 ${qualityFilter === '1080p' ? 'bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/30 font-bold' : 'text-zinc-500 hover:text-purple-500'}`}
+                                onClick={() => setQualityFilter('all')}
+                                className={`px-2.5 py-1 rounded-lg transition shrink-0 ${qualityFilter === 'all' ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm border border-zinc-200 dark:border-zinc-700' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
                               >
-                                1080p ({qualityCounts['1080p']})
+                                All
                               </button>
-                            )}
-                            {qualityCounts['2160p'] > 0 && (
-                              <button
-                                type="button"
-                                onClick={() => setQualityFilter('2160p')}
-                                className={`px-2.5 py-1 rounded-lg transition shrink-0 ${qualityFilter === '2160p' ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 font-bold' : 'text-zinc-500 hover:text-emerald-500'}`}
-                              >
-                                4K ({qualityCounts['2160p']})
-                              </button>
-                            )}
-                          </div>
-                        )}
+                              {qualityCounts['480p'] > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setQualityFilter('480p')}
+                                  className={`px-2.5 py-1 rounded-lg transition shrink-0 ${qualityFilter === '480p' ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-bold' : 'text-zinc-500 hover:text-amber-500'}`}
+                                >
+                                  480p
+                                </button>
+                              )}
+                              {qualityCounts['720p'] > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setQualityFilter('720p')}
+                                  className={`px-2.5 py-1 rounded-lg transition shrink-0 ${qualityFilter === '720p' ? 'bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 font-bold' : 'text-zinc-500 hover:text-cyan-500'}`}
+                                >
+                                  720p
+                                </button>
+                              )}
+                              {qualityCounts['1080p'] > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setQualityFilter('1080p')}
+                                  className={`px-2.5 py-1 rounded-lg transition shrink-0 ${qualityFilter === '1080p' ? 'bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/30 font-bold' : 'text-zinc-500 hover:text-purple-500'}`}
+                                >
+                                  1080p
+                                </button>
+                              )}
+                              {qualityCounts['2160p'] > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setQualityFilter('2160p')}
+                                  className={`px-2.5 py-1 rounded-lg transition shrink-0 ${qualityFilter === '2160p' ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 font-bold' : 'text-zinc-500 hover:text-emerald-500'}`}
+                                >
+                                  4K
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
 
@@ -3635,113 +4098,333 @@ export const LinkCheckerModal: React.FC<Props> = ({
                         {mdriveError}
                       </div>
                     ) : (
-                      <div className="grid gap-2 max-h-[50vh] overflow-y-auto custom-scrollbar pr-2">
-                        {filteredMdriveResults.map(({ item, originalIndex: i }) => (
-                          <div 
-                            key={i}
-                            className={`group p-4 rounded-2xl border transition-all cursor-pointer flex items-center gap-4 ${
-                              mdriveSelectedIndices.has(i) 
-                                ? 'bg-cyan-500/5 border-cyan-500/30' 
-                                : 'bg-zinc-50 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'
-                            }`}
-                            onClick={() => {
-                              setMdriveSelectedIndices(prev => {
-                                const next = new Set(prev);
-                                if (next.has(i)) next.delete(i);
-                                else next.add(i);
-                                return next;
-                              });
-                            }}
-                          >
-                            <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center shrink-0 transition-all ${
-                              mdriveSelectedIndices.has(i)
-                                ? 'bg-cyan-500 border-cyan-500'
-                                : 'border-zinc-300 dark:border-zinc-700'
-                            }`}>
-                              {mdriveSelectedIndices.has(i) && <CheckCircle2 className="w-4 h-4 text-white" />}
-                            </div>
-                             <div className="flex-1 min-w-0">
-                              {(() => {
-                                const locTag = getLocationTag({ fileName: item.file_name, url: item.url });
-                                const text = `${item.file_name || ''} ${item.quality || ''} ${item.url || ''}`.toLowerCase();
-                                let qBadge = null;
-                                if (text.includes('480p')) qBadge = <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 shrink-0">480p</span>;
-                                else if (text.includes('720p')) qBadge = <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 shrink-0">720p</span>;
-                                else if (text.includes('1080p')) qBadge = <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/30 shrink-0">1080p</span>;
-                                else if (text.includes('2160p') || text.includes('4k')) qBadge = <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 shrink-0">4K</span>;
+                      <div className="space-y-4 max-h-[50vh] overflow-y-auto custom-scrollbar pr-2">
+                        {(() => {
+                          const matchesQuality = (item: any) => {
+                            if (qualityFilter === 'all') return true;
+                            const text = `${item.file_name || ''} ${item.quality || ''} ${item.url || ''}`.toLowerCase();
+                            if (qualityFilter === '480p') return text.includes('480p');
+                            if (qualityFilter === '720p') return text.includes('720p');
+                            if (qualityFilter === '1080p') return text.includes('1080p');
+                            if (qualityFilter === '2160p') return text.includes('2160p') || text.includes('4k');
+                            return true;
+                          };
 
-                                // HEVC detection
-                                const hasHevc = text.includes('hevc') || text.includes('x265') || text.includes('h265') || text.includes('h.265') || text.includes('10bit') || text.includes('10-bit');
-                                let hevcBadge = null;
-                                if (hasHevc) {
-                                  hevcBadge = (
-                                    <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 shrink-0">
-                                      HEVC
+                          const renderItemCard = (item: any, i: number, info?: ReturnType<typeof getItemEpisodeInfo>, showEpBadge: boolean = true) => {
+                            const itemInfo = info || getItemEpisodeInfo(item);
+                            const locTag = getLocationTag({ fileName: item.file_name, url: item.url });
+                            const text = `${item.file_name || ''} ${item.quality || ''} ${item.url || ''}`.toLowerCase();
+                            
+                            let qBadge = null;
+                            if (text.includes('480p')) qBadge = <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 shrink-0">480p</span>;
+                            else if (text.includes('720p')) qBadge = <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 shrink-0">720p</span>;
+                            else if (text.includes('1080p')) qBadge = <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/30 shrink-0">1080p</span>;
+                            else if (text.includes('2160p') || text.includes('4k')) qBadge = <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 shrink-0">4K</span>;
+
+                            const hasHevc = text.includes('hevc') || text.includes('x265') || text.includes('h265') || text.includes('h.265') || text.includes('10bit') || text.includes('10-bit');
+                            const sizeVal = item.size || item.file_size;
+                            const isSelected = mdriveSelectedIndices.has(i);
+
+                            return (
+                              <div 
+                                key={i}
+                                className={`group p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center gap-3.5 ${
+                                  isSelected 
+                                    ? 'bg-cyan-500/5 border-cyan-500/40 shadow-xs' 
+                                    : 'bg-zinc-50 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'
+                                }`}
+                                onClick={() => {
+                                  setMdriveSelectedIndices(prev => {
+                                    const next = new Set(prev);
+                                    if (next.has(i)) next.delete(i);
+                                    else next.add(i);
+                                    return next;
+                                  });
+                                }}
+                              >
+                                <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all ${
+                                  isSelected
+                                    ? 'bg-cyan-500 border-cyan-500'
+                                    : 'border-zinc-300 dark:border-zinc-700 group-hover:border-zinc-400'
+                                }`}>
+                                  {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-white stroke-[3]" />}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    {showEpBadge && itemInfo.isEpisode && (
+                                      <span className="px-2 py-0.5 rounded text-[10px] font-black bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 shrink-0">
+                                        {itemInfo.label}
+                                      </span>
+                                    )}
+                                    {itemInfo.isPack && (
+                                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/30 shrink-0 flex items-center gap-1">
+                                        <Package className="w-3 h-3" />
+                                        Pack
+                                      </span>
+                                    )}
+                                    {qBadge}
+                                    {hasHevc && (
+                                      <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 shrink-0">
+                                        HEVC
+                                      </span>
+                                    )}
+                                    {sizeVal && (
+                                      <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-teal-500/20 text-teal-600 dark:text-teal-400 border border-teal-500/30 shrink-0">
+                                        {sizeVal}
+                                      </span>
+                                    )}
+                                    {locTag && (
+                                      <span className="px-2 py-0.5 rounded text-[10px] font-mono font-extrabold bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 border border-indigo-500/30 shrink-0">
+                                        {locTag}
+                                      </span>
+                                    )}
+                                    <h4 className="text-xs sm:text-sm font-semibold truncate text-zinc-900 dark:text-white flex-1" title={item.file_name || item.url}>
+                                      {item.file_name || 'HubCloud Link'}
+                                    </h4>
+                                  </div>
+                                  <p className="text-[10px] text-zinc-500 flex items-center gap-1.5 mt-1 truncate">
+                                    <LinkIcon className="w-3 h-3 shrink-0" />
+                                    <span className="truncate">{item.url}</span>
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  {!(item.size || item.file_size) && (
+                                    <span className="text-[9px] font-mono bg-zinc-200/70 dark:bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-400 uppercase italic">
+                                      No Size
                                     </span>
-                                  );
-                                }
-
-                                // Size badge on the left side
-                                const sizeVal = item.size || item.file_size;
-                                let sizeBadge = null;
-                                if (sizeVal) {
-                                  sizeBadge = (
-                                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-teal-500/20 text-teal-600 dark:text-teal-400 border border-teal-500/30 shrink-0">
-                                      {sizeVal}
-                                    </span>
-                                  );
-                                }
-
-                                return (
-                                  <>
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                      {qBadge}
-                                      {hevcBadge}
-                                      {sizeBadge}
-                                      {locTag && (
-                                        <span className="px-2 py-0.5 rounded text-[11px] font-mono font-extrabold bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 border border-indigo-500/30 shrink-0">
-                                          {locTag}
-                                        </span>
-                                      )}
-                                      <h4 className="text-sm font-bold truncate text-zinc-900 dark:text-white flex-1">
-                                        {item.file_name || 'HubCloud Link'}
-                                      </h4>
+                                  )}
+                                  {!item.is_direct && (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleExtractDirectMdrive(i);
+                                      }}
+                                      disabled={mdriveExtractingDirect[i]}
+                                      className="p-1.5 bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all disabled:opacity-50"
+                                      title="Extract Direct Drive Link"
+                                    >
+                                      {mdriveExtractingDirect[i] ? <LoaderIcon className="w-3.5 h-3.5 animate-spin text-cyan-500" /> : <ExternalLink className="w-3.5 h-3.5" />}
+                                    </button>
+                                  )}
+                                  {item.is_direct && (
+                                    <div className="p-1.5 bg-cyan-500/20 rounded-lg text-cyan-500" title="Direct Drive Link Extracted">
+                                      <CheckCircle2 className="w-3.5 h-3.5" />
                                     </div>
-                                    <p className="text-[10px] text-zinc-500 flex items-center gap-2 mt-1 truncate">
-                                      <LinkIcon className="w-3 h-3 shrink-0" />
-                                      <span className="truncate">{item.url}</span>
-                                    </p>
-                                  </>
-                                );
-                              })()}
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {!(item.size || item.file_size) && (
-                                <span className="text-[10px] font-mono bg-zinc-200 dark:bg-zinc-800 px-2 py-1 rounded text-zinc-400 uppercase italic">
-                                  No Size
-                                </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          };
+
+                          if (!parsedMdriveGroups.hasEpisodes) {
+                            return (
+                              <div className="grid gap-2">
+                                {filteredMdriveResults.map(({ item, originalIndex: i }) => 
+                                  renderItemCard(item, i, undefined, false)
+                                )}
+                              </div>
+                            );
+                          }
+
+                          // When episodes exist, render in distinct groups
+                          const visiblePacks = parsedMdriveGroups.packs.filter(({ item }) => matchesQuality(item));
+                          const visibleOthers = parsedMdriveGroups.others.filter(({ item }) => matchesQuality(item));
+
+                          return (
+                            <div className="space-y-4">
+                              {/* 1. Complete Season Packs Section */}
+                              {contentTypeFilter !== 'episodes' && visiblePacks.length > 0 && (
+                                <div className="rounded-2xl border border-purple-500/30 bg-purple-500/5 p-3.5 space-y-2.5">
+                                  <div className="flex items-center justify-between px-1">
+                                    <div className="flex items-center gap-2">
+                                      <Package className="w-4 h-4 text-purple-500" />
+                                      <span className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider">
+                                        Complete Season Packs
+                                      </span>
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-600 dark:text-purple-400">
+                                        {visiblePacks.length} {visiblePacks.length === 1 ? 'pack' : 'packs'}
+                                      </span>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const allPacksSel = visiblePacks.every(({ originalIndex }) => mdriveSelectedIndices.has(originalIndex));
+                                        setMdriveSelectedIndices(prev => {
+                                          const next = new Set(prev);
+                                          if (allPacksSel) visiblePacks.forEach(({ originalIndex }) => next.delete(originalIndex));
+                                          else visiblePacks.forEach(({ originalIndex }) => next.add(originalIndex));
+                                          return next;
+                                        });
+                                      }}
+                                      className="text-[11px] font-bold text-purple-600 dark:text-purple-400 hover:underline px-2 py-0.5"
+                                    >
+                                      {visiblePacks.every(({ originalIndex }) => mdriveSelectedIndices.has(originalIndex)) ? 'Deselect Packs' : 'Select All Packs'}
+                                    </button>
+                                  </div>
+                                  <div className="grid gap-2">
+                                    {visiblePacks.map(({ item, originalIndex, info }) => renderItemCard(item, originalIndex, info, false))}
+                                  </div>
+                                </div>
                               )}
-                              {!item.is_direct && (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleExtractDirectMdrive(i);
-                                  }}
-                                  disabled={mdriveExtractingDirect[i]}
-                                  className="p-2 bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 rounded-xl text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all disabled:opacity-50"
-                                  title="Extract Direct Drive Link"
-                                >
-                                  {mdriveExtractingDirect[i] ? <LoaderIcon className="w-4 h-4 animate-spin text-cyan-500" /> : <ExternalLink className="w-4 h-4" />}
-                                </button>
+
+                              {/* 2. Individual Episodes Section */}
+                              {contentTypeFilter !== 'packs' && (
+                                <div className="space-y-3 pt-1">
+                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between px-1 border-b border-zinc-200 dark:border-zinc-800 pb-2.5 gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <Tv className="w-4 h-4 text-indigo-500" />
+                                      <span className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider">
+                                        Episodes ({parsedMdriveGroups.sortedEpKeys.length} Episodes)
+                                      </span>
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-600 dark:text-indigo-400">
+                                        {parsedMdriveGroups.totalEpisodesCount} Links
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-2 flex-wrap self-end sm:self-auto">
+                                      {/* Grouping switcher */}
+                                      <div className="flex items-center bg-zinc-200/60 dark:bg-zinc-800/60 p-0.5 rounded-lg text-[11px] font-bold">
+                                        <button
+                                          type="button"
+                                          onClick={() => setEpisodeGroupingMode('quality')}
+                                          className={`px-2.5 py-1 rounded-md transition ${
+                                            episodeGroupingMode === 'quality'
+                                              ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-xs'
+                                              : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
+                                          }`}
+                                        >
+                                          By Quality (720p...)
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setEpisodeGroupingMode('episode')}
+                                          className={`px-2.5 py-1 rounded-md transition ${
+                                            episodeGroupingMode === 'episode'
+                                              ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-xs'
+                                              : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
+                                          }`}
+                                        >
+                                          By Episode
+                                        </button>
+                                      </div>
+
+                                      <button
+                                        type="button"
+                                        onClick={selectAllEpisodes}
+                                        className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline px-2 py-0.5"
+                                      >
+                                        Select All Episodes
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {/* Quality Grouping Mode (720p together, 1080p together, etc.) */}
+                                  {episodeGroupingMode === 'quality' ? (
+                                    <div className="space-y-4">
+                                      {parsedMdriveGroups.activeQualityCategories.map((qCat) => {
+                                        const qLinks = (parsedMdriveGroups.episodesByQuality.get(qCat) || []).filter(({ item }) => matchesQuality(item));
+                                        if (qLinks.length === 0) return null;
+                                        const allQSelected = qLinks.length > 0 && qLinks.every(({ originalIndex }) => mdriveSelectedIndices.has(originalIndex));
+                                        const qConfig = QUALITY_COLORS[qCat] || QUALITY_COLORS['Other'];
+                                        const qLabel = QUALITY_LABELS[qCat] || qCat;
+
+                                        return (
+                                          <div
+                                            key={qCat}
+                                            className={`rounded-2xl border ${qConfig.border} ${qConfig.bg} p-3.5 space-y-3 transition-colors duration-200`}
+                                          >
+                                            <div className="flex items-center justify-between px-1 flex-wrap gap-2">
+                                              <div className="flex items-center gap-2">
+                                                <span className={`px-2.5 py-1 rounded-lg text-xs font-black border ${qConfig.badge}`}>
+                                                  {qLabel}
+                                                </span>
+                                                <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                                                  {qLinks.length} {qLinks.length === 1 ? 'episode link' : 'episodes'}
+                                                </span>
+                                              </div>
+                                              <button
+                                                type="button"
+                                                onClick={() => toggleQualityEpisodesSelection(qCat)}
+                                                className={`text-xs font-bold px-3 py-1 rounded-lg border transition shadow-xs ${
+                                                  allQSelected
+                                                    ? 'bg-rose-500/15 hover:bg-rose-500/25 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                                                    : `${qConfig.buttonBg} ${qConfig.buttonText}`
+                                                }`}
+                                              >
+                                                {allQSelected ? `Deselect All ${qCat}` : `Select All ${qCat} (${qLinks.length})`}
+                                              </button>
+                                            </div>
+                                            <div className="grid gap-2">
+                                              {qLinks.map(({ item, originalIndex, info }) => renderItemCard(item, originalIndex, info, true))}
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  ) : (
+                                    /* Episode-first Grouping Mode */
+                                    <div className="space-y-3">
+                                      {parsedMdriveGroups.sortedEpKeys.map((epNum) => {
+                                        const epLinks = (parsedMdriveGroups.episodesMap.get(epNum) || []).filter(({ item }) => matchesQuality(item));
+                                        if (epLinks.length === 0) return null;
+                                        const allEpSelected = epLinks.every(({ originalIndex }) => mdriveSelectedIndices.has(originalIndex));
+                                        const label = epLinks[0]?.info.label || `Episode ${epNum}`;
+
+                                        return (
+                                          <div key={epNum} className="rounded-2xl border border-zinc-200/90 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/40 p-3 space-y-2">
+                                            <div className="flex items-center justify-between px-1">
+                                              <div className="flex items-center gap-2">
+                                                <span className="px-2.5 py-0.5 rounded-md text-xs font-black bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30">
+                                                  {label}
+                                                </span>
+                                                <span className="text-[11px] font-medium text-zinc-500">
+                                                  {epLinks.length} {epLinks.length === 1 ? 'quality' : 'qualities'} available
+                                                </span>
+                                              </div>
+                                              <button
+                                                type="button"
+                                                onClick={() => toggleEpisodeSelection(epNum)}
+                                                className={`text-[11px] font-bold px-2 py-0.5 rounded-md transition ${
+                                                  allEpSelected 
+                                                    ? 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30'
+                                                    : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800'
+                                                }`}
+                                              >
+                                                {allEpSelected ? 'Deselect Ep' : 'Select Ep'}
+                                              </button>
+                                            </div>
+                                            <div className="grid gap-2">
+                                              {epLinks.map(({ item, originalIndex, info }) => renderItemCard(item, originalIndex, info, false))}
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
                               )}
-                              {item.is_direct && (
-                                <div className="p-2 bg-cyan-500/20 rounded-xl text-cyan-500" title="Direct Drive Link Extracted">
-                                  <CheckCircle2 className="w-4 h-4" />
+
+                              {/* 3. General / Other Links Section */}
+                              {contentTypeFilter === 'all' && visibleOthers.length > 0 && (
+                                <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/30 p-3 space-y-2">
+                                  <div className="flex items-center justify-between px-1">
+                                    <div className="flex items-center gap-2">
+                                      <Film className="w-4 h-4 text-zinc-500" />
+                                      <span className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider">
+                                        Other Links
+                                      </span>
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
+                                        {visibleOthers.length}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="grid gap-2">
+                                    {visibleOthers.map(({ item, originalIndex, info }) => renderItemCard(item, originalIndex, info, true))}
+                                  </div>
                                 </div>
                               )}
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })()}
                       </div>
                     )}
 
@@ -4245,9 +4928,54 @@ export const LinkCheckerModal: React.FC<Props> = ({
                   <button onClick={reset} className="inline-flex items-center justify-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-transparent px-3.5 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-1.5 transition-colors"><Trash2 className="h-3.5 w-3.5" /> Reset</button>
                   
                   {!!results.length && (
-                    <button onClick={toggleSelectAll} className="inline-flex items-center justify-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-transparent px-3.5 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-1.5 transition-colors">
-                      {areAllEligibleSelected ? "Deselect All" : "Select All"}
-                    </button>
+                    <>
+                      <button onClick={toggleSelectAll} className="inline-flex items-center justify-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-transparent px-3.5 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-1.5 transition-colors">
+                        {areAllEligibleSelected ? "Deselect All" : "Select All"}
+                      </button>
+
+                      {parsedSortedGroups.hasEpisodes && (
+                        <>
+                          <button 
+                            onClick={selectAllCheckedEpisodes} 
+                            className="inline-flex items-center justify-center rounded-xl border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 px-3.5 py-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400 gap-1.5 transition-colors shadow-sm"
+                          >
+                            <Tv className="h-3.5 w-3.5" />
+                            Select All Episodes ({parsedSortedGroups.totalEpisodesCount})
+                          </button>
+                          {parsedSortedGroups.activeQualityCategories.map(qCat => {
+                            const qList = parsedSortedGroups.episodesByQuality.get(qCat) || [];
+                            if (qList.length === 0) return null;
+                            const allQSel = qList.every(e => selectedUrls.has(e.result.url));
+                            const qConfig = QUALITY_COLORS[qCat] || QUALITY_COLORS['Other'];
+                            return (
+                              <button
+                                key={qCat}
+                                type="button"
+                                onClick={() => toggleCheckedQualitySelection(qCat)}
+                                className={`inline-flex items-center justify-center rounded-xl border px-3 py-1.5 text-xs font-bold gap-1.5 transition-colors shadow-sm ${
+                                  allQSel
+                                    ? 'bg-rose-500/15 hover:bg-rose-500/25 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                                    : `${qConfig.buttonBg} ${qConfig.buttonText}`
+                                }`}
+                                title={`Select or deselect all ${qCat} episodes`}
+                              >
+                                {allQSel ? `Deselect ${qCat}` : `Select All ${qCat} (${qList.length})`}
+                              </button>
+                            );
+                          })}
+                        </>
+                      )}
+
+                      {parsedSortedGroups.packs.length > 0 && (
+                        <button 
+                          onClick={toggleCheckedPacksSelection} 
+                          className="inline-flex items-center justify-center rounded-xl border border-purple-500/30 bg-purple-500/10 hover:bg-purple-500/20 px-3.5 py-1.5 text-xs font-bold text-purple-600 dark:text-purple-400 gap-1.5 transition-colors shadow-sm"
+                        >
+                          <Package className="h-3.5 w-3.5" />
+                          Select All Packs ({parsedSortedGroups.packs.length})
+                        </button>
+                      )}
+                    </>
                   )}
 
                   {(onAddLinks || onBatchAddLinks) && selectedUrls.size > 0 && !loading && (
@@ -4286,150 +5014,348 @@ export const LinkCheckerModal: React.FC<Props> = ({
                   </div>
                 )}
 
-                <div className="space-y-3 max-h-[500px] overflow-auto pr-1">
-                  {sortedResults.map(({ result, locationTag }) => {
-                    const statusLabel = result.statusLabel || (result.ok ? "WORKING" : "UNKNOWN");
-                    const openRow = !!expanded[result.url];
+                <div className="space-y-4 max-h-[500px] overflow-auto pr-1">
+                  {(() => {
+                    const renderCheckedResultCard = ({ result, locationTag }: (typeof sortedResults)[0], showEpBadge: boolean = true) => {
+                      const statusLabel = result.statusLabel || (result.ok ? "WORKING" : "UNKNOWN");
+                      const openRow = !!expanded[result.url];
+                      const itemInfo = getItemEpisodeInfo({ ...result, locationTag });
 
-                    return (
-                      <div key={`${result.url}-${result.qualityLabel || "na"}`} className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 overflow-hidden transition-colors duration-300">
-                        <div className="p-4 space-y-3">
-                          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                            <div className="min-w-0 flex-1 flex items-start gap-3">
-                              <div className="mt-1">
-                                <input type="checkbox" checked={selectedUrls.has(result.url)} onChange={() => toggleSelect(result.url)} className="h-5 w-5 rounded border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950" />
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  {result.ok ? <CheckCircle2 className="h-5 w-5 text-emerald-500 dark:text-emerald-400" /> : <XCircle className="h-5 w-5 text-red-500 dark:text-red-400" />}
-                                  <div className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${badgeMap[statusLabel]}`}>{statusLabel}</div>
-                                  {result.isDirectDownload ? <div className="inline-flex rounded-full border border-blue-200 dark:border-blue-800 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-600 dark:text-blue-400"><FileDown className="h-3.5 w-3.5 mr-1" /> Direct Download</div> : null}
-                                  {(result.mismatchWarnings?.length || 0) > 0 ? <div className="inline-flex rounded-full border border-pink-200 dark:border-pink-800 bg-pink-500/10 px-3 py-1 text-xs font-medium text-pink-600 dark:text-pink-400"><Siren className="h-3.5 w-3.5 mr-1" /> Mismatch</div> : null}
+                      return (
+                        <div key={`${result.url}-${result.qualityLabel || "na"}`} className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 overflow-hidden transition-colors duration-300">
+                          <div className="p-4 space-y-3">
+                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                              <div className="min-w-0 flex-1 flex items-start gap-3">
+                                <div className="mt-1">
+                                  <input type="checkbox" checked={selectedUrls.has(result.url)} onChange={() => toggleSelect(result.url)} className="h-5 w-5 rounded border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950" />
                                 </div>
-                                <div className="mt-2 flex flex-wrap gap-2 items-center">
-                                  {result.fileSizeText ? <span className="rounded-full border border-teal-200 dark:border-teal-800 bg-teal-500/10 px-2.5 py-1 text-[11px] font-bold text-teal-600 dark:text-teal-300">{result.fileSizeText}</span> : null}
-                                  {result.qualityLabel ? <span className="rounded-full border border-fuchsia-200 dark:border-fuchsia-800 bg-fuchsia-500/10 px-2.5 py-1 text-[11px] font-medium text-fuchsia-600 dark:text-fuchsia-300">{result.qualityLabel}</span> : null}
-                                  {result.printQualityLabel ? <span className="rounded-full border border-rose-200 dark:border-rose-800 bg-rose-500/10 px-2.5 py-1 text-[11px] font-medium text-rose-600 dark:text-rose-300">{result.printQualityLabel}</span> : null}
-                                  {((result.codecLabel === "HEVC") || (result.fileName && /\b(hevc|x265|h[\.\-_]?265|10bit|10-bit)\b/i.test(result.fileName)) || (result.url && /\b(hevc|x265|h[\.\-_]?265|10bit|10-bit)\b/i.test(result.url))) ? (
-                                    <span className="rounded-full border border-indigo-200 dark:border-indigo-800 bg-indigo-500/10 px-2.5 py-1 text-[11px] font-bold text-indigo-600 dark:text-indigo-300">HEVC</span>
-                                  ) : result.codecLabel ? (
-                                    <span className="rounded-full border border-indigo-200 dark:border-indigo-800 bg-indigo-500/10 px-2.5 py-1 text-[11px] font-medium text-indigo-600 dark:text-indigo-300">{result.codecLabel}</span>
-                                  ) : null}
-                                  {result.audioLabel ? <span className="rounded-full border border-emerald-200 dark:border-emerald-800 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-300">{result.audioLabel}</span> : null}
-                                  {result.subtitleLabel ? <span className="rounded-full border border-amber-200 dark:border-amber-800 bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium text-amber-600 dark:text-amber-300">{result.subtitleLabel}</span> : null}
-                                  {locationTag ? (
-                                    <span className="rounded-full border border-indigo-300 dark:border-indigo-700 bg-indigo-500/20 px-2.5 py-1 text-[11px] font-extrabold text-indigo-600 dark:text-indigo-300 shadow-xs">
-                                      Location: {locationTag}
-                                    </span>
-                                  ) : (
-                                    <>
-                                      {result.season ? <span className="rounded-full border border-blue-200 dark:border-blue-800 bg-blue-500/10 px-2.5 py-1 text-[11px] font-bold text-blue-600 dark:text-blue-300">Season {result.season}</span> : null}
-                                      {result.episode ? <span className="rounded-full border border-indigo-200 dark:border-indigo-800 bg-indigo-500/10 px-2.5 py-1 text-[11px] font-bold text-indigo-600 dark:text-indigo-300">Episode {result.episode}</span> : null}
-                                      {result.isFullSeasonMKV ? <span className="rounded-full border border-purple-200 dark:border-purple-800 bg-purple-500/10 px-2.5 py-1 text-[11px] font-bold text-purple-600 dark:text-purple-300">Full Season MKV</span> : null}
-                                      {result.isFullSeasonZIP ? <span className="rounded-full border border-purple-200 dark:border-purple-800 bg-purple-500/10 px-2.5 py-1 text-[11px] font-bold text-purple-600 dark:text-purple-300">Full Season ZIP</span> : null}
-                                    </>
-                                  )}
-                                </div>
-                                {(isHubcloudVariant(result.url) || (result.candidates && result.candidates.length > 0)) && (
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    {result.ok ? <CheckCircle2 className="h-5 w-5 text-emerald-500 dark:text-emerald-400" /> : <XCircle className="h-5 w-5 text-red-500 dark:text-red-400" />}
+                                    <div className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${badgeMap[statusLabel]}`}>{statusLabel}</div>
+                                    {showEpBadge && itemInfo.isEpisode && (
+                                      <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30">
+                                        {itemInfo.label}
+                                      </span>
+                                    )}
+                                    {result.isDirectDownload ? <div className="inline-flex rounded-full border border-blue-200 dark:border-blue-800 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-600 dark:text-blue-400"><FileDown className="h-3.5 w-3.5 mr-1" /> Direct Download</div> : null}
+                                    {(result.mismatchWarnings?.length || 0) > 0 ? <div className="inline-flex rounded-full border border-pink-200 dark:border-pink-800 bg-pink-500/10 px-3 py-1 text-xs font-medium text-pink-600 dark:text-pink-400"><Siren className="h-3.5 w-3.5 mr-1" /> Mismatch</div> : null}
+                                  </div>
                                   <div className="mt-2 flex flex-wrap gap-2 items-center">
-                                    <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 mr-1 flex items-center gap-1.5"><Server className="h-3.5 w-3.5" /> Downloads:</span>
-                                    {result.candidates && result.candidates.length > 0 ? (
-                                      <>
-                                        {result.candidates.map((cand, idx) => {
-                                          let name = cand.text.replace(/download/i, '').replace(/\[|\]/g, '').trim();
-                                          if (!name) return null;
-                                          const isPixeldrain = name.toLowerCase().includes("pixeldrain") || cand.href.toLowerCase().includes("pixeldrain");
-                                          return (
-                                            <span key={idx} className={`rounded-lg border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
-                                              isPixeldrain 
-                                                ? "border-emerald-200 dark:border-emerald-800 bg-emerald-500/10 text-emerald-600 dark:text-cyan-400" 
-                                                : "border-zinc-200 dark:border-zinc-700 bg-zinc-200/50 dark:bg-zinc-800/50 text-zinc-600 dark:text-zinc-300"
-                                            }`}>
-                                              {name}
-                                            </span>
-                                          );
-                                        })}
-                                        {isMissingPixeldrain(result) && (
-                                          <button
-                                            onClick={() => handleCheck([result.url], undefined, 0, true)}
-                                            disabled={loading}
-                                            className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 dark:border-red-800 bg-red-500/10 hover:bg-red-500/20 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider text-red-600 dark:text-red-400 animate-pulse cursor-pointer transition-colors"
-                                            title="Retry fetching Pixeldrain download link for this item"
-                                          >
-                                            <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
-                                            Missing Pixeldrain (Retry)
-                                          </button>
-                                        )}
-                                      </>
+                                    {result.fileSizeText ? <span className="rounded-full border border-teal-200 dark:border-teal-800 bg-teal-500/10 px-2.5 py-1 text-[11px] font-bold text-teal-600 dark:text-teal-300">{result.fileSizeText}</span> : null}
+                                    {result.qualityLabel ? <span className="rounded-full border border-fuchsia-200 dark:border-fuchsia-800 bg-fuchsia-500/10 px-2.5 py-1 text-[11px] font-medium text-fuchsia-600 dark:text-fuchsia-300">{result.qualityLabel}</span> : null}
+                                    {result.printQualityLabel ? <span className="rounded-full border border-rose-200 dark:border-rose-800 bg-rose-500/10 px-2.5 py-1 text-[11px] font-medium text-rose-600 dark:text-rose-300">{result.printQualityLabel}</span> : null}
+                                    {((result.codecLabel === "HEVC") || (result.fileName && /\b(hevc|x265|h[\.\-_]?265|10bit|10-bit)\b/i.test(result.fileName)) || (result.url && /\b(hevc|x265|h[\.\-_]?265|10bit|10-bit)\b/i.test(result.url))) ? (
+                                      <span className="rounded-full border border-indigo-200 dark:border-indigo-800 bg-indigo-500/10 px-2.5 py-1 text-[11px] font-bold text-indigo-600 dark:text-indigo-300">HEVC</span>
+                                    ) : result.codecLabel ? (
+                                      <span className="rounded-full border border-indigo-200 dark:border-indigo-800 bg-indigo-500/10 px-2.5 py-1 text-[11px] font-medium text-indigo-600 dark:text-indigo-300">{result.codecLabel}</span>
+                                    ) : null}
+                                    {result.audioLabel ? <span className="rounded-full border border-emerald-200 dark:border-emerald-800 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-300">{result.audioLabel}</span> : null}
+                                    {result.subtitleLabel ? <span className="rounded-full border border-amber-200 dark:border-amber-800 bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium text-amber-600 dark:text-amber-300">{result.subtitleLabel}</span> : null}
+                                    {locationTag ? (
+                                      <span className="rounded-full border border-indigo-300 dark:border-indigo-700 bg-indigo-500/20 px-2.5 py-1 text-[11px] font-extrabold text-indigo-600 dark:text-indigo-300 shadow-xs">
+                                        Location: {locationTag}
+                                      </span>
                                     ) : (
-                                      <button
-                                        onClick={() => handleCheck([result.url], undefined, 0, true)}
-                                        disabled={loading}
-                                        className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 dark:border-red-800 bg-red-500/10 hover:bg-red-500/20 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider text-red-600 dark:text-red-400 animate-pulse cursor-pointer transition-colors"
-                                        title="Retry fetching Pixeldrain download link for this item"
-                                      >
-                                        <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
-                                        Missing Pixeldrain (Retry)
-                                      </button>
+                                      <>
+                                        {result.season ? <span className="rounded-full border border-blue-200 dark:border-blue-800 bg-blue-500/10 px-2.5 py-1 text-[11px] font-bold text-blue-600 dark:text-blue-300">Season {result.season}</span> : null}
+                                        {result.episode ? <span className="rounded-full border border-indigo-200 dark:border-indigo-800 bg-indigo-500/10 px-2.5 py-1 text-[11px] font-bold text-indigo-600 dark:text-indigo-300">Episode {result.episode}</span> : null}
+                                        {result.isFullSeasonMKV ? <span className="rounded-full border border-purple-200 dark:border-purple-800 bg-purple-500/10 px-2.5 py-1 text-[11px] font-bold text-purple-600 dark:text-purple-300">Full Season MKV</span> : null}
+                                        {result.isFullSeasonZIP ? <span className="rounded-full border border-purple-200 dark:border-purple-800 bg-purple-500/10 px-2.5 py-1 text-[11px] font-bold text-purple-600 dark:text-purple-300">Full Season ZIP</span> : null}
+                                      </>
                                     )}
                                   </div>
-                                )}
-                                <div className="mt-2 flex items-center gap-2 flex-wrap">
-                                  <span className="break-all text-sm font-medium text-zinc-700 dark:text-zinc-200 select-all">{result.url}</span>
+                                  {(isHubcloudVariant(result.url) || (result.candidates && result.candidates.length > 0)) && (
+                                    <div className="mt-2 flex flex-wrap gap-2 items-center">
+                                      <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 mr-1 flex items-center gap-1.5"><Server className="h-3.5 w-3.5" /> Downloads:</span>
+                                      {result.candidates && result.candidates.length > 0 ? (
+                                        <>
+                                          {result.candidates.map((cand, idx) => {
+                                            let name = cand.text.replace(/download/i, '').replace(/\[|\]/g, '').trim();
+                                            if (!name) return null;
+                                            const isPixeldrain = name.toLowerCase().includes("pixeldrain") || cand.href.toLowerCase().includes("pixeldrain");
+                                            return (
+                                              <span key={idx} className={`rounded-lg border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
+                                                isPixeldrain 
+                                                  ? "border-emerald-200 dark:border-emerald-800 bg-emerald-500/10 text-emerald-600 dark:text-cyan-400" 
+                                                  : "border-zinc-200 dark:border-zinc-700 bg-zinc-200/50 dark:bg-zinc-800/50 text-zinc-600 dark:text-zinc-300"
+                                              }`}>
+                                                {name}
+                                              </span>
+                                            );
+                                          })}
+                                          {isMissingPixeldrain(result) && (
+                                            <button
+                                              onClick={() => handleCheck([result.url], undefined, 0, true)}
+                                              disabled={loading}
+                                              className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 dark:border-red-800 bg-red-500/10 hover:bg-red-500/20 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider text-red-600 dark:text-red-400 animate-pulse cursor-pointer transition-colors"
+                                              title="Retry fetching Pixeldrain download link for this item"
+                                            >
+                                              <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
+                                              Missing Pixeldrain (Retry)
+                                            </button>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <button
+                                          onClick={() => handleCheck([result.url], undefined, 0, true)}
+                                          disabled={loading}
+                                          className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 dark:border-red-800 bg-red-500/10 hover:bg-red-500/20 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider text-red-600 dark:text-red-400 animate-pulse cursor-pointer transition-colors"
+                                          title="Retry fetching Pixeldrain download link for this item"
+                                        >
+                                          <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
+                                          Missing Pixeldrain (Retry)
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
+                                  <div className="mt-2 flex items-center gap-2 flex-wrap">
+                                    <span className="break-all text-sm font-medium text-zinc-700 dark:text-zinc-200 select-all">{result.url}</span>
+                                  </div>
+                                  {result.finalUrl && result.finalUrl !== result.url && (
+                                    <div className="mt-1 break-all text-xs text-zinc-500 dark:text-zinc-400">Redirects to: {result.finalUrl}</div>
+                                  )}
+                                  <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">{result.message || (result.ok ? "The link is reachable." : "The link could not be verified.")}</p>
                                 </div>
-                                {result.finalUrl && result.finalUrl !== result.url && (
-                                  <div className="mt-1 break-all text-xs text-zinc-500 dark:text-zinc-400">Redirects to: {result.finalUrl}</div>
+                              </div>
+                              <div className="flex gap-2 self-start">
+                                {(!result.ok || result.statusLabel === "UNKNOWN" || result.statusLabel === "MISSING_FILENAME" || result.statusLabel === "BROKEN" || result.statusLabel === "UNAVAILABLE" || isMissingPixeldrain(result)) && (
+                                  <button
+                                    onClick={() => handleCheck([result.url], undefined, 0, true)}
+                                    disabled={loading}
+                                    className="inline-flex items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50 gap-1.5 transition-colors"
+                                    title="Retry checking this link"
+                                  >
+                                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                                    Retry
+                                  </button>
                                 )}
-                                <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">{result.message || (result.ok ? "The link is reachable." : "The link could not be verified.")}</p>
+                                <button onClick={() => toggleExpand(result.url)} className="inline-flex items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-transparent px-4 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-2 transition-colors">Details {openRow ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</button>
                               </div>
                             </div>
-                            <div className="flex gap-2 self-start">
-                              {(!result.ok || result.statusLabel === "UNKNOWN" || result.statusLabel === "MISSING_FILENAME" || result.statusLabel === "BROKEN" || result.statusLabel === "UNAVAILABLE" || isMissingPixeldrain(result)) && (
-                                <button
-                                  onClick={() => handleCheck([result.url], undefined, 0, true)}
-                                  disabled={loading}
-                                  className="inline-flex items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50 gap-1.5 transition-colors"
-                                  title="Retry checking this link"
-                                >
-                                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                                  Retry
-                                </button>
-                              )}
-                              <button onClick={() => toggleExpand(result.url)} className="inline-flex items-center justify-center rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-transparent px-4 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-2 transition-colors">Details {openRow ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</button>
+                            {openRow ? (
+                              <div className="grid gap-2 text-xs text-zinc-500 dark:text-zinc-400 sm:grid-cols-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/70 p-4 transition-colors duration-300">
+                                {typeof result.status !== "undefined" ? <div>Status: {result.status}</div> : null}
+                                {result.host ? <div>Host: {result.host}</div> : null}
+                                {result.contentType ? <div>Content-Type: {result.contentType}</div> : null}
+                                {result.source ? <div>Method: {result.source}</div> : null}
+                                {result.fileName ? <div>File Name: {result.fileName}</div> : null}
+                                {result.fileSizeText ? <div>File Size: {result.fileSizeText}</div> : null}
+                                {result.qualityLabel ? <div>Quality: {result.qualityLabel}</div> : null}
+                                {result.printQualityLabel ? <div>Print Quality: {result.printQualityLabel}</div> : null}
+                                {result.codecLabel ? <div>Codec: {result.codecLabel}</div> : null}
+                                {result.audioLabel ? <div>Audio: {result.audioLabel}</div> : null}
+                                {result.subtitleLabel ? <div>Subtitles: {result.subtitleLabel}</div> : null}
+                                {locationTag ? <div>Location: <span className="font-mono font-bold text-indigo-500 dark:text-indigo-400">{locationTag}</span></div> : null}
+                                {result.season ? <div>Season: {result.season}</div> : null}
+                                {result.episode ? <div>Episode: {result.episode}</div> : null}
+                                {result.isFullSeasonMKV ? <div>Full Season MKV: Yes</div> : null}
+                                {result.isFullSeasonZIP ? <div>Full Season ZIP: Yes</div> : null}
+                                {typeof result.confidenceScore === "number" ? <div>Confidence: {result.confidenceScore}%</div> : null}
+                                {result.finalUrl ? <div className="sm:col-span-2 break-all text-zinc-600 dark:text-zinc-300">Final URL: {result.finalUrl}</div> : null}
+                                {(result.mismatchWarnings?.length || 0) > 0 ? (
+                                  <div className="sm:col-span-2 rounded-xl border border-pink-200 dark:border-pink-900/70 bg-pink-50 dark:bg-pink-950/30 p-3 text-pink-600 dark:text-pink-300 transition-colors duration-300">
+                                    <div className="font-semibold mb-2">Mismatch Warnings</div>
+                                    <ul className="list-disc pl-5 space-y-1">{result.mismatchWarnings?.map((w, i) => <li key={i}>{w}</li>)}</ul>
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                      );
+                    };
+
+                    if (!parsedSortedGroups.hasEpisodes) {
+                      return sortedResults.map((entry) => renderCheckedResultCard(entry, false));
+                    }
+
+                    return (
+                      <div className="space-y-4">
+                        {/* 1. Complete Season Packs */}
+                        {parsedSortedGroups.packs.length > 0 && (
+                          <div className="rounded-2xl border border-purple-500/30 bg-purple-500/5 p-3.5 space-y-3">
+                            <div className="flex items-center justify-between px-1">
+                              <div className="flex items-center gap-2">
+                                <Package className="w-4 h-4 text-purple-500" />
+                                <span className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider">
+                                  Complete Season Packs
+                                </span>
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-600 dark:text-purple-400">
+                                  {parsedSortedGroups.packs.length} {parsedSortedGroups.packs.length === 1 ? 'pack' : 'packs'}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={toggleCheckedPacksSelection}
+                                className="text-[11px] font-bold text-purple-600 dark:text-purple-400 hover:underline px-2 py-0.5"
+                              >
+                                {parsedSortedGroups.packs.every(e => selectedUrls.has(e.result.url)) ? 'Deselect Packs' : 'Select All Packs'}
+                              </button>
+                            </div>
+                            <div className="grid gap-2">
+                              {parsedSortedGroups.packs.map(entry => renderCheckedResultCard(entry, false))}
                             </div>
                           </div>
-                          {openRow ? (
-                            <div className="grid gap-2 text-xs text-zinc-500 dark:text-zinc-400 sm:grid-cols-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/70 p-4 transition-colors duration-300">
-                              {typeof result.status !== "undefined" ? <div>Status: {result.status}</div> : null}
-                              {result.host ? <div>Host: {result.host}</div> : null}
-                              {result.contentType ? <div>Content-Type: {result.contentType}</div> : null}
-                              {result.source ? <div>Method: {result.source}</div> : null}
-                              {result.fileName ? <div>File Name: {result.fileName}</div> : null}
-                              {result.fileSizeText ? <div>File Size: {result.fileSizeText}</div> : null}
-                              {result.qualityLabel ? <div>Quality: {result.qualityLabel}</div> : null}
-                              {result.printQualityLabel ? <div>Print Quality: {result.printQualityLabel}</div> : null}
-                              {result.codecLabel ? <div>Codec: {result.codecLabel}</div> : null}
-                              {result.audioLabel ? <div>Audio: {result.audioLabel}</div> : null}
-                              {result.subtitleLabel ? <div>Subtitles: {result.subtitleLabel}</div> : null}
-                              {locationTag ? <div>Location: <span className="font-mono font-bold text-indigo-500 dark:text-indigo-400">{locationTag}</span></div> : null}
-                              {result.season ? <div>Season: {result.season}</div> : null}
-                              {result.episode ? <div>Episode: {result.episode}</div> : null}
-                              {result.isFullSeasonMKV ? <div>Full Season MKV: Yes</div> : null}
-                              {result.isFullSeasonZIP ? <div>Full Season ZIP: Yes</div> : null}
-                              {typeof result.confidenceScore === "number" ? <div>Confidence: {result.confidenceScore}%</div> : null}
-                              {result.finalUrl ? <div className="sm:col-span-2 break-all text-zinc-600 dark:text-zinc-300">Final URL: {result.finalUrl}</div> : null}
-                              {(result.mismatchWarnings?.length || 0) > 0 ? (
-                                <div className="sm:col-span-2 rounded-xl border border-pink-200 dark:border-pink-900/70 bg-pink-50 dark:bg-pink-950/30 p-3 text-pink-600 dark:text-pink-300 transition-colors duration-300">
-                                  <div className="font-semibold mb-2">Mismatch Warnings</div>
-                                  <ul className="list-disc pl-5 space-y-1">{result.mismatchWarnings?.map((w, i) => <li key={i}>{w}</li>)}</ul>
-                                </div>
-                              ) : null}
+                        )}
+
+                        {/* 2. Individual Episodes */}
+                        <div className="space-y-3 pt-1">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between px-1 border-b border-zinc-200 dark:border-zinc-800 pb-2.5 gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Tv className="w-4 h-4 text-indigo-500" />
+                              <span className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider">
+                                Episodes ({parsedSortedGroups.sortedEpKeys.length} Episodes)
+                              </span>
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-600 dark:text-indigo-400">
+                                {parsedSortedGroups.totalEpisodesCount} Links
+                              </span>
                             </div>
-                          ) : null}
+                            <div className="flex items-center gap-2 flex-wrap self-end sm:self-auto">
+                              {/* Grouping switcher */}
+                              <div className="flex items-center bg-zinc-200/60 dark:bg-zinc-800/60 p-0.5 rounded-lg text-[11px] font-bold">
+                                <button
+                                  type="button"
+                                  onClick={() => setCheckedEpisodeGroupingMode('quality')}
+                                  className={`px-2.5 py-1 rounded-md transition ${
+                                    checkedEpisodeGroupingMode === 'quality'
+                                      ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-xs'
+                                      : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
+                                  }`}
+                                >
+                                  By Quality (720p...)
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setCheckedEpisodeGroupingMode('episode')}
+                                  className={`px-2.5 py-1 rounded-md transition ${
+                                    checkedEpisodeGroupingMode === 'episode'
+                                      ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-xs'
+                                      : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
+                                  }`}
+                                >
+                                  By Episode
+                                </button>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={selectAllCheckedEpisodes}
+                                className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline px-2 py-0.5"
+                              >
+                                Select All Episodes
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Quality Grouping Mode for Checked Results */}
+                          {checkedEpisodeGroupingMode === 'quality' ? (
+                            <div className="space-y-4">
+                              {parsedSortedGroups.activeQualityCategories.map((qCat) => {
+                                const qEntries = parsedSortedGroups.episodesByQuality.get(qCat) || [];
+                                if (qEntries.length === 0) return null;
+                                const allQSelected = qEntries.length > 0 && qEntries.every(e => selectedUrls.has(e.result.url));
+                                const qConfig = QUALITY_COLORS[qCat] || QUALITY_COLORS['Other'];
+                                const qLabel = QUALITY_LABELS[qCat] || qCat;
+
+                                return (
+                                  <div
+                                    key={qCat}
+                                    className={`rounded-2xl border ${qConfig.border} ${qConfig.bg} p-3.5 space-y-3 transition-colors duration-200`}
+                                  >
+                                    <div className="flex items-center justify-between px-1 flex-wrap gap-2">
+                                      <div className="flex items-center gap-2">
+                                        <span className={`px-2.5 py-1 rounded-lg text-xs font-black border ${qConfig.badge}`}>
+                                          {qLabel}
+                                        </span>
+                                        <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                                          {qEntries.length} {qEntries.length === 1 ? 'episode link' : 'episodes'}
+                                        </span>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleCheckedQualitySelection(qCat)}
+                                        className={`text-xs font-bold px-3 py-1 rounded-lg border transition shadow-xs ${
+                                          allQSelected
+                                            ? 'bg-rose-500/15 hover:bg-rose-500/25 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                                            : `${qConfig.buttonBg} ${qConfig.buttonText}`
+                                        }`}
+                                      >
+                                        {allQSelected ? `Deselect All ${qCat}` : `Select All ${qCat} (${qEntries.length})`}
+                                      </button>
+                                    </div>
+                                    <div className="grid gap-2">
+                                      {qEntries.map(entry => renderCheckedResultCard(entry, true))}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            /* Episode-first Grouping Mode */
+                            <div className="space-y-3">
+                              {parsedSortedGroups.sortedEpKeys.map((epNum) => {
+                                const epEntries = parsedSortedGroups.episodesMap.get(epNum) || [];
+                                if (epEntries.length === 0) return null;
+                                const allEpSelected = epEntries.every(e => selectedUrls.has(e.result.url));
+                                const firstInfo = getItemEpisodeInfo({ ...epEntries[0].result, locationTag: epEntries[0].locationTag });
+                                const label = firstInfo.label || `Episode ${epNum}`;
+
+                                return (
+                                  <div key={epNum} className="rounded-2xl border border-zinc-200/90 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/40 p-3 space-y-2.5">
+                                    <div className="flex items-center justify-between px-1">
+                                      <div className="flex items-center gap-2">
+                                        <span className="px-2.5 py-0.5 rounded-md text-xs font-black bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30">
+                                          {label}
+                                        </span>
+                                        <span className="text-[11px] font-medium text-zinc-500">
+                                          {epEntries.length} {epEntries.length === 1 ? 'quality' : 'qualities'} available
+                                        </span>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleCheckedEpisodeSelection(epNum)}
+                                        className={`text-[11px] font-bold px-2 py-0.5 rounded-md transition ${
+                                          allEpSelected 
+                                            ? 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30'
+                                            : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800'
+                                        }`}
+                                      >
+                                        {allEpSelected ? 'Deselect Ep' : 'Select Ep'}
+                                      </button>
+                                    </div>
+                                    <div className="grid gap-2">
+                                      {epEntries.map(entry => renderCheckedResultCard(entry, false))}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
+
+                        {/* 3. Other Links */}
+                        {parsedSortedGroups.others.length > 0 && (
+                          <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/30 p-3 space-y-2">
+                            <div className="flex items-center justify-between px-1">
+                              <div className="flex items-center gap-2">
+                                <Film className="w-4 h-4 text-zinc-500" />
+                                <span className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider">
+                                  Other Links
+                                </span>
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
+                                  {parsedSortedGroups.others.length}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="grid gap-2">
+                              {parsedSortedGroups.others.map(entry => renderCheckedResultCard(entry, true))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
-                  })}
+                  })()}
                 </div>
               </div>
             </div>
