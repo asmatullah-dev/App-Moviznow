@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { doc, writeBatch, serverTimestamp } from 'firebase/firestore';
-import { db, runWithNetwork } from '../firebase';
+import { db, runWithNetwork, auth } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { safeStorage } from '../utils/safeStorage';
 import { updateChunkMetaLocalCache, getUtcVersion } from '../utils/chunkMeta';
@@ -378,7 +378,6 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
       safeStorage.removeItem('needs_user_sync');
       safeStorage.removeItem('profile_cache');
       const { signOut } = await import('firebase/auth');
-      const { auth } = await import('../firebase');
       await signOut(auth).catch(() => {});
     } else {
       safeStorage.setItem('needs_user_sync', 'true');

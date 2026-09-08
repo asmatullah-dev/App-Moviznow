@@ -1,7 +1,7 @@
 import React from 'react';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { Helmet } from 'react-helmet';
+import { Helmet } from 'react-helmet-async';
 import { 
   MessageCircle, 
   Send, 
@@ -13,7 +13,8 @@ import {
   ShieldCheck,
   CheckCircle2,
   PhoneCall,
-  UserCheck
+  UserCheck,
+  Film
 } from 'lucide-react';
 import { standardizePhone } from '../../contexts/AuthContext';
 import { motion } from 'motion/react';
@@ -142,16 +143,39 @@ export default function Contact() {
                 </p>
               </div>
 
-              <motion.button
-                whileHover={{ scale: 1.03 }}
-                whileTap={{ scale: 0.97 }}
-                onClick={handleWhatsappChannelClick}
-                disabled={!settings?.whatsappChannelLink}
-                className="w-full bg-gradient-to-r from-purple-600 via-indigo-600 to-rose-600 hover:from-purple-500 hover:to-rose-500 text-white disabled:opacity-50 disabled:cursor-not-allowed py-4 rounded-2xl font-black transition-all shadow-xl shadow-purple-600/25 flex items-center justify-center gap-2.5 text-xs sm:text-sm tracking-wide"
-              >
-                <Send className="w-5 h-5" />
-                <span>{t("Join Official Channel")}</span>
-              </motion.button>
+              <div className="w-full space-y-3">
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={handleWhatsappChannelClick}
+                  disabled={!settings?.whatsappChannelLink}
+                  className="w-full bg-gradient-to-r from-purple-600 via-indigo-600 to-rose-600 hover:from-purple-500 hover:to-rose-500 text-white disabled:opacity-50 disabled:cursor-not-allowed py-3.5 sm:py-4 rounded-2xl font-black transition-all shadow-xl shadow-purple-600/25 flex items-center justify-center gap-2.5 text-xs sm:text-sm tracking-wide"
+                >
+                  <Send className="w-5 h-5" />
+                  <span>{t("Join Official Channel")}</span>
+                </motion.button>
+
+                <div className="grid grid-cols-2 gap-2 sm:gap-2.5 w-full">
+                  <a
+                    href="https://whatsapp.com/channel/0029VbBU43bHFxOwOghfmD1I"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-200 hover:text-white text-xs font-bold transition-all shadow-sm hover:scale-[1.02] active:scale-95 whitespace-nowrap"
+                  >
+                    <Send className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                    <span className="whitespace-nowrap">{t("For Updates")}</span>
+                  </a>
+                  <a
+                    href="https://whatsapp.com/channel/0029Vb6m6uFEAKWA7Rzxjv0e"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-pink-500/15 hover:bg-pink-500/25 border border-pink-500/30 text-pink-200 hover:text-white text-xs font-bold transition-all shadow-sm hover:scale-[1.02] active:scale-95 whitespace-nowrap"
+                  >
+                    <Film className="w-3.5 h-3.5 text-pink-400 shrink-0" />
+                    <span className="whitespace-nowrap">{t("For Clips")}</span>
+                  </a>
+                </div>
+              </div>
             </motion.div>
           </div>
 

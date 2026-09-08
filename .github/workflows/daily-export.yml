@@ -1,10 +1,7 @@
-name: Daily Content Catalog Export
+name: Manual Content Catalog Export
 
 on:
-  schedule:
-    # Runs every day at 01:52 UTC (6:52 AM PKT / Pakistan Time)
-    - cron: '52 1 * * *'
-  workflow_dispatch: # Allows manual trigger from GitHub Actions UI
+  workflow_dispatch: # Allows manual trigger from GitHub Actions UI or Admin Panel
 
 jobs:
   export-catalog:

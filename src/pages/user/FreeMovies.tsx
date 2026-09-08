@@ -20,7 +20,7 @@ import {
   Star
 } from 'lucide-react';
 import { standardizePhone } from '../../contexts/AuthContext';
-import { Helmet } from 'react-helmet';
+import { Helmet } from 'react-helmet-async';
 import { useContent } from '../../contexts/ContentContext';
 import { Link } from 'react-router-dom';
 import { Content } from '../../types';

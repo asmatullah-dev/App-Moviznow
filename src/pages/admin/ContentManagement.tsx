@@ -7401,7 +7401,7 @@ export default function ContentManagement() {
             </div>
             <div className="p-6 space-y-4">
               <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                Trigger the GitHub Actions workflow to update your catalog JSON export on your GitHub repository.
+                Trigger the GitHub Actions workflow manually on demand to export and update your catalog JSON files in your repository (automatic schedule is disabled).
               </p>
               <div>
                 <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">

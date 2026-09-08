@@ -6,7 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useAdminContent } from '../../contexts/AdminContentContext';
 import { getUtcVersion } from '../../utils/chunkMeta';
-import { Save, AlertCircle, GripVertical, Plus, Trash2, Layout, Wallet, Phone, Image as ImageIcon, Settings as SettingsIcon, RefreshCw, ShieldCheck, X, Eye, EyeOff, Database, Rocket, Loader2, Bell, BellOff, Info, Mail, Check, Megaphone } from 'lucide-react';
+import { Save, AlertCircle, GripVertical, Plus, Trash2, Layout, Wallet, Phone, Image as ImageIcon, Settings as SettingsIcon, RefreshCw, ShieldCheck, X, Eye, EyeOff, Database, Rocket, Loader2, Bell, BellOff, Info, Mail, Check, Megaphone, Copy, ExternalLink, HelpCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { clsx } from 'clsx';
 import { Navigate } from 'react-router-dom';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
@@ -93,6 +93,18 @@ export default function AdminSettings() {
   const [bankTestResult, setBankTestResult] = useState<{ success: boolean; count?: number; emails?: any[]; error?: string } | null>(null);
   const [manualTokenInput, setManualTokenInput] = useState('');
   const [showManualInput, setShowManualInput] = useState(false);
+  const [showBlockedHelp, setShowBlockedHelp] = useState(false);
+  const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
+
+  const copyToClipboard = (text: string, label: string) => {
+    try {
+      navigator.clipboard.writeText(text);
+      setCopiedLabel(label);
+      setTimeout(() => setCopiedLabel(null), 2500);
+    } catch (e) {
+      console.warn('Clipboard write failed:', e);
+    }
+  };
 
   const fetchGmailStatus = async () => {
     setLoadingGmailStatus(true);
@@ -126,47 +138,28 @@ export default function AdminSettings() {
         });
         setManualTokenInput('');
         setShowManualInput(false);
+        setShowBlockedHelp(false);
         await fetchGmailStatus();
       } else {
         setError(data.error || data.details || 'Failed to authenticate Gmail token on server.');
+        setShowBlockedHelp(true);
+        setShowManualInput(true);
       }
     } catch (err: any) {
       setError('Connection to server failed: ' + err.message);
+      setShowBlockedHelp(true);
+      setShowManualInput(true);
     } finally {
       setConnectingGmail(false);
     }
   };
 
-  const handleConnectGmail = async () => {
+  // 1. Primary: Firebase Auth Google Popup (uses Firebase Auth Domain)
+  const handleConnectWithPopup = async () => {
     setConnectingGmail(true);
     setError(null);
     try {
-      // 1. Try Google Identity Services (GSI) Token Client first
-      if (typeof window !== 'undefined' && (window as any).google?.accounts?.oauth2) {
-        const client = (window as any).google.accounts.oauth2.initTokenClient({
-          client_id: '460140141169-nlm0no0uhcaaaot9037sp4g31r36i808.apps.googleusercontent.com',
-          scope: 'https://www.googleapis.com/auth/gmail.readonly',
-          callback: async (tokenResponse: any) => {
-            if (tokenResponse?.access_token) {
-              await syncGmailTokenToServer(tokenResponse.access_token);
-            } else if (tokenResponse?.error) {
-              setError('Google Authorization error: ' + tokenResponse.error);
-              setConnectingGmail(false);
-            }
-          },
-          error_callback: (err: any) => {
-            console.error('Google GSI error:', err);
-            setError('Google authorization cancelled or blocked.');
-            setConnectingGmail(false);
-          }
-        });
-        client.requestAccessToken({ prompt: 'select_account' });
-        return;
-      }
-
-      // 2. Fallback: Firebase Auth with GoogleAuthProvider
       const { signInWithPopup, GoogleAuthProvider } = await import('firebase/auth');
-      const { auth } = await import('../../firebase');
       const provider = new GoogleAuthProvider();
       provider.addScope('https://www.googleapis.com/auth/gmail.readonly');
       provider.setCustomParameters({ prompt: 'select_account' });
@@ -175,14 +168,68 @@ export default function AdminSettings() {
       if (credential?.accessToken) {
         await syncGmailTokenToServer(credential.accessToken, result.user.email || undefined);
       } else {
-        setError('Could not retrieve access token from Google popup.');
+        setError('Could not retrieve access token from Google popup. Please try Manual Token Sync below.');
+        setShowBlockedHelp(true);
+        setShowManualInput(true);
         setConnectingGmail(false);
       }
     } catch (err: any) {
-      console.error('Gmail connect error:', err);
-      setError('Gmail Connection Error: ' + (err.message || 'Please check popup settings'));
+      console.error('Gmail popup error:', err);
+      if (err.code === 'auth/popup-blocked') {
+        setError('Popup was blocked by your browser. Please allow popups for this site or use Manual Token Sync below.');
+      } else if (err.code === 'auth/unauthorized-domain') {
+        setError(`Domain ${window.location.hostname} is not authorized in Firebase Console (Authentication > Settings > Authorized Domains).`);
+      } else if (err.code === 'auth/popup-closed-by-user') {
+        setError('Google sign-in popup was closed before completion.');
+      } else {
+        setError('Google Authorization Error: ' + (err.message || 'Access blocked. Unverified apps require adding your email as a Test User in Google Cloud Console.'));
+      }
+      setShowBlockedHelp(true);
+      setShowManualInput(true);
       setConnectingGmail(false);
     }
+  };
+
+  // 2. Alternative: Google Identity Services (GSI) Token Client
+  const handleConnectWithGSI = () => {
+    setConnectingGmail(true);
+    setError(null);
+    try {
+      if (typeof window !== 'undefined' && (window as any).google?.accounts?.oauth2) {
+        const client = (window as any).google.accounts.oauth2.initTokenClient({
+          client_id: '460140141169-nlm0no0uhcaaaot9037sp4g31r36i808.apps.googleusercontent.com',
+          scope: 'https://www.googleapis.com/auth/gmail.readonly',
+          callback: async (tokenResponse: any) => {
+            if (tokenResponse?.access_token) {
+              await syncGmailTokenToServer(tokenResponse.access_token);
+            } else if (tokenResponse?.error) {
+              setError('Google Authorization error: ' + (tokenResponse.error_description || tokenResponse.error));
+              setShowBlockedHelp(true);
+              setShowManualInput(true);
+              setConnectingGmail(false);
+            }
+          },
+          error_callback: (err: any) => {
+            console.error('Google GSI error:', err);
+            setError('Google authorization was blocked or cancelled: ' + (err.message || 'Access blocked by Google'));
+            setShowBlockedHelp(true);
+            setShowManualInput(true);
+            setConnectingGmail(false);
+          }
+        });
+        client.requestAccessToken({ prompt: 'select_account' });
+      } else {
+        handleConnectWithPopup();
+      }
+    } catch (err: any) {
+      console.error('Gmail connect error:', err);
+      handleConnectWithPopup();
+    }
+  };
+
+  const handleConnectGmail = async () => {
+    // Default to Firebase Popup for best cross-origin compatibility
+    await handleConnectWithPopup();
   };
 
   const handleTestBankSearch = async () => {
@@ -1433,8 +1480,9 @@ export default function AdminSettings() {
                 type="button"
                 id="connect-gmail-btn"
                 disabled={connectingGmail}
-                onClick={handleConnectGmail}
+                onClick={handleConnectWithPopup}
                 className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-sm font-medium transition-all shadow-sm flex items-center gap-2.5"
+                title="Connect using Firebase Auth Google Popup"
               >
                 {connectingGmail ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -1447,7 +1495,18 @@ export default function AdminSettings() {
                     <path fill="none" d="M0 0h48v48H0z"></path>
                   </svg>
                 )}
-                <span>{gmailStatus?.isValid ? "Reconnect / Switch Account" : "Connect with Google"}</span>
+                <span>{gmailStatus?.isValid ? "Reconnect Google (Popup)" : "Connect with Google"}</span>
+              </button>
+
+              <button
+                type="button"
+                id="connect-gsi-btn"
+                disabled={connectingGmail}
+                onClick={handleConnectWithGSI}
+                className="px-4 py-2.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 rounded-xl text-sm font-medium transition-colors flex items-center gap-2"
+                title="Connect using Google One-Tap / Identity Services"
+              >
+                <span>One-Tap (GSI)</span>
               </button>
 
               <button
@@ -1488,12 +1547,137 @@ export default function AdminSettings() {
 
               <button
                 type="button"
+                onClick={() => setShowBlockedHelp(!showBlockedHelp)}
+                className="px-3.5 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors ml-auto"
+              >
+                <HelpCircle className="w-4 h-4" />
+                <span>Why is Google Blocked?</span>
+                {showBlockedHelp ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setShowManualInput(!showManualInput)}
-                className="px-3 py-2 text-xs text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 font-medium ml-auto"
+                className="px-3 py-2 text-xs text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 font-medium"
               >
                 {showManualInput ? "Hide Manual Sync" : "Manual Token Sync"}
               </button>
             </div>
+
+            {/* Troubleshooting & Fix Guide for Google Blocked Error */}
+            {showBlockedHelp && (
+              <div className="p-5 rounded-2xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 space-y-4 text-xs">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-bold text-amber-900 dark:text-amber-300 text-sm">
+                      Why Google says "Access blocked: This app has not completed Google verification"
+                    </h4>
+                    <p className="text-amber-800/90 dark:text-amber-400/90 mt-1 leading-relaxed">
+                      Google classifies Gmail read access (<code className="font-mono text-[11px] bg-amber-100 dark:bg-amber-900/50 px-1 py-0.5 rounded">gmail.readonly</code>) as a <strong>Restricted Sensitive Scope</strong>. While your Google Cloud project is in development/testing mode, Google blocks anyone who is not added to your project's <strong>Test Users</strong> list or whose origin URL isn't whitelisted.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                  {/* Solution 1: Google Cloud Console */}
+                  <div className="p-4 rounded-xl bg-white dark:bg-zinc-900 border border-amber-200/70 dark:border-zinc-800 space-y-2.5">
+                    <div className="font-bold text-zinc-900 dark:text-white flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px]">1</span>
+                        Fix in Google Cloud Console
+                      </span>
+                      <a
+                        href="https://console.cloud.google.com/apis/credentials/consent?project=app-moviznow"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-blue-600 hover:text-blue-700 flex items-center gap-1 text-[11px] font-medium"
+                      >
+                        Open Console <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                    <ol className="list-decimal pl-4 space-y-1.5 text-zinc-600 dark:text-zinc-300">
+                      <li>
+                        Go to <strong>APIs & Services &gt; OAuth consent screen</strong>.
+                      </li>
+                      <li>
+                        Under <strong>Test users</strong>, click <strong>+ ADD USERS</strong>, type <code className="bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">asmatullah9327@gmail.com</code>, and click <strong>Save</strong>.
+                      </li>
+                      <li>
+                        In <strong>Credentials &gt; OAuth 2.0 Client IDs</strong>, edit your Web Client and add this current origin to <strong>Authorized JavaScript origins</strong>:
+                        <div className="mt-1 flex items-center gap-1.5">
+                          <code className="flex-1 bg-zinc-100 dark:bg-zinc-800 p-1.5 rounded font-mono text-[10px] truncate">
+                            {typeof window !== 'undefined' ? window.location.origin : ''}
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(typeof window !== 'undefined' ? window.location.origin : '', 'origin')}
+                            className="p-1.5 bg-zinc-200 dark:bg-zinc-700 hover:bg-zinc-300 rounded text-zinc-700 dark:text-zinc-200 transition-colors"
+                            title="Copy Origin"
+                          >
+                            {copiedLabel === 'origin' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                          </button>
+                        </div>
+                      </li>
+                      <li>
+                        Click <strong>Connect with Google</strong> again. Google will show an "Advanced &gt; Go to MovizNow" bypass screen!
+                      </li>
+                    </ol>
+                  </div>
+
+                  {/* Solution 2: Instant OAuth Playground Workaround */}
+                  <div className="p-4 rounded-xl bg-white dark:bg-zinc-900 border border-amber-200/70 dark:border-zinc-800 space-y-2.5">
+                    <div className="font-bold text-zinc-900 dark:text-white flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px]">2</span>
+                        Instant 30-Sec Playground Token
+                      </span>
+                      <a
+                        href="https://developers.google.com/oauthplayground"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-emerald-600 hover:text-emerald-700 flex items-center gap-1 text-[11px] font-medium"
+                      >
+                        OAuth Playground <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                    <p className="text-zinc-500">
+                      Generate an access token directly with your Google account without modifying Google Cloud settings:
+                    </p>
+                    <ol className="list-decimal pl-4 space-y-1.5 text-zinc-600 dark:text-zinc-300">
+                      <li>
+                        Open <strong>Google OAuth Playground</strong> link above.
+                      </li>
+                      <li>
+                        In Step 1, paste this scope into <em>Input your own scopes</em>:
+                        <div className="mt-1 flex items-center gap-1.5">
+                          <code className="flex-1 bg-zinc-100 dark:bg-zinc-800 p-1.5 rounded font-mono text-[10px] truncate">
+                            https://www.googleapis.com/auth/gmail.readonly
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard('https://www.googleapis.com/auth/gmail.readonly', 'scope')}
+                            className="p-1.5 bg-zinc-200 dark:bg-zinc-700 hover:bg-zinc-300 rounded text-zinc-700 dark:text-zinc-200 transition-colors"
+                            title="Copy Scope"
+                          >
+                            {copiedLabel === 'scope' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                          </button>
+                        </div>
+                      </li>
+                      <li>
+                        Click <strong>Authorize APIs</strong> &amp; select <code className="bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">asmatullah9327@gmail.com</code>.
+                      </li>
+                      <li>
+                        In Step 2, click <strong>Exchange authorization code for tokens</strong>.
+                      </li>
+                      <li>
+                        Copy the <code className="font-mono text-emerald-600 dark:text-emerald-400">Access token</code> (<span className="italic font-mono">ya29...</span>) and paste it into the <strong>Manual Token Sync</strong> box below!
+                      </li>
+                    </ol>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Manual Token Input (Fallback / Testing) */}
             {showManualInput && (
@@ -1503,7 +1687,7 @@ export default function AdminSettings() {
                   <span>Manual Google Access Token Sync</span>
                 </div>
                 <p className="text-xs text-zinc-500">
-                  If your browser blocks popup authentication, you can paste a valid Google OAuth access token below:
+                  If Google blocks the popup or you generated a token from OAuth Playground, paste the access token (<code className="font-mono">ya29...</code>) below:
                 </p>
                 <div className="flex items-center gap-2">
                   <input

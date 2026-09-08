@@ -1,7 +1,7 @@
 import React from 'react';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { Helmet } from 'react-helmet';
+import { Helmet } from 'react-helmet-async';
 import { 
   Film, 
   ShieldCheck, 

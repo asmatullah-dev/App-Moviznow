@@ -25,7 +25,7 @@ import {
   HelpCircle
 } from 'lucide-react';
 import { standardizePhone } from '../../contexts/AuthContext';
-import { Helmet } from 'react-helmet';
+import { Helmet } from 'react-helmet-async';
 import { Link, useNavigate } from 'react-router-dom';
 import { useContent } from '../../contexts/ContentContext';
 import { Content, Role } from '../../types';

@@ -324,6 +324,8 @@ const translations: Record<string, Record<Language, string>> = {
   'Online • Instant Support': { en: 'Online • Instant Support', 'ur-roman': 'Online • Fori Support', ur: 'آن لائن • فوری سپورٹ' },
   'Official Channel': { en: 'Official Channel', 'ur-roman': 'Official Channel', ur: 'آفیشل چینل' },
   'Join Official Channel': { en: 'Join Official Channel', 'ur-roman': 'Official Channel Join Karein', ur: 'آفیشل چینل میں شامل ہوں' },
+  'For Updates': { en: 'For Updates', 'ur-roman': 'For Updates', ur: 'اپڈیٹس کے لیے' },
+  'For Clips': { en: 'For Clips', 'ur-roman': 'For Clips', ur: 'کلپس کے لیے' },
   '< 3 Minutes': { en: '< 3 Minutes', 'ur-roman': '< 3 Minute', ur: '< 3 منٹ' },
   'Average response time': { en: 'Average response time', 'ur-roman': 'Average jawab ka waqt', ur: 'اوسط ردعمل کا وقت' },
   'Real Support Staff': { en: 'Real Support Staff', 'ur-roman': 'Asli Support Staff', ur: 'حقیقی سپورٹ عملہ' },

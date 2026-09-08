@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Link, useSearchParams, useNavigate, useLocation } from "react-router-dom";
-import { Helmet } from "react-helmet";
+import { Helmet } from "react-helmet-async";
 import { motion, AnimatePresence } from "framer-motion";
 import { clsx } from "clsx";
 import {
@@ -21,6 +21,7 @@ import {
   Sparkles,
   RefreshCw,
   FolderOpen,
+  Send,
 } from "lucide-react";
 
 import { AdBanner } from "../../components/AdBanner";
@@ -1409,7 +1410,7 @@ export default function Home({
             </button>
 
             {settings?.whatsappChannelLink && (
-              <div className="mt-2">
+              <div className="mt-2 flex flex-col items-center gap-2">
                 <a
                   href={settings.whatsappChannelLink}
                   target="_blank"
@@ -1418,6 +1419,27 @@ export default function Home({
                 >
                   <MessageCircle className="w-4 h-4" /> Join our WhatsApp Channel
                 </a>
+
+                <div className="flex items-center justify-center gap-2">
+                  <a
+                    href="https://whatsapp.com/channel/0029VbBU43bHFxOwOghfmD1I"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 text-xs font-semibold whitespace-nowrap transition-colors"
+                  >
+                    <Send className="w-3.5 h-3.5 shrink-0" />
+                    <span>{t("For Updates")}</span>
+                  </a>
+                  <a
+                    href="https://whatsapp.com/channel/0029Vb6m6uFEAKWA7Rzxjv0e"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/25 text-xs font-semibold whitespace-nowrap transition-colors"
+                  >
+                    <Film className="w-3.5 h-3.5 shrink-0" />
+                    <span>{t("For Clips")}</span>
+                  </a>
+                </div>
               </div>
             )}
           </div>
