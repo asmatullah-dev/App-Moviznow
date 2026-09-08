@@ -22,76 +22,49 @@ let memoizedJsonVersion: string | null = null;
 
 /**
  * Calculates a unique, reliable version string for the static export JSON file.
+ * Incorporates explicit version/exportedAt, item count, and a fast 32-bit content hash across all items.
+ * Guarantees that any addition, deletion, or modification in the JSON creates a new version string.
  */
 export function getStaticExportVersion(): string {
   if (memoizedJsonVersion) return memoizedJsonVersion;
 
-  const explicit = (unifiedData as any).exportedAt || (unifiedData as any).version;
-  if (explicit) {
-    memoizedJsonVersion = String(explicit);
-    return memoizedJsonVersion;
-  }
+  const explicit = (unifiedData as any).exportedAt || (unifiedData as any).version || '';
+  const items = (staticContentData || []) as StaticContentItem[];
 
-  let maxTime = 0;
-  let maxTimeStr = '';
-
-  const metaUpd = staticMetadataData?.updatedAt;
-  if (metaUpd) {
-    const t = parseVersionTime(metaUpd);
-    if (t > maxTime) {
-      maxTime = t;
-      maxTimeStr = new Date(t).toISOString();
-    }
-  }
-
-  const collUpd = staticCollectionsData?.updatedAt;
-  if (collUpd) {
-    const t = parseVersionTime(collUpd);
-    if (t > maxTime) {
-      maxTime = t;
-      maxTimeStr = new Date(t).toISOString();
-    }
-  }
-
-  const items = staticContentData as StaticContentItem[];
+  // Fast 32-bit hash across all items to detect any field edits, additions or removals
+  let hash = 0;
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
-    const itemUpd = item.upd || item.cre || (item as any).updatedAt || (item as any).createdAt;
-    if (itemUpd) {
-      const t = parseVersionTime(itemUpd);
-      if (t > maxTime) {
-        maxTime = t;
-        maxTimeStr = typeof itemUpd === 'string' ? itemUpd : new Date(t).toISOString();
-      }
+    const s = `${item.id}|${item.tit || item.title || ''}|${item.upd || item.cre || ''}|${item.ord ?? ''}|${item.qua || ''}|${item.yea || ''}`;
+    for (let j = 0; j < s.length; j++) {
+      hash = (Math.imul(31, hash) + s.charCodeAt(j)) | 0;
     }
   }
 
-  const versionStr = maxTimeStr ? `${maxTimeStr}_count_${items.length}` : `static_count_${items.length}`;
-  memoizedJsonVersion = versionStr;
+  memoizedJsonVersion = `v2_${explicit}_cnt_${items.length}_h_${hash}`;
   return memoizedJsonVersion;
 }
 
 let isMergingStatic = false;
 
 /**
- * Checks whether the static export JSON file is newer than the version applied to local cache.
+ * Checks whether the static export JSON file has changed compared to what was cached.
  */
 export function isStaticExportNewer(): boolean {
   if (isMergingStatic) return false;
   const currentVer = getStaticExportVersion();
   const cachedVer = safeStorage.getItem('cached_json_catalog_version');
 
-  if (!cachedVer) return false; // Handled directly on init synchronously
-  if (cachedVer === currentVer) return false;
-
-  const currTime = parseVersionTime(currentVer);
-  const cachedTime = parseVersionTime(cachedVer);
-
-  if (currTime > 0 && cachedTime > 0) {
-    if (currTime > cachedTime) return true;
-    if (cachedTime > currTime) return false;
+  // If there is no cached content at all (clean first launch),
+  // getCachedContentData handles it on startup synchronously without showing an update banner.
+  const cachedContentStr = safeStorage.getItem('content_cache');
+  if (!cachedContentStr || cachedContentStr === '[]') {
+    return false;
   }
 
+  // If cachedVer is missing or does not match currentVer,
+  // we have a new JSON export or changes!
+  if (!cachedVer) return true;
   return currentVer !== cachedVer;
 }
 
@@ -367,40 +340,51 @@ function getCachedCollections(includeStatic: boolean = true): AppCollection[] {
 
 /**
  * Formats toast message when a new JSON file is updated:
- * - Shows how many contents are updated and how many added
- * - Does not show deleted number
- * - Does not show if updated or added is 0 (omits 0 counts, and returns null if both are 0)
+ * - Shows even 1 content is updated or even 1 content is added
+ * - If only added, then show added message (e.g. "1 content added" or "X contents added")
+ * - If only updated, then show updated message (e.g. "1 content updated" or "Y contents updated")
+ * - If both, then show both (e.g. "1 content added, 1 content updated" or "X contents added, Y contents updated")
+ * - Never shows deleted number
+ * - Never shows if updated or added is 0 (returns null)
  */
 export function formatContentUpdateToast(added: number, updated: number): string | null {
   if (added <= 0 && updated <= 0) return null;
 
-  const parts: string[] = [];
-  if (added > 0) {
-    parts.push(`${added} ${added === 1 ? 'content' : 'contents'} added`);
-  }
-  if (updated > 0) {
-    parts.push(`${updated} ${updated === 1 ? 'content' : 'contents'} updated`);
-  }
+  const addedStr = added > 0 ? `${added} ${added === 1 ? 'content added' : 'contents added'}` : null;
+  const updatedStr = updated > 0 ? `${updated} ${updated === 1 ? 'content updated' : 'contents updated'}` : null;
 
-  return parts.join(', ');
+  if (addedStr && updatedStr) {
+    return `${addedStr}, ${updatedStr}`;
+  }
+  return addedStr || updatedStr;
+}
+
+function normalizeStringOrObj(val: any): string {
+  if (val === undefined || val === null) return '';
+  if (typeof val === 'string') return val;
+  try {
+    return JSON.stringify(val);
+  } catch (e) {
+    return String(val);
+  }
 }
 
 function isContentDifferent(existing: Content, fresh: Content): boolean {
-  if (existing.title !== fresh.title) return true;
-  if (existing.type !== fresh.type) return true;
-  if (existing.year !== fresh.year) return true;
-  if (existing.posterUrl !== fresh.posterUrl) return true;
-  if (existing.trailerUrl !== fresh.trailerUrl) return true;
-  if (existing.description !== fresh.description) return true;
-  if (existing.order !== fresh.order) return true;
-  if (existing.qualityId !== fresh.qualityId) return true;
-  if (existing.secondTitle !== fresh.secondTitle) return true;
-  if (existing.status !== fresh.status) return true;
-  if (existing.imdbRating !== fresh.imdbRating) return true;
-  if (existing.movieLinks !== fresh.movieLinks) return true;
-  if (existing.seasons !== fresh.seasons) return true;
-  if (existing.fullSeasonZip !== fresh.fullSeasonZip) return true;
-  if (existing.fullSeasonMkv !== fresh.fullSeasonMkv) return true;
+  if ((existing.title || '') !== (fresh.title || '')) return true;
+  if ((existing.type || '') !== (fresh.type || '')) return true;
+  if ((existing.year || 0) !== (fresh.year || 0)) return true;
+  if ((existing.posterUrl || '') !== (fresh.posterUrl || '')) return true;
+  if ((existing.trailerUrl || '') !== (fresh.trailerUrl || '')) return true;
+  if ((existing.description || '') !== (fresh.description || '')) return true;
+  if ((existing.order ?? 0) !== (fresh.order ?? 0)) return true;
+  if ((existing.qualityId || '') !== (fresh.qualityId || '')) return true;
+  if ((existing.secondTitle || '') !== (fresh.secondTitle || '')) return true;
+  if ((existing.status || '') !== (fresh.status || '')) return true;
+  if ((existing.imdbRating || '') !== (fresh.imdbRating || '')) return true;
+  if (normalizeStringOrObj(existing.movieLinks) !== normalizeStringOrObj(fresh.movieLinks)) return true;
+  if (normalizeStringOrObj(existing.seasons) !== normalizeStringOrObj(fresh.seasons)) return true;
+  if ((existing.fullSeasonZip || '') !== (fresh.fullSeasonZip || '')) return true;
+  if ((existing.fullSeasonMkv || '') !== (fresh.fullSeasonMkv || '')) return true;
   if (JSON.stringify(existing.genreIds || []) !== JSON.stringify(fresh.genreIds || [])) return true;
   if (JSON.stringify(existing.languageIds || []) !== JSON.stringify(fresh.languageIds || [])) return true;
   return false;

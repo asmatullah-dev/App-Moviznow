@@ -65,7 +65,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         } catch (e) {
           console.error("Error safely merging newer JSON export:", e);
         }
-      }, 500);
+      }, 300);
     }
     
     setLoading(false);

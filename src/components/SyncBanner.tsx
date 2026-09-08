@@ -53,7 +53,7 @@ export function SyncBanner() {
           setUpdatedCount(undefined);
           setCustomMessage(undefined);
           setIsInitialLoad(false);
-        }, 3500);
+        }, 4000);
       }
     };
 
