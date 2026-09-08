@@ -14,6 +14,133 @@ export function isAdRestrictedRoute(pathname?: string): boolean {
 }
 
 /**
+ * Permanently removes all popunder scripts and social ads (Social Bar, push overlays, click-jackers)
+ * from the DOM while preserving banner ads (AdBanner and Google AdSense).
+ */
+export function purgePopunderAndSocialAds(): void {
+  if (typeof document === 'undefined') return;
+
+  const popunderAndSocialScriptPatterns = [
+    '99e78b0792c97e620e43154c137cd1f3', // Popunder script
+    'f0270bbaca005a7be1c664c3c0ae0386', // Social bar script
+    'nap5k.com',
+    'n6wxm.com',
+    'workdeadlinededicate.com',
+    'profitableratecpmnetwork',
+    'monetag',
+  ];
+
+  try {
+    const scripts = document.querySelectorAll('script');
+    scripts.forEach((s) => {
+      const src = s.src || '';
+      if (!src) {
+        const content = s.textContent || '';
+        if (
+          content.includes('f0270bbaca005a7be1c664c3c0ae0386') ||
+          content.includes('99e78b0792c97e620e43154c137cd1f3') ||
+          content.includes('monetag')
+        ) {
+          s.remove();
+        }
+        return;
+      }
+
+      if (popunderAndSocialScriptPatterns.some((pattern) => src.includes(pattern))) {
+        s.remove();
+      }
+    });
+
+    // Remove scripts with popunder or social ad attributes
+    document.querySelectorAll('script[data-popunder-script="true"]').forEach((el) => el.remove());
+    document.querySelectorAll('script[data-authorized-ad-script="true"]').forEach((el) => {
+      const src = el.getAttribute('src') || '';
+      if (src.includes('99e78b') || src.includes('f0270b') || src.includes('monetag')) {
+        el.remove();
+      }
+    });
+  } catch (e) {}
+
+  // Clear global variables used by popunders and social ads
+  try {
+    const globalsToClear = [
+      '_pop', '_pop_config', '_pop_script', '__p_scr', '__p_config',
+      '_sb', '_socialBar', '_social', '_pl', '_pst'
+    ];
+    globalsToClear.forEach((g) => {
+      if ((window as any)[g]) {
+        try {
+          delete (window as any)[g];
+        } catch (err) {
+          (window as any)[g] = undefined;
+        }
+      }
+    });
+  } catch (e) {}
+
+  // Remove injected social bar and popunder overlay elements outside #root
+  try {
+    const selectors = [
+      'div[class*="monetag"]',
+      'div[id*="monetag"]',
+      'div[id^="popunder-"]',
+      'div[id*="social"]',
+      'div[class*="social"]',
+      'div[id*="pro-"]',
+      'div[class*="pro-"]',
+      'div[id*="pro_"]',
+      'div[class*="pro_"]',
+      'div[id*="adsterra"]',
+      'div[class*="adsterra"]',
+      'iframe[src*="f0270bbaca005a7be1c664c3c0ae0386"]'
+    ];
+
+    selectors.forEach((sel) => {
+      document.querySelectorAll(sel).forEach((el) => {
+        const htmlEl = el as HTMLElement;
+        if (!htmlEl.closest('#root') && htmlEl.id !== 'omdb-modal-root' && !htmlEl.hasAttribute('data-app-portal')) {
+          htmlEl.remove();
+        }
+      });
+    });
+
+    // Remove fixed or absolute click-catcher overlays outside #root
+    const allOutsideElements = document.querySelectorAll('body > *:not(#root):not(script):not(style):not(#omdb-modal-root)');
+    allOutsideElements.forEach((el) => {
+      const htmlEl = el as HTMLElement;
+      if (htmlEl.hasAttribute('data-app-portal') || htmlEl.id === 'omdb-modal-root') return;
+      
+      const id = (htmlEl.id || '').toLowerCase();
+      const className = (typeof htmlEl.className === 'string' ? htmlEl.className : '').toLowerCase();
+      const isSocialOrPopunder = id.includes('social') || className.includes('social') || id.includes('pro-') || className.includes('pro-') || id.includes('adsterra') || className.includes('adsterra') || id.includes('popunder');
+
+      if (isSocialOrPopunder) {
+        try { htmlEl.remove(); } catch (err) {}
+        return;
+      }
+      
+      try {
+        const style = window.getComputedStyle(htmlEl);
+        const isFixed = style.position === 'fixed' || style.position === 'absolute';
+        const zIndex = parseInt(style.zIndex, 10);
+        const opacity = parseFloat(style.opacity);
+
+        if (isFixed && (zIndex > 50 || zIndex === 2147483647 || isNaN(zIndex))) {
+          const width = htmlEl.offsetWidth || window.innerWidth;
+          const height = htmlEl.offsetHeight || window.innerHeight;
+          const screenWidth = window.innerWidth;
+          const screenHeight = window.innerHeight;
+          
+          if ((width > screenWidth * 0.3 && height > screenHeight * 0.3) || (opacity < 0.1 && width > 100 && height > 100)) {
+            htmlEl.remove();
+          }
+        }
+      } catch (err) {}
+    });
+  } catch (e) {}
+}
+
+/**
  * Remove all injected ad scripts and network elements from the DOM.
  * @param purgeSocialBar Defaults to true. When true, forcefully removes Social Bar scripts and widgets.
  */

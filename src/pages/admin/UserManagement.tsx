@@ -1602,8 +1602,8 @@ export default function UserManagement() {
                     </optgroup>
                     <optgroup label="Change Role" className="text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900">
                       <option value="role_user">Set Role: User</option>
-                      <option value="role_basic">Set Role: Basic (With Ads)</option>
-                      <option value="role_vip">Set Role: VIP (Ad-Free)</option>
+                      <option value="role_basic">Set Role: Basic</option>
+                      <option value="role_vip">Set Role: VIP</option>
                       <option value="role_trial">Set Role: Trial</option>
                       <option value="role_selected_content">Set Role: Selected Content</option>
                       {(profile?.role === 'admin' || profile?.role === 'owner') && (
@@ -1664,8 +1664,8 @@ export default function UserManagement() {
               >
                 <option value="all">All Roles</option>
                 <option value="user">User</option>
-                <option value="basic">Basic User (With Ads)</option>
-                <option value="vip">VIP User (Ad-Free)</option>
+                <option value="basic">Basic</option>
+                <option value="vip">VIP</option>
                 <option value="trial">Trial</option>
                 <option value="selected_content">Selected Content</option>
                 {(profile?.role === 'admin' || profile?.role === 'owner') && (
@@ -1798,8 +1798,8 @@ export default function UserManagement() {
                           user.role === 'trial' ? 'bg-yellow-500/10 text-yellow-500' :
                           'bg-zinc-500/10 text-zinc-500'}`}
                       >
-                        {user.role === 'vip' ? 'VIP User' :
-                         user.role === 'basic' ? 'Basic User' :
+                        {user.role === 'vip' ? 'VIP' :
+                         user.role === 'basic' ? 'Basic' :
                          user.role === 'selected_content' ? 'Selected Content' : 
                          user.role === 'content_manager' ? 'Content Manager' :
                          user.role === 'user_manager' ? 'User Manager' :
@@ -1979,8 +1979,8 @@ export default function UserManagement() {
                         className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500 disabled:opacity-50"
                       >
                         <option value="user">User (Pending/New)</option>
-                        <option value="basic">Basic User (With Ads)</option>
-                        <option value="vip">VIP User (Ad-Free)</option>
+                        <option value="basic">Basic</option>
+                        <option value="vip">VIP</option>
                         <option value="trial">Trial</option>
                         <option value="selected_content">Selected Content</option>
                         {(profile?.role === 'admin' || profile?.role === 'owner') && (
@@ -2119,8 +2119,8 @@ export default function UserManagement() {
                       <div>
                         <div className="text-zinc-500 text-[10px] uppercase font-bold mb-0.5">Role</div>
                         <div className="font-bold text-emerald-400 text-sm">
-                          {selectedUser.role === 'vip' ? 'VIP User' :
-                           selectedUser.role === 'basic' ? 'Basic User' :
+                          {selectedUser.role === 'vip' ? 'VIP' :
+                           selectedUser.role === 'basic' ? 'Basic' :
                            selectedUser.role === 'selected_content' ? 'Selected Content' : 
                            selectedUser.role === 'content_manager' ? 'Content Manager' :
                            selectedUser.role === 'user_manager' ? 'User Manager' :
@@ -3062,8 +3062,8 @@ export default function UserManagement() {
                         className="w-full p-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent"
                       >
                         <option value="user">User (Pending/New)</option>
-                        <option value="basic">Basic User (With Ads)</option>
-                        <option value="vip">VIP User (Ad-Free)</option>
+                        <option value="basic">Basic</option>
+                        <option value="vip">VIP</option>
                         <option value="trial">Trial</option>
                         <option value="selected_content">Selected Content</option>
                         {(profile?.role === 'admin' || profile?.role === 'owner') && (

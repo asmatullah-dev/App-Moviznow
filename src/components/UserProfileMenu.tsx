@@ -133,8 +133,8 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
   };
 
   const getRoleDisplayLabel = (r: string) => {
-    if (r === 'vip') return 'VIP User';
-    if (r === 'basic') return 'Basic User';
+    if (r === 'vip') return 'VIP';
+    if (r === 'basic') return 'Basic';
     if (r === 'user') return 'User';
     return r.replace('_', ' ');
   };

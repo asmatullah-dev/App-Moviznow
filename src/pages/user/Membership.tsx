@@ -37,21 +37,21 @@ import { PageTransition } from "../../components/PageTransition";
 import { AdBanner } from "../../components/AdBanner";
 
 const VIP_PLANS = [
-  { id: '1m', name: '1 Month (VIP Ad-Free)', months: 1, price: 300, perMonth: 300, planRole: 'vip' as Role, headerBadge: '', saveBadge: '', popular: false, icon: Zap },
-  { id: '3m', name: '3 Months (VIP Ad-Free)', months: 3, price: 750, perMonth: 250, planRole: 'vip' as Role, headerBadge: '', saveBadge: 'Save 17%', popular: false, icon: Sparkles },
-  { id: '6m', name: '6 Months (VIP Ad-Free)', months: 6, price: 1400, perMonth: 233, planRole: 'vip' as Role, headerBadge: '', saveBadge: 'Save 22%', popular: false, icon: ShieldCheck },
-  { id: '1y', name: '1 Year (VIP Ad-Free)', months: 12, price: 2600, perMonth: 216, planRole: 'vip' as Role, headerBadge: '🔥 Most Popular', saveBadge: 'Save 28%', popular: true, icon: Crown },
-  { id: '2y', name: '2 Years (VIP Ad-Free)', months: 24, price: 4000, perMonth: 166, planRole: 'vip' as Role, headerBadge: '👑 Mega VIP', saveBadge: 'Save 44%', popular: false, icon: Gem },
+  { id: '1m', name: '1 Month VIP', months: 1, price: 300, perMonth: 300, planRole: 'vip' as Role, headerBadge: '', saveBadge: '', popular: false, icon: Zap },
+  { id: '3m', name: '3 Months VIP', months: 3, price: 750, perMonth: 250, planRole: 'vip' as Role, headerBadge: '', saveBadge: 'Save 17%', popular: false, icon: Sparkles },
+  { id: '6m', name: '6 Months VIP', months: 6, price: 1400, perMonth: 233, planRole: 'vip' as Role, headerBadge: '', saveBadge: 'Save 22%', popular: false, icon: ShieldCheck },
+  { id: '1y', name: '1 Year VIP', months: 12, price: 2600, perMonth: 216, planRole: 'vip' as Role, headerBadge: '🔥 Most Popular', saveBadge: 'Save 28%', popular: true, icon: Crown },
+  { id: '2y', name: '2 Years VIP', months: 24, price: 4000, perMonth: 166, planRole: 'vip' as Role, headerBadge: '👑 Mega VIP', saveBadge: 'Save 44%', popular: false, icon: Gem },
 ];
 
 const BASIC_PLANS = [
-  { id: 'basic_1m', name: '1 Month (Basic With Ads)', months: 1, price: 50, perMonth: 50, planRole: 'basic' as Role, headerBadge: '📺 RS 50/MO', saveBadge: 'With Ads', popular: true, icon: Zap },
-  { id: 'basic_3m', name: '3 Months (Basic With Ads)', months: 3, price: 140, perMonth: 46, planRole: 'basic' as Role, headerBadge: '', saveBadge: 'Save 7%', popular: false, icon: Sparkles },
-  { id: 'basic_6m', name: '6 Months (Basic With Ads)', months: 6, price: 260, perMonth: 43, planRole: 'basic' as Role, headerBadge: '', saveBadge: 'Save 13%', popular: false, icon: ShieldCheck },
-  { id: 'basic_1y', name: '1 Year (Basic With Ads)', months: 12, price: 500, perMonth: 41, planRole: 'basic' as Role, headerBadge: '🔥 BEST VALUE', saveBadge: 'Save 17%', popular: false, icon: Crown },
+  { id: 'basic_1m', name: '1 Month Basic', months: 1, price: 100, perMonth: 100, planRole: 'basic' as Role, headerBadge: '📺 RS 100/MO', saveBadge: '', popular: true, icon: Zap },
+  { id: 'basic_3m', name: '3 Months Basic', months: 3, price: 280, perMonth: 93, planRole: 'basic' as Role, headerBadge: '', saveBadge: 'Save 7%', popular: false, icon: Sparkles },
+  { id: 'basic_6m', name: '6 Months Basic', months: 6, price: 520, perMonth: 86, planRole: 'basic' as Role, headerBadge: '', saveBadge: 'Save 13%', popular: false, icon: ShieldCheck },
+  { id: 'basic_1y', name: '1 Year Basic', months: 12, price: 1000, perMonth: 83, planRole: 'basic' as Role, headerBadge: '🔥 BEST VALUE', saveBadge: 'Save 17%', popular: false, icon: Crown },
 ];
 
-const ALL_MEMBERSHIP_PLANS逗 = [...VIP_PLANS, ...BASIC_PLANS];
+const ALL_MEMBERSHIP_PLANS = [...VIP_PLANS, ...BASIC_PLANS];
 
 export default function Membership() {
   const { settings } = useSettings();
@@ -180,7 +180,7 @@ export default function Membership() {
                     }`}
                   >
                     <Crown className="w-4 h-4" />
-                    <span>VIP User (Ad-Free)</span>
+                    <span>VIP</span>
                   </button>
                   <button
                     type="button"
@@ -197,7 +197,7 @@ export default function Membership() {
                     }`}
                   >
                     <Zap className="w-4 h-4" />
-                    <span>Basic User (Rs 50/mo)</span>
+                    <span>Basic</span>
                   </button>
                 </div>
 
@@ -317,32 +317,32 @@ export default function Membership() {
                     <thead>
                       <tr className="bg-zinc-950/90 border-b border-zinc-800">
                         <th className="p-3 sm:p-3.5 font-bold text-zinc-400">{t('Features')}</th>
-                        <th className="p-3 sm:p-3.5 font-black text-sky-400 bg-sky-950/30 text-center">
+                        <th className="p-3 sm:p-3.5 font-black text-sky-400 bg-sky-950/30 text-center w-36 sm:w-44">
                           <div className="flex items-center justify-center gap-1">
                             <Zap className="w-3.5 h-3.5" />
-                            <span>Basic User</span>
+                            <span>Basic</span>
                           </div>
-                          <span className="text-[10px] font-normal text-zinc-400 block mt-0.5">Rs. 50/mo</span>
+                          <span className="text-[10px] font-normal text-zinc-400 block mt-0.5">Rs. 100/mo</span>
                         </th>
-                        <th className="p-3 sm:p-3.5 font-black text-amber-400 bg-amber-950/30 text-center">
+                        <th className="p-3 sm:p-3.5 font-black text-amber-400 bg-amber-950/30 text-center w-36 sm:w-44">
                           <div className="flex items-center justify-center gap-1">
                             <Crown className="w-3.5 h-3.5" />
-                            <span>VIP User</span>
+                            <span>VIP</span>
                           </div>
-                          <span className="text-[10px] font-normal text-amber-300/80 block mt-0.5">Ad-Free</span>
+                          <span className="text-[10px] font-normal text-amber-300/80 block mt-0.5">From Rs. 166/mo</span>
                         </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-800/60 font-medium">
                       <tr className="hover:bg-zinc-800/30 transition-colors">
-                        <td className="p-3 sm:p-3.5 text-zinc-300 font-bold">{t('Ads Experience')}</td>
+                        <td className="p-3 sm:p-3.5 text-zinc-300 font-bold">{t('Ads')}</td>
                         <td className="p-3 sm:p-3.5 text-center text-sky-300 bg-sky-950/15 font-bold">
-                          {t('With Occasional Ads')}
-                        </td>
-                        <td className="p-3 sm:p-3.5 text-center text-emerald-400 bg-amber-950/15 font-black flex-1">
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[11px]">
-                            <Check className="w-3 h-3 text-emerald-400" /> 100% Ad-Free
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-sky-500/20 text-sky-300 text-[11px] font-bold border border-sky-500/30">
+                            {t('Has some banners')}
                           </span>
+                        </td>
+                        <td className="p-3 sm:p-3.5 text-center bg-amber-950/15 font-black">
+                          <X className="w-4 h-4 text-emerald-400 mx-auto" />
                         </td>
                       </tr>
                       <tr className="hover:bg-zinc-800/30 transition-colors">
@@ -364,6 +364,15 @@ export default function Membership() {
                         </td>
                       </tr>
                       <tr className="hover:bg-zinc-800/30 transition-colors">
+                        <td className="p-3 sm:p-3.5 text-zinc-300">{t('Instant AI Auto-Approval')}</td>
+                        <td className="p-3 sm:p-3.5 text-center text-emerald-400 bg-sky-950/15">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 mx-auto" />
+                        </td>
+                        <td className="p-3 sm:p-3.5 text-center text-emerald-400 bg-amber-950/15">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 mx-auto" />
+                        </td>
+                      </tr>
+                      <tr className="hover:bg-zinc-800/30 transition-colors">
                         <td className="p-3 sm:p-3.5 text-zinc-300 font-bold">{t('Free Demanding')}</td>
                         <td className="p-3 sm:p-3.5 text-center text-zinc-500 bg-sky-950/15">
                           <X className="w-4 h-4 text-zinc-500 mx-auto" />
@@ -372,15 +381,6 @@ export default function Membership() {
                           <span className="inline-flex items-center gap-1 text-[11px] text-amber-300 font-bold">
                             <Crown className="w-3 h-3 text-amber-400" /> {t('Free Demanding')}
                           </span>
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-zinc-800/30 transition-colors">
-                        <td className="p-3 sm:p-3.5 text-zinc-300">{t('Instant AI Auto-Approval')}</td>
-                        <td className="p-3 sm:p-3.5 text-center text-emerald-400 bg-sky-950/15">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-400 mx-auto" />
-                        </td>
-                        <td className="p-3 sm:p-3.5 text-center text-emerald-400 bg-amber-950/15">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-400 mx-auto" />
                         </td>
                       </tr>
                       <tr className="hover:bg-zinc-800/30 transition-colors">
@@ -407,27 +407,27 @@ export default function Membership() {
                 <div className="p-4 rounded-2xl bg-zinc-950/70 border border-zinc-800/80 flex items-start gap-3">
                   <Sparkles className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
                   <p className="text-xs text-zinc-300 leading-relaxed font-medium">
-                    <span className="font-bold text-white">{t('Pro-Tip:')}</span> {t('If you want completely ad-free watching with free demanding, choose ')}
-                    <span className="text-amber-400 font-bold">{t('VIP User')}</span>. {t('If you are on a budget and do not mind occasional ads, select ')}
-                    <span className="text-sky-400 font-bold">{t('Basic User (Rs 50/mo)')}</span>.
+                    <span className="font-bold text-white">{t('Pro-Tip:')}</span> {t('Choose ')}
+                    <span className="text-amber-400 font-bold">{t('VIP')}</span> {t('for ad-free watching and free demanding, or select ')}
+                    <span className="text-sky-400 font-bold">{t('Basic')}</span> {t('for budget streaming.')}
                   </p>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Basic User Plans (With Ads) - FIRST SECTION */}
+          {/* Basic Plans - FIRST SECTION */}
           <div className="space-y-6">
             <div className="text-center space-y-2 max-w-2xl mx-auto">
               <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider bg-sky-500/10 border border-sky-500/30 text-sky-400 shadow-sm">
                 <Zap className="w-3.5 h-3.5 fill-current" />
-                <span>{t("Basic User (With Ads)")}</span>
+                <span>{t("Basic Plans")}</span>
               </div>
               <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
-                {t("Basic User Plans")}
+                {t("Basic Plans")}
               </h2>
               <p className="text-xs sm:text-sm text-zinc-300">
-                {t("Full access to our entire catalog of HD movies and web series with occasional ads at super budget-friendly prices.")}
+                {t("Full access to our entire catalog of HD movies and web series at super budget-friendly prices.")}
               </p>
             </div>
 
@@ -442,17 +442,16 @@ export default function Membership() {
                     <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30">
                       {t("Entry Level")}
                     </span>
-                    <span className="text-[10px] font-bold text-zinc-400">{t("With Ads")}</span>
                   </div>
-                  <h3 className="text-xl font-extrabold text-white mb-1">{t("1 Month")}</h3>
-                  <div className="text-3xl font-black text-sky-400 mb-1">{t("PKR 50")}</div>
-                  <p className="text-zinc-500 mb-4 text-xs font-bold">{t("≈ PKR 50/month")}</p>
+                  <h3 className="text-xl font-extrabold text-white mb-1">{t("1 Month Basic")}</h3>
+                  <div className="text-3xl font-black text-sky-400 mb-1">{t("PKR 100")}</div>
+                  <p className="text-zinc-500 mb-4 text-xs font-bold">{t("≈ PKR 100/month")}</p>
                   <p className="text-xs font-bold text-zinc-400 mb-5 min-h-[32px]">{t("Monthly starter plan")}</p>
                   
                   <ul className="space-y-3 mb-6 text-xs text-zinc-300">
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("All movies & web series")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("Full HD 1080p quality")}</span></li>
-                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("Supported by ads")}</span></li>
+                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("Instant AI Auto-Approval")}</span></li>
                   </ul>
                 </div>
 
@@ -480,19 +479,18 @@ export default function Membership() {
                     <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30">
                       {t("Quarterly")}
                     </span>
-                    <span className="text-[10px] font-bold text-zinc-400">{t("With Ads")}</span>
                   </div>
-                  <h3 className="text-xl font-extrabold text-white mb-1">{t("3 Months")}</h3>
-                  <div className="text-3xl font-black text-sky-400 mb-1">{t("PKR 140")}</div>
-                  <p className="text-zinc-500 mb-4 text-xs font-bold">{t("≈ PKR 46/month")}</p>
+                  <h3 className="text-xl font-extrabold text-white mb-1">{t("3 Months Basic")}</h3>
+                  <div className="text-3xl font-black text-sky-400 mb-1">{t("PKR 280")}</div>
+                  <p className="text-zinc-500 mb-4 text-xs font-bold">{t("≈ PKR 93/month")}</p>
                   <p className="text-xs font-bold text-zinc-300 mb-5 min-h-[32px]">
-                    <span className="line-through text-zinc-500">{t("PKR 150")}</span> <span className="text-sky-400 font-bold">{t("Save PKR 10")}</span>
+                    <span className="line-through text-zinc-500">{t("PKR 300")}</span> <span className="text-sky-400 font-bold">{t("Save PKR 20")}</span>
                   </p>
                   
                   <ul className="space-y-3 mb-6 text-xs text-zinc-300">
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("All movies & web series")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("Full HD 1080p quality")}</span></li>
-                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("Supported by ads")}</span></li>
+                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("Instant AI Auto-Approval")}</span></li>
                   </ul>
                 </div>
 
@@ -520,19 +518,18 @@ export default function Membership() {
                     <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30">
                       {t("Semi-Annual")}
                     </span>
-                    <span className="text-[10px] font-bold text-zinc-400">{t("With Ads")}</span>
                   </div>
-                  <h3 className="text-xl font-extrabold text-white mb-1">{t("6 Months")}</h3>
-                  <div className="text-3xl font-black text-sky-400 mb-1">{t("PKR 260")}</div>
-                  <p className="text-zinc-500 mb-4 text-xs font-bold">{t("≈ PKR 43/month")}</p>
+                  <h3 className="text-xl font-extrabold text-white mb-1">{t("6 Months Basic")}</h3>
+                  <div className="text-3xl font-black text-sky-400 mb-1">{t("PKR 520")}</div>
+                  <p className="text-zinc-500 mb-4 text-xs font-bold">{t("≈ PKR 86/month")}</p>
                   <p className="text-xs font-bold text-zinc-300 mb-5 min-h-[32px]">
-                    <span className="line-through text-zinc-500">{t("PKR 300")}</span> <span className="text-sky-400 font-bold">{t("Save PKR 40")}</span>
+                    <span className="line-through text-zinc-500">{t("PKR 600")}</span> <span className="text-sky-400 font-bold">{t("Save PKR 80")}</span>
                   </p>
                   
                   <ul className="space-y-3 mb-6 text-xs text-zinc-300">
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("All movies & web series")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("Full HD 1080p quality")}</span></li>
-                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("Supported by ads")}</span></li>
+                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("Instant AI Auto-Approval")}</span></li>
                   </ul>
                 </div>
 
@@ -560,22 +557,21 @@ export default function Membership() {
                     <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30">
                       {t("Annual Pass")}
                     </span>
-                    <span className="text-[10px] font-bold text-zinc-400">{t("With Ads")}</span>
                   </div>
                   <h3 className="text-xl font-black text-white mb-1 flex items-center gap-1.5">
                     <span>{t("1 Year Basic")}</span>
                     <Zap className="w-4 h-4 text-sky-400 fill-current" />
                   </h3>
-                  <div className="text-3xl font-black text-sky-400 mb-1">{t("PKR 500")}</div>
-                  <p className="text-zinc-400 mb-4 text-xs font-bold">{t("≈ PKR 41/month")}</p>
+                  <div className="text-3xl font-black text-sky-400 mb-1">{t("PKR 1000")}</div>
+                  <p className="text-zinc-400 mb-4 text-xs font-bold">{t("≈ PKR 83/month")}</p>
                   <p className="text-xs font-bold text-zinc-300 mb-5 min-h-[32px]">
-                    <span className="line-through text-zinc-500">{t("PKR 600")}</span> <span className="text-sky-300 font-bold bg-sky-500/20 px-2 py-0.5 rounded border border-sky-500/30">{t("Save PKR 100")}</span>
+                    <span className="line-through text-zinc-500">{t("PKR 1200")}</span> <span className="text-sky-300 font-bold bg-sky-500/20 px-2 py-0.5 rounded border border-sky-500/30">{t("Save PKR 200")}</span>
                   </p>
                   
                   <ul className="space-y-3 mb-6 text-xs text-zinc-200 font-medium">
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("All movies & web series")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("Full HD 1080p quality")}</span></li>
-                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("Supported by ads")}</span></li>
+                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-sky-400 shrink-0" /> <span>{t("Instant AI Auto-Approval")}</span></li>
                   </ul>
                 </div>
 
