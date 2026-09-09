@@ -47,6 +47,12 @@ export function normalizeUrl(input: string) {
   let trimmed = input.trim();
   if (!trimmed) return "";
 
+  // Normalize accidental spaces inside URLs around query parameters (e.g. "search.php ?search=Hindi&cat=All")
+  trimmed = trimmed
+    .replace(/(https?:\/\/[^\s"'?#]+)\s+(\?[^\s"']+)/gi, '$1$2')
+    .replace(/([?&][^=&\s]+)\s*=\s*/g, '$1=')
+    .replace(/([?&][^&\s]+)\s+&/g, '$1&');
+
   // Basic protocol check
   if (!/^https?:\/\//i.test(trimmed)) {
     trimmed = `https://${trimmed}`;
@@ -138,9 +144,16 @@ export function normalizeUrl(input: string) {
 }
 
 export function splitLinks(text: string) {
+  if (!text) return [];
+  // Normalize accidental spaces inside URLs around query parameters (e.g. "search.php ?search=Hindi&cat=All")
+  const sanitizedText = text
+    .replace(/(https?:\/\/[^\s"'?#]+)\s+(\?[^\s"']+)/gi, '$1$2')
+    .replace(/([?&][^=&\s]+)\s*=\s*/g, '$1=')
+    .replace(/([?&][^&\s]+)\s+&/g, '$1&');
+
   // Balanced parentheses are common in URLs (especially movie titles on these sites)
   // We'll use a more permissive regex but still try to avoid trailing punctuation common in prose
-  const matches = text.match(/https?:\/\/[^\s"']+/g) || [];
+  const matches = sanitizedText.match(/https?:\/\/[^\s"']+/g) || [];
   return [...new Set(matches.map((s) => {
     let clean = s.trim();
     // Remove common trailing punctuation that's unlikely to be part of the URL itself

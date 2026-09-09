@@ -12,7 +12,7 @@ export const AdSenseScriptManager: React.FC = () => {
   useEffect(() => {
     const isLogin = isAdRestrictedRoute(location.pathname);
     const isExempt = isUserExemptFromAds(profile);
-    const provider = settings?.adProvider || 'both';
+    const provider = settings?.adProvider || 'google_adsense';
     const client = settings?.adSenseClientId || 'ca-pub-3128773545517669';
 
     const scriptSelector = 'script[src*="adsbygoogle.js"]';

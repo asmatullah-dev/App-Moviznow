@@ -860,21 +860,19 @@ export default function AdminSettings() {
             <div className="space-y-2">
               <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Ad Monetization Provider</label>
               <select
-                value={settings.adProvider || 'both'}
+                value={settings.adProvider || 'google_adsense'}
                 onChange={(e) => setSettings({ ...settings, adProvider: e.target.value as any })}
                 className="w-full px-4 py-2.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none cursor-pointer text-sm"
               >
-                <option value="both">Enable Both (AdSense Banners & Full Video Interstitial Ads)</option>
-                <option value="google_adsense">Google AdSense Banners Only</option>
-                <option value="interstitial_only">Interactive Video Interstitial Ads Only</option>
+                <option value="google_adsense">Google AdSense Only (Recommended)</option>
                 <option value="disabled">Disable All Advertising (100% Ad-Free Platform)</option>
               </select>
               <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                Configure your display & video networks. Ads are shown exclusively to <strong>Basic Users</strong>, <strong>Trial Users</strong>, and unauthenticated guests. VIP users remain 100% ad-free.
+                Monetization is configured exclusively with <strong>Google AdSense</strong>. All third-party banner networks, interstitial scripts, and popunders have been completely removed. VIP users remain 100% ad-free.
               </p>
             </div>
 
-            {((settings.adProvider || 'both') === 'google_adsense' || (settings.adProvider || 'both') === 'both') && (
+            {(settings.adProvider || 'google_adsense') === 'google_adsense' && (
               <div className="p-5 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-200 dark:border-zinc-800/80 space-y-4">
                 <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider">Google AdSense Integration</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -899,92 +897,30 @@ export default function AdminSettings() {
                     />
                   </div>
                 </div>
-              </div>
-            )}
 
-            {((settings.adProvider || 'both') === 'interstitial_only' || (settings.adProvider || 'both') === 'both') && (
-              <div className="p-5 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-200 dark:border-zinc-800/80 space-y-4">
-                <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider">Interactive Video Interstitial Ads</h3>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                  Runs a fully interactive video ad overlay with a countdown timer before basic or trial users can unlock their stream links.
-                </p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Ad Skip Timer (Seconds)</label>
-                    <input
-                      type="number"
-                      min="3"
-                      max="60"
-                      value={settings.adSkipTimer ?? 5}
-                      onChange={(e) => setSettings({ ...settings, adSkipTimer: parseInt(e.target.value) || 5 })}
-                      className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
-                    />
-                  </div>
-                  <div className="space-y-2 md:col-span-2">
-                    <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Sponsor/Ad Destination Link (Redirect on Click)</label>
-                    <input
-                      type="text"
-                      value={settings.adRedirectUrl || ''}
-                      onChange={(e) => setSettings({ ...settings, adRedirectUrl: e.target.value })}
-                      placeholder="e.g. https://sponsor-site.com"
-                      className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Video Ad URL / Smartlink URL</label>
-                  <input
-                    type="text"
-                    value={settings.adVideoUrl || ''}
-                    onChange={(e) => setSettings({ ...settings, adVideoUrl: e.target.value })}
-                    placeholder="e.g. https://commercialhalftime.com/htqpa4mty?key=53a3c0b6e7edfce96cd08f0cabe01b54"
-                    className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
-                  />
-                </div>
-              </div>
-            )}
-
-            {((settings.adProvider || 'both') !== 'disabled') && (
-              <div className="p-5 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-200 dark:border-zinc-800/80 space-y-4">
-                <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider">Custom Sponsor Banner Display</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Sponsor Title</label>
-                    <input
-                      type="text"
-                      value={settings.adBannerTitle || ''}
-                      onChange={(e) => setSettings({ ...settings, adBannerTitle: e.target.value })}
-                      className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">CTA Button Text</label>
-                    <input
-                      type="text"
-                      value={settings.adBannerCtaText || ''}
-                      onChange={(e) => setSettings({ ...settings, adBannerCtaText: e.target.value })}
-                      className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">CTA Button Destination Route/Link</label>
-                    <input
-                      type="text"
-                      value={settings.adBannerLink || ''}
-                      onChange={(e) => setSettings({ ...settings, adBannerLink: e.target.value })}
-                      className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Sponsor Description/Subtext</label>
-                    <textarea
-                      value={settings.adBannerDescription || ''}
-                      onChange={(e) => setSettings({ ...settings, adBannerDescription: e.target.value })}
-                      rows={2}
-                      className="w-full px-4 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm resize-none"
-                    />
+                <div className="pt-3 border-t border-zinc-200 dark:border-zinc-700/60">
+                  <h4 className="text-xs font-bold text-zinc-900 dark:text-zinc-200 uppercase tracking-wider mb-2.5">Ad Banner VIP Upgrade Button</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Button Label</label>
+                      <input
+                        type="text"
+                        placeholder="Remove Ads (Go VIP)"
+                        value={settings.adBannerCtaText || ''}
+                        onChange={(e) => setSettings({ ...settings, adBannerCtaText: e.target.value })}
+                        className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Target Route / Link</label>
+                      <input
+                        type="text"
+                        placeholder="/plans"
+                        value={settings.adBannerLink || ''}
+                        onChange={(e) => setSettings({ ...settings, adBannerLink: e.target.value })}
+                        className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>

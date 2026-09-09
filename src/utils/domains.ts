@@ -4,7 +4,7 @@ export const HUBCLOUD_DOMAIN = 'https://hubcloud.foo';
 export const HUBDRIVE_DOMAIN = 'https://hubdrive.space';
 
 export const DEFAULT_MOVIESDRIVE_DOMAIN = 'https://new6.moviesdrives.my';
-export const DEFAULT_SKYMOVIES_DOMAIN = 'https://skymovieshd.ceo';
+export const DEFAULT_SKYMOVIES_DOMAIN = 'https://skymovieshd.meme';
 export const DEFAULT_FILMYGO_DOMAIN = 'https://filmygo.online';
 export const DEFAULT_HDHUB4U_DOMAIN = 'https://new5.hdhub4u.cl';
 export const DEFAULT_FILMYFLY_DOMAIN = 'https://filmyfly.green';
@@ -32,7 +32,12 @@ export function getSkymoviesDomain(): string {
     if (!domain.startsWith('http://') && !domain.startsWith('https://')) {
       domain = 'https://' + domain;
     }
-    return domain.replace(/\/+$/, '');
+    const clean = domain.replace(/\/+$/, '');
+    if (clean.includes('skymovieshd.ceo')) {
+      safeStorage.setItem('custom_skymovies_domain', DEFAULT_SKYMOVIES_DOMAIN);
+      return DEFAULT_SKYMOVIES_DOMAIN;
+    }
+    return clean;
   }
   return DEFAULT_SKYMOVIES_DOMAIN;
 }

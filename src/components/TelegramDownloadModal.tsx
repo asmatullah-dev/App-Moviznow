@@ -59,8 +59,10 @@ export function TelegramDownloadModal({
 
   const handleResolve = (id: string, url: string) => {
     const isExempt = isUserExemptFromAds(profile, content);
+    const provider = settings?.adProvider || 'google_adsense';
+    const isInterstitialActive = provider === 'both' || provider === 'interstitial_only';
     
-    if (!isExempt) {
+    if (!isExempt && isInterstitialActive && settings?.adVideoUrl) {
       setAdPendingLink({ id, url });
     } else {
       executeResolve(id, url);
@@ -126,7 +128,7 @@ export function TelegramDownloadModal({
       <VideoAdInterstitial
         isOpen={!!adPendingLink}
         onClose={() => setAdPendingLink(null)}
-        adUrl={settings?.adVideoUrl || "https://commercialhalftime.com/htqpa4mty?key=53a3c0b6e7edfce96cd08f0cabe01b54"}
+        adUrl={settings?.adVideoUrl || ""}
         onAdComplete={() => {
           if (adPendingLink) {
             executeResolve(adPendingLink.id, adPendingLink.url);

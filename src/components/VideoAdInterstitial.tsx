@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Timer, ChevronRight, ShieldCheck, RefreshCw, Loader2, AlertCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useSettings } from '../contexts/SettingsContext';
 import { isUserExemptFromAds } from '../utils/adUtils';
 
 interface VideoAdInterstitialProps {
@@ -15,10 +16,12 @@ export const VideoAdInterstitial: React.FC<VideoAdInterstitialProps> = ({
   isOpen,
   onClose,
   onAdComplete,
-  adUrl = 'https://commercialhalftime.com/htqpa4mty?key=53a3c0b6e7edfce96cd08f0cabe01b54'
+  adUrl = ''
 }) => {
   const { profile } = useAuth();
+  const { settings } = useSettings();
   const isExempt = isUserExemptFromAds(profile);
+  const isInterstitialsDisabled = !settings?.adProvider || settings.adProvider === 'disabled' || settings.adProvider === 'google_adsense' || !adUrl;
 
   const [timeLeft, setTimeLeft] = useState(30);
   const [canSkip, setCanSkip] = useState(false);
@@ -31,13 +34,13 @@ export const VideoAdInterstitial: React.FC<VideoAdInterstitialProps> = ({
   const onCloseRef = useRef(onClose);
   const iframeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Auto bypass video ad immediately if user is VIP / exempt
+  // Auto bypass video ad immediately if user is VIP / exempt or if Google AdSense is the only ad provider
   useEffect(() => {
-    if (isOpen && isExempt) {
+    if (isOpen && (isExempt || isInterstitialsDisabled)) {
       onAdCompleteRef.current?.();
       onCloseRef.current?.();
     }
-  }, [isOpen, isExempt]);
+  }, [isOpen, isExempt, isInterstitialsDisabled]);
 
   // Helper to generate a fresh ad URL with cache-busting / rotation query
   const generateAdUrl = useCallback((baseUrl: string, attempt: number) => {
@@ -184,7 +187,7 @@ export const VideoAdInterstitial: React.FC<VideoAdInterstitialProps> = ({
     }
   };
 
-  if (!isOpen || isExempt) return null;
+  if (!isOpen || isExempt || isInterstitialsDisabled) return null;
 
   return (
     <AnimatePresence>

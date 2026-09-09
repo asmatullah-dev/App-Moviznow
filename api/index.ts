@@ -2691,6 +2691,71 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
     }
   });
 
+  // SkymoviesHD Search Cache & Grouping Helper
+  interface SkymoviesCacheEntry {
+    allPosts: { title: string; url: string; image?: string }[];
+    timestamp: number;
+  }
+  const skymoviesSearchCache = new Map<string, SkymoviesCacheEntry>();
+
+  function getMovieGroupKey(title: string): string {
+    let s = title.toLowerCase();
+    // remove file sizes like [1.5GB], [350MB], [2.8GB], [70MB]
+    s = s.replace(/\[\s*[\d\.]+\s*(?:gb|mb)\s*\]/gi, ' ');
+    s = s.replace(/\(\s*[\d\.]+\s*(?:gb|mb)\s*\)/gi, ' ');
+    // remove resolutions
+    s = s.replace(/\b(?:2160p|1080p|720p|480p|360p|4k|uhd)\b/gi, ' ');
+    // remove codecs and common stream flags
+    s = s.replace(/\b(?:10bit|8bit|x264|x265|x266|h264|h265|h266|hevc|aac(?:\s*2\.0)?|ac3|dts|dd5\.1|5\.1|esubs|esub|subs|sub)\b/gi, ' ');
+    // clean punctuation and extra spaces
+    s = s.replace(/[^a-z0-9]+/gi, ' ').trim();
+    return s;
+  }
+
+  function getQualityWeight(title: string): number {
+    const lower = title.toLowerCase();
+    if (lower.includes('2160p') || lower.includes('4k')) return 5;
+    if (lower.includes('1080p')) return 4;
+    if (lower.includes('720p')) return 3;
+    if (lower.includes('480p')) return 2;
+    if (lower.includes('360p')) return 1;
+    return 0;
+  }
+
+  function parseSizeInMB(title: string): number {
+    const m = title.match(/\[?\s*([\d\.]+)\s*(GB|MB)\s*\]?/i);
+    if (!m) return 0;
+    const val = parseFloat(m[1]);
+    const unit = m[2].toUpperCase();
+    return unit === 'GB' ? val * 1024 : val;
+  }
+
+  function groupCatalogPosts(items: { title: string; url: string; image?: string }[]) {
+    const groups = new Map<string, { title: string; url: string; image?: string }[]>();
+    const order: string[] = [];
+    for (const item of items) {
+      const key = getMovieGroupKey(item.title) || item.title.toLowerCase();
+      if (!groups.has(key)) {
+        groups.set(key, []);
+        order.push(key);
+      }
+      groups.get(key)!.push(item);
+    }
+    const result: { title: string; url: string; image?: string }[] = [];
+    for (const key of order) {
+      const group = groups.get(key)!;
+      if (group.length > 1) {
+        group.sort((a, b) => {
+          const diff = getQualityWeight(b.title) - getQualityWeight(a.title);
+          if (diff !== 0) return diff;
+          return parseSizeInMB(b.title) - parseSizeInMB(a.title);
+        });
+      }
+      result.push(...group);
+    }
+    return result;
+  }
+
   // SkymoviesHD Extraction API
   app.get('/api/skymovieshd', async (req: express.Request, res: express.Response) => {
     try {
@@ -2699,11 +2764,28 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         return res.status(400).json({ error: 'Valid SkymoviesHD URL required' });
       }
 
-      // Clean URL
+      // Clean URL: normalize accidental spaces around query string separators (e.g. "search.php ?search=Hindi&cat=All")
       let targetUrl = url.trim().replace(/[:\s]+$/, '');
       if (!targetUrl.startsWith('http')) {
         targetUrl = 'https://' + targetUrl;
       }
+      targetUrl = targetUrl
+        .replace(/(https?:\/\/[^\s"'?#]+)\s+(\?[^\s"']+)/gi, '$1$2')
+        .replace(/([?&][^=&\s]+)\s*=\s*/g, '$1=')
+        .replace(/([?&][^&\s]+)\s+&/g, '$1&');
+
+      // If query parameters like 'search' or 'cat' were split by Express because the URL was unencoded, reconstitute them
+      try {
+        const fullUrlObj = new URL(targetUrl);
+        for (const [k, v] of Object.entries(req.query)) {
+          if (k !== 'url' && k !== 'offset' && k !== 'limit' && k !== 'page' && typeof v === 'string') {
+            if (!fullUrlObj.searchParams.has(k)) {
+              fullUrlObj.searchParams.set(k, v);
+            }
+          }
+        }
+        targetUrl = fullUrlObj.toString();
+      } catch (e) {}
 
       console.log(`[SkymoviesHD] Extracting redirection links from: ${targetUrl}`);
 
@@ -2717,113 +2799,226 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       const searchParam = urlObj.searchParams.get('search') || urlObj.searchParams.get('q') || urlObj.searchParams.get('s') || '';
       const isSearchUrl = targetUrl.includes('search.php') || Boolean(searchParam) || urlObj.pathname === '/' || urlObj.pathname === '' || urlObj.pathname.endsWith('index.php') || urlObj.pathname.endsWith('index.html');
 
-      const response = await fetch(targetUrl, { headers, signal: AbortSignal.timeout(7000) });
-      if (!response.ok) throw new Error(`SkymoviesHD returned ${response.status}`);
-      const text = await response.text();
-      const $ = cheerio.load(text);
-
       if (isSearchUrl) {
-        console.log(`[SkymoviesHD] Search page detected, parsing catalog posts...`);
-        const postsMap = new Map<string, { title: string; image?: string }>();
+        console.log(`[SkymoviesHD] Search page detected, checking cache and parsing catalog posts...`);
 
-        const isDummyImg = (src?: string) => {
-          if (!src) return true;
-          return /arw\.gif|logo|favicon|icon|blank|default|\.gif$/i.test(src);
-        };
+        // Cache key strips pagination/slicing parameters
+        let cacheKey = targetUrl;
+        try {
+          const ck = new URL(targetUrl);
+          ck.searchParams.delete('page');
+          ck.searchParams.delete('offset');
+          ck.searchParams.delete('limit');
+          cacheKey = ck.toString();
+        } catch (e) {}
 
-        $("a[href]").each((_, el) => {
-          let href = $(el).attr("href") || "";
-          if (!href) return;
-          if (href.startsWith("/")) href = urlObj.origin + href;
-          if (!href.startsWith("http")) return;
+        const limit = Math.min(Math.max(parseInt((req.query.limit as string) || urlObj.searchParams.get('limit') || '500', 10), 1), 1000);
+        let offset = 0;
+        if (req.query.offset || urlObj.searchParams.get('offset')) {
+          offset = Math.max(0, parseInt((req.query.offset as string) || urlObj.searchParams.get('offset') || '0', 10));
+        } else if (req.query.page || urlObj.searchParams.get('page')) {
+          const page = Math.max(1, parseInt((req.query.page as string) || urlObj.searchParams.get('page') || '1', 10));
+          offset = (page - 1) * limit;
+        }
 
+        let allPosts: { title: string; url: string; image?: string }[] = [];
+        const cached = skymoviesSearchCache.get(cacheKey);
+
+        if (cached && (Date.now() - cached.timestamp < 15 * 60 * 1000) && cached.allPosts.length > 0) {
+          console.log(`[SkymoviesHD] Serving from cache: ${cached.allPosts.length} posts for ${cacheKey}`);
+          allPosts = cached.allPosts;
+        } else {
+          // Fetch remote HTML without offset/page params
+          let fetchUrl = targetUrl;
           try {
-            const u = new URL(href);
-            const path = u.pathname;
-            if (path === "/" || path.includes("search.php") || path.includes("/category/") || path.includes("/genre/") || path.includes("/tag/") || path.includes("/page/")) return;
-            if (/\.(jpg|jpeg|png|gif|webp|css|js|xml|svg|zip|rar|mkv|mp4)$/i.test(path)) return;
-            if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|site-request|how-to|howto|faq|terms|sitemap|report|help)/i.test(path)) return;
+            const fu = new URL(targetUrl);
+            fu.searchParams.delete('offset');
+            fu.searchParams.delete('limit');
+            fu.searchParams.delete('page');
+            fetchUrl = fu.toString();
+          } catch(e) {}
 
-            const getImgSrc = (imgEl: any): string => {
-              if (!imgEl || imgEl.length === 0) return "";
-              let src =
-                imgEl.attr("data-src") ||
-                imgEl.attr("data-original") ||
-                imgEl.attr("data-lazy-src") ||
-                imgEl.attr("data-cfsrc") ||
-                imgEl.attr("src") ||
-                "";
-              if (!src) {
-                const srcset = imgEl.attr("srcset") || imgEl.attr("data-srcset");
-                if (srcset) {
-                  src = srcset.split(",")[0].trim().split(" ")[0];
+          const response = await fetch(fetchUrl, { headers, signal: AbortSignal.timeout(25000) });
+          if (!response.ok) throw new Error(`SkymoviesHD returned ${response.status}`);
+          const text = await response.text();
+
+          const postsMap = new Map<string, { title: string; image?: string }>();
+
+          const isDummyImg = (src?: string) => {
+            if (!src) return true;
+            return /arw\.gif|logo|favicon|icon|blank|default|\.gif$/i.test(src);
+          };
+
+          // Fast regex extractor for high performance on large pages (e.g. 14MB search results with 45k+ links)
+          const anchorRegex = /<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+          let match: RegExpExecArray | null;
+          while ((match = anchorRegex.exec(text)) !== null) {
+            try {
+              let href = match[1].trim();
+              if (!href) continue;
+              if (href.startsWith("/")) href = urlObj.origin + href;
+              if (!href.startsWith("http")) continue;
+
+              const u = new URL(href);
+              const path = u.pathname;
+              if (path === "/" || path.includes("search.php") || path.includes("/category/") || path.includes("/genre/") || path.includes("/tag/") || path.includes("/page/")) continue;
+              if (/\.(jpg|jpeg|png|gif|webp|css|js|xml|svg|zip|rar|mkv|mp4)$/i.test(path)) continue;
+              if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|site-request|how-to|howto|faq|terms|sitemap|report|help)/i.test(path)) continue;
+
+              const innerHtml = match[2];
+              let title = innerHtml.replace(/<[^>]+>/g, " ").replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+              if (!title || title.length <= 2) continue;
+              if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how to|site search|search|faq|terms|sitemap|report|help)/i.test(title)) continue;
+
+              let image = "";
+              const imgMatch = innerHtml.match(/<img\s+[^>]*src=["']([^"']+)["']/i) ||
+                               innerHtml.match(/data-(?:src|original|lazy-src)=["']([^"']+)["']/i);
+              if (imgMatch) {
+                const src = imgMatch[1].trim();
+                if (src && !isDummyImg(src)) {
+                  try { image = new URL(src, targetUrl).href; } catch(e) { image = src; }
                 }
               }
-              return src || "";
-            };
 
-            let title = $(el).text().trim() || $(el).attr("title") || $(el).find("img").attr("alt") || "";
-            let image = getImgSrc($(el).find("img"));
-            const container = $(el).closest("article, .post, .entry, .card, div, tr, td, p");
-            if (!title) {
-              title = container.find("h1, h2, h3, h4, .entry-title, .post-title, b, strong").text().trim();
-            }
-            if (isDummyImg(image)) {
-              image = getImgSrc(container.find("img"));
-            }
-            if (isDummyImg(image)) {
-              image = getImgSrc($(el).prev("img")) || getImgSrc($(el).next("img")) || getImgSrc($(el).parent().find("img"));
-            }
-            if (image) {
-              try { image = new URL(image, targetUrl).href; } catch(e) {}
-            }
-            if (isDummyImg(image)) image = "";
-
-            title = title.replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
-            if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how to|site search|search|faq|terms|sitemap|report|help)/i.test(title)) return;
-
-            if (title && title.length > 2) {
               if (!postsMap.has(href)) {
                 postsMap.set(href, { title, image: image || undefined });
               } else if (image && !postsMap.get(href)?.image) {
                 postsMap.get(href)!.image = image;
               }
-            }
-          } catch (e) {}
-        });
+            } catch (e) {}
+          }
 
-        const posts = Array.from(postsMap.entries()).map(([postUrl, data]) => ({ title: data.title, url: postUrl, image: data.image }));
+          // Cheerio fallback if regex found no posts
+          if (postsMap.size === 0) {
+            const $ = cheerio.load(text);
+            $("a[href]").each((_, el) => {
+              let href = $(el).attr("href") || "";
+              if (!href) return;
+              if (href.startsWith("/")) href = urlObj.origin + href;
+              if (!href.startsWith("http")) return;
 
-        // Fetch real poster images for top 15 posts if image is missing/dummy
-        const needPosterBatch = posts.slice(0, 15).filter(p => !p.image || isDummyImg(p.image));
+              try {
+                const u = new URL(href);
+                const path = u.pathname;
+                if (path === "/" || path.includes("search.php") || path.includes("/category/") || path.includes("/genre/") || path.includes("/tag/") || path.includes("/page/")) return;
+                if (/\.(jpg|jpeg|png|gif|webp|css|js|xml|svg|zip|rar|mkv|mp4)$/i.test(path)) return;
+                if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|site-request|how-to|howto|faq|terms|sitemap|report|help)/i.test(path)) return;
+
+                const getImgSrc = (imgEl: any): string => {
+                  if (!imgEl || imgEl.length === 0) return "";
+                  let src =
+                    imgEl.attr("data-src") ||
+                    imgEl.attr("data-original") ||
+                    imgEl.attr("data-lazy-src") ||
+                    imgEl.attr("data-cfsrc") ||
+                    imgEl.attr("src") ||
+                    "";
+                  if (!src) {
+                    const srcset = imgEl.attr("srcset") || imgEl.attr("data-srcset");
+                    if (srcset) {
+                      src = srcset.split(",")[0].trim().split(" ")[0];
+                    }
+                  }
+                  return src || "";
+                };
+
+                let title = $(el).text().trim() || $(el).attr("title") || $(el).find("img").attr("alt") || "";
+                let image = getImgSrc($(el).find("img"));
+                const container = $(el).closest("article, .post, .entry, .card, div, tr, td, p");
+                if (!title) {
+                  title = container.find("h1, h2, h3, h4, .entry-title, .post-title, b, strong").text().trim();
+                }
+                if (isDummyImg(image)) {
+                  image = getImgSrc(container.find("img"));
+                }
+                if (isDummyImg(image)) {
+                  image = getImgSrc($(el).prev("img")) || getImgSrc($(el).next("img")) || getImgSrc($(el).parent().find("img"));
+                }
+                if (image) {
+                  try { image = new URL(image, targetUrl).href; } catch(e) {}
+                }
+                if (isDummyImg(image)) image = "";
+
+                title = title.replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+                if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how to|site search|search|faq|terms|sitemap|report|help)/i.test(title)) return;
+
+                if (title && title.length > 2) {
+                  if (!postsMap.has(href)) {
+                    postsMap.set(href, { title, image: image || undefined });
+                  } else if (image && !postsMap.get(href)?.image) {
+                    postsMap.get(href)!.image = image;
+                  }
+                }
+              } catch (e) {}
+            });
+          }
+
+          const rawPosts = Array.from(postsMap.entries()).map(([postUrl, data]) => ({
+            title: data.title,
+            url: postUrl,
+            image: data.image
+          }));
+
+          // Arrange/group posts so variants of same movie (diff quality/size) sit together
+          allPosts = groupCatalogPosts(rawPosts);
+
+          // Save in cache (capped to 25 entries)
+          if (skymoviesSearchCache.size >= 25) {
+            const firstKey = skymoviesSearchCache.keys().next().value;
+            if (firstKey) skymoviesSearchCache.delete(firstKey);
+          }
+          skymoviesSearchCache.set(cacheKey, { allPosts, timestamp: Date.now() });
+        }
+
+        const posts = allPosts.slice(offset, offset + limit);
+        const hasMore = (offset + limit) < allPosts.length;
+
+        // Fetch real poster images for top 8 posts if image is missing/dummy
+        const isDummyImg = (src?: string) => {
+          if (!src) return true;
+          return /arw\.gif|logo|favicon|icon|blank|default|\.gif$/i.test(src);
+        };
+        const needPosterBatch = posts.slice(0, 8).filter(p => !p.image || isDummyImg(p.image));
         if (needPosterBatch.length > 0) {
           await Promise.all(needPosterBatch.map(async (p) => {
             try {
               const pRes = await fetch(p.url, {
                 headers: { 'User-Agent': headers['User-Agent'] },
-                signal: AbortSignal.timeout(2200)
+                signal: AbortSignal.timeout(1800)
               });
               if (pRes.ok) {
                 const pText = await pRes.text();
-                const p$ = cheerio.load(pText);
-                let foundImg = "";
-                p$("img").each((_, imgEl) => {
-                  let src = p$(imgEl).attr("src") || p$(imgEl).attr("data-src") || p$(imgEl).attr("data-original") || "";
-                  if (src && !isDummyImg(src)) {
-                    try { foundImg = new URL(src, p.url).href; } catch(e) { foundImg = src; }
-                    return false; // break
+                const imgMatch = pText.match(/<img\s+[^>]*src=["'](https?:\/\/[^"']+\.(?:jpg|jpeg|png|webp))["']/i) ||
+                                 pText.match(/<img\s+[^>]*src=["'](\/images\/[^"']+\.(?:jpg|jpeg|png|webp))["']/i);
+                if (imgMatch) {
+                  let foundImg = imgMatch[1];
+                  if (!isDummyImg(foundImg)) {
+                    try { foundImg = new URL(foundImg, p.url).href; } catch(e) {}
+                    p.image = foundImg;
                   }
-                });
-                if (foundImg) p.image = foundImg;
+                }
               }
             } catch(e) {}
           }));
         }
 
-        if (posts.length > 0) {
-          return res.json({ is_search: true, posts, found: posts.length });
-        }
+        return res.json({
+          is_search: true,
+          posts,
+          found: allPosts.length,
+          total_found: allPosts.length,
+          offset,
+          limit,
+          page: Math.floor(offset / limit) + 1,
+          total_pages: Math.ceil(allPosts.length / limit),
+          has_more: hasMore
+        });
       }
+
+      // Single Movie Page: Fetch HTML and extract download links
+      const response = await fetch(targetUrl, { headers, signal: AbortSignal.timeout(25000) });
+      if (!response.ok) throw new Error(`SkymoviesHD returned ${response.status}`);
+      const text = await response.text();
 
       const hbData = new Map<string, { label: string }>();
       const parts = text.split('<a ');
@@ -2853,6 +3048,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       
       if (hbData.size === 0) {
         // Fallback: Check if page contains catalog post links
+        const $ = cheerio.load(text);
         const postsMap = new Map<string, { title: string; image?: string }>();
         $("a[href]").each((_, el) => {
           let href = $(el).attr("href") || "";

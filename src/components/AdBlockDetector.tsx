@@ -61,10 +61,10 @@ export const AdBlockDetector: React.FC = () => {
       // 3. Verification check: Are our actual ad scripts missing?
       // Only confirm if at least one of these checks fails AND we aren't seeing any ads
       if (adBlockDetected) {
-        // If we detected something, double check if ANY CPM script managed to load
+        // If we detected something, verify if Google AdSense script managed to load
         const scripts = document.querySelectorAll('script');
         const hasAdScript = Array.from(scripts).some(s => 
-          s.src.includes('commercialhalftime.com')
+          s.src.includes('pagead2.googlesyndication.com') || s.src.includes('adsbygoogle')
         );
         
         // If we have ad scripts loaded, it's a false positive or partial block, don't show yet

@@ -2656,7 +2656,7 @@ export default function MovieDetails() {
             videoAdResolveRef.current = null;
           }
         }}
-        adUrl={settings?.adVideoUrl || "https://commercialhalftime.com/htqpa4mty?key=53a3c0b6e7edfce96cd08f0cabe01b54"}
+        adUrl={settings?.adVideoUrl || ""}
       />
       <div className="min-h-screen bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white pb-20 transition-colors duration-300">
       <Helmet>

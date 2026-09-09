@@ -48,16 +48,16 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     'UserManagers', 'SelectedContent', 
     'Income', 'ErrorLinks', 'ReportedLinks', 'Notifications', 'Requests'
   ],
-  adProvider: 'both',
+  adProvider: 'google_adsense',
   adSenseClientId: 'ca-pub-3128773545517669',
   adSenseSlotId: '1035133642',
-  adBannerTitle: 'MovizNow Premium Sponsor',
-  adBannerDescription: 'Enjoy high quality streaming on Basic Plan. Upgrade to VIP to remove all ads!',
-  adBannerCtaText: 'Remove Ads (Go VIP)',
-  adBannerLink: '/top-up',
+  adBannerTitle: 'MovizNow Sponsor',
+  adBannerDescription: 'Enjoy streaming on Basic Plan. Upgrade to VIP to remove all ads!',
+  adBannerCtaText: 'Go VIP',
+  adBannerLink: '/plans',
   adSkipTimer: 5,
-  adVideoUrl: 'https://commercialhalftime.com/htqpa4mty?key=53a3c0b6e7edfce96cd08f0cabe01b54',
-  adRedirectUrl: 'https://moviznow.app/premium',
+  adVideoUrl: '',
+  adRedirectUrl: '',
   whatsappChannelLink: 'https://whatsapp.com/channel/0029Vb7PxRC9MF96ZZVGdx2n',
 };
 
@@ -74,6 +74,14 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           if (!parsed.whatsappChannelLink) {
             parsed.whatsappChannelLink = 'https://whatsapp.com/channel/0029Vb7PxRC9MF96ZZVGdx2n';
           }
+          if (!parsed.adBannerLink || parsed.adBannerLink === '/top-up') {
+            parsed.adBannerLink = '/plans';
+          }
+          // Enforce Google AdSense only
+          if (parsed.adProvider === 'both' || parsed.adProvider === 'interstitial_only') {
+            parsed.adProvider = 'google_adsense';
+          }
+          parsed.adVideoUrl = '';
           localStorage.setItem('cached_app_settings', JSON.stringify(parsed));
         }
         return parsed || DEFAULT_APP_SETTINGS;

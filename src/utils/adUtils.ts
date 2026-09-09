@@ -28,6 +28,8 @@ export function purgePopunderAndSocialAds(): void {
     'workdeadlinededicate.com',
     'profitableratecpmnetwork',
     'monetag',
+    'commercialhalftime',
+    'adsterra',
   ];
 
   try {
@@ -39,6 +41,8 @@ export function purgePopunderAndSocialAds(): void {
         if (
           content.includes('f0270bbaca005a7be1c664c3c0ae0386') ||
           content.includes('99e78b0792c97e620e43154c137cd1f3') ||
+          content.includes('commercialhalftime') ||
+          content.includes('adsterra') ||
           content.includes('monetag')
         ) {
           s.remove();
@@ -144,10 +148,10 @@ export function purgePopunderAndSocialAds(): void {
  * Remove all injected ad scripts and network elements from the DOM.
  * @param purgeSocialBar Defaults to true. When true, forcefully removes Social Bar scripts and widgets.
  */
-export function purgeAllAdElements(purgeSocialBar: boolean = true): void {
+export function purgeAllAdElements(purgeSocialBar: boolean = true, purgeAdSense: boolean = false): void {
   if (typeof document === 'undefined') return;
 
-  // 1. Remove all ad network scripts (AdSense, Monetag, Adsterra/commercialhalftime, CPM networks, Social Bar)
+  // 1. Remove all ad network scripts (Monetag, Adsterra/commercialhalftime, CPM networks, Social Bar, and AdSense if requested)
   const adScriptPatterns = [
     '99e78b0792c97e620e43154c137cd1f3', // Specific Popunder ID
     'f0270bbaca005a7be1c664c3c0ae0386', // Social bar script ID
@@ -158,7 +162,7 @@ export function purgeAllAdElements(purgeSocialBar: boolean = true): void {
     'monetag',
     'adsterra',
     'commercialhalftime',
-    'adsbygoogle.js',
+    ...(purgeAdSense ? ['adsbygoogle.js'] : []),
   ];
 
   try {
@@ -208,9 +212,10 @@ export function purgeAllAdElements(purgeSocialBar: boolean = true): void {
   // 2. Clear potential global variables that ad scripts use
   try {
     const globalsToClear = [
-      '_pop', '_pop_config', '_pop_script', 'adsbygoogle', 
+      '_pop', '_pop_config', '_pop_script', 
       'CommercialHalftime', 'Adsterra', 'Monetag', 
-      '__p_scr', '__p_config', '_sb', '_socialBar', '_social'
+      '__p_scr', '__p_config', '_sb', '_socialBar', '_social',
+      ...(purgeAdSense ? ['adsbygoogle'] : [])
     ];
     globalsToClear.forEach(g => {
       if ((window as any)[g]) {
@@ -223,16 +228,13 @@ export function purgeAllAdElements(purgeSocialBar: boolean = true): void {
     });
   } catch (e) {}
 
-  // 3. Remove injected Monetag / Popunder / Vignette / AdSense / Social Bar overlay or container elements
+  // 3. Remove injected Monetag / Popunder / Vignette / Social Bar overlay or container elements
   try {
     const selectors = [
-      'ins.adsbygoogle',
-      'div[id^="google_ads_iframe"]',
       'iframe[src*="commercialhalftime"]',
       'iframe[src*="adsterra"]',
       'iframe[src*="nap5k"]',
       'iframe[src*="n6wxm"]',
-      'iframe[id*="google_ads"]',
       'div[class*="monetag"]',
       'div[class*="vignette"]',
       'div[id*="monetag"]',
@@ -240,6 +242,7 @@ export function purgeAllAdElements(purgeSocialBar: boolean = true): void {
       'div[id^="ad-"]',
       'div[id^="popunder-"]',
       '.pub_300x250',
+      ...(purgeAdSense ? ['ins.adsbygoogle', 'div[id^="google_ads_iframe"]', 'iframe[id*="google_ads"]'] : []),
     ];
 
     if (purgeSocialBar) {
