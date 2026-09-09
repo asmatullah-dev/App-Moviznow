@@ -53,7 +53,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   adSenseSlotId: '1035133642',
   adBannerTitle: 'MovizNow Sponsor',
   adBannerDescription: 'Enjoy streaming on Basic Plan. Upgrade to VIP to remove all ads!',
-  adBannerCtaText: 'Go VIP',
+  adBannerCtaText: 'Remove Ads (Go VIP)',
   adBannerLink: '/plans',
   adSkipTimer: 5,
   adVideoUrl: '',

@@ -5065,7 +5065,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                           type="text"
                           value={filmyflyDomainInput}
                           onChange={(e) => setFilmyflyDomainInput(e.target.value)}
-                          placeholder="https://filmyfly.green"
+                          placeholder="https://filmyfly.sale"
                           className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-amber-500 font-mono"
                         />
                       </div>
@@ -5078,7 +5078,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                           setSkymoviesDomainInput("https://skymovieshd.meme");
                           setFilmygoDomainInput("https://filmygo.online");
                           setHdhubDomainInput("https://new5.hdhub4u.cl");
-                          setFilmyflyDomainInput("https://filmyfly.green");
+                          setFilmyflyDomainInput("https://filmyfly.sale");
                         }}
                         className="px-3 py-1 text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition"
                       >

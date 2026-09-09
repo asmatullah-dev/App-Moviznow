@@ -2517,7 +2517,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       let queryStr = typeof search === 'string' ? search.trim() : '';
 
       if (!targetUrl && queryStr) {
-        targetUrl = `https://filmyfly.green/search.html?search=${encodeURIComponent(queryStr)}`;
+        targetUrl = `https://filmyfly.sale/search.html?search=${encodeURIComponent(queryStr)}`;
       }
 
       if (!targetUrl) {
@@ -2527,6 +2527,16 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       if (!targetUrl.startsWith('http')) {
         targetUrl = 'https://' + targetUrl;
       }
+
+      // Automatically migrate outdated FilmyFly domains (e.g. filmyfly.green, filmyfly.vin, etc.) to active filmyfly.sale
+      try {
+        const u = new URL(targetUrl);
+        if (u.hostname.includes('filmyfly') && u.hostname !== 'filmyfly.sale') {
+          u.hostname = 'filmyfly.sale';
+          u.protocol = 'https:';
+          targetUrl = u.toString();
+        }
+      } catch (e) {}
 
       console.log(`[FilmyFly] Processing request for: ${targetUrl}`);
 
@@ -2540,7 +2550,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
 
       if (isSearch) {
         console.log(`[FilmyFly] Search / catalog query: ${targetUrl}`);
-        const { html: searchHtml } = await fetchWithVddos(targetUrl, { 'Referer': 'https://filmyfly.green/' });
+        const { html: searchHtml } = await fetchWithVddos(targetUrl, { 'Referer': 'https://filmyfly.sale/' });
         const $ = cheerio.load(searchHtml || '');
 
         const postsMap = new Map<string, { title: string; url: string; image?: string }>();
@@ -2573,11 +2583,36 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
 
       // Catalog / Movie Page or Direct Linkmake / FilesDL extraction
       console.log(`[FilmyFly] Extracting content/movie page: ${targetUrl}`);
-      const { html: movieHtml } = await fetchWithVddos(targetUrl, { 'Referer': 'https://filmyfly.green/' });
-      const $movie = cheerio.load(movieHtml || '');
+      let { html: movieHtml } = await fetchWithVddos(targetUrl, { 'Referer': 'https://filmyfly.sale/' });
+      let $movie = cheerio.load(movieHtml || '');
 
-      const pageTitle = $movie("title").text().replace(/».*$/, "").trim() || $movie("h1, h2, .movie-title").first().text().trim() || "FilmyFly Content";
-      let poster = $movie(".poster img, .movie-img img, img[src*='poster'], img[src*='movie'], img[src*='webp']").first().attr("src") || "";
+      // Guard against old domain redirecting to bare homepage while a movie page was requested
+      const canonical = $movie('link[rel="canonical"]').attr('href') || '';
+      if ((canonical.endsWith('filmyfly.sale/') || canonical.endsWith('filmyfly.sale')) && targetUrl.includes('/movie/')) {
+        try {
+          const u = new URL(targetUrl);
+          if (u.pathname && u.pathname !== '/' && u.pathname !== '/index.html') {
+            const directUrl = `https://filmyfly.sale${u.pathname}${u.search}`;
+            console.log(`[FilmyFly] Detected homepage redirect for movie path, retrying on: ${directUrl}`);
+            const { html: retryHtml } = await fetchWithVddos(directUrl, { 'Referer': 'https://filmyfly.sale/' });
+            if (retryHtml && retryHtml.length > 500) {
+              movieHtml = retryHtml;
+              $movie = cheerio.load(movieHtml);
+              targetUrl = directUrl;
+            }
+          }
+        } catch (e) {}
+      }
+
+      let pageTitle = $movie("meta[property='og:title']").attr("content") || 
+        $movie("title").text().replace(/».*$/, "").trim() || 
+        $movie("h1, h2, .movie-title").first().text().trim() || 
+        "FilmyFly Content";
+      pageTitle = pageTitle.replace(/»\s*FilmyFly.*$/i, "").replace(/\s*-\s*FilmyFly.*$/i, "").trim();
+
+      // Extract accurate movie poster instead of header logo
+      let poster = $movie("meta[property='og:image']").attr("content") ||
+        $movie("img[src*='imagecloud'], img[src*='poster'], img[src*='iwebp.store'], .poster img, .movie-img img").first().attr("src") || "";
 
       if (poster && !poster.startsWith("http")) {
         try { poster = new URL(poster, targetUrl).href; } catch(e) {}
@@ -2614,7 +2649,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         $gate("a[href]").each((_, el) => {
           const href = $gate(el).attr("href") || "";
           const text = $gate(el).text().trim() || "Download Option";
-          if (href.includes("filesdl") || href.includes("cloud") || href.includes("drive")) {
+          if (href.includes("filesdl") || href.includes("cloud") || href.includes("drive") || href.includes("/download/")) {
             let fullFilesdl = href;
             try { fullFilesdl = new URL(href, startGateUrl).href; } catch(e) {}
             qualityLinks.push({ label: text, filesdlUrl: fullFilesdl });
@@ -2670,6 +2705,30 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
                   shortQuality: cachedItem?.shortQuality,
                   is_direct: true
                 });
+              } else if (!hubcloudUrl) {
+                // Fallback direct links from filesdl if Hubcloud is not present
+                let fallbackUrl = "";
+                let fallbackTitle = `${pageTitle} [${q.label}]`;
+                $filesdl("a[href]").each((_, el) => {
+                  const h = $filesdl(el).attr("href") || "";
+                  const t = $filesdl(el).text().trim();
+                  if ((h.includes("pixeldrain") || h.includes("gofile") || h.includes("download.php") || h.includes("direct") || h.includes("fast")) && !fallbackUrl) {
+                    fallbackUrl = h;
+                    if (t) fallbackTitle = `${pageTitle} - ${t}`;
+                  }
+                });
+
+                if (fallbackUrl && !seenHubUrls.has(fallbackUrl)) {
+                  seenHubUrls.add(fallbackUrl);
+                  hits.push({
+                    file_name: fallbackTitle,
+                    url: fallbackUrl,
+                    size: null,
+                    quality: q.label,
+                    shortQuality: undefined,
+                    is_direct: true
+                  });
+                }
               }
             } catch (err: any) {
               console.error(`[FilmyFly] Error resolving FilesDL link ${q.filesdlUrl}:`, err.message);

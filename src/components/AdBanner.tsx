@@ -32,7 +32,7 @@ export const AdBanner: React.FC<AdBannerProps> = ({
   const provider = settings?.adProvider || 'google_adsense';
   const clientId = settings?.adSenseClientId || 'ca-pub-3128773545517669';
   const slotId = settings?.adSenseSlotId || '1035133642';
-  const ctaText = settings?.adBannerCtaText || 'Remove Ads (Go VIP)';
+  const ctaText = (settings?.adBannerCtaText && settings.adBannerCtaText !== 'Go VIP') ? settings.adBannerCtaText : 'Remove Ads (Go VIP)';
   const ctaLink = (settings?.adBannerLink && settings.adBannerLink !== '/top-up') ? settings.adBannerLink : '/plans';
 
   useEffect(() => {
@@ -60,7 +60,7 @@ export const AdBanner: React.FC<AdBannerProps> = ({
   return (
     <div className={`w-full overflow-hidden flex flex-col items-center justify-center my-4 ${className}`}>
       <div className="w-full max-w-5xl mx-auto">
-        {/* Banner Top Header: Advertisement label + Remove Ads (Go VIP) button */}
+        {/* Banner Top Header: Advertisement label + Go VIP button */}
         <div className="flex items-center justify-between px-1.5 mb-1.5 w-full">
           <span className="text-[10px] uppercase tracking-widest text-zinc-400 dark:text-zinc-500 font-bold flex items-center gap-1">
             Advertisement
