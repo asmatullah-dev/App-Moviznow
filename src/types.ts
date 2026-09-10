@@ -363,9 +363,13 @@ export interface AppSettings {
       databaseId: string;
     }[];
   };
-  adProvider?: 'disabled' | 'google_adsense' | 'interstitial_only' | 'both';
+  adProvider?: 'disabled' | 'google_adsense' | 'interstitial_only' | 'both' | 'commercialhalftime' | 'custom_banner';
   adSenseClientId?: string;
   adSenseSlotId?: string;
+  bannerAdKey?: string;
+  bannerAdScriptUrl?: string;
+  bannerAdWidth?: number;
+  bannerAdHeight?: number;
   adBannerTitle?: string;
   adBannerDescription?: string;
   adBannerCtaText?: string;

@@ -28,7 +28,6 @@ export function purgePopunderAndSocialAds(): void {
     'workdeadlinededicate.com',
     'profitableratecpmnetwork',
     'monetag',
-    'commercialhalftime',
     'adsterra',
   ];
 
@@ -41,7 +40,6 @@ export function purgePopunderAndSocialAds(): void {
         if (
           content.includes('f0270bbaca005a7be1c664c3c0ae0386') ||
           content.includes('99e78b0792c97e620e43154c137cd1f3') ||
-          content.includes('commercialhalftime') ||
           content.includes('adsterra') ||
           content.includes('monetag')
         ) {
@@ -161,7 +159,6 @@ export function purgeAllAdElements(purgeSocialBar: boolean = true, purgeAdSense:
     'profitableratecpmnetwork',
     'monetag',
     'adsterra',
-    'commercialhalftime',
     ...(purgeAdSense ? ['adsbygoogle.js'] : []),
   ];
 
@@ -175,7 +172,6 @@ export function purgeAllAdElements(purgeSocialBar: boolean = true, purgeAdSense:
         if (
           content.includes('f0270bbaca005a7be1c664c3c0ae0386') ||
           content.includes('99e78b0792c97e620e43154c137cd1f3') ||
-          content.includes('commercialhalftime') ||
           content.includes('adsterra') ||
           content.includes('monetag')
         ) {

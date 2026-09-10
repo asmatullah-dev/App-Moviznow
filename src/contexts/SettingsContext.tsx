@@ -48,9 +48,13 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     'UserManagers', 'SelectedContent', 
     'Income', 'ErrorLinks', 'ReportedLinks', 'Notifications', 'Requests'
   ],
-  adProvider: 'google_adsense',
+  adProvider: 'commercialhalftime',
   adSenseClientId: 'ca-pub-3128773545517669',
   adSenseSlotId: '1035133642',
+  bannerAdKey: '37fefa62ab23d5571ac1b29359968b26',
+  bannerAdScriptUrl: 'https://commercialhalftime.com/37fefa62ab23d5571ac1b29359968b26/invoke.js',
+  bannerAdWidth: 300,
+  bannerAdHeight: 250,
   adBannerTitle: 'MovizNow Sponsor',
   adBannerDescription: 'Enjoy streaming on Basic Plan. Upgrade to VIP to remove all ads!',
   adBannerCtaText: 'Remove Ads (Go VIP)',
@@ -77,9 +81,20 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           if (!parsed.adBannerLink || parsed.adBannerLink === '/top-up') {
             parsed.adBannerLink = '/plans';
           }
-          // Enforce Google AdSense only
+          if (!parsed.bannerAdKey) {
+            parsed.bannerAdKey = '37fefa62ab23d5571ac1b29359968b26';
+          }
+          if (!parsed.bannerAdScriptUrl) {
+            parsed.bannerAdScriptUrl = 'https://commercialhalftime.com/37fefa62ab23d5571ac1b29359968b26/invoke.js';
+          }
+          if (!parsed.bannerAdWidth) {
+            parsed.bannerAdWidth = 300;
+          }
+          if (!parsed.bannerAdHeight) {
+            parsed.bannerAdHeight = 250;
+          }
           if (parsed.adProvider === 'both' || parsed.adProvider === 'interstitial_only') {
-            parsed.adProvider = 'google_adsense';
+            parsed.adProvider = 'commercialhalftime';
           }
           parsed.adVideoUrl = '';
           localStorage.setItem('cached_app_settings', JSON.stringify(parsed));

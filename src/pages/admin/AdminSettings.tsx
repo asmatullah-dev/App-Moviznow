@@ -860,19 +860,74 @@ export default function AdminSettings() {
             <div className="space-y-2">
               <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Ad Monetization Provider</label>
               <select
-                value={settings.adProvider || 'google_adsense'}
+                value={settings.adProvider || 'commercialhalftime'}
                 onChange={(e) => setSettings({ ...settings, adProvider: e.target.value as any })}
                 className="w-full px-4 py-2.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none cursor-pointer text-sm"
               >
-                <option value="google_adsense">Google AdSense Only (Recommended)</option>
+                <option value="commercialhalftime">Banner Ads (300x250 CommercialHalftime / atOptions)</option>
+                <option value="google_adsense">Google AdSense</option>
                 <option value="disabled">Disable All Advertising (100% Ad-Free Platform)</option>
               </select>
               <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                Monetization is configured exclusively with <strong>Google AdSense</strong>. All third-party banner networks, interstitial scripts, and popunders have been completely removed. VIP users remain 100% ad-free.
+                Monetization is configured for <strong>300x250 Banner Ads</strong>. VIP users remain 100% ad-free across all devices.
               </p>
             </div>
 
-            {(settings.adProvider || 'google_adsense') === 'google_adsense' && (
+            {(settings.adProvider || 'commercialhalftime') === 'commercialhalftime' && (
+              <div className="p-5 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-200 dark:border-zinc-800/80 space-y-4">
+                <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider">300x250 Banner Ad Settings</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Banner Ad Key (atOptions)</label>
+                    <input
+                      type="text"
+                      placeholder="37fefa62ab23d5571ac1b29359968b26"
+                      value={settings.bannerAdKey || '37fefa62ab23d5571ac1b29359968b26'}
+                      onChange={(e) => setSettings({ ...settings, bannerAdKey: e.target.value })}
+                      className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-mono text-xs"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Banner Invoke Script URL</label>
+                    <input
+                      type="text"
+                      placeholder="https://commercialhalftime.com/37fefa62ab23d5571ac1b29359968b26/invoke.js"
+                      value={settings.bannerAdScriptUrl || 'https://commercialhalftime.com/37fefa62ab23d5571ac1b29359968b26/invoke.js'}
+                      onChange={(e) => setSettings({ ...settings, bannerAdScriptUrl: e.target.value })}
+                      className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-mono text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-zinc-200 dark:border-zinc-700/60">
+                  <h4 className="text-xs font-bold text-zinc-900 dark:text-zinc-200 uppercase tracking-wider mb-2.5">Ad Banner VIP Upgrade Button</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Button Label</label>
+                      <input
+                        type="text"
+                        placeholder="Remove Ads (Go VIP)"
+                        value={settings.adBannerCtaText || ''}
+                        onChange={(e) => setSettings({ ...settings, adBannerCtaText: e.target.value })}
+                        className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Target Route / Link</label>
+                      <input
+                        type="text"
+                        placeholder="/plans"
+                        value={settings.adBannerLink || ''}
+                        onChange={(e) => setSettings({ ...settings, adBannerLink: e.target.value })}
+                        className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {settings.adProvider === 'google_adsense' && (
               <div className="p-5 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-200 dark:border-zinc-800/80 space-y-4">
                 <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider">Google AdSense Integration</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

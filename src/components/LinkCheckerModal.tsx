@@ -2215,30 +2215,33 @@ export const LinkCheckerModal: React.FC<Props> = ({
       });
       setMdriveResults(hits);
 
-      if (hits.length > 0) {
-        const hasSeries = hasSeriesOrZipIndicator(hits);
+      const hubcloudHits = hits.filter((h: any) => /(hubcloud|vcloud|hubdrive|drivehub|hubcdn|hblinks)/i.test(h.url || ''));
 
-        if (hasSeries) {
-          // Do NOT auto-select or auto-replace. Open selection popup with empty selection initially!
-          setMdriveSelectedIndices(new Set());
-          setMdriveUrl(targetUrl);
-          return;
-        }
-      }
-
-      if (hits.length === 1) {
-        // Auto-select and proceed without UI if only one result
-        const singleLink = hits[0].url;
+      // If MDrive page only has 1 option to select (1 hit in total or 1 hubcloud hit):
+      // Automatically select and proceed without opening any popup!
+      if (hits.length === 1 || hubcloudHits.length === 1) {
+        const singleLink = hits.length === 1 ? hits[0].url : hubcloudHits[0].url;
         processedExtractionsRef.current.add(targetUrl);
+        processedExtractionsRef.current.add(normalizeUrl(targetUrl));
         
         const baseLink = targetUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
         const escapedBase = baseLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}/?`, 'g');
         
         const currentInput = inputRef.current;
-        const nextInput = currentInput.replace(regex, singleLink);
+        let nextInput = currentInput.replace(regex, singleLink);
+        if (nextInput === currentInput) {
+          nextInput = currentInput.split('\n').map(line => {
+            const trimmed = line.trim();
+            if (!trimmed) return line;
+            if (trimmed === targetUrl.trim() || normalizeUrl(trimmed) === normalizeUrl(targetUrl)) {
+              return singleLink;
+            }
+            return line;
+          }).join('\n');
+        }
         
-        console.log("MDrive auto-replacement:", { from: targetUrl, to: singleLink });
+        console.log("MDrive auto-replacement (single option):", { from: targetUrl, to: singleLink });
         setInput(nextInput);
         setMdriveUrl(null);
         setMdriveResults([]);
@@ -2251,17 +2254,70 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
       if (hits.length > 1) {
         const autoHits = filterFilmygoHits(hits, targetUrl);
-        if (autoHits.length > 0) {
-          // Auto-select and proceed without UI
-          const selectedUrls = autoHits.map(h => h.url).join('\n');
+        if (autoHits.length === 1) {
+          const singleLink = autoHits[0].url;
           processedExtractionsRef.current.add(targetUrl);
+          processedExtractionsRef.current.add(normalizeUrl(targetUrl));
           
           const baseLink = targetUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
           const escapedBase = baseLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
           const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}/?`, 'g');
           
           const currentInput = inputRef.current;
-          const nextInput = currentInput.replace(regex, selectedUrls);
+          let nextInput = currentInput.replace(regex, singleLink);
+          if (nextInput === currentInput) {
+            nextInput = currentInput.split('\n').map(line => {
+              const trimmed = line.trim();
+              if (!trimmed) return line;
+              if (trimmed === targetUrl.trim() || normalizeUrl(trimmed) === normalizeUrl(targetUrl)) {
+                return singleLink;
+              }
+              return line;
+            }).join('\n');
+          }
+          
+          console.log("MDrive single auto-selection replacement:", { from: targetUrl, to: singleLink });
+          setInput(nextInput);
+          setMdriveUrl(null);
+          setMdriveResults([]);
+          
+          setTimeout(() => {
+            handleCheck(undefined, nextInput);
+          }, 400);
+          return;
+        }
+
+        const hasSeries = hasSeriesOrZipIndicator(hits);
+
+        if (hasSeries) {
+          // Multiple series episodes/packs: open selection popup for user to pick
+          setMdriveSelectedIndices(new Set());
+          setMdriveUrl(targetUrl);
+          return;
+        }
+
+        if (autoHits.length > 1) {
+          // Auto-select and proceed without UI
+          const selectedUrls = autoHits.map(h => h.url).join('\n');
+          processedExtractionsRef.current.add(targetUrl);
+          processedExtractionsRef.current.add(normalizeUrl(targetUrl));
+          
+          const baseLink = targetUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+          const escapedBase = baseLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}/?`, 'g');
+          
+          const currentInput = inputRef.current;
+          let nextInput = currentInput.replace(regex, selectedUrls);
+          if (nextInput === currentInput) {
+            nextInput = currentInput.split('\n').map(line => {
+              const trimmed = line.trim();
+              if (!trimmed) return line;
+              if (trimmed === targetUrl.trim() || normalizeUrl(trimmed) === normalizeUrl(targetUrl)) {
+                return selectedUrls;
+              }
+              return line;
+            }).join('\n');
+          }
           
           console.log("MDrive manual auto-selection replacement:", { from: targetUrl, to: selectedUrls });
           setInput(nextInput);
@@ -2286,6 +2342,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
       } else if (hits.length === 0) {
         // No links found, mark as processed and continue
         processedExtractionsRef.current.add(targetUrl);
+        processedExtractionsRef.current.add(normalizeUrl(targetUrl));
         setMdriveUrl(null); // Ensure popup stays closed
         setTimeout(() => {
           handleCheck();
@@ -2650,6 +2707,26 @@ export const LinkCheckerModal: React.FC<Props> = ({
               return !u.includes('gdflix') && !name.includes('gdflix');
             });
             if (hits.length > 0) {
+              const hubcloudHits = hits.filter((h: any) => /(hubcloud|vcloud|hubdrive|drivehub|hubcdn|hblinks)/i.test(h.url || ''));
+
+              // If MDrive page has only 1 option to select (1 hit or 1 Hubcloud link), auto-select immediately without modal popup!
+              if (res.type === 'mdrive') {
+                if (hits.length === 1) {
+                  replaceOriginalUrl(res.original, hits[0].url);
+                  console.log("MDrive auto-extraction successful (1 link):", hits[0].url);
+                  continue;
+                }
+                if (hubcloudHits.length === 1) {
+                  replaceOriginalUrl(res.original, hubcloudHits[0].url);
+                  console.log("MDrive single Hubcloud auto-extraction successful:", hubcloudHits[0].url);
+                  continue;
+                }
+              } else if (hits.length === 1) {
+                replaceOriginalUrl(res.original, hits[0].url);
+                console.log(`${res.type} auto-extraction successful (1 link):`, { from: res.original, to: hits[0].url });
+                continue;
+              }
+
               const autoHits = filterFilmygoHits(hits, res.original);
               const autoIndices = new Set<number>();
               hits.forEach((h: any, idx: number) => {
@@ -2658,9 +2735,15 @@ export const LinkCheckerModal: React.FC<Props> = ({
                 }
               });
 
+              if (res.type === 'mdrive' && autoHits.length === 1) {
+                replaceOriginalUrl(res.original, autoHits[0].url);
+                console.log("MDrive single autoHit auto-extraction successful:", autoHits[0].url);
+                continue;
+              }
+
               const hasSeries = hasSeriesOrZipIndicator(hits);
 
-              if (hasSeries) {
+              if (hasSeries && hits.length > 1) {
                 setMdriveUrl(res.original);
                 setMdriveResults(hits);
                 setMdriveSelectedIndices(new Set());
@@ -2682,10 +2765,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                   break;
                 }
               } else if (res.type === 'mdrive') {
-                if (hits.length === 1) {
-                  replaceOriginalUrl(res.original, hits[0].url);
-                  console.log("MDrive auto-extraction successful (1 link).");
-                } else if (autoHits.length > 0) {
+                if (autoHits.length > 0) {
                   const selectedUrls = autoHits.map(h => h.url).join('\n');
                   replaceOriginalUrl(res.original, selectedUrls);
                   console.log(`MDrive auto-selected ${autoHits.length} hits without modal popup:`, { from: res.original, count: autoHits.length });
