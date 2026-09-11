@@ -752,6 +752,14 @@ export default function ContentManagement() {
   useEffect(() => {
     setLoading(contextLoading);
   }, [contextLoading]);
+
+  // Connect to Firestore for content chunks strictly when inside Content Management tab
+  useEffect(() => {
+    quickRefreshCatalog(false, undefined, true).catch(err => {
+      console.warn("Content management initial sync error:", err);
+    });
+  }, [quickRefreshCatalog]);
+
   const [isSyncingFromFirestore, setIsSyncingFromFirestore] = useState(false);
   const [isGithubModalOpen, setIsGithubModalOpen] = useState(false);
   const [githubRepo, setGithubRepo] = useState(() => localStorage.getItem("githubRepo") || "");

@@ -216,11 +216,8 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       // 4. Guest / non-admin: keep admin state clean and light without polluting with static JSON
       setLoading(false);
 
-      // 5. Automatic background sync from Firestore for authenticated admins
-      const isAdminOrEditor = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
-      if (isAdminOrEditor && user) {
-        syncWithServer(false).catch(err => console.warn('Auto background sync on mount:', err));
-      }
+      // Note: No automatic Firestore content sync on mount for any user or admin.
+      // Firestore content connection is strictly restricted to the Content Management tab.
     };
 
     hydrateAndLoad();
@@ -702,7 +699,15 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     return sorted;
   };
 
-  const syncWithServer = async (force: boolean = false): Promise<{ updatedSomething: boolean; updatedContentCount: number; isInitialLoad?: boolean }> => {
+  const syncWithServer = async (force: boolean = false, forceAdminSync: boolean = false): Promise<{ updatedSomething: boolean; updatedContentCount: number; isInitialLoad?: boolean }> => {
+    // Only connect to Firestore if explicitly requested by Content Management tab
+    if (!forceAdminSync) {
+        refreshContentFromLocal();
+        refreshCollectionsFromLocal();
+        setLoading(false);
+        return { updatedSomething: false, updatedContentCount: 0, isInitialLoad: false };
+    }
+
     // Non-admin / unauthenticated bypass
     if (!profile && !user) {
         refreshContentFromLocal();
@@ -1022,20 +1027,6 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     if (isAdmin) {
       finalizeUserChanges(force).catch(console.error);
     }
-
-    // Sync content with server
-    tasks.push(
-      syncWithServer(force)
-        .then(res => {
-          serverUpdatedCount = res.updatedContentCount;
-          if (res.isInitialLoad) isInitialLoadDone = true;
-          return Boolean(res.updatedSomething);
-        })
-        .catch(err => {
-          console.error("Sync with server error:", err);
-          return false;
-        })
-    );
 
     const syncResults = await Promise.all(tasks);
     if (syncResults.some(Boolean)) {

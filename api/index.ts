@@ -970,6 +970,42 @@ async function startServer() {
       };
 
       const urlObj = new URL(targetUrl);
+      const isDirectWorker = /(?:workers\.dev|telegra\.ph)\/Download-/i.test(targetUrl);
+
+      // Direct workers.dev / Telegraph link handler
+      if (isDirectWorker) {
+        try {
+          const wRes = await fetch(targetUrl, { headers, signal: AbortSignal.timeout(7000) });
+          const wHtml = await wRes.text();
+          const $w = cheerio.load(wHtml);
+          const title = $w("title").text().replace(/–\s*Telegraph/i, "").trim() || "Download Link";
+          let driveUrl = "";
+          let fallbackUrl = "";
+          $w("a[href]").each((_, a) => {
+            const h = $w(a).attr("href") || "";
+            if (h.includes("hubcloud") || h.includes("hubcould") || h.includes("vcloud")) {
+              if (h.includes("/drive/") && !driveUrl) driveUrl = h;
+              else if (!fallbackUrl) fallbackUrl = h;
+            }
+          });
+          const finalHub = driveUrl || fallbackUrl;
+          const sizeMatch = title.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i);
+          return res.json({
+            is_search: false,
+            hits: [{
+              file_name: title,
+              url: finalHub ? normalizeDomain(finalHub) : targetUrl,
+              size: sizeMatch ? sizeMatch[1].toUpperCase() : null,
+              is_direct: Boolean(finalHub)
+            }],
+            found: 1
+          });
+        } catch (wErr: any) {
+          console.error('[MoviesDrive] Direct worker error:', wErr.message);
+          return res.status(500).json({ error: 'Failed to extract worker link' });
+        }
+      }
+
       const q = urlObj.searchParams.get('q') || urlObj.searchParams.get('s') || '';
       const page = urlObj.searchParams.get('page') || '1';
       const isSearchUrl = targetUrl.includes('search.html') || targetUrl.includes('search.php') || Boolean(q) || urlObj.pathname === '/' || urlObj.pathname === '' || urlObj.pathname.endsWith('index.html');
@@ -1031,54 +1067,93 @@ async function startServer() {
         } catch (e) {}
       }
       const text = await response.text();
+      const $ = cheerio.load(text);
 
-      // Check if it's a single post containing MDrive links
-      const hasMdriveLinks = /(?:mdrive|mdrvie)\.lol\/archive\//i.test(text);
+      // 3. Scan for download links on post pages (MDrive, Workers.dev / Telegraph, direct HubCloud)
+      const rawLinks: { href: string; label: string; isMdrive: boolean; isWorker: boolean; isHubcloud: boolean }[] = [];
+      const seenUrls = new Set<string>();
 
-      if (hasMdriveLinks) {
-        const hits: any[] = [];
-        const seenUrls = new Set<string>();
-        const parts = text.split('<a ');
-        
-        for(let i = 1; i < parts.length; i++) {
-          const p = parts[i];
-          const m = p.match(/href=["']([^"']*(?:mdrive|mdrvie)\.lol\/archive\/[^"']*)["']/i);
-          if (m) {
-            const mUrl = m[1].trim();
-            if (!seenUrls.has(mUrl)) {
-              seenUrls.add(mUrl);
-              
-              let label = "";
-              const closeAnchorIndex = p.indexOf('</a>');
-              if (closeAnchorIndex !== -1) {
-                const anchorContent = p.substring(0, closeAnchorIndex);
-                const tagEndIndex = anchorContent.indexOf('>');
-                if (tagEndIndex !== -1) {
-                  const innerHtml = anchorContent.substring(tagEndIndex + 1);
-                  label = innerHtml.replace(/<[^>]*>/g, '').trim();
-                }
-              }
-              
-              if (!label) label = "Download Link";
-              label = label.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
-              
-              hits.push({
-                file_name: label,
-                url: normalizeDomain(mUrl),
-                size: null,
-                is_direct: false
-              });
+      $("a[href]").each((_, el) => {
+        const href = $(el).attr("href") || "";
+        const isMdrive = /(?:mdrive|mdrvie)\.lol\/archive\//i.test(href);
+        const isWorker = /(?:workers\.dev|telegra\.ph)\/Download-/i.test(href);
+        const isHubcloud = /(?:hubcloud|hubcould|hub-cloud|vcloud\.live|vcloud|hubdrive)\.[^"'\s<>\[\]]*/i.test(href);
+
+        if (isMdrive || isWorker || isHubcloud) {
+          if (!seenUrls.has(href)) {
+            seenUrls.add(href);
+            let label = $(el).text().trim().replace(/\s+/g, " ");
+            const parentText = $(el).parent().text().trim().replace(/\s+/g, " ");
+            if (parentText && parentText.length > label.length && parentText.length < 120 && (parentText.includes("Ep") || parentText.includes("Episode") || parentText.includes("Season") || parentText.includes("ZIP") || parentText.includes("Zip"))) {
+              label = parentText;
             }
+            if (!label) label = "Download Link";
+            label = label.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+            rawLinks.push({ href, label, isMdrive, isWorker, isHubcloud });
           }
         }
+      });
+
+      if (rawLinks.length > 0) {
+        const hits = await Promise.all(rawLinks.map(async (item) => {
+          if (item.isWorker) {
+            try {
+              const wRes = await fetch(item.href, { signal: AbortSignal.timeout(6000) });
+              const wHtml = await wRes.text();
+              const $w = cheerio.load(wHtml);
+              const wTitle = $w("title").text().replace(/–\s*Telegraph/i, "").trim();
+              let driveUrl = "";
+              let fallbackUrl = "";
+              $w("a[href]").each((_, a) => {
+                const h = $w(a).attr("href") || "";
+                if (h.includes("hubcloud") || h.includes("hubcould") || h.includes("vcloud")) {
+                  if (h.includes("/drive/") && !driveUrl) driveUrl = h;
+                  else if (!fallbackUrl) fallbackUrl = h;
+                }
+              });
+              const hubUrl = driveUrl || fallbackUrl;
+              if (hubUrl) {
+                const finalTitle = wTitle || item.label;
+                const sizeMatch = finalTitle.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i);
+                return {
+                  file_name: finalTitle,
+                  url: normalizeDomain(hubUrl),
+                  size: sizeMatch ? sizeMatch[1].toUpperCase() : null,
+                  is_direct: true
+                };
+              }
+            } catch (wErr: any) {
+              console.warn(`[MoviesDrive] Worker resolve warning for ${item.href}:`, wErr.message);
+            }
+            return {
+              file_name: item.label,
+              url: item.href,
+              size: null,
+              is_direct: false
+            };
+          } else if (item.isMdrive) {
+            return {
+              file_name: item.label,
+              url: normalizeDomain(item.href),
+              size: null,
+              is_direct: false
+            };
+          } else {
+            return {
+              file_name: item.label,
+              url: normalizeDomain(item.href),
+              size: null,
+              is_direct: true
+            };
+          }
+        }));
 
         if (hits.length > 0) {
           return res.json({ is_search: false, hits, found: hits.length });
         }
       }
 
-      // 3. Fallback: Parse catalog/search/archive HTML with Cheerio if no MDrive links found directly
-      const $ = cheerio.load(text);
+      // 4. Fallback: Parse catalog/search/archive HTML with Cheerio if no download links found directly
       const postsMap = new Map<string, { title: string; image?: string }>();
 
       $("a[href]").each((_, el) => {
@@ -1143,30 +1218,11 @@ async function startServer() {
 
       const posts = Array.from(postsMap.entries()).map(([postUrl, data]) => ({ title: data.title, url: postUrl, image: data.image }));
 
-      if (posts.length > 0 && isSearchUrl) {
+      if (posts.length > 0 && (isSearchUrl || posts.length > 1)) {
         return res.json({ is_search: true, posts, found: posts.length });
       }
 
-      // Fallback for native HubCloud links on post page
-      const hits: any[] = [];
-      const seenUrls = new Set<string>();
-      const hubcloudMatch = text.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|hubdrive|skymovies|moviesdrive|mdrive|filmygo)\.[^"'\s<>\[\]]*/gi);
-      if (hubcloudMatch) {
-         hubcloudMatch.forEach(hubUrl => {
-            const cleanHubUrl = hubUrl.replace(/&amp;/g, '&');
-            if (!seenUrls.has(cleanHubUrl)) {
-               seenUrls.add(cleanHubUrl);
-               hits.push({
-                  file_name: "Original HubCloud Link",
-                  url: normalizeDomain(cleanHubUrl),
-                  size: null,
-                  is_direct: true
-               });
-            }
-         });
-      }
-
-      return res.json({ is_search: false, hits, found: hits.length });
+      return res.json({ is_search: false, hits: [], found: 0 });
     } catch (error: any) {
       console.error('MoviesDrive extract error:', error);
       res.status(500).json({ error: error.message });
@@ -1353,7 +1409,11 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         urlObj = new URL('https://new5.hdhub4u.cl');
       }
 
-      const searchQuery = urlObj.searchParams.get('s') || urlObj.searchParams.get('search') || urlObj.searchParams.get('q') || urlObj.searchParams.get('to-search') || '';
+      const searchQuery = urlObj.searchParams.get('q') || urlObj.searchParams.get('s') || urlObj.searchParams.get('search') || urlObj.searchParams.get('to-search') || '';
+      const pageQuery = parseInt(urlObj.searchParams.get('page') || urlObj.searchParams.get('to-page') || urlObj.searchParams.get('p') || '1', 10) || 1;
+      const pagePathMatch = urlObj.pathname.match(/\/page\/(\d+)/i);
+      const pageNum = pagePathMatch ? parseInt(pagePathMatch[1], 10) : pageQuery;
+
       const isSearchOrCatalogUrl = 
         Boolean(searchQuery) || 
         urlObj.pathname === '/' || 
@@ -1367,7 +1427,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         urlObj.pathname.includes('/tag/');
 
       if (isSearchOrCatalogUrl) {
-        console.log(`[HDHub4U] Search/catalog page detected: ${targetUrl}`);
+        console.log(`[HDHub4U] Search/catalog page detected: ${targetUrl} (searchQuery: "${searchQuery}", page: ${pageNum})`);
 
         const getImgSrc = (imgEl: any): string => {
           if (!imgEl || imgEl.length === 0) return "";
@@ -1393,6 +1453,42 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
           const currObj = new URL(currentTargetUrl);
           const effectiveHost = currObj.hostname;
 
+          // Specifically handle HDHub4U thumb li and recent-movies elements
+          $("li.thumb, .recent-movies li, article, .post, .entry, .card, .post-item").each((_, el) => {
+            try {
+              const container = $(el);
+              const a = container.find("figcaption a[href]").first().length > 0
+                ? container.find("figcaption a[href]").first()
+                : container.find("a[href]").first();
+              const rawHref = a.attr("href");
+              if (!rawHref || rawHref.startsWith("#") || rawHref.startsWith("javascript:")) return;
+
+              const fullUrl = new URL(rawHref, currentTargetUrl).href;
+              const u = new URL(fullUrl);
+              const uHost = u.hostname.toLowerCase();
+              const isTargetDomain = uHost.includes("hdhub") || uHost === effectiveHost || uHost.endsWith(effectiveHost.replace(/^www\./, ''));
+              if (!isTargetDomain) return;
+
+              const path = u.pathname;
+              if (path === "/" || path === "" || path.includes("/category/") || path.includes("/genre/") || path.includes("/tag/") || path.includes("/page/") || path.includes("search.html") || path.includes("search.php") || path.includes("/search/")) return;
+              if (/\.(jpg|jpeg|png|gif|webp|css|js|xml|svg|zip|rar|mkv|mp4)$/i.test(path)) return;
+              if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how-to|howto|faq|terms|sitemap|report)/i.test(path)) return;
+
+              const img = container.find("img").first();
+              let title = container.find("figcaption").text().trim() || 
+                          container.find("h1, h2, h3, h4, .entry-title, .post-title, .title").first().text().trim() ||
+                          img.attr("title") || img.attr("alt") || a.text().trim();
+              let image = getImgSrc(img);
+              if (image) {
+                try { image = new URL(image, currentTargetUrl).href; } catch(e) {}
+              }
+              title = title.replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/&#038;/g, "&").replace(/\s+/g, " ").trim();
+              if (title && title.length > 3 && !postsMap.has(fullUrl)) {
+                postsMap.set(fullUrl, { title, image: image || undefined });
+              }
+            } catch (e) {}
+          });
+
           $("a[href]").each((_, el) => {
             let rawHref = $(el).attr("href") || "";
             if (!rawHref || rawHref.startsWith("#") || rawHref.startsWith("javascript:")) return;
@@ -1412,11 +1508,11 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
               let title = $(el).text().trim() || $(el).attr("title") || $(el).attr("aria-label") || $(el).find("img").attr("alt") || "";
               let image = getImgSrc($(el).find("img"));
               
-              const container = $(el).closest("article, .post, .entry, .card, .post-item, .sh-movie-item, .recent-movies, figure, .item, li, div[class*='post'], div[class*='movie'], div[class*='item']");
+              const container = $(el).closest("li.thumb, article, .post, .entry, .card, .post-item, .sh-movie-item, .recent-movies, li, figure, .item, div[class*='post'], div[class*='movie'], div[class*='item']");
               
               if (!title || title.length < 3 || /^(read more|download|watch|click|link)/i.test(title)) {
                 if (container.length > 0) {
-                  title = container.find("h1, h2, h3, h4, .entry-title, .post-title, .title, .entry-header, figcaption, strong, b").first().text().trim();
+                  title = container.find("figcaption, h1, h2, h3, h4, .entry-title, .post-title, .title, .entry-header, strong, b").first().text().trim();
                 }
               }
               if (!title || title.length < 3 || /^(read more|download|watch|click|link)/i.test(title)) {
@@ -1439,7 +1535,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
               if (image) {
                 try { image = new URL(image, currentTargetUrl).href; } catch(e) {}
               }
-              title = title.replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+              title = title.replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/&#038;/g, "&").replace(/\s+/g, " ").trim();
               if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how to|site search|search|faq|terms|sitemap|report|help|join our group)/i.test(title)) return;
 
               if (title && title.length > 3) {
@@ -1465,16 +1561,91 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
           }));
         };
 
-        // Handle search query with candidate fallback list
+        // Handle search query
         if (searchQuery) {
           const cleanQ = searchQuery.trim();
-          const slug = cleanQ.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-          const origin = urlObj.origin;
+          console.log(`[HDHub4U] Executing search for: "${cleanQ}" (page ${pageNum})`);
 
+          // 1. Primary: Query the official Typesense / Pingora Search API directly
+          const tryTypesense = async (apiUrl: string) => {
+            const u = new URL(apiUrl);
+            u.searchParams.set('q', cleanQ);
+            u.searchParams.set('query_by', 'post_title,category,stars,director,imdb_id');
+            u.searchParams.set('query_by_weights', '4,2,2,2,4');
+            u.searchParams.set('sort_by', 'sort_by_date:desc');
+            u.searchParams.set('limit', '25');
+            u.searchParams.set('highlight_fields', 'none');
+            u.searchParams.set('use_cache', 'true');
+            u.searchParams.set('page', String(pageNum));
+
+            const resp = await axios.get(u.toString(), {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': `${urlObj.origin}/`,
+                'Origin': urlObj.origin,
+                'Accept': 'application/json, text/plain, */*'
+              },
+              timeout: 10000,
+              validateStatus: () => true
+            });
+
+            if (resp.status === 200 && resp.data && Array.isArray(resp.data.hits)) {
+              return resp.data;
+            }
+            return null;
+          };
+
+          try {
+            let data = await tryTypesense('https://search.pingora.fyi/collections/post/documents/search');
+
+            // If pingora.fyi fails, try to dynamically read the proxyUrl from /search.html on the target domain
+            if (!data) {
+              try {
+                const { html: searchHtml } = await fetchWithVddos(`${urlObj.origin}/search.html`, { Referer: `${urlObj.origin}/` }, 6000);
+                const match = searchHtml.match(/proxyUrl\s*:\s*["']([^"']+)["']/);
+                if (match && match[1] && match[1] !== 'https://search.pingora.fyi/collections/post/documents/search') {
+                  data = await tryTypesense(match[1]);
+                }
+              } catch(e) {}
+            }
+
+            if (data && Array.isArray(data.hits)) {
+              const posts: { title: string; url: string; image?: string }[] = [];
+              for (const hit of data.hits) {
+                const doc = hit.document;
+                if (!doc) continue;
+                let postPath = "";
+                try {
+                  postPath = new URL(doc.permalink, 'https://dummy.com').pathname;
+                } catch(e) {
+                  postPath = doc.permalink || "";
+                }
+                const postUrl = `${urlObj.origin}${postPath}`;
+                const title = (doc.post_title || "").replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/&#038;/g, "&").replace(/\s+/g, " ").trim();
+                const image = doc.post_thumbnail || undefined;
+                if (title && postUrl) {
+                  posts.push({ title, url: postUrl, image });
+                }
+              }
+
+              console.log(`[HDHub4U] Typesense search returned ${posts.length} posts (total found: ${data.found})`);
+              return res.json({
+                is_search: true,
+                posts,
+                found: data.found ?? posts.length,
+                total_found: data.found ?? posts.length,
+                page: pageNum,
+                has_more: (data.found || 0) > pageNum * 25
+              });
+            }
+          } catch (err: any) {
+            console.warn(`[HDHub4U] Typesense search attempt failed:`, err.message);
+          }
+
+          // 2. Candidate fallbacks (only valid paths, NEVER /?s= which redirects to home /?t=1)
+          const slug = cleanQ.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
           const searchCandidates = [
-            `${origin}/search/${encodeURIComponent(slug)}/`,
-            `${origin}/?s=${encodeURIComponent(cleanQ)}`,
-            `${origin}/search.html?q=${encodeURIComponent(cleanQ)}`,
+            `${urlObj.origin}/search/${encodeURIComponent(slug)}/`,
             `https://new5.hdhub4u.cl/search/${encodeURIComponent(slug)}/`,
             `https://new1.hdhub4u.cl/search/${encodeURIComponent(slug)}/`,
             `https://hdhub4u.boo/search/${encodeURIComponent(slug)}/`
@@ -1483,18 +1654,31 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
           for (const candUrl of searchCandidates) {
             console.log(`[HDHub4U] Trying search candidate: ${candUrl}`);
             try {
-              const { html: candHtml, status: candStatus } = await fetchWithVddos(candUrl);
+              const { html: candHtml, status: candStatus, finalUrl: candFinalUrl } = await fetchWithVddos(candUrl);
+              // Ensure the candidate did NOT redirect to the homepage
+              if (candFinalUrl) {
+                try {
+                  const finalObj = new URL(candFinalUrl);
+                  if (finalObj.pathname === '/' || finalObj.pathname === '' || finalObj.searchParams.has('t')) {
+                    console.log(`[HDHub4U] Candidate redirected to home page, skipping: ${candFinalUrl}`);
+                    continue;
+                  }
+                } catch(e) {}
+              }
               if (candStatus === 200 && candHtml && !isCloudflareHtml(candStatus, candHtml)) {
                 const foundPosts = parsePostsFromHtml(candHtml, candUrl);
                 if (foundPosts.length > 0) {
                   console.log(`[HDHub4U] Successfully found ${foundPosts.length} posts using: ${candUrl}`);
-                  return res.json({ is_search: true, posts: foundPosts, found: foundPosts.length });
+                  return res.json({ is_search: true, posts: foundPosts, found: foundPosts.length, total_found: foundPosts.length, page: pageNum });
                 }
               }
             } catch (err: any) {
               console.log(`[HDHub4U] Candidate ${candUrl} error: ${err.message}`);
             }
           }
+
+          // If a search was specifically performed and no results found, return 0 posts rather than scraping homepage!
+          return res.json({ is_search: true, posts: [], found: 0, total_found: 0, page: pageNum });
         }
 
         // Standard fetch fallback for catalog / category / page URLs

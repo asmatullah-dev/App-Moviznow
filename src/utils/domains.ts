@@ -1,7 +1,28 @@
 import { safeStorage } from './safeStorage';
 
-export const HUBCLOUD_DOMAIN = 'https://hubcloud.foo';
+export const HUBCLOUD_DOMAIN = 'https://hubcloud.cx';
 export const HUBDRIVE_DOMAIN = 'https://hubdrive.space';
+
+export function getHubcloudDomain(): string {
+  const stored = safeStorage.getItem('custom_hubcloud_domain');
+  if (stored && stored.trim()) {
+    let domain = stored.trim();
+    if (!domain.startsWith('http://') && !domain.startsWith('https://')) {
+      domain = 'https://' + domain;
+    }
+    const clean = domain.replace(/\/+$/, '');
+    if (clean.includes('hubcloud.one') || clean.includes('hubcloud.foo') || clean.includes('hubcould')) {
+      safeStorage.setItem('custom_hubcloud_domain', HUBCLOUD_DOMAIN);
+      return HUBCLOUD_DOMAIN;
+    }
+    return clean;
+  }
+  return HUBCLOUD_DOMAIN;
+}
+
+export function setHubcloudDomain(domain: string): void {
+  safeStorage.setItem('custom_hubcloud_domain', domain.trim());
+}
 
 export const DEFAULT_MOVIESDRIVE_DOMAIN = 'https://new6.moviesdrives.my';
 export const DEFAULT_SKYMOVIES_DOMAIN = 'https://skymovieshd.meme';

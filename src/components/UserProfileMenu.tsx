@@ -32,6 +32,22 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
   const [isOpen, setIsOpen] = useState(false);
   const [isRefreshingData, setIsRefreshingData] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
+
+  useEffect(() => {
+    const handleSyncStatus = (e: any) => {
+      if (e?.detail?.status === 'syncing') {
+        setIsRefreshingData(true);
+      } else if (
+        e?.detail?.status === 'success' ||
+        e?.detail?.status === 'error' ||
+        e?.detail?.status === 'up-to-date'
+      ) {
+        setIsRefreshingData(false);
+      }
+    };
+    window.addEventListener('sync_status', handleSyncStatus);
+    return () => window.removeEventListener('sync_status', handleSyncStatus);
+  }, []);
   const menuRef = useRef<HTMLDivElement>(null);
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
   const [newRequest, setNewRequest] = useState({ title: '', type: 'movie' as 'movie' | 'series', year: '' });

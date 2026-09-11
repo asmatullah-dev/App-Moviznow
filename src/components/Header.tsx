@@ -10,6 +10,7 @@ import { NotificationMenu } from "./NotificationMenu";
 import { CartButton } from "./CartButton";
 import { UserProfileMenu } from "./UserProfileMenu";
 import { AdminButtons } from "./AdminButtons";
+import { HeaderRefreshButton } from "./HeaderRefreshButton";
 
 interface HeaderProps {
   showSearchAndFilters?: boolean;
@@ -103,6 +104,7 @@ export function Header({
               <Download className="w-4 h-4" />
             </button>
           )}
+          <HeaderRefreshButton />
           <AdminButtons profile={profile} />
           <NotificationMenu />
           <CartButton />

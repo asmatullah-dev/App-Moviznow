@@ -16,6 +16,8 @@ export function RefreshAppDataManager() {
   const executeUnifiedRefreshAndSync = useCallback(async (reason: string = 'manual') => {
     if (isRefreshingRef.current) return;
 
+    const isManualTrigger = reason === 'catalog_button' || reason === 'user_profile_button' || reason === 'manual' || reason === 'header_button';
+
     // For guest users (unauthenticated), populate content library from static export JSON and skip Firestore network calls!
     if (!user) {
       seedStaticExportData();
@@ -23,10 +25,10 @@ export function RefreshAppDataManager() {
       if (reason !== 'app_open' && reason !== '10_hour_sync') {
         window.dispatchEvent(new CustomEvent('sync_status', {
           detail: {
-            status: 'up-to-date',
+            status: isManualTrigger ? 'success' : 'up-to-date',
             isInitialLoad: false,
             updatedCount: 0,
-            message: 'Data is up to date'
+            message: isManualTrigger ? 'Refresh successfully' : 'Data is up to date'
           }
         }));
       }
@@ -37,17 +39,15 @@ export function RefreshAppDataManager() {
       if (reason !== 'app_open' && reason !== '10_hour_sync') {
         window.dispatchEvent(new CustomEvent('sync_status', {
           detail: {
-            status: 'up-to-date',
+            status: isManualTrigger ? 'error' : 'up-to-date',
             isInitialLoad: false,
             updatedCount: 0,
-            message: 'Data is up to date'
+            message: isManualTrigger ? 'You are currently offline' : 'Data is up to date'
           }
         }));
       }
       return;
     }
-
-    const isManualTrigger = reason === 'catalog_button' || reason === 'user_profile_button' || reason === 'manual';
 
     if (!isManualTrigger) {
       const storageKey = `last_unified_10h_refresh_sync_time_v2_${user.uid}`;
@@ -222,10 +222,10 @@ export function RefreshAppDataManager() {
 
   useEffect(() => {
     (window as any).triggerRefreshAppData = (reason: any) => {
-      executeUnifiedRef.current(reason);
+      return executeUnifiedRef.current(reason);
     };
     (window as any).triggerSyncUserData = (reason: any) => {
-      executeUnifiedRef.current(reason);
+      return executeUnifiedRef.current(reason);
     };
 
     const handleRefreshEvent = (e: Event) => {

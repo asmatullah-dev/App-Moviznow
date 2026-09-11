@@ -17,6 +17,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
+  ChevronsRight,
   Info,
   Siren,
   Plus,
@@ -1327,8 +1328,15 @@ export const LinkCheckerModal: React.FC<Props> = ({
   const [showSkymoviesSearchInput, setShowSkymoviesSearchInput] = useState<boolean>(false);
   const [skymoviesSearchTerm, setSkymoviesSearchTerm] = useState<string>("");
   const [skymoviesVisibleLimit, setSkymoviesVisibleLimit] = useState<number>(500);
-  const [skymoviesTotalFound, setSkymoviesTotalFound] = useState<number>(0);
-  const [skymoviesHasMore, setSkymoviesHasMore] = useState<boolean>(false);
+  // Catalog Pagination & Scroll State
+  const catalogScrollRef = React.useRef<HTMLDivElement>(null);
+  const [catalogTotalFound, setCatalogTotalFound] = useState<number>(0);
+  const [catalogHasMore, setCatalogHasMore] = useState<boolean>(false);
+  // Aliases for SkyMoviesHD backward compatibility
+  const skymoviesTotalFound = catalogTotalFound;
+  const setSkymoviesTotalFound = setCatalogTotalFound;
+  const skymoviesHasMore = catalogHasMore;
+  const setSkymoviesHasMore = setCatalogHasMore;
   const [skymoviesLoadingMore, setSkymoviesLoadingMore] = useState<boolean>(false);
   const [catalogViewMode, setCatalogViewMode] = useState<'compact' | 'detailed'>('compact');
 
@@ -1361,9 +1369,17 @@ export const LinkCheckerModal: React.FC<Props> = ({
       const isFilmy = u.hostname.includes("filmygo") || u.origin === filmyDomain;
       const isHdhub = u.hostname.includes("hdhub4u") || u.origin === hdhubDomain;
       const isFilmyfly = u.hostname.includes("filmyfly") || u.origin === filmyflyDomain;
-      const q = u.searchParams.get("to-search") || u.searchParams.get("search") || u.searchParams.get("q") || u.searchParams.get("s") || "";
+      
+      let q = u.searchParams.get("to-search") || u.searchParams.get("search") || u.searchParams.get("q") || u.searchParams.get("s") || "";
+      if (!q) {
+        const searchPathMatch = u.pathname.match(/\/search\/([^/]+)/i);
+        if (searchPathMatch && searchPathMatch[1] && !searchPathMatch[1].endsWith('.html') && !searchPathMatch[1].endsWith('.php')) {
+          q = decodeURIComponent(searchPathMatch[1]);
+        }
+      }
+
       let p = parseInt(u.searchParams.get("to-page") || u.searchParams.get("page") || u.searchParams.get("p") || u.searchParams.get("pg") || "1", 10) || 1;
-      if (isHdhub && !u.searchParams.get("page") && !u.searchParams.get("p")) {
+      if (!u.searchParams.get("page") && !u.searchParams.get("p") && !u.searchParams.get("to-page") && !u.searchParams.get("pg")) {
         const pageMatch = u.pathname.match(/\/page\/(\d+)/i);
         if (pageMatch) p = parseInt(pageMatch[1], 10);
       }
@@ -1372,6 +1388,26 @@ export const LinkCheckerModal: React.FC<Props> = ({
       return { query: "", page: 1, origin: mdDomain, isSkyMovies: false, isFilmygo: false, isHdhub4u: false, isFilmyfly: false };
     }
   }, [moviesdriveSearchUrl]);
+
+  const catalogTotalPages = useMemo(() => {
+    if (catalogTotalFound && catalogTotalFound > 0) {
+      return Math.max(1, Math.ceil(catalogTotalFound / 25));
+    }
+    return Math.max(1, moviesdrivePageInfo.page);
+  }, [catalogTotalFound, moviesdrivePageInfo.page]);
+
+  const getPaginationPages = (current: number, total: number): (number | '...')[] => {
+    if (total <= 7) {
+      return Array.from({ length: total }, (_, i) => i + 1);
+    }
+    if (current <= 4) {
+      return [1, 2, 3, 4, 5, '...', total];
+    }
+    if (current >= total - 3) {
+      return [1, '...', total - 4, total - 3, total - 2, total - 1, total];
+    }
+    return [1, '...', current - 1, current, current + 1, '...', total];
+  };
 
   const contentTitleIndex = useMemo(() => {
     const map = new Map<string, Content>();
@@ -1823,29 +1859,41 @@ export const LinkCheckerModal: React.FC<Props> = ({
           ? `${origin}/search.html?q=${encodeURIComponent(query)}` 
           : `${origin}/search.html?q=${encodeURIComponent(query)}&page=${targetPage}`;
       } else {
-        newUrl = `${origin}/page/${targetPage}/`;
+        newUrl = targetPage === 1 ? `${origin}/` : `${origin}/page/${targetPage}/`;
       }
       endpoint = `/api/hdhub4u?url=${encodeURIComponent(newUrl)}`;
     } else if (isFilmyfly) {
       if (query) {
         newUrl = `${origin}/search.html?search=${encodeURIComponent(query)}&page=${targetPage}`;
       } else {
-        newUrl = `${origin}/page/${targetPage}/`;
+        newUrl = targetPage === 1 ? `${origin}/` : `${origin}/page/${targetPage}/`;
       }
       endpoint = `/api/filmyfly?url=${encodeURIComponent(newUrl)}`;
     } else {
-      newUrl = `${origin}/search.html?q=${encodeURIComponent(query)}&page=${targetPage}`;
+      if (query) {
+        newUrl = targetPage === 1 
+          ? `${origin}/search.html?q=${encodeURIComponent(query)}` 
+          : `${origin}/search.html?q=${encodeURIComponent(query)}&page=${targetPage}`;
+      } else {
+        newUrl = targetPage === 1 ? `${origin}/` : `${origin}/page/${targetPage}/`;
+      }
       endpoint = `/api/moviesdrive?url=${encodeURIComponent(newUrl)}`;
     }
-    setMoviesdriveSearchUrl(newUrl);
     setMoviesdrivePageLoading(true);
     try {
       const res = await fetch(endpoint);
       if (!res.ok) throw new Error('Catalog page fetch failed');
       const data = await res.json();
       if (data.is_search && Array.isArray(data.posts)) {
+        setMoviesdriveSearchUrl(newUrl);
         setMoviesdriveSearchPosts(data.posts);
         
+        const total = data.total_found || data.found || data.posts.length;
+        if (total) {
+          setCatalogTotalFound(total);
+        }
+        setCatalogHasMore(Boolean(data.has_more) || (total > targetPage * 25));
+
         setAllAccumulatedPosts(prev => {
           const nextMap = new Map(prev);
           data.posts.forEach((p: any) => {
@@ -1864,6 +1912,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
             return next;
           });
         }
+
+        // Smooth scroll back to top of posts container on page change
+        catalogScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
       }
     } catch (e) {
       console.error("Error fetching catalog page:", e);
@@ -2556,6 +2607,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
         normU.includes('filesdl.in') || normU.includes('filesdl.top') || normU.includes('filesdl.') || normU.includes('linkmake.') ||
         normU.includes('mdrive.lol') || normU.includes('mdrvie.lol') ||
         normU.includes('moviesdrives.') || normU.includes('moviesdrive.') ||
+        normU.includes('workers.dev') || normU.includes('telegra.ph') ||
         normU.includes('filmygo.') || normU.includes('skymovies') || normU.includes('hdhub4u') || normU.includes('filmyfly') ||
         (mdDomain && normU.includes(normalizeUrl(mdDomain))) ||
         (skyDomain && normU.includes(normalizeUrl(skyDomain))) ||
@@ -2585,7 +2637,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
               if (!res.ok) throw new Error('MDrive fetch failed');
               const data = await res.json();
               return { type: 'mdrive', original: targetUrl, data };
-            } else if (normUrl.includes('moviesdrives.') || normUrl.includes('moviesdrive.') || (mdDomain && normUrl.includes(normalizeUrl(mdDomain)))) {
+            } else if (normUrl.includes('moviesdrives.') || normUrl.includes('moviesdrive.') || normUrl.includes('workers.dev') || normUrl.includes('telegra.ph') || (mdDomain && normUrl.includes(normalizeUrl(mdDomain)))) {
               const res = await fetch(`/api/moviesdrive?url=${encodeURIComponent(normUrl)}`, { signal: controller.signal });
               clearTimeout(timer);
               if (!res.ok) throw new Error('MoviesDrive fetch failed');
@@ -2669,11 +2721,11 @@ export const LinkCheckerModal: React.FC<Props> = ({
               if (Array.isArray(res.data?.posts) && res.data.posts.length > 0) {
                 setMoviesdriveSearchUrl(res.original);
                 setMoviesdriveSearchPosts(res.data.posts);
+                const total = res.data.total_found || res.data.found || res.data.posts.length;
+                setCatalogTotalFound(total);
+                setCatalogHasMore(Boolean(res.data.has_more) || (total > res.data.posts.length));
                 const isSky = res.type === 'skymovieshd' || res.original.includes('skymovies');
                 if (isSky) {
-                  const total = res.data.total_found || res.data.found || res.data.posts.length;
-                  setSkymoviesTotalFound(total);
-                  setSkymoviesHasMore(Boolean(res.data.has_more) || (total > res.data.posts.length));
                   setSkymoviesVisibleLimit(500);
                 }
                 const initialLimit = isSky ? 10 : Math.min(res.data.posts.length, 25);
@@ -3651,6 +3703,163 @@ export const LinkCheckerModal: React.FC<Props> = ({
     });
   };
 
+  const renderPaginationControls = (position: 'top' | 'bottom' = 'top') => {
+    if (moviesdrivePageInfo.isSkyMovies) return null;
+    const currentPage = moviesdrivePageInfo.page;
+    const totalPages = catalogTotalPages;
+    const pageNumbers = getPaginationPages(currentPage, totalPages);
+
+    const activePageClasses = moviesdrivePageInfo.isHdhub4u
+      ? 'bg-sky-600 text-white shadow-xs'
+      : moviesdrivePageInfo.isFilmygo
+      ? 'bg-emerald-600 text-white shadow-xs'
+      : moviesdrivePageInfo.isFilmyfly
+      ? 'bg-teal-600 text-white shadow-xs'
+      : 'bg-indigo-600 text-white shadow-xs';
+
+    const badgeBorderClasses = moviesdrivePageInfo.isHdhub4u
+      ? 'bg-sky-500/10 text-sky-500 border-sky-500/20'
+      : moviesdrivePageInfo.isFilmygo
+      ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+      : moviesdrivePageInfo.isFilmyfly
+      ? 'bg-teal-500/10 text-teal-500 border-teal-500/20'
+      : 'bg-indigo-500/10 text-indigo-500 border-indigo-500/20';
+
+    return (
+      <div 
+        id={`catalog-pagination-${position}`}
+        className="flex flex-wrap items-center justify-between gap-2.5 p-2.5 bg-zinc-50 dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800"
+      >
+        <div className="flex flex-wrap items-center gap-1">
+          {/* First Page Button */}
+          <button
+            type="button"
+            onClick={() => handleMoviesdrivePageChange(1)}
+            disabled={currentPage <= 1 || moviesdrivePageLoading}
+            className="px-2 py-1 rounded-lg text-xs font-bold bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition flex items-center gap-1 cursor-pointer"
+            title="First Page"
+          >
+            <ChevronsLeft className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">First</span>
+          </button>
+
+          {/* Previous Page Button */}
+          <button
+            type="button"
+            onClick={() => handleMoviesdrivePageChange(currentPage - 1)}
+            disabled={currentPage <= 1 || moviesdrivePageLoading}
+            className="px-2.5 py-1 rounded-lg text-xs font-bold bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition flex items-center gap-1 cursor-pointer"
+            title="Previous Page"
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+            <span>Prev</span>
+          </button>
+
+          {/* Numbered Page Buttons: 1, 2, 3, 4, ... */}
+          <div className="flex items-center gap-1 mx-0.5">
+            {pageNumbers.map((p, idx) => {
+              if (p === '...') {
+                return (
+                  <span key={`dots-${idx}`} className="px-1 text-xs text-zinc-400 font-bold select-none">
+                    ...
+                  </span>
+                );
+              }
+              const isCurrent = p === currentPage;
+              return (
+                <button
+                  key={`page-${p}`}
+                  type="button"
+                  onClick={() => handleMoviesdrivePageChange(p)}
+                  disabled={moviesdrivePageLoading}
+                  className={`min-w-7 h-7 px-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center cursor-pointer ${
+                    isCurrent
+                      ? activePageClasses
+                      : 'bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                  }`}
+                  title={`Page ${p}`}
+                >
+                  {p}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Next Page Button */}
+          <button
+            type="button"
+            onClick={() => handleMoviesdrivePageChange(currentPage + 1)}
+            disabled={(!catalogHasMore && currentPage >= totalPages) || moviesdrivePageLoading}
+            className="px-2.5 py-1 rounded-lg text-xs font-bold bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition flex items-center gap-1 cursor-pointer"
+            title="Next Page"
+          >
+            <span>Next</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Last Page Button */}
+          {totalPages > 1 && (
+            <button
+              type="button"
+              onClick={() => handleMoviesdrivePageChange(totalPages)}
+              disabled={currentPage >= totalPages || moviesdrivePageLoading}
+              className="px-2 py-1 rounded-lg text-xs font-bold bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition flex items-center gap-1 cursor-pointer"
+              title={`Last Page (${totalPages})`}
+            >
+              <span className="hidden sm:inline">Last</span>
+              <ChevronsRight className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Page status and custom page jumper */}
+        <div className="flex items-center gap-2 ml-auto">
+          <span className={`text-[11px] font-bold px-2 py-1 rounded-lg border ${badgeBorderClasses}`}>
+            Page {currentPage} of {totalPages}
+          </span>
+
+          <form 
+            onSubmit={(e) => {
+              e.preventDefault();
+              const num = parseInt(customPageInput, 10);
+              if (!isNaN(num) && num >= 1) {
+                handleMoviesdrivePageChange(num);
+                setCustomPageInput("");
+              }
+            }}
+            className="flex items-center gap-1.5"
+          >
+            <span className="text-xs text-zinc-500 font-medium hidden sm:inline">Go:</span>
+            <input
+              type="number"
+              min={1}
+              max={totalPages > 1 ? totalPages : undefined}
+              placeholder="#"
+              value={customPageInput}
+              onChange={(e) => setCustomPageInput(e.target.value)}
+              className="w-12 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-1.5 py-1 text-xs text-center font-bold text-zinc-900 dark:text-zinc-100 outline-none focus:border-indigo-500"
+            />
+            <button
+              type="submit"
+              disabled={!customPageInput || moviesdrivePageLoading}
+              className={`px-2 py-1 rounded-lg text-xs font-bold text-white disabled:opacity-40 transition cursor-pointer ${
+                moviesdrivePageInfo.isHdhub4u
+                  ? 'bg-sky-600 hover:bg-sky-500'
+                  : moviesdrivePageInfo.isFilmygo
+                  ? 'bg-emerald-600 hover:bg-emerald-500'
+                  : moviesdrivePageInfo.isFilmyfly
+                  ? 'bg-teal-600 hover:bg-teal-500'
+                  : 'bg-indigo-600 hover:bg-indigo-500'
+              }`}
+            >
+              Go
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <AnimatePresence>
       {isOpen ? (
@@ -3844,72 +4053,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
                       </div>
                     </div>
 
-                    {/* Pagination Controls - Only for MoviesDrive / FilmyGo */}
-                    {!moviesdrivePageInfo.isSkyMovies && (
-                      <div className="flex flex-wrap items-center justify-between gap-3 p-2.5 bg-zinc-50 dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800">
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => handleMoviesdrivePageChange(1)}
-                            disabled={moviesdrivePageInfo.page <= 1 || moviesdrivePageLoading}
-                            className="px-2.5 py-1 rounded-lg text-xs font-bold bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition flex items-center gap-1 cursor-pointer"
-                            title="First Page"
-                          >
-                            <ChevronsLeft className="w-3.5 h-3.5" />
-                            First
-                          </button>
-                          <button
-                            onClick={() => handleMoviesdrivePageChange(moviesdrivePageInfo.page - 1)}
-                            disabled={moviesdrivePageInfo.page <= 1 || moviesdrivePageLoading}
-                            className="px-2.5 py-1 rounded-lg text-xs font-bold bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition flex items-center gap-1 cursor-pointer"
-                            title="Previous Page"
-                          >
-                            <ChevronLeft className="w-3.5 h-3.5" />
-                            Prev
-                          </button>
-                          <span className={`text-xs font-bold px-2.5 py-1 rounded-lg border ${moviesdrivePageInfo.isFilmyfly ? "bg-teal-500/10 text-teal-500 border-teal-500/20" : moviesdrivePageInfo.isFilmygo ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" : moviesdrivePageInfo.isHdhub4u ? "bg-sky-500/10 text-sky-500 border-sky-500/20" : "bg-indigo-500/10 text-indigo-500 border-indigo-500/20"}`}>
-                            Page {moviesdrivePageInfo.page}
-                          </span>
-                          <button
-                            onClick={() => handleMoviesdrivePageChange(moviesdrivePageInfo.page + 1)}
-                            disabled={moviesdrivePageLoading}
-                            className="px-2.5 py-1 rounded-lg text-xs font-bold bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition flex items-center gap-1 cursor-pointer"
-                            title="Next Page"
-                          >
-                            Next
-                            <ChevronRight className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-
-                        <form 
-                          onSubmit={(e) => {
-                            e.preventDefault();
-                            const num = parseInt(customPageInput, 10);
-                            if (!isNaN(num) && num >= 1) {
-                              handleMoviesdrivePageChange(num);
-                              setCustomPageInput("");
-                            }
-                          }}
-                          className="flex items-center gap-2"
-                        >
-                          <span className="text-xs text-zinc-500 font-medium">Custom Page:</span>
-                          <input
-                            type="number"
-                            min={1}
-                            placeholder="#"
-                            value={customPageInput}
-                            onChange={(e) => setCustomPageInput(e.target.value)}
-                            className="w-14 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs text-center font-bold text-zinc-900 dark:text-zinc-100 outline-none focus:border-indigo-500"
-                          />
-                          <button
-                            type="submit"
-                            disabled={!customPageInput || moviesdrivePageLoading}
-                            className="px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-40 transition cursor-pointer"
-                          >
-                            Go
-                          </button>
-                        </form>
-                      </div>
-                    )}
+                    {/* Pagination Controls - Top */}
+                    {renderPaginationControls('top')}
 
                     {moviesdrivePageLoading ? (
                       <div className="py-16 flex flex-col items-center justify-center gap-3">
@@ -3929,7 +4074,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                         return (
                           <div className="flex flex-col">
                             {/* The scrollable catalog list container with ample vertical space */}
-                            <div className="h-[60vh] sm:h-[65vh] max-h-[72vh] overflow-y-auto custom-scrollbar pr-1 pb-2">
+                            <div ref={catalogScrollRef} className="h-[60vh] sm:h-[65vh] max-h-[72vh] overflow-y-auto custom-scrollbar pr-1 pb-2">
                               {catalogViewMode === 'compact' ? (
                                 /* Compact High-Density View: 10-12+ items visible at once */
                                 <div className="space-y-1.5">
@@ -4134,6 +4279,12 @@ export const LinkCheckerModal: React.FC<Props> = ({
                                       </>
                                     )}
                                   </button>
+                                </div>
+                              )}
+
+                              {!moviesdrivePageInfo.isSkyMovies && (
+                                <div className="pt-3 pb-1">
+                                  {renderPaginationControls('bottom')}
                                 </div>
                               )}
                             </div>

@@ -7,6 +7,9 @@ export function normalizeDomain(url: string): string {
     try {
         const urlObj = new URL(trimmed);
         const host = urlObj.hostname.toLowerCase();
+        if (host.includes("hubcloud.one") || host.includes("hubcloud.foo") || host.includes("hubcould") || host === "hubcloud.club" || host === "hubcloud.lol") {
+            urlObj.hostname = "hubcloud.cx";
+        }
         if (host.includes("hubcloud") || host.includes("vcloud") || host.includes("hubdrive")) {
             const eVal = urlObj.searchParams.get("e");
             urlObj.search = eVal ? `?e=${eVal}` : "";
@@ -15,6 +18,9 @@ export function normalizeDomain(url: string): string {
         }
     } catch (e) {
         // Fallback for non-standard links or parsing issues
+        if (trimmed.includes("hubcloud.one") || trimmed.includes("hubcloud.foo") || trimmed.includes("hubcould")) {
+            trimmed = trimmed.replace(/https?:\/\/(?:www\.)?(?:hubcloud\.one|hubcloud\.foo|hubcould\.\w+)/i, "https://hubcloud.cx");
+        }
         if (trimmed.includes("hubcloud") || trimmed.includes("vcloud") || trimmed.includes("hubdrive")) {
             const eMatch = trimmed.match(/[?&]e=([^&#\s]+)/);
             const queryIdx = trimmed.indexOf("?");

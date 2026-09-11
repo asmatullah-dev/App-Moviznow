@@ -62,9 +62,11 @@ export function normalizeUrl(input: string) {
     const url = new URL(trimmed);
     const host = url.hostname.toLowerCase().replace(/^www\./, "");
 
-    // We no longer normalize domains to hubcloud.cx or hubdrive.space
-    // to allow users to use any working mirror/domain they provide.
-    
+    // Route old or legacy hubcloud domains (hubcloud.one, hubcloud.foo, hubcould) to new active domain hubcloud.cx
+    if (host.includes("hubcloud.one") || host.includes("hubcloud.foo") || host.includes("hubcould") || host === "hubcloud.club" || host === "hubcloud.lol") {
+      url.hostname = "hubcloud.cx";
+    }
+
     const isPixeldrain =
       host.includes("pixeldrain.com") ||
       host.includes("pixeldrain.dev") ||
@@ -123,6 +125,10 @@ export function normalizeUrl(input: string) {
       trimmed.includes("pixeldrain.net/") ||
       trimmed.includes("pixel.drain/") ||
       trimmed.includes("pixeldra.in/");
+
+    if (trimmed.includes("hubcloud.one") || trimmed.includes("hubcloud.foo") || trimmed.includes("hubcould")) {
+      trimmed = trimmed.replace(/https?:\/\/(?:www\.)?(?:hubcloud\.one|hubcloud\.foo|hubcould\.\w+)/i, "https://hubcloud.cx");
+    }
 
     if (trimmed.includes("hubcloud") || trimmed.includes("vcloud") || trimmed.includes("hubdrive")) {
       const eMatch = trimmed.match(/[?&]e=([^&#\s]+)/);
