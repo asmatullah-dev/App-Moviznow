@@ -2620,7 +2620,7 @@ export default function MovieDetails() {
       `🗣️ Language: ${contentLangs || "N/A"}\n` +
       `🎭 Genre: ${contentGenres || "N/A"}\n` +
       `🖨️ Print Quality: ${contentQuality}\n\n` +
-      `🔗 Watch here: https://MovizNow.com/${mergedContent.id}\n` +
+      `🔗 Watch here: MovizNow.com/${mergedContent.id}\n` +
       `📞 WhatsApp: ${(() => {
         let sn = settings?.supportNumber || "3416286423";
         if (sn.startsWith("92")) sn = "0" + sn.substring(2);
@@ -2628,12 +2628,16 @@ export default function MovieDetails() {
         return sn;
       })()}`;
 
+    const sanitizedText = baseText
+      .replace(/https?:\/\/(?:www\.)?moviznow\.com\/([a-zA-Z0-9_-]+)/gi, "MovizNow.com/$1")
+      .trim();
+
     setSharePreviewModal({
       isOpen: true,
       title: "Share Content",
       contentTitle: `${formatContentTitle(mergedContent)} (${mergedContent.year})`,
       posterUrl: mergedContent.posterUrl,
-      text: baseText.trim(),
+      text: sanitizedText,
       shareSubject: `${formatContentTitle(mergedContent)} (${mergedContent.year})`,
     });
   };

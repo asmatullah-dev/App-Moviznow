@@ -55,7 +55,9 @@ export default function SharePreviewModal({
     }
   }, [isOpen, posterUrl]);
 
-  const cleanShareText = (shareText || '').trim();
+  const cleanShareText = (shareText || '')
+    .replace(/https?:\/\/(?:www\.)?moviznow\.com\/([a-zA-Z0-9_-]+)/gi, 'MovizNow.com/$1')
+    .trim();
 
   // Extract clean search title (strips year in parentheses e.g. "Awarapan 2 (2026)" -> "Awarapan 2")
   const getSearchableTitle = (rawTitle?: string) => {

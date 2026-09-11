@@ -3318,7 +3318,9 @@ export default function ContentManagement() {
       if (sn.startsWith("92")) sn = "0" + sn.substring(2);
       else if (!sn.startsWith("0")) sn = "0" + sn;
       text += `📞 WhatsApp: ${sn}`;
-      text = text.trim();
+      text = text
+        .replace(/https?:\/\/(?:www\.)?moviznow\.com\/([a-zA-Z0-9_-]+)/gi, "MovizNow.com/$1")
+        .trim();
 
       let files: File[] = [];
       if (content.posterUrl) {
@@ -3775,7 +3777,9 @@ export default function ContentManagement() {
     else if (!sn.startsWith("0")) sn = "0" + sn;
     text += `📞 WhatsApp: ${sn}`;
     
-    text = text.trim();
+    text = text
+      .replace(/https?:\/\/(?:www\.)?moviznow\.com\/([a-zA-Z0-9_-]+)/gi, "MovizNow.com/$1")
+      .trim();
 
     const shareData: any = {
       title: updatedContent.title,
