@@ -133,7 +133,12 @@ function isUserPrivileged(user: any, profile: any): boolean {
 export function UsersProvider({ children }: { children: React.ReactNode }) {
   const { profile, user, authLoading } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>(() => {
-    const cached = safeStorage.getItem('cached_all_users');
+    let cached = safeStorage.getItem('cached_all_users');
+    if (!cached && typeof window !== 'undefined' && window.localStorage) {
+      try {
+        cached = window.localStorage.getItem('cached_all_users');
+      } catch (e) {}
+    }
     if (!cached) return [];
     try {
       const parsed: UserProfile[] = JSON.parse(cached);
@@ -164,14 +169,32 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
 
   // Reusable multi-tier cache persistence helper (Synchronous LocalStorage + Asynchronous IndexedDB)
   const saveUsersCache = useCallback((usersList: UserProfile[], mtimes?: Record<string, any>) => {
+    if (!usersList || usersList.length === 0) {
+      // Guard: Never overwrite non-empty cache with an empty list!
+      const existing = safeStorage.getItem('cached_all_users') || (typeof window !== 'undefined' ? localStorage.getItem('cached_all_users') : null);
+      if (existing && existing !== '[]') {
+        console.warn("[UsersCache] Prevented overwriting non-empty users cache with empty list");
+        return;
+      }
+    }
     try {
       const serialized = JSON.stringify(usersList);
       safeStorage.setItem('cached_all_users', serialized);
+      if (typeof window !== 'undefined' && window.localStorage) {
+        try {
+          window.localStorage.setItem('cached_all_users', serialized);
+        } catch (e) {}
+      }
       safeStorage.setItemAsync('cached_all_users', serialized).catch(() => {});
 
       if (mtimes && Object.keys(mtimes).length > 0) {
         const mtimesStr = JSON.stringify(mtimes);
         safeStorage.setItem('sync_user_mtimes', mtimesStr);
+        if (typeof window !== 'undefined' && window.localStorage) {
+          try {
+            window.localStorage.setItem('sync_user_mtimes', mtimesStr);
+          } catch (e) {}
+        }
         safeStorage.setItemAsync('sync_user_mtimes', mtimesStr).catch(() => {});
         try {
           updateChunkMetaLocalCache({ users: mtimes });
@@ -199,6 +222,11 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
               const loaded = Array.from(uniqueMap.values());
               setUsers(loaded);
               safeStorage.setItem('cached_all_users', JSON.stringify(loaded));
+              if (typeof window !== 'undefined' && window.localStorage) {
+                try {
+                  window.localStorage.setItem('cached_all_users', JSON.stringify(loaded));
+                } catch (e) {}
+              }
             }
           } catch (e) {}
         }
@@ -365,19 +393,30 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const fetchUsers = useCallback(async (force = false) => {
+  const fetchUsers = useCallback(async (force = false, forceFull = false) => {
     if (fetchPromiseRef.current) {
         return fetchPromiseRef.current;
     }
 
     const runFetch = async () => {
-      // 1. Read existing cached users first
-      const cachedStr = safeStorage.getItem('cached_all_users');
+      // 1. Read existing cached users first (from safeStorage, localStorage, and if needed IndexedDB)
+      let cachedStr = safeStorage.getItem('cached_all_users');
+      if (!cachedStr && typeof window !== 'undefined' && window.localStorage) {
+        try {
+          cachedStr = window.localStorage.getItem('cached_all_users');
+        } catch (e) {}
+      }
+      if (!cachedStr) {
+        try {
+          cachedStr = await safeStorage.getItemAsync('cached_all_users');
+        } catch (e) {}
+      }
+
       let locallyCachedUsers: UserProfile[] = [];
       if (cachedStr) {
         try {
           const parsed = JSON.parse(cachedStr);
-          if (Array.isArray(parsed)) locallyCachedUsers = parsed;
+          if (Array.isArray(parsed) && parsed.length > 0) locallyCachedUsers = parsed;
         } catch (e) {}
       }
 
@@ -401,15 +440,15 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       const lastFetchTimeStr = safeStorage.getItem('last_users_sync_timestamp');
       const lastFetchTime = lastFetchTimeStr ? parseInt(lastFetchTimeStr, 10) : 0;
 
-      // Minimum cooldown between non-forced fetch attempts (4 hours) to prevent redundant queries
-      const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
-      if (!force && (now - lastFetchTime < FOUR_HOURS_MS) && locallyCachedUsers.length > 0) {
+      // Minimum cooldown between non-forced fetch attempts (15 mins) to prevent redundant queries
+      const FIFTEEN_MINS_MS = 15 * 60 * 1000;
+      if (!force && (now - lastFetchTime < FIFTEEN_MINS_MS) && locallyCachedUsers.length > 0) {
         setLoading(false);
         return { users: locallyCachedUsers, updatedSomething: false };
       }
       
-      // For forced calls, allow execution but prevent rapid duplicate triggers (300ms debounce)
-      if (force && (now - lastFetchTimestampRef.current < 300) && locallyCachedUsers.length > 0) {
+      // For forced calls, allow execution but prevent rapid duplicate triggers (500ms debounce)
+      if (force && (now - lastFetchTimestampRef.current < 500) && locallyCachedUsers.length > 0) {
         setLoading(false);
         return { users: locallyCachedUsers, updatedSomething: false };
       }
@@ -420,8 +459,8 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       }
       
       try {
-        // If force is requested OR local cache is completely empty, perform a full fetch from Firestore
-        if (force || locallyCachedUsers.length === 0) {
+        // ONLY perform a full collection scan if explicitly forced with forceFull OR local cache is completely empty
+        if (forceFull || locallyCachedUsers.length === 0) {
           const snap = await runWithNetwork(() => getDocs(collection(db, 'users')));
           const initialMap = new Map<string, UserProfile>();
           const initialMtimes: Record<string, any> = {};
@@ -433,8 +472,15 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
             initialMtimes[docSnap.id] = normalized.updatedAt || getUtcVersion();
           });
 
-          // Preserve any uncommitted local pending updates
           let initialList = Array.from(initialMap.values());
+          // Safety guard: if query returns 0 docs but we already had locallyCachedUsers, preserve local cache!
+          if (initialList.length === 0 && locallyCachedUsers.length > 0) {
+            console.warn("[UsersContext] Server returned empty user list; preserving existing cache");
+            setLoading(false);
+            return { users: locallyCachedUsers, updatedSomething: false };
+          }
+
+          // Preserve any uncommitted local pending updates
           const pendingStr = safeStorage.getItem('pending_user_updates');
           if (pendingStr) {
             try {
@@ -448,20 +494,23 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
             } catch (e) {}
           }
 
-          saveUsersCache(initialList, initialMtimes);
-          setUsers(initialList);
+          if (initialList.length > 0) {
+            saveUsersCache(initialList, initialMtimes);
+            setUsers(initialList);
+          }
           safeStorage.setItem('last_users_sync_timestamp', now.toString());
           setLoading(false);
           setError(null);
-          return { users: initialList, updatedSomething: true };
+          return { users: initialList.length > 0 ? initialList : locallyCachedUsers, updatedSomething: true };
         }
 
-        // Otherwise (non-forced background sync), check chunk_meta delta
-        const versions = await getChunkMeta(false);
+        // DELTA SYNC using chunk_meta (consumes only 1 read for chunk_meta + 1 per changed user)
+        // If force is true, bypass chunk_meta 60s cooldown to check the latest server versions
+        const versions = await getChunkMeta(force);
         const serverUsersVersion: Record<string, any> = (versions && typeof versions === 'object' && versions.users && typeof versions.users === 'object') ? versions.users : {};
 
         let localUsersVersion: Record<string, any> = {};
-        const knownMtimesStr = safeStorage.getItem('sync_user_mtimes');
+        const knownMtimesStr = safeStorage.getItem('sync_user_mtimes') || (typeof window !== 'undefined' ? localStorage.getItem('sync_user_mtimes') : null);
         if (knownMtimesStr) {
           try { localUsersVersion = JSON.parse(knownMtimesStr); } catch (e) {}
         }
@@ -594,7 +643,11 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         setLoading(false);
         
         // Return existing cached users on error so UI doesn't break
-        return { users: locallyCachedUsers, updatedSomething: false };
+        const fallback = locallyCachedUsers.length > 0 ? locallyCachedUsers : [];
+        if (fallback.length > 0) {
+          setUsers(prev => prev.length === 0 ? fallback : prev);
+        }
+        return { users: fallback, updatedSomething: false };
       }
     };
 
@@ -608,8 +661,8 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
   // Clean up on explicit sign out
   useEffect(() => {
     if (!user && !authLoading) {
-      const cached = safeStorage.getItem('cached_all_users');
-      // If user signed out completely, clear in-memory users
+      const cached = safeStorage.getItem('cached_all_users') || (typeof window !== 'undefined' ? localStorage.getItem('cached_all_users') : null);
+      // If user signed out completely, clear in-memory users only if cache is also not present
       if (!cached) {
         setUsers([]);
       }

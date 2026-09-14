@@ -35,6 +35,7 @@ import { isContentDataEqual } from "../../contexts/ContentContext";
 import { useAdminContent } from "../../contexts/AdminContentContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { useUsers } from "../../contexts/UsersContext";
+import { isEpisodeRange } from "../../utils/linkScanner";
 import {
   Content,
   Genre,
@@ -86,6 +87,8 @@ import {
   Clock,
   GitMerge,
   Github,
+  Layers,
+  Sparkles,
 } from "lucide-react";
 import {
   DragDropContext,
@@ -105,6 +108,8 @@ import {
 import { LinkCheckerModal } from "../../components/LinkCheckerModal";
 import { TelegramDownloadModal } from "../../components/TelegramDownloadModal";
 import { AdjustContentsModal } from "../../components/AdjustContentsModal";
+import { BulkContentImporterModal } from "../../components/BulkContentImporterModal";
+import { QualityUpgradeAlertsModal } from "../../components/QualityUpgradeAlertsModal";
 import Modal from "../../components/Modal";
 import ManageModal from "../../components/ManageModal";
 import { Button } from "../../components/Button";
@@ -822,6 +827,8 @@ export default function ContentManagement() {
 
   useScrollRestoration("admin_content_mgmt_window", true, !loading);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isBulkImporterOpen, setIsBulkImporterOpen] = useState(false);
+  const [isQualityAlertsOpen, setIsQualityAlertsOpen] = useState(false);
   const [isSyncConfirmOpen, setIsSyncConfirmOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -1928,6 +1935,17 @@ export default function ContentManagement() {
         setType(metadata.type);
         activeType = metadata.type;
       }
+
+      if ((metadata as any).sampleUrl) {
+        setSampleUrl((metadata as any).sampleUrl);
+      }
+      if ((metadata as any).title && !title) {
+        setTitle((metadata as any).title);
+      }
+      if ((metadata as any).year) {
+        const parsedYear = parseInt(String((metadata as any).year), 10);
+        if (!isNaN(parsedYear)) setYear(parsedYear);
+      }
     }
 
     if (activeType === "movie") {
@@ -1946,6 +1964,7 @@ export default function ContentManagement() {
         links.forEach((newLink) => {
           if (newLink.isSample && newLink.url) {
             setSampleUrl(newLink.url);
+            return; // Don't add sample link to movie download links table
           }
 
           // SKIP if URL already exists in content
@@ -1985,8 +2004,36 @@ export default function ContentManagement() {
           setSampleUrl(link.url);
         }
 
-        const targetSeason = link.season || metadata?.season || 1;
-        const targetEpisode = link.episode || metadata?.episode; // if undefined, it's a full season
+        let targetSeason = link.season || metadata?.season;
+        let targetEpisode = link.episode || metadata?.episode;
+
+        // Fallback extraction from link fileName, name, or url if episode or season is not explicitly set
+        if (targetEpisode === undefined || targetSeason === undefined) {
+          const textToScan = `${(link as any).fileName || ''} ${link.name || ''} ${link.url || ''}`;
+          const hasRange = isEpisodeRange(textToScan);
+          if (!hasRange) {
+            const combMatch = textToScan.match(/(?<=^|[^a-zA-Z0-9])s(\d+)\s*e(\d+)(?![a-z0-9])/i) ||
+                              textToScan.match(/season\s*(\d+).*?episode\s*(\d+)/i) ||
+                              textToScan.match(/(?<=^|[^a-zA-Z0-9])dl\s+(\d+)\s+(\d+)(?![a-z0-9])/i);
+            if (combMatch) {
+              if (targetSeason === undefined) targetSeason = parseInt(combMatch[1], 10);
+              if (targetEpisode === undefined) targetEpisode = parseInt(combMatch[2], 10);
+            } else {
+              const sMatch = textToScan.match(/(?<=^|[^a-zA-Z0-9])(?:s(\d+)|season\s*(\d+)|ss\s*(\d+))(?![a-z0-9])/i);
+              const eMatch = textToScan.match(/(?<=^|[^a-zA-Z0-9])(?:e(\d+)|episode\s*(\d+)|ep\s*(\d+))(?![a-z0-9])/i);
+              if (targetSeason === undefined && sMatch) targetSeason = parseInt(sMatch[1] || sMatch[2] || sMatch[3], 10);
+              if (targetEpisode === undefined && eMatch) targetEpisode = parseInt(eMatch[1] || eMatch[2] || eMatch[3], 10);
+            }
+          }
+        }
+        if (!targetSeason) targetSeason = 1;
+
+        if (targetEpisode !== undefined) {
+          link.season = targetSeason;
+          link.episode = targetEpisode;
+          link.isFullSeasonMKV = false;
+          link.isFullSeasonZIP = false;
+        }
 
         let seasonIdx = updatedSeasons.findIndex(
           (s) => s.seasonNumber === targetSeason,
@@ -2215,9 +2262,17 @@ export default function ContentManagement() {
           order: currentMaxOrder + index + 1,
         };
 
+        const sampleLink = b.links.find((l: LinkDef) => l.isSample && l.url);
+        const sampleUrlToSave = b.metadata?.sampleUrl || sampleLink?.url || "";
+        if (sampleUrlToSave) {
+          contentData.sampleUrl = sampleUrlToSave;
+        }
+
         if (b.metadata.type === "movie" || !b.metadata.type) {
+          const downloadLinks = b.links.filter((l: LinkDef) => !l.isSample);
+          const linksToSave = downloadLinks.length > 0 ? downloadLinks : b.links;
           contentData.movieLinks = JSON.stringify(
-            [...b.links].sort(
+            [...linksToSave].sort(
               (a, b) =>
                 getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
             ),
@@ -2229,7 +2284,36 @@ export default function ContentManagement() {
           const seasonMap = new Map<number, Season>();
 
           b.links.forEach((l: LinkDef) => {
-            const sNum = l.season || b.metadata.season || 1;
+            let sNum = l.season || b.metadata.season;
+            let epNum = l.episode || b.metadata.episode;
+
+            if (epNum === undefined || sNum === undefined) {
+              const textToScan = `${(l as any).fileName || ''} ${l.name || ''} ${l.url || ''}`;
+              const hasRange = isEpisodeRange(textToScan);
+              if (!hasRange) {
+                const combMatch = textToScan.match(/(?<=^|[^a-zA-Z0-9])s(\d+)\s*e(\d+)(?![a-z0-9])/i) ||
+                                  textToScan.match(/season\s*(\d+).*?episode\s*(\d+)/i) ||
+                                  textToScan.match(/(?<=^|[^a-zA-Z0-9])dl\s+(\d+)\s+(\d+)(?![a-z0-9])/i);
+                if (combMatch) {
+                  if (sNum === undefined) sNum = parseInt(combMatch[1], 10);
+                  if (epNum === undefined) epNum = parseInt(combMatch[2], 10);
+                } else {
+                  const sMatch = textToScan.match(/(?<=^|[^a-zA-Z0-9])(?:s(\d+)|season\s*(\d+)|ss\s*(\d+))(?![a-z0-9])/i);
+                  const eMatch = textToScan.match(/(?<=^|[^a-zA-Z0-9])(?:e(\d+)|episode\s*(\d+)|ep\s*(\d+))(?![a-z0-9])/i);
+                  if (sNum === undefined && sMatch) sNum = parseInt(sMatch[1] || sMatch[2] || sMatch[3], 10);
+                  if (epNum === undefined && eMatch) epNum = parseInt(eMatch[1] || eMatch[2] || eMatch[3], 10);
+                }
+              }
+            }
+            if (!sNum) sNum = 1;
+
+            if (epNum !== undefined) {
+              l.season = sNum;
+              l.episode = epNum;
+              l.isFullSeasonMKV = false;
+              l.isFullSeasonZIP = false;
+            }
+
             if (!seasonMap.has(sNum)) {
               seasonMap.set(sNum, {
                 id: Math.random().toString(36).substr(2, 9),
@@ -2242,16 +2326,16 @@ export default function ContentManagement() {
             const s = seasonMap.get(sNum)!;
 
             if (
-              l.episode !== undefined &&
+              epNum !== undefined &&
               !l.isFullSeasonZIP &&
               !l.isFullSeasonMKV
             ) {
-              let ep = s.episodes.find((e) => e.episodeNumber === l.episode);
+              let ep = s.episodes.find((e) => e.episodeNumber === epNum);
               if (!ep) {
                 ep = {
                   id: Math.random().toString(36).substr(2, 9),
-                  episodeNumber: l.episode,
-                  title: `Episode ${l.episode}`,
+                  episodeNumber: epNum,
+                  title: `Episode ${epNum}`,
                   links: [],
                 };
                 s.episodes.push(ep);
@@ -6036,12 +6120,30 @@ export default function ContentManagement() {
                 </button>
               </div>
             )}
+            <div className="flex items-center gap-2 flex-nowrap">
+              <button
+                onClick={() => setIsBulkImporterOpen(true)}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2.5 sm:px-4 sm:py-3 rounded-xl font-medium flex items-center justify-center transition-colors whitespace-nowrap shadow-sm text-sm"
+                title="Bulk Content Importer / Multi-site Batch Queue"
+              >
+                <span>Bulk Importer</span>
+              </button>
+
+              <button
+                onClick={() => setIsQualityAlertsOpen(true)}
+                className="bg-amber-600 hover:bg-amber-700 text-white px-3.5 py-2.5 sm:px-4 sm:py-3 rounded-xl font-medium flex items-center justify-center transition-colors whitespace-nowrap shadow-sm text-sm"
+                title="Smart Quality Upgrade Alerts"
+              >
+                <span>Quality Alerts</span>
+              </button>
+            </div>
+
             <button
               onClick={() => {
                 resetForm();
                 setIsModalOpen(true);
               }}
-              className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-3 rounded-xl font-medium flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
+              className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-3 rounded-xl font-medium flex items-center justify-center gap-2 transition-colors whitespace-nowrap shadow-sm"
             >
               <Plus className="w-5 h-5" />
               Add Content
@@ -7452,6 +7554,23 @@ export default function ContentManagement() {
           </div>
         </div>
       )}
+
+      {/* Bulk Content Importer Modal */}
+      <BulkContentImporterModal
+        isOpen={isBulkImporterOpen}
+        onClose={() => setIsBulkImporterOpen(false)}
+        genres={genres}
+        languages={languages}
+        qualities={qualities}
+      />
+
+      {/* Quality Upgrade Alerts Modal */}
+      <QualityUpgradeAlertsModal
+        isOpen={isQualityAlertsOpen}
+        onClose={() => setIsQualityAlertsOpen(false)}
+        qualities={qualities}
+        languages={languages}
+      />
 
       {loading && contentList.length > 0 && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[9999] bg-emerald-500 text-white px-6 py-2.5 rounded-full flex items-center justify-center gap-2 text-sm font-medium shadow-lg whitespace-nowrap">

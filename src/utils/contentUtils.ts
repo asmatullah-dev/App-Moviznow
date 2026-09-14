@@ -357,3 +357,150 @@ export const getOttBadgeConfig = (platform?: string | null) => {
 
   return { name: platform, bg: 'bg-zinc-800 text-white border-zinc-700', key: p };
 };
+
+/**
+ * Match whether a Content item belongs to a requested OTT platform
+ */
+export function matchContentOttPlatform(content: any, targetOtt: string, cachedOttPlatform?: string | null): boolean {
+  if (!targetOtt || targetOtt.toLowerCase() === 'all' || targetOtt.toLowerCase() === 'any') return true;
+  const target = targetOtt.toLowerCase().trim();
+
+  // 1. Direct fields
+  const directOtt = (content?.ottPlatform || content?.ott_platform || '').toLowerCase().trim();
+  const cachedOtt = (cachedOttPlatform || '').toLowerCase().trim();
+
+  // Normalized key mappings
+  const platformKeywords: Record<string, string[]> = {
+    netflix: ['netflix', 'nf', 'nf-web-dl', 'nfweb', 'nfrip'],
+    'prime video': ['prime video', 'prime', 'amazon', 'amzn', 'amzn-web-dl', 'pvd'],
+    'disney+ hotstar': ['disney+ hotstar', 'disney+', 'hotstar', 'disney', 'dsnp', 'hs', 'hstar', 'dsnp-web-dl'],
+    jiocinema: ['jiocinema', 'jio cinema', 'jio', 'jc', 'jc web-dl'],
+    sonyliv: ['sonyliv', 'sony liv', 'sony', 'sliv', 'sliv web-dl'],
+    zee5: ['zee5', 'zee 5', 'zee'],
+    'apple tv+': ['apple tv+', 'apple tv', 'apple', 'atvp', 'atv', 'atvp-web-dl'],
+    'hbo max': ['hbo max', 'max', 'hbo', 'hbomax'],
+    hulu: ['hulu'],
+    'paramount+': ['paramount+', 'paramount', 'pmtp'],
+    peacock: ['peacock'],
+  };
+
+  const keywords = platformKeywords[target] || [target];
+
+  // Helper matching
+  const testString = (str?: string | null) => {
+    if (!str) return false;
+    const lower = str.toLowerCase();
+    return keywords.some(k => {
+      if (k.length <= 3) {
+        return (
+          lower.includes(`[${k}]`) ||
+          lower.includes(`(${k})`) ||
+          lower.includes(` ${k} `) ||
+          lower.includes(`.${k}.`) ||
+          lower.includes(`-${k}-`) ||
+          lower.includes(`${k} web-dl`) ||
+          lower.includes(`${k} webdl`) ||
+          lower.includes(`${k}rip`)
+        );
+      }
+      return lower.includes(k);
+    });
+  };
+
+  // Check direct OTT field
+  if (directOtt) {
+    if (keywords.some(k => directOtt.includes(k))) return true;
+    const badge = getOttBadgeConfig(directOtt);
+    if (badge && (badge.name.toLowerCase().includes(target) || keywords.some(k => badge.key.includes(k)))) {
+      return true;
+    }
+  }
+
+  // Check cached OTT field
+  if (cachedOtt) {
+    if (keywords.some(k => cachedOtt.includes(k))) return true;
+    const badge = getOttBadgeConfig(cachedOtt);
+    if (badge && (badge.name.toLowerCase().includes(target) || keywords.some(k => badge.key.includes(k)))) {
+      return true;
+    }
+  }
+
+  // Check metadata strings
+  if (testString(content?.title)) return true;
+  if (testString(content?.secondTitle)) return true;
+  if (testString(content?.description)) return true;
+  if (testString(content?.movieLinks)) return true;
+  if (testString(content?.seasons)) return true;
+  if (testString(content?.fullSeasonZip)) return true;
+  if (testString(content?.fullSeasonMkv)) return true;
+
+  return false;
+}
+
+/**
+ * Match whether a Content item has links or print quality for a target resolution
+ */
+export function matchContentResolution(
+  content: any,
+  targetResolution: string,
+  qualities: any[] = []
+): boolean {
+  if (!targetResolution || targetResolution.toLowerCase() === 'any' || targetResolution.toLowerCase() === 'all') {
+    return true;
+  }
+  const target = targetResolution.toLowerCase().trim();
+
+  // Define regex patterns for accurate matching
+  let pattern: RegExp;
+  if (target.includes('4k') || target.includes('2160') || target.includes('uhd')) {
+    pattern = /(?:4k|2160p?|uhd|ultra\s*hd)/i;
+  } else if (target.includes('1080') || target.includes('fhd')) {
+    pattern = /(?:1080p?|fhd|full\s*hd)/i;
+  } else if (target.includes('720')) {
+    pattern = /(?:720p?)/i;
+  } else if (target.includes('480') || target.includes('sd')) {
+    pattern = /(?:480p?|sd)/i;
+  } else {
+    pattern = new RegExp(target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+  }
+
+  // 1. Check qualityId against qualities list
+  if (content?.qualityId && qualities.length > 0) {
+    const qObj = qualities.find((q: any) => q.id === content.qualityId);
+    if (qObj && pattern.test(qObj.name || '')) {
+      return true;
+    }
+  }
+
+  // 2. Check movieLinks
+  if (content?.movieLinks) {
+    if (typeof content.movieLinks === 'string') {
+      if (pattern.test(content.movieLinks)) return true;
+    } else if (Array.isArray(content.movieLinks)) {
+      const found = content.movieLinks.some((l: any) => 
+        pattern.test(l?.name || '') || 
+        pattern.test(l?.quality || '') || 
+        pattern.test(l?.url || '')
+      );
+      if (found) return true;
+    }
+  }
+
+  // 3. Check seasons & fullSeasonZip & fullSeasonMkv
+  if (content?.seasons && pattern.test(typeof content.seasons === 'string' ? content.seasons : JSON.stringify(content.seasons))) {
+    return true;
+  }
+  if (content?.fullSeasonZip && pattern.test(typeof content.fullSeasonZip === 'string' ? content.fullSeasonZip : JSON.stringify(content.fullSeasonZip))) {
+    return true;
+  }
+  if (content?.fullSeasonMkv && pattern.test(typeof content.fullSeasonMkv === 'string' ? content.fullSeasonMkv : JSON.stringify(content.fullSeasonMkv))) {
+    return true;
+  }
+
+  // 4. Check title / secondTitle
+  if (content?.title && pattern.test(content.title)) return true;
+  if (content?.secondTitle && pattern.test(content.secondTitle)) return true;
+
+  return false;
+}
+

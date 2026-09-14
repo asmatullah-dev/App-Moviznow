@@ -260,8 +260,8 @@ export default function UserManagement() {
           }
         }
         
-        // Delta sync users using chunk_meta (60s cooldown prevents redundant server queries)
-        const res = await refreshUsers(true);
+        // Delta sync users using chunk_meta (cooldown prevents redundant server queries)
+        const res = await refreshUsers(false);
         if (mounted) {
           if (res?.updatedSomething) {
             window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'success', message: 'Users refreshed successfully' } }));

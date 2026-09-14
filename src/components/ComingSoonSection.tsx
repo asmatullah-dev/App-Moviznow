@@ -274,17 +274,71 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className 
       return isHd && !isLow;
     };
 
+    const normalizeNumerals = (str: string): string => {
+      return str
+        .toLowerCase()
+        .replace(/\bpart\s*one\b/gi, 'part 1')
+        .replace(/\bpart\s*two\b/gi, 'part 2')
+        .replace(/\bpart\s*three\b/gi, 'part 3')
+        .replace(/\bpart\s*four\b/gi, 'part 4')
+        .replace(/\bpart\s*five\b/gi, 'part 5')
+        .replace(/\bchapter\s*one\b/gi, 'chapter 1')
+        .replace(/\bchapter\s*two\b/gi, 'chapter 2')
+        .replace(/\bchapter\s*three\b/gi, 'chapter 3')
+        .replace(/\bchapter\s*four\b/gi, 'chapter 4')
+        .replace(/\bchapter\s*five\b/gi, 'chapter 5')
+        .replace(/\b(viii|8th)\b/gi, '8')
+        .replace(/\b(vii|7th)\b/gi, '7')
+        .replace(/\b(vi|6th)\b/gi, '6')
+        .replace(/\b(iv|4th)\b/gi, '4')
+        .replace(/\b(v|5th)\b/gi, '5')
+        .replace(/\b(iii|3rd)\b/gi, '3')
+        .replace(/\b(ii|2nd)\b/gi, '2')
+        .replace(/\b(ix|9th)\b/gi, '9')
+        .replace(/\b(x|10th)\b/gi, '10');
+    };
+
+    const extractSequelTag = (str: string): string | null => {
+      const norm = normalizeNumerals(str);
+      const partMatch = norm.match(/\b(?:part|chapter|volume|vol)\s*(\d+)\b/i);
+      if (partMatch) return `part${partMatch[1]}`;
+      const numMatch = norm.match(/\b(\d+)\b/);
+      if (numMatch && (numMatch[1].length < 4 || parseInt(numMatch[1], 10) < 1900)) {
+        return numMatch[1];
+      }
+      return null;
+    };
+
+    const normalizeClean = (str: string): string => {
+      return normalizeNumerals(str)
+        .toLowerCase()
+        .replace(/&/g, ' and ')
+        .replace(/\b(a|an|the)\b/gi, ' ')
+        .replace(/[^a-z0-9]/g, '');
+    };
+
+    const isMatch = (itemTitle: string, libTitle: string): boolean => {
+      if (!itemTitle || !libTitle) return false;
+      const normI = normalizeClean(itemTitle);
+      const normL = normalizeClean(libTitle);
+      if (normI && normL && normI === normL) return true;
+
+      const seqI = extractSequelTag(itemTitle);
+      const seqL = extractSequelTag(libTitle);
+      if (seqI !== seqL) {
+        if (seqI || seqL) return false;
+      }
+
+      return false;
+    };
+
     return items.filter((item) => {
-      const normTitle = (item.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      const normOrig = (item.originalTitle || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-
       const matchedInLibrary = contentList.find((c) => {
-        const cTitle = (c.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        const cSecond = (c.secondTitle || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-
         const titleMatch =
-          (normTitle && (cTitle === normTitle || (normTitle.length >= 4 && (cTitle.includes(normTitle) || normTitle.includes(cTitle))))) ||
-          (normOrig && (cTitle === normOrig || cSecond === normOrig));
+          isMatch(item.title, c.title) ||
+          (item.originalTitle ? isMatch(item.originalTitle, c.title) : false) ||
+          (c.secondTitle ? isMatch(item.title, c.secondTitle) : false) ||
+          (c.secondTitle && item.originalTitle ? isMatch(item.originalTitle, c.secondTitle) : false);
 
         if (!titleMatch) return false;
 
@@ -300,13 +354,52 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className 
 
       if (!matchedInLibrary) return true;
 
+      // Verify library item has actual media download links
+      let hasLinks = false;
+      if (matchedInLibrary.movieLinks) {
+        try {
+          const links = JSON.parse(matchedInLibrary.movieLinks);
+          if (Array.isArray(links) && links.some((l: any) => l?.url)) hasLinks = true;
+        } catch (e) {}
+      }
+      if (matchedInLibrary.fullSeasonZip) {
+        try {
+          const links = JSON.parse(matchedInLibrary.fullSeasonZip);
+          if (Array.isArray(links) && links.some((l: any) => l?.url)) hasLinks = true;
+        } catch (e) {}
+      }
+      if (matchedInLibrary.fullSeasonMkv) {
+        try {
+          const links = JSON.parse(matchedInLibrary.fullSeasonMkv);
+          if (Array.isArray(links) && links.some((l: any) => l?.url)) hasLinks = true;
+        } catch (e) {}
+      }
+      if (matchedInLibrary.seasons) {
+        try {
+          const seasons = JSON.parse(matchedInLibrary.seasons);
+          if (Array.isArray(seasons)) {
+            for (const s of seasons) {
+              if (Array.isArray(s.zipLinks) && s.zipLinks.some((l: any) => l?.url)) hasLinks = true;
+              if (Array.isArray(s.mkvLinks) && s.mkvLinks.some((l: any) => l?.url)) hasLinks = true;
+              if (Array.isArray(s.episodes)) {
+                for (const ep of s.episodes) {
+                  if (Array.isArray(ep.links) && ep.links.some((l: any) => l?.url)) hasLinks = true;
+                }
+              }
+            }
+          }
+        } catch (e) {}
+      }
+
+      if (!hasLinks) return true; // If 0 download links in library, content is still considered upcoming
+
       // Check if library item has HD quality tag
       const qualityObj = qualities.find((q) => q.id === matchedInLibrary.qualityId);
       if (qualityObj?.name && isHdPrint(qualityObj.name)) {
         return false;
       }
 
-      // Check movieLinks
+      // Check movieLinks for HD print
       if (matchedInLibrary.movieLinks) {
         try {
           const links = JSON.parse(matchedInLibrary.movieLinks);
@@ -319,7 +412,7 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className 
         } catch (e) {}
       }
 
-      // Check seasons / episodes
+      // Check seasons / episodes for HD print
       if (matchedInLibrary.seasons) {
         try {
           const seasons = JSON.parse(matchedInLibrary.seasons);

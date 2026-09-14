@@ -180,34 +180,62 @@ export const getChunkMeta = async (forceRefresh = false): Promise<Record<string,
     return savedMeta;
   }
 
+  // If offline, never attempt network fetch - immediately return saved cache
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return savedMeta || {};
+  }
+
   // Deduplicate concurrent in-flight fetches
   if (chunkMetaPromise) {
     return chunkMetaPromise;
   }
 
   // Fetch from server: either first load (no saved meta) or 60s cooldown has expired
-  chunkMetaPromise = runWithNetwork(() => getDoc(doc(db, 'chunk_meta', 'versions')))
-    .then(snap => snap.exists() ? (snap.data() || {}) : {})
-    .then(data => {
-      const now = Date.now();
-      lastFetchTimeMs = now;
-      memoryCache = data;
-      safeStorage.setItem('cached_chunk_meta_doc', JSON.stringify(data));
-      safeStorage.setItem('last_chunk_meta_fetch_time', now.toString());
+  // Race with 2500ms timeout so slow internet or Firestore stalls never block startup
+  const networkDocPromise = runWithNetwork(() => getDoc(doc(db, 'chunk_meta', 'versions')))
+    .then(snap => snap.exists() ? (snap.data() || {}) : {});
 
-      const shiftedTimeInternal = new Date(now + (5 - 7) * 60 * 60 * 1000);
-      const periodInternal = `${shiftedTimeInternal.getUTCFullYear()}-${shiftedTimeInternal.getUTCMonth() + 1}-${shiftedTimeInternal.getUTCDate()}`;
-      safeStorage.setItem('last_chunk_meta_period', periodInternal);
-      
-      chunkMetaPromise = null;
-      return data;
-    })
-    .catch(err => {
-      console.error("Error fetching chunk_meta from server:", err);
-      chunkMetaPromise = null;
-      const fallback = getSavedChunkMeta();
-      return fallback || {};
-    });
+  chunkMetaPromise = new Promise<Record<string, any>>((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        console.warn("[chunkMeta] Server fetch exceeded 2500ms, immediately returning saved cache");
+        resolve(savedMeta || {});
+      }
+    }, 2500);
+
+    networkDocPromise
+      .then(data => {
+        const now = Date.now();
+        lastFetchTimeMs = now;
+        memoryCache = data;
+        safeStorage.setItem('cached_chunk_meta_doc', JSON.stringify(data));
+        safeStorage.setItem('last_chunk_meta_fetch_time', now.toString());
+
+        const shiftedTimeInternal = new Date(now + (5 - 7) * 60 * 60 * 1000);
+        const periodInternal = `${shiftedTimeInternal.getUTCFullYear()}-${shiftedTimeInternal.getUTCMonth() + 1}-${shiftedTimeInternal.getUTCDate()}`;
+        safeStorage.setItem('last_chunk_meta_period', periodInternal);
+
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(data);
+        }
+      })
+      .catch(err => {
+        console.error("Error fetching chunk_meta from server:", err);
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          const fallback = getSavedChunkMeta();
+          resolve(fallback || {});
+        }
+      })
+      .finally(() => {
+        chunkMetaPromise = null;
+      });
+  });
 
   return chunkMetaPromise;
 };

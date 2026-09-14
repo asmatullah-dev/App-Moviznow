@@ -41,6 +41,7 @@ export type LinkCheckResult = {
   candidates?: { text: string; href: string }[];
   linkName?: string;
   locationName?: string;
+  isSample?: boolean;
 };
 
 export function normalizeUrl(input: string) {
@@ -147,6 +148,20 @@ export function normalizeUrl(input: string) {
     }
     return trimmed.replace(/\/$/, "");
   }
+}
+
+export function isEpisodeRange(source?: string): boolean {
+  if (!source) return false;
+  const lower = source.toLowerCase();
+  // Match episode ranges like E01-E10, E01-10, S01E01-E10, S01E01-10, EP01-EP12, EP 01 to 10, Episode 1-8, E01-08
+  const rangeRegex = /(?:(?<=^|[^a-zA-Z0-9])|(?<=s\d+))(?:e|ep|episode)\s*0*(\d{1,4})\s*(?:-|to|&)\s*(?:(?:e|ep|episode)\s*0*(\d{1,4})|0*(\d{1,4})(?![a-z0-9]|p\b|k\b))/i;
+  const match = lower.match(rangeRegex);
+  if (!match) return false;
+  const endEp = parseInt(match[2] || match[3], 10);
+  const hasEpPrefixOnSecond = !!match[2];
+  const isResolution = [360, 480, 540, 576, 720, 1080, 1440, 2160].includes(endEp);
+  if (!hasEpPrefixOnSecond && isResolution) return false;
+  return true;
 }
 
 export function splitLinks(text: string) {
@@ -453,7 +468,7 @@ export function detectMetadataForLink(
     return foundLangs.length > 0 ? foundLangs.join(" / ") : undefined;
   })();
 
-  const hasRange = /(?:e|ep|episode)\s*\d+\s*(?:-|to|&)\s*(?:e|ep)?\d+/i.test(lower);
+  const hasRange = isEpisodeRange(lower);
   const isMKV = lower.includes(".mkv") || (hasRange && !lower.includes(".zip"));
   const isZIP = lower.includes(".zip");
 
@@ -480,7 +495,7 @@ export function detectMetadataForLink(
           const lineStr = lines[i] || "";
           const lowerLine = lineStr.toLowerCase();
 
-          const hasRangeInLine = /(?:e|ep|episode)\s*\d+\s*(?:-|to|&)\s*(?:e|ep)?\d+/i.test(lowerLine);
+          const hasRangeInLine = isEpisodeRange(lowerLine);
 
           const combMatch = !hasRangeInLine ? (
             lowerLine.match(/(?<=^|[^a-zA-Z0-9])s(\d+)\s*e(\d+)(?![a-z0-9])/i) ||
@@ -533,7 +548,8 @@ export function detectMetadataForLink(
       // 3. Fallback full text scan
       if (season === undefined && episode === undefined) {
         const fullLower = text.toLowerCase();
-        const fullCombinedMatch = !hasRange ? (
+        const fullRange = isEpisodeRange(fullLower);
+        const fullCombinedMatch = !fullRange ? (
           fullLower.match(/(?<=^|[^a-zA-Z0-9])s(\d+)\s*e(\d+)(?![a-z0-9])/i) ||
           fullLower.match(/season\s*(\d+).*?episode\s*(\d+)/i) ||
           fullLower.match(/(?<=^|[^a-zA-Z0-9])dl\s+(\d+)\s+(\d+)(?![a-z0-9])/i)
@@ -544,19 +560,25 @@ export function detectMetadataForLink(
           episode = parseInt(fullCombinedMatch[2], 10);
         } else {
           const sMatch = fullLower.match(/(?<=^|[^a-zA-Z0-9])(?:s(\d+)|season\s*(\d+)|ss\s*(\d+))(?![a-z0-9])/i);
-          const eMatch = !hasRange ? fullLower.match(/(?<=^|[^a-zA-Z0-9])(?:e(\d+)|episode\s*(\d+)|ep\s*(\d+))(?![a-z0-9])/i) : null;
+          const eMatch = !fullRange ? fullLower.match(/(?<=^|[^a-zA-Z0-9])(?:e(\d+)|episode\s*(\d+)|ep\s*(\d+))(?![a-z0-9])/i) : null;
 
           if (sMatch) season = parseInt(sMatch[1] || sMatch[2] || sMatch[3], 10);
           if (eMatch) episode = parseInt(eMatch[1] || eMatch[2] || eMatch[3], 10);
         }
       }
 
-      return { season, episode, year };
+      const isSingleEpisode = episode !== undefined && !hasRange;
+      const isFullSeasonMKV = !isSingleEpisode && ((/full\s*season|complete\s*season|all\s*episodes/i.test(lower) || hasRange) && isMKV);
+      const isFullSeasonZIP = !isSingleEpisode && ((/full\s*season|complete\s*season|all\s*episodes/i.test(lower) || hasRange) && isZIP);
+
+      return {
+        season,
+        episode,
+        year,
+        isFullSeasonMKV,
+        isFullSeasonZIP,
+      };
     })(),
-    isFullSeasonMKV:
-      (/full\s*season|complete\s*season/i.test(lower) || hasRange) && isMKV,
-    isFullSeasonZIP:
-      (/full\s*season|complete\s*season/i.test(lower) || hasRange) && isZIP,
   };
 }
 
@@ -772,28 +794,33 @@ export function detectFromFilename(
   const yearMatch = source.match(/\b(19\d{2}|20\d{2})\b/);
   if (yearMatch) result.year = parseInt(yearMatch[1]);
 
-  const hasEpisodeRange = /(?:e|ep|episode)\s*\d+\s*(?:-|to|&)\s*(?:e|ep)?\d+/i.test(source);
+  const hasEpisodeRange = isEpisodeRange(source);
 
   const combinedMatch = hasEpisodeRange ? null : (
-    source.match(/(?<=^|[^a-zA-Z0-9])s(\d+)e(\d+)(?![a-z0-9])/i) ||
+    source.match(/(?<=^|[^a-zA-Z0-9])s(\d+)\s*e(\d+)(?![a-z0-9])/i) ||
+    source.match(/season[\s._-]*(\d+)[\s._-]*episode[\s._-]*(\d+)/i) ||
     source.match(/(?<=^|[^a-zA-Z0-9])dl\s+(\d+)\s+(\d+)(?![a-z0-9])/i)
   );
   if (combinedMatch) {
     result.season = parseInt(combinedMatch[1]);
     result.episode = parseInt(combinedMatch[2]);
+    result.isFullSeasonMKV = false;
+    result.isFullSeasonZIP = false;
   } else {
     const seriesMatch = source.match(
-      /(?<=^|[^a-zA-Z0-9])(s(\d+)|season\s*(\d+))(?![a-z0-9])/i,
+      /(?<=^|[^a-zA-Z0-9])(?:s(\d+)|season[\s._-]*(\d+)|ss[\s._-]*(\d+))(?![a-z0-9])/i,
     );
     if (seriesMatch) {
-      result.season = parseInt(seriesMatch[2] || seriesMatch[3]);
+      result.season = parseInt(seriesMatch[1] || seriesMatch[2] || seriesMatch[3]);
       const episodeMatch = hasEpisodeRange ? null : source.match(
-        /(?<=^|[^a-zA-Z0-9])(?:e(\d+)|episode\s*(\d+)|ep\s*(\d+))(?![a-z0-9])/i,
+        /(?<=^|[^a-zA-Z0-9])(?:e(\d+)|episode[\s._-]*(\d+)|ep[\s._-]*(\d+))(?![a-z0-9])/i,
       );
       if (episodeMatch) {
         result.episode = parseInt(
           episodeMatch[1] || episodeMatch[2] || episodeMatch[3],
         );
+        result.isFullSeasonMKV = false;
+        result.isFullSeasonZIP = false;
       } else {
         // Full season detection
         if (source.includes(".mkv")) result.isFullSeasonMKV = true;
@@ -801,6 +828,18 @@ export function detectFromFilename(
         if (hasEpisodeRange && !result.isFullSeasonMKV && !result.isFullSeasonZIP) {
           result.isFullSeasonMKV = true;
         }
+      }
+    } else {
+      const episodeOnlyMatch = hasEpisodeRange ? null : source.match(
+        /(?<=^|[^a-zA-Z0-9])(?:e(\d+)|episode[\s._-]*(\d+)|ep[\s._-]*(\d+))(?![a-z0-9])/i,
+      );
+      if (episodeOnlyMatch && !source.match(/\b(movie|film)\b/i)) {
+        result.episode = parseInt(
+          episodeOnlyMatch[1] || episodeOnlyMatch[2] || episodeOnlyMatch[3],
+        );
+        result.season = 1;
+        result.isFullSeasonMKV = false;
+        result.isFullSeasonZIP = false;
       }
     }
   }
@@ -1057,11 +1096,15 @@ export async function performFullLinkScan(
     url
   );
   const hasFileName = !!base.fileName;
+  const isSample = /\bsample\b/i.test(base.fileName || "") || 
+                   /\bsample\b/i.test(url) || 
+                   /\bsample\b/i.test(finalUrlToUse) || 
+                   /\bsample\b/i.test(postMeta.qualityLabel || "");
 
   const result: LinkCheckResult = {
     ...base,
     url: finalUrlToUse,
-    qualityLabel: fileMeta.qualityLabel || postMeta.qualityLabel,
+    qualityLabel: isSample ? "Sample" : (fileMeta.qualityLabel || postMeta.qualityLabel),
     codecLabel:
       fileMeta.codecLabel || (hasFileName ? undefined : postMeta.codecLabel),
     audioLabel:
@@ -1072,9 +1115,10 @@ export async function performFullLinkScan(
     printQualityLabel: fileMeta.printQualityLabel || postMeta.printQualityLabel,
     season: fileMeta.season ?? postMeta.season,
     episode: fileMeta.episode ?? postMeta.episode,
-    isFullSeasonMKV: fileMeta.isFullSeasonMKV || postMeta.isFullSeasonMKV,
-    isFullSeasonZIP: fileMeta.isFullSeasonZIP || postMeta.isFullSeasonZIP,
+    isFullSeasonMKV: (fileMeta.episode ?? postMeta.episode) !== undefined ? false : Boolean(fileMeta.isFullSeasonMKV || postMeta.isFullSeasonMKV),
+    isFullSeasonZIP: (fileMeta.episode ?? postMeta.episode) !== undefined ? false : Boolean(fileMeta.isFullSeasonZIP || postMeta.isFullSeasonZIP),
     year: fileMeta.year || postMeta.year || base.year,
+    isSample: isSample ? true : undefined,
   };
 
   if (result.ok && !result.fileName) {
@@ -1090,7 +1134,7 @@ export async function performFullLinkScan(
     }
   }
 
-  if (result.ok && result.fileSize && result.fileSize < 20 * 1000 * 1000) {
+  if (result.ok && !result.isSample && result.fileSize && result.fileSize < 20 * 1000 * 1000) {
     result.statusLabel = "SMALL_FILE";
     result.message = "File size too small (< 20MB)";
   }

@@ -106,10 +106,22 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return DEFAULT_APP_SETTINGS;
     }
   });
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => {
+    try {
+      return !localStorage.getItem('cached_app_settings');
+    } catch {
+      return false;
+    }
+  });
 
   const refreshSettings = useCallback(async (force: boolean = false) => {
     try {
+      // If offline, rely completely on local settings cache and do not stall
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        setLoading(false);
+        return;
+      }
+
       // For guest users (unauthenticated), use local storage or default app settings and skip Firestore network calls
       if (!auth.currentUser) {
         const cached = localStorage.getItem('cached_app_settings');
@@ -130,9 +142,13 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       if (force || !localStorage.getItem('cached_app_settings') || serverVersionTime > localVersionTime) {
         const docRef = doc(db, 'settings', 'app_settings');
-        const docSnap = await runWithNetwork(() => getDoc(docRef));
+        // 2500ms timeout race so slow internet never keeps app waiting on settings
+        const fetchPromise = runWithNetwork(() => getDoc(docRef));
+        const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500));
         
-        if (docSnap.exists()) {
+        const docSnap = await Promise.race([fetchPromise, timeoutPromise]);
+        
+        if (docSnap && docSnap.exists()) {
           const data = docSnap.data() as AppSettings;
           if (data) {
             if (data.supportNumber === '3363284466' || data.supportNumber === '03363284466') {

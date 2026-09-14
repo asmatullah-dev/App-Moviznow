@@ -252,7 +252,8 @@ import {
   guessLinkType, 
   detectMetadataForLink, 
   buildMismatchWarnings,
-  performFullLinkScan
+  performFullLinkScan,
+  isEpisodeRange
 } from '../utils/linkScanner';
 import { useModalBehavior } from '../hooks/useModalBehavior';
 import {
@@ -321,7 +322,7 @@ export const getLocationTag = (item: {
   // Fallback parsing from fileName, url, or finalUrl if season or episode missing
   if (season === undefined && episode === undefined) {
     const textToScan = `${item.fileName || ''} ${item.finalUrl || ''} ${item.url || ''}`.toLowerCase();
-    const hasRange = /(?:e|ep|episode)\s*\d+\s*(?:-|to|&)\s*(?:e|ep)?\d+/i.test(textToScan);
+    const hasRange = isEpisodeRange(textToScan);
 
     const combinedMatch = hasRange ? null : (
       textToScan.match(/(?<=^|[^a-zA-Z0-9])s(\d+)\s*e(\d+)(?![a-z0-9])/i) ||
@@ -332,6 +333,8 @@ export const getLocationTag = (item: {
     if (combinedMatch) {
       season = parseInt(combinedMatch[1], 10);
       episode = parseInt(combinedMatch[2], 10);
+      isFullSeasonMKV = false;
+      isFullSeasonZIP = false;
     } else {
       const sMatch = textToScan.match(/(?<=^|[^a-zA-Z0-9])(?:s(\d+)|season\s*(\d+)|ss\s*(\d+))(?![a-z0-9])/i);
       const eMatch = hasRange ? null : textToScan.match(/(?<=^|[^a-zA-Z0-9])(?:e(\d+)|episode\s*(\d+)|ep\s*(\d+))(?![a-z0-9])/i);
@@ -339,11 +342,21 @@ export const getLocationTag = (item: {
       if (sMatch) season = parseInt(sMatch[1] || sMatch[2] || sMatch[3], 10);
       if (eMatch) episode = parseInt(eMatch[1] || eMatch[2] || eMatch[3], 10);
 
-      if (textToScan.includes(".zip")) isFullSeasonZIP = true;
-      else if (textToScan.includes(".mkv") || hasRange || /full season|complete season|all episodes/i.test(textToScan)) {
-        isFullSeasonMKV = true;
+      if (episode !== undefined) {
+        isFullSeasonMKV = false;
+        isFullSeasonZIP = false;
+      } else {
+        if (textToScan.includes(".zip")) isFullSeasonZIP = true;
+        else if (textToScan.includes(".mkv") || hasRange || /full season|complete season|all episodes/i.test(textToScan)) {
+          isFullSeasonMKV = true;
+        }
       }
     }
+  }
+
+  if (episode !== undefined) {
+    isFullSeasonMKV = false;
+    isFullSeasonZIP = false;
   }
 
   const qual = item.qualityLabel || '';
@@ -415,10 +428,13 @@ const PostPoster: React.FC<{ image?: string; title: string; compact?: boolean }>
   );
 };
 
-const extractTitleAndYear = (rawTitle: string): { title: string; year?: number; formatted: string } => {
+const extractTitleAndYear = (rawTitle: string): { title: string; year?: number; season?: number; episode?: number; isEpisodeRange?: boolean; formatted: string } => {
   if (!rawTitle) return { title: "", formatted: "" };
 
   let text = rawTitle.trim();
+
+  // Strip sample prefix first if present
+  text = text.replace(/^(?:sample|sample[-_.\s]+)/i, "").trim();
 
   // Strip prefix words like Download, Watch Online, Stream, etc.
   text = text.replace(/^(download|watch|stream|movie|series)\b\s*/i, "");
@@ -450,39 +466,88 @@ const extractTitleAndYear = (rawTitle: string): { title: string; year?: number; 
     .replace(/\s+/g, " ")
     .trim();
 
+  // Detect season & episode before noise stripping
+  const hasEpRange = isEpisodeRange(rawTitle);
+  let season: number | undefined = undefined;
+  let episode: number | undefined = undefined;
+
+  const combMatch = hasEpRange ? null : (
+    rawTitle.match(/(?<=^|[^a-zA-Z0-9])s(\d+)\s*e(\d+)(?![a-z0-9])/i) ||
+    rawTitle.match(/season[\s._-]*(\d+)[\s._-]*episode[\s._-]*(\d+)/i) ||
+    rawTitle.match(/(?<=^|[^a-zA-Z0-9])dl\s+(\d+)\s+(\d+)(?![a-z0-9])/i)
+  );
+
+  if (combMatch) {
+    season = parseInt(combMatch[1], 10);
+    episode = parseInt(combMatch[2], 10);
+  } else {
+    const sMatch = rawTitle.match(/(?<=^|[^a-zA-Z0-9])(?:s(\d+)|season[\s._-]*(\d+)|ss[\s._-]*(\d+))(?![a-z0-9])/i);
+    const eMatch = hasEpRange ? null : rawTitle.match(/(?<=^|[^a-zA-Z0-9])(?:e(\d+)|episode[\s._-]*(\d+)|ep[\s._-]*(\d+))(?![a-z0-9])/i);
+    if (sMatch) season = parseInt(sMatch[1] || sMatch[2] || sMatch[3], 10);
+    if (eMatch) episode = parseInt(eMatch[1] || eMatch[2] || eMatch[3], 10);
+  }
+
   const formatted = year && cleanTitle ? `${cleanTitle} (${year})` : cleanTitle;
 
-  return { title: cleanTitle, year, formatted };
+  return { title: cleanTitle, year, season, episode, isEpisodeRange: hasEpRange, formatted };
 };
 
 const normalizeTitle = (str: string) => {
   return str.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]/g, "");
 };
 
-const normalizeForCompare = (str: string, stripSeason: boolean = true): string => {
-  if (!str) return "";
-  let clean = str
-    .toLowerCase()
-    .replace(/&/g, " and ");
-
-  if (stripSeason) {
-    clean = clean
-      .replace(/\b(season|seasons)\s*\d{1,2}\b/gi, " ")
-      .replace(/\bs\d{1,2}\b/gi, " ");
-  }
-
-  return clean.replace(/[^a-z0-9]/g, "");
-};
-
-const tokenize = (str: string): string[] => {
+const normalizeNumerals = (str: string): string => {
   return str
     .toLowerCase()
+    .replace(/\bpart\s*one\b/gi, "part 1")
+    .replace(/\bpart\s*two\b/gi, "part 2")
+    .replace(/\bpart\s*three\b/gi, "part 3")
+    .replace(/\bpart\s*four\b/gi, "part 4")
+    .replace(/\bpart\s*five\b/gi, "part 5")
+    .replace(/\bchapter\s*one\b/gi, "chapter 1")
+    .replace(/\bchapter\s*two\b/gi, "chapter 2")
+    .replace(/\bchapter\s*three\b/gi, "chapter 3")
+    .replace(/\bchapter\s*four\b/gi, "chapter 4")
+    .replace(/\bchapter\s*five\b/gi, "chapter 5")
+    .replace(/\b(viii|8th)\b/gi, "8")
+    .replace(/\b(vii|7th)\b/gi, "7")
+    .replace(/\b(vi|6th)\b/gi, "6")
+    .replace(/\b(iv|4th)\b/gi, "4")
+    .replace(/\b(v|5th)\b/gi, "5")
+    .replace(/\b(iii|3rd)\b/gi, "3")
+    .replace(/\b(ii|2nd)\b/gi, "2")
+    .replace(/\b(ix|9th)\b/gi, "9")
+    .replace(/\b(x|10th)\b/gi, "10");
+};
+
+const extractSequelTag = (str: string): string | null => {
+  const norm = normalizeNumerals(str);
+  const partMatch = norm.match(/\b(?:part|chapter|volume|vol)\s*(\d+)\b/i);
+  if (partMatch) return `part${partMatch[1]}`;
+  const numMatch = norm.match(/\b(\d+)\b/);
+  // Avoid 4-digit years being treated as sequel tag
+  if (numMatch && (numMatch[1].length < 4 || parseInt(numMatch[1], 10) < 1900)) {
+    return numMatch[1];
+  }
+  return null;
+};
+
+const normalizeCleanForMatch = (str: string): string => {
+  return normalizeNumerals(str)
+    .toLowerCase()
     .replace(/&/g, " and ")
-    .replace(/\b(season|seasons)\s*\d{1,2}\b/gi, " ")
-    .replace(/\bs\d{1,2}\b/gi, " ")
+    .replace(/\b(a|an|the)\b/gi, " ")
+    .replace(/[^a-z0-9]/g, "");
+};
+
+const tokenizeCleanForMatch = (str: string): string[] => {
+  return normalizeNumerals(str)
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/\b(a|an|the|of|in|for|and|to|movie|film|series)\b/gi, " ")
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
-    .filter(w => w.length > 0 && !["a", "an", "the", "and", "of", "in", "for", "part", "vol", "volume", "season", "seasons", "s1", "s2", "s3", "s4", "s5", "s01", "s02", "s03", "s04", "s05"].includes(w));
+    .filter(w => w.length > 0);
 };
 
 const levenshteinDistance = (a: string, b: string): number => {
@@ -508,64 +573,67 @@ const levenshteinDistance = (a: string, b: string): number => {
   return matrix[b.length][a.length];
 };
 
-const isFlexibleTitleMatch = (postCleanTitle: string, contentRawTitle: string): boolean => {
+const isPreciseTitleMatch = (postCleanTitle: string, contentRawTitle: string): boolean => {
   if (!postCleanTitle || !contentRawTitle) return false;
 
   const contentParsed = extractTitleAndYear(contentRawTitle);
   const contentCleanTitle = contentParsed.title || contentRawTitle;
 
-  // 1. Direct comparison with seasons stripped (e.g., "Loklok S1" vs "Loklok" or "Loki Season 2" vs "Loki S02")
-  const normP_season = normalizeForCompare(postCleanTitle, true);
-  const normC_season = normalizeForCompare(contentCleanTitle, true);
+  const normP = normalizeCleanForMatch(postCleanTitle);
+  const normC = normalizeCleanForMatch(contentCleanTitle);
 
-  if (normP_season && normC_season && normP_season === normC_season) return true;
+  // Exact normalized match
+  if (normP && normC && normP === normC) return true;
 
-  // 2. Direct comparison WITH seasons kept
-  const normP_full = normalizeForCompare(postCleanTitle, false);
-  const normC_full = normalizeForCompare(contentCleanTitle, false);
-
-  if (normP_full && normC_full && normP_full === normC_full) return true;
-
-  // 3. Substring match on season-stripped normalized strings
-  if (normP_season.length >= 4 && normC_season.length >= 4) {
-    if (normP_season.includes(normC_season) || normC_season.includes(normP_season)) return true;
-  }
-
-  // 4. Substring match on full normalized strings
-  if (normP_full.length >= 4 && normC_full.length >= 4) {
-    if (normP_full.includes(normC_full) || normC_full.includes(normP_full)) return true;
-  }
-
-  // 5. Edit distance for minor typos / symbol variations
-  const maxLen = Math.max(normP_season.length, normC_season.length);
-  const dist = levenshteinDistance(normP_season, normC_season);
-  if (maxLen >= 5 && dist <= 2) return true;
-  if (maxLen >= 10 && dist <= 3) return true;
-
-  // 6. Token-based word comparison (handles S1/S2/Season differences, symbol differences, 1-word differences)
-  const pTokens = tokenize(postCleanTitle);
-  const cTokens = tokenize(contentCleanTitle);
+  const pTokens = tokenizeCleanForMatch(postCleanTitle);
+  const cTokens = tokenizeCleanForMatch(contentCleanTitle);
 
   if (pTokens.length === 0 || cTokens.length === 0) return false;
 
-  const cSet = new Set(cTokens);
-  const common = pTokens.filter(t => cSet.has(t)).length;
+  // Sequel / number mismatch check
+  const pSeq = extractSequelTag(postCleanTitle);
+  const cSeq = extractSequelTag(contentCleanTitle);
+  if (pSeq !== cSeq) {
+    if (pSeq || cSeq) return false;
+  }
 
-  const maxTokens = Math.max(pTokens.length, cTokens.length);
-  const minTokens = Math.min(pTokens.length, cTokens.length);
+  // Exact token match
+  if (pTokens.join(" ") === cTokens.join(" ")) return true;
 
-  // If token sets match completely or differ by 1 word
-  if (maxTokens <= 3 && common >= minTokens) return true;
-  if (maxTokens > 3 && common >= maxTokens - 1) return true;
-
-  // Overlap ratio check: at least 70% of words in common
-  if (common / maxTokens >= 0.7) return true;
+  // Single-word typo or minor punctuation difference if word counts match
+  if (pTokens.length === cTokens.length && normP.length >= 6 && normC.length >= 6) {
+    let diffWords = 0;
+    for (let i = 0; i < pTokens.length; i++) {
+      if (pTokens[i] !== cTokens[i]) {
+        diffWords++;
+        const dist = levenshteinDistance(pTokens[i], cTokens[i]);
+        if (dist > 1 && (pTokens[i].length < 8 || dist > 2)) return false;
+      }
+    }
+    if (diffWords <= 1) return true;
+  }
 
   return false;
 };
 
-const getAllUrlsFromContent = (c: Content): string[] => {
-  const urls: string[] = [];
+const isFlexibleTitleMatch = (postCleanTitle: string, contentRawTitle: string): boolean => {
+  return isPreciseTitleMatch(postCleanTitle, contentRawTitle);
+};
+
+const getMediaLinksFromContent = (c: Content): {
+  hasAnyMediaLinks: boolean;
+  totalMediaLinksCount: number;
+  movieLinksCount: number;
+  seasonLinksMap: Map<number, { zipCount: number; mkvCount: number; episodeMap: Map<number, number>; totalLinks: number }>;
+  hasHubcloud: boolean;
+  hasPixeldrain: boolean;
+  allUrls: string[];
+} => {
+  let totalMediaLinksCount = 0;
+  let movieLinksCount = 0;
+  const allUrls: string[] = [];
+  const seasonLinksMap = new Map<number, { zipCount: number; mkvCount: number; episodeMap: Map<number, number>; totalLinks: number }>();
+
   const safeParse = (data: any): any[] => {
     if (!data) return [];
     if (typeof data === 'string') {
@@ -578,47 +646,92 @@ const getAllUrlsFromContent = (c: Content): string[] => {
     return data;
   };
 
-  const extractUrls = (items: any) => {
-    if (!Array.isArray(items)) return;
+  const processLinks = (items: any): number => {
+    if (!Array.isArray(items)) return 0;
+    let count = 0;
     items.forEach((ld: any) => {
-      if (ld?.url) urls.push(ld.url);
+      if (ld?.url && typeof ld.url === 'string' && ld.url.trim().length > 0) {
+        count++;
+        allUrls.push(ld.url);
+      }
       if (ld?.links && Array.isArray(ld.links)) {
         ld.links.forEach((l: any) => {
-          if (l?.url) urls.push(l.url);
+          if (l?.url && typeof l.url === 'string' && l.url.trim().length > 0) {
+            count++;
+            allUrls.push(l.url);
+          }
         });
       }
     });
+    return count;
   };
 
   if (c.movieLinks) {
-    extractUrls(safeParse(c.movieLinks));
+    const ml = processLinks(safeParse(c.movieLinks));
+    movieLinksCount += ml;
+    totalMediaLinksCount += ml;
   }
+  if (c.fullSeasonZip) {
+    const zl = processLinks(safeParse(c.fullSeasonZip));
+    totalMediaLinksCount += zl;
+  }
+  if (c.fullSeasonMkv) {
+    const ml = processLinks(safeParse(c.fullSeasonMkv));
+    totalMediaLinksCount += ml;
+  }
+  if ((c as any).telegramLinks) {
+    const tl = processLinks(safeParse((c as any).telegramLinks));
+    totalMediaLinksCount += tl;
+  }
+
   if (c.seasons) {
     const parsed = safeParse(c.seasons);
     if (Array.isArray(parsed)) {
       parsed.forEach((s: any) => {
-        extractUrls(s.zipLinks || []);
-        extractUrls(s.mkvLinks || []);
+        const sNum = s.seasonNumber || 1;
+        const zipCount = processLinks(s.zipLinks || []);
+        const mkvCount = processLinks(s.mkvLinks || []);
+        const episodeMap = new Map<number, number>();
+        let epLinksTotal = 0;
         if (Array.isArray(s.episodes)) {
           s.episodes.forEach((e: any) => {
-            extractUrls(e.links || []);
+            const eNum = e.episodeNumber;
+            const elCount = processLinks(e.links || []);
+            if (eNum !== undefined) {
+              episodeMap.set(eNum, elCount);
+            }
+            epLinksTotal += elCount;
           });
         }
+        const sTotal = zipCount + mkvCount + epLinksTotal;
+        seasonLinksMap.set(sNum, { zipCount, mkvCount, episodeMap, totalLinks: sTotal });
+        totalMediaLinksCount += sTotal;
       });
     }
   }
-  if (c.fullSeasonZip) {
-    extractUrls(safeParse(c.fullSeasonZip));
-  }
-  if (c.fullSeasonMkv) {
-    extractUrls(safeParse(c.fullSeasonMkv));
-  }
-  if ((c as any).telegramLinks) {
-    extractUrls(safeParse((c as any).telegramLinks));
-  }
-  if (c.trailerUrl) urls.push(c.trailerUrl);
 
-  return urls;
+  const hasPixeldrain = allUrls.some(u => {
+    const l = u.toLowerCase();
+    return l.includes("pixeldrain") || l.includes("pixel.drain") || l.includes("pixeldra.in");
+  });
+  const hasHubcloud = allUrls.some(u => {
+    const l = u.toLowerCase();
+    return l.includes("hubcloud") || l.includes("vcloud") || l.includes("hubdrive");
+  });
+
+  return {
+    hasAnyMediaLinks: totalMediaLinksCount > 0,
+    totalMediaLinksCount,
+    movieLinksCount,
+    seasonLinksMap,
+    hasHubcloud,
+    hasPixeldrain,
+    allUrls
+  };
+};
+
+const getAllUrlsFromContent = (c: Content): string[] => {
+  return getMediaLinksFromContent(c).allUrls;
 };
 
 const checkGalleryAvailability = (
@@ -626,8 +739,8 @@ const checkGalleryAvailability = (
   contentList: Content[],
   qualities: Quality[] = [],
   languages: Language[] = [],
-  titleIndex?: Map<string, Content>
-): { isAvailable: boolean; badgeLabel: 'Available' | 'Missing'; reason?: string; matchedContent?: Content; parsed: { title: string; year?: number; formatted: string } } => {
+  titleIndex?: Map<string, Content[]>
+): { isAvailable: boolean; badgeLabel: 'Available' | 'Missing'; reason?: string; matchedContent?: Content; parsed: { title: string; year?: number; season?: number; episode?: number; formatted: string } } => {
   const parsed = extractTitleAndYear(postTitle);
   if (!parsed.title) {
     return { isAvailable: false, badgeLabel: 'Missing', reason: 'Unrecognized Title', parsed };
@@ -638,65 +751,76 @@ const checkGalleryAvailability = (
     return { isAvailable: false, badgeLabel: 'Missing', reason: 'Unrecognized Title', parsed };
   }
 
-  let matched: Content | undefined = undefined;
+  // Find candidates matching title
+  let candidates: Content[] = [];
   if (titleIndex && titleIndex.has(normParsed)) {
-    const candidate = titleIndex.get(normParsed)!;
-    if (!parsed.year || !candidate.year || Math.abs(candidate.year - parsed.year) <= 1) {
-      matched = candidate;
-    }
+    candidates = titleIndex.get(normParsed)!;
+  } else {
+    candidates = contentList.filter(c => {
+      if (!c || !c.title) return false;
+      return isPreciseTitleMatch(parsed.title, c.title) || 
+        (c.secondTitle ? isPreciseTitleMatch(parsed.title, c.secondTitle) : false);
+    });
   }
 
-  if (!matched) {
-    matched = contentList.find(c => {
-      if (!c || !c.title) return false;
+  if (candidates.length === 0) {
+    return {
+      isAvailable: false,
+      badgeLabel: 'Missing',
+      reason: 'Not in Gallery',
+      parsed
+    };
+  }
 
-      // Flexible title match on primary title or 2nd title (handles dubbed titles, original titles, symbols, typos, 1-word difference)
-      const titleMatches = isFlexibleTitleMatch(parsed.title, c.title) || 
-        (c.secondTitle ? isFlexibleTitleMatch(parsed.title, c.secondTitle) : false);
-      if (!titleMatches) return false;
+  let matched: Content | undefined = undefined;
+  if (parsed.year) {
+    matched = candidates.find(c => {
+      const candidateYears: number[] = [];
+      if (c.year) candidateYears.push(c.year);
 
-      // Strict year check: if post has a year, check against main content year AND all season years (Season 1, Season 2, etc.)
-      if (parsed.year) {
-        const candidateYears: number[] = [];
-        if (c.year) candidateYears.push(c.year);
+      const titleYear = extractTitleAndYear(c.title).year;
+      if (titleYear) candidateYears.push(titleYear);
 
-        const titleYear = extractTitleAndYear(c.title).year;
-        if (titleYear) candidateYears.push(titleYear);
+      if (c.secondTitle) {
+        const secTitleYear = extractTitleAndYear(c.secondTitle).year;
+        if (secTitleYear) candidateYears.push(secTitleYear);
+      }
 
-        if (c.secondTitle) {
-          const secTitleYear = extractTitleAndYear(c.secondTitle).year;
-          if (secTitleYear) candidateYears.push(secTitleYear);
-        }
-
-        if (c.seasons) {
-          try {
-            const parsedSeasons: any[] = Array.isArray(c.seasons) ? c.seasons : JSON.parse(c.seasons as string);
-            if (Array.isArray(parsedSeasons)) {
-              parsedSeasons.forEach(s => {
-                if (s.year && typeof s.year === 'number') {
-                  candidateYears.push(s.year);
-                }
-                if (s.title) {
-                  const sYear = extractTitleAndYear(s.title).year;
-                  if (sYear) candidateYears.push(sYear);
-                }
-              });
-            }
-          } catch (e) {
-            // ignore JSON parse error
+      if (c.seasons) {
+        try {
+          const parsedSeasons: any[] = Array.isArray(c.seasons) ? c.seasons : JSON.parse(c.seasons as string);
+          if (Array.isArray(parsedSeasons)) {
+            parsedSeasons.forEach(s => {
+              if (s.year && typeof s.year === 'number') {
+                candidateYears.push(s.year);
+              }
+              if (s.title) {
+                const sYear = extractTitleAndYear(s.title).year;
+                if (sYear) candidateYears.push(sYear);
+              }
+            });
           }
-        }
-
-        if (candidateYears.length > 0) {
-          const hasMatchingYear = candidateYears.some(y => Math.abs(y - parsed.year!) <= 1);
-          if (!hasMatchingYear) {
-            return false;
-          }
+        } catch (e) {
+          // ignore JSON parse error
         }
       }
 
+      if (candidateYears.length > 0) {
+        return candidateYears.some(y => Math.abs(y - parsed.year!) <= 1);
+      }
       return true;
     });
+
+    if (!matched) {
+      return {
+        isAvailable: false,
+        badgeLabel: 'Missing',
+        reason: 'Not in Gallery (Year Mismatch)',
+        parsed
+      };
+    }
+  } else {
+    matched = candidates.find(c => getMediaLinksFromContent(c).hasAnyMediaLinks) || candidates[0];
   }
 
   if (!matched) {
@@ -708,11 +832,53 @@ const checkGalleryAvailability = (
     };
   }
 
+  // Check if library item has actual media download links
+  const mediaInfo = getMediaLinksFromContent(matched);
+  if (!mediaInfo.hasAnyMediaLinks) {
+    return {
+      isAvailable: false,
+      badgeLabel: 'Missing',
+      reason: 'No Download Links in Library',
+      matchedContent: matched,
+      parsed
+    };
+  }
+
+  // Season & Episode availability check
+  const targetSeason = parsed.season;
+  const targetEpisode = parsed.episode;
+
+  if (targetSeason !== undefined) {
+    const sInfo = mediaInfo.seasonLinksMap.get(targetSeason);
+    if (!sInfo || sInfo.totalLinks === 0) {
+      return {
+        isAvailable: false,
+        badgeLabel: 'Missing',
+        reason: `Season ${targetSeason} Not in Library`,
+        matchedContent: matched,
+        parsed
+      };
+    }
+
+    if (targetEpisode !== undefined && !parsed.isEpisodeRange) {
+      const epLinks = sInfo.episodeMap.get(targetEpisode) || 0;
+      if (epLinks === 0 && sInfo.zipCount === 0 && sInfo.mkvCount === 0) {
+        return {
+          isAvailable: false,
+          badgeLabel: 'Missing',
+          reason: `S${targetSeason} E${targetEpisode} Not in Library`,
+          matchedContent: matched,
+          parsed
+        };
+      }
+    }
+  }
+
   // Quality evaluation: Digital releases (WEB-DL, WEBRip, HDRip, BluRay, BRRip)
   const digitalQualityRegex = /\b(web-?dl|web-?rip|hdr-?ip|hd-?rip|bluray|blu-?ray|brrip|br-?rip)\b/i;
   const postHasDigitalQuality = digitalQualityRegex.test(postTitle);
 
-  const libQualityObj = qualities.find(q => q.id === matched.qualityId);
+  const libQualityObj = qualities.find(q => q.id === matched!.qualityId);
   const libQualityName = libQualityObj ? libQualityObj.name : "";
   const combinedLibInfo = `${libQualityName} ${matched.title} ${matched.description || ""} ${matched.movieLinks || ""}`.toLowerCase();
   
@@ -765,17 +931,7 @@ const checkGalleryAvailability = (
   }
 
   // Check if library version has Pixeldrain but is missing Hubcloud links
-  const allLibUrls = getAllUrlsFromContent(matched);
-  const hasPixeldrain = allLibUrls.some(u => {
-    const l = u.toLowerCase();
-    return l.includes("pixeldrain") || l.includes("pixel.drain") || l.includes("pixeldra.in");
-  });
-  const hasHubcloud = allLibUrls.some(u => {
-    const l = u.toLowerCase();
-    return l.includes("hubcloud") || l.includes("vcloud") || l.includes("hubdrive");
-  });
-
-  if (hasPixeldrain && !hasHubcloud) {
+  if (mediaInfo.hasPixeldrain && !mediaInfo.hasHubcloud) {
     return {
       isAvailable: false,
       badgeLabel: 'Missing',
@@ -1332,6 +1488,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
   const catalogScrollRef = React.useRef<HTMLDivElement>(null);
   const [catalogTotalFound, setCatalogTotalFound] = useState<number>(0);
   const [catalogHasMore, setCatalogHasMore] = useState<boolean>(false);
+  const [catalogExplicitTotalPages, setCatalogExplicitTotalPages] = useState<number>(1);
   // Aliases for SkyMoviesHD backward compatibility
   const skymoviesTotalFound = catalogTotalFound;
   const setSkymoviesTotalFound = setCatalogTotalFound;
@@ -1390,11 +1547,21 @@ export const LinkCheckerModal: React.FC<Props> = ({
   }, [moviesdriveSearchUrl]);
 
   const catalogTotalPages = useMemo(() => {
-    if (catalogTotalFound && catalogTotalFound > 0) {
-      return Math.max(1, Math.ceil(catalogTotalFound / 25));
+    const cp = moviesdrivePageInfo.page;
+    let maxP = Math.max(1, cp);
+    if (catalogExplicitTotalPages && catalogExplicitTotalPages > 1) {
+      maxP = Math.max(maxP, catalogExplicitTotalPages);
+    } else if (catalogTotalFound && catalogTotalFound > 0) {
+      const perPage = moviesdriveSearchPosts.length > 0 ? moviesdriveSearchPosts.length : 20;
+      if (catalogTotalFound > perPage) {
+        maxP = Math.max(maxP, Math.ceil(catalogTotalFound / perPage));
+      }
     }
-    return Math.max(1, moviesdrivePageInfo.page);
-  }, [catalogTotalFound, moviesdrivePageInfo.page]);
+    if (catalogHasMore && maxP <= cp) {
+      maxP = cp + 1;
+    }
+    return maxP;
+  }, [catalogExplicitTotalPages, catalogTotalFound, catalogHasMore, moviesdrivePageInfo.page, moviesdriveSearchPosts.length]);
 
   const getPaginationPages = (current: number, total: number): (number | '...')[] => {
     if (total <= 7) {
@@ -1410,16 +1577,22 @@ export const LinkCheckerModal: React.FC<Props> = ({
   };
 
   const contentTitleIndex = useMemo(() => {
-    const map = new Map<string, Content>();
+    const map = new Map<string, Content[]>();
     if (!contentList) return map;
     contentList.forEach(c => {
       if (c.title) {
         const norm = normalizeTitle(c.title);
-        if (norm) map.set(norm, c);
+        if (norm) {
+          if (!map.has(norm)) map.set(norm, []);
+          map.get(norm)!.push(c);
+        }
       }
       if (c.secondTitle) {
         const norm = normalizeTitle(c.secondTitle);
-        if (norm) map.set(norm, c);
+        if (norm) {
+          if (!map.has(norm)) map.set(norm, []);
+          map.get(norm)!.push(c);
+        }
       }
     });
     return map;
@@ -1796,8 +1969,15 @@ export const LinkCheckerModal: React.FC<Props> = ({
       const eMatch = urlText.match(/(?<=^|[^a-zA-Z0-9])(?:e(\d+)|episode\s*(\d+))(?![a-z0-9])/i);
       if (sMatch) season = parseInt(sMatch[1] || sMatch[2], 10);
       if (eMatch) episode = parseInt(eMatch[1] || eMatch[2], 10);
-      if (urlText.toLowerCase().includes(".zip")) isFullSeasonZIP = true;
-      if (urlText.toLowerCase().includes(".mkv")) isFullSeasonMKV = true;
+      if (episode === undefined) {
+        if (urlText.toLowerCase().includes(".zip")) isFullSeasonZIP = true;
+        if (urlText.toLowerCase().includes(".mkv")) isFullSeasonMKV = true;
+      }
+    }
+
+    if (episode !== undefined) {
+      isFullSeasonMKV = false;
+      isFullSeasonZIP = false;
     }
 
     const mergedResult: LinkCheckResult = {
@@ -1866,7 +2046,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
       if (query) {
         newUrl = `${origin}/search.html?search=${encodeURIComponent(query)}&page=${targetPage}`;
       } else {
-        newUrl = targetPage === 1 ? `${origin}/` : `${origin}/page/${targetPage}/`;
+        newUrl = targetPage === 1 ? `${origin}/` : `${origin}/?page=${targetPage}`;
       }
       endpoint = `/api/filmyfly?url=${encodeURIComponent(newUrl)}`;
     } else {
@@ -1888,11 +2068,20 @@ export const LinkCheckerModal: React.FC<Props> = ({
         setMoviesdriveSearchUrl(newUrl);
         setMoviesdriveSearchPosts(data.posts);
         
-        const total = data.total_found || data.found || data.posts.length;
+        const postsCount = data.posts.length;
+        const total = typeof data.total_found === 'number' ? data.total_found : (typeof data.found === 'number' ? data.found : postsCount);
         if (total) {
           setCatalogTotalFound(total);
         }
-        setCatalogHasMore(Boolean(data.has_more) || (total > targetPage * 25));
+
+        const explicitPages = typeof data.total_pages === 'number' && data.total_pages > 0
+          ? data.total_pages
+          : (total > targetPage * (postsCount || 20) ? Math.ceil(total / Math.max(1, postsCount || 20)) : targetPage);
+
+        setCatalogExplicitTotalPages(Math.max(explicitPages, targetPage));
+
+        const hasMore = Boolean(data.has_more) || (explicitPages > targetPage) || (total > targetPage * (postsCount || 20));
+        setCatalogHasMore(hasMore);
 
         setAllAccumulatedPosts(prev => {
           const nextMap = new Map(prev);
@@ -2003,6 +2192,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
     processedExtractionsRef.current.delete(targetUrl);
     setMoviesdriveSearchUrl(null);
     setMoviesdriveSearchPosts([]);
+    setCatalogTotalFound(0);
+    setCatalogExplicitTotalPages(1);
+    setCatalogHasMore(false);
     setAllAccumulatedPosts(new Map());
     setMoviesdriveSelectedUrls(new Set());
 
@@ -2040,6 +2232,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
     processedExtractionsRef.current.delete(targetUrl);
     setMoviesdriveSearchUrl(null);
     setMoviesdriveSearchPosts([]);
+    setCatalogTotalFound(0);
+    setCatalogExplicitTotalPages(1);
+    setCatalogHasMore(false);
     setAllAccumulatedPosts(new Map());
     setMoviesdriveSelectedUrls(new Set());
 
@@ -2071,6 +2266,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
     processedExtractionsRef.current.delete(targetUrl);
     setMoviesdriveSearchUrl(null);
     setMoviesdriveSearchPosts([]);
+    setCatalogTotalFound(0);
+    setCatalogExplicitTotalPages(1);
+    setCatalogHasMore(false);
     setAllAccumulatedPosts(new Map());
     setMoviesdriveSelectedUrls(new Set());
 
@@ -2102,6 +2300,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
     processedExtractionsRef.current.delete(targetUrl);
     setMoviesdriveSearchUrl(null);
     setMoviesdriveSearchPosts([]);
+    setCatalogTotalFound(0);
+    setCatalogExplicitTotalPages(1);
+    setCatalogHasMore(false);
     setAllAccumulatedPosts(new Map());
     setMoviesdriveSelectedUrls(new Set());
 
@@ -2134,6 +2335,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
     processedExtractionsRef.current.delete(targetUrl);
     setMoviesdriveSearchUrl(null);
     setMoviesdriveSearchPosts([]);
+    setCatalogTotalFound(0);
+    setCatalogExplicitTotalPages(1);
+    setCatalogHasMore(false);
     setAllAccumulatedPosts(new Map());
     setMoviesdriveSelectedUrls(new Set());
 
@@ -2721,9 +2925,14 @@ export const LinkCheckerModal: React.FC<Props> = ({
               if (Array.isArray(res.data?.posts) && res.data.posts.length > 0) {
                 setMoviesdriveSearchUrl(res.original);
                 setMoviesdriveSearchPosts(res.data.posts);
-                const total = res.data.total_found || res.data.found || res.data.posts.length;
+                const postsCount = res.data.posts.length;
+                const total = typeof res.data.total_found === 'number' ? res.data.total_found : (typeof res.data.found === 'number' ? res.data.found : postsCount);
                 setCatalogTotalFound(total);
-                setCatalogHasMore(Boolean(res.data.has_more) || (total > res.data.posts.length));
+                const explicitPages = typeof res.data.total_pages === 'number' && res.data.total_pages > 0
+                  ? res.data.total_pages
+                  : (total > postsCount ? Math.ceil(total / Math.max(1, postsCount)) : 1);
+                setCatalogExplicitTotalPages(explicitPages);
+                setCatalogHasMore(Boolean(res.data.has_more) || (explicitPages > 1) || (total > postsCount));
                 const isSky = res.type === 'skymovieshd' || res.original.includes('skymovies');
                 if (isSky) {
                   setSkymoviesVisibleLimit(500);
@@ -2786,6 +2995,18 @@ export const LinkCheckerModal: React.FC<Props> = ({
                   autoIndices.add(idx);
                 }
               });
+
+              // Ensure sample hit is included in autoHits and selected in UI
+              const sampleHit = hits.find((h: any) => h.is_sample || h.isSample || /\bsample\b/i.test(h.file_name || '') || /\bsample\b/i.test(h.quality || ''));
+              if (sampleHit) {
+                const sampleIdx = hits.findIndex((h: any) => h.url === sampleHit.url);
+                if (sampleIdx !== -1) {
+                  autoIndices.add(sampleIdx);
+                }
+                if (!autoHits.some((ah: any) => ah.url === sampleHit.url)) {
+                  autoHits.push(sampleHit);
+                }
+              }
 
               if (res.type === 'mdrive' && autoHits.length === 1) {
                 replaceOriginalUrl(res.original, autoHits[0].url);
@@ -3007,14 +3228,18 @@ export const LinkCheckerModal: React.FC<Props> = ({
     let year: number | undefined;
     let title: string | undefined;
 
+    let cleanText = text.trim();
+    cleanText = cleanText.replace(/^(?:sample|sample[-_.\s]+)/i, "").trim();
+    cleanText = cleanText.replace(/^(download|watch|stream|movie|series)\b\s*/i, "");
+
     // Detect year - look for 4 digits that start with 19 or 20
     const yearPattern = /(?:\D|^)(19\d{2}|20\d{2})(?:\D|$)/;
-    const yearMatch = text.match(yearPattern);
+    const yearMatch = cleanText.match(yearPattern);
 
     if (yearMatch) {
       year = parseInt(yearMatch[1], 10);
-      const yearIndex = text.indexOf(yearMatch[1]);
-      title = text.substring(0, yearIndex).trim();
+      const yearIndex = cleanText.indexOf(yearMatch[1]);
+      title = cleanText.substring(0, yearIndex).trim();
     } else {
       // No year, look for quality/print/language markers
       const noiseMarkers = [
@@ -3028,12 +3253,12 @@ export const LinkCheckerModal: React.FC<Props> = ({
       ];
       
       const markerRegex = new RegExp(`\\b(${noiseMarkers.join('|')})\\b`, 'i');
-      const markerMatch = text.match(markerRegex);
+      const markerMatch = cleanText.match(markerRegex);
       
       if (markerMatch) {
-        title = text.substring(0, markerMatch.index).trim();
+        title = cleanText.substring(0, markerMatch.index).trim();
       } else {
-        title = text.trim();
+        title = cleanText.trim();
       }
     }
 
@@ -3082,10 +3307,12 @@ export const LinkCheckerModal: React.FC<Props> = ({
       // Use detected quality or fallback
       const quality = r.qualityLabel || '720p';
 
-      // Build a descriptive name
-      let finalName = quality;
-      
       const source = `${r.fileName || ""} ${r.finalUrl || ""}`.toLowerCase();
+      const isSampleLink = r.isSample || (r as any).is_sample || source.includes('sample');
+
+      // Build a descriptive name
+      let finalName = isSampleLink ? 'Sample' : quality;
+      
       let detectedS: number | undefined;
       let detectedE: number | undefined;
 
@@ -3140,19 +3367,24 @@ export const LinkCheckerModal: React.FC<Props> = ({
         unit: unit,
       };
 
-      const hasEpisodeRange = /(?:e|ep|episode)\s*\d+\s*(?:-|to|&)\s*(?:e|ep)?\d+/i.test(source);
+      const hasEpisodeRange = isEpisodeRange(source);
 
       const finalS = detectedS !== undefined ? detectedS : r.season;
       const finalE = (detectedE !== undefined && !hasEpisodeRange) ? detectedE : r.episode;
 
       if (finalS !== undefined) linkItem.season = finalS;
-      if (finalE !== undefined) linkItem.episode = finalE;
-      if (source.includes('.zip')) {
-        linkItem.isFullSeasonZIP = true;
-      } else if (hasEpisodeRange || /full season|all episodes|complete/i.test(source)) {
-        linkItem.isFullSeasonMKV = true;
+      if (finalE !== undefined) {
+        linkItem.episode = finalE;
+        linkItem.isFullSeasonMKV = false;
+        linkItem.isFullSeasonZIP = false;
+      } else {
+        if (source.includes('.zip')) {
+          linkItem.isFullSeasonZIP = true;
+        } else if (hasEpisodeRange || /full season|all episodes|complete/i.test(source)) {
+          linkItem.isFullSeasonMKV = true;
+        }
       }
-      if (source.toLowerCase().includes('sample')) linkItem.isSample = true;
+      if (isSampleLink) linkItem.isSample = true;
 
       return linkItem;
     });
@@ -3174,14 +3406,16 @@ export const LinkCheckerModal: React.FC<Props> = ({
        
        qualityLinks.forEach((ql, idx) => {
          const r = validResults[idx];
-         const sourceText = `${r.fileName || ""} ${r.url || ""}`;
+         const isSampleLink = ql.isSample || r.isSample || (r as any).is_sample || /\bsample\b/i.test(r.fileName || '');
+         const cleanFileName = (r.fileName || "").replace(/^SAMPLE[-_.\s]*/i, "").trim();
+         const sourceText = `${cleanFileName || r.fileName || ""} ${r.url || ""}`;
          const { title: extractedTitle, year: extractedYear } = extractTitleAndYear(sourceText);
          const year = extractedYear || r.year;
          const title = extractedTitle;
          const derivedTitle = title || `Untitled ${new Date().getFullYear()}`;
          const isSeries = !!(ql.season || ql.episode);
          const key = isSeries ? derivedTitle : `${derivedTitle}|${year || ''}`;
- 
+
          if (!batchesMap.has(key)) {
             batchesMap.set(key, { 
               title: derivedTitle, 
@@ -3199,7 +3433,15 @@ export const LinkCheckerModal: React.FC<Props> = ({
          if (!batch.links.some(l => l.url === ql.url)) {
            batch.links.push(ql);
          }
- 
+
+         if (isSampleLink && ql.url) {
+           (batch.detectMetadata as any).sampleUrl = ql.url;
+           // If batch title was generic or empty, use the clean title from sample link
+           if (title && (!batch.title || batch.title.startsWith("Untitled"))) {
+             batch.title = title;
+           }
+         }
+
          // Update detection per batch (if movie, keep movie, if any link is series, whole batch is series)
          if (ql.season || ql.episode || ql.isFullSeasonMKV || ql.isFullSeasonZIP || /full season|all episodes|complete/i.test(sourceText)) {
            batch.detectMetadata.type = "series";
@@ -3215,7 +3457,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
          if (r.subtitleLabel || /subtitles|subs|softsub|hardsub|esub|esubs|msub|msubs/i.test(source)) {
            batch.detectMetadata.subtitles = true;
          }
- 
+
          // Apply detected S/E to batch metadata if not already set (fallback for creation)
          if (ql.season && !batch.detectMetadata.season) batch.detectMetadata.season = ql.season;
          if (ql.episode && !batch.detectMetadata.episode) batch.detectMetadata.episode = ql.episode;
@@ -3228,7 +3470,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
          links: b.links,
          metadata: {
            ...b.detectMetadata,
-           languages: Array.from(b.detectMetadata.languages)
+           languages: Array.from(b.detectMetadata.languages),
+           sampleUrl: (b.detectMetadata as any).sampleUrl
          }
        }));
 
@@ -3261,7 +3504,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
       }
 
       let isSeriesLink = false;
-      const hasEpisodeRange = /(?:e|ep|episode)\s*\d+\s*(?:-|to|&)\s*(?:e|ep)?\d+/i.test(source);
+      const hasEpisodeRange = isEpisodeRange(source);
       if (r.isFullSeasonMKV || r.isFullSeasonZIP || /full season|all episodes|complete/i.test(source) || hasEpisodeRange) {
         isSeriesLink = true;
       }
@@ -3297,13 +3540,19 @@ export const LinkCheckerModal: React.FC<Props> = ({
        detectedType = "series";
     }
 
-    const combinedNames = validResults.map(r => r.fileName || '').join(' ') + ' ' + input;
-    const { title: extractedTitle, year: extractedYear } = extractTitleAndYear(combinedNames);
+    const sampleResult = validResults.find(r => r.isSample || (r as any).is_sample || /\bsample\b/i.test(r.fileName || '') || /\bsample\b/i.test(r.url || ''));
+    let cleanSampleName = "";
+    if (sampleResult && sampleResult.fileName) {
+      cleanSampleName = sampleResult.fileName.replace(/^SAMPLE[-_.\s]*/i, "").trim();
+    }
+    const combinedNames = (cleanSampleName ? cleanSampleName + " " : "") + validResults.map(r => r.fileName || '').join(' ') + ' ' + input;
+    const { title: extractedTitle, year: extractedYear } = extractTitleAndYear(cleanSampleName || combinedNames);
     
     // Fallback to first working result's year if available
     const fallbackYear = validResults.find(r => r.year)?.year;
     const year = extractedYear || fallbackYear;
     const title = extractedTitle;
+    const sampleUrl = sampleResult ? normalizeUrl(sampleResult.finalUrl || sampleResult.url) : undefined;
 
     if (onAddLinks) {
       onAddLinks(qualityLinks, {
@@ -3316,7 +3565,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
         // @ts-ignore
         title,
         // @ts-ignore
-        year
+        year,
+        // @ts-ignore
+        sampleUrl
       });
     }
     reset();
@@ -3704,9 +3955,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
   };
 
   const renderPaginationControls = (position: 'top' | 'bottom' = 'top') => {
-    if (moviesdrivePageInfo.isSkyMovies) return null;
     const currentPage = moviesdrivePageInfo.page;
     const totalPages = catalogTotalPages;
+    if (totalPages <= 1 && !catalogHasMore && currentPage <= 1) return null;
     const pageNumbers = getPaginationPages(currentPage, totalPages);
 
     const activePageClasses = moviesdrivePageInfo.isHdhub4u
@@ -3715,6 +3966,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
       ? 'bg-emerald-600 text-white shadow-xs'
       : moviesdrivePageInfo.isFilmyfly
       ? 'bg-teal-600 text-white shadow-xs'
+      : moviesdrivePageInfo.isSkyMovies
+      ? 'bg-amber-600 text-white shadow-xs'
       : 'bg-indigo-600 text-white shadow-xs';
 
     const badgeBorderClasses = moviesdrivePageInfo.isHdhub4u
@@ -3723,6 +3976,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
       ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
       : moviesdrivePageInfo.isFilmyfly
       ? 'bg-teal-500/10 text-teal-500 border-teal-500/20'
+      : moviesdrivePageInfo.isSkyMovies
+      ? 'bg-amber-500/10 text-amber-500 border-amber-500/20'
       : 'bg-indigo-500/10 text-indigo-500 border-indigo-500/20';
 
     return (
@@ -4282,11 +4537,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
                                 </div>
                               )}
 
-                              {!moviesdrivePageInfo.isSkyMovies && (
-                                <div className="pt-3 pb-1">
-                                  {renderPaginationControls('bottom')}
-                                </div>
-                              )}
+                              <div className="pt-3 pb-1">
+                                {renderPaginationControls('bottom')}
+                              </div>
                             </div>
                           </div>
                         );
@@ -4623,6 +4876,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                             const itemInfo = info || getItemEpisodeInfo(item);
                             const locTag = getLocationTag({ fileName: item.file_name, url: item.url });
                             const text = `${item.file_name || ''} ${item.quality || ''} ${item.url || ''}`.toLowerCase();
+                            const isSampleItem = !!(item.is_sample || item.isSample || text.includes('sample'));
                             
                             let qBadge = null;
                             if (text.includes('480p')) qBadge = <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 shrink-0">480p</span>;
@@ -4660,6 +4914,11 @@ export const LinkCheckerModal: React.FC<Props> = ({
                                 </div>
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-1.5 flex-wrap">
+                                    {isSampleItem && (
+                                      <span className="px-2 py-0.5 rounded text-[10px] font-black bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 shrink-0 flex items-center gap-1">
+                                        SAMPLE
+                                      </span>
+                                    )}
                                     {showEpBadge && itemInfo.isEpisode && (
                                       <span className="px-2 py-0.5 rounded text-[10px] font-black bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 shrink-0">
                                         {itemInfo.label}
@@ -5548,6 +5807,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
                                       </span>
                                     )}
                                     {result.isDirectDownload ? <div className="inline-flex rounded-full border border-blue-200 dark:border-blue-800 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-600 dark:text-blue-400"><FileDown className="h-3.5 w-3.5 mr-1" /> Direct Download</div> : null}
+                                    {(result.isSample || (result.fileName && /\bsample\b/i.test(result.fileName)) || (result.url && /\bsample\b/i.test(result.url))) ? (
+                                      <div className="inline-flex rounded-full border border-rose-200 dark:border-rose-800 bg-rose-500/10 px-3 py-1 text-xs font-black text-rose-600 dark:text-rose-400">SAMPLE</div>
+                                    ) : null}
                                     {(result.mismatchWarnings?.length || 0) > 0 ? <div className="inline-flex rounded-full border border-pink-200 dark:border-pink-800 bg-pink-500/10 px-3 py-1 text-xs font-medium text-pink-600 dark:text-pink-400"><Siren className="h-3.5 w-3.5 mr-1" /> Mismatch</div> : null}
                                   </div>
                                   <div className="mt-2 flex flex-wrap gap-2 items-center">

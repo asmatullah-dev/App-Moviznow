@@ -27,11 +27,39 @@ export default defineConfig(({mode}) => {
           runtimeCaching: [
             {
               urlPattern: ({ request }) => request.mode === 'navigate',
-              handler: 'NetworkOnly',
+              handler: 'NetworkFirst',
+              options: {
+                cacheName: 'app-shell-cache',
+                networkTimeoutSeconds: 2,
+                plugins: [
+                  {
+                    cacheWillUpdate: async ({ response }) => {
+                      if (response && (response.status === 200 || response.type === 'opaqueredirect')) {
+                        return response;
+                      }
+                      return null;
+                    },
+                  },
+                ],
+              },
             },
             {
               urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
               handler: 'NetworkOnly',
+            },
+            {
+              urlPattern: ({ request }) => request.destination === 'image',
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'image-cache',
+                expiration: {
+                  maxEntries: 1000,
+                  maxAgeSeconds: 30 * 24 * 60 * 60,
+                },
+                cacheableResponse: {
+                  statuses: [0, 200],
+                },
+              },
             }
           ],
           importScripts: ['/firebase-messaging-sw.js'],

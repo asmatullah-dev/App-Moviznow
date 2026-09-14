@@ -435,7 +435,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               safeStorage.removeItem("profile_cache");
               safeStorage.removeItem("profile_doc_snap");
               safeStorage.removeItem(`profile_version_${currentUser.uid}`);
-              safeStorage.removeItem("cached_all_users");
               localStorage.removeItem("session_started");
               setProfile(null);
               setUser(null);
@@ -460,7 +459,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           safeStorage.removeItem("profile_cache");
           safeStorage.removeItem("profile_doc_snap");
           safeStorage.removeItem(`profile_version_${currentUser.uid}`);
-          safeStorage.removeItem("cached_all_users");
           localStorage.removeItem("session_started");
           setProfile(null);
           setUser(null);
@@ -1184,7 +1182,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 safeStorage.removeItem("profile_cache");
                 safeStorage.removeItem("profile_doc_snap");
                 safeStorage.removeItem(`profile_version_${currentUser.uid}`);
-                safeStorage.removeItem("cached_all_users");
                 localStorage.removeItem("session_started");
                 setProfile(null);
                 setUser(null);
@@ -1413,7 +1410,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               safeStorage.removeItem("profile_cache");
               safeStorage.removeItem("profile_doc_snap");
               safeStorage.removeItem(`profile_version_${currentUser.uid}`);
-              safeStorage.removeItem("cached_all_users");
             } else if (cachedP && cachedP.uid === currentUser.uid) {
               const normCachedP = normalizeUserStatusAndExpiry(cachedP);
               setProfile(normCachedP);
@@ -1687,7 +1683,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Force refresh app data
       safeStorage.removeItem("profile_cache");
       safeStorage.removeItem("cached_chunk_users_versions");
-      safeStorage.removeItem("cached_all_users");
       localStorage.removeItem(`last_user_sync_time_v2_${result.user.uid}`);
 
       // Check if we need to link phone/email in Firestore
@@ -1854,7 +1849,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Force refresh app data
       safeStorage.removeItem("profile_cache");
       safeStorage.removeItem("cached_chunk_users_versions");
-      safeStorage.removeItem("cached_all_users");
       localStorage.removeItem(`last_user_sync_time_v2_${result.user.uid}`);
 
       try {
@@ -2544,7 +2538,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Explicitly clear cache on intentional logout to ensure user is logged out
     safeStorage.removeItem("profile_cache");
     safeStorage.removeItem("cached_chunk_users_versions");
-    safeStorage.removeItem("cached_all_users");
     safeStorage.removeItem("referral_stats_count");
     safeStorage.removeItem("referral_stats_activated");
     safeStorage.removeItem("referral_users_list");

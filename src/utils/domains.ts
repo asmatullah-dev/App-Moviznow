@@ -28,7 +28,7 @@ export const DEFAULT_MOVIESDRIVE_DOMAIN = 'https://new6.moviesdrives.my';
 export const DEFAULT_SKYMOVIES_DOMAIN = 'https://skymovieshd.meme';
 export const DEFAULT_FILMYGO_DOMAIN = 'https://filmygo.online';
 export const DEFAULT_HDHUB4U_DOMAIN = 'https://new5.hdhub4u.cl';
-export const DEFAULT_FILMYFLY_DOMAIN = 'https://filmyfly.sale';
+export const DEFAULT_FILMYFLY_DOMAIN = 'https://filmyfly.bingo';
 
 export function getMoviesdriveDomain(): string {
   const stored = safeStorage.getItem('custom_moviesdrive_domain');

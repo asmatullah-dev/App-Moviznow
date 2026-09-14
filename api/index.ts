@@ -223,6 +223,83 @@ export async function fetchWithVddos(targetUrl: string, customHeaders?: Record<s
   return { html, status: res.status, finalUrl };
 }
 
+export function extractHtmlPagination(html: string, currentUrl: string) {
+  let hasMore = false;
+  let totalPages = 1;
+  let currentPage = 1;
+
+  try {
+    const u = new URL(currentUrl);
+    const pParam = u.searchParams.get("to-page") || u.searchParams.get("page") || u.searchParams.get("p") || u.searchParams.get("pg");
+    if (pParam) currentPage = parseInt(pParam, 10) || 1;
+    else {
+      const pm = u.pathname.match(/\/page\/(\d+)/i);
+      if (pm) currentPage = parseInt(pm[1], 10) || 1;
+    }
+  } catch(e) {}
+
+  if (!html) return { currentPage, totalPages, hasMore };
+  const $ = cheerio.load(html);
+
+  // Check explicit Next buttons/links
+  const nextEl = $("a.next, .next a, a[rel=\"next\"], .pagination .next, .nav-links .next, a:contains(\"Next\"), a:contains(\"next\"), a:contains(\"❯\"), a:contains(\"›\"), a:contains(\"»\"), a:contains(\"\")");
+  if (nextEl.length > 0) {
+    hasMore = true;
+  }
+
+  // Check all pagination links and find maximum page number
+  const pageNumbers = new Set<number>();
+  pageNumbers.add(currentPage);
+
+  $("a[href]").each((_, el) => {
+    const href = $(el).attr("href") || "";
+    const text = $(el).text().trim().replace(/,/g, "");
+
+    // Check link text if it is a pure integer
+    if (/^\d+$/.test(text)) {
+      const num = parseInt(text, 10);
+      if (num > 0 && num < 100000) pageNumbers.add(num);
+    }
+
+    // Check page numbers in href
+    const m1 = href.match(/\/page\/(\d+)/i);
+    if (m1) {
+      const num = parseInt(m1[1], 10);
+      if (num > 0 && num < 100000) pageNumbers.add(num);
+    }
+    const m2 = href.match(/[?&](?:to-page|page|p|pg)=(\d+)/i);
+    if (m2) {
+      const num = parseInt(m2[1], 10);
+      if (num > 0 && num < 100000) pageNumbers.add(num);
+    }
+  });
+
+  // If wp-pagenavi or pagination text has "Page X of Y" or "Page X of Y Pages"
+  const pageInfoText = $(".pages, .pagination, .nav-links, .wp-pagenavi").text();
+  const ofMatch = pageInfoText.match(/Page\s+(\d+)\s+of\s+(\d+)/i) || pageInfoText.match(/(\d+)\s+of\s+(\d+)\s+Pages/i);
+  if (ofMatch) {
+    const p1 = parseInt(ofMatch[1], 10);
+    const p2 = parseInt(ofMatch[2], 10);
+    if (p1) currentPage = p1;
+    if (p2) totalPages = Math.max(totalPages, p2);
+  }
+
+  if (pageNumbers.size > 0) {
+    const maxPage = Math.max(...Array.from(pageNumbers));
+    totalPages = Math.max(totalPages, maxPage);
+  }
+
+  if (hasMore && totalPages <= currentPage) {
+    totalPages = currentPage + 1;
+  }
+
+  if (currentPage < totalPages) {
+    hasMore = true;
+  }
+
+  return { currentPage, totalPages, hasMore };
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -1049,7 +1126,20 @@ async function startServer() {
               }).filter((p: any) => p.url && p.title);
 
               if (posts.length > 0) {
-                return res.json({ is_search: true, posts, found: posts.length });
+                const totalFound = typeof sData.found === 'number' ? sData.found : (sData.total_found || posts.length);
+                const perPage = posts.length || 10;
+                const currentPage = parseInt(page as string, 10) || 1;
+                const totalPages = Math.max(1, Math.ceil(totalFound / perPage));
+                const hasMore = currentPage < totalPages || (totalFound > currentPage * perPage);
+                return res.json({
+                  is_search: true,
+                  posts,
+                  found: posts.length,
+                  total_found: totalFound,
+                  page: currentPage,
+                  total_pages: totalPages,
+                  has_more: hasMore
+                });
               }
             }
           }
@@ -1058,15 +1148,16 @@ async function startServer() {
         }
       }
 
-      // 2. Fetch the HTML page
-      const response = await fetch(targetUrl, { headers, signal: AbortSignal.timeout(7000) });
-      if (!response.ok) throw new Error(`MoviesDrive returned ${response.status}`);
-      if (response.url) {
+      // 2. Fetch the HTML page (using fetchWithVddos for SSL & DDoS resilience)
+      const { html: text, status: fetchStatus, finalUrl } = await fetchWithVddos(targetUrl, headers, 12000);
+      if (!text || (fetchStatus >= 400 && fetchStatus !== 403 && fetchStatus !== 404)) {
+        throw new Error(`MoviesDrive returned ${fetchStatus}`);
+      }
+      if (finalUrl) {
         try {
-          effectiveOrigin = new URL(response.url).origin;
+          effectiveOrigin = new URL(finalUrl).origin;
         } catch (e) {}
       }
-      const text = await response.text();
       const $ = cheerio.load(text);
 
       // 3. Scan for download links on post pages (MDrive, Workers.dev / Telegraph, direct HubCloud)
@@ -1219,7 +1310,16 @@ async function startServer() {
       const posts = Array.from(postsMap.entries()).map(([postUrl, data]) => ({ title: data.title, url: postUrl, image: data.image }));
 
       if (posts.length > 0 && (isSearchUrl || posts.length > 1)) {
-        return res.json({ is_search: true, posts, found: posts.length });
+        const pag = extractHtmlPagination(text, targetUrl);
+        return res.json({
+          is_search: true,
+          posts,
+          found: posts.length,
+          page: pag.currentPage,
+          total_pages: pag.totalPages,
+          has_more: pag.hasMore,
+          total_found: pag.totalPages * posts.length
+        });
       }
 
       return res.json({ is_search: false, hits: [], found: 0 });
@@ -1629,13 +1729,16 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
               }
 
               console.log(`[HDHub4U] Typesense search returned ${posts.length} posts (total found: ${data.found})`);
+              const totalFound = data.found ?? posts.length;
+              const totalPages = Math.max(1, Math.ceil(totalFound / 25));
               return res.json({
                 is_search: true,
                 posts,
-                found: data.found ?? posts.length,
-                total_found: data.found ?? posts.length,
+                found: totalFound,
+                total_found: totalFound,
                 page: pageNum,
-                has_more: (data.found || 0) > pageNum * 25
+                total_pages: totalPages,
+                has_more: totalFound > pageNum * 25
               });
             }
           } catch (err: any) {
@@ -1669,7 +1772,16 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
                 const foundPosts = parsePostsFromHtml(candHtml, candUrl);
                 if (foundPosts.length > 0) {
                   console.log(`[HDHub4U] Successfully found ${foundPosts.length} posts using: ${candUrl}`);
-                  return res.json({ is_search: true, posts: foundPosts, found: foundPosts.length, total_found: foundPosts.length, page: pageNum });
+                  const pag = extractHtmlPagination(candHtml, candUrl);
+                  return res.json({
+                    is_search: true,
+                    posts: foundPosts,
+                    found: foundPosts.length,
+                    page: pag.currentPage || pageNum,
+                    total_pages: pag.totalPages,
+                    has_more: pag.hasMore,
+                    total_found: pag.totalPages * foundPosts.length
+                  });
                 }
               }
             } catch (err: any) {
@@ -1678,17 +1790,26 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
           }
 
           // If a search was specifically performed and no results found, return 0 posts rather than scraping homepage!
-          return res.json({ is_search: true, posts: [], found: 0, total_found: 0, page: pageNum });
+          return res.json({ is_search: true, posts: [], found: 0, total_found: 0, page: pageNum, total_pages: 1, has_more: false });
         }
 
         // Standard fetch fallback for catalog / category / page URLs
         const { html: text, status: initialStatus } = await fetchWithVddos(targetUrl);
         if (text && !isCloudflareHtml(initialStatus, text)) {
           const posts = parsePostsFromHtml(text, targetUrl);
-          return res.json({ is_search: true, posts, found: posts.length });
+          const pag = extractHtmlPagination(text, targetUrl);
+          return res.json({
+            is_search: true,
+            posts,
+            found: posts.length,
+            page: pag.currentPage || pageNum,
+            total_pages: pag.totalPages,
+            has_more: pag.hasMore,
+            total_found: pag.totalPages * posts.length
+          });
         }
 
-        return res.json({ is_search: true, posts: [], found: 0 });
+        return res.json({ is_search: true, posts: [], found: 0, page: pageNum, total_pages: 1, has_more: false });
       }
 
       const { html: text, status: initialStatus, finalUrl: resolvedTargetUrl } = await fetchWithVddos(targetUrl);
@@ -1752,6 +1873,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         episode?: number | string;
         seasonEpLabel?: string;
         fullContext?: string;
+        isSample?: boolean;
       }>();
 
       $("a[href]").each((_, el) => {
@@ -1781,6 +1903,25 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         if (/\.(jpg|jpeg|png|gif|webp|css|js|xml|svg)$/i.test(fullHref)) return;
         if (/(contact|dmca|about|privacy|disclaimer|login|register|request|how-to|howto|faq|terms|sitemap|report)/i.test(lowerHref)) return;
 
+        let anchorText = $(el).text().trim();
+        let contextText = "";
+
+        const parentTag = $(el).closest("p, h1, h2, h3, h4, h5, div, li, strong");
+        if (parentTag.length > 0) {
+          contextText = parentTag.text().trim();
+        }
+        
+        const prevBlock = $(el).parent().prev("p, h1, h2, h3, h4, div, strong");
+        if (prevBlock.length > 0) {
+          contextText = (prevBlock.text().trim() + " " + contextText).trim();
+        }
+
+        const isSampleLink = /\bsample\b/i.test(anchorText) || 
+                             /\bsample\b/i.test(contextText) || 
+                             /\bsample\b/i.test(lowerHref) ||
+                             /\bsample\b/i.test($(el).attr("class") || "") ||
+                             /\bsample\b/i.test($(el).attr("title") || "");
+
         const isDownloadLink = 
           lowerHref.includes("hblinks") || 
           lowerHref.includes("hublinks") || 
@@ -1798,25 +1939,13 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
           lowerHref.includes("vcloud") ||
           lowerHref.includes("hubdrive") ||
           lowerHref.includes("hubcdn") ||
+          isSampleLink ||
           /maxbutton|btn|download/i.test($(el).attr("class") || "") ||
-          /\b(download|480p|720p|1080p|2160p|4k|hevc|x264|10bit|zip|pack|episode|ep)\b/i.test($(el).text() + " " + $(el).parent().text());
+          /\b(download|480p|720p|1080p|2160p|4k|hevc|x264|10bit|zip|pack|episode|ep|sample)\b/i.test($(el).text() + " " + $(el).parent().text());
 
         if (!isDownloadLink) return;
 
         if (fullHref === targetUrl || lowerHref.includes("/category/") || lowerHref.includes("/genre/") || lowerHref.includes("/tag/") || lowerHref.includes("/page/") || lowerHref.includes("search.html") || lowerHref.includes("search.php")) return;
-
-        let anchorText = $(el).text().trim();
-        let contextText = "";
-
-        const parentTag = $(el).closest("p, h1, h2, h3, h4, h5, div, li, strong");
-        if (parentTag.length > 0) {
-          contextText = parentTag.text().trim();
-        }
-        
-        const prevBlock = $(el).parent().prev("p, h1, h2, h3, h4, div, strong");
-        if (prevBlock.length > 0) {
-          contextText = (prevBlock.text().trim() + " " + contextText).trim();
-        }
 
         // Look for preceding episode header if this is an episode section (e.g. <h4>EPiSODE 1</h4>)
         let epHeader = "";
@@ -1833,7 +1962,9 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         const seInfo = parseSeasonEpisode(fullContext);
 
         let label = anchorText || qualityLabel || "Download Link";
-        if (pageTitle && !label.toLowerCase().includes(pageTitle.toLowerCase().slice(0, 10))) {
+        if (isSampleLink) {
+          label = pageTitle ? `${pageTitle} [SAMPLE]` : (anchorText || "Sample Link");
+        } else if (pageTitle && !label.toLowerCase().includes(pageTitle.toLowerCase().slice(0, 10))) {
           if (qualityLabel) {
             label = `${pageTitle} [${qualityLabel}]`;
           } else {
@@ -1846,12 +1977,13 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         if (!hbData.has(fullHref)) {
           hbData.set(fullHref, {
             label,
-            quality: qualityLabel,
-            shortQuality,
+            quality: isSampleLink ? "Sample" : qualityLabel,
+            shortQuality: isSampleLink ? "Sample" : shortQuality,
             season: seInfo.season,
             episode: seInfo.episode,
             seasonEpLabel: seInfo.seasonEpLabel,
-            fullContext
+            fullContext,
+            isSample: isSampleLink
           });
         }
       });
@@ -1862,6 +1994,8 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
 
       const hits: any[] = [];
       const seenUrls = new Set<string>();
+      let sampleFullMovieTitle = "";
+      let sampleHubcloudUrl = "";
 
       await Promise.all(
         Array.from(hbData.entries()).map(async ([linkUrl, meta]) => {
@@ -1887,6 +2021,23 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
                 const sizeVal = cachedHb?.size ? `${cachedHb.size} ${cachedHb.unit || ''}`.trim() : null;
                 const seasonEp = cachedHb?.seasonEpLabel || parseSeasonEpisode(fileName).seasonEpLabel;
 
+                const isSample = (meta as any).isSample || 
+                                 /sample/i.test(cachedHb?.original_title || "") || 
+                                 /sample/i.test(linkUrl);
+
+                if (isSample) {
+                  const cleanTitleCandidate = (cachedHb?.original_title || fileName || '')
+                    .replace(/^SAMPLE[-_.\s]*/i, '')
+                    .replace(/\.(mkv|mp4|avi|webm)$/i, '')
+                    .trim();
+                  if (cleanTitleCandidate && !sampleFullMovieTitle) {
+                    sampleFullMovieTitle = cleanTitleCandidate;
+                  }
+                  if (!sampleHubcloudUrl) {
+                    sampleHubcloudUrl = normalizeDomain(linkUrl);
+                  }
+                }
+
                 if (/^\[?\s*\d{3,4}p?\s*\]?$/i.test(fileName.trim()) || fileName.trim().length < 6) {
                   if (pageTitle) {
                     fileName = `${pageTitle} ${seasonEp || ''} [${meta.shortQuality || meta.quality || 'Direct'}]`.replace(/\s+/g, ' ').trim();
@@ -1897,11 +2048,13 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
                   file_name: fileName,
                   url: normalizeDomain(linkUrl),
                   size: sizeVal,
-                  quality: cachedHb?.quality || meta.shortQuality || meta.quality,
+                  quality: isSample ? "Sample" : (cachedHb?.quality || meta.shortQuality || meta.quality),
                   season: cachedHb?.season,
                   episode: cachedHb?.episode,
                   seasonEpLabel: seasonEp,
-                  is_direct: true
+                  is_direct: true,
+                  is_sample: isSample ? true : undefined,
+                  isSample: isSample ? true : undefined
                 });
               }
               return;
@@ -1947,6 +2100,25 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
                 const sizeVal = cachedHb?.size ? `${cachedHb.size} ${cachedHb.unit || ''}`.trim() : null;
                 const seasonEp = cachedHb?.seasonEpLabel || seData.seasonEpLabel || (meta as any).seasonEpLabel;
 
+                const isSample = (meta as any).isSample || 
+                                 /sample/i.test(hdTitle) || 
+                                 /sample/i.test(cachedHb?.original_title || "") || 
+                                 /sample/i.test(linkUrl) || 
+                                 /sample/i.test(hubcloudLink);
+
+                if (isSample) {
+                  const cleanTitleCandidate = (cachedHb?.original_title || hdTitle || fileName || '')
+                    .replace(/^SAMPLE[-_.\s]*/i, '')
+                    .replace(/\.(mkv|mp4|avi|webm)$/i, '')
+                    .trim();
+                  if (cleanTitleCandidate && !sampleFullMovieTitle) {
+                    sampleFullMovieTitle = cleanTitleCandidate;
+                  }
+                  if (!sampleHubcloudUrl) {
+                    sampleHubcloudUrl = normalizeDomain(hubcloudLink);
+                  }
+                }
+
                 if (/^\[?\s*\d{3,4}p?\s*\]?$/i.test(fileName.trim()) || fileName.trim().length < 6) {
                   if (pageTitle) {
                     fileName = `${pageTitle} ${seasonEp || ''} [${meta.shortQuality || meta.quality || 'Direct'}]`.replace(/\s+/g, ' ').trim();
@@ -1957,11 +2129,13 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
                   file_name: fileName,
                   url: normalizeDomain(hubcloudLink),
                   size: sizeVal,
-                  quality: cachedHb?.quality || qData.qualityLabel || meta.shortQuality || meta.quality,
+                  quality: isSample ? "Sample" : (cachedHb?.quality || qData.qualityLabel || meta.shortQuality || meta.quality),
                   season: cachedHb?.season !== undefined ? cachedHb.season : seData.season !== undefined ? seData.season : (meta as any).season,
                   episode: cachedHb?.episode !== undefined ? cachedHb.episode : seData.episode !== undefined ? seData.episode : (meta as any).episode,
                   seasonEpLabel: seasonEp,
-                  is_direct: true
+                  is_direct: true,
+                  is_sample: isSample ? true : undefined,
+                  isSample: isSample ? true : undefined
                 });
               }
               return;
@@ -2249,7 +2423,22 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         return (a.file_name || '').localeCompare(b.file_name || '', undefined, { numeric: true, sensitivity: 'base' });
       });
 
-      return res.json({ is_search: false, hits: uniqueHits, found: uniqueHits.length });
+      // If sample provided a full movie release title, enrich any hit with short/truncated name
+      if (sampleFullMovieTitle) {
+        uniqueHits.forEach(h => {
+          if (!h.is_sample && (/^\[?\s*\d{3,4}p?\s*\]?$/i.test(h.file_name?.trim() || '') || (h.file_name?.trim().length || 0) < 6)) {
+            h.file_name = `${sampleFullMovieTitle} [${h.quality || 'Direct'}]`;
+          }
+        });
+      }
+
+      return res.json({ 
+        is_search: false, 
+        hits: uniqueHits, 
+        found: uniqueHits.length,
+        full_movie_title: sampleFullMovieTitle || undefined,
+        sample_url: sampleHubcloudUrl || undefined
+      });
     } catch (error: any) {
       console.error('HDHub4U extract error:', error);
       res.status(500).json({ error: error.message });
@@ -2373,7 +2562,16 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
 
         const posts = Array.from(postsMap.entries()).map(([postUrl, data]) => ({ title: data.title, url: postUrl, image: data.image }));
         if (posts.length > 0) {
-          return res.json({ is_search: true, posts, found: posts.length });
+          const pag = extractHtmlPagination(text, targetUrl);
+          return res.json({
+            is_search: true,
+            posts,
+            found: posts.length,
+            page: pag.currentPage,
+            total_pages: pag.totalPages,
+            has_more: pag.hasMore,
+            total_found: pag.totalPages * posts.length
+          });
         }
       }
       
@@ -2715,8 +2913,8 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       // Automatically migrate outdated FilmyFly domains (e.g. filmyfly.green, filmyfly.vin, etc.) to active filmyfly.sale
       try {
         const u = new URL(targetUrl);
-        if (u.hostname.includes('filmyfly') && u.hostname !== 'filmyfly.sale') {
-          u.hostname = 'filmyfly.sale';
+        if (u.hostname.includes('filmyfly') && u.hostname !== 'filmyfly.bingo' && u.hostname !== 'filmyfly.sale') {
+          u.hostname = 'filmyfly.bingo';
           u.protocol = 'https:';
           targetUrl = u.toString();
         }
@@ -2727,14 +2925,14 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       let isSearch = false;
       try {
         const urlObj = new URL(targetUrl);
-        isSearch = targetUrl.includes('search.html') || targetUrl.includes('?search=') || urlObj.searchParams.has('search') || urlObj.pathname === '/' || urlObj.pathname === '' || urlObj.pathname.endsWith('index.html');
+        isSearch = targetUrl.includes('search.html') || targetUrl.includes('?search=') || urlObj.searchParams.has('search') || urlObj.searchParams.has('page') || urlObj.pathname === '/' || urlObj.pathname === '' || urlObj.pathname.endsWith('index.html');
       } catch (e) {
         isSearch = targetUrl.includes('search.html') || targetUrl.includes('?search=');
       }
 
       if (isSearch) {
         console.log(`[FilmyFly] Search / catalog query: ${targetUrl}`);
-        const { html: searchHtml } = await fetchWithVddos(targetUrl, { 'Referer': 'https://filmyfly.sale/' });
+        const { html: searchHtml } = await fetchWithVddos(targetUrl, { 'Referer': 'https://filmyfly.bingo/' });
         const $ = cheerio.load(searchHtml || '');
 
         const postsMap = new Map<string, { title: string; url: string; image?: string }>();
@@ -2762,7 +2960,16 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         });
 
         const posts = Array.from(postsMap.values());
-        return res.json({ is_search: true, posts, found: posts.length });
+        const pag = extractHtmlPagination(searchHtml || '', targetUrl);
+        return res.json({
+          is_search: true,
+          posts,
+          found: posts.length,
+          page: pag.currentPage,
+          total_pages: pag.totalPages,
+          has_more: pag.hasMore,
+          total_found: pag.totalPages * posts.length
+        });
       }
 
       // Catalog / Movie Page or Direct Linkmake / FilesDL extraction

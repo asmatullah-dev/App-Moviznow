@@ -18,53 +18,120 @@ const triggerAppReload = (reason: string) => {
   if (now - lastReload > 30000) {
     sessionStorage.setItem('last_auto_reload_timestamp', String(now));
     console.log(`[Auto-Update] Update triggered due to: ${reason}`);
-    window.location.reload();
+
+    // Signal Service Worker to activate new version immediately
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistration().then((reg) => {
+        if (reg) {
+          reg.update().catch(() => {});
+          if (reg.waiting) {
+            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+          }
+        }
+      }).catch(() => {});
+
+      if (navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({ type: 'SKIP_WAITING' });
+      }
+    }
+
+    // Brief timeout so Service Worker message dispatches, then reload page
+    setTimeout(() => {
+      window.location.reload();
+    }, 150);
+  } else {
+    console.warn(`[Auto-Update] Reload throttled (< 30s cooldown active). Reason: ${reason}`);
   }
 };
 
 // Check version endpoint on backend
 let isCheckingDeployment = false;
-let initialBaselineEstablished = false;
 let knownServerVersion: string | null = null;
-const pageLoadTimestamp = Date.now();
+let initialOpenRetryAttempted = false;
 
-const checkDeploymentVersion = async () => {
-  if (import.meta.env.DEV) return;
+const handleVersionSuccess = (serverVersion: string) => {
+  // Check if server version is different from the currently running client build ID
+  const isNewerThanClient =
+    CURRENT_BUILD_ID &&
+    CURRENT_BUILD_ID !== 'unknown' &&
+    serverVersion !== CURRENT_BUILD_ID;
+
+  // Check if a new version was deployed while app was running
+  const isNewerThanKnown =
+    knownServerVersion !== null &&
+    serverVersion !== knownServerVersion;
+
+  if (isNewerThanClient || isNewerThanKnown) {
+    console.log('[Auto-Update] Newer version detected!', {
+      client: CURRENT_BUILD_ID,
+      knownServer: knownServerVersion,
+      newServer: serverVersion,
+    });
+    knownServerVersion = serverVersion;
+    triggerAppReload(`Newer version detected (Server: ${serverVersion}, Current: ${CURRENT_BUILD_ID})`);
+  } else {
+    if (!knownServerVersion) {
+      console.log('[Auto-Update] Version verified:', serverVersion);
+    }
+    knownServerVersion = serverVersion;
+  }
+};
+
+const handleVersionFailure = (trigger: 'open' | 'open_retry' | 'background', err: any) => {
+  if (err?.name !== 'AbortError') {
+    console.warn(`[Auto-Update] Version check (${trigger}) failed:`, err?.message || err);
+  } else {
+    console.warn(`[Auto-Update] Version check (${trigger}) timed out`);
+  }
+
+  if (trigger === 'open') {
+    // If the initial check fails on open: retry after 30 seconds
+    if (!initialOpenRetryAttempted) {
+      initialOpenRetryAttempted = true;
+      console.log('[Auto-Update] Open version check failed. Retrying in 30 seconds...');
+      setTimeout(() => {
+        checkDeploymentVersion('open_retry');
+      }, 30000);
+    }
+  } else if (trigger === 'open_retry') {
+    // If the retry also fails: don't try again until the app is opened again!
+    console.log('[Auto-Update] 30-second retry failed. Will not retry open-check again until app is reopened.');
+  }
+};
+
+const checkDeploymentVersion = async (trigger: 'open' | 'open_retry' | 'background' = 'background') => {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    handleVersionFailure(trigger, new Error('Device is offline'));
+    return;
+  }
   if (isCheckingDeployment) return;
   
   isCheckingDeployment = true;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 4000);
+
   try {
-    const res = await fetch(`/api/version?_t=${Date.now()}`, { cache: 'no-store' });
+    const res = await fetch(`/api/version?_t=${Date.now()}`, { 
+      cache: 'no-store',
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+
     if (res.ok) {
       const data = await res.json();
       const serverVersion = data?.version;
       
       if (serverVersion && serverVersion !== 'unknown') {
-        if (!initialBaselineEstablished) {
-          initialBaselineEstablished = true;
-          knownServerVersion = serverVersion;
-          console.log('[Auto-Update] Initial version baseline established:', {
-            client: CURRENT_BUILD_ID,
-            server: serverVersion
-          });
-        } else if (knownServerVersion && serverVersion !== knownServerVersion) {
-          // A new deployment occurred while the app was running
-          console.log('[Auto-Update] New deployment detected! Old:', knownServerVersion, 'New:', serverVersion);
-          knownServerVersion = serverVersion;
-          triggerAppReload('New deployment version detected');
-        } else if (
-          CURRENT_BUILD_ID !== 'unknown' &&
-          serverVersion !== CURRENT_BUILD_ID &&
-          Date.now() - pageLoadTimestamp > 60000
-        ) {
-          // Stale client version after 1 minute of active use
-          console.log('[Auto-Update] Stale client build detected. Refreshing to latest version...');
-          triggerAppReload('Stale client version');
-        }
+        handleVersionSuccess(serverVersion);
+      } else {
+        handleVersionFailure(trigger, new Error('Invalid version payload'));
       }
+    } else {
+      handleVersionFailure(trigger, new Error(`HTTP status ${res.status}`));
     }
-  } catch (err) {
-    console.warn('[Auto-Update] Version check error:', err);
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    handleVersionFailure(trigger, err);
   } finally {
     isCheckingDeployment = false;
   }
@@ -72,17 +139,27 @@ const checkDeploymentVersion = async () => {
 
 // Check version on launch and periodically / on resume
 if (typeof window !== 'undefined') {
-  // Initial check after page is settled
-  setTimeout(checkDeploymentVersion, 3000);
+  // 1. Always check API version on open (non-blocking for app rendering)
+  setTimeout(() => {
+    checkDeploymentVersion('open');
+  }, 100);
   
-  // Periodic check every 5 minutes
-  setInterval(checkDeploymentVersion, 5 * 60 * 1000);
+  // 2. Keep checking the version in background every 5 minutes
+  setInterval(() => {
+    checkDeploymentVersion('background');
+  }, 5 * 60 * 1000);
   
-  // Check when user resumes the tab
+  // 3. Background check when user resumes the tab
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-      checkDeploymentVersion();
+      checkDeploymentVersion('background');
     }
+  });
+
+  // 4. Background check when connection is restored
+  window.addEventListener('online', () => {
+    console.log('[Auto-Update] Online event received, checking version in background...');
+    checkDeploymentVersion('background');
   });
 }
 

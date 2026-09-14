@@ -43,11 +43,14 @@ class SafeStorage {
    * Identifies whether a storage key / payload should be kept out of synchronous localStorage.
    */
   private isLargeKey(key: string, valueLength?: number): boolean {
-    if (valueLength !== undefined && valueLength > 25000) return true;
+    // Critical user cache must remain in localStorage for instant 0ms reload on page refresh
+    if (key === 'cached_all_users' || key === 'sync_user_mtimes' || key.startsWith('cached_all_users')) {
+      return false;
+    }
+    if (valueLength !== undefined && valueLength > 150000) return true;
     return (
       key.includes('content_cache') ||
       key.includes('admin_content_cache') ||
-      key.includes('cached_all_users') ||
       key.includes('_chunk_') ||
       key.startsWith('search_index') ||
       key.startsWith('poster_cache_') ||
@@ -69,6 +72,7 @@ class SafeStorage {
       for (let i = 0; i < window.localStorage.length; i++) {
         const k = window.localStorage.key(i);
         if (!k) continue;
+        if (k === 'cached_all_users' || k === 'sync_user_mtimes' || k.startsWith('cached_all_users')) continue;
         if (this.isLargeKey(k)) {
           keysToRemove.push(k);
         }

@@ -31,6 +31,8 @@ import { isUserExpired } from "../../contexts/UsersContext";
 import { safeStorage } from "../../utils/safeStorage";
 import { smartSearch } from "../../utils/searchUtils";
 import { memoryStore } from "../../utils/memoryStore";
+import { matchContentOttPlatform, matchContentResolution } from "../../utils/contentUtils";
+import { getCachedImdbRating } from "../../services/imdbRatingService";
 
 import { useAuth, standardizePhone } from "../../contexts/AuthContext";
 import { useLanguage } from "../../contexts/LanguageContext";
@@ -174,6 +176,12 @@ export default function Home({
   const [selectedYear, setSelectedYear] = useState<string>(
     () => sessionStorage.getItem("home_year") || "",
   );
+  const [selectedOttPlatform, setSelectedOttPlatform] = useState<string>(
+    () => sessionStorage.getItem("home_ott") || "",
+  );
+  const [selectedResolution, setSelectedResolution] = useState<string>(
+    () => sessionStorage.getItem("home_resolution") || "",
+  );
   const [currentPage, setCurrentPage] = useState(
     () => Number(sessionStorage.getItem("home_page")) || 1,
   );
@@ -280,6 +288,8 @@ export default function Home({
     sessionStorage.setItem("home_type", selectedType);
     sessionStorage.setItem("home_quality", selectedQuality);
     sessionStorage.setItem("home_year", selectedYear);
+    sessionStorage.setItem("home_ott", selectedOttPlatform);
+    sessionStorage.setItem("home_resolution", selectedResolution);
     sessionStorage.setItem("home_page", currentPage.toString());
   }, [
     search,
@@ -289,6 +299,8 @@ export default function Home({
     selectedType,
     selectedQuality,
     selectedYear,
+    selectedOttPlatform,
+    selectedResolution,
     currentPage,
   ]);
 
@@ -303,6 +315,8 @@ export default function Home({
     setSelectedLanguage("");
     setSelectedQuality("");
     setSelectedYear("");
+    setSelectedOttPlatform("");
+    setSelectedResolution("");
     setSearch("");
     setCurrentPage(1);
     setShowFilters(false);
@@ -315,6 +329,8 @@ export default function Home({
     sessionStorage.removeItem("home_type");
     sessionStorage.removeItem("home_quality");
     sessionStorage.removeItem("home_year");
+    sessionStorage.removeItem("home_ott");
+    sessionStorage.removeItem("home_resolution");
     sessionStorage.removeItem("home_page");
     sessionStorage.removeItem("home_search");
 
@@ -328,6 +344,8 @@ export default function Home({
     selectedLanguage !== "" ||
     selectedQuality !== "" ||
     selectedYear !== "" ||
+    selectedOttPlatform !== "" ||
+    selectedResolution !== "" ||
     search !== "";
 
   const hideScrollingTabs = hasActiveFilters || currentPage > 1;
@@ -683,6 +701,18 @@ export default function Home({
         return false;
       });
     }
+    if (selectedOttPlatform) {
+      result = result.filter((c) => {
+        let cachedOtt: string | null = null;
+        try {
+          cachedOtt = getCachedImdbRating(c.id)?.ottPlatform || null;
+        } catch (e) {}
+        return matchContentOttPlatform(c, selectedOttPlatform, cachedOtt);
+      });
+    }
+    if (selectedResolution) {
+      result = result.filter((c) => matchContentResolution(c, selectedResolution, sortedQualities));
+    }
 
     result.sort((a, b) => {
       const aCanPlay = canPlayMap.get(a.id) ? 1 : 0;
@@ -724,9 +754,12 @@ export default function Home({
     selectedLanguage,
     selectedQuality,
     selectedYear,
+    selectedOttPlatform,
+    selectedResolution,
     profile?.role,
     canPlayMap,
     assignedContentSet,
+    sortedQualities,
   ]);
 
   const totalPages = useMemo(() => {
@@ -830,6 +863,10 @@ export default function Home({
                   setSelectedQuality={setSelectedQuality}
                   selectedYear={selectedYear}
                   setSelectedYear={setSelectedYear}
+                  selectedOttPlatform={selectedOttPlatform}
+                  setSelectedOttPlatform={setSelectedOttPlatform}
+                  selectedResolution={selectedResolution}
+                  setSelectedResolution={setSelectedResolution}
                   genres={sortedGenres}
                   languages={sortedLanguages}
                   qualities={sortedQualities}
@@ -1175,6 +1212,10 @@ export default function Home({
                   setSelectedQuality={setSelectedQuality}
                   selectedYear={selectedYear}
                   setSelectedYear={setSelectedYear}
+                  selectedOttPlatform={selectedOttPlatform}
+                  setSelectedOttPlatform={setSelectedOttPlatform}
+                  selectedResolution={selectedResolution}
+                  setSelectedResolution={setSelectedResolution}
                   genres={sortedGenres}
                   languages={sortedLanguages}
                   qualities={sortedQualities}
