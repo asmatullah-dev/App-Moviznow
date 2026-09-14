@@ -17,16 +17,8 @@ import {
 import { useModalBehavior } from '../hooks/useModalBehavior';
 import { useHaptics } from '../hooks/useHaptics';
 import { useAdminContent } from '../contexts/AdminContentContext';
-import { Content, Genre, Language, Quality } from '../types';
-import {
-  getFilmygoDomain,
-  getHdhub4uDomain,
-  getSkymoviesDomain,
-  getMoviesdriveDomain,
-  getFilmyflyDomain,
-} from '../utils/domains';
-import { performFullLinkScan } from '../utils/linkScanner';
-import { generateSearchVariations } from './BulkContentImporterModal';
+import { Content, Language, Quality, QualityLinks } from '../types';
+import { checkContentViaLinkChecker, ScrapedLinkItem } from './LinkCheckerModal';
 
 interface Props {
   isOpen: boolean;
@@ -40,8 +32,9 @@ interface UpgradeCandidate {
   currentQualityText: string;
   isLowPrint: boolean;
   status: 'pending' | 'checking' | 'upgradable' | 'up_to_date' | 'error';
-  upgradedLinks?: { name: string; url: string; quality: string; size?: string; audio?: string }[];
+  upgradedLinks?: QualityLinks;
   upgradedQualityName?: string;
+  discoveredItems?: ScrapedLinkItem[];
   source?: string;
 }
 
@@ -54,6 +47,7 @@ export const QualityUpgradeAlertsModal: React.FC<Props> = ({
   const { contentList, updateContentFields } = useAdminContent();
   const { vibrate } = useHaptics();
 
+  const [filterMode, setFilterMode] = useState<'low' | 'all'>('low');
   const [candidates, setCandidates] = useState<UpgradeCandidate[]>([]);
   const [isScanningAll, setIsScanningAll] = useState<boolean>(false);
   const [upgradedIds, setUpgradedIds] = useState<Set<string>>(new Set());
@@ -67,16 +61,14 @@ export const QualityUpgradeAlertsModal: React.FC<Props> = ({
     if (!text || typeof text !== 'string') return false;
     const s = text.toLowerCase();
     return (
-      s.includes('cam') ||
-      s.includes('hdcam') ||
+      /\b(hd-?cam|cam-?rip|cam|predvd|pre-dvd|telesync|hdts|ts|hdtc|tc|line\s*audio|hall\s*audio)\b/i.test(s) ||
+      s.includes('telesync') ||
       s.includes('predvd') ||
       s.includes('pre-dvd') ||
-      s.includes('telesync') ||
+      s.includes('hdcam') ||
       s.includes('hdts') ||
-      s.includes('hdtc') ||
       s.includes('line audio') ||
-      s.includes('hall audio') ||
-      s.includes('sample')
+      s.includes('hall audio')
     );
   };
 
@@ -99,10 +91,10 @@ export const QualityUpgradeAlertsModal: React.FC<Props> = ({
     return isHd && !isLowPrintMarker(s);
   };
 
-  // Detect low quality items in library on open
+  // Detect low quality or all items in library on open / filter change
   useEffect(() => {
     if (isOpen) {
-      const lowItems: UpgradeCandidate[] = [];
+      const items: UpgradeCandidate[] = [];
       contentList.forEach((c) => {
         const qualityObj = qualities.find((q) => q.id === c.qualityId);
         const qName = qualityObj?.name || '';
@@ -122,19 +114,19 @@ export const QualityUpgradeAlertsModal: React.FC<Props> = ({
           } catch (e) {}
         }
 
-        if (low) {
-          lowItems.push({
+        if (filterMode === 'all' || low) {
+          items.push({
             content: c,
-            currentQualityText: qName || 'CAM/PreDVD Print',
-            isLowPrint: true,
+            currentQualityText: qName || (low ? 'CAM/PreDVD Print' : 'Standard'),
+            isLowPrint: low,
             status: 'pending',
           });
         }
       });
 
-      setCandidates(lowItems);
+      setCandidates(items);
     }
-  }, [isOpen, contentList, qualities]);
+  }, [isOpen, contentList, qualities, filterMode]);
 
   const checkUpgradeForItem = async (candidate: UpgradeCandidate, signal: AbortSignal) => {
     const { content } = candidate;
@@ -143,223 +135,49 @@ export const QualityUpgradeAlertsModal: React.FC<Props> = ({
     );
 
     const yearNum = content.year ? parseInt(content.year.toString(), 10) : undefined;
-    const searchQueries = generateSearchVariations(content.title, yearNum);
 
     try {
-      // 1. Try FilmyGo
-      const fgDomain = getFilmygoDomain();
-      for (const q of searchQueries) {
-        if (signal.aborted) break;
-        const fgSearchUrl = `${fgDomain}/site-search.html?to-search=${encodeURIComponent(q)}&to-page=1`;
-        const fgRes = await fetch(`/api/filmygo?url=${encodeURIComponent(fgSearchUrl)}`, { signal }).catch(() => null);
-        if (fgRes && fgRes.ok) {
-          const fgData = await fgRes.json().catch(() => ({}));
-          const posts = fgData.posts || [];
-          for (const post of posts.slice(0, 3)) {
-            const postRes = await fetch(`/api/filmygo?url=${encodeURIComponent(post.url)}`, { signal }).catch(() => null);
-            if (postRes && postRes.ok) {
-              const postData = await postRes.json().catch(() => ({}));
-              const links = postData.links || [];
-              const hdLinks = links.filter((l: any) => isHdPrintMarker(l.name || l.quality || l.url || ''));
-              if (hdLinks.length > 0) {
-                setCandidates((prev) =>
-                  prev.map((c) =>
-                    c.content.id === content.id
-                      ? {
-                          ...c,
-                          status: 'upgradable',
-                          source: 'FilmyGo',
-                          upgradedQualityName: '1080p / 720p WEB-DL (Digital HD)',
-                          upgradedLinks: hdLinks.map((l: any) => ({
-                            name: l.name || `${content.title} HD`,
-                            url: l.url,
-                            quality: l.quality || '1080p',
-                            size: l.size,
-                            audio: l.audio || 'Hindi',
-                          })),
-                        }
-                      : c
-                  )
-                );
-                return;
-              }
-            }
-          }
-        }
-      }
+      // Execute multi-source LinkChecker engine in background
+      const res = await checkContentViaLinkChecker({
+        title: content.title,
+        year: yearNum,
+        type: content.type === 'series' ? 'series' : 'movie',
+        content,
+        languages,
+        qualities,
+        signal,
+      });
 
-      // 2. Try HDHub4U
-      const hdDomain = getHdhub4uDomain();
-      for (const q of searchQueries) {
-        if (signal.aborted) break;
-        const hdSearchUrl = `${hdDomain}/search.html?q=${encodeURIComponent(q)}`;
-        const hdRes = await fetch(`/api/hdhub4u?url=${encodeURIComponent(hdSearchUrl)}`, { signal }).catch(() => null);
-        if (hdRes && hdRes.ok) {
-          const hdData = await hdRes.json().catch(() => ({}));
-          const posts = hdData.posts || [];
-          for (const post of posts.slice(0, 3)) {
-            const postRes = await fetch(`/api/hdhub4u?url=${encodeURIComponent(post.url)}`, { signal }).catch(() => null);
-            if (postRes && postRes.ok) {
-              const postData = await postRes.json().catch(() => ({}));
-              const cands = postData.candidates || postData.links || [];
-              const hdLinks = cands.filter((l: any) => isHdPrintMarker(l.text || l.name || l.href || l.url || ''));
-              if (hdLinks.length > 0) {
-                setCandidates((prev) =>
-                  prev.map((c) =>
-                    c.content.id === content.id
-                      ? {
-                          ...c,
-                          status: 'upgradable',
-                          source: 'HDHub4U',
-                          upgradedQualityName: 'Digital WEB-DL / BluRay',
-                          upgradedLinks: hdLinks.map((l: any) => ({
-                            name: l.text || l.name || `${content.title} HD`,
-                            url: l.href || l.url,
-                            quality: '1080p',
-                            audio: 'Hindi Clean',
-                          })),
-                        }
-                      : c
-                  )
-                );
-                return;
-              }
-            }
-          }
-        }
-      }
+      if (signal.aborted) return;
 
-      // 3. Try SkyMoviesHD
-      const skyDomain = getSkymoviesDomain();
-      for (const q of searchQueries) {
-        if (signal.aborted) break;
-        const skySearchUrl = `${skyDomain}/search.php?search=${encodeURIComponent(q)}&cat=All`;
-        const skyRes = await fetch(`/api/skymovieshd?url=${encodeURIComponent(skySearchUrl)}`, { signal }).catch(() => null);
-        if (skyRes && skyRes.ok) {
-          const skyData = await skyRes.json().catch(() => ({}));
-          const posts = skyData.posts || [];
-          for (const post of posts.slice(0, 3)) {
-            const postRes = await fetch(`/api/skymovieshd?url=${encodeURIComponent(post.url)}`, { signal }).catch(() => null);
-            if (postRes && postRes.ok) {
-              const postData = await postRes.json().catch(() => ({}));
-              const links = postData.links || [];
-              const hdLinks = links.filter((l: any) => isHdPrintMarker(l.name || l.quality || l.url || ''));
-              if (hdLinks.length > 0) {
-                setCandidates((prev) =>
-                  prev.map((c) =>
-                    c.content.id === content.id
-                      ? {
-                          ...c,
-                          status: 'upgradable',
-                          source: 'SkyMoviesHD',
-                          upgradedQualityName: 'Digital HD WebRip',
-                          upgradedLinks: hdLinks.map((l: any) => ({
-                            name: l.name || `${content.title} HD`,
-                            url: l.url,
-                            quality: l.quality || '720p',
-                            size: l.size,
-                            audio: l.audio || 'Hindi',
-                          })),
-                        }
-                      : c
-                  )
-                );
-                return;
-              }
-            }
-          }
-        }
-      }
+      // Check if any HD/Digital/4K links are present
+      const hdLinks = res.links.filter((l) => {
+        const txt = `${l.label} ${l.rawQuality || ''} ${l.fileName || ''} ${l.url}`.toLowerCase();
+        return isHdPrintMarker(txt) || l.quality === '1080p' || l.quality === '720p' || l.quality === '2160p';
+      });
 
-      // 4. Try MoviesDrive
-      const mdDomain = getMoviesdriveDomain();
-      for (const q of searchQueries) {
-        if (signal.aborted) break;
-        const mdSearchUrl = `${mdDomain}/search.html?q=${encodeURIComponent(q)}&page=1`;
-        const mdRes = await fetch(`/api/moviesdrive?url=${encodeURIComponent(mdSearchUrl)}`, { signal }).catch(() => null);
-        if (mdRes && mdRes.ok) {
-          const mdData = await mdRes.json().catch(() => ({}));
-          const posts = mdData.posts || [];
-          for (const post of posts.slice(0, 3)) {
-            const postRes = await fetch(`/api/moviesdrive?url=${encodeURIComponent(post.url)}`, { signal }).catch(() => null);
-            if (postRes && postRes.ok) {
-              const postData = await postRes.json().catch(() => ({}));
-              const links = postData.links || [];
-              const hdLinks = links.filter((l: any) => isHdPrintMarker(l.name || l.quality || l.url || ''));
-              if (hdLinks.length > 0) {
-                setCandidates((prev) =>
-                  prev.map((c) =>
-                    c.content.id === content.id
-                      ? {
-                          ...c,
-                          status: 'upgradable',
-                          source: 'MoviesDrive',
-                          upgradedQualityName: 'Digital WEB-DL HD',
-                          upgradedLinks: hdLinks.map((l: any) => ({
-                            name: l.name || `${content.title} HD`,
-                            url: l.url,
-                            quality: l.quality || '1080p',
-                            size: l.size,
-                            audio: l.audio || 'Hindi',
-                          })),
-                        }
-                      : c
-                  )
-                );
-                return;
-              }
-            }
-          }
-        }
+      if (hdLinks.length > 0) {
+        let suggestedQuality = res.metadata.printQuality || '1080p / 720p WEB-DL (Digital HD)';
+        setCandidates((prev) =>
+          prev.map((c) =>
+            c.content.id === content.id
+              ? {
+                  ...c,
+                  status: 'upgradable',
+                  source: 'LinkChecker Background Engine',
+                  upgradedQualityName: suggestedQuality,
+                  upgradedLinks: res.qualityLinks,
+                  discoveredItems: res.links,
+                }
+              : c
+          )
+        );
+      } else {
+        setCandidates((prev) =>
+          prev.map((c) => (c.content.id === content.id ? { ...c, status: 'up_to_date' } : c))
+        );
       }
-
-      // 5. Try FilmyFly
-      const ffDomain = getFilmyflyDomain();
-      for (const q of searchQueries) {
-        if (signal.aborted) break;
-        const ffSearchUrl = `${ffDomain}/search.html?search=${encodeURIComponent(q)}&page=1`;
-        const ffRes = await fetch(`/api/filmyfly?url=${encodeURIComponent(ffSearchUrl)}`, { signal }).catch(() => null);
-        if (ffRes && ffRes.ok) {
-          const ffData = await ffRes.json().catch(() => ({}));
-          const posts = ffData.posts || [];
-          for (const post of posts.slice(0, 3)) {
-            const postRes = await fetch(`/api/filmyfly?url=${encodeURIComponent(post.url)}`, { signal }).catch(() => null);
-            if (postRes && postRes.ok) {
-              const postData = await postRes.json().catch(() => ({}));
-              const links = postData.links || [];
-              const hdLinks = links.filter((l: any) => isHdPrintMarker(l.name || l.quality || l.url || ''));
-              if (hdLinks.length > 0) {
-                setCandidates((prev) =>
-                  prev.map((c) =>
-                    c.content.id === content.id
-                      ? {
-                          ...c,
-                          status: 'upgradable',
-                          source: 'FilmyFly',
-                          upgradedQualityName: 'Digital WEB-DL HD',
-                          upgradedLinks: hdLinks.map((l: any) => ({
-                            name: l.name || `${content.title} HD`,
-                            url: l.url,
-                            quality: l.quality || '1080p',
-                            size: l.size,
-                            audio: l.audio || 'Hindi',
-                          })),
-                        }
-                      : c
-                  )
-                );
-                return;
-              }
-            }
-          }
-        }
-      }
-
-      // If no HD print found
-      setCandidates((prev) =>
-        prev.map((c) => (c.content.id === content.id ? { ...c, status: 'up_to_date' } : c))
-      );
-    } catch (e) {
+    } catch (err) {
       setCandidates((prev) =>
         prev.map((c) => (c.content.id === content.id ? { ...c, status: 'error' } : c))
       );
@@ -367,49 +185,65 @@ export const QualityUpgradeAlertsModal: React.FC<Props> = ({
   };
 
   const handleScanAll = async () => {
+    if (candidates.length === 0 || isScanningAll) return;
     setIsScanningAll(true);
-    vibrate(40);
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+    vibrate(50);
+
+    const ctrl = new AbortController();
+    abortControllerRef.current = ctrl;
 
     for (const cand of candidates) {
-      if (controller.signal.aborted) break;
-      await checkUpgradeForItem(cand, controller.signal);
+      if (cand.status === 'upgradable' || upgradedIds.has(cand.content.id)) continue;
+      if (ctrl.signal.aborted) break;
+      await checkUpgradeForItem(cand, ctrl.signal);
     }
 
     setIsScanningAll(false);
-    abortControllerRef.current = null;
-    vibrate(30);
   };
 
   const handleUpgradeItem = async (candidate: UpgradeCandidate) => {
-    if (!candidate.upgradedLinks || candidate.upgradedLinks.length === 0) return;
-
-    const hdQuality = qualities.find((q) => isHdPrintMarker(q.name))?.id || qualities[0]?.id || '';
+    const { content, upgradedLinks, upgradedQualityName } = candidate;
+    if (!upgradedLinks || upgradedLinks.length === 0) return;
 
     try {
+      // Find matching HD quality ID in qualities list or fallback to 1080p
+      let hdQuality = qualities.find((q) => isHdPrintMarker(q.name) || q.name.includes('1080p') || q.name.includes('720p'))?.id;
+      if (!hdQuality && qualities.length > 0) hdQuality = qualities[0].id;
+
+      // Update in DB
       await updateContentFields([
         {
-          id: candidate.content.id,
-          chunkId: candidate.content.chunkId,
+          id: content.id,
           fields: {
             qualityId: hdQuality,
-            movieLinks: JSON.stringify(candidate.upgradedLinks),
+            movieLinks: JSON.stringify(upgradedLinks),
             updatedAt: new Date().toISOString(),
           },
         },
       ]);
 
-      setUpgradedIds((prev) => new Set([...prev, candidate.content.id]));
+      setUpgradedIds((prev) => new Set([...prev, content.id]));
       vibrate(50);
     } catch (e) {
-      console.error('Failed to apply upgrade:', e);
+      console.error('Failed to upgrade content:', e);
     }
+  };
+
+  const handleUpgradeAll = async () => {
+    const upgradableList = candidates.filter(
+      (c) => c.status === 'upgradable' && !upgradedIds.has(c.content.id)
+    );
+    if (upgradableList.length === 0) return;
+
+    for (const cand of upgradableList) {
+      await handleUpgradeItem(cand);
+    }
+    vibrate([50, 50, 50]);
   };
 
   if (!isOpen) return null;
 
-  const upgradableCount = candidates.filter((c) => c.status === 'upgradable').length;
+  const upgradableCount = candidates.filter((c) => c.status === 'upgradable' && !upgradedIds.has(c.content.id)).length;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
@@ -435,7 +269,7 @@ export const QualityUpgradeAlertsModal: React.FC<Props> = ({
                 )}
               </h2>
               <p className="text-xs text-zinc-400">
-                Scans library for CAM/PreDVD prints and searches scrapers for Digital HD upgrades
+                Scans library for CAM/PreDVD prints and verifies Digital HD upgrades via background Link Checker
               </p>
             </div>
           </div>
@@ -449,31 +283,57 @@ export const QualityUpgradeAlertsModal: React.FC<Props> = ({
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
-          {/* Action Header */}
-          <div className="flex items-center justify-between bg-zinc-950/40 p-4 rounded-xl border border-zinc-800">
-            <div>
-              <span className="text-sm font-semibold text-white">
-                Low Quality Content in Library: {candidates.length}
-              </span>
-              <p className="text-xs text-zinc-400">
-                Check online sources for HD WEB-DL / BluRay prints
-              </p>
+          {/* Action Header with Filter Toggle */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-zinc-950/40 p-4 rounded-xl border border-zinc-800">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setFilterMode('low')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+                  filterMode === 'low'
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm'
+                    : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-zinc-200'
+                }`}
+              >
+                Low Quality Prints ({candidates.filter((c) => c.isLowPrint).length})
+              </button>
+              <button
+                onClick={() => setFilterMode('all')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+                  filterMode === 'all'
+                    ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40 shadow-sm'
+                    : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-zinc-200'
+                }`}
+              >
+                All Content ({contentList.length})
+              </button>
             </div>
-            <button
-              onClick={handleScanAll}
-              disabled={isScanningAll || candidates.length === 0}
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-colors shadow-md"
-            >
-              {isScanningAll ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" /> Scanning Scrapers...
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="w-4 h-4" /> Scan for HD Upgrades
-                </>
+
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              {upgradableCount > 0 && (
+                <button
+                  onClick={handleUpgradeAll}
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-colors shadow-md flex-1 sm:flex-initial justify-center"
+                >
+                  <ArrowUpRight className="w-4 h-4" /> Upgrade All ({upgradableCount})
+                </button>
               )}
-            </button>
+
+              <button
+                onClick={handleScanAll}
+                disabled={isScanningAll || candidates.length === 0}
+                className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-colors border border-zinc-700 flex-1 sm:flex-initial justify-center"
+              >
+                {isScanningAll ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-cyan-400" /> Scanning...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-4 h-4" /> Scan for HD Upgrades
+                  </>
+                )}
+              </button>
+            </div>
           </div>
 
           {/* Candidates List */}
@@ -524,25 +384,28 @@ export const QualityUpgradeAlertsModal: React.FC<Props> = ({
                             </span>
                             {cand.status === 'checking' && (
                               <span className="flex items-center gap-1 text-xs text-cyan-400 animate-pulse">
-                                <Loader2 className="w-3 h-3 animate-spin" /> Checking...
+                                <Loader2 className="w-3 h-3 animate-spin" /> LinkChecker scanning in background...
                               </span>
                             )}
                             {cand.status === 'up_to_date' && (
-                              <span className="text-xs text-zinc-500">No HD release yet</span>
+                              <span className="text-xs text-zinc-500">No HD release verified yet</span>
+                            )}
+                            {cand.status === 'error' && (
+                              <span className="text-xs text-red-400">Scan error</span>
                             )}
                           </div>
                         </div>
                       </div>
 
                       {/* Upgrade Details & Button */}
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
                         {cand.status === 'upgradable' && !isUpgraded && (
                           <div className="text-right hidden sm:block">
                             <span className="text-xs font-bold text-emerald-400 block">
                               {cand.upgradedQualityName}
                             </span>
                             <span className="text-[10px] text-zinc-400">
-                              via {cand.source} ({cand.upgradedLinks?.length} links)
+                              {cand.upgradedLinks?.length} verified links
                             </span>
                           </div>
                         )}
@@ -554,7 +417,7 @@ export const QualityUpgradeAlertsModal: React.FC<Props> = ({
                         ) : cand.status === 'upgradable' ? (
                           <button
                             onClick={() => handleUpgradeItem(cand)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-all shadow-md"
+                            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-all shadow-md"
                           >
                             <ArrowUpRight className="w-4 h-4" /> Upgrade to HD
                           </button>
@@ -566,7 +429,7 @@ export const QualityUpgradeAlertsModal: React.FC<Props> = ({
                             }}
                             disabled={cand.status === 'checking'}
                             className="p-2 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800"
-                            title="Check this item"
+                            title="Scan with LinkChecker"
                           >
                             <RefreshCw className="w-4 h-4" />
                           </button>

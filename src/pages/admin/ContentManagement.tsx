@@ -758,13 +758,6 @@ export default function ContentManagement() {
     setLoading(contextLoading);
   }, [contextLoading]);
 
-  // Connect to Firestore for content chunks strictly when inside Content Management tab
-  useEffect(() => {
-    quickRefreshCatalog(false, undefined, true).catch(err => {
-      console.warn("Content management initial sync error:", err);
-    });
-  }, [quickRefreshCatalog]);
-
   const [isSyncingFromFirestore, setIsSyncingFromFirestore] = useState(false);
   const [isGithubModalOpen, setIsGithubModalOpen] = useState(false);
   const [githubRepo, setGithubRepo] = useState(() => localStorage.getItem("githubRepo") || "");
@@ -2848,6 +2841,34 @@ export default function ContentManagement() {
     }
   };
 
+  const directLinkExtractionCache = new Map<string, string>();
+
+  const extractDirectLinkFast = async (rawUrl: string): Promise<string> => {
+    if (!rawUrl || !isExtractableLink(rawUrl)) return rawUrl;
+    if (directLinkExtractionCache.has(rawUrl)) {
+      return directLinkExtractionCache.get(rawUrl)!;
+    }
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3500);
+      const res = await fetch("/api/hubcloud/direct-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: rawUrl }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.url && data.url !== rawUrl) {
+          directLinkExtractionCache.set(rawUrl, data.url);
+          return data.url;
+        }
+      }
+    } catch (e) {}
+    return rawUrl;
+  };
+
   const handleSharePipeline = async (
     content: Content,
     mode: "standard" | "whatsapp" = "standard",
@@ -2952,142 +2973,98 @@ export default function ContentManagement() {
         })();
       }
 
-      // Parallelize Link Extraction and TMDB fetch
-      // We will perform link extraction synchronously within executeShare/executeWhatsappShare.
-      // Wait, executeShare and executeWhatsappShare already do link extraction!
-      // If we call them, they will run in sequence. But if we do TMDB fetch HERE, we just wait for it.
-      // Wait, we WANT parallel execution. We can just run TMDB fetch and a dummy link promise here, but since the real link extraction is inside executeShare...
-      // Actually, if we just await tmdbPromise FIRST, then executeShare will do link extraction sequentially afterwards.
-      // To run them at the SAME TIME, we can pass tmdbPromise into executeShare and await it INSIDE executeShare ALONGSIDE linkPromises!
-      // But we can't easily change executeShare signature without breaking things.
-      // Instead, we just await tmdbPromise here. The user requested "fast speed", and doing them sequentially here might be okay since the Hubcloud links are already extracted sequentially, but wait, the user specifically asked:
-      // "use hubcloud and media model at same time".
-      // So we MUST run them at the same time.
-      // I will extract the link extraction logic into a promise right here!
-      
-      let linkPromise = (async () => {
-         let newContent = { ...content };
-         const processLink = async (link: LinkDef) => {
-            if (!link.url) return link;
-            if (link.url && link.url.toLowerCase().includes("<html")) {
-              return { ...link, url: "", tinyUrl: "" };
-            }
-            let extractedUrl = link.url;
-            if (isExtractableLink(extractedUrl)) {
-              for (let attempt = 1; attempt <= 3; attempt++) {
-                let currentExtracted = false;
-                try {
-                  const res = await fetch("/api/hubcloud/direct-link", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ url: extractedUrl }),
-                  });
-                  if (res.ok) {
-                    const data = await res.json();
-                    if (data.url && data.url !== extractedUrl) {
-                      extractedUrl = data.url;
-                      currentExtracted = true;
-                    }
-                  }
-                } catch (e) { }
-                if (attempt < 3 && !currentExtracted) {
-                   await new Promise(resolve => setTimeout(resolve, 800));
-                } else if (currentExtracted) {
-                   break;
-                }
-              }
-            }
+      const processLinkFast = async (link: LinkDef): Promise<LinkDef> => {
+        if (!link.url) return link;
+        if (link.url && link.url.toLowerCase().includes("<html")) {
+          return { ...link, url: "", tinyUrl: "" };
+        }
+        let extractedUrl = await extractDirectLinkFast(link.url);
+
+        if (
+          extractedUrl.includes("pixeldrain.com") ||
+          extractedUrl.includes("pixeldrain.dev") ||
+          extractedUrl.includes("pixeldrain.net")
+        ) {
+          return { ...link, url: extractedUrl, tinyUrl: "" };
+        }
+        let prevTinyUrl = link.tinyUrl;
+        const isBadTinyUrl =
+          prevTinyUrl &&
+          typeof prevTinyUrl === "string" &&
+          prevTinyUrl.toLowerCase().includes("<html");
+
+        if (extractedUrl.length > 100) {
+          if (!prevTinyUrl || isBadTinyUrl) {
+            const tinyUrl = await generateTinyUrl(
+              extractedUrl,
+              true,
+              settings?.supportNumber || "3416286423",
+            );
             if (
-              extractedUrl.includes("pixeldrain.com") ||
-              extractedUrl.includes("pixeldrain.dev") ||
-              extractedUrl.includes("pixeldrain.net")
+              tinyUrl &&
+              tinyUrl !== extractedUrl &&
+              !tinyUrl.toLowerCase().includes("<html")
             ) {
+              return { ...link, url: extractedUrl, tinyUrl };
+            } else if (isBadTinyUrl) {
               return { ...link, url: extractedUrl, tinyUrl: "" };
             }
-            let prevTinyUrl = link.tinyUrl;
-            const isBadTinyUrl =
-              prevTinyUrl &&
-              typeof prevTinyUrl === "string" &&
-              prevTinyUrl.toLowerCase().includes("<html");
-
-            if (extractedUrl.length > 100) {
-              if (!prevTinyUrl || isBadTinyUrl) {
-                const tinyUrl = await generateTinyUrl(
-                  extractedUrl,
-                  true,
-                  settings?.supportNumber || "3416286423",
-                );
-                if (
-                  tinyUrl &&
-                  tinyUrl !== extractedUrl &&
-                  !tinyUrl.toLowerCase().includes("<html")
-                ) {
-                  return { ...link, url: extractedUrl, tinyUrl };
-                } else if (isBadTinyUrl) {
-                  return { ...link, url: extractedUrl, tinyUrl: "" };
-                }
-              }
-              return { ...link, url: extractedUrl, tinyUrl: prevTinyUrl };
-            } else {
-              return { ...link, url: extractedUrl, tinyUrl: "" };
-            }
-          };
-
-          if (newContent.sampleUrl) {
-             let processedSampleUrl = newContent.sampleUrl;
-             if (isExtractableLink(processedSampleUrl)) {
-                try {
-                  const res = await fetch("/api/hubcloud/direct-link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: processedSampleUrl }) });
-                  if (res.ok) {
-                    const data = await res.json();
-                    if (data.url && data.url !== processedSampleUrl) processedSampleUrl = data.url;
-                  }
-                } catch(e) {}
-             }
-             if (processedSampleUrl.length > 100 && !processedSampleUrl.includes('pixeldrain.com') && !processedSampleUrl.includes('pixeldrain.dev') && !processedSampleUrl.includes('pixeldrain.net') && !processedSampleUrl.includes('t.me')) {
-                const tinyUrl = await generateTinyUrl(processedSampleUrl, true, settings?.supportNumber || '3416286423');
-                if (tinyUrl && !tinyUrl.toLowerCase().includes('<html')) processedSampleUrl = tinyUrl;
-             }
-             newContent.sampleUrl = processedSampleUrl;
           }
+          return { ...link, url: extractedUrl, tinyUrl: prevTinyUrl };
+        } else {
+          return { ...link, url: extractedUrl, tinyUrl: "" };
+        }
+      };
 
-          if (newContent.type === "movie" && newContent.movieLinks) {
-            const links = parseLinks(newContent.movieLinks);
-            const processedLinks = await Promise.all(links.map(processLink));
-            newContent.movieLinks = JSON.stringify(processedLinks);
-          } else if (newContent.type === "series" && newContent.seasons) {
-            const parsedSeasons: Season[] = Array.isArray(newContent.seasons)
-              ? newContent.seasons
-              : JSON.parse(newContent.seasons || "[]");
-            
-            const linkPromises: Promise<void>[] = [];
-            for (let s = 0; s < parsedSeasons.length; s++) {
-              const season = parsedSeasons[s];
-              if (selectedSeasonNumbers && !selectedSeasonNumbers.includes(season.seasonNumber)) {
-                 continue;
-              }
-              const zipLinks = parseLinks(JSON.stringify(season.zipLinks || []));
-              if (zipLinks.length > 0) {
-                linkPromises.push((async () => { season.zipLinks = await Promise.all(zipLinks.map(processLink)); })());
-              }
-              const mkvLinks = parseLinks(JSON.stringify(season.mkvLinks || []));
-              if (mkvLinks.length > 0) {
-                linkPromises.push((async () => { season.mkvLinks = await Promise.all(mkvLinks.map(processLink)); })());
-              }
-              if (season.episodes && Array.isArray(season.episodes)) {
-                for (let e = 0; e < season.episodes.length; e++) {
-                  const ep = season.episodes[e];
-                  const epLinks = parseLinks(JSON.stringify(ep.links || []));
-                  if (epLinks.length > 0) {
-                    linkPromises.push((async () => { ep.links = await Promise.all(epLinks.map(processLink)); })());
-                  }
-                }
-              }
+      const linkPromise = (async () => {
+         let newContent = { ...content };
+
+         if (newContent.sampleUrl) {
+            let processedSampleUrl = await extractDirectLinkFast(newContent.sampleUrl);
+            if (processedSampleUrl.length > 100 && !processedSampleUrl.includes('pixeldrain.com') && !processedSampleUrl.includes('pixeldrain.dev') && !processedSampleUrl.includes('pixeldrain.net') && !processedSampleUrl.includes('t.me')) {
+               const tinyUrl = await generateTinyUrl(processedSampleUrl, true, settings?.supportNumber || '3416286423');
+               if (tinyUrl && !tinyUrl.toLowerCase().includes('<html')) processedSampleUrl = tinyUrl;
             }
-            await Promise.all(linkPromises);
-            newContent.seasons = JSON.stringify(parsedSeasons);
-          }
-          return newContent;
+            newContent.sampleUrl = processedSampleUrl;
+         }
+
+         if (newContent.type === "movie" && newContent.movieLinks) {
+           const links = parseLinks(newContent.movieLinks);
+           const processedLinks = await Promise.all(links.map(processLinkFast));
+           newContent.movieLinks = JSON.stringify(processedLinks);
+         } else if (newContent.type === "series" && newContent.seasons) {
+           const parsedSeasons: Season[] = Array.isArray(newContent.seasons)
+             ? newContent.seasons
+             : JSON.parse(newContent.seasons || "[]");
+           
+           const linkPromises: Promise<void>[] = [];
+           for (let s = 0; s < parsedSeasons.length; s++) {
+             const season = parsedSeasons[s];
+             if (selectedSeasonNumbers && !selectedSeasonNumbers.includes(season.seasonNumber)) {
+                continue;
+             }
+             const zipLinks = parseLinks(JSON.stringify(season.zipLinks || []));
+             if (zipLinks.length > 0) {
+               linkPromises.push((async () => { season.zipLinks = await Promise.all(zipLinks.map(processLinkFast)); })());
+             }
+             const mkvLinks = parseLinks(JSON.stringify(season.mkvLinks || []));
+             if (mkvLinks.length > 0) {
+               linkPromises.push((async () => { season.mkvLinks = await Promise.all(mkvLinks.map(processLinkFast)); })());
+             }
+             if (season.episodes && Array.isArray(season.episodes)) {
+               for (let e = 0; e < season.episodes.length; e++) {
+                 const ep = season.episodes[e];
+                 const epLinks = parseLinks(JSON.stringify(ep.links || []));
+                 if (epLinks.length > 0) {
+                   linkPromises.push((async () => { ep.links = await Promise.all(epLinks.map(processLinkFast)); })());
+                 }
+               }
+             }
+           }
+           await Promise.all(linkPromises);
+           newContent.seasons = JSON.stringify(parsedSeasons);
+         }
+         return newContent;
       })();
       
       const [tmdbRes, linkRes] = await Promise.all([tmdbPromise, linkPromise]);
@@ -3095,7 +3072,7 @@ export default function ContentManagement() {
       let updatedContent = { ...linkRes };
 
       if (tmdbRes) {
-          const { details, imdbRatingData, fetchedSeasons, needsDuration, parsedSeasons, type } = tmdbRes;
+          const { details, imdbRatingData, fetchedSeasons, needsDuration, type } = tmdbRes;
           updatedContent.description = updatedContent.description || details.overview || "";
           updatedContent.runtime = updatedContent.runtime ||
             (details.runtime
@@ -3161,9 +3138,9 @@ export default function ContentManagement() {
       }
 
       if (mode === "whatsapp") {
-        await executeWhatsappShare(updatedContent, selectedSeasonNumbers);
+        await executeWhatsappShare(updatedContent, selectedSeasonNumbers, true);
       } else {
-        await executeShare(updatedContent, selectedSeasonNumbers);
+        await executeShare(updatedContent, selectedSeasonNumbers, true);
       }
     } catch (error) {
       console.error("Share Pipeline Error:", error);
@@ -3232,6 +3209,7 @@ export default function ContentManagement() {
   const executeWhatsappShare = async (
     content: Content,
     selectedSeasonNumbers?: number[],
+    isPreprocessed: boolean = false,
   ) => {
     setLoadingWhatsappShareId(content.id);
     let text = "";
@@ -3409,29 +3387,34 @@ export default function ContentManagement() {
       let files: File[] = [];
       if (content.posterUrl) {
         try {
-          const response = await fetch(content.posterUrl);
-          const blob = await response.blob();
-          const file = new File([blob], "poster.jpg", {
-            type: blob.type || "image/jpeg",
-          });
-          files = [file];
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 2000);
+          const response = await fetch(content.posterUrl, { signal: controller.signal });
+          clearTimeout(timeoutId);
+          if (response.ok) {
+            const blob = await response.blob();
+            const file = new File([blob], "poster.jpg", {
+              type: blob.type || "image/jpeg",
+            });
+            files = [file];
+          }
         } catch (e) {
           try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 2000);
             const proxyResponse = await fetch(
               `/api/image-proxy?url=${encodeURIComponent(content.posterUrl)}`,
+              { signal: controller.signal }
             );
+            clearTimeout(timeoutId);
             if (proxyResponse.ok) {
               const blob = await proxyResponse.blob();
               const file = new File([blob], "poster.jpg", {
                 type: blob.type || "image/jpeg",
               });
               files = [file];
-            } else {
-              throw new Error("Proxy fetch also failed");
             }
-          } catch (proxyError) {
-            // Fallback silently
-          }
+          } catch (proxyError) {}
         }
       }
 
@@ -3493,6 +3476,7 @@ export default function ContentManagement() {
   const executeShare = async (
     content: Content,
     selectedSeasonNumbers?: number[],
+    isPreprocessed: boolean = false,
   ) => {
     setLoadingShareId(content.id);
     const displaySecondTitle = content.secondTitle && content.secondTitle.toLowerCase() !== content.title.toLowerCase() && isRomanized(content.secondTitle) ? ` – ${content.secondTitle}` : "";
@@ -3523,35 +3507,8 @@ export default function ContentManagement() {
 
     let processedSampleUrl = content.sampleUrl;
 
-    if (processedSampleUrl && isExtractableLink(processedSampleUrl)) {
-      let sampleExtractionSuccess = false;
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-          const res = await fetch("/api/hubcloud/direct-link", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: processedSampleUrl }),
-          });
-          if (res.ok) {
-            const data = await res.json();
-            if (data.url && data.url !== processedSampleUrl) {
-              processedSampleUrl = data.url;
-              sampleExtractionSuccess = true;
-              break;
-            }
-          }
-        } catch (e) {
-          console.error(`Hubcloud extract failed for sampleUrl (attempt ${attempt})`, e);
-        }
-        if (attempt < 3 && !sampleExtractionSuccess) {
-           await new Promise(resolve => setTimeout(resolve, 800));
-        } else if (sampleExtractionSuccess) {
-           break;
-        }
-      }
-      if (!sampleExtractionSuccess) {
-         processedSampleUrl = '';
-      }
+    if (!isPreprocessed && processedSampleUrl && isExtractableLink(processedSampleUrl)) {
+      processedSampleUrl = await extractDirectLinkFast(processedSampleUrl);
     }
 
     if (processedSampleUrl) {
@@ -3577,43 +3534,12 @@ export default function ContentManagement() {
 
     const processLink = async (link: LinkDef) => {
       if (!link.url) return link;
-
-      // If the original URL is HTML, it's broken
       if (link.url && link.url.toLowerCase().includes("<html")) {
         return { ...link, url: "", tinyUrl: "" };
       }
 
-      let extractedUrl = link.url;
-      
-      // Extract HubCloud and mirror links
-      if (isExtractableLink(extractedUrl)) {
-        for (let attempt = 1; attempt <= 3; attempt++) {
-          let currentExtracted = false;
-          try {
-            const res = await fetch("/api/hubcloud/direct-link", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ url: extractedUrl }),
-            });
-            if (res.ok) {
-              const data = await res.json();
-              if (data.url && data.url !== extractedUrl) {
-                extractedUrl = data.url;
-                currentExtracted = true;
-              }
-            }
-          } catch (e) {
-            console.error(`Hubcloud extract failed for share (attempt ${attempt})`, e);
-          }
-          if (attempt < 3 && !currentExtracted) {
-             await new Promise(resolve => setTimeout(resolve, 800));
-          } else if (currentExtracted) {
-             break;
-          }
-        }
-      }
+      let extractedUrl = await extractDirectLinkFast(link.url);
 
-      // Explicit check - NO tiny url for pixeldrain
       if (
         extractedUrl.includes("pixeldrain.com") ||
         extractedUrl.includes("pixeldrain.dev") ||
@@ -3651,11 +3577,11 @@ export default function ContentManagement() {
     };
 
     if (updatedContent.type === "movie" && updatedContent.movieLinks) {
-      const links: QualityLinks = parseLinks(updatedContent.movieLinks);
+      let links: QualityLinks = parseLinks(updatedContent.movieLinks);
 
-      const processedLinks = await Promise.all(links.map(processLink));
-      for (let i = 0; i < links.length; i++) {
-        links[i] = processedLinks[i];
+      if (!isPreprocessed) {
+        const processedLinks = await Promise.all(links.map(processLink));
+        links = processedLinks;
       }
 
       const sortedLinks = [...links].sort((a, b) => {
@@ -3719,52 +3645,54 @@ export default function ContentManagement() {
           )
         : parsedSeasons;
 
-      const linkPromises: Promise<void>[] = [];
+      if (!isPreprocessed) {
+        const linkPromises: Promise<void>[] = [];
 
-      for (let s = 0; s < seasonsToShare.length; s++) {
-        const season = seasonsToShare[s];
+        for (let s = 0; s < seasonsToShare.length; s++) {
+          const season = seasonsToShare[s];
 
-        const zipLinks = parseLinks(JSON.stringify(season.zipLinks || []));
-        if (zipLinks.length > 0) {
-          linkPromises.push(
-            (async () => {
-              const processed = await Promise.all(
-                zipLinks.map(processLink),
-              );
-              season.zipLinks = processed;
-            })(),
-          );
-        }
-        const mkvLinks = parseLinks(JSON.stringify(season.mkvLinks || []));
-        if (mkvLinks.length > 0) {
-          linkPromises.push(
-            (async () => {
-              const processed = await Promise.all(
-                mkvLinks.map(processLink),
-              );
-              season.mkvLinks = processed;
-            })(),
-          );
-        }
-        if (season.episodes && Array.isArray(season.episodes)) {
-          for (let e = 0; e < season.episodes.length; e++) {
-            const ep = season.episodes[e];
-            const epLinks = parseLinks(JSON.stringify(ep.links || []));
-            if (epLinks.length > 0) {
-              linkPromises.push(
-                (async () => {
-                  const processed = await Promise.all(
-                    epLinks.map(processLink),
-                  );
-                  ep.links = processed;
-                })(),
-              );
+          const zipLinks = parseLinks(JSON.stringify(season.zipLinks || []));
+          if (zipLinks.length > 0) {
+            linkPromises.push(
+              (async () => {
+                const processed = await Promise.all(
+                  zipLinks.map(processLink),
+                );
+                season.zipLinks = processed;
+              })(),
+            );
+          }
+          const mkvLinks = parseLinks(JSON.stringify(season.mkvLinks || []));
+          if (mkvLinks.length > 0) {
+            linkPromises.push(
+              (async () => {
+                const processed = await Promise.all(
+                  mkvLinks.map(processLink),
+                );
+                season.mkvLinks = processed;
+              })(),
+            );
+          }
+          if (season.episodes && Array.isArray(season.episodes)) {
+            for (let e = 0; e < season.episodes.length; e++) {
+              const ep = season.episodes[e];
+              const epLinks = parseLinks(JSON.stringify(ep.links || []));
+              if (epLinks.length > 0) {
+                linkPromises.push(
+                  (async () => {
+                    const processed = await Promise.all(
+                      epLinks.map(processLink),
+                    );
+                    ep.links = processed;
+                  })(),
+                );
+              }
             }
           }
         }
-      }
 
-      await Promise.all(linkPromises);
+        await Promise.all(linkPromises);
+      }
 
       seasonsToShare.forEach((season) => {
         text += `\n📺 *Season ${season.seasonNumber}${season.year ? ` (${season.year})` : updatedContent.year ? ` (${updatedContent.year})` : ""}*\n`;
@@ -6077,47 +6005,52 @@ export default function ContentManagement() {
                     URL.revokeObjectURL(url);
                     triggerAlert("Success", "Catalog exported to unified JSON file", "success");
                   }}
-                  className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-lg text-sm font-medium transition-colors"
+                  className="p-2.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-lg text-sm font-medium transition-colors flex items-center justify-center shadow-sm"
                   title="Export All Content to JSON"
+                  aria-label="Export"
                 >
-                  <FileDown className="w-4 h-4" />
-                  Export
+                  <FileDown className="w-5 h-5" />
                 </button>
                 {profile?.role === "owner" && (
                   <button
                     onClick={() => setIsGithubModalOpen(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-100 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 rounded-lg text-sm font-medium transition-colors"
+                    className="p-2.5 bg-zinc-900 dark:bg-zinc-100 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 rounded-lg text-sm font-medium transition-colors flex items-center justify-center shadow-sm"
                     title="Trigger GitHub Actions JSON Sync Workflow"
+                    aria-label="GitHub Sync"
                   >
-                    <Github className="w-4 h-4" />
-                    GitHub Sync
+                    <Github className="w-5 h-5" />
                   </button>
                 )}
                 <button
                   onClick={handleManualFirestoreRefresh}
                   disabled={isSyncingFromFirestore}
-                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                  className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 flex items-center justify-center shadow-sm"
                   title="Refresh content chunks & metadata directly from Firestore"
+                  aria-label="Refresh"
                 >
-                  <RefreshCw className={clsx("w-4 h-4", isSyncingFromFirestore && "animate-spin")} />
-                  Refresh Chunks & Meta
+                  <RefreshCw className={clsx("w-5 h-5", isSyncingFromFirestore && "animate-spin")} />
                 </button>
-                {hasPendingChanges && (
-                  <span className="flex h-2 w-2 rounded-full bg-red-500 animate-ping" />
-                )}
-                <button
-                  className={clsx(
-                    "px-6 py-3 rounded-xl font-medium flex items-center justify-center gap-2 transition-colors whitespace-nowrap text-white",
-                    hasPendingChanges
-                      ? "bg-orange-600 hover:bg-orange-700"
-                      : "bg-zinc-600 hover:bg-zinc-700",
+                <div className="relative inline-flex items-center">
+                  {hasPendingChanges && (
+                    <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5 z-10 pointer-events-none">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+                    </span>
                   )}
-                  onClick={() => setIsSyncConfirmOpen(true)}
-                >
-                  {hasPendingChanges
-                    ? "Update Changes to Server*"
-                    : "Update Changes to Server"}
-                </button>
+                  <button
+                    className={clsx(
+                      "p-2.5 rounded-lg font-medium flex items-center justify-center transition-colors text-white shadow-sm",
+                      hasPendingChanges
+                        ? "bg-orange-600 hover:bg-orange-700"
+                        : "bg-zinc-600 hover:bg-zinc-700",
+                    )}
+                    onClick={() => setIsSyncConfirmOpen(true)}
+                    title={hasPendingChanges ? "Upload Changes to Server (Pending changes exist)" : "Upload Changes to Server"}
+                    aria-label="Upload Changes to Server"
+                  >
+                    <Upload className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
             )}
             <div className="flex items-center gap-2 flex-nowrap">

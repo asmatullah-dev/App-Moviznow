@@ -1075,8 +1075,9 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
   };
 
   const quickRefreshCatalog = async (manual: boolean = false, prefetchedVersions?: Record<string, any>, forceAdminSync: boolean = false): Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean; isInitialLoad?: boolean }> => {
-    // Non-admin or standard browsing bypass: do not perform admin firestore sync
-    if (!forceAdminSync) {
+    // Strictly require explicit manual click from the Content Management tab's refresh button.
+    // Do not refresh automatically on tab open or from any other refresh button.
+    if (!manual || !forceAdminSync) {
         refreshContentFromLocal();
         refreshCollectionsFromLocal();
         setLoading(false);

@@ -216,16 +216,25 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    // Run automated cache cleanup (evicts metadata/posters unused for > 3 days, IMDb/OTT unused for > 5 days; keeps chunk data)
-    runPeriodicCacheCleanup().catch((err) =>
-      console.warn("Automated cache cleanup failed:", err)
-    );
+    // Run automated cache cleanup during idle time after startup (evicts metadata/posters unused for > 3 days, IMDb/OTT unused for > 5 days; keeps chunk data)
+    const timer = setTimeout(() => {
+      if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+        (window as any).requestIdleCallback(() => {
+          runPeriodicCacheCleanup().catch(() => {});
+        });
+      } else {
+        runPeriodicCacheCleanup().catch(() => {});
+      }
+    }, 6000);
 
     const interval = setInterval(() => {
       runPeriodicCacheCleanup().catch(() => {});
     }, 6 * 60 * 60 * 1000); // Check every 6 hours
 
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(timer);
+      clearInterval(interval);
+    };
   }, []);
 
   useModalBehavior(isMediaModalOpen, () => setIsMediaModalOpen(false));

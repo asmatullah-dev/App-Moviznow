@@ -22,8 +22,14 @@ class SafeStorage {
     this.isAvailable = this.checkAvailability();
     if (typeof window !== 'undefined') {
       this.hydrate();
-      // Clean up legacy oversized keys from localStorage in background to prevent quota crashes
-      setTimeout(() => this.purgeOversizedLocalStorageKeys(), 500);
+      // Clean up legacy oversized keys from localStorage in background during idle time
+      setTimeout(() => {
+        if ('requestIdleCallback' in window) {
+          (window as any).requestIdleCallback(() => this.purgeOversizedLocalStorageKeys());
+        } else {
+          this.purgeOversizedLocalStorageKeys();
+        }
+      }, 3500);
     }
   }
 

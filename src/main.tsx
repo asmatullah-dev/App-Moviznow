@@ -139,10 +139,10 @@ const checkDeploymentVersion = async (trigger: 'open' | 'open_retry' | 'backgrou
 
 // Check version on launch and periodically / on resume
 if (typeof window !== 'undefined') {
-  // 1. Always check API version on open (non-blocking for app rendering)
+  // 1. Check API version after initial UI paint finishes (non-blocking for app rendering)
   setTimeout(() => {
     checkDeploymentVersion('open');
-  }, 100);
+  }, 3500);
   
   // 2. Keep checking the version in background every 5 minutes
   setInterval(() => {

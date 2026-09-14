@@ -243,6 +243,7 @@ export function sortResultsByEpisodeAndQuality(results: any[]) {
   });
 }
 import { QualityLinks, Language, Quality, LinkDef, Content } from '../types';
+export type { QualityLinks };
 import { useAdminContent } from '../contexts/AdminContentContext';
 import { 
   LinkCheckResult, 
@@ -428,7 +429,7 @@ const PostPoster: React.FC<{ image?: string; title: string; compact?: boolean }>
   );
 };
 
-const extractTitleAndYear = (rawTitle: string): { title: string; year?: number; season?: number; episode?: number; isEpisodeRange?: boolean; formatted: string } => {
+export const extractTitleAndYear = (rawTitle: string): { title: string; year?: number; season?: number; episode?: number; isEpisodeRange?: boolean; formatted: string } => {
   if (!rawTitle) return { title: "", formatted: "" };
 
   let text = rawTitle.trim();
@@ -573,7 +574,7 @@ const levenshteinDistance = (a: string, b: string): number => {
   return matrix[b.length][a.length];
 };
 
-const isPreciseTitleMatch = (postCleanTitle: string, contentRawTitle: string): boolean => {
+export const isPreciseTitleMatch = (postCleanTitle: string, contentRawTitle: string): boolean => {
   if (!postCleanTitle || !contentRawTitle) return false;
 
   const contentParsed = extractTitleAndYear(contentRawTitle);
@@ -950,7 +951,7 @@ const checkGalleryAvailability = (
   };
 };
 
-const hasSeriesOrZipIndicator = (hits: any[]): boolean => {
+export const hasSeriesOrZipIndicator = (hits: any[]): boolean => {
   if (!hits) return false;
   return hits.some((h: any) => {
     const name = (h.file_name || '').toLowerCase();
@@ -969,7 +970,7 @@ const hasSeriesOrZipIndicator = (hits: any[]): boolean => {
   });
 };
 
-const filterFilmygoHits = (hits: any[], pageUrl: string): any[] => {
+export const filterFilmygoHits = (hits: any[], pageUrl: string): any[] => {
   if (!hits || hits.length === 0) return [];
 
   // Exclude gdflix links completely
@@ -1129,6 +1130,522 @@ const filterFilmygoHits = (hits: any[], pageUrl: string): any[] => {
   // Return selected hits, deduplicated by the Set
   return Array.from(new Set(selected));
 };
+
+export interface ScrapedLinkItem {
+  id: string;
+  source: string;
+  sourceTitle?: string;
+  url: string;
+  quality: '480p' | '720p' | '1080p' | '2160p' | 'Other';
+  label: string;
+  rawQuality?: string;
+  audio?: string;
+  size?: string;
+  bytes?: number;
+  season?: number;
+  episode?: number;
+  isFullSeasonMKV?: boolean;
+  isFullSeasonZIP?: boolean;
+  isSample?: boolean;
+  isHevc?: boolean;
+  isDual?: boolean;
+  status?: string;
+  fileName?: string;
+  finalUrl?: string;
+}
+
+export interface CheckContentViaLinkCheckerOptions {
+  title?: string;
+  year?: number;
+  type?: 'movie' | 'series';
+  input?: string;
+  content?: Content | null;
+  languages?: Language[];
+  qualities?: Quality[];
+  signal?: AbortSignal;
+  onProgress?: (message: string) => void;
+  maxPostsPerProvider?: number;
+}
+
+export interface CheckContentViaLinkCheckerResult {
+  links: ScrapedLinkItem[];
+  qualityLinks: QualityLinks;
+  results: LinkCheckResult[];
+  metadata: {
+    title?: string;
+    year?: number;
+    languages: string[];
+    printQuality?: string;
+    subtitles?: boolean;
+    type?: 'movie' | 'series';
+    season?: number;
+    episode?: number;
+    sampleUrl?: string;
+  };
+  sample?: ScrapedLinkItem;
+}
+
+export async function checkContentViaLinkChecker(
+  options: CheckContentViaLinkCheckerOptions
+): Promise<CheckContentViaLinkCheckerResult> {
+  const {
+    title = '',
+    year,
+    input = '',
+    languages = [],
+    qualities = [],
+    signal,
+    onProgress,
+    maxPostsPerProvider = 2,
+  } = options;
+
+  const log = (msg: string) => {
+    if (onProgress) onProgress(msg);
+  };
+
+  const rawCandidateUrls: { url: string; source: string; postTitle?: string; isSample?: boolean }[] = [];
+
+  // 1. Direct input links if provided
+  if (input.trim()) {
+    const directLinks = splitLinks(input).map(normalizeUrl).filter(Boolean);
+    directLinks.forEach((u) => {
+      rawCandidateUrls.push({ url: u, source: 'Direct Input' });
+    });
+  }
+
+  // 2. If title is provided, perform Multi-Source Search across all 5 providers
+  if (title.trim()) {
+    log(`Searching providers for "${title}"...`);
+    const cleanTitle = title.trim();
+    const queryVariations = [
+      year ? `${cleanTitle} ${year}` : cleanTitle,
+      cleanTitle,
+    ].filter((v, i, a) => a.indexOf(v) === i);
+
+    const fgDomain = getFilmygoDomain();
+    const hdDomain = getHdhub4uDomain();
+    const skyDomain = getSkymoviesDomain();
+    const mdDomain = getMoviesdriveDomain();
+    const ffDomain = getFilmyflyDomain();
+
+    // Provider tasks
+    const providerTasks = [
+      // FilmyGo
+      async () => {
+        for (const q of queryVariations) {
+          if (signal?.aborted) break;
+          try {
+            const sUrl = `${fgDomain}/site-search.html?to-search=${encodeURIComponent(q)}&to-page=1`;
+            const res = await fetch(`/api/filmygo?url=${encodeURIComponent(sUrl)}`, { signal }).catch(() => null);
+            if (!res || !res.ok) continue;
+            const data = await res.json().catch(() => ({}));
+            let posts = data.posts || [];
+            if (!posts.length) continue;
+            posts = [...posts].sort((a: any, b: any) => {
+              const aMatch = isPreciseTitleMatch(a.title || '', cleanTitle) ? 1 : 0;
+              const bMatch = isPreciseTitleMatch(b.title || '', cleanTitle) ? 1 : 0;
+              return bMatch - aMatch;
+            });
+            for (const p of posts.slice(0, maxPostsPerProvider)) {
+              if (signal?.aborted) break;
+              const pRes = await fetch(`/api/filmygo?url=${encodeURIComponent(p.url)}`, { signal }).catch(() => null);
+              if (!pRes || !pRes.ok) continue;
+              const pData = await pRes.json().catch(() => ({}));
+              const rawHits = pData.hits || pData.links || [];
+              const filtered = filterFilmygoHits(rawHits, p.url);
+              const toUse = filtered.length > 0 ? filtered : rawHits;
+              toUse.forEach((h: any) => {
+                const u = h.url || h.href;
+                if (u) {
+                  rawCandidateUrls.push({
+                    url: u,
+                    source: 'FilmyGo',
+                    postTitle: p.title,
+                    isSample: Boolean(h.isSample || h.is_sample || /\bsample\b/i.test(h.file_name || '')),
+                  });
+                }
+              });
+            }
+            if (rawCandidateUrls.length > 0) break;
+          } catch (e) {}
+        }
+      },
+      // HDHub4U
+      async () => {
+        for (const q of queryVariations) {
+          if (signal?.aborted) break;
+          try {
+            const sUrl = `${hdDomain}/search.html?q=${encodeURIComponent(q)}`;
+            const res = await fetch(`/api/hdhub4u?url=${encodeURIComponent(sUrl)}`, { signal }).catch(() => null);
+            if (!res || !res.ok) continue;
+            const data = await res.json().catch(() => ({}));
+            let posts = data.posts || [];
+            if (!posts.length) continue;
+            posts = [...posts].sort((a: any, b: any) => {
+              const aMatch = isPreciseTitleMatch(a.title || '', cleanTitle) ? 1 : 0;
+              const bMatch = isPreciseTitleMatch(b.title || '', cleanTitle) ? 1 : 0;
+              return bMatch - aMatch;
+            });
+            for (const p of posts.slice(0, maxPostsPerProvider)) {
+              if (signal?.aborted) break;
+              const pRes = await fetch(`/api/hdhub4u?url=${encodeURIComponent(p.url)}`, { signal }).catch(() => null);
+              if (!pRes || !pRes.ok) continue;
+              const pData = await pRes.json().catch(() => ({}));
+              const rawHits = pData.hits || pData.candidates || pData.links || [];
+              const filtered = filterFilmygoHits(rawHits, p.url);
+              const toUse = filtered.length > 0 ? filtered : rawHits;
+              toUse.forEach((h: any) => {
+                const u = h.url || h.href;
+                if (u) {
+                  rawCandidateUrls.push({
+                    url: u,
+                    source: 'HDHub4U',
+                    postTitle: p.title,
+                    isSample: Boolean(h.isSample || h.is_sample),
+                  });
+                }
+              });
+            }
+            if (rawCandidateUrls.length > 0) break;
+          } catch (e) {}
+        }
+      },
+      // SkyMoviesHD
+      async () => {
+        for (const q of queryVariations) {
+          if (signal?.aborted) break;
+          try {
+            const sUrl = `${skyDomain}/search.php?search=${encodeURIComponent(q)}&cat=All`;
+            const res = await fetch(`/api/skymovieshd?url=${encodeURIComponent(sUrl)}`, { signal }).catch(() => null);
+            if (!res || !res.ok) continue;
+            const data = await res.json().catch(() => ({}));
+            let posts = data.posts || [];
+            if (!posts.length) continue;
+            posts = [...posts].sort((a: any, b: any) => {
+              const aMatch = isPreciseTitleMatch(a.title || '', cleanTitle) ? 1 : 0;
+              const bMatch = isPreciseTitleMatch(b.title || '', cleanTitle) ? 1 : 0;
+              return bMatch - aMatch;
+            });
+            for (const p of posts.slice(0, maxPostsPerProvider)) {
+              if (signal?.aborted) break;
+              const pRes = await fetch(`/api/skymovieshd?url=${encodeURIComponent(p.url)}`, { signal }).catch(() => null);
+              if (!pRes || !pRes.ok) continue;
+              const pData = await pRes.json().catch(() => ({}));
+              const rawHits = pData.hits || pData.links || [];
+              const filtered = filterFilmygoHits(rawHits, p.url);
+              const toUse = filtered.length > 0 ? filtered : rawHits;
+              toUse.forEach((h: any) => {
+                const u = h.url || h.href;
+                if (u) {
+                  rawCandidateUrls.push({
+                    url: u,
+                    source: 'SkyMoviesHD',
+                    postTitle: p.title,
+                    isSample: Boolean(h.isSample || h.is_sample),
+                  });
+                }
+              });
+            }
+            if (rawCandidateUrls.length > 0) break;
+          } catch (e) {}
+        }
+      },
+      // MoviesDrive
+      async () => {
+        for (const q of queryVariations) {
+          if (signal?.aborted) break;
+          try {
+            const sUrl = `${mdDomain}/search.html?q=${encodeURIComponent(q)}&page=1`;
+            const res = await fetch(`/api/moviesdrive?url=${encodeURIComponent(sUrl)}`, { signal }).catch(() => null);
+            if (!res || !res.ok) continue;
+            const data = await res.json().catch(() => ({}));
+            let posts = data.posts || [];
+            if (!posts.length) continue;
+            posts = [...posts].sort((a: any, b: any) => {
+              const aMatch = isPreciseTitleMatch(a.title || '', cleanTitle) ? 1 : 0;
+              const bMatch = isPreciseTitleMatch(b.title || '', cleanTitle) ? 1 : 0;
+              return bMatch - aMatch;
+            });
+            for (const p of posts.slice(0, maxPostsPerProvider)) {
+              if (signal?.aborted) break;
+              const pRes = await fetch(`/api/moviesdrive?url=${encodeURIComponent(p.url)}`, { signal }).catch(() => null);
+              if (!pRes || !pRes.ok) continue;
+              const pData = await pRes.json().catch(() => ({}));
+              const rawHits = pData.hits || [];
+              const filtered = filterFilmygoHits(rawHits, p.url);
+              const toUse = filtered.length > 0 ? filtered : rawHits;
+              toUse.forEach((h: any) => {
+                const u = h.url || h.href;
+                if (u) {
+                  rawCandidateUrls.push({
+                    url: u,
+                    source: 'MoviesDrive',
+                    postTitle: p.title,
+                    isSample: Boolean(h.isSample || h.is_sample),
+                  });
+                }
+              });
+            }
+            if (rawCandidateUrls.length > 0) break;
+          } catch (e) {}
+        }
+      },
+      // FilmyFly
+      async () => {
+        for (const q of queryVariations) {
+          if (signal?.aborted) break;
+          try {
+            const sUrl = `${ffDomain}/search.html?search=${encodeURIComponent(q)}&page=1`;
+            const res = await fetch(`/api/filmyfly?url=${encodeURIComponent(sUrl)}`, { signal }).catch(() => null);
+            if (!res || !res.ok) continue;
+            const data = await res.json().catch(() => ({}));
+            let posts = data.posts || [];
+            if (!posts.length) continue;
+            posts = [...posts].sort((a: any, b: any) => {
+              const aMatch = isPreciseTitleMatch(a.title || '', cleanTitle) ? 1 : 0;
+              const bMatch = isPreciseTitleMatch(b.title || '', cleanTitle) ? 1 : 0;
+              return bMatch - aMatch;
+            });
+            for (const p of posts.slice(0, maxPostsPerProvider)) {
+              if (signal?.aborted) break;
+              const pRes = await fetch(`/api/filmyfly?url=${encodeURIComponent(p.url)}`, { signal }).catch(() => null);
+              if (!pRes || !pRes.ok) continue;
+              const pData = await pRes.json().catch(() => ({}));
+              const rawHits = pData.hits || pData.links || [];
+              const filtered = filterFilmygoHits(rawHits, p.url);
+              const toUse = filtered.length > 0 ? filtered : rawHits;
+              toUse.forEach((h: any) => {
+                const u = h.url || h.href;
+                if (u) {
+                  rawCandidateUrls.push({
+                    url: u,
+                    source: 'FilmyFly',
+                    postTitle: p.title,
+                    isSample: Boolean(h.isSample || h.is_sample),
+                  });
+                }
+              });
+            }
+            if (rawCandidateUrls.length > 0) break;
+          } catch (e) {}
+        }
+      },
+    ];
+
+    await Promise.all(providerTasks.map((fn) => fn()));
+  }
+
+  // 3. Resolve intermediate wrapper links (mdrive, howblogs, filesdl)
+  const resolvedDirectUrls: { url: string; source: string; postTitle?: string; isSample?: boolean }[] = [];
+  const uniqueUrls = new Set<string>();
+
+  for (const item of rawCandidateUrls) {
+    if (signal?.aborted) break;
+    const norm = normalizeUrl(item.url);
+    if (uniqueUrls.has(norm)) continue;
+    uniqueUrls.add(norm);
+
+    try {
+      if (norm.includes('mdrive.lol') || norm.includes('mdrvie.lol')) {
+        const res = await fetch(`/api/mdrive?url=${encodeURIComponent(norm)}`, { signal }).catch(() => null);
+        if (res && res.ok) {
+          const mData = await res.json().catch(() => ({}));
+          const mHits = (mData.hits || []).filter((h: any) => !/(gdflix)/i.test(h.url || ''));
+          const hubcloud = mHits.filter((h: any) => /(hubcloud|vcloud|hubdrive|drivehub|hubcdn|hblinks)/i.test(h.url || ''));
+          const chosen = hubcloud.length > 0 ? hubcloud : mHits;
+          chosen.slice(0, 3).forEach((ch: any) => {
+            if (ch.url) {
+              resolvedDirectUrls.push({
+                url: ch.url,
+                source: item.source,
+                postTitle: item.postTitle,
+                isSample: Boolean(item.isSample || ch.isSample || ch.is_sample),
+              });
+            }
+          });
+          continue;
+        }
+      } else if (norm.includes('howblogs.xyz')) {
+        const res = await fetch(`/api/howblogs?url=${encodeURIComponent(norm)}`, { signal }).catch(() => null);
+        if (res && res.ok) {
+          const hbData = await res.json().catch(() => ({}));
+          if (hbData.url) {
+            resolvedDirectUrls.push({
+              url: hbData.url,
+              source: item.source,
+              postTitle: item.postTitle,
+              isSample: item.isSample,
+            });
+            continue;
+          }
+        }
+      } else if (norm.includes('filesdl.') || norm.includes('filesdl.in') || norm.includes('filesdl.top')) {
+        const res = await fetch(`/api/filesdl?url=${encodeURIComponent(norm)}`, { signal }).catch(() => null);
+        if (res && res.ok) {
+          const fData = await res.json().catch(() => ({}));
+          if (fData.url) {
+            resolvedDirectUrls.push({
+              url: fData.url,
+              source: item.source,
+              postTitle: item.postTitle,
+              isSample: item.isSample,
+            });
+            continue;
+          }
+        }
+      }
+    } catch (e) {}
+
+    resolvedDirectUrls.push(item);
+  }
+
+  log(`Checking and verifying ${resolvedDirectUrls.length} links via LinkChecker engine...`);
+
+  // 4. Run performFullLinkScan on candidate URLs (parallel with concurrency limit)
+  const metaMap: Record<string, any> = {};
+  const fullTextContext = resolvedDirectUrls.map((r) => `${r.postTitle || ''} ${r.url}`).join('\n');
+  resolvedDirectUrls.forEach((r) => {
+    metaMap[r.url] = detectMetadataForLink(fullTextContext, r.url, languages, qualities);
+  });
+
+  const checkResults: LinkCheckResult[] = [];
+  const concurrency = 12;
+  const queue = [...resolvedDirectUrls];
+
+  const worker = async () => {
+    while (queue.length > 0) {
+      if (signal?.aborted) break;
+      const target = queue.shift();
+      if (!target) break;
+
+      try {
+        const res = await performFullLinkScan(
+          target.url,
+          metaMap,
+          languages,
+          qualities,
+          undefined,
+          undefined,
+          undefined,
+          true
+        );
+        if (target.isSample) (res as any).isSample = true;
+        checkResults.push(res);
+      } catch (err: any) {
+        checkResults.push({
+          url: target.url,
+          ok: false,
+          statusLabel: 'UNKNOWN',
+          message: err?.message || 'Check failed',
+        });
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, resolvedDirectUrls.length) }, () => worker()));
+
+  // Filter valid / selectable results
+  const validResults = checkResults.filter((r) => {
+    const isWorking = r.statusLabel === 'WORKING' || r.statusLabel === 'REDIRECT' || r.statusLabel === 'SMALL_FILE' || r.statusLabel === 'MISSING_FILENAME' || r.statusLabel === 'MISSING_METADATA' || r.statusLabel === 'SIZE_MISMATCH';
+    return isWorking && r.url;
+  });
+
+  // Convert to ScrapedLinkItem[] and QualityLinks
+  const scrapedItems: ScrapedLinkItem[] = [];
+  const detectedLangs = new Set<string>();
+  let detectedPrintQuality: string | undefined;
+  let detectedSubtitles = false;
+  let detectedType: 'movie' | 'series' = options.type || 'movie';
+  let detectedSeason: number | undefined;
+  let detectedEpisode: number | undefined;
+  let sampleScrapedItem: ScrapedLinkItem | undefined;
+
+  validResults.forEach((r, idx) => {
+    const sourceText = `${r.fileName || ''} ${r.finalUrl || r.url || ''}`.toLowerCase();
+    const isSample = Boolean(r.isSample || (r as any).is_sample || /\bsample\b/i.test(sourceText));
+
+    const qCategory = getItemQualityCategory(r);
+    const qualityStr = r.qualityLabel || qCategory;
+
+    let sizeFormatted = '';
+    let bytes = r.fileSize || 0;
+    if (r.fileSizeText) {
+      sizeFormatted = r.fileSizeText;
+    } else if (bytes > 0) {
+      const mb = bytes / (1024 * 1024);
+      sizeFormatted = mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(0)} MB`;
+    }
+
+    if (r.audioLabel) {
+      r.audioLabel.split(' / ').forEach((l) => detectedLangs.add(l.trim()));
+    }
+    if (r.printQualityLabel && !detectedPrintQuality) {
+      detectedPrintQuality = r.printQualityLabel;
+    }
+    if (r.subtitleLabel || /subtitles|subs|softsub|hardsub|esub|esubs/i.test(sourceText)) {
+      detectedSubtitles = true;
+    }
+
+    const item: ScrapedLinkItem = {
+      id: `lc-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 4)}`,
+      source: 'LinkChecker',
+      sourceTitle: r.fileName || title,
+      url: normalizeUrl(r.finalUrl || r.url),
+      quality: qCategory,
+      label: isSample ? 'Sample' : `${qualityStr}${r.codecLabel ? ` ${r.codecLabel}` : ''}`,
+      rawQuality: qualityStr,
+      audio: r.audioLabel || 'Hindi',
+      size: sizeFormatted,
+      bytes: bytes,
+      season: r.season,
+      episode: r.episode,
+      isFullSeasonMKV: r.isFullSeasonMKV,
+      isFullSeasonZIP: r.isFullSeasonZIP,
+      isSample: isSample,
+      isHevc: r.codecLabel === 'HEVC' || /hevc|x265|10bit/i.test(sourceText),
+      isDual: /dual|multi/i.test(sourceText) || (r.audioLabel && r.audioLabel.includes('Dual')),
+      status: r.statusLabel,
+      fileName: r.fileName,
+      finalUrl: r.finalUrl,
+    };
+
+    if (isSample && !sampleScrapedItem) {
+      sampleScrapedItem = item;
+    }
+    scrapedItems.push(item);
+  });
+
+  const qualityLinks: QualityLinks = scrapedItems.map((s) => ({
+    id: s.id,
+    name: s.label,
+    url: s.url,
+    size: s.size ? s.size.replace(/MB|GB/i, '').trim() : '',
+    unit: s.size && s.size.toLowerCase().includes('gb') ? 'GB' : 'MB',
+    season: s.season,
+    episode: s.episode,
+    isFullSeasonMKV: s.isFullSeasonMKV,
+    isFullSeasonZIP: s.isFullSeasonZIP,
+    isSample: s.isSample,
+  }));
+
+  return {
+    links: scrapedItems,
+    qualityLinks,
+    results: checkResults,
+    metadata: {
+      title: title || undefined,
+      year: year || undefined,
+      languages: Array.from(detectedLangs),
+      printQuality: detectedPrintQuality,
+      subtitles: detectedSubtitles,
+      type: detectedType,
+      season: detectedSeason,
+      episode: detectedEpisode,
+      sampleUrl: sampleScrapedItem ? sampleScrapedItem.url : undefined,
+    },
+    sample: sampleScrapedItem,
+  };
+}
 
 type Props = {
   isOpen: boolean;
@@ -5515,7 +6032,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                           type="text"
                           value={moviesdriveDomainInput}
                           onChange={(e) => setMoviesdriveDomainInput(e.target.value)}
-                          placeholder="https://new6.moviesdrives.my"
+                          placeholder="https://moviesdrives.cfd"
                           className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-amber-500 font-mono"
                         />
                       </div>
@@ -5535,7 +6052,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                           type="text"
                           value={filmygoDomainInput}
                           onChange={(e) => setFilmygoDomainInput(e.target.value)}
-                          placeholder="https://filmygo.online"
+                          placeholder="https://filmycab.press"
                           className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-amber-500 font-mono"
                         />
                       </div>
@@ -5555,7 +6072,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                           type="text"
                           value={filmyflyDomainInput}
                           onChange={(e) => setFilmyflyDomainInput(e.target.value)}
-                          placeholder="https://filmyfly.sale"
+                          placeholder="https://filmyfly.bingo"
                           className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-amber-500 font-mono"
                         />
                       </div>
@@ -5564,11 +6081,11 @@ export const LinkCheckerModal: React.FC<Props> = ({
                       <button
                         type="button"
                         onClick={() => {
-                          setMoviesdriveDomainInput("https://new6.moviesdrives.my");
+                          setMoviesdriveDomainInput("https://moviesdrives.cfd");
                           setSkymoviesDomainInput("https://skymovieshd.meme");
-                          setFilmygoDomainInput("https://filmygo.online");
+                          setFilmygoDomainInput("https://filmycab.press");
                           setHdhubDomainInput("https://new5.hdhub4u.cl");
-                          setFilmyflyDomainInput("https://filmyfly.sale");
+                          setFilmyflyDomainInput("https://filmyfly.bingo");
                         }}
                         className="px-3 py-1 text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition"
                       >

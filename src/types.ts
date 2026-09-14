@@ -352,6 +352,7 @@ export interface AppSettings {
   maintenanceMessage?: string;
   maintenanceEndTime?: string; // ISO string
   whatsappChannelLink?: string;
+  whatsappClipsLink?: string;
   scrollingText?: string;
   emailSettings?: EmailSettings;
   serviceAccounts?: {

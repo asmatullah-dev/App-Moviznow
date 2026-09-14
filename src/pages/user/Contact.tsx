@@ -166,7 +166,7 @@ export default function Contact() {
                     <span className="whitespace-nowrap">{t("For Updates")}</span>
                   </a>
                   <a
-                    href="https://whatsapp.com/channel/0029Vb6m6uFEAKWA7Rzxjv0e"
+                    href={settings?.whatsappClipsLink || "https://chat.whatsapp.com/DJvn1Vssg8pCC6JTosnOQQ"}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-pink-500/15 hover:bg-pink-500/25 border border-pink-500/30 text-pink-200 hover:text-white text-xs font-bold transition-all shadow-sm hover:scale-[1.02] active:scale-95 whitespace-nowrap"

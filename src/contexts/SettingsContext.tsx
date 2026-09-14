@@ -63,6 +63,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   adVideoUrl: '',
   adRedirectUrl: '',
   whatsappChannelLink: 'https://whatsapp.com/channel/0029Vb7PxRC9MF96ZZVGdx2n',
+  whatsappClipsLink: 'https://chat.whatsapp.com/DJvn1Vssg8pCC6JTosnOQQ',
 };
 
 export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -77,6 +78,9 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           }
           if (!parsed.whatsappChannelLink) {
             parsed.whatsappChannelLink = 'https://whatsapp.com/channel/0029Vb7PxRC9MF96ZZVGdx2n';
+          }
+          if (!parsed.whatsappClipsLink) {
+            parsed.whatsappClipsLink = 'https://chat.whatsapp.com/DJvn1Vssg8pCC6JTosnOQQ';
           }
           if (!parsed.adBannerLink || parsed.adBannerLink === '/top-up') {
             parsed.adBannerLink = '/plans';
@@ -156,6 +160,9 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             }
             if (!data.whatsappChannelLink) {
               data.whatsappChannelLink = 'https://whatsapp.com/channel/0029Vb7PxRC9MF96ZZVGdx2n';
+            }
+            if (!data.whatsappClipsLink) {
+              data.whatsappClipsLink = 'https://chat.whatsapp.com/DJvn1Vssg8pCC6JTosnOQQ';
             }
           }
           setSettings(data);

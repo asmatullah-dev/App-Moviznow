@@ -2499,9 +2499,10 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
           if ($(el).closest('.trending-slider, .images-list').length > 0) return;
 
           try {
-            const fullUrl = new URL(rawHref, targetUrl).href;
+            const fullUrl = new URL(rawHref, resolvedTargetUrl || targetUrl).href;
             const u = new URL(fullUrl);
-            if (u.hostname !== urlObj.hostname) return;
+            const effHost = new URL(resolvedTargetUrl || targetUrl).hostname;
+            if (u.hostname !== urlObj.hostname && u.hostname !== effHost && !u.hostname.includes('filmygo') && !u.hostname.includes('filmycab')) return;
             const path = u.pathname;
             const searchStr = u.search;
 
@@ -2524,7 +2525,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
               image = getImgSrc($(el).prev("img")) || getImgSrc($(el).next("img")) || getImgSrc($(el).parent().find("img"));
             }
             if (image) {
-              try { image = new URL(image, targetUrl).href; } catch(e) {}
+              try { image = new URL(image, resolvedTargetUrl || targetUrl).href; } catch(e) {}
             }
 
             title = title.replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
@@ -2553,7 +2554,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
                 const parent = $(aEl).closest("article, .post, .entry, .card, .item, div, tr, li");
                 const foundImg = getImgSrc(parent.find("img"));
                 if (foundImg) {
-                  try { pData.image = new URL(foundImg, targetUrl).href; } catch(e) {}
+                  try { pData.image = new URL(foundImg, resolvedTargetUrl || targetUrl).href; } catch(e) {}
                 }
               });
             } catch (e) {}
@@ -2561,18 +2562,16 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         }
 
         const posts = Array.from(postsMap.entries()).map(([postUrl, data]) => ({ title: data.title, url: postUrl, image: data.image }));
-        if (posts.length > 0) {
-          const pag = extractHtmlPagination(text, targetUrl);
-          return res.json({
-            is_search: true,
-            posts,
-            found: posts.length,
-            page: pag.currentPage,
-            total_pages: pag.totalPages,
-            has_more: pag.hasMore,
-            total_found: pag.totalPages * posts.length
-          });
-        }
+        const pag = extractHtmlPagination(text, resolvedTargetUrl || targetUrl);
+        return res.json({
+          is_search: true,
+          posts,
+          found: posts.length,
+          page: pag.currentPage,
+          total_pages: pag.totalPages,
+          has_more: pag.hasMore,
+          total_found: pag.totalPages * posts.length
+        });
       }
       
       // Remove sidebars, recommended/trending posts, and footers so we only extract links belonging to this specific movie

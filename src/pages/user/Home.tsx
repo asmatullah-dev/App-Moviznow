@@ -1472,7 +1472,7 @@ export default function Home({
                     <span>{t("For Updates")}</span>
                   </a>
                   <a
-                    href="https://whatsapp.com/channel/0029Vb6m6uFEAKWA7Rzxjv0e"
+                    href={settings?.whatsappClipsLink || "https://chat.whatsapp.com/DJvn1Vssg8pCC6JTosnOQQ"}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/25 text-xs font-semibold whitespace-nowrap transition-colors"

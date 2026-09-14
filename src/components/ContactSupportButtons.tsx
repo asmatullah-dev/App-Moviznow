@@ -101,7 +101,7 @@ export function ContactSupportButtons({ content }: ContactSupportButtonsProps) {
           <span className="whitespace-nowrap">{t("For Updates")}</span>
         </a>
         <a
-          href="https://whatsapp.com/channel/0029Vb6m6uFEAKWA7Rzxjv0e"
+          href={settings?.whatsappClipsLink || "https://chat.whatsapp.com/DJvn1Vssg8pCC6JTosnOQQ"}
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-pink-500/10 dark:bg-pink-500/15 hover:bg-pink-500/20 text-pink-700 dark:text-pink-300 border border-pink-500/20 text-xs font-bold transition-all shadow-sm hover:scale-[1.02] active:scale-95 whitespace-nowrap"

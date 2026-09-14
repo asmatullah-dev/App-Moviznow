@@ -24,9 +24,9 @@ export function setHubcloudDomain(domain: string): void {
   safeStorage.setItem('custom_hubcloud_domain', domain.trim());
 }
 
-export const DEFAULT_MOVIESDRIVE_DOMAIN = 'https://new6.moviesdrives.my';
+export const DEFAULT_MOVIESDRIVE_DOMAIN = 'https://moviesdrives.cfd';
 export const DEFAULT_SKYMOVIES_DOMAIN = 'https://skymovieshd.meme';
-export const DEFAULT_FILMYGO_DOMAIN = 'https://filmygo.online';
+export const DEFAULT_FILMYGO_DOMAIN = 'https://filmycab.press';
 export const DEFAULT_HDHUB4U_DOMAIN = 'https://new5.hdhub4u.cl';
 export const DEFAULT_FILMYFLY_DOMAIN = 'https://filmyfly.bingo';
 
@@ -37,7 +37,12 @@ export function getMoviesdriveDomain(): string {
     if (!domain.startsWith('http://') && !domain.startsWith('https://')) {
       domain = 'https://' + domain;
     }
-    return domain.replace(/\/+$/, '');
+    const clean = domain.replace(/\/+$/, '');
+    if (clean.includes('new6.moviesdrives.my') || clean.includes('moviesdrives.my')) {
+      safeStorage.setItem('custom_moviesdrive_domain', DEFAULT_MOVIESDRIVE_DOMAIN);
+      return DEFAULT_MOVIESDRIVE_DOMAIN;
+    }
+    return clean;
   }
   return DEFAULT_MOVIESDRIVE_DOMAIN;
 }
@@ -74,7 +79,12 @@ export function getFilmygoDomain(): string {
     if (!domain.startsWith('http://') && !domain.startsWith('https://')) {
       domain = 'https://' + domain;
     }
-    return domain.replace(/\/+$/, '');
+    const clean = domain.replace(/\/+$/, '');
+    if (clean.includes('filmygo.online')) {
+      safeStorage.setItem('custom_filmygo_domain', DEFAULT_FILMYGO_DOMAIN);
+      return DEFAULT_FILMYGO_DOMAIN;
+    }
+    return clean;
   }
   return DEFAULT_FILMYGO_DOMAIN;
 }

@@ -50,17 +50,29 @@ export async function searchYouTubeTrailer(title: string, type: string) {
   return [];
 }
 
+const imdbRatingCache = new Map<string, any>();
+const kinocheckCache = new Map<string, string | null>();
+
 export async function fetchKinoCheckTrailer(tmdbId: string, type: string) {
+  const cacheKey = `${type}_${tmdbId}`;
+  if (kinocheckCache.has(cacheKey)) {
+    return kinocheckCache.get(cacheKey)!;
+  }
+
   try {
      const endpoint = (type === 'series' || type === 'tv') ? 'shows' : 'movies';
+     // Fast prioritized languages
+     const languages = ['hi', 'en', ''];
      
-     // Priority languages: Hindi, English, Punjabi, Tamil, Telugu, Malayalam, Kannada + Global
-     const languages = ['hi', 'en', 'pa', 'ta', 'te', 'ml', 'kn', ''];
-     
+     const controller = new AbortController();
+     const timeoutId = setTimeout(() => controller.abort(), 2000);
+
      const fetchPromises = languages.map(async (lang) => {
        try {
          const langParam = lang ? `&language=${lang}` : '';
-         const res = await fetch(`https://api.kinocheck.de/${endpoint}?tmdb_id=${tmdbId}${langParam}`);
+         const res = await fetch(`https://api.kinocheck.de/${endpoint}?tmdb_id=${tmdbId}${langParam}`, {
+           signal: controller.signal
+         });
          if (res.ok) {
            const data = await res.json();
            if (data.trailer?.youtube_video_id) {
@@ -72,23 +84,28 @@ export async function fetchKinoCheckTrailer(tmdbId: string, type: string) {
      });
 
      const results = await Promise.all(fetchPromises);
+     clearTimeout(timeoutId);
      
-     // Filter out nulls and sort by original priority
      const validResults = results.filter((r): r is { lang: string; url: string } => r !== null);
      
-     if (validResults.length === 0) return null;
+     if (validResults.length === 0) {
+       kinocheckCache.set(cacheKey, null);
+       return null;
+     }
 
-     // Sort by original languages array order
      validResults.sort((a, b) => {
        const indexA = languages.indexOf(a.lang);
        const indexB = languages.indexOf(b.lang);
        return indexA - indexB;
      });
 
-     return validResults[0].url;
+     const resultUrl = validResults[0].url;
+     kinocheckCache.set(cacheKey, resultUrl);
+     return resultUrl;
   } catch (e) {
      console.error("KinoCheck Error:", e);
   }
+  kinocheckCache.set(cacheKey, null);
   return null;
 }
 
@@ -269,54 +286,52 @@ export async function searchTMDBByTitle(
   const queryStr = searchTitle.replace(/[^a-zA-Z0-9\u00C0-\u024F\u0600-\u06FF\u0900-\u097F]/g, ' ').replace(/\s+/g, ' ').trim();
   const finalQuery = queryStr || searchTitle;
 
+  const searchTasks: Promise<any>[] = [];
+
   // 1. Movie search
   if (!forceType || forceType === 'movie' || forceType === 'all') {
-    try {
-      const movieRes = await fetchTmdb('search/movie', {
+    searchTasks.push(
+      fetchTmdb('search/movie', {
         query: finalQuery,
         year: searchYear || undefined
-      });
-      const movieData = await movieRes.json();
-      if (movieData.results) {
-        movieData.results.forEach((item: any) => addResult(item, 'movie'));
-      }
-    } catch (e) {}
+      }).then(res => res.json()).then(data => {
+        if (data.results) data.results.forEach((item: any) => addResult(item, 'movie'));
+      }).catch(() => {})
+    );
   }
 
   // 2. TV / Series search
   if (!forceType || forceType === 'series' || forceType === 'tv' || forceType === 'all') {
-    try {
-      const tvRes = await fetchTmdb('search/tv', {
+    searchTasks.push(
+      fetchTmdb('search/tv', {
         query: finalQuery,
         first_air_date_year: (searchYear && searchYear !== '2026') ? searchYear : undefined
-      });
-      const tvData = await tvRes.json();
-      if (tvData.results) {
-        tvData.results.forEach((item: any) => addResult(item, 'tv'));
-      }
-    } catch (e) {}
+      }).then(res => res.json()).then(data => {
+        if (data.results) data.results.forEach((item: any) => addResult(item, 'tv'));
+      }).catch(() => {})
+    );
   }
+
+  await Promise.all(searchTasks);
 
   // 3. Fallback: Search without year if year was provided and yielded 0 results
   if (results.length === 0 && searchYear) {
+    const fallbackTasks: Promise<any>[] = [];
     if (!forceType || forceType === 'movie' || forceType === 'all') {
-      try {
-        const movieRes = await fetchTmdb('search/movie', { query: finalQuery });
-        const movieData = await movieRes.json();
-        if (movieData.results) {
-          movieData.results.forEach((item: any) => addResult(item, 'movie'));
-        }
-      } catch (e) {}
+      fallbackTasks.push(
+        fetchTmdb('search/movie', { query: finalQuery }).then(res => res.json()).then(data => {
+          if (data.results) data.results.forEach((item: any) => addResult(item, 'movie'));
+        }).catch(() => {})
+      );
     }
     if (!forceType || forceType === 'series' || forceType === 'tv' || forceType === 'all') {
-      try {
-        const tvRes = await fetchTmdb('search/tv', { query: finalQuery });
-        const tvData = await tvRes.json();
-        if (tvData.results) {
-          tvData.results.forEach((item: any) => addResult(item, 'tv'));
-        }
-      } catch (e) {}
+      fallbackTasks.push(
+        fetchTmdb('search/tv', { query: finalQuery }).then(res => res.json()).then(data => {
+          if (data.results) data.results.forEach((item: any) => addResult(item, 'tv'));
+        }).catch(() => {})
+      );
     }
+    await Promise.all(fallbackTasks);
   }
 
   // 4. Multi search fallback (matches edge case aliases, alternative names, original names)
@@ -487,15 +502,27 @@ export function getBestTrailer(videos: { results?: any[] }) {
 
 export async function fetchIMDbRating(imdbID: string) {
   if (!imdbID) return null;
-  const url = `${OMDB_BASE}?i=${imdbID}&apikey=${OMDB_API_KEY}`;
-  const res = await fetch(url);
-  const data = await res.json();
-  if (data.Response === 'True') {
-    return {
-      rating: data.imdbRating,
-      votes: data.imdbVotes,
-    };
+  if (imdbRatingCache.has(imdbID)) {
+    return imdbRatingCache.get(imdbID);
   }
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2500);
+    const url = `${OMDB_BASE}?i=${imdbID}&apikey=${OMDB_API_KEY}`;
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.Response === 'True') {
+        const result = {
+          rating: data.imdbRating,
+          votes: data.imdbVotes,
+        };
+        imdbRatingCache.set(imdbID, result);
+        return result;
+      }
+    }
+  } catch (e) {}
   return null;
 }
 
@@ -614,22 +641,36 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
         }
       };
 
+      const primaryAndSecondarySearches: Promise<void>[] = [];
+
       // 1. Search with Primary Title if provided
       if (t && t.trim()) {
-        let res1 = await searchTMDBByTitle(t.trim(), y.trim(), ft, t2.trim());
-        if ((!res1 || res1.length === 0) && y.trim()) {
-          res1 = await searchTMDBByTitle(t.trim(), '', ft, t2.trim());
-        }
-        addResults(res1);
+        primaryAndSecondarySearches.push(
+          (async () => {
+            let res1 = await searchTMDBByTitle(t.trim(), y.trim(), ft, t2.trim());
+            if ((!res1 || res1.length === 0) && y.trim()) {
+              res1 = await searchTMDBByTitle(t.trim(), '', ft, t2.trim());
+            }
+            addResults(res1);
+          })()
+        );
       }
 
       // 2. Search with 2nd Title if provided
       if (t2 && t2.trim()) {
-        let res2 = await searchTMDBByTitle(t2.trim(), y.trim(), ft, t.trim());
-        if ((!res2 || res2.length === 0) && y.trim()) {
-          res2 = await searchTMDBByTitle(t2.trim(), '', ft, t.trim());
-        }
-        addResults(res2);
+        primaryAndSecondarySearches.push(
+          (async () => {
+            let res2 = await searchTMDBByTitle(t2.trim(), y.trim(), ft, t.trim());
+            if ((!res2 || res2.length === 0) && y.trim()) {
+              res2 = await searchTMDBByTitle(t2.trim(), '', ft, t.trim());
+            }
+            addResults(res2);
+          })()
+        );
+      }
+
+      if (primaryAndSecondarySearches.length > 0) {
+        await Promise.all(primaryAndSecondarySearches);
       }
 
       // 3. Fallback: If still empty, check if title or 2nd title has punctuation/separators
@@ -757,7 +798,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
       const promises: Promise<any>[] = [];
       let imdbPromiseIndex = -1;
       let seasonsPromiseIndex = -1;
-      let kinocheckPromiseIndex = -1;
+      let digitalReleasePromiseIndex = -1;
 
       if (details.external_ids && details.external_ids.imdb_id) {
         promises.push(fetchIMDbRating(details.external_ids.imdb_id));
@@ -769,20 +810,35 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
         seasonsPromiseIndex = promises.length - 1;
       }
 
-      promises.push(fetchKinoCheckTrailer(tmdbId, type));
-      kinocheckPromiseIndex = promises.length - 1;
+      // Check digital release concurrently for movies if not already in details
+      let detectedOtt = extractOttPlatformFromTMDBDetails(details, type);
+      if (!detectedOtt && details.id && type === 'movie') {
+        promises.push(fetchMovieDigitalReleaseDate(details.id));
+        digitalReleasePromiseIndex = promises.length - 1;
+      }
+
+      let trailerUrl = getBestTrailer(details.videos) || '';
+      let kinocheckPromiseIndex = -1;
+      // Only fetch KinoCheck if TMDB videos didn't have a trailer
+      if (!trailerUrl) {
+        promises.push(fetchKinoCheckTrailer(tmdbId, type));
+        kinocheckPromiseIndex = promises.length - 1;
+      }
 
       const results = await Promise.all(promises);
 
       const imdbRatingData = imdbPromiseIndex !== -1 ? results[imdbPromiseIndex] : null;
       const seasonsData = seasonsPromiseIndex !== -1 ? results[seasonsPromiseIndex] : null;
-      let trailerUrl = getBestTrailer(details.videos) || '';
       
+      if (digitalReleasePromiseIndex !== -1 && results[digitalReleasePromiseIndex]?.platformNote) {
+        detectedOtt = results[digitalReleasePromiseIndex].platformNote;
+      }
+
       if (trailerUrl) {
-          setTrailerSource('tmdb');
-      } else {
-          trailerUrl = kinocheckPromiseIndex !== -1 ? results[kinocheckPromiseIndex] : null;
-          if (trailerUrl) setTrailerSource('kinocheck');
+        setTrailerSource('tmdb');
+      } else if (kinocheckPromiseIndex !== -1 && results[kinocheckPromiseIndex]) {
+        trailerUrl = results[kinocheckPromiseIndex];
+        setTrailerSource('kinocheck');
       }
 
       const primaryTitle = details.title || details.name;
@@ -807,11 +863,9 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
       let finalSecondTitle = '';
 
       if (trimmedInputTitle && !hasWordMatch) {
-        // "if no words matchs from main title and tmdb title then tmdb title and move main title to 2nd title"
         finalTitle = primaryTitle;
         finalSecondTitle = trimmedInputTitle;
       } else {
-        // "fetch 2nd title from media modal if available otherwise use the main title to 2nd title"
         const mediaModalSecondTitle = getBestAlternativeTitle(details);
         if (mediaModalSecondTitle) {
           finalSecondTitle = mediaModalSecondTitle;
@@ -824,23 +878,6 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
 
       if (finalSecondTitle && (finalSecondTitle.toLowerCase() === finalTitle.toLowerCase() || !isRomanized(finalSecondTitle))) {
         finalSecondTitle = '';
-      }
-
-      let detectedOtt = extractOttPlatformFromTMDBDetails(details, type);
-      if (!detectedOtt && details.id && type === 'movie') {
-        const { platformNote } = await fetchMovieDigitalReleaseDate(details.id);
-        if (platformNote) detectedOtt = platformNote;
-      }
-      if (!detectedOtt) {
-        detectedOtt = await predictOttPlatformWithAI(
-          finalTitle,
-          type === 'tv' ? 'tv' : 'movie',
-          (details.release_date || details.first_air_date || '').split('-')[0],
-          details.overview,
-          details.genres?.map((g: any) => g.name),
-          details.original_title || details.original_name,
-          details.production_countries?.map((c: any) => c.name).join(', ')
-        );
       }
 
       const parsedData: any = {
@@ -863,6 +900,23 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
       };
 
       setFetchedData(parsedData);
+
+      // Asynchronously predict OTT if not yet detected without delaying UI display
+      if (!detectedOtt) {
+        predictOttPlatformWithAI(
+          finalTitle,
+          type === 'tv' ? 'tv' : 'movie',
+          (details.release_date || details.first_air_date || '').split('-')[0],
+          details.overview,
+          details.genres?.map((g: any) => g.name),
+          details.original_title || details.original_name,
+          details.production_countries?.map((c: any) => c.name).join(', ')
+        ).then(aiOtt => {
+          if (aiOtt) {
+            setFetchedData((prev: any) => prev ? { ...prev, ottPlatform: aiOtt } : prev);
+          }
+        }).catch(() => {});
+      }
 
       if (parsedData.imdbRating) {
         saveImdbRatingToStorage(
