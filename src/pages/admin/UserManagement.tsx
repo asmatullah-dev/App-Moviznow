@@ -294,16 +294,19 @@ export default function UserManagement() {
   }, [allUsers, profile?.role, sendImmediateExpiryNotifications]);
 
   // Fetch fresh data on mount and force sync on unmount
-  const { checkForUpdates } = useAdminContent();
-  const isSyncingOnMountRef = useRef(false);
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
+  const sendImmediateExpiryNotificationsRef = useRef(sendImmediateExpiryNotifications);
+  sendImmediateExpiryNotificationsRef.current = sendImmediateExpiryNotifications;
+  const hasSyncedOnMountRef = useRef(false);
 
   useEffect(() => {
     let mounted = true;
     if (authLoading) return; // Wait until auth is fully loaded
-    if (isSyncingOnMountRef.current) return;
+    if (hasSyncedOnMountRef.current) return;
+    hasSyncedOnMountRef.current = true;
 
     const syncOnMount = async () => {
-      isSyncingOnMountRef.current = true;
       try {
         window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'syncing', message: 'Refreshing users...' } }));
         
@@ -328,7 +331,8 @@ export default function UserManagement() {
         const freshUsers = res?.users || allUsers || [];
 
         // Check for users whose status changed to 'expired' or who are expired without having received notice
-        if ((profile?.role === 'admin' || profile?.role === 'owner') && !isInitialMountCheckDoneRef.current) {
+        const currentProfile = profileRef.current;
+        if ((currentProfile?.role === 'admin' || currentProfile?.role === 'owner') && !isInitialMountCheckDoneRef.current) {
           isInitialMountCheckDoneRef.current = true;
           const todayStr = new Date().toISOString().split('T')[0];
           const unnotifiedExpiredUids: string[] = [];
@@ -348,7 +352,7 @@ export default function UserManagement() {
 
           if (unnotifiedExpiredUids.length > 0) {
             console.log(`[UserManagement Mount] Found ${unnotifiedExpiredUids.length} expired user(s) requiring immediate notification on tab open:`, unnotifiedExpiredUids);
-            sendImmediateExpiryNotifications(unnotifiedExpiredUids, freshUsers);
+            sendImmediateExpiryNotificationsRef.current(unnotifiedExpiredUids, freshUsers);
           }
         }
 
@@ -364,8 +368,6 @@ export default function UserManagement() {
         if (mounted) {
           window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'error', message: 'Failed to refresh users' } }));
         }
-      } finally {
-        isSyncingOnMountRef.current = false;
       }
     };
 
@@ -377,7 +379,8 @@ export default function UserManagement() {
       mounted = false;
 
       // Email notification fallback for any remaining unnotified expired users when exiting User Management tab
-      if ((profile?.role === 'admin' || profile?.role === 'owner') && changedToExpiredUidsRef.current.size > 0 && profile?.uid) {
+      const currentProfile = profileRef.current;
+      if ((currentProfile?.role === 'admin' || currentProfile?.role === 'owner') && changedToExpiredUidsRef.current.size > 0 && currentProfile?.uid) {
         const expiredUids = Array.from(changedToExpiredUidsRef.current);
         if (expiredUids.length > 0) {
           console.log(`[UserManagement Exit] Triggering exit expiry check fallback for ${expiredUids.length} user(s):`, expiredUids);
@@ -385,7 +388,7 @@ export default function UserManagement() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              adminUid: profile.uid,
+              adminUid: currentProfile.uid,
               targetUserIds: expiredUids,
             }),
             keepalive: true,
@@ -394,7 +397,7 @@ export default function UserManagement() {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, location.pathname, profile?.role, profile?.uid, sendImmediateExpiryNotifications]);
+  }, [authLoading]);
 
   // Handle page unload for hard refreshes
   useEffect(() => {

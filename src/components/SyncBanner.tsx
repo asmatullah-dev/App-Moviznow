@@ -12,6 +12,8 @@ export function SyncBanner() {
   useEffect(() => {
     let timeoutId: NodeJS.Timeout | null = null;
     let syncingSafetyTimeout: NodeJS.Timeout | null = null;
+    let lastEventKey = '';
+    let lastEventTime = 0;
 
     const handleSyncStatus = (e: Event) => {
       const customEvent = e as CustomEvent;
@@ -29,6 +31,14 @@ export function SyncBanner() {
         msg = detail.message;
         initialLoad = Boolean(detail.isInitialLoad);
       }
+
+      const now = Date.now();
+      const currentKey = `${status}|${msg || ''}|${count || 0}|${initialLoad}`;
+      if (currentKey === lastEventKey && (now - lastEventTime < 2000)) {
+        return; // Ignore rapid duplicate identical event
+      }
+      lastEventKey = currentKey;
+      lastEventTime = now;
 
       if (timeoutId) clearTimeout(timeoutId);
       if (syncingSafetyTimeout) clearTimeout(syncingSafetyTimeout);
