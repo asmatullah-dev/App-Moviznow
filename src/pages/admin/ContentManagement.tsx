@@ -220,6 +220,29 @@ const isExtractableLink = (url: string) => {
   );
 };
 
+const directLinkExtractionCache = new Map<string, string>();
+
+const getCachedDirectLink = (url: string): string | null => {
+  if (!url) return null;
+  if (directLinkExtractionCache.has(url)) return directLinkExtractionCache.get(url)!;
+  try {
+    const stored = sessionStorage.getItem(`direct_link_${url}`);
+    if (stored && !isExtractableLink(stored)) {
+      directLinkExtractionCache.set(url, stored);
+      return stored;
+    }
+  } catch {}
+  return null;
+};
+
+const setCachedDirectLink = (url: string, directUrl: string) => {
+  if (!url || !directUrl || isExtractableLink(directUrl)) return;
+  directLinkExtractionCache.set(url, directUrl);
+  try {
+    sessionStorage.setItem(`direct_link_${url}`, directUrl);
+  } catch {}
+};
+
 interface ContentCardProps {
   content: Content;
   profile: any;
@@ -2841,16 +2864,15 @@ export default function ContentManagement() {
     }
   };
 
-  const directLinkExtractionCache = new Map<string, string>();
-
-  const extractDirectLinkFast = async (rawUrl: string): Promise<string> => {
+  const extractDirectLinkFast = async (rawUrl: string, timeoutMs: number = 18000): Promise<string> => {
     if (!rawUrl || !isExtractableLink(rawUrl)) return rawUrl;
-    if (directLinkExtractionCache.has(rawUrl)) {
-      return directLinkExtractionCache.get(rawUrl)!;
+    const cached = getCachedDirectLink(rawUrl);
+    if (cached) {
+      return cached;
     }
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3500);
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
       const res = await fetch("/api/hubcloud/direct-link", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2860,13 +2882,105 @@ export default function ContentManagement() {
       clearTimeout(timeoutId);
       if (res.ok) {
         const data = await res.json();
-        if (data.url && data.url !== rawUrl) {
-          directLinkExtractionCache.set(rawUrl, data.url);
-          return data.url;
+        let directUrl = data.url;
+
+        // If data.url is missing, unchanged, or still an extractable link, inspect candidates
+        if ((!directUrl || directUrl === rawUrl || isExtractableLink(directUrl)) && Array.isArray(data.candidates) && data.candidates.length > 0) {
+          const pixelCandidate = data.candidates.find((c: any) =>
+            c.href && (c.href.includes("pixeldrain") || (c.text && c.text.toLowerCase().includes("pixel")))
+          );
+          if (pixelCandidate?.href) {
+            directUrl = pixelCandidate.href;
+          } else {
+            const validCandidate = data.candidates.find((c: any) =>
+              c.href && !isExtractableLink(c.href) && !c.href.toLowerCase().includes("hubcloud")
+            );
+            if (validCandidate?.href) {
+              directUrl = validCandidate.href;
+            }
+          }
+        }
+
+        if (directUrl && directUrl !== rawUrl && !isExtractableLink(directUrl)) {
+          setCachedDirectLink(rawUrl, directUrl);
+          return directUrl;
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn("Direct link extraction timeout/error for:", rawUrl, e);
+    }
     return rawUrl;
+  };
+
+  const processLinkFast = async (link: LinkDef): Promise<LinkDef> => {
+    if (!link.url) return link;
+    if (link.url && link.url.toLowerCase().includes("<html")) {
+      return { ...link, url: "", tinyUrl: "" };
+    }
+    let extractedUrl = await extractDirectLinkFast(link.url);
+
+    if (
+      extractedUrl.includes("pixeldrain.com") ||
+      extractedUrl.includes("pixeldrain.dev") ||
+      extractedUrl.includes("pixeldrain.net") ||
+      extractedUrl.includes("pixel.drain") ||
+      extractedUrl.includes("pixeldra.in")
+    ) {
+      return { ...link, url: extractedUrl, tinyUrl: "" };
+    }
+    let prevTinyUrl = link.tinyUrl;
+    const isBadTinyUrl =
+      prevTinyUrl &&
+      typeof prevTinyUrl === "string" &&
+      (prevTinyUrl.toLowerCase().includes("<html") || isExtractableLink(prevTinyUrl));
+
+    if (extractedUrl.length > 100) {
+      if (!prevTinyUrl || isBadTinyUrl) {
+        const tinyUrl = await generateTinyUrl(
+          extractedUrl,
+          true,
+          settings?.supportNumber || "3416286423",
+        );
+        if (
+          tinyUrl &&
+          tinyUrl !== extractedUrl &&
+          !tinyUrl.toLowerCase().includes("<html")
+        ) {
+          return { ...link, url: extractedUrl, tinyUrl };
+        } else if (isBadTinyUrl) {
+          return { ...link, url: extractedUrl, tinyUrl: "" };
+        }
+      }
+      return { ...link, url: extractedUrl, tinyUrl: prevTinyUrl };
+    } else {
+      return { ...link, url: extractedUrl, tinyUrl: "" };
+    }
+  };
+
+  const persistExtractedLinks = async (origContent: Content, updatedContent: Content) => {
+    try {
+      const changedFields: Record<string, any> = {};
+      if (updatedContent.movieLinks && updatedContent.movieLinks !== origContent.movieLinks) {
+        changedFields.movieLinks = updatedContent.movieLinks;
+      }
+      if (updatedContent.sampleUrl && updatedContent.sampleUrl !== origContent.sampleUrl) {
+        changedFields.sampleUrl = updatedContent.sampleUrl;
+      }
+      if (updatedContent.seasons && updatedContent.seasons !== origContent.seasons) {
+        changedFields.seasons = updatedContent.seasons;
+      }
+      if (Object.keys(changedFields).length > 0) {
+        await updateContentFields([
+          {
+            id: origContent.id,
+            chunkId: origContent.chunkId,
+            fields: changedFields,
+          },
+        ]);
+      }
+    } catch (e) {
+      console.warn("Could not save extracted links to database in background:", e);
+    }
   };
 
   const handleSharePipeline = async (
@@ -2973,54 +3087,15 @@ export default function ContentManagement() {
         })();
       }
 
-      const processLinkFast = async (link: LinkDef): Promise<LinkDef> => {
-        if (!link.url) return link;
-        if (link.url && link.url.toLowerCase().includes("<html")) {
-          return { ...link, url: "", tinyUrl: "" };
-        }
-        let extractedUrl = await extractDirectLinkFast(link.url);
-
-        if (
-          extractedUrl.includes("pixeldrain.com") ||
-          extractedUrl.includes("pixeldrain.dev") ||
-          extractedUrl.includes("pixeldrain.net")
-        ) {
-          return { ...link, url: extractedUrl, tinyUrl: "" };
-        }
-        let prevTinyUrl = link.tinyUrl;
-        const isBadTinyUrl =
-          prevTinyUrl &&
-          typeof prevTinyUrl === "string" &&
-          prevTinyUrl.toLowerCase().includes("<html");
-
-        if (extractedUrl.length > 100) {
-          if (!prevTinyUrl || isBadTinyUrl) {
-            const tinyUrl = await generateTinyUrl(
-              extractedUrl,
-              true,
-              settings?.supportNumber || "3416286423",
-            );
-            if (
-              tinyUrl &&
-              tinyUrl !== extractedUrl &&
-              !tinyUrl.toLowerCase().includes("<html")
-            ) {
-              return { ...link, url: extractedUrl, tinyUrl };
-            } else if (isBadTinyUrl) {
-              return { ...link, url: extractedUrl, tinyUrl: "" };
-            }
-          }
-          return { ...link, url: extractedUrl, tinyUrl: prevTinyUrl };
-        } else {
-          return { ...link, url: extractedUrl, tinyUrl: "" };
-        }
-      };
-
       const linkPromise = (async () => {
          let newContent = { ...content };
+         let hasAnyLinkExtracted = false;
 
-         if (newContent.sampleUrl) {
+         if (newContent.sampleUrl && isExtractableLink(newContent.sampleUrl)) {
             let processedSampleUrl = await extractDirectLinkFast(newContent.sampleUrl);
+            if (processedSampleUrl !== newContent.sampleUrl) {
+              hasAnyLinkExtracted = true;
+            }
             if (processedSampleUrl.length > 100 && !processedSampleUrl.includes('pixeldrain.com') && !processedSampleUrl.includes('pixeldrain.dev') && !processedSampleUrl.includes('pixeldrain.net') && !processedSampleUrl.includes('t.me')) {
                const tinyUrl = await generateTinyUrl(processedSampleUrl, true, settings?.supportNumber || '3416286423');
                if (tinyUrl && !tinyUrl.toLowerCase().includes('<html')) processedSampleUrl = tinyUrl;
@@ -3031,7 +3106,11 @@ export default function ContentManagement() {
          if (newContent.type === "movie" && newContent.movieLinks) {
            const links = parseLinks(newContent.movieLinks);
            const processedLinks = await Promise.all(links.map(processLinkFast));
-           newContent.movieLinks = JSON.stringify(processedLinks);
+           const processedStr = JSON.stringify(processedLinks);
+           if (processedStr !== newContent.movieLinks) {
+             hasAnyLinkExtracted = true;
+           }
+           newContent.movieLinks = processedStr;
          } else if (newContent.type === "series" && newContent.seasons) {
            const parsedSeasons: Season[] = Array.isArray(newContent.seasons)
              ? newContent.seasons
@@ -3062,8 +3141,17 @@ export default function ContentManagement() {
              }
            }
            await Promise.all(linkPromises);
-           newContent.seasons = JSON.stringify(parsedSeasons);
+           const newSeasonsStr = JSON.stringify(parsedSeasons);
+           if (newSeasonsStr !== (typeof newContent.seasons === "string" ? newContent.seasons : JSON.stringify(newContent.seasons))) {
+             hasAnyLinkExtracted = true;
+           }
+           newContent.seasons = newSeasonsStr;
          }
+
+         if (hasAnyLinkExtracted) {
+           persistExtractedLinks(content, newContent);
+         }
+
          return newContent;
       })();
       
@@ -3272,7 +3360,12 @@ export default function ContentManagement() {
       text = `*${content.title}${displaySecondTitle} ${content.year || ""}*\n${partsStr}`;
 
       if (content.type === "movie" && content.movieLinks) {
-        const links: QualityLinks = parseLinks(content.movieLinks);
+        let links: QualityLinks = parseLinks(content.movieLinks);
+        const hasUnextracted = links.some((l) => l?.url && isExtractableLink(l.url));
+        if (!isPreprocessed || hasUnextracted) {
+          links = await Promise.all(links.map(processLinkFast));
+        }
+
         const sortedLinks = [...links].filter((l) => l && l.url).sort((a, b) => {
           const pA = (l: LinkDef) => {
             const lName = (l.name || "").toLowerCase();
@@ -3304,6 +3397,40 @@ export default function ContentManagement() {
               selectedSeasonNumbers.includes(s.seasonNumber),
             )
           : parsedSeasons;
+
+        const hasUnextracted = seasonsToShare.some((s) => {
+          const z = parseLinks(JSON.stringify(s.zipLinks || []));
+          const m = parseLinks(JSON.stringify(s.mkvLinks || []));
+          const ep = (s.episodes || []).flatMap((e: any) => parseLinks(JSON.stringify(e.links || [])));
+          return (
+            z.some((l) => l?.url && isExtractableLink(l.url)) ||
+            m.some((l) => l?.url && isExtractableLink(l.url)) ||
+            ep.some((l) => l?.url && isExtractableLink(l.url))
+          );
+        });
+
+        if (!isPreprocessed || hasUnextracted) {
+          for (let s = 0; s < seasonsToShare.length; s++) {
+            const season = seasonsToShare[s];
+            const zLinks = parseLinks(JSON.stringify(season.zipLinks || []));
+            if (zLinks.length > 0) {
+              season.zipLinks = await Promise.all(zLinks.map(processLinkFast));
+            }
+            const mLinks = parseLinks(JSON.stringify(season.mkvLinks || []));
+            if (mLinks.length > 0) {
+              season.mkvLinks = await Promise.all(mLinks.map(processLinkFast));
+            }
+            if (season.episodes && Array.isArray(season.episodes)) {
+              for (let e = 0; e < season.episodes.length; e++) {
+                const ep = season.episodes[e];
+                const epLinks = parseLinks(JSON.stringify(ep.links || []));
+                if (epLinks.length > 0) {
+                  ep.links = await Promise.all(epLinks.map(processLinkFast));
+                }
+              }
+            }
+          }
+        }
 
         seasonsToShare.forEach((season) => {
           text += `\n\n📺 *Season ${season.seasonNumber}${season.year ? ` (${season.year})` : content.year ? ` (${content.year})` : ""}*\n`;
@@ -3507,7 +3634,7 @@ export default function ContentManagement() {
 
     let processedSampleUrl = content.sampleUrl;
 
-    if (!isPreprocessed && processedSampleUrl && isExtractableLink(processedSampleUrl)) {
+    if (processedSampleUrl && isExtractableLink(processedSampleUrl)) {
       processedSampleUrl = await extractDirectLinkFast(processedSampleUrl);
     }
 
@@ -3532,55 +3659,12 @@ export default function ContentManagement() {
       return 3;
     };
 
-    const processLink = async (link: LinkDef) => {
-      if (!link.url) return link;
-      if (link.url && link.url.toLowerCase().includes("<html")) {
-        return { ...link, url: "", tinyUrl: "" };
-      }
-
-      let extractedUrl = await extractDirectLinkFast(link.url);
-
-      if (
-        extractedUrl.includes("pixeldrain.com") ||
-        extractedUrl.includes("pixeldrain.dev") ||
-        extractedUrl.includes("pixeldrain.net")
-      ) {
-        return { ...link, url: extractedUrl, tinyUrl: "" };
-      }
-
-      let prevTinyUrl = link.tinyUrl;
-      const isBadTinyUrl =
-        prevTinyUrl &&
-        typeof prevTinyUrl === "string" &&
-        prevTinyUrl.toLowerCase().includes("<html");
-
-      if (extractedUrl.length > 100) {
-        if (!prevTinyUrl || isBadTinyUrl) {
-          const tinyUrl = await generateTinyUrl(
-            extractedUrl,
-            true,
-            settings?.supportNumber || "3416286423",
-          );
-          if (
-            tinyUrl &&
-            tinyUrl !== extractedUrl &&
-            !tinyUrl.toLowerCase().includes("<html")
-          ) {
-            return { ...link, url: extractedUrl, tinyUrl };
-          } else if (isBadTinyUrl) {
-            return { ...link, url: extractedUrl, tinyUrl: "" };
-          }
-        }
-        return { ...link, url: extractedUrl, tinyUrl: prevTinyUrl };
-      }
-      return { ...link, url: extractedUrl, tinyUrl: "" };
-    };
-
     if (updatedContent.type === "movie" && updatedContent.movieLinks) {
       let links: QualityLinks = parseLinks(updatedContent.movieLinks);
 
-      if (!isPreprocessed) {
-        const processedLinks = await Promise.all(links.map(processLink));
+      const hasUnextracted = links.some((l) => l?.url && isExtractableLink(l.url));
+      if (!isPreprocessed || hasUnextracted) {
+        const processedLinks = await Promise.all(links.map(processLinkFast));
         links = processedLinks;
       }
 
@@ -3645,7 +3729,18 @@ export default function ContentManagement() {
           )
         : parsedSeasons;
 
-      if (!isPreprocessed) {
+      const hasUnextracted = seasonsToShare.some((s) => {
+        const z = parseLinks(JSON.stringify(s.zipLinks || []));
+        const m = parseLinks(JSON.stringify(s.mkvLinks || []));
+        const ep = (s.episodes || []).flatMap((e: any) => parseLinks(JSON.stringify(e.links || [])));
+        return (
+          z.some((l) => l?.url && isExtractableLink(l.url)) ||
+          m.some((l) => l?.url && isExtractableLink(l.url)) ||
+          ep.some((l) => l?.url && isExtractableLink(l.url))
+        );
+      });
+
+      if (!isPreprocessed || hasUnextracted) {
         const linkPromises: Promise<void>[] = [];
 
         for (let s = 0; s < seasonsToShare.length; s++) {
@@ -3656,7 +3751,7 @@ export default function ContentManagement() {
             linkPromises.push(
               (async () => {
                 const processed = await Promise.all(
-                  zipLinks.map(processLink),
+                  zipLinks.map(processLinkFast),
                 );
                 season.zipLinks = processed;
               })(),
@@ -3667,7 +3762,7 @@ export default function ContentManagement() {
             linkPromises.push(
               (async () => {
                 const processed = await Promise.all(
-                  mkvLinks.map(processLink),
+                  mkvLinks.map(processLinkFast),
                 );
                 season.mkvLinks = processed;
               })(),
@@ -3681,7 +3776,7 @@ export default function ContentManagement() {
                 linkPromises.push(
                   (async () => {
                     const processed = await Promise.all(
-                      epLinks.map(processLink),
+                      epLinks.map(processLinkFast),
                     );
                     ep.links = processed;
                   })(),
