@@ -525,7 +525,33 @@ emailRouter.post("/send-movie-notification", async (req, res) => {
     let candidateUsers: Array<{ email: string; lastActive?: string; emailNotificationsDisabled?: boolean; emailNotificationsEnabled?: boolean; unsubscribed?: boolean; notificationPreferences?: any }> = [];
 
     if (Array.isArray(targetEmails)) {
-      candidateUsers = targetEmails.filter(e => typeof e === "string" && isValidGmailAddress(e)).map(e => ({ email: e }));
+      const emailList = targetEmails.filter(e => typeof e === "string" && isValidGmailAddress(e));
+      if (firestore && emailList.length > 0) {
+        try {
+          const snap = await firestore.collection("users").where("email", "in", emailList.slice(0, 30)).get();
+          const foundMap = new Map<string, any>();
+          snap.forEach(d => {
+            const u = d.data();
+            if (u.email) foundMap.set(u.email.toLowerCase().trim(), u);
+          });
+          candidateUsers = emailList.map(e => {
+            const clean = e.toLowerCase().trim();
+            const uData = foundMap.get(clean);
+            return uData ? {
+              email: e,
+              lastActive: uData.lastActive,
+              emailNotificationsDisabled: uData.emailNotificationsDisabled,
+              emailNotificationsEnabled: uData.emailNotificationsEnabled,
+              unsubscribed: uData.unsubscribed,
+              notificationPreferences: uData.notificationPreferences,
+            } : { email: e };
+          });
+        } catch (e) {
+          candidateUsers = emailList.map(e => ({ email: e }));
+        }
+      } else {
+        candidateUsers = emailList.map(e => ({ email: e }));
+      }
     } else if (Array.isArray(req.body.targetUsers) && req.body.targetUsers.length > 0) {
       candidateUsers = req.body.targetUsers.filter((u: any) => u && isValidGmailAddress(u.email));
     } else if (firestore) {

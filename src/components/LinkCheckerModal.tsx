@@ -982,14 +982,72 @@ export const filterFilmygoHits = (hits: any[], pageUrl: string): any[] => {
   if (nonGdflixHits.length === 0) return [];
 
   const parseSizeInGB = (sizeStr?: string | null): number => {
-    if (!sizeStr) return 0;
-    const match = sizeStr.match(/(\d+(?:\.\d+)?)\s*(GB|MB)/i);
+    if (!sizeStr || typeof sizeStr !== 'string') return 0;
+    const match = sizeStr.match(/(\d+(?:\.\d+)?)\s*(GB|MB|KB)/i);
     if (!match) return 0;
     const val = parseFloat(match[1]);
     const unit = match[2].toUpperCase();
     if (unit === 'GB') return val;
     if (unit === 'MB') return val / 1024;
+    if (unit === 'KB') return val / (1024 * 1024);
     return 0;
+  };
+
+  const getHitSizeGB = (h: any): number => {
+    if (!h) return 0;
+    if (h.size) {
+      const s = parseSizeInGB(h.size);
+      if (s > 0) return s;
+    }
+    if (h.file_name) {
+      const s = parseSizeInGB(h.file_name);
+      if (s > 0) return s;
+    }
+    if (h.label) {
+      const s = parseSizeInGB(h.label);
+      if (s > 0) return s;
+    }
+    if (h.quality) {
+      const s = parseSizeInGB(h.quality);
+      if (s > 0) return s;
+    }
+    if (h.url) {
+      const s = parseSizeInGB(h.url);
+      if (s > 0) return s;
+    }
+    return 0;
+  };
+
+  const isHitHevc = (h: any): boolean => {
+    const text = `${h.file_name || ''} ${h.label || ''} ${h.quality || ''}`.toLowerCase();
+    return text.includes('hevc') || text.includes('x265') || text.includes('h265') || text.includes('h.265') || text.includes('10bit') || text.includes('10-bit');
+  };
+
+  const getHitResolution = (h: any): '480p' | '720p' | '1080p' | '4k' | 'other' => {
+    const text = `${h.file_name || ''} ${h.label || ''} ${h.quality || ''}`.toLowerCase();
+    if (text.includes('4k') || text.includes('2160p')) return '4k';
+    if (text.includes('1080p')) return '1080p';
+    if (text.includes('720p')) return '720p';
+    if (text.includes('480p')) return '480p';
+    return 'other';
+  };
+
+  const getSmallestHit = (candidates: any[]): any | undefined => {
+    if (!candidates || candidates.length === 0) return undefined;
+    if (candidates.length === 1) return candidates[0];
+
+    const sorted = [...candidates].sort((a, b) => {
+      const sizeA = getHitSizeGB(a);
+      const sizeB = getHitSizeGB(b);
+      if (sizeA > 0 && sizeB > 0) {
+        return sizeA - sizeB;
+      }
+      if (sizeA > 0 && sizeB <= 0) return -1;
+      if (sizeB > 0 && sizeA <= 0) return 1;
+      return 0;
+    });
+
+    return sorted[0];
   };
 
   const isHindiLineHit = (h: any): boolean => {
@@ -1012,29 +1070,10 @@ export const filterFilmygoHits = (hits: any[], pageUrl: string): any[] => {
 
   const pageUrlLower = pageUrl.toLowerCase();
 
-  const findHit = (res: '480p' | '720p' | '1080p' | '4k' | '2160p', isHevc: boolean) => {
-    const candidates = effectiveHits.filter(h => {
-      const name = (h.file_name || '').toLowerCase();
-      let hasRes = false;
-      if (res === '4k' || res === '2160p') {
-        hasRes = name.includes('4k') || name.includes('2160p');
-      } else {
-        hasRes = name.includes(res);
-      }
-      const hasHevc = name.includes('hevc') || name.includes('x265') || name.includes('h265') || name.includes('h.265') || name.includes('10bit') || name.includes('10-bit');
-      return hasRes && (isHevc ? hasHevc : !hasHevc);
-    });
-
-    if (candidates.length === 0) return undefined;
-
-    return candidates[0];
-  };
-
   // Check if non-HEVC quality links exist at all in the hits list
   const hasAnyNonHevc = effectiveHits.some(h => {
-    const name = (h.file_name || '').toLowerCase();
-    return (name.includes('480p') || name.includes('720p') || name.includes('1080p') || name.includes('2160p') || name.includes('4k')) && 
-           !(name.includes('hevc') || name.includes('x265') || name.includes('h265') || name.includes('h.265') || name.includes('10bit') || name.includes('10-bit'));
+    const res = getHitResolution(h);
+    return res !== 'other' && !isHitHevc(h);
   });
 
   const isSeriesUrl = pageUrlLower.includes('series') || 
@@ -1056,10 +1095,10 @@ export const filterFilmygoHits = (hits: any[], pageUrl: string): any[] => {
   const selected: any[] = [];
 
   if (isSeries) {
-    // Series rule: select "480p HEVC", "720p HEVC", "1080p HEVC"
-    const hit480pHevc = findHit('480p', true);
-    const hit720pHevc = findHit('720p', true);
-    const hit1080pHevc = findHit('1080p', true);
+    // Series rule: select "480p HEVC", "720p HEVC", "1080p HEVC" (smaller size if duplicates)
+    const hit480pHevc = getSmallestHit(effectiveHits.filter(h => getHitResolution(h) === '480p' && isHitHevc(h)));
+    const hit720pHevc = getSmallestHit(effectiveHits.filter(h => getHitResolution(h) === '720p' && isHitHevc(h)));
+    const hit1080pHevc = getSmallestHit(effectiveHits.filter(h => getHitResolution(h) === '1080p' && isHitHevc(h)));
 
     if (hit480pHevc) selected.push(hit480pHevc);
     if (hit720pHevc) selected.push(hit720pHevc);
@@ -1076,50 +1115,65 @@ export const filterFilmygoHits = (hits: any[], pageUrl: string): any[] => {
       }
     }
   } else {
-    // Movie rule:
-    // Automatically select 480p, 720p, 1080p, 4K
-    const hit480p = findHit('480p', false);
-    const hit480pHevc = findHit('480p', true);
+    // Movie selection rules:
+    // Candidate pools by quality and HEVC status
+    const cand480p = effectiveHits.filter(h => getHitResolution(h) === '480p' && !isHitHevc(h));
+    const cand480pHevc = effectiveHits.filter(h => getHitResolution(h) === '480p' && isHitHevc(h));
+    const hit480p = getSmallestHit(cand480p);
+    const hit480pHevc = getSmallestHit(cand480pHevc);
 
-    const hit720p = findHit('720p', false);
-    const hit720pHevc = findHit('720p', true);
+    const cand720p = effectiveHits.filter(h => getHitResolution(h) === '720p' && !isHitHevc(h));
+    const cand720pHevc = effectiveHits.filter(h => getHitResolution(h) === '720p' && isHitHevc(h));
+    const hit720p = getSmallestHit(cand720p);
+    const hit720pHevc = getSmallestHit(cand720pHevc);
 
-    const hit1080p = findHit('1080p', false);
-    const hit1080pHevc = findHit('1080p', true);
+    const cand1080p = effectiveHits.filter(h => getHitResolution(h) === '1080p' && !isHitHevc(h));
+    const cand1080pHevc = effectiveHits.filter(h => getHitResolution(h) === '1080p' && isHitHevc(h));
+    const hit1080p = getSmallestHit(cand1080p);
+    const hit1080pHevc = getSmallestHit(cand1080pHevc);
 
-    const hit4k = findHit('4k', false) || findHit('2160p', false);
-    const hit4kHevc = findHit('4k', true) || findHit('2160p', true);
+    // 4K candidates (whether HEVC or not): only select if less than 10 GB
+    const cand4k = effectiveHits.filter(h => getHitResolution(h) === '4k');
+    const cand4kUnder10GB = cand4k.filter(h => {
+      const sizeGB = getHitSizeGB(h);
+      return sizeGB > 0 && sizeGB < 10;
+    });
+    const hit4k = getSmallestHit(cand4kUnder10GB);
 
-    // 480p selection: fallback to HEVC if not exist
+    // 1. 480p selection:
+    // Always select smaller size 480p. If 480p is not available, select 480p HEVC (smaller size).
     if (hit480p) {
       selected.push(hit480p);
     } else if (hit480pHevc) {
       selected.push(hit480pHevc);
     }
 
-    // 720p selection: fallback to HEVC if not exist. Plus select HEVC if size > 1.5GB
+    // 2. 720p selection:
+    // Always select smaller size 720p. If 720p not available, select 720p HEVC (smaller size).
+    // If 720p is available and greater than 1.45GB, also select 720p HEVC (smaller size).
     if (hit720p) {
       selected.push(hit720p);
-      const sizeGB = parseSizeInGB(hit720p.size);
-      if (sizeGB > 1.5 && hit720pHevc) {
+      const size720p = getHitSizeGB(hit720p);
+      if (size720p > 1.45 && hit720pHevc) {
         selected.push(hit720pHevc);
       }
     } else if (hit720pHevc) {
       selected.push(hit720pHevc);
     }
 
-    // 1080p selection: fallback to HEVC if not exist
+    // 3. 1080p selection:
+    // Always select smaller size 1080p (skipping higher-sized 1080p links).
+    // If 1080p is not available, select 1080p HEVC (smaller size).
     if (hit1080p) {
       selected.push(hit1080p);
     } else if (hit1080pHevc) {
       selected.push(hit1080pHevc);
     }
 
-    // 4K selection: fallback to HEVC if not exist
+    // 4. 4K selection:
+    // Select 4K only if less than 10GB (whether HEVC or not, select smaller size if multiple).
     if (hit4k) {
       selected.push(hit4k);
-    } else if (hit4kHevc) {
-      selected.push(hit4kHevc);
     }
   }
 
@@ -1127,8 +1181,17 @@ export const filterFilmygoHits = (hits: any[], pageUrl: string): any[] => {
     return effectiveHits;
   }
 
-  // Return selected hits, deduplicated by the Set
-  return Array.from(new Set(selected));
+  // Deduplicate selected hits by URL while preserving order
+  const uniqueSelected: any[] = [];
+  const seenSelectedUrls = new Set<string>();
+  for (const item of selected) {
+    if (item && item.url && !seenSelectedUrls.has(item.url)) {
+      seenSelectedUrls.add(item.url);
+      uniqueSelected.push(item);
+    }
+  }
+
+  return uniqueSelected.length > 0 ? uniqueSelected : effectiveHits;
 };
 
 export interface ScrapedLinkItem {
@@ -3329,7 +3392,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
         normU.includes('mdrive.lol') || normU.includes('mdrvie.lol') ||
         normU.includes('moviesdrives.') || normU.includes('moviesdrive.') ||
         normU.includes('workers.dev') || normU.includes('telegra.ph') ||
-        normU.includes('filmygo.') || normU.includes('skymovies') || normU.includes('hdhub4u') || normU.includes('filmyfly') ||
+        normU.includes('filmygo.') || normU.includes('filmycab.') || normU.includes('skymovies') || normU.includes('hdhub4u') || normU.includes('filmyfly') ||
         (mdDomain && normU.includes(normalizeUrl(mdDomain))) ||
         (skyDomain && normU.includes(normalizeUrl(skyDomain))) ||
         (filmyDomain && normU.includes(normalizeUrl(filmyDomain))) ||
@@ -3364,7 +3427,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
               if (!res.ok) throw new Error('MoviesDrive fetch failed');
               const data = await res.json();
               return { type: 'moviesdrive', original: targetUrl, data };
-            } else if (normUrl.includes('filmygo.') || (filmyDomain && normUrl.includes(normalizeUrl(filmyDomain)))) {
+            } else if (normUrl.includes('filmygo.') || normUrl.includes('filmycab.') || (filmyDomain && normUrl.includes(normalizeUrl(filmyDomain)))) {
               const res = await fetch(`/api/filmygo?url=${encodeURIComponent(normUrl)}`, { signal: controller.signal });
               clearTimeout(timer);
               if (!res.ok) throw new Error('FilmyGo fetch failed');

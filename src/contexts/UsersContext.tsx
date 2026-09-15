@@ -83,7 +83,12 @@ export function normalizeUserStatusAndExpiry(u: UserProfile): UserProfile {
       }
     } else {
       if (u.status !== 'suspended' && u.status !== 'pending') {
-        return { ...u, status: 'active' };
+        const resetNotice = u.expiryNoticeSent && u.lastExpiryNoticeFor && u.expiryDate !== u.lastExpiryNoticeFor;
+        return {
+          ...u,
+          status: 'active',
+          ...(resetNotice ? { expiryNoticeSent: false, expiryNoticeSentDate: undefined } : {})
+        };
       }
     }
   }
@@ -440,18 +445,14 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       const lastFetchTimeStr = safeStorage.getItem('last_users_sync_timestamp');
       const lastFetchTime = lastFetchTimeStr ? parseInt(lastFetchTimeStr, 10) : 0;
 
-      // Minimum cooldown between non-forced fetch attempts (15 mins) to prevent redundant queries
-      const FIFTEEN_MINS_MS = 15 * 60 * 1000;
-      if (!force && (now - lastFetchTime < FIFTEEN_MINS_MS) && locallyCachedUsers.length > 0) {
+      const FIFTEEN_SECONDS_MS = 15 * 1000;
+      // Cooldown for non-forced fetch: if within 15 seconds, return local cache
+      if (!force && (now - lastFetchTime < FIFTEEN_SECONDS_MS) && locallyCachedUsers.length > 0) {
         setLoading(false);
         return { users: locallyCachedUsers, updatedSomething: false };
       }
       
-      // For forced calls, allow execution but prevent rapid duplicate triggers (500ms debounce)
-      if (force && (now - lastFetchTimestampRef.current < 500) && locallyCachedUsers.length > 0) {
-        setLoading(false);
-        return { users: locallyCachedUsers, updatedSomething: false };
-      }
+      // When force is true, all cooldowns are bypassed. Update lastFetchTimestamp.
       lastFetchTimestampRef.current = now;
 
       if (locallyCachedUsers.length === 0) {
@@ -505,7 +506,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         }
 
         // DELTA SYNC using chunk_meta (consumes only 1 read for chunk_meta + 1 per changed user)
-        // If force is true, bypass chunk_meta 60s cooldown to check the latest server versions
+        // When force is true, bypasses all chunk_meta cooldowns to immediately fetch latest server versions
         const versions = await getChunkMeta(force);
         const serverUsersVersion: Record<string, any> = (versions && typeof versions === 'object' && versions.users && typeof versions.users === 'object') ? versions.users : {};
 

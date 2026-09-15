@@ -97,7 +97,7 @@ let chunkMetaPromise: Promise<Record<string, any>> | null = null;
 let memoryCache: Record<string, any> | null = null;
 let lastFetchTimeMs = 0;
 
-const SIXTY_SECONDS_MS = 60 * 1000;
+const FIFTEEN_SECONDS_MS = 15 * 1000;
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 
 export const getSavedChunkMeta = (): Record<string, any> | null => {
@@ -132,8 +132,8 @@ const shouldFetchMeta = () => {
   const lastFetchTime = lastFetchTimeStr ? parseInt(lastFetchTimeStr, 10) : 0;
   const effectiveLastFetch = Math.max(lastFetchTimeMs, lastFetchTime);
   
-  // If fetched within 60 seconds, definitely do not fetch
-  if (effectiveLastFetch > 0 && (now - effectiveLastFetch < SIXTY_SECONDS_MS)) {
+  // If fetched within 15 seconds, return false (cooldown)
+  if (effectiveLastFetch > 0 && (now - effectiveLastFetch < FIFTEEN_SECONDS_MS)) {
     return false;
   }
 
@@ -151,14 +151,13 @@ const shouldFetchMeta = () => {
      return true;
   }
   
-  return false;
+  return true;
 };
 
 /**
  * Gets chunk_meta versions.
- * Enforces a strict 60-second cooldown on server calls:
- * Saves the chunk meta and does NOT recall from server for 60 seconds.
- * Even on manual trigger / forceRefresh, returns the saved chunk meta during the 60s cooldown.
+ * If forceRefresh is requested, bypasses all cooldowns and fetches directly from server.
+ * If not forcing refresh, checks if 15 seconds have passed since the last get chunk meta.
  */
 export const getChunkMeta = async (forceRefresh = false): Promise<Record<string, any>> => {
   const nowMs = Date.now();
@@ -168,14 +167,14 @@ export const getChunkMeta = async (forceRefresh = false): Promise<Record<string,
 
   const savedMeta = getSavedChunkMeta();
   const timeSinceLastFetch = nowMs - effectiveLastFetch;
-  const isWithin60Sec = effectiveLastFetch > 0 && timeSinceLastFetch < SIXTY_SECONDS_MS;
+  const isWithin15Sec = effectiveLastFetch > 0 && timeSinceLastFetch < FIFTEEN_SECONDS_MS;
 
-  // RULE: 60 sec cooldown for background checks. If forceRefresh is explicitly requested, bypass cooldown.
-  if (!forceRefresh && savedMeta && isWithin60Sec) {
+  // RULE: 15 sec cooldown for background checks. If forceRefresh is explicitly requested, bypass all cooldowns.
+  if (!forceRefresh && savedMeta && isWithin15Sec) {
     return savedMeta;
   }
 
-  // If not forcing refresh, check if savedMeta is still valid under standard policy (within 6 hours / daily check)
+  // If not forcing refresh, check if savedMeta is still valid under standard policy (within 15s / 6 hours / daily check)
   if (!forceRefresh && savedMeta && !shouldFetchMeta()) {
     return savedMeta;
   }
@@ -185,17 +184,17 @@ export const getChunkMeta = async (forceRefresh = false): Promise<Record<string,
     return savedMeta || {};
   }
 
-  // Deduplicate concurrent in-flight fetches
-  if (chunkMetaPromise) {
+  // Deduplicate concurrent in-flight fetches unless forceRefresh is explicitly requested
+  if (chunkMetaPromise && !forceRefresh) {
     return chunkMetaPromise;
   }
 
-  // Fetch from server: either first load (no saved meta) or 60s cooldown has expired
+  // Fetch from server: either first load (no saved meta) or 15s cooldown has expired or forceRefresh requested
   // Race with 2500ms timeout so slow internet or Firestore stalls never block startup
   const networkDocPromise = runWithNetwork(() => getDoc(doc(db, 'chunk_meta', 'versions')))
     .then(snap => snap.exists() ? (snap.data() || {}) : {});
 
-  chunkMetaPromise = new Promise<Record<string, any>>((resolve) => {
+  const fetchPromise = new Promise<Record<string, any>>((resolve) => {
     let settled = false;
     const timer = setTimeout(() => {
       if (!settled) {
@@ -233,11 +232,14 @@ export const getChunkMeta = async (forceRefresh = false): Promise<Record<string,
         }
       })
       .finally(() => {
-        chunkMetaPromise = null;
+        if (chunkMetaPromise === fetchPromise) {
+          chunkMetaPromise = null;
+        }
       });
   });
 
-  return chunkMetaPromise;
+  chunkMetaPromise = fetchPromise;
+  return fetchPromise;
 };
 
 export const updateChunkMetaLocalCache = (updates: Record<string, any>) => {

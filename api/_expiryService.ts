@@ -391,9 +391,39 @@ async function sendFcmExpiryNotification(userId: string, expiryDateStr: string) 
       topic: `user_${userId}`,
     };
 
-    const response = await admin.messaging().send(message);
-    console.log(`[Expiry Notification] FCM push sent to user_${userId}:`, response);
-    return true;
+    let sentAny = false;
+    try {
+      const response = await admin.messaging().send(message);
+      console.log(`[Expiry Notification] FCM push sent to topic user_${userId}:`, response);
+      sentAny = true;
+    } catch (topicErr: any) {
+      console.warn(`[Expiry Notification] FCM topic send notice for user_${userId}:`, topicErr.message);
+    }
+
+    // Also attempt direct send to device tokens if available in fcm_tokens collection
+    try {
+      const firestore = getDb();
+      if (firestore) {
+        const tokensSnap = await firestore.collection("fcm_tokens").where("userId", "==", userId).limit(5).get();
+        if (!tokensSnap.empty) {
+          const directTokens = tokensSnap.docs.map(d => d.data()?.token).filter(Boolean);
+          if (directTokens.length > 0) {
+            const tokenMessages = directTokens.map(token => ({
+              ...message,
+              token,
+              topic: undefined,
+            }));
+            const directRes = await admin.messaging().sendEach(tokenMessages);
+            console.log(`[Expiry Notification] FCM direct tokens sent (${directRes.successCount}/${directTokens.length} success) for user ${userId}`);
+            if (directRes.successCount > 0) sentAny = true;
+          }
+        }
+      }
+    } catch (tokenErr: any) {
+      console.warn(`[Expiry Notification] FCM direct tokens notice for user ${userId}:`, tokenErr.message);
+    }
+
+    return sentAny;
   } catch (err: any) {
     console.warn(`[Expiry Notification] FCM push skipped or failed for user_${userId}:`, err.message);
     return false;
@@ -539,23 +569,28 @@ async function processUserDocs(
     }
 
     // Parse the expiry date
-    const expiryDateStr = typeof expiryDate === "string" ? expiryDate.split("T")[0] : "";
-    if (!expiryDateStr) continue;
+    const rawExpiryDate = expiryDate || todayStr;
+    const expiryDateStr = typeof rawExpiryDate === "string" ? rawExpiryDate.split("T")[0] : todayStr;
 
-    // Check if the user is on the date of expired or past expired
-    // Parse parts [YYYY, MM, DD]
-    const parts = expiryDateStr.split("-");
-    if (parts.length !== 3) continue;
+    // Determine if user is expired (either explicitly status === 'expired' or expiry date passed)
+    let isExpired = data.status === "expired";
 
-    const expiryYear = parseInt(parts[0], 10);
-    const expiryMonth = parseInt(parts[1], 10) - 1;
-    const expiryDay = parseInt(parts[2], 10);
+    if (!isExpired && expiryDateStr) {
+      const parts = expiryDateStr.split("-");
+      if (parts.length === 3) {
+        const expiryYear = parseInt(parts[0], 10);
+        const expiryMonth = parseInt(parts[1], 10) - 1;
+        const expiryDay = parseInt(parts[2], 10);
 
-    // Expiry boundary is midnight starting the day AFTER the expiry date (expiryDay + 1).
-    // E.g., for "2026-08-20", boundary is 2026-08-21 00:00:00.
-    // The user remains ACTIVE for the ENTIRE duration of August 20th.
-    const expiryBoundary = new Date(Date.UTC(expiryYear, expiryMonth, expiryDay + 1, 0, 0, 0, 0));
-    const isExpired = now >= expiryBoundary || todayStr > expiryDateStr;
+        // Expiry boundary is midnight starting the day AFTER the expiry date (expiryDay + 1).
+        // E.g., for "2026-08-20", boundary is 2026-08-21 00:00:00.
+        // The user remains ACTIVE for the ENTIRE duration of August 20th.
+        const expiryBoundary = new Date(Date.UTC(expiryYear, expiryMonth, expiryDay + 1, 0, 0, 0, 0));
+        if (now >= expiryBoundary || todayStr > expiryDateStr) {
+          isExpired = true;
+        }
+      }
+    }
 
     if (!isExpired) {
       // Not yet expired
@@ -565,15 +600,15 @@ async function processUserDocs(
     result.expiredUsersFound++;
 
     // Normalize date strings for safe comparison
-    const targetNormalized = expiryDateStr;
+    const targetNormalized = expiryDateStr || todayStr;
     const lastNoticeNormalized = typeof data.lastExpiryNoticeFor === "string" ? data.lastExpiryNoticeFor.split("T")[0] : "";
     const noticeSentDateNormalized = typeof data.expiryNoticeSentDate === "string" ? data.expiryNoticeSentDate.split("T")[0] : "";
 
-    // Quick initial check before running transaction
+    // Quick initial check before running transaction (skip if already notified for this exact expiry date)
     if (
       lastNoticeNormalized === targetNormalized ||
       noticeSentDateNormalized === targetNormalized ||
-      (data.expiryNoticeSent === true && lastNoticeNormalized === targetNormalized)
+      (data.expiryNoticeSent === true && (lastNoticeNormalized === targetNormalized || noticeSentDateNormalized === targetNormalized))
     ) {
       result.skippedAlreadyNotified++;
       continue;
@@ -582,6 +617,7 @@ async function processUserDocs(
     // CRITICAL ATOMIC TRANSACTION: Claim lock BEFORE sending email to prevent double emails from concurrent runs
     const userRef = firestore.collection("users").doc(uid);
     let claimed = false;
+    let effectiveDateForNotice = rawExpiryDate;
 
     try {
       await firestore.runTransaction(async (transaction) => {
@@ -589,24 +625,26 @@ async function processUserDocs(
         if (!freshSnap.exists) return;
         const freshData = freshSnap.data() || {};
 
-        const freshExpiryDate = freshData.expiryDate;
-        if (!freshExpiryDate || freshExpiryDate === "Lifetime" || freshExpiryDate === "null" || freshExpiryDate === "") {
+        const freshExpiryDate = freshData.expiryDate || freshData.expiryNoticeSentDate || todayStr;
+        if (freshExpiryDate === "Lifetime") {
           return;
         }
 
-        const freshExpiryStr = typeof freshExpiryDate === "string" ? freshExpiryDate.split("T")[0] : "";
+        const freshExpiryStr = typeof freshExpiryDate === "string" ? freshExpiryDate.split("T")[0] : todayStr;
         const freshLastNotice = typeof freshData.lastExpiryNoticeFor === "string" ? freshData.lastExpiryNoticeFor.split("T")[0] : "";
         const freshSentDate = typeof freshData.expiryNoticeSentDate === "string" ? freshData.expiryNoticeSentDate.split("T")[0] : "";
 
         if (
           freshLastNotice === freshExpiryStr ||
           freshSentDate === freshExpiryStr ||
-          (freshData.expiryNoticeSent === true && freshLastNotice === freshExpiryStr)
+          (freshData.expiryNoticeSent === true && (freshLastNotice === freshExpiryStr || freshSentDate === freshExpiryStr))
         ) {
           // Already claimed/notified by another concurrent process
           claimed = false;
           return;
         }
+
+        effectiveDateForNotice = freshExpiryDate;
 
         // Atomically mark user as processing/notified for this expiry date
         transaction.update(userRef, {
@@ -631,7 +669,8 @@ async function processUserDocs(
       continue;
     }
 
-    console.log(`[Expiry Notification] Claimed lock. Processing expiration notice for user ${uid} (${email}), expired on ${expiryDateStr}`);
+    const finalNoticeDateStr = typeof effectiveDateForNotice === "string" ? effectiveDateForNotice.split("T")[0] : todayStr;
+    console.log(`[Expiry Notification] Claimed lock. Processing expiration notice for user ${uid} (${email}), expired on ${finalNoticeDateStr}`);
 
     let emailSuccess = false;
     let fcmSuccess = false;
@@ -643,7 +682,8 @@ async function processUserDocs(
       data.notificationPreferences?.email?.membershipExpiry !== false &&
       data.emailNotificationsEnabled !== false &&
       data.emailNotificationsDisabled !== true &&
-      data.unsubscribed !== true;
+      data.unsubscribed !== true &&
+      data.isEmailUnsubscribed !== true;
 
     const isFcmAllowed =
       data.notificationPreferences?.fcm?.enabled !== false &&
@@ -659,7 +699,7 @@ async function processUserDocs(
         const emailHtml = generateExpiryEmailHtml({
           displayName,
           email,
-          expiryDateStr,
+          expiryDateStr: finalNoticeDateStr,
           siteUrl,
         });
 
@@ -669,7 +709,7 @@ async function processUserDocs(
           to: email,
           subject,
           html: emailHtml,
-          text: `Hello ${displayName},\n\nYour MovizNow membership has expired on ${formatDateDisplay(expiryDateStr)}.\n\nView membership plans to restore high-speed 4K/1080p downloads and unlimited streaming:\n${siteUrl}/membership\n\n© MovizNow`,
+          text: `Hello ${displayName},\n\nYour MovizNow membership has expired on ${formatDateDisplay(finalNoticeDateStr)}.\n\nView membership plans to restore high-speed 4K/1080p downloads and unlimited streaming:\n${siteUrl}/membership\n\n© MovizNow`,
           senderEmailOverride: "Alerts@MovizNow.com",
           replyTo: "contactus@MovizNow.com",
         });
@@ -684,7 +724,7 @@ async function processUserDocs(
             displayName,
             email,
             subject,
-            `Your MovizNow membership has expired on ${formatDateDisplay(expiryDateStr)}. Email notice sent to ${email}.`
+            `Your MovizNow membership has expired on ${formatDateDisplay(finalNoticeDateStr)}. Email notice sent to ${email}.`
           );
         }
       } catch (emailErr: any) {
@@ -697,7 +737,7 @@ async function processUserDocs(
 
     // 2. Send FCM Push Notification
     if (isFcmAllowed) {
-      fcmSuccess = await sendFcmExpiryNotification(uid, expiryDateStr);
+      fcmSuccess = await sendFcmExpiryNotification(uid, finalNoticeDateStr);
       if (fcmSuccess) {
         result.fcmSent++;
       }
@@ -706,7 +746,7 @@ async function processUserDocs(
     }
 
     // 3. Create In-App Notification in Firestore
-    inAppSuccess = await saveInAppExpiryNotification(firestore, uid, displayName, email, expiryDateStr);
+    inAppSuccess = await saveInAppExpiryNotification(firestore, uid, displayName, email, finalNoticeDateStr);
     if (inAppSuccess) {
       result.inAppCreated++;
     }
@@ -831,6 +871,7 @@ export async function sendMembershipUpdateNotification(params: MembershipUpdateP
       data.emailNotificationsEnabled !== false &&
       data.emailNotificationsDisabled !== true &&
       data.unsubscribed !== true &&
+      data.isEmailUnsubscribed !== true &&
       isValidGmailAddress(email);
 
     const isFcmAllowed =
@@ -995,6 +1036,7 @@ export async function sendOrderApprovedNotification(params: OrderApprovedParams)
       data.emailNotificationsEnabled !== false &&
       data.emailNotificationsDisabled !== true &&
       data.unsubscribed !== true &&
+      data.isEmailUnsubscribed !== true &&
       isValidGmailAddress(email);
 
     const isFcmAllowed =

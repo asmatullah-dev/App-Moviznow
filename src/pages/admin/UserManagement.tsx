@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
 import { collection, doc, updateDoc, getDoc, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit, deleteField, increment} from 'firebase/firestore';
@@ -215,20 +215,83 @@ export default function UserManagement() {
   // Track user UIDs whose status changed to 'expired' during the User Management tab session
   const changedToExpiredUidsRef = useRef<Set<string>>(new Set());
   const prevUsersMapRef = useRef<Map<string, string>>(new Map());
+  const isInitialMountCheckDoneRef = useRef(false);
 
-  // Track status changes to 'expired' across user updates
+  // Helper to send expiry notifications immediately and flag the users
+  const sendImmediateExpiryNotifications = useCallback(async (targetUids: string[], userList?: UserProfile[]) => {
+    if (!targetUids || targetUids.length === 0 || !profile?.uid) return;
+    if (profile.role !== 'admin' && profile.role !== 'owner') return;
+
+    const sourceUsers = userList && userList.length > 0 ? userList : allUsers;
+    const todayStr = new Date().toISOString().split('T')[0];
+    const uniqueUids = Array.from(new Set(targetUids.filter(Boolean)));
+    if (uniqueUids.length === 0) return;
+
+    // Filter out owners and admins
+    const validUids = uniqueUids.filter(uid => {
+      const u = sourceUsers.find(user => user.uid === uid);
+      return u && u.role !== 'admin' && u.role !== 'owner';
+    });
+
+    if (validUids.length === 0) return;
+
+    console.log(`[UserManagement] Triggering immediate expiry email & push notifications for ${validUids.length} user(s):`, validUids);
+
+    // 1. Immediately flag user updates locally & in pending updates
+    const batchUpdates: Record<string, Partial<UserProfile>> = {};
+    validUids.forEach(uid => {
+      const u = sourceUsers.find(user => user.uid === uid);
+      batchUpdates[uid] = {
+        status: 'expired',
+        expiryNoticeSent: true,
+        expiryNoticeSentDate: todayStr,
+        lastExpiryNoticeFor: u?.expiryDate || todayStr,
+      };
+    });
+
+    updateMultipleUserFields(batchUpdates);
+    
+    // Commit to Firestore
+    finalizeUserChanges(true).catch(err => console.warn("Failed to persist expiry flags on Firestore:", err));
+
+    // 2. Call backend expiry service immediately
+    try {
+      const res = await fetch('/api/notifications/check-expiry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          adminUid: profile.uid,
+          targetUserIds: validUids,
+        }),
+      });
+      const resData = await res.json();
+      console.log("[UserManagement] Immediate expiry notification response:", resData);
+    } catch (err) {
+      console.error("[UserManagement] Error triggering immediate expiry notification:", err);
+    }
+  }, [profile?.uid, profile?.role, allUsers, updateMultipleUserFields, finalizeUserChanges]);
+
+  // Track status changes to 'expired' across user updates and trigger immediate notifications
   useEffect(() => {
     if (!allUsers || allUsers.length === 0) return;
+    const immediateExpiredUids: string[] = [];
+
     allUsers.forEach(u => {
       if (u && u.uid && u.role !== 'admin' && u.role !== 'owner') {
         const prevStatus = prevUsersMapRef.current.get(u.uid);
-        if (u.status === 'expired' && prevStatus && prevStatus !== 'expired') {
+        if (prevStatus !== undefined && prevStatus !== 'expired' && u.status === 'expired') {
           changedToExpiredUidsRef.current.add(u.uid);
+          immediateExpiredUids.push(u.uid);
         }
         prevUsersMapRef.current.set(u.uid, u.status || '');
       }
     });
-  }, [allUsers]);
+
+    if (immediateExpiredUids.length > 0 && (profile?.role === 'admin' || profile?.role === 'owner')) {
+      console.log(`[UserManagement Live] Status changed to expired for ${immediateExpiredUids.length} user(s). Sending immediate notification.`);
+      sendImmediateExpiryNotifications(immediateExpiredUids);
+    }
+  }, [allUsers, profile?.role, sendImmediateExpiryNotifications]);
 
   // Fetch fresh data on mount and force sync on unmount
   const { checkForUpdates } = useAdminContent();
@@ -262,6 +325,33 @@ export default function UserManagement() {
         
         // Delta sync users using chunk_meta (cooldown prevents redundant server queries)
         const res = await refreshUsers(false);
+        const freshUsers = res?.users || allUsers || [];
+
+        // Check for users whose status changed to 'expired' or who are expired without having received notice
+        if ((profile?.role === 'admin' || profile?.role === 'owner') && !isInitialMountCheckDoneRef.current) {
+          isInitialMountCheckDoneRef.current = true;
+          const todayStr = new Date().toISOString().split('T')[0];
+          const unnotifiedExpiredUids: string[] = [];
+
+          freshUsers.forEach(u => {
+            if (u && u.uid && u.role !== 'admin' && u.role !== 'owner') {
+              const prevStatus = initialMap.get(u.uid);
+              const isExpired = u.status === 'expired' || isUserExpired(u.expiryDate);
+              const expStr = u.expiryDate ? u.expiryDate.split('T')[0] : todayStr;
+              const notYetNotified = !u.expiryNoticeSent || (u.expiryNoticeSentDate !== expStr && u.lastExpiryNoticeFor !== (u.expiryDate || todayStr));
+
+              if (isExpired && (prevStatus === 'active' || notYetNotified)) {
+                unnotifiedExpiredUids.push(u.uid);
+              }
+            }
+          });
+
+          if (unnotifiedExpiredUids.length > 0) {
+            console.log(`[UserManagement Mount] Found ${unnotifiedExpiredUids.length} expired user(s) requiring immediate notification on tab open:`, unnotifiedExpiredUids);
+            sendImmediateExpiryNotifications(unnotifiedExpiredUids, freshUsers);
+          }
+        }
+
         if (mounted) {
           if (res?.updatedSomething) {
             window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'success', message: 'Users refreshed successfully' } }));
@@ -286,11 +376,11 @@ export default function UserManagement() {
     return () => {
       mounted = false;
 
-      // Email notification for Expiry only triggered by admin and owner when exiting User Management tab
+      // Email notification fallback for any remaining unnotified expired users when exiting User Management tab
       if ((profile?.role === 'admin' || profile?.role === 'owner') && changedToExpiredUidsRef.current.size > 0 && profile?.uid) {
         const expiredUids = Array.from(changedToExpiredUidsRef.current);
         if (expiredUids.length > 0) {
-          console.log(`[UserManagement Exit] Triggering expiry notifications for ${expiredUids.length} user(s):`, expiredUids);
+          console.log(`[UserManagement Exit] Triggering exit expiry check fallback for ${expiredUids.length} user(s):`, expiredUids);
           fetch('/api/notifications/check-expiry', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -304,7 +394,7 @@ export default function UserManagement() {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, location.pathname]);
+  }, [authLoading, location.pathname, profile?.role, profile?.uid, sendImmediateExpiryNotifications]);
 
   // Handle page unload for hard refreshes
   useEffect(() => {
@@ -565,12 +655,29 @@ export default function UserManagement() {
         updateData.status = 'active'; // ensure user is active since they bought membership
       }
 
+      const isBecomingExpired = (updateData.status === 'expired' || (updateData.expiryDate && isUserExpired(updateData.expiryDate))) && ((selectedUser.role as string) !== 'owner' && (selectedUser.role as string) !== 'admin');
+      
+      if (isBecomingExpired) {
+        const todayStr = new Date().toISOString().split('T')[0];
+        updateData.status = 'expired';
+        updateData.expiryNoticeSent = true;
+        updateData.expiryNoticeSentDate = todayStr;
+        updateData.lastExpiryNoticeFor = updateData.expiryDate || selectedUser.expiryDate || todayStr;
+      } else if (updateData.status === 'active') {
+        updateData.expiryNoticeSent = false;
+      }
+
       const currentEditingId = editingId;
       const previousRole = selectedUser.role;
       const newRole = editForm.role;
 
       updateUserFields(currentEditingId, updateData);
       await finalizeUserChanges(true);
+
+      // If status became expired and was previously active, immediately send expiry notifications
+      if (isBecomingExpired && selectedUser.status === 'active') {
+        sendImmediateExpiryNotifications([currentEditingId]);
+      }
 
       // Send membership update notification to enabled services if expiry date changed
       if (updateData.expiryDate !== undefined && updateData.expiryDate !== selectedUser.expiryDate) {
@@ -1130,16 +1237,36 @@ export default function UserManagement() {
     setSelectedUsers([]);
     
     try {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const expiredUidsToSend: string[] = [];
+      const batchUpdates: Record<string, Partial<UserProfile>> = {};
+
       currentSelected.forEach(uid => {
         const user = users.find(u => u.uid === uid);
-        if (user?.role !== 'owner') {
-          updateUserFields(uid, { status });
+        if (user?.role !== 'owner' && user?.role !== 'admin') {
+          const userUpdates: Partial<UserProfile> = { status };
           if (status === 'expired') {
-            changedToExpiredUidsRef.current.add(uid);
+            userUpdates.expiryNoticeSent = true;
+            userUpdates.expiryNoticeSentDate = todayStr;
+            userUpdates.lastExpiryNoticeFor = user?.expiryDate || todayStr;
+            if (user?.status === 'active') {
+              expiredUidsToSend.push(uid);
+            }
+          } else if (status === 'active') {
+            userUpdates.expiryNoticeSent = false;
           }
+          batchUpdates[uid] = userUpdates;
         }
       });
-      await finalizeUserChanges(true);
+
+      if (Object.keys(batchUpdates).length > 0) {
+        updateMultipleUserFields(batchUpdates);
+        await finalizeUserChanges(true);
+      }
+
+      if (status === 'expired' && expiredUidsToSend.length > 0) {
+        sendImmediateExpiryNotifications(expiredUidsToSend);
+      }
     } catch (error) {
       console.error('Error updating users:', error);
       setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to update users' });
@@ -1508,7 +1635,7 @@ export default function UserManagement() {
                        console.warn("Finalize user changes warning:", e);
                      }
                    }
-                   // 2. Refresh users (uses saved chunk meta during 60s cooldown, or fetches server if cooldown expired)
+                   // 2. Refresh users (bypasses all cooldowns, fetches fresh chunk meta and immediately refreshes changed users)
                    const res = await refreshUsers(true);
                    return res;
                 };

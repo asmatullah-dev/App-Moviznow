@@ -110,10 +110,10 @@ export function isGenericTitle(str: string): boolean {
   if (!str) return true;
   const s = str.trim().toLowerCase();
   if (s.length < 3) return true;
-  if (/^\[?\s*(?:download|direct download|direct|hubcloud|vcloud|link|server|click|fast server|gdrive|stream|watch|480p?|720p?|1080p?|2160p?|4k|direct link)\s*\]?$/i.test(s)) return true;
-  if (/^(direct|download|hubcloud|vcloud)\s*\[?\s*\d{3,4}p?\s*\]?$/i.test(s)) return true;
+  if (/^\[?\s*(?:filesdl|download|direct download|direct|hubcloud|vcloud|link|server|click|fast server|gdrive|stream|watch|480p?|720p?|1080p?|2160p?|4k|direct link)\s*\]?$/i.test(s)) return true;
+  if (/^(direct|download|hubcloud|vcloud|filesdl)\s*\[?\s*\d{3,4}p?\s*\]?$/i.test(s)) return true;
   if (/^\[?\s*\d{3,4}p?\s*\]?$/i.test(s)) return true;
-  if (/just a moment|cloudflare|ddos protection|attention required/i.test(s)) return true;
+  if (/just a moment|cloudflare|ddos protection|attention required|bookmark new domain|join our telegram|notice:|warning:/i.test(s)) return true;
   return false;
 }
 
@@ -173,44 +173,48 @@ export function parseHubcloudHtmlTitle($: cheerio.CheerioAPI, htmlData: string):
   let rawTitle = "";
 
   if ($) {
-    const filenameElements = [
-      $('.file-name, #file-name, .filename, #filename, [class*="filename"], [class*="file-name"]'),
-      $('td:contains("File Name"), td:contains("Filename")').next('td'),
-      $('li:contains("File Name"), li:contains("Filename")'),
-      $('div:contains("File Name:"), p:contains("File Name:"), span:contains("File Name:")'),
-      $('strong:contains("File Name:"), b:contains("File Name:")'),
-      $('.card-header'),
-      $('.card-title'),
-      $('h1'),
-      $('h2'),
-      $('h3'),
-      $('title')
+    const candidateSelectors = [
+      '.file-name, #file-name, .filename, #filename, [class*="filename"], [class*="file-name"]',
+      'td:contains("File Name"), td:contains("Filename")',
+      '.card-header, .card-title, .header-title',
+      'h1, h2, h3',
+      'title'
     ];
 
-    for (const element of filenameElements) {
-      if (element && element.length > 0) {
-        element.each((_, el) => {
+    for (const sel of candidateSelectors) {
+      const elements = $(sel);
+      if (elements && elements.length > 0) {
+        elements.each((_, el) => {
           let text = $(el).text().trim();
-          if (text.includes(':')) {
-            const parts = text.split(':');
-            text = parts.slice(1).join(':').trim();
+          if ($(el).is('td') && $(el).next('td').length > 0) {
+            text = $(el).next('td').text().trim();
           }
+          // Remove explicit "File Name:" or "Filename:" prefix
+          text = text.replace(/^(?:file\s*name|filename|title|name)\s*:\s*/i, '').trim();
+          text = text.replace(/^Notice:.*$/i, '').trim();
+
           if (text && !isGenericTitle(text)) {
-            if (!rawTitle || (isGenericTitle(rawTitle) && !isGenericTitle(text)) || (text.length > rawTitle.length && !isGenericTitle(text))) {
+            const isMediaTitle = /\.(?:mkv|mp4|avi|webm|zip|rar)\b/i.test(text) ||
+                                 /\b(480p|720p|1080p|2160p|4k|hevc|bluray|web-dl|hdrip|dual audio)\b/i.test(text) ||
+                                 /\b(19\d\d|20\d\d)\b/.test(text);
+
+            if (!rawTitle || isGenericTitle(rawTitle)) {
+              rawTitle = text;
+            } else if (isMediaTitle && (!/\.(?:mkv|mp4|avi|webm)\b/i.test(rawTitle) || text.length > rawTitle.length)) {
               rawTitle = text;
             }
           }
         });
       }
-      if (rawTitle && !isGenericTitle(rawTitle) && rawTitle.length > 8) {
+      if (rawTitle && !isGenericTitle(rawTitle) && (/\.(?:mkv|mp4|avi|webm)\b/i.test(rawTitle) || rawTitle.length > 12)) {
         break;
       }
     }
   }
 
   if ((!rawTitle || isGenericTitle(rawTitle)) && htmlData) {
-    const fnMatch = htmlData.match(/(?:file\s*name|filename|title|name)\s*[:=]\s*["']?([^"'\n\r<>{}]+)["']?/i) ||
-                    htmlData.match(/class=["']?(?:file-name|filename|card-header|card-title)["']?[^>]*>([^<]+)</i) ||
+    const fnMatch = htmlData.match(/(?:file\s*name|filename)\s*[:=]\s*["']?([^"'\n\r<>{}]+)["']?/i) ||
+                    htmlData.match(/class=["']?(?:file-name|filename|card-header|header-title)["']?[^>]*>([^<]+)</i) ||
                     htmlData.match(/([a-zA-Z0-9._\-\s\[\]()]{6,}\.(?:mkv|mp4|avi|webm|zip|rar))/i);
     if (fnMatch && fnMatch[1] && !isGenericTitle(fnMatch[1])) {
       rawTitle = fnMatch[1].trim();
@@ -710,7 +714,9 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
       }
 
       const candidateLinks: { text: string; href: string }[] = [];
-      $2("a.btn").each((i, el) => {
+      const seenCandidateUrls = new Set<string>();
+
+      $2('a.btn, a[class*="btn"], a[id], .btn a, a[href*="pixeldrain"], a[href*="workers.dev"], a[href*="fsl"], a[href*="bbdownload"], a[href*="download"], a[href*="drive"]').each((i, el) => {
         let href = $2(el).attr("href") || "";
         const text = $2(el).text().toLowerCase();
         const id = $2(el).attr("id");
@@ -752,7 +758,8 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
             }
           });
         }
-        if (href && !text.includes("telegram")) {
+        if (href && !text.includes("telegram") && !href.includes("telegram") && !seenCandidateUrls.has(href)) {
+          seenCandidateUrls.add(href);
           candidateLinks.push({ text, href });
         }
       });

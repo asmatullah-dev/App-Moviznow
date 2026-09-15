@@ -1,4 +1,4 @@
-import { linkExtractionRouter, getCachedHubcloudData, setCachedHubcloudData, parseSeasonEpisode, parseHubcloudHtmlTitle, fetchHtml } from "./_LinkExtractionModal.js";
+import { linkExtractionRouter, getCachedHubcloudData, setCachedHubcloudData, parseSeasonEpisode, parseHubcloudHtmlTitle, isGenericTitle, fetchHtml } from "./_LinkExtractionModal.js";
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -2577,6 +2577,8 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       // Remove sidebars, recommended/trending posts, and footers so we only extract links belonging to this specific movie
       $("aside, .sidebar, #secondary, .widget, .related-posts, .related, .trending, .popular-posts, .popular, footer, #footer, #comments").remove();
 
+      const pageMovieTitle = $("h1").first().text().trim() || $("title").first().text().replace(/[-–|]\s*Filmy(?:Cab|Go).*$/i, '').trim();
+
       const $mainContainer = $(".entry-content, .post-content, article, main, .entry").length > 0
         ? $(".entry-content, .post-content, article, main, .entry")
         : $("body");
@@ -2621,13 +2623,16 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
 
           const lower = label.toLowerCase();
           const hasHindiLine = /\bhindi\b.*?\bline\b/.test(lower);
+          const isHQ = lower.includes("hq");
 
           if (lower.includes("480p") && lower.includes("hevc")) label = "Download Now 480p HEVC";
           else if (lower.includes("720p") && lower.includes("hevc")) label = "Download Now 720p HEVC";
           else if (lower.includes("1080p") && lower.includes("hevc")) label = "Download Now 1080p HEVC";
+          else if (lower.includes("1080p") && isHQ) label = "Download Now 1080p HQ";
           else if (lower.includes("480p")) label = "Download Now 480p";
           else if (lower.includes("720p")) label = "Download Now 720p";
           else if (lower.includes("1080p")) label = "Download Now 1080p";
+          else if (lower.includes("4k") || lower.includes("2160p")) label = "Download Now 4K";
 
           if (hasHindiLine && !label.includes("Hindi (Line)")) {
             label += " Hindi (Line)";
@@ -2694,10 +2699,35 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         visited.add(startUrl);
 
         try {
-          const { html: htmlText, finalUrl: resolvedStartUrl } = await fetchWithVddos(startUrl, undefined, 8000);
-          const finalUrl = resolvedStartUrl || startUrl;
+          let htmlText = "";
+          let finalUrl = startUrl;
+
+          try {
+            const fetched = await fetchWithVddos(startUrl, undefined, 15000);
+            htmlText = fetched.html;
+            finalUrl = fetched.finalUrl || startUrl;
+          } catch (fetchErr) {
+            try {
+              const res = await axios.get(startUrl, {
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                timeout: 12000,
+                maxRedirects: 5
+              });
+              htmlText = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+            } catch (e2) {}
+          }
+
           if (finalUrl && finalUrl !== startUrl) {
             visited.add(finalUrl);
+          }
+
+          const $doc = cheerio.load(htmlText);
+          let pageFileName = $doc("h1").first().text().trim() ||
+                             $doc(".file-name, #file-name, .filename, .card-header").first().text().trim() ||
+                             $doc("title").first().text().replace(/[-–|]\s*FilesDL.*$/i, '').trim();
+
+          if (pageFileName) {
+            pageFileName = pageFileName.replace(/^Notice:.*$/i, '').replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
           }
 
           // Direct match for HubCloud / VCloud / HubDrive / Mdrive / FastDL / FilePress
@@ -2715,7 +2745,10 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
                               htmlText.match(/(\d+(?:\.\d+)?\s*(?:GB|MB|KB))/i);
             const size = sizeMatch ? sizeMatch[1].toUpperCase() : null;
 
-            let finalName = parentLabel || "HubCloud Link";
+            const cleanLabelQuality = parentLabel.replace(/^Download\s*(Now\s*)?/i, '').trim();
+            const fallbackName = pageMovieTitle ? `${pageMovieTitle} [${cleanLabelQuality}]` : parentLabel;
+            let finalName = (!pageFileName || isGenericTitle(pageFileName)) ? fallbackName : pageFileName;
+
             if (size) {
               const escapedSize = size.replace(/\./g, '\\.');
               finalName = finalName.replace(new RegExp(`\\[?${escapedSize}\\]?`, 'gi'), "").trim();
@@ -2775,9 +2808,11 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
 
               if (anchorText && !/^(direct\s*)?download(\s*now)?$/i.test(anchorText)) {
                 let resLabel = "";
+                const isHQ = lowerAnchor.includes("hq");
                 if (lowerAnchor.includes("480p") && lowerAnchor.includes("hevc")) resLabel = "Download Now 480p HEVC";
                 else if (lowerAnchor.includes("720p") && lowerAnchor.includes("hevc")) resLabel = "Download Now 720p HEVC";
                 else if (lowerAnchor.includes("1080p") && lowerAnchor.includes("hevc")) resLabel = "Download Now 1080p HEVC";
+                else if (lowerAnchor.includes("1080p") && isHQ) resLabel = "Download Now 1080p HQ";
                 else if (lowerAnchor.includes("480p")) resLabel = "Download Now 480p";
                 else if (lowerAnchor.includes("720p")) resLabel = "Download Now 720p";
                 else if (lowerAnchor.includes("1080p")) resLabel = "Download Now 1080p";
@@ -2824,8 +2859,10 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
 
           // If startUrl itself is a HubCloud URL, return it; otherwise return empty array
           if (isHubCloudUrl(startUrl)) {
+            const cleanLabelQuality = parentLabel.replace(/^Download\s*(Now\s*)?/i, '').trim();
+            const fallbackName = pageMovieTitle ? `${pageMovieTitle} [${cleanLabelQuality}]` : parentLabel;
             return [{
-              file_name: parentLabel || "HubCloud Link",
+              file_name: fallbackName || "HubCloud Link",
               url: normalizeDomain(startUrl),
               size: null,
               is_direct: true,
@@ -2834,8 +2871,10 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
           return [];
         } catch (e) {
           if (isHubCloudUrl(startUrl)) {
+            const cleanLabelQuality = parentLabel.replace(/^Download\s*(Now\s*)?/i, '').trim();
+            const fallbackName = pageMovieTitle ? `${pageMovieTitle} [${cleanLabelQuality}]` : parentLabel;
             return [{
-              file_name: parentLabel || "HubCloud Link",
+              file_name: fallbackName || "HubCloud Link",
               url: normalizeDomain(startUrl),
               size: null,
               is_direct: true,
@@ -2856,30 +2895,35 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         index === self.findIndex((t) => t.url === hit.url)
       );
 
-      // Deduplicate Hubdrive vs Hubcloud based on file_name
+      // Deduplicate Hubdrive vs Hubcloud based on url path & file name
       const dedupedHits: any[] = [];
-      const seenFiles = new Map<string, string>();
-      
+      const seenUrls = new Set<string>();
+      const seenKeys = new Map<string, { hit: any; index: number }>();
+
       for (const hit of finalHits) {
-         const isHubdrive = hit.url.includes('hubdrive.');
-         const existing = seenFiles.get(hit.file_name);
-         
-         if (existing) {
-             if (isHubdrive && !existing.includes('hubdrive.')) {
-                 continue;
-             }
-             if (!isHubdrive && existing.includes('hubdrive.')) {
-                 const idx = dedupedHits.findIndex(h => h.file_name === hit.file_name && h.url === existing);
-                 if (idx !== -1) dedupedHits.splice(idx, 1);
-                 dedupedHits.push(hit);
-                 seenFiles.set(hit.file_name, hit.url);
-                 continue;
-             }
-             continue;
-         }
-         
-         dedupedHits.push(hit);
-         seenFiles.set(hit.file_name, hit.url);
+        if (!hit.url || seenUrls.has(hit.url)) continue;
+        seenUrls.add(hit.url);
+
+        const isHubdrive = hit.url.includes('hubdrive.');
+        const normPath = hit.url.replace(/^https?:\/\/[^\/]+/, '');
+        const key = `${hit.file_name}__${hit.size || ''}__${normPath}`;
+
+        if (seenKeys.has(key)) {
+          const existing = seenKeys.get(key)!;
+          if (isHubdrive && !existing.hit.url.includes('hubdrive.')) {
+            continue; // Keep hubcloud over hubdrive
+          }
+          if (!isHubdrive && existing.hit.url.includes('hubdrive.')) {
+            dedupedHits[existing.index] = hit; // Replace hubdrive with hubcloud
+            seenKeys.set(key, { hit, index: existing.index });
+            continue;
+          }
+          continue;
+        }
+
+        const newIndex = dedupedHits.length;
+        dedupedHits.push(hit);
+        seenKeys.set(key, { hit, index: newIndex });
       }
       finalHits = dedupedHits;
       
@@ -3734,7 +3778,34 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
 
         try {
           if (Array.isArray(targetUserIds) && targetUserIds.length > 0) {
-            const messages: any[] = targetUserIds.map((uid: string) => ({
+            let activeUserIds = targetUserIds;
+            if (db) {
+              const filteredList: string[] = [];
+              for (const uid of targetUserIds) {
+                try {
+                  const uDoc = await db.collection("users").doc(uid).get();
+                  if (uDoc.exists) {
+                    const uData = uDoc.data() || {};
+                    const isFcmAllowed =
+                      uData.notificationPreferences?.fcm?.enabled !== false &&
+                      uData.notification !== "no" &&
+                      !uData.isFcmDisabled;
+                    if (isFcmAllowed) filteredList.push(uid);
+                  } else {
+                    filteredList.push(uid);
+                  }
+                } catch (e) {
+                  filteredList.push(uid);
+                }
+              }
+              activeUserIds = filteredList;
+            }
+
+            if (activeUserIds.length === 0) {
+              return res.json({ success: true, successCount: 0, failureCount: 0, message: "No active users with FCM enabled." });
+            }
+
+            const messages: any[] = activeUserIds.map((uid: string) => ({
               notification: {
                 title,
                 body,
