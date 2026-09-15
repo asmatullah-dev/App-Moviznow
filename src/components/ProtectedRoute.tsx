@@ -24,15 +24,15 @@ export function ProtectedRoute({ children, requireAdmin = false, requireAuth = f
   const [isSavingWhatsapp, setIsSavingWhatsapp] = useState(false);
 
   React.useEffect(() => {
-    // Ultra-fast safety cap: max 120ms wait for fresh/uncached auth resolution
+    // Safety cap: allow Firebase auth to resolve from persistence without premature timeouts
     const timer = setTimeout(() => {
       setMaxWaitReached(true);
-    }, 120);
+    }, 3000);
 
-    // Safety cap for admin profile check: max 2000ms
+    // Safety cap for admin profile check: max 2500ms
     const adminTimer = setTimeout(() => {
       setAdminWaitReached(true);
-    }, 2000);
+    }, 2500);
 
     return () => {
       clearTimeout(timer);
@@ -42,7 +42,7 @@ export function ProtectedRoute({ children, requireAdmin = false, requireAuth = f
 
   const hasCachedUser = !!user || !!profile || !!safeStorage.getItem('profile_cache');
 
-  // Only show loading screen if requireAuth or requireAdmin is requested and auth is still initializing within the fast safety window
+  // Only show loading screen if requireAuth or requireAdmin is requested and auth is still initializing
   const isChecking = (requireAuth || requireAdmin) && !hasCachedUser && authLoading && !maxWaitReached;
 
   if (isChecking) {
@@ -57,16 +57,18 @@ export function ProtectedRoute({ children, requireAdmin = false, requireAuth = f
     );
   }
 
-  // If this route strictly requires an authenticated user or admin
-  if ((requireAuth || requireAdmin) && !user && !profile) {
+  // If this route strictly requires an authenticated user or admin, wait until authLoading is false
+  if ((requireAuth || requireAdmin) && !authLoading && !user && !profile) {
     console.log('ProtectedRoute: Protected route requires authentication, redirecting to login', location);
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // If we're using a cached profile but wait... if suspended, still redirect
-  if (profile?.status === 'suspended') {
-    console.log('ProtectedRoute: User is suspended, redirecting to login');
-    return <Navigate to="/login" state={{ from: location, suspended: true }} replace />;
+  // If we're using a cached profile but wait... if suspended or deleted, still redirect
+  const isSuspended = profile?.status === 'suspended';
+  const isDeleted = (profile?.status as any) === 'deleted';
+  if (isSuspended || isDeleted) {
+    console.log('ProtectedRoute: User is suspended or deleted, redirecting to login');
+    return <Navigate to="/login" state={{ from: location, suspended: isSuspended, deleted: isDeleted }} replace />;
   }
 
   // Check for Whatsapp number

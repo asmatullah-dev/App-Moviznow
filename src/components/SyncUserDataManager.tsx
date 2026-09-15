@@ -373,15 +373,7 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
     return true;
   } catch (err: any) {
     console.error('Failed to sync user data to Firestore:', err);
-    if (err && (err.code === 'permission-denied' || err.message?.includes('permission') || err.message?.includes('not-found'))) {
-      console.warn("Permission denied or user document missing. Clearing local queues and signing out.");
-      safeStorage.removeItem('needs_user_sync');
-      safeStorage.removeItem('profile_cache');
-      const { signOut } = await import('firebase/auth');
-      await signOut(auth).catch(() => {});
-    } else {
-      safeStorage.setItem('needs_user_sync', 'true');
-    }
+    safeStorage.setItem('needs_user_sync', 'true');
     return false;
   }
 }

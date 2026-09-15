@@ -5,6 +5,46 @@ import { normalizeDomain } from './_domainUtils.js';
 
 export const linkExtractionRouter = Router();
 
+export function isExtractableIntermediate(u?: string): boolean {
+  if (!u || typeof u !== 'string') return false;
+  const l = u.toLowerCase();
+  return (
+    l.includes("hubcloud") ||
+    l.includes("hubcould") ||
+    l.includes("vcloud") ||
+    l.includes("hubdrive") ||
+    l.includes("moviesdrive") ||
+    l.includes("skymovies") ||
+    l.includes("mdrive") ||
+    l.includes("filmygo") ||
+    l.includes("gadgetsyn") ||
+    l.includes("techy") ||
+    l.includes("drivehub") ||
+    l.includes("gdflix") ||
+    l.includes("filepress") ||
+    l.includes("fastdl") ||
+    l.includes("filesdl") ||
+    l.includes("linkmake")
+  );
+}
+
+export function hasValidDirectLink(data: any, originalUrl: string): boolean {
+  if (!data) return false;
+  if (data.url && typeof data.url === 'string') {
+    const trimmed = data.url.trim();
+    if (trimmed !== originalUrl && !isExtractableIntermediate(trimmed)) {
+      return true;
+    }
+  }
+  if (Array.isArray(data.candidates) && data.candidates.length > 0) {
+    const hasDirectCandidate = data.candidates.some(
+      (c: any) => c && c.href && !isExtractableIntermediate(c.href)
+    );
+    if (hasDirectCandidate) return true;
+  }
+  return false;
+}
+
 const extractionCache = new Map<string, { data: any, timestamp: number }>();
 const inFlightRequests = new Map<string, Promise<any>>();
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutes cache
@@ -34,8 +74,11 @@ export function setCachedHubcloudData(url: string, data: any) {
   const item = { data, timestamp: Date.now() };
   extractionCache.set(`extract_${url}`, item);
   extractionCache.set(`extract_${normalizedUrl}`, item);
-  extractionCache.set(`direct_${url}_false`, item);
-  extractionCache.set(`direct_${normalizedUrl}_false`, item);
+  // Only cache as direct if it actually resolved to a direct link!
+  if (hasValidDirectLink(data, url)) {
+    extractionCache.set(`direct_${url}_false`, item);
+    extractionCache.set(`direct_${normalizedUrl}_false`, item);
+  }
 }
 
 export function parseSeasonEpisode(text: string): {
@@ -890,7 +933,7 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
 
       if (finalExtractedData.title || finalExtractedData.original_title) {
         setCachedHubcloudData(url, finalExtractedData);
-        if (workingLink && workingLink !== url) {
+        if (workingLink && workingLink !== url && hasValidDirectLink(finalExtractedData, url)) {
           setCachedHubcloudData(workingLink, finalExtractedData);
         }
       }
@@ -924,7 +967,14 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
       
       const cached = extractionCache.get(cacheKey);
       if (!force && cached && Date.now() - cached.timestamp < CACHE_TTL) {
-        return res.json(cached.data);
+        if (isCheckOnly) {
+          return res.json(cached.data);
+        }
+        if (hasValidDirectLink(cached.data, url)) {
+          return res.json(cached.data);
+        }
+        // Cached entry did not contain a valid direct link - delete it and re-extract!
+        extractionCache.delete(cacheKey);
       }
 
       // In-flight coalescing
@@ -954,10 +1004,11 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
            return res.json(responseData);
         }
 
-        // Cache if extraction found valid candidates, size, or changed url
-        const isSuccessfulLink = data && ((data.candidates && data.candidates.length > 0) || (data.url && data.url !== url) || data.title);
-        if (isSuccessfulLink) {
+        // Cache ONLY if the extraction actually produced a valid direct link!
+        if (hasValidDirectLink(data, url)) {
            extractionCache.set(cacheKey, { data, timestamp: Date.now() });
+        } else {
+           extractionCache.delete(cacheKey);
         }
         return res.json(data);
       } catch (err) {

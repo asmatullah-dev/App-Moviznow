@@ -308,8 +308,6 @@ export default function UserManagement() {
 
     const syncOnMount = async () => {
       try {
-        window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'syncing', message: 'Refreshing users...' } }));
-        
         // Record initial statuses before refresh
         const initialMap = new Map((allUsers || []).map(u => [u.uid, u.status]));
 
@@ -356,18 +354,11 @@ export default function UserManagement() {
           }
         }
 
-        if (mounted) {
-          if (res?.updatedSomething) {
-            window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'success', message: 'Users refreshed successfully' } }));
-          } else {
-            window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'up-to-date', message: 'Users are up to date' } }));
-          }
+        if (mounted && res?.updatedSomething) {
+          window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'success', message: 'Users refreshed successfully' } }));
         }
       } catch (err) {
         console.error("Refresh users failed on tab open:", err);
-        if (mounted) {
-          window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'error', message: 'Failed to refresh users' } }));
-        }
       }
     };
 

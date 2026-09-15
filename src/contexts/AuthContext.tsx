@@ -92,8 +92,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Ensure local persistence mode before doing any auth logic to prevent unexpected logouts
-setPersistence(auth, browserLocalPersistence).catch(console.error);
+// Local persistence is initialized in src/firebase.ts to ensure consistent session retention
 
 export const standardizePhone = (phone: string) => {
   if (!phone) return "";
@@ -396,16 +395,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // 1. Firstly read chunk_meta
         let serverVersion: any = localVersion;
         let isVersionMissing = false;
+        let isChunkMetaChecked = false;
+        let isUidInChunkMeta = false;
         if (navigator.onLine) {
           setIsSyncing(true);
           try {
             const { getChunkMeta } = await import("../utils/chunkMeta");
             const meta = await getChunkMeta(force);
             const chunkUsersMeta = meta.users || {};
+            isChunkMetaChecked = true;
             if (currentUser.uid in chunkUsersMeta) {
               serverVersion = chunkUsersMeta[currentUser.uid];
+              const verObj = typeof serverVersion === 'object' ? serverVersion : null;
+              if (serverVersion === -1 || verObj?.deleted) {
+                isUidInChunkMeta = false;
+                isVersionMissing = true;
+              } else {
+                isUidInChunkMeta = true;
+              }
             } else {
               isVersionMissing = true;
+              isUidInChunkMeta = false;
             }
           } catch (e) {
             console.error("Failed to fetch chunk_meta for profile:", e);
@@ -419,52 +429,70 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           (serverVersionTime > 0 && serverVersionTime > localVersionTime) || (!localProfile);
 
         let serverProfile: UserProfile | null = null;
-        let docSnap;
+        let docSnap: any = undefined;
 
-        // 7. Verify user profile in Firestore when online if force, version changed, 10 hours passed, or profile missing
-        if (navigator.onLine && (force || versionChanged || is10HourSyncPassed || !localProfile)) {
+        // 7. Verify user profile in Firestore when online if force, version changed, 10 hours passed, profile missing, or UID missing/deleted in chunk_meta
+        if (navigator.onLine && (force || versionChanged || is10HourSyncPassed || !localProfile || isVersionMissing || !isUidInChunkMeta)) {
           try {
             docSnap = await runWithNetwork(() => getDoc(userRef));
             if (docSnap.exists()) {
               serverProfile = docSnap.data() as UserProfile;
               updatedSomething = true;
-            } else if (!justLoggedInRef.current) {
-              console.warn(
-                `User UID ${currentUser.uid} not found in Firestore. Logging out and routing to login.`,
+            } else {
+              console.log(
+                `User UID ${currentUser.uid} document not found in Firestore user data.`
               );
-              safeStorage.removeItem("profile_cache");
-              safeStorage.removeItem("profile_doc_snap");
-              safeStorage.removeItem(`profile_version_${currentUser.uid}`);
-              localStorage.removeItem("session_started");
-              setProfile(null);
-              setUser(null);
-              setLoading(false);
-              await signOut(auth).catch(() => {});
-              return false;
             }
           } catch (e) {
             console.error(
               "Error reading user data from Firestore, using local fallback",
               e,
             );
-            if (!localProfile) {
-              // Can't run without local profile if getDoc fails
-              throw e;
+          }
+        }
+
+        // Check if user has been deleted and no UID available in chunk_meta or user data
+        if (navigator.onLine) {
+          const isDocCheckedAndMissing = docSnap !== undefined && !docSnap.exists();
+          const isDeletedInUserDoc = serverProfile && (serverProfile.status as any) === "deleted";
+          const isDeletedOrMissingInMeta = isChunkMetaChecked && !isUidInChunkMeta;
+
+          if (isDeletedInUserDoc || (isDeletedOrMissingInMeta && isDocCheckedAndMissing)) {
+            const isNewSignup =
+              justLoggedInRef.current ||
+              !!safeStorage.getItem("pending_signup_profile") ||
+              !!sessionStorage.getItem("pending_signup_phone") ||
+              (currentUser.metadata?.creationTime &&
+                Date.now() - new Date(currentUser.metadata.creationTime).getTime() < 3 * 60 * 1000);
+
+            if (!isNewSignup) {
+              console.warn(
+                `[AuthContext] User UID ${currentUser.uid} is deleted (no UID in chunk_meta or user data). Signing out and routing to login.`
+              );
+              safeStorage.removeItem("profile_cache");
+              safeStorage.removeItem("profile_doc_snap");
+              safeStorage.removeItem(`profile_version_${currentUser.uid}`);
+              localStorage.removeItem(`last_user_sync_time_v2_${currentUser.uid}`);
+              safeStorage.removeItem("needs_user_sync");
+              safeStorage.removeItem("pending_user_updates");
+              safeStorage.removeItem("pending_signup_profile");
+              sessionStorage.removeItem("session_started");
+              setProfile(null);
+              setUser(null);
+              setLoading(false);
+              await signOut(auth).catch(() => {});
+              window.location.replace("/login");
+              return false;
             }
           }
         }
 
         if (localProfile && localProfile.uid && localProfile.uid !== currentUser.uid) {
-          console.warn("UID mismatch between auth and local storage. Invalid user session.");
+          console.warn("UID mismatch between auth and local storage. Resetting local profile cache.");
           safeStorage.removeItem("profile_cache");
           safeStorage.removeItem("profile_doc_snap");
           safeStorage.removeItem(`profile_version_${currentUser.uid}`);
-          localStorage.removeItem("session_started");
-          setProfile(null);
-          setUser(null);
-          setLoading(false);
-          await signOut(auth).catch(() => {});
-          return false;
+          localProfile = null;
         }
 
         // 3. Update user data if changed versions then sync it with local storage version like time in app, favorites, watch later... merge data intelligently first in local storage
@@ -1168,27 +1196,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               }, {} as any);
             } else {
               // No existing matching profile found in search
-              const isNewSignup =
-                justLoggedInRef.current ||
-                !!safeStorage.getItem("pending_signup_profile") ||
-                !!sessionStorage.getItem("pending_signup_phone") ||
-                (currentUser.metadata?.creationTime &&
-                  Date.now() - new Date(currentUser.metadata.creationTime).getTime() < 3 * 60 * 1000);
+              if (isChunkMetaChecked && !isUidInChunkMeta) {
+                const isNewSignup =
+                  justLoggedInRef.current ||
+                  !!safeStorage.getItem("pending_signup_profile") ||
+                  !!sessionStorage.getItem("pending_signup_phone") ||
+                  (currentUser.metadata?.creationTime &&
+                    Date.now() - new Date(currentUser.metadata.creationTime).getTime() < 3 * 60 * 1000);
 
-              if (!isNewSignup) {
-                console.warn(
-                  `User UID ${currentUser.uid} was deleted from Firestore and no matching profile exists. Signing out safely.`,
-                );
-                safeStorage.removeItem("profile_cache");
-                safeStorage.removeItem("profile_doc_snap");
-                safeStorage.removeItem(`profile_version_${currentUser.uid}`);
-                localStorage.removeItem("session_started");
-                setProfile(null);
-                setUser(null);
-                setLoading(false);
-                await signOut(auth).catch(() => {});
-                return false;
+                if (!isNewSignup) {
+                  console.warn(
+                    `[AuthContext] User UID ${currentUser.uid} was deleted and no UID available in chunk_meta or user data. Signing out and routing to login.`
+                  );
+                  safeStorage.removeItem("profile_cache");
+                  safeStorage.removeItem("profile_doc_snap");
+                  safeStorage.removeItem(`profile_version_${currentUser.uid}`);
+                  localStorage.removeItem(`last_user_sync_time_v2_${currentUser.uid}`);
+                  safeStorage.removeItem("needs_user_sync");
+                  safeStorage.removeItem("pending_user_updates");
+                  safeStorage.removeItem("pending_signup_profile");
+                  sessionStorage.removeItem("session_started");
+                  setProfile(null);
+                  setUser(null);
+                  setLoading(false);
+                  await signOut(auth).catch(() => {});
+                  window.location.replace("/login");
+                  return false;
+                }
               }
+              console.log(
+                `No existing matching profile found for ${currentUser.uid}; initializing fresh profile.`
+              );
             }
           } catch (e) {
             console.error("Failed to check for existing accounts:", e);

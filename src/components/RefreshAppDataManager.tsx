@@ -108,11 +108,13 @@ export function RefreshAppDataManager() {
       // 3. Check self user version and refresh user profile
       if (user?.uid) {
         const chunkUsersMeta = versions.users || {};
-        const serverUserVer = chunkUsersMeta[user.uid] || 0;
+        const serverUserVer = chunkUsersMeta[user.uid];
         const localUserVer = safeStorage.getItem(`profile_version_${user.uid}`) || '0';
-        const serverUserTime = parseVersionTime(serverUserVer);
+        const serverUserTime = parseVersionTime(serverUserVer || 0);
         const localUserTime = parseVersionTime(localUserVer);
-        if (isManualTrigger || (serverUserTime > 0 && serverUserTime > localUserTime)) {
+        const isDeletedInChunkMeta = !(user.uid in chunkUsersMeta) || serverUserVer === -1 || (typeof serverUserVer === 'object' && (serverUserVer as any)?.deleted);
+
+        if (isDeletedInChunkMeta || isManualTrigger || (serverUserTime > 0 && serverUserTime > localUserTime)) {
           const profileFetched = await refreshProfile(true, 'manual').catch((err) => {
             console.error("Profile refresh failed:", err);
             return null;
@@ -187,20 +189,6 @@ export function RefreshAppDataManager() {
       }
     } catch (err: any) {
       console.error('Error during Unified Refresh & Sync:', err);
-
-      // Handle permission denied or user missing from database by forcing relogin
-      if (err && (err.code === 'permission-denied' || err.message?.includes('permission') || err.message?.includes('not-found'))) {
-        console.warn("Unified process received permission denied or document missing. Automatically proceeding for relogin.");
-        window.dispatchEvent(new CustomEvent('sync_status', {
-          detail: {
-            status: 'error',
-            message: 'Session invalid / user deleted. Logging out...'
-          }
-        }));
-        await logout().catch(() => {});
-        isRefreshingRef.current = false;
-        return;
-      }
 
       window.dispatchEvent(new CustomEvent('sync_status', {
         detail: {

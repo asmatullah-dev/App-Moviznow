@@ -51,6 +51,10 @@ export function normalizeUserStatusAndExpiry(u: UserProfile): UserProfile {
     u = { ...u, role: 'user' };
   }
 
+  if (u.status === 'deleted') {
+    return u;
+  }
+
   if (u.role === 'owner' || u.role === 'admin') {
     return { ...u, status: 'active', expiryDate: u.expiryDate || 'Lifetime' };
   }

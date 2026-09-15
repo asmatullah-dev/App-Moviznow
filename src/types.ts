@@ -1,5 +1,5 @@
 export type Role = 'owner' | 'admin' | 'vip' | 'basic' | 'user' | 'selected_content' | 'content_manager' | 'trial' | 'user_manager' | 'manager';
-export type Status = 'pending' | 'active' | 'expired' | 'suspended';
+export type Status = 'pending' | 'active' | 'expired' | 'suspended' | 'deleted';
 
 export interface FcmNotificationChannelSettings {
   enabled: boolean;
@@ -60,7 +60,7 @@ export interface UserProfile {
   permissions?: string[]; // Specific management access
   managedBy?: string; // UID of the User Manager who added this user
   isUserManager?: boolean; // Flag to keep user in User Managers list even if role changes
-  previousStatus?: 'active' | 'pending' | 'suspended' | 'expired'; // Store previous status when manager role changes
+  previousStatus?: Status; // Store previous status when manager role changes
   lastActive?: string; // ISO string
   updatedAt?: string; // ISO string
   requirePasswordReset?: boolean;

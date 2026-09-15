@@ -33,8 +33,11 @@ export function SyncBanner() {
       }
 
       const now = Date.now();
+      if (status === 'up-to-date' && lastEventKey.startsWith('up-to-date') && (now - lastEventTime < 5000)) {
+        return; // Prevent duplicate or chained up-to-date banners across components
+      }
       const currentKey = `${status}|${msg || ''}|${count || 0}|${initialLoad}`;
-      if (currentKey === lastEventKey && (now - lastEventTime < 2000)) {
+      if (currentKey === lastEventKey && (now - lastEventTime < 3000)) {
         return; // Ignore rapid duplicate identical event
       }
       lastEventKey = currentKey;
