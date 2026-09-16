@@ -30,23 +30,35 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const [isOpen, setIsOpen] = useState(false);
-  const [isRefreshingData, setIsRefreshingData] = useState(false);
+  const [isRefreshingData, setIsRefreshingData] = useState(() => Boolean((window as any).__isAppDataSyncing));
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
 
   useEffect(() => {
+    let safetyTimeout: NodeJS.Timeout | null = null;
     const handleSyncStatus = (e: any) => {
       if (e?.detail?.status === 'syncing') {
+        (window as any).__isAppDataSyncing = true;
         setIsRefreshingData(true);
+        if (safetyTimeout) clearTimeout(safetyTimeout);
+        safetyTimeout = setTimeout(() => {
+          (window as any).__isAppDataSyncing = false;
+          setIsRefreshingData(false);
+        }, 30000);
       } else if (
         e?.detail?.status === 'success' ||
         e?.detail?.status === 'error' ||
         e?.detail?.status === 'up-to-date'
       ) {
+        (window as any).__isAppDataSyncing = false;
         setIsRefreshingData(false);
+        if (safetyTimeout) clearTimeout(safetyTimeout);
       }
     };
     window.addEventListener('sync_status', handleSyncStatus);
-    return () => window.removeEventListener('sync_status', handleSyncStatus);
+    return () => {
+      window.removeEventListener('sync_status', handleSyncStatus);
+      if (safetyTimeout) clearTimeout(safetyTimeout);
+    };
   }, []);
   const menuRef = useRef<HTMLDivElement>(null);
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);

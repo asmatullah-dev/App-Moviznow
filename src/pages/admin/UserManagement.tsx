@@ -1614,7 +1614,7 @@ export default function UserManagement() {
               onClick={() => {
                 if (isManualRefreshing) return;
                 setIsManualRefreshing(true);
-                window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'syncing', message: 'Refreshing users...' } }));
+                window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'syncing', isManual: true, message: 'Refreshing users...' } }));
                 
                 const doSync = async () => {
                    // 1. Finalize any pending user edits first
@@ -1636,13 +1636,13 @@ export default function UserManagement() {
                 
                 doSync().then((res) => {
                   if (res?.updatedSomething) {
-                    window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'success', message: 'Users refreshed successfully' } }));
+                    window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'success', isManual: true, message: 'Users refreshed successfully' } }));
                   } else {
-                    window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'up-to-date', message: 'Users are up to date' } }));
+                    window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'up-to-date', isManual: true, message: 'Users are up to date' } }));
                   }
                 }).catch((err) => {
                   console.error("Manual refresh failed:", err);
-                  window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'error', message: 'Failed to refresh users' } }));
+                  window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'error', isManual: true, message: 'Failed to refresh users' } }));
                 }).finally(() => {
                   setIsManualRefreshing(false);
                 });

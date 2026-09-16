@@ -27,6 +27,7 @@ export function RefreshAppDataManager() {
           detail: {
             status: isManualTrigger ? 'success' : 'up-to-date',
             isInitialLoad: false,
+            isManual: isManualTrigger,
             updatedCount: 0,
             message: isManualTrigger ? 'Refresh successfully' : 'Data is up to date'
           }
@@ -41,6 +42,7 @@ export function RefreshAppDataManager() {
           detail: {
             status: isManualTrigger ? 'error' : 'up-to-date',
             isInitialLoad: false,
+            isManual: isManualTrigger,
             updatedCount: 0,
             message: isManualTrigger ? 'You are currently offline' : 'Data is up to date'
           }
@@ -63,12 +65,14 @@ export function RefreshAppDataManager() {
     }
 
     isRefreshingRef.current = true;
+    (window as any).__isAppDataSyncing = true;
 
-    // Dispatch start toast
+    // Dispatch start toast (spinning icon on both header button & user profile menu)
     window.dispatchEvent(new CustomEvent('sync_status', {
       detail: {
         status: 'syncing',
         isInitialLoad: false,
+        isManual: isManualTrigger,
         message: isManualTrigger ? 'Refreshing...' : 'Updating data...'
       }
     }));
@@ -164,6 +168,7 @@ export function RefreshAppDataManager() {
           detail: {
             status: 'success',
             isInitialLoad: false,
+            isManual: true,
             updatedCount: 0,
             message: 'Refresh successfully'
           }
@@ -173,6 +178,7 @@ export function RefreshAppDataManager() {
           detail: {
             status: 'success',
             isInitialLoad: false,
+            isManual: false,
             updatedCount: 0,
             message: 'Data updated successfully'
           }
@@ -182,6 +188,7 @@ export function RefreshAppDataManager() {
           detail: {
             status: 'up-to-date',
             isInitialLoad: false,
+            isManual: false,
             updatedCount: 0,
             message: 'Data is up to date'
           }
@@ -194,10 +201,12 @@ export function RefreshAppDataManager() {
         detail: {
           status: 'error',
           isInitialLoad: false,
-          message: 'Sync failed. Will retry automatically.'
+          isManual: isManualTrigger,
+          message: isManualTrigger ? 'Sync failed' : 'Sync failed. Will retry automatically.'
         }
       }));
     } finally {
+      (window as any).__isAppDataSyncing = false;
       isRefreshingRef.current = false;
     }
   }, [user, profile, refreshProfile, refreshSettings, refreshNotifications, logout]);

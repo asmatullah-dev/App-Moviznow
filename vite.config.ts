@@ -63,7 +63,7 @@ export default defineConfig(({mode}) => {
             }
           ],
           importScripts: ['/firebase-messaging-sw.js'],
-          maximumFileSizeToCacheInBytes: 5 * 1024 * 1024
+          maximumFileSizeToCacheInBytes: 15 * 1024 * 1024
         },
         manifest: {
           name: 'MovizNow',

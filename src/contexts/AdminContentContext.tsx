@@ -996,12 +996,14 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         return { updated: false, updatedContentCount: 0, isInitialLoad: false };
     }
     
-    // Proceed with sync - ALWAYS show 'syncing' toast when updating data (both scheduled and force)
+    // Proceed with sync
+    (window as any).__isAppDataSyncing = true;
     window.dispatchEvent(new CustomEvent('sync_status', {
       detail: {
         status: 'syncing',
+        isManual: force,
         isInitialLoad: noLocalData || isLibraryEmpty,
-        message: (noLocalData || isLibraryEmpty) ? 'Loading Data...' : 'Updating data...'
+        message: (noLocalData || isLibraryEmpty) ? 'Loading Data...' : (force ? 'Refreshing...' : 'Updating data...')
       }
     }));
 
@@ -1037,11 +1039,13 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     safeStorage.setItem('admin_last_meta_check_period', checkPeriod);
     safeStorage.setItem('admin_last_successful_meta_check', Date.now().toString());
     safeStorage.setItem('admin_has_completed_initial_sync', 'true');
+    (window as any).__isAppDataSyncing = false;
 
     if (isInitialLoadDone || (isLibraryEmpty && updatedSomething)) {
         window.dispatchEvent(new CustomEvent('sync_status', {
           detail: {
             status: 'success',
+            isManual: force,
             isInitialLoad: true,
             updatedContentCount: 0,
             message: 'Loaded All Contents Successfully'
@@ -1051,6 +1055,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         window.dispatchEvent(new CustomEvent('sync_status', {
           detail: {
             status: 'success',
+            isManual: force,
             isInitialLoad: false,
             updatedContentCount: serverUpdatedCount,
             message: `${serverUpdatedCount} content updated`
@@ -1060,6 +1065,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         window.dispatchEvent(new CustomEvent('sync_status', {
           detail: {
             status: updatedSomething ? 'success' : 'up-to-date',
+            isManual: force,
             isInitialLoad: false,
             updatedContentCount: 0,
             message: updatedSomething ? 'Data updated successfully' : 'Data is up to date'
@@ -1133,11 +1139,13 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
 
     // Dispatch 'syncing' status when manually triggered or when library is empty/initial load
     if (manual || isLibraryEmpty) {
+      (window as any).__isAppDataSyncing = true;
       window.dispatchEvent(new CustomEvent('sync_status', {
         detail: {
           status: 'syncing',
+          isManual: manual,
           isInitialLoad: isLibraryEmpty,
-          message: isLibraryEmpty ? 'Loading Data...' : 'Updating data...'
+          message: isLibraryEmpty ? 'Loading Data...' : (manual ? 'Refreshing...' : 'Updating data...')
         }
       }));
     }
@@ -1348,10 +1356,13 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         refreshCollectionsFromLocal();
       }
 
+      (window as any).__isAppDataSyncing = false;
+
       if (isLibraryEmpty) {
         window.dispatchEvent(new CustomEvent('sync_status', {
           detail: {
             status: 'success',
+            isManual: manual,
             isInitialLoad: true,
             updatedContentCount: 0,
             message: 'Loaded All Contents Successfully'
@@ -1361,6 +1372,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         window.dispatchEvent(new CustomEvent('sync_status', {
           detail: {
             status: 'success',
+            isManual: manual,
             isInitialLoad: false,
             updatedContentCount: totalUpdatedContentCount,
             message: `${totalUpdatedContentCount} content updated`
@@ -1370,6 +1382,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         window.dispatchEvent(new CustomEvent('sync_status', {
           detail: {
             status: 'up-to-date',
+            isManual: true,
             isInitialLoad: false,
             updatedContentCount: 0,
             message: 'Data is up to date'
@@ -1390,10 +1403,12 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       };
     } catch (error) {
       console.error("Error in quickRefreshCatalog:", error);
+      (window as any).__isAppDataSyncing = false;
       if (manual) {
         window.dispatchEvent(new CustomEvent('sync_status', {
           detail: {
             status: 'up-to-date',
+            isManual: true,
             isInitialLoad: false,
             updatedContentCount: 0,
             message: 'Data is up to date'

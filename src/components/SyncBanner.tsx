@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { RefreshCw, CheckCircle2, AlertCircle, Film } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 
 export function SyncBanner() {
@@ -8,6 +8,7 @@ export function SyncBanner() {
   const [updatedCount, setUpdatedCount] = useState<number | undefined>(undefined);
   const [customMessage, setCustomMessage] = useState<string | undefined>(undefined);
   const [isInitialLoad, setIsInitialLoad] = useState<boolean>(false);
+  const isManualActiveRef = useRef<boolean>(false);
 
   useEffect(() => {
     let timeoutId: NodeJS.Timeout | null = null;
@@ -22,6 +23,7 @@ export function SyncBanner() {
       let count: number | undefined = undefined;
       let msg: string | undefined = undefined;
       let initialLoad: boolean = false;
+      let isManual: boolean = false;
 
       if (typeof detail === 'string') {
         status = detail as any;
@@ -30,13 +32,41 @@ export function SyncBanner() {
         count = detail.updatedContentCount !== undefined ? detail.updatedContentCount : detail.updatedCount;
         msg = detail.message;
         initialLoad = Boolean(detail.isInitialLoad);
+        isManual = Boolean(
+          detail.isManual || 
+          detail.manual || 
+          detail.isManualTrigger ||
+          msg === 'Refreshing...' ||
+          msg === 'Refresh successfully' ||
+          msg === 'Refreshing users...' ||
+          msg === 'Users refreshed successfully' ||
+          msg === 'Users are up to date'
+        );
+      }
+
+      // Hide toast banner completely for all automatic background syncs (app open, 10-hour sync, periodic sync)
+      // Only display toasts when the user manually triggers a refresh
+      if (status === 'syncing') {
+        if (!isManual) {
+          isManualActiveRef.current = false;
+          setSyncStatus(null);
+          return;
+        }
+        isManualActiveRef.current = true;
+      } else {
+        // For completion status (success / up-to-date / error):
+        // Only show toast if this sync was manually triggered!
+        if (!isManual && !isManualActiveRef.current) {
+          setSyncStatus(null);
+          return;
+        }
       }
 
       const now = Date.now();
       if (status === 'up-to-date' && lastEventKey.startsWith('up-to-date') && (now - lastEventTime < 5000)) {
         return; // Prevent duplicate or chained up-to-date banners across components
       }
-      const currentKey = `${status}|${msg || ''}|${count || 0}|${initialLoad}`;
+      const currentKey = `${status}|${msg || ''}|${count || 0}|${isManual}`;
       if (currentKey === lastEventKey && (now - lastEventTime < 3000)) {
         return; // Ignore rapid duplicate identical event
       }
@@ -52,21 +82,21 @@ export function SyncBanner() {
       setIsInitialLoad(initialLoad);
 
       if (status === 'syncing') {
-        // Safety timeout: if still syncing after 25 seconds (e.g. unhandled rejection or hung promise),
-        // gently auto-dismiss the banner without fabricating a false error.
         syncingSafetyTimeout = setTimeout(() => {
+          isManualActiveRef.current = false;
           setSyncStatus(null);
           setUpdatedCount(undefined);
           setCustomMessage(undefined);
           setIsInitialLoad(false);
-        }, 25000);
+        }, 20000);
       } else if (status === 'success' || status === 'up-to-date' || status === 'error') {
         timeoutId = setTimeout(() => {
+          isManualActiveRef.current = false;
           setSyncStatus(null);
           setUpdatedCount(undefined);
           setCustomMessage(undefined);
           setIsInitialLoad(false);
-        }, 4000);
+        }, 3500);
       }
     };
 
@@ -79,21 +109,6 @@ export function SyncBanner() {
   }, []);
 
   if (!syncStatus) return null;
-
-  // Suppress silent background "updating data" and "data is up to date" in user-facing pages (not admin)
-  const isUserPage = !window.location.pathname.startsWith('/admin');
-  if (isUserPage) {
-    if (syncStatus === 'up-to-date') return null;
-    if (
-      syncStatus === 'syncing' &&
-      !isInitialLoad &&
-      customMessage !== 'Loading Data...' &&
-      customMessage !== 'Refreshing...' &&
-      !customMessage?.toLowerCase().includes('refresh')
-    ) {
-      return null;
-    }
-  }
 
   const bgClasses = {
     syncing: 'bg-blue-600 dark:bg-blue-600',
