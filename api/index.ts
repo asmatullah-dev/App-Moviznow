@@ -402,20 +402,6 @@ async function startServer() {
     res.send("User-agent: Mediapartners-Google\nAllow: /\n\nUser-agent: Google-Adwords-Instant\nAllow: /\n\nUser-agent: *\nAllow: /\nDisallow: /api/\n");
   });
 
-  // Enable CORS for API routes so Vercel and other frontends can consume AI Studio API
-  app.use((req, res, next) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
-    res.setHeader(
-      "Access-Control-Allow-Headers",
-      "Content-Type, Authorization, X-Requested-With, X-AI-Studio-Proxy, Accept, Origin",
-    );
-    if (req.method === "OPTIONS") {
-      return res.sendStatus(204);
-    }
-    next();
-  });
-
   app.use(express.json({ limit: "50mb" }));
   app.use("/api", translateRouter);
   app.use("/api/email", emailRouter);

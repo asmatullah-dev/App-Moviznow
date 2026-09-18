@@ -1,24 +1,9 @@
 import { Router } from 'express';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import https from 'https';
-import http from 'http';
-import fs from 'fs';
-import path from 'path';
 import { normalizeDomain } from './_domainUtils.js';
 
 export const linkExtractionRouter = Router();
-
-const httpsAgent = new https.Agent({
-  rejectUnauthorized: false,
-  keepAlive: true,
-  timeout: 10000,
-});
-
-const httpAgent = new http.Agent({
-  keepAlive: true,
-  timeout: 10000,
-});
 
 export function isExtractableIntermediate(u?: string): boolean {
   if (!u || typeof u !== 'string') return false;
@@ -62,56 +47,11 @@ export function hasValidDirectLink(data: any, originalUrl: string): boolean {
 
 const extractionCache = new Map<string, { data: any, timestamp: number }>();
 const inFlightRequests = new Map<string, Promise<any>>();
-const CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days cache
+const CACHE_TTL = 30 * 60 * 1000; // 30 minutes cache
 
 const htmlCache = new Map<string, { data: any, status: number, headers: any, timestamp: number }>();
 const inFlightHtmlRequests = new Map<string, Promise<any>>();
 const HTML_CACHE_TTL = 30 * 60 * 1000; // 30 minutes HTML cache
-
-const DISK_CACHE_FILE = path.join(process.cwd(), '.hubcloud_cache.json');
-let saveDiskCacheTimer: NodeJS.Timeout | null = null;
-
-// Initialize disk cache
-try {
-  if (fs.existsSync(DISK_CACHE_FILE)) {
-    const raw = fs.readFileSync(DISK_CACHE_FILE, 'utf8');
-    const parsed = JSON.parse(raw);
-    const now = Date.now();
-    let loadedCount = 0;
-    if (parsed && typeof parsed === 'object') {
-      for (const [k, v] of Object.entries(parsed)) {
-        if (v && typeof v === 'object' && (v as any).data && (v as any).timestamp) {
-          if (now - (v as any).timestamp < CACHE_TTL) {
-            extractionCache.set(k, v as any);
-            loadedCount++;
-          }
-        }
-      }
-    }
-    console.log(`[Hubcloud Cache] Loaded ${loadedCount} entries from disk cache.`);
-  }
-} catch (e: any) {
-  console.warn('[Hubcloud Cache] Could not load disk cache:', e.message);
-}
-
-function persistDiskCache() {
-  if (saveDiskCacheTimer) return;
-  saveDiskCacheTimer = setTimeout(() => {
-    saveDiskCacheTimer = null;
-    try {
-      const obj: Record<string, any> = {};
-      const now = Date.now();
-      for (const [k, v] of extractionCache.entries()) {
-        if (now - v.timestamp < CACHE_TTL) {
-          obj[k] = v;
-        }
-      }
-      fs.writeFileSync(DISK_CACHE_FILE, JSON.stringify(obj), 'utf8');
-    } catch (e: any) {
-      console.warn('[Hubcloud Cache] Could not write disk cache:', e.message);
-    }
-  }, 2000);
-}
 
 export function getCachedHubcloudData(url: string) {
   if (!url) return null;
@@ -139,7 +79,6 @@ export function setCachedHubcloudData(url: string, data: any) {
     extractionCache.set(`direct_${url}_false`, item);
     extractionCache.set(`direct_${normalizedUrl}_false`, item);
   }
-  persistDiskCache();
 }
 
 export function parseSeasonEpisode(text: string): {
@@ -410,74 +349,23 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000);
 
-export const AI_STUDIO_API_URL = (
-  process.env.AI_STUDIO_API_URL ||
-  "https://ais-pre-ztgr34s3xe3g6vxljx3ldl-684080073915.asia-southeast1.run.app"
-).replace(/\/+$/, "");
-
-export async function fetchFromAiStudioApi(url: string, isVcloud = false, force = false): Promise<any> {
-  // Prevent circular calls if AI Studio is handling the request itself
-  if (process.env.AI_STUDIO_SELF || process.env.K_SERVICE || !process.env.VERCEL) {
-    return null;
-  }
-  try {
-    const endpoint = `${AI_STUDIO_API_URL}/api/hubcloud/page`;
-    const res = await axios.post(
-      endpoint,
-      { url, isVcloud, force, source: "vercel" },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "X-AI-Studio-Proxy": "vercel",
-        },
-        timeout: 10000,
-        validateStatus: () => true,
-      },
-    );
-    if (res.status === 200 && res.data && res.data.ok && res.data.html && res.data.html.length > 100) {
-      return {
-        data: res.data.html,
-        status: 200,
-        headers: res.headers || {},
-        source: "ai-studio-api",
-      };
-    }
-  } catch (err: any) {
-    console.warn(`[fetchFromAiStudioApi] Warning: Could not fetch ${url} from AI Studio API:`, err.message);
-  }
-  return null;
-}
-
-async function fetchDirect(url: string, timeout = 7000, redirectCount = 0): Promise<any> {
-  if (redirectCount > 3) return { data: "", status: 500, headers: {} };
+async function fetchDirect(url: string, timeout = 6000) {
   const headers = {
     "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     Accept:
       "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
     "Cache-Control": "no-cache",
     Pragma: "no-cache",
   };
-  try {
-    const res = await axios.get(url, {
-      headers,
-      httpsAgent,
-      httpAgent,
-      validateStatus: () => true,
-      timeout,
-      maxRedirects: 5,
-      maxContentLength: 5242880,
-      maxBodyLength: 5242880,
-    });
-    if (res.status >= 300 && res.status < 400 && res.headers.location) {
-      const nextUrl = new URL(res.headers.location, url).toString();
-      return fetchDirect(nextUrl, timeout, redirectCount + 1);
-    }
-    return res;
-  } catch (err: any) {
-    return { data: "", status: 500, headers: {}, error: err.message };
-  }
+  return axios.get(url, {
+    headers,
+    validateStatus: () => true,
+    timeout,
+    maxContentLength: 5242880,
+    maxBodyLength: 5242880,
+  });
 }
 
 function isCloudflareResponse(response: any) {
@@ -501,10 +389,24 @@ function isCloudflareResponse(response: any) {
   return false;
 }
 
-async function fetchWithApi(url: string, timeout = 10000, isVcloud = false) {
+async function fetchWithApi(url: string, timeout = 12000, isVcloud = false) {
   const apiKey = process.env.SCRAPER_API_KEY || "9cd207e5fa77b2c6ef6072a7ea4c4326";
 
-  // Try Microlink
+  // Try ScraperAPI first for vcloud
+  if (isVcloud || url.includes("vcloud")) {
+    try {
+      const scraperApiUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
+      const res = await axios.get(scraperApiUrl, {
+        validateStatus: () => true,
+        timeout,
+        maxContentLength: 5242880,
+        maxBodyLength: 5242880,
+      });
+      if (!isCloudflareResponse(res)) return res;
+    } catch (err) {}
+  }
+
+  // Try Microlink for non-vcloud
   try {
     const microlinkUrl = `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`;
     const res = await axios.get(microlinkUrl, {
@@ -517,20 +419,7 @@ async function fetchWithApi(url: string, timeout = 10000, isVcloud = false) {
     }
   } catch (err) {}
 
-  // Try AllOrigins
-  try {
-    const allOriginsUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-    const aoRes = await axios.get(allOriginsUrl, {
-      validateStatus: () => true,
-      timeout: Math.min(timeout, 8000),
-    });
-    if (aoRes.data && aoRes.data.contents && typeof aoRes.data.contents === "string" && aoRes.data.contents.length > 200) {
-      const fakeResp = { data: aoRes.data.contents, status: 200, headers: aoRes.headers };
-      if (!isCloudflareResponse(fakeResp)) return fakeResp;
-    }
-  } catch (err) {}
-
-  // Try ScraperAPI
+  // Fallback to ScraperAPI for all Hubcloud variants if Microlink failed or returned Cloudflare
   try {
     const scraperApiUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
     const scraperRes = await axios.get(scraperApiUrl, {
@@ -542,11 +431,11 @@ async function fetchWithApi(url: string, timeout = 10000, isVcloud = false) {
     if (!isCloudflareResponse(scraperRes)) return scraperRes;
   } catch (err) {}
 
-  // Try Jina AI Reader
+  // Fallback to Jina AI Reader
   try {
     const jinaUrl = `https://r.jina.ai/${url}`;
     const jinaRes = await axios.get(jinaUrl, {
-      headers: { "X-No-Cache": "true", Accept: "text/html" },
+      headers: { "X-No-Cache": "true" },
       validateStatus: () => true,
       timeout: 8000,
     });
@@ -561,33 +450,26 @@ async function fetchWithApi(url: string, timeout = 10000, isVcloud = false) {
 
 async function fetchHtmlFallback(url: string, isVcloud = false) {
   let response;
-  const isVercel = Boolean(
-    process.env.VERCEL ||
-    process.env.VERCEL_ENV ||
-    process.env.NEXT_PUBLIC_VERCEL_ENV
-  );
-
-  // 1. Direct fetch (fastest and most reliable in Node environment with SSL agent)
-  try {
-    response = await fetchDirect(url, 7000);
-    if (!isCloudflareResponse(response)) return response;
-  } catch (err) {}
-
-  // 2. If running on Vercel and direct was blocked by Cloudflare datacenter IP, try AI Studio API
-  if (isVercel) {
+  
+  // Vercel IPs are blocked by Cloudflare, so skip direct fetch to save time
+  if (!process.env.VERCEL) {
     try {
-      response = await fetchFromAiStudioApi(url, isVcloud);
-      if (response && !isCloudflareResponse(response)) return response;
+      response = await fetchDirect(url, 6000);
+      if (!isCloudflareResponse(response)) return response;
     } catch (err) {}
   }
 
-  // 3. Fallback to API scrapers (Microlink / AllOrigins / ScraperAPI / Jina)
   try {
-    response = await fetchWithApi(url, 10000, isVcloud);
+    response = await fetchWithApi(url, 12000, isVcloud);
     if (!isCloudflareResponse(response)) return response;
   } catch (err) {}
 
-  return response || { data: "", status: 500, headers: {} };
+  try {
+    response = await fetchWithApi(url, 14000, isVcloud);
+  } catch (err) {
+    response = { data: "", status: 500, headers: {} };
+  }
+  return response;
 }
 
 export async function fetchHtml(url: string, isVcloud = false, force = false) {
@@ -627,111 +509,6 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
   }
 }
 
-  // Permissive CORS middleware for all /api/hubcloud routes to allow Vercel frontends & backends
-  linkExtractionRouter.use("/api/hubcloud", (req, res, next) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
-    res.setHeader(
-      "Access-Control-Allow-Headers",
-      "Content-Type, Authorization, X-Requested-With, X-AI-Studio-Proxy, Accept, Origin",
-    );
-    if (req.method === "OPTIONS") {
-      return res.sendStatus(204);
-    }
-    next();
-  });
-
-  // Dedicated AI Studio HubCloud Page Fetch Endpoint
-  // Allows Vercel deployments and frontends to fetch raw HTML & parsed metadata seamlessly
-  linkExtractionRouter.all("/api/hubcloud/page", async (req, res) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.setHeader(
-      "Access-Control-Allow-Headers",
-      "Content-Type, Authorization, X-Requested-With, X-AI-Studio-Proxy, Accept, Origin",
-    );
-    if (req.method === "OPTIONS") {
-      return res.sendStatus(204);
-    }
-
-    try {
-      const rawUrl =
-        (req.body && (req.body.url || req.body.link)) ||
-        (req.query && (req.query.url || req.query.link));
-
-      if (!rawUrl || typeof rawUrl !== "string") {
-        return res.status(400).json({
-          ok: false,
-          error: "Missing 'url' query parameter or request body field",
-        });
-      }
-
-      const normalizedUrl = normalizeDomain(rawUrl);
-      const isVcloud = Boolean(
-        (req.body && req.body.isVcloud) ||
-        (req.query && req.query.isVcloud) ||
-        normalizedUrl.includes("vcloud"),
-      );
-      const force = Boolean(
-        (req.body && req.body.force) || (req.query && req.query.force),
-      );
-
-      // Perform fetch on AI Studio's Cloud Run environment
-      const response = await fetchHtml(normalizedUrl, isVcloud, force);
-      const htmlData = response?.data || "";
-      const isCf = isCloudflareResponse(response);
-
-      if (isCf || !htmlData || htmlData.length < 50) {
-        return res.status(response?.status || 502).json({
-          ok: false,
-          url: normalizedUrl,
-          status: response?.status || 502,
-          isCloudflare: isCf,
-          error: isCf
-            ? "Cloudflare verification / challenge detected"
-            : "Failed to retrieve page content",
-          source: "ai-studio-api",
-        });
-      }
-
-      // Quick parse for title & size for caller convenience
-      const $ = cheerio.load(htmlData);
-      const parsedMeta = parseHubcloudHtmlTitle($, htmlData);
-
-      let sizeStr =
-        $('td:contains("File Size")').next("td").text() ||
-        $('li:contains("File Size") i').text() ||
-        $('li:contains("File Size")').text() ||
-        $('li:contains("Size") i').text() ||
-        $('li:contains("Size")').text();
-      sizeStr = sizeStr.replace("File Size", "").replace("Size", "").trim();
-
-      return res.json({
-        ok: true,
-        url: normalizedUrl,
-        status: 200,
-        html: htmlData,
-        data: htmlData,
-        isCloudflare: false,
-        title:
-          parsedMeta.clean_title ||
-          parsedMeta.original_title ||
-          $("title").text().trim(),
-        original_title: parsedMeta.original_title,
-        size: sizeStr,
-        source: "ai-studio-api",
-        timestamp: Date.now(),
-      });
-    } catch (err: any) {
-      console.error("[/api/hubcloud/page] Error:", err.message);
-      return res.status(500).json({
-        ok: false,
-        error: err.message || "Failed to fetch page from AI Studio API",
-        source: "ai-studio-api",
-      });
-    }
-  });
-
   linkExtractionRouter.post("/api/hubcloud/extract", async (req, res) => {
     try {
       const { url, forceExtract, isVcloud, force } = req.body;
@@ -755,35 +532,6 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
       const cached = extractionCache.get(cacheKey);
       if (!force && cached && Date.now() - cached.timestamp < CACHE_TTL) {
         return res.json(cached.data);
-      }
-
-      // When hosted on Vercel, delegate HubCloud extraction directly to AI Studio API
-      if (process.env.VERCEL && !req.headers["x-ai-studio-proxy"]) {
-        try {
-          const aiStudioRes = await axios.post(
-            `${AI_STUDIO_API_URL}/api/hubcloud/extract`,
-            { url, forceExtract, isVcloud, force },
-            {
-              headers: {
-                "Content-Type": "application/json",
-                "X-AI-Studio-Proxy": "vercel",
-              },
-              timeout: 18000,
-              validateStatus: () => true,
-            },
-          );
-          if (
-            aiStudioRes.status === 200 &&
-            aiStudioRes.data &&
-            !aiStudioRes.data.isCloudflare &&
-            !aiStudioRes.data.title?.toLowerCase().includes("cloudflare")
-          ) {
-            extractionCache.set(cacheKey, { data: aiStudioRes.data, timestamp: Date.now() });
-            return res.json(aiStudioRes.data);
-          }
-        } catch (err: any) {
-          console.warn("[Vercel -> AI Studio extract proxy failed]:", err.message);
-        }
       }
 
       if (inFlightRequests.has(cacheKey)) {
@@ -1008,26 +756,20 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
       let nextUrl =
         $("#download").attr("href") ||
         $('a:contains("Generate Direct Download Link")').attr("href") ||
-        $('a:contains("Download")').attr("href") ||
         $("a.btn-zip").attr("href") ||
-        $("a.btn-success1").attr("href") ||
-        $("a.btn2").attr("href") ||
-        $("a[href*='gamerxyt.com']").attr("href") ||
-        $("a[href*='hubcloud.php']").attr("href") ||
         "";
 
-      // Extract url from script for vcloud/hubcloud if href is missing
+      // Extract url from script for vcloud if href is missing
       if (!nextUrl) {
          const scriptHtml = $.html();
-         const match = scriptHtml.match(/var\s+(?:url|link|downloadUrl)\s*=\s*['"]([^'"]+)['"]/i) ||
-                       scriptHtml.match(/window\.location\s*=\s*['"]([^'"]+)['"]/i);
+         const match = scriptHtml.match(/var\s+url\s*=\s*['"]([^'"]+)['"]/i);
          if (match && match[1]) {
             nextUrl = match[1];
          }
       }
 
       if (!nextUrl) {
-        if ($("a.btn, a[class*='btn']").length > 0) {
+        if ($("a.btn").length > 0) {
           $2 = $;
         } else {
           return { url };
@@ -1037,20 +779,32 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
       if (!$2 && nextUrl) {
         let res2 = await fetchHtml(nextUrl, isVcloud, force);
         $2 = cheerio.load(res2.data);
+
+        const titleText2 = $2("title").text().toLowerCase();
+        const isCf2 =
+          titleText2.includes("just a moment") ||
+          titleText2.includes("cloudflare") ||
+          titleText2.includes("ddos protection") ||
+          res2.status === 403 ||
+          res2.status === 503;
+
+        if (isCf2) {
+           // We could return isCloudflare here if it's completely unbypassable
+           // but keeping original behavior we just ignore and continue with what we have
+        }
       }
 
       const candidateLinks: { text: string; href: string }[] = [];
       const seenCandidateUrls = new Set<string>();
 
-      const target$ = $2 || $;
-      target$('a.btn, a[class*="btn"], a[id], .btn a, a[href*="pixeldrain"], a[href*="workers.dev"], a[href*="fsl"], a[href*="bbdownload"], a[href*="download"], a[href*="drive"], a[href*="r2.cloudflarestorage"], a[href*="fuckingfast"], a[href*="gpdl"]').each((i, el) => {
-        let href = target$(el).attr("href") || "";
-        const text = target$(el).text().toLowerCase();
-        const id = target$(el).attr("id");
+      $2('a.btn, a[class*="btn"], a[id], .btn a, a[href*="pixeldrain"], a[href*="workers.dev"], a[href*="fsl"], a[href*="bbdownload"], a[href*="download"], a[href*="drive"]').each((i, el) => {
+        let href = $2(el).attr("href") || "";
+        const text = $2(el).text().toLowerCase();
+        const id = $2(el).attr("id");
 
         if (id) {
-          target$("script").each((_, scriptEl) => {
-            const scriptContent = target$(scriptEl).html();
+          $2("script").each((_, scriptEl) => {
+            const scriptContent = $2(scriptEl).html();
             if (!scriptContent) return;
 
             if (
@@ -1090,35 +844,6 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
           candidateLinks.push({ text, href });
         }
       });
-
-      // Fallback: regex scan script and raw body for embedded direct storage / pixeldrain URLs
-      if (candidateLinks.length === 0 && target$) {
-        const rawHtml = target$.html();
-        const pdMatches = rawHtml.matchAll(/https?:\/\/(?:www\.)?(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+)/gi);
-        for (const m of pdMatches) {
-          const u = `https://pixeldrain.dev/u/${m[1]}`;
-          if (!seenCandidateUrls.has(u)) {
-            seenCandidateUrls.add(u);
-            candidateLinks.push({ text: "pixeldrain", href: u });
-          }
-        }
-        const r2Matches = rawHtml.matchAll(/https?:\/\/[a-zA-Z0-9.-]+\.r2\.cloudflarestorage\.com\/[^\s"'<>]+/gi);
-        for (const m of r2Matches) {
-          const u = m[0];
-          if (!seenCandidateUrls.has(u)) {
-            seenCandidateUrls.add(u);
-            candidateLinks.push({ text: "fsl server", href: u });
-          }
-        }
-        const ffMatches = rawHtml.matchAll(/https?:\/\/fuckingfast\.net\/[a-zA-Z0-9_-]+/gi);
-        for (const m of ffMatches) {
-          const u = m[0];
-          if (!seenCandidateUrls.has(u)) {
-            seenCandidateUrls.add(u);
-            candidateLinks.push({ text: "fast server", href: u });
-          }
-        }
-      }
 
       if (candidateLinks.length === 0) {
         return { url };
@@ -1288,36 +1013,6 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
         }
         // Cached entry did not contain a valid direct link - delete it and re-extract!
         extractionCache.delete(cacheKey);
-      }
-
-      // When hosted on Vercel, delegate HubCloud direct link extraction directly to AI Studio API
-      if (process.env.VERCEL && !req.headers["x-ai-studio-proxy"]) {
-        try {
-          const aiStudioRes = await axios.post(
-            `${AI_STUDIO_API_URL}/api/hubcloud/direct-link`,
-            { url, checkOnly, isVcloud, force },
-            {
-              headers: {
-                "Content-Type": "application/json",
-                "X-AI-Studio-Proxy": "vercel",
-              },
-              timeout: 22000,
-              validateStatus: () => true,
-            },
-          );
-          if (
-            aiStudioRes.status === 200 &&
-            aiStudioRes.data &&
-            !aiStudioRes.data.isCloudflare
-          ) {
-            if (hasValidDirectLink(aiStudioRes.data, url)) {
-              extractionCache.set(cacheKey, { data: aiStudioRes.data, timestamp: Date.now() });
-            }
-            return res.json(aiStudioRes.data);
-          }
-        } catch (err: any) {
-          console.warn("[Vercel -> AI Studio direct-link proxy failed]:", err.message);
-        }
       }
 
       // In-flight coalescing
