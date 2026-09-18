@@ -1,9 +1,24 @@
 import { Router } from 'express';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import https from 'https';
+import http from 'http';
+import fs from 'fs';
+import path from 'path';
 import { normalizeDomain } from './_domainUtils.js';
 
 export const linkExtractionRouter = Router();
+
+const httpsAgent = new https.Agent({
+  rejectUnauthorized: false,
+  keepAlive: true,
+  timeout: 10000,
+});
+
+const httpAgent = new http.Agent({
+  keepAlive: true,
+  timeout: 10000,
+});
 
 export function isExtractableIntermediate(u?: string): boolean {
   if (!u || typeof u !== 'string') return false;
@@ -47,11 +62,56 @@ export function hasValidDirectLink(data: any, originalUrl: string): boolean {
 
 const extractionCache = new Map<string, { data: any, timestamp: number }>();
 const inFlightRequests = new Map<string, Promise<any>>();
-const CACHE_TTL = 30 * 60 * 1000; // 30 minutes cache
+const CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days cache
 
 const htmlCache = new Map<string, { data: any, status: number, headers: any, timestamp: number }>();
 const inFlightHtmlRequests = new Map<string, Promise<any>>();
 const HTML_CACHE_TTL = 30 * 60 * 1000; // 30 minutes HTML cache
+
+const DISK_CACHE_FILE = path.join(process.cwd(), '.hubcloud_cache.json');
+let saveDiskCacheTimer: NodeJS.Timeout | null = null;
+
+// Initialize disk cache
+try {
+  if (fs.existsSync(DISK_CACHE_FILE)) {
+    const raw = fs.readFileSync(DISK_CACHE_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    const now = Date.now();
+    let loadedCount = 0;
+    if (parsed && typeof parsed === 'object') {
+      for (const [k, v] of Object.entries(parsed)) {
+        if (v && typeof v === 'object' && (v as any).data && (v as any).timestamp) {
+          if (now - (v as any).timestamp < CACHE_TTL) {
+            extractionCache.set(k, v as any);
+            loadedCount++;
+          }
+        }
+      }
+    }
+    console.log(`[Hubcloud Cache] Loaded ${loadedCount} entries from disk cache.`);
+  }
+} catch (e: any) {
+  console.warn('[Hubcloud Cache] Could not load disk cache:', e.message);
+}
+
+function persistDiskCache() {
+  if (saveDiskCacheTimer) return;
+  saveDiskCacheTimer = setTimeout(() => {
+    saveDiskCacheTimer = null;
+    try {
+      const obj: Record<string, any> = {};
+      const now = Date.now();
+      for (const [k, v] of extractionCache.entries()) {
+        if (now - v.timestamp < CACHE_TTL) {
+          obj[k] = v;
+        }
+      }
+      fs.writeFileSync(DISK_CACHE_FILE, JSON.stringify(obj), 'utf8');
+    } catch (e: any) {
+      console.warn('[Hubcloud Cache] Could not write disk cache:', e.message);
+    }
+  }, 2000);
+}
 
 export function getCachedHubcloudData(url: string) {
   if (!url) return null;
@@ -79,6 +139,7 @@ export function setCachedHubcloudData(url: string, data: any) {
     extractionCache.set(`direct_${url}_false`, item);
     extractionCache.set(`direct_${normalizedUrl}_false`, item);
   }
+  persistDiskCache();
 }
 
 export function parseSeasonEpisode(text: string): {
@@ -356,7 +417,7 @@ export const AI_STUDIO_API_URL = (
 
 export async function fetchFromAiStudioApi(url: string, isVcloud = false, force = false): Promise<any> {
   // Prevent circular calls if AI Studio is handling the request itself
-  if (process.env.AI_STUDIO_SELF || process.env.K_SERVICE) {
+  if (process.env.AI_STUDIO_SELF || process.env.K_SERVICE || !process.env.VERCEL) {
     return null;
   }
   try {
@@ -369,7 +430,7 @@ export async function fetchFromAiStudioApi(url: string, isVcloud = false, force 
           "Content-Type": "application/json",
           "X-AI-Studio-Proxy": "vercel",
         },
-        timeout: 15000,
+        timeout: 10000,
         validateStatus: () => true,
       },
     );
@@ -387,30 +448,36 @@ export async function fetchFromAiStudioApi(url: string, isVcloud = false, force 
   return null;
 }
 
-async function fetchDirect(url: string, timeout = 8000, redirectCount = 0): Promise<any> {
+async function fetchDirect(url: string, timeout = 7000, redirectCount = 0): Promise<any> {
   if (redirectCount > 3) return { data: "", status: 500, headers: {} };
   const headers = {
     "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
     Accept:
       "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
     "Cache-Control": "no-cache",
     Pragma: "no-cache",
   };
-  const res = await axios.get(url, {
-    headers,
-    validateStatus: () => true,
-    timeout,
-    maxRedirects: 5,
-    maxContentLength: 5242880,
-    maxBodyLength: 5242880,
-  });
-  if (res.status >= 300 && res.status < 400 && res.headers.location) {
-    const nextUrl = new URL(res.headers.location, url).toString();
-    return fetchDirect(nextUrl, timeout, redirectCount + 1);
+  try {
+    const res = await axios.get(url, {
+      headers,
+      httpsAgent,
+      httpAgent,
+      validateStatus: () => true,
+      timeout,
+      maxRedirects: 5,
+      maxContentLength: 5242880,
+      maxBodyLength: 5242880,
+    });
+    if (res.status >= 300 && res.status < 400 && res.headers.location) {
+      const nextUrl = new URL(res.headers.location, url).toString();
+      return fetchDirect(nextUrl, timeout, redirectCount + 1);
+    }
+    return res;
+  } catch (err: any) {
+    return { data: "", status: 500, headers: {}, error: err.message };
   }
-  return res;
 }
 
 function isCloudflareResponse(response: any) {
@@ -434,24 +501,10 @@ function isCloudflareResponse(response: any) {
   return false;
 }
 
-async function fetchWithApi(url: string, timeout = 12000, isVcloud = false) {
+async function fetchWithApi(url: string, timeout = 10000, isVcloud = false) {
   const apiKey = process.env.SCRAPER_API_KEY || "9cd207e5fa77b2c6ef6072a7ea4c4326";
 
-  // Try ScraperAPI first for vcloud
-  if (isVcloud || url.includes("vcloud")) {
-    try {
-      const scraperApiUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
-      const res = await axios.get(scraperApiUrl, {
-        validateStatus: () => true,
-        timeout,
-        maxContentLength: 5242880,
-        maxBodyLength: 5242880,
-      });
-      if (!isCloudflareResponse(res)) return res;
-    } catch (err) {}
-  }
-
-  // Try Microlink for non-vcloud
+  // Try Microlink
   try {
     const microlinkUrl = `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`;
     const res = await axios.get(microlinkUrl, {
@@ -464,7 +517,20 @@ async function fetchWithApi(url: string, timeout = 12000, isVcloud = false) {
     }
   } catch (err) {}
 
-  // Fallback to ScraperAPI for all Hubcloud variants if Microlink failed or returned Cloudflare
+  // Try AllOrigins
+  try {
+    const allOriginsUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+    const aoRes = await axios.get(allOriginsUrl, {
+      validateStatus: () => true,
+      timeout: Math.min(timeout, 8000),
+    });
+    if (aoRes.data && aoRes.data.contents && typeof aoRes.data.contents === "string" && aoRes.data.contents.length > 200) {
+      const fakeResp = { data: aoRes.data.contents, status: 200, headers: aoRes.headers };
+      if (!isCloudflareResponse(fakeResp)) return fakeResp;
+    }
+  } catch (err) {}
+
+  // Try ScraperAPI
   try {
     const scraperApiUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
     const scraperRes = await axios.get(scraperApiUrl, {
@@ -476,11 +542,11 @@ async function fetchWithApi(url: string, timeout = 12000, isVcloud = false) {
     if (!isCloudflareResponse(scraperRes)) return scraperRes;
   } catch (err) {}
 
-  // Fallback to Jina AI Reader
+  // Try Jina AI Reader
   try {
     const jinaUrl = `https://r.jina.ai/${url}`;
     const jinaRes = await axios.get(jinaUrl, {
-      headers: { "X-No-Cache": "true" },
+      headers: { "X-No-Cache": "true", Accept: "text/html" },
       validateStatus: () => true,
       timeout: 8000,
     });
@@ -501,7 +567,13 @@ async function fetchHtmlFallback(url: string, isVcloud = false) {
     process.env.NEXT_PUBLIC_VERCEL_ENV
   );
 
-  // 1. If running on Vercel, fetch page requests of HubCloud directly from AI Studio API!
+  // 1. Direct fetch (fastest and most reliable in Node environment with SSL agent)
+  try {
+    response = await fetchDirect(url, 7000);
+    if (!isCloudflareResponse(response)) return response;
+  } catch (err) {}
+
+  // 2. If running on Vercel and direct was blocked by Cloudflare datacenter IP, try AI Studio API
   if (isVercel) {
     try {
       response = await fetchFromAiStudioApi(url, isVcloud);
@@ -509,34 +581,13 @@ async function fetchHtmlFallback(url: string, isVcloud = false) {
     } catch (err) {}
   }
 
-  // 2. If not on Vercel, perform direct fetch on Google Cloud Run (AI Studio environment)
-  if (!isVercel) {
-    try {
-      response = await fetchDirect(url, 8000);
-      if (!isCloudflareResponse(response)) return response;
-    } catch (err) {}
-  }
-
-  // 3. If direct fetch encountered Cloudflare challenge or failed, try AI Studio API as fallback
-  if (!isVercel) {
-    try {
-      const aiStudioResp = await fetchFromAiStudioApi(url, isVcloud);
-      if (aiStudioResp && !isCloudflareResponse(aiStudioResp)) return aiStudioResp;
-    } catch (err) {}
-  }
-
-  // 4. Fallback to API scrapers (ScraperAPI / Microlink / Jina)
+  // 3. Fallback to API scrapers (Microlink / AllOrigins / ScraperAPI / Jina)
   try {
-    response = await fetchWithApi(url, 12000, isVcloud);
+    response = await fetchWithApi(url, 10000, isVcloud);
     if (!isCloudflareResponse(response)) return response;
   } catch (err) {}
 
-  try {
-    response = await fetchWithApi(url, 14000, isVcloud);
-  } catch (err) {
-    response = { data: "", status: 500, headers: {} };
-  }
-  return response;
+  return response || { data: "", status: 500, headers: {} };
 }
 
 export async function fetchHtml(url: string, isVcloud = false, force = false) {
@@ -957,20 +1008,26 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
       let nextUrl =
         $("#download").attr("href") ||
         $('a:contains("Generate Direct Download Link")').attr("href") ||
+        $('a:contains("Download")').attr("href") ||
         $("a.btn-zip").attr("href") ||
+        $("a.btn-success1").attr("href") ||
+        $("a.btn2").attr("href") ||
+        $("a[href*='gamerxyt.com']").attr("href") ||
+        $("a[href*='hubcloud.php']").attr("href") ||
         "";
 
-      // Extract url from script for vcloud if href is missing
+      // Extract url from script for vcloud/hubcloud if href is missing
       if (!nextUrl) {
          const scriptHtml = $.html();
-         const match = scriptHtml.match(/var\s+url\s*=\s*['"]([^'"]+)['"]/i);
+         const match = scriptHtml.match(/var\s+(?:url|link|downloadUrl)\s*=\s*['"]([^'"]+)['"]/i) ||
+                       scriptHtml.match(/window\.location\s*=\s*['"]([^'"]+)['"]/i);
          if (match && match[1]) {
             nextUrl = match[1];
          }
       }
 
       if (!nextUrl) {
-        if ($("a.btn").length > 0) {
+        if ($("a.btn, a[class*='btn']").length > 0) {
           $2 = $;
         } else {
           return { url };
@@ -980,32 +1037,20 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
       if (!$2 && nextUrl) {
         let res2 = await fetchHtml(nextUrl, isVcloud, force);
         $2 = cheerio.load(res2.data);
-
-        const titleText2 = $2("title").text().toLowerCase();
-        const isCf2 =
-          titleText2.includes("just a moment") ||
-          titleText2.includes("cloudflare") ||
-          titleText2.includes("ddos protection") ||
-          res2.status === 403 ||
-          res2.status === 503;
-
-        if (isCf2) {
-           // We could return isCloudflare here if it's completely unbypassable
-           // but keeping original behavior we just ignore and continue with what we have
-        }
       }
 
       const candidateLinks: { text: string; href: string }[] = [];
       const seenCandidateUrls = new Set<string>();
 
-      $2('a.btn, a[class*="btn"], a[id], .btn a, a[href*="pixeldrain"], a[href*="workers.dev"], a[href*="fsl"], a[href*="bbdownload"], a[href*="download"], a[href*="drive"]').each((i, el) => {
-        let href = $2(el).attr("href") || "";
-        const text = $2(el).text().toLowerCase();
-        const id = $2(el).attr("id");
+      const target$ = $2 || $;
+      target$('a.btn, a[class*="btn"], a[id], .btn a, a[href*="pixeldrain"], a[href*="workers.dev"], a[href*="fsl"], a[href*="bbdownload"], a[href*="download"], a[href*="drive"], a[href*="r2.cloudflarestorage"], a[href*="fuckingfast"], a[href*="gpdl"]').each((i, el) => {
+        let href = target$(el).attr("href") || "";
+        const text = target$(el).text().toLowerCase();
+        const id = target$(el).attr("id");
 
         if (id) {
-          $2("script").each((_, scriptEl) => {
-            const scriptContent = $2(scriptEl).html();
+          target$("script").each((_, scriptEl) => {
+            const scriptContent = target$(scriptEl).html();
             if (!scriptContent) return;
 
             if (
@@ -1045,6 +1090,35 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
           candidateLinks.push({ text, href });
         }
       });
+
+      // Fallback: regex scan script and raw body for embedded direct storage / pixeldrain URLs
+      if (candidateLinks.length === 0 && target$) {
+        const rawHtml = target$.html();
+        const pdMatches = rawHtml.matchAll(/https?:\/\/(?:www\.)?(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+)/gi);
+        for (const m of pdMatches) {
+          const u = `https://pixeldrain.dev/u/${m[1]}`;
+          if (!seenCandidateUrls.has(u)) {
+            seenCandidateUrls.add(u);
+            candidateLinks.push({ text: "pixeldrain", href: u });
+          }
+        }
+        const r2Matches = rawHtml.matchAll(/https?:\/\/[a-zA-Z0-9.-]+\.r2\.cloudflarestorage\.com\/[^\s"'<>]+/gi);
+        for (const m of r2Matches) {
+          const u = m[0];
+          if (!seenCandidateUrls.has(u)) {
+            seenCandidateUrls.add(u);
+            candidateLinks.push({ text: "fsl server", href: u });
+          }
+        }
+        const ffMatches = rawHtml.matchAll(/https?:\/\/fuckingfast\.net\/[a-zA-Z0-9_-]+/gi);
+        for (const m of ffMatches) {
+          const u = m[0];
+          if (!seenCandidateUrls.has(u)) {
+            seenCandidateUrls.add(u);
+            candidateLinks.push({ text: "fast server", href: u });
+          }
+        }
+      }
 
       if (candidateLinks.length === 0) {
         return { url };
