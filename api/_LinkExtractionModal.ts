@@ -5,20 +5,6 @@ import { normalizeDomain } from './_domainUtils.js';
 
 export const linkExtractionRouter = Router();
 
-export const AI_STUDIO_API_URL =
-  process.env.AI_STUDIO_API_URL ||
-  process.env.HUBCLOUD_PROXY_API_URL ||
-  "https://ais-pre-ztgr34s3xe3g6vxljx3ldl-684080073915.asia-southeast1.run.app";
-
-export function isVercelEnvironment(): boolean {
-  return Boolean(
-    process.env.VERCEL ||
-    process.env.VERCEL_ENV ||
-    process.env.AWS_LAMBDA_FUNCTION_NAME ||
-    process.env.LAMBDA_TASK_ROOT
-  );
-}
-
 export function isExtractableIntermediate(u?: string): boolean {
   if (!u || typeof u !== 'string') return false;
   const l = u.toLowerCase();
@@ -465,37 +451,8 @@ async function fetchWithApi(url: string, timeout = 12000, isVcloud = false) {
 async function fetchHtmlFallback(url: string, isVcloud = false) {
   let response;
   
-  // If running on Vercel, fetch HTML via AI Studio API to bypass datacenter Cloudflare IP blocks
-  if (isVercelEnvironment()) {
-    try {
-      const aiStudioRes = await axios.post(
-        `${AI_STUDIO_API_URL}/api/hubcloud/fetch-html`,
-        { url, isVcloud },
-        {
-          headers: {
-            "Content-Type": "application/json",
-            "x-proxy-source": "vercel",
-          },
-          timeout: 15000,
-          validateStatus: () => true,
-        }
-      );
-      if (
-        aiStudioRes.status === 200 &&
-        aiStudioRes.data &&
-        typeof aiStudioRes.data.data === "string" &&
-        aiStudioRes.data.data.length > 200 &&
-        !isCloudflareResponse(aiStudioRes.data)
-      ) {
-        return aiStudioRes.data;
-      }
-    } catch (err: any) {
-      console.warn(`[Vercel HubCloud Proxy] AI Studio HTML fetch failed, falling back:`, err.message);
-    }
-  }
-
-  // When not on Vercel (e.g. running on AI Studio server or local dev), try direct fetch
-  if (!isVercelEnvironment()) {
+  // Vercel IPs are blocked by Cloudflare, so skip direct fetch to save time
+  if (!process.env.VERCEL) {
     try {
       response = await fetchDirect(url, 6000);
       if (!isCloudflareResponse(response)) return response;
@@ -575,43 +532,6 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
       const cached = extractionCache.get(cacheKey);
       if (!force && cached && Date.now() - cached.timestamp < CACHE_TTL) {
         return res.json(cached.data);
-      }
-
-      // When running on Vercel, forward the Hubcloud extraction request to AI Studio API
-      if (isVercelEnvironment() && req.headers["x-proxy-source"] !== "vercel") {
-        try {
-          const aiRes = await axios.post(
-            `${AI_STUDIO_API_URL}/api/hubcloud/extract`,
-            { url, forceExtract, isVcloud: isVcloudBool, force },
-            {
-              headers: {
-                "Content-Type": "application/json",
-                "x-proxy-source": "vercel",
-              },
-              timeout: 18000,
-              validateStatus: () => true,
-            }
-          );
-          if (
-            aiRes.status === 200 &&
-            aiRes.data &&
-            (aiRes.data.title || aiRes.data.size || aiRes.data.isWorking !== undefined)
-          ) {
-            if (
-              aiRes.data.isWorking &&
-              !aiRes.data.isNotFound &&
-              aiRes.data.title &&
-              !aiRes.data.title.toLowerCase().includes("cloudflare block") &&
-              !aiRes.data.title.toLowerCase().includes("just a moment")
-            ) {
-              setCachedHubcloudData(url, aiRes.data);
-              extractionCache.set(cacheKey, { data: aiRes.data, timestamp: Date.now() });
-            }
-            return res.json(aiRes.data);
-          }
-        } catch (err: any) {
-          console.warn(`[Vercel HubCloud Proxy] AI Studio extract error, falling back locally:`, err.message);
-        }
       }
 
       if (inFlightRequests.has(cacheKey)) {
@@ -1101,34 +1021,6 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
         return res.json(data);
       }
 
-      // When running on Vercel, forward direct link extraction to AI Studio API
-      if (isVercelEnvironment() && req.headers["x-proxy-source"] !== "vercel") {
-        try {
-          const aiRes = await axios.post(
-            `${AI_STUDIO_API_URL}/api/hubcloud/direct-link`,
-            { url, checkOnly: isCheckOnly, isVcloud: isVcloudBool, force },
-            {
-              headers: {
-                "Content-Type": "application/json",
-                "x-proxy-source": "vercel",
-              },
-              timeout: 20000,
-              validateStatus: () => true,
-            }
-          );
-          if (aiRes.status === 200 && aiRes.data) {
-            if (isCheckOnly && aiRes.data.ok) {
-              extractionCache.set(cacheKey, { data: aiRes.data, timestamp: Date.now() });
-            } else if (hasValidDirectLink(aiRes.data, url)) {
-              extractionCache.set(cacheKey, { data: aiRes.data, timestamp: Date.now() });
-            }
-            return res.json(aiRes.data);
-          }
-        } catch (err: any) {
-          console.warn(`[Vercel HubCloud Proxy] AI Studio direct-link failed, running locally:`, err.message);
-        }
-      }
-
       const extractPromise = performExtraction(url, isCheckOnly, 0, isVcloudBool, force);
       inFlightRequests.set(cacheKey, extractPromise);
 
@@ -1176,23 +1068,6 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
       }
 
       url = url.trim();
-
-      // When running on Vercel, forward Telegram resolution to AI Studio API
-      if (isVercelEnvironment() && req.headers["x-proxy-source"] !== "vercel") {
-        try {
-          const aiRes = await axios.get(`${AI_STUDIO_API_URL}/api/resolve-tg`, {
-            params: { url },
-            headers: { "x-proxy-source": "vercel" },
-            timeout: 15000,
-            validateStatus: () => true,
-          });
-          if (aiRes.status === 200 && aiRes.data && aiRes.data.url) {
-            return res.json(aiRes.data);
-          }
-        } catch (err: any) {
-          console.warn(`[Vercel HubCloud Proxy] AI Studio resolve-tg error, falling back locally:`, err.message);
-        }
-      }
 
       const formatTgUrl = (rawUrl: string) => {
         if (!rawUrl) return rawUrl;
@@ -1354,47 +1229,3 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
       res.status(500).json({ error: error.message || 'Failed to resolve Telegram link' });
     }
   });
-
-  // HTML Fetch / Hubcloud Proxy endpoint for Vercel or external clients
-  linkExtractionRouter.all(['/api/hubcloud/fetch-html', '/api/fetch-html'], async (req: any, res: any) => {
-    try {
-      const url = ((req.body && req.body.url) || req.query?.url) as string;
-      const isVcloud = Boolean(req.body?.isVcloud ?? req.query?.isVcloud);
-      const force = Boolean(req.body?.force ?? req.query?.force);
-
-      if (!url || typeof url !== 'string') {
-        return res.status(400).json({ error: 'Valid URL parameter is required' });
-      }
-
-      const htmlResult = await fetchHtml(url.trim(), isVcloud, force);
-      res.setHeader('Cache-Control', 'public, max-age=1800');
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      return res.json(htmlResult);
-    } catch (err: any) {
-      console.error('Fetch HTML error:', err.message || err);
-      res.status(500).json({ error: err.message || 'Failed to fetch HTML', status: 500, data: '' });
-    }
-  });
-
-  // Raw HTML Proxy endpoint
-  linkExtractionRouter.all(['/api/hubcloud/page', '/api/hubcloud/raw'], async (req: any, res: any) => {
-    try {
-      const url = ((req.body && req.body.url) || req.query?.url) as string;
-      const isVcloud = Boolean(req.body?.isVcloud ?? req.query?.isVcloud);
-      const force = Boolean(req.body?.force ?? req.query?.force);
-
-      if (!url || typeof url !== 'string') {
-        return res.status(400).send('Valid URL parameter is required');
-      }
-
-      const htmlResult = await fetchHtml(url.trim(), isVcloud, force);
-      res.setHeader('Cache-Control', 'public, max-age=1800');
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      return res.status(htmlResult.status || 200).send(htmlResult.data || '');
-    } catch (err: any) {
-      console.error('Hubcloud raw page error:', err.message || err);
-      res.status(500).send(`Error: ${err.message || 'Failed to fetch page'}`);
-    }
-  });
-
