@@ -402,6 +402,17 @@ async function startServer() {
     res.send("User-agent: Mediapartners-Google\nAllow: /\n\nUser-agent: Google-Adwords-Instant\nAllow: /\n\nUser-agent: *\nAllow: /\nDisallow: /api/\n");
   });
 
+  // CORS & Preflight handling for API routes
+  app.use((req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, HEAD");
+    res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, x-proxy-source, x-ai-studio-caller");
+    if (req.method === "OPTIONS") {
+      return res.status(200).end();
+    }
+    next();
+  });
+
   app.use(express.json({ limit: "50mb" }));
   app.use("/api", translateRouter);
   app.use("/api/email", emailRouter);
