@@ -1,4 +1,5 @@
 import { Language, Quality } from "../types";
+import { parseQualityCategoryFromText } from "./linkSelector";
 
 export type StatusLabel =
   | "WORKING"
@@ -342,10 +343,8 @@ export function detectMetadataForLink(
 
   const lower = windowLines.toLowerCase();
 
-  const qualityMatch = lower.match(
-    /\b(2160p|4k|1440p|1080p|720p|480p|360p|540p)\b/i,
-  )?.[1];
-  const quality = formatQuality(qualityMatch);
+  const qCategory = parseQualityCategoryFromText(lower);
+  const quality = qCategory !== 'Other' ? (qCategory === '2160p' ? '4K' : qCategory) : undefined;
 
   const codec = normalizeCodec(
     lower.match(/\b(x265|x264|h[\.\-_]?265|h[\.\-_]?264|hevc|10bit|10-bit|av1)\b/i)?.[1],
@@ -582,11 +581,22 @@ export function detectMetadataForLink(
   };
 }
 
+const clientLinkCheckCache = new Map<string, { data: LinkCheckResult; timestamp: number }>();
+const CLIENT_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
 export async function serverCheckLink(
   url: string,
   signal?: AbortSignal,
   force: boolean = false,
 ): Promise<LinkCheckResult> {
+  const norm = normalizeUrl(url) || url;
+  if (!force) {
+    const cached = clientLinkCheckCache.get(norm);
+    if (cached && Date.now() - cached.timestamp < CLIENT_CACHE_TTL) {
+      return { ...cached.data, url };
+    }
+  }
+
   const response = await fetch("/api/check-link", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -596,7 +606,7 @@ export async function serverCheckLink(
 
   const data = await response.json().catch(() => ({}));
 
-  return {
+  const res: LinkCheckResult = {
     url,
     ok: !!data?.ok,
     status: data?.status,
@@ -611,6 +621,80 @@ export async function serverCheckLink(
     host: data?.host,
     source: data?.source,
   };
+
+  if (res.ok && res.statusLabel === 'WORKING') {
+    clientLinkCheckCache.set(norm, { data: res, timestamp: Date.now() });
+  }
+
+  return res;
+}
+
+export async function serverCheckLinksBatch(
+  urls: string[],
+  signal?: AbortSignal,
+  force: boolean = false
+): Promise<Record<string, LinkCheckResult>> {
+  if (!urls || urls.length === 0) return {};
+  const results: Record<string, LinkCheckResult> = {};
+  const missingUrls: string[] = [];
+
+  for (const u of urls) {
+    const norm = normalizeUrl(u) || u;
+    if (!force) {
+      const cached = clientLinkCheckCache.get(norm);
+      if (cached && Date.now() - cached.timestamp < CLIENT_CACHE_TTL) {
+        results[u] = { ...cached.data, url: u };
+        continue;
+      }
+    }
+    missingUrls.push(u);
+  }
+
+  if (missingUrls.length === 0) {
+    return results;
+  }
+
+  try {
+    const response = await fetch("/api/check-links-batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ urls: missingUrls, force }),
+      signal,
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const serverResults = data?.results || {};
+      for (const u of missingUrls) {
+        const itemData = serverResults[u];
+        if (itemData) {
+          const resItem: LinkCheckResult = {
+            url: u,
+            ok: !!itemData?.ok,
+            status: itemData?.status,
+            statusLabel: itemData?.statusLabel || (itemData?.ok ? "WORKING" : "UNKNOWN"),
+            message: itemData?.message,
+            finalUrl: itemData?.finalUrl,
+            contentType: itemData?.contentType,
+            isDirectDownload: !!itemData?.isDirectDownload,
+            fileName: itemData?.fileName,
+            fileSize: itemData?.fileSize,
+            fileSizeText: itemData?.fileSizeText,
+            host: itemData?.host,
+            source: itemData?.source,
+          };
+          results[u] = resItem;
+          if (resItem.ok && resItem.statusLabel === "WORKING") {
+            clientLinkCheckCache.set(normalizeUrl(u) || u, { data: resItem, timestamp: Date.now() });
+          }
+        }
+      }
+    }
+  } catch {
+    // Fallback to individual checks if batch API fails
+  }
+
+  return results;
 }
 
 export function detectFromFilename(
@@ -622,10 +706,8 @@ export function detectFromFilename(
 ) {
   const source = `${fileName || ""} ${finalUrl || ""} ${rawUrl || ""}`.toLowerCase();
 
-  const qualityMatch = source.match(
-    /\b(2160p|4k|1440p|1080p|720p|480p|360p|540p)\b/i,
-  )?.[1];
-  const quality = formatQuality(qualityMatch);
+  const qCategory = parseQualityCategoryFromText(source);
+  const quality = qCategory !== 'Other' ? (qCategory === '2160p' ? '4K' : qCategory) : undefined;
 
   const codec = normalizeCodec(
     source.match(/\b(x265|x264|h[\.\-_]?265|h[\.\-_]?264|hevc|10bit|10-bit|av1)\b/i)?.[1],
@@ -877,13 +959,13 @@ export async function performFullLinkScan(
       statusLabel: "WORKING",
       message: "Assuming working (initial)",
     };
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    for (let attempt = 1; attempt <= 1; attempt++) {
       try {
         const extractController = new AbortController();
-        const extractTimeout = setTimeout(() => extractController.abort(), 18000);
+        const extractTimeout = setTimeout(() => extractController.abort(), 6000);
         
         const directController = new AbortController();
-        const directTimeout = setTimeout(() => directController.abort(), 18000);
+        const directTimeout = setTimeout(() => directController.abort(), 6000);
 
         const currentForce = attempt === 2 ? true : force;
 
@@ -928,7 +1010,7 @@ export async function performFullLinkScan(
           }
         }
 
-        const resolvedTitle = extractData?.title || dLinkData?.title || "";
+        const resolvedTitle = extractData?.original_title || extractData?.title || dLinkData?.original_title || dLinkData?.title || "";
         const resolvedSize = (extractData?.size && extractData?.unit) ? `${extractData.size} ${extractData.unit}` : (dLinkData?.size || "");
         const isNotFound = extractData?.isNotFound || dLinkData?.isNotFound;
 
@@ -954,7 +1036,7 @@ export async function performFullLinkScan(
         };
         finalUrlToUse = url;
 
-        if ((candidatesInfo && candidatesInfo.length > 0) || resolvedTitle || attempt === 2) {
+        if ((candidatesInfo && candidatesInfo.length > 0) || resolvedTitle) {
           break;
         }
       } catch {

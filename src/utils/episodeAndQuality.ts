@@ -1,4 +1,5 @@
 import { isEpisodeRange } from './linkScanner';
+import { parseQualityCategoryFromText } from './linkSelector';
 
 export type QualityCategory = '720p' | '1080p' | '480p' | '2160p' | 'Other';
 
@@ -16,22 +17,6 @@ export const QUALITY_COLORS: Record<
   QualityCategory,
   { badge: string; border: string; bg: string; text: string; buttonBg: string; buttonText: string }
 > = {
-  '720p': {
-    badge: 'bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border-cyan-500/30',
-    border: 'border-cyan-500/30',
-    bg: 'bg-cyan-500/5',
-    text: 'text-cyan-600 dark:text-cyan-400',
-    buttonBg: 'bg-cyan-500/15 hover:bg-cyan-500/25 border-cyan-500/30',
-    buttonText: 'text-cyan-600 dark:text-cyan-400',
-  },
-  '1080p': {
-    badge: 'bg-purple-500/20 text-purple-600 dark:text-purple-400 border-purple-500/30',
-    border: 'border-purple-500/30',
-    bg: 'bg-purple-500/5',
-    text: 'text-purple-600 dark:text-purple-400',
-    buttonBg: 'bg-purple-500/15 hover:bg-purple-500/25 border-purple-500/30',
-    buttonText: 'text-purple-600 dark:text-purple-400',
-  },
   '480p': {
     badge: 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/30',
     border: 'border-amber-500/30',
@@ -40,13 +25,29 @@ export const QUALITY_COLORS: Record<
     buttonBg: 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/30',
     buttonText: 'text-amber-600 dark:text-amber-400',
   },
-  '2160p': {
+  '720p': {
     badge: 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
     border: 'border-emerald-500/30',
     bg: 'bg-emerald-500/5',
     text: 'text-emerald-600 dark:text-emerald-400',
     buttonBg: 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/30',
     buttonText: 'text-emerald-600 dark:text-emerald-400',
+  },
+  '1080p': {
+    badge: 'bg-sky-500/20 text-sky-600 dark:text-sky-400 border-sky-500/30',
+    border: 'border-sky-500/30',
+    bg: 'bg-sky-500/5',
+    text: 'text-sky-600 dark:text-sky-400',
+    buttonBg: 'bg-sky-500/15 hover:bg-sky-500/25 border-sky-500/30',
+    buttonText: 'text-sky-600 dark:text-sky-400',
+  },
+  '2160p': {
+    badge: 'bg-purple-500/20 text-purple-600 dark:text-purple-400 border-purple-500/30',
+    border: 'border-purple-500/30',
+    bg: 'bg-purple-500/5',
+    text: 'text-purple-600 dark:text-purple-400',
+    buttonBg: 'bg-purple-500/15 hover:bg-purple-500/25 border-purple-500/30',
+    buttonText: 'text-purple-600 dark:text-purple-400',
   },
   'Other': {
     badge: 'bg-zinc-500/20 text-zinc-600 dark:text-zinc-400 border-zinc-500/30',
@@ -123,12 +124,8 @@ export function getItemEpisodeInfo(item: any): {
 
 export function getItemQualityCategory(item: any): QualityCategory {
   if (!item) return 'Other';
-  const text = `${item.quality || ''} ${item.qualityLabel || ''} ${item.file_name || ''} ${item.fileName || ''} ${item.url || ''} ${item.finalUrl || ''} ${item.locationTag || ''}`.toLowerCase();
-  if (text.includes('2160p') || text.includes('4k')) return '2160p';
-  if (text.includes('1080p')) return '1080p';
-  if (text.includes('720p')) return '720p';
-  if (text.includes('480p')) return '480p';
-  return 'Other';
+  const text = `${item.quality || ''} ${item.qualityLabel || ''} ${item.rawQuality || ''} ${item.file_name || ''} ${item.fileName || ''} ${item.url || ''} ${item.finalUrl || ''} ${item.locationTag || ''}`.toLowerCase();
+  return parseQualityCategoryFromText(text);
 }
 
 export function sortHitsByEpisodeAndQuality(hits: any[]) {

@@ -62,10 +62,100 @@ async function getActiveGmailToken(providedToken?: string): Promise<string | nul
   return null;
 }
 
+// Helper to normalize dates to YYYY-MM-DD
+function normalizeDate(rawDate?: string, rawDateTime?: string): string {
+  const candidates = [rawDate, rawDateTime].filter((s): s is string => Boolean(s && s.trim()));
+  const monthMap: Record<string, string> = {
+    jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06",
+    jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12"
+  };
+
+  for (const str of candidates) {
+    const trimmed = str.trim();
+
+    // 1. ISO format: YYYY-MM-DD or YYYY/MM/DD
+    const isoMatch = trimmed.match(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+    if (isoMatch) {
+      const y = isoMatch[1];
+      const m = isoMatch[2].padStart(2, "0");
+      const d = isoMatch[3].padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+
+    // 2. DD-MM-YYYY or DD/MM/YYYY
+    const ddmmyyyy = trimmed.match(/(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
+    if (ddmmyyyy) {
+      const d = ddmmyyyy[1].padStart(2, "0");
+      const m = ddmmyyyy[2].padStart(2, "0");
+      const y = ddmmyyyy[3];
+      return `${y}-${m}-${d}`;
+    }
+
+    // 3. Named month: e.g. "18 Sep, 2026", "18-Sep-2026", "Sep 18, 2026"
+    const namedMonthMatch = trimmed.match(/(\d{1,2})[\s,-]+([a-zA-Z]{3,9})[\s,-]+(\d{4})/) ||
+                            trimmed.match(/([a-zA-Z]{3,9})[\s,-]+(\d{1,2})[\s,-]+(\d{4})/);
+    if (namedMonthMatch) {
+      let d = "";
+      let mon = "";
+      let y = "";
+      if (/^\d+$/.test(namedMonthMatch[1])) {
+        d = namedMonthMatch[1].padStart(2, "0");
+        mon = namedMonthMatch[2].toLowerCase().slice(0, 3);
+        y = namedMonthMatch[3];
+      } else {
+        mon = namedMonthMatch[1].toLowerCase().slice(0, 3);
+        d = namedMonthMatch[2].padStart(2, "0");
+        y = namedMonthMatch[3];
+      }
+      if (monthMap[mon]) {
+        return `${y}-${monthMap[mon]}-${d}`;
+      }
+    }
+  }
+  return "";
+}
+
+// Helper to normalize time to 24-hour HH:MM
+function normalizeTime(rawTime?: string, rawDateTime?: string): string {
+  const candidates = [rawTime, rawDateTime].filter((s): s is string => Boolean(s && s.trim()));
+
+  for (const str of candidates) {
+    const trimmed = str.trim();
+
+    // 1. 12-hour format with AM/PM: e.g. "02:35 PM", "2:35pm", "11:45 AM"
+    const ampmMatch = trimmed.match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)/i);
+    if (ampmMatch) {
+      let hours = parseInt(ampmMatch[1], 10);
+      const minutes = ampmMatch[2];
+      const period = ampmMatch[3].toUpperCase();
+      if (period === "PM" && hours < 12) hours += 12;
+      if (period === "AM" && hours === 12) hours = 0;
+      return `${String(hours).padStart(2, "0")}:${minutes}`;
+    }
+
+    // 2. 24-hour format: e.g. "14:35" or "09:15"
+    const h24Match = trimmed.match(/(?:^|\s|[T])(\d{1,2}):(\d{2})(?::\d{2})?(?:\s|$)/);
+    if (h24Match) {
+      const hours = parseInt(h24Match[1], 10);
+      const minutes = h24Match[2];
+      if (hours >= 0 && hours <= 23) {
+        return `${String(hours).padStart(2, "0")}:${minutes}`;
+      }
+    }
+  }
+  return "";
+}
+
 // 1. OCR endpoint: Recognize payment details from payment screenshot using Gemini AI
 ordersRouter.post("/ocr-payment-receipt", async (req, res) => {
   try {
-    const { imageBase64, mimeType = "image/jpeg" } = req.body;
+    const { 
+      imageBase64, 
+      mimeType = "image/jpeg",
+      receiverAccountTitle = "Asmat Ullah",
+      receiverAccountNumber = "03416286423",
+      knownReceiverAccounts = []
+    } = req.body;
     if (!imageBase64) {
       return res.status(400).json({ error: "Missing imageBase64 data in request" });
     }
@@ -74,21 +164,47 @@ ordersRouter.post("/ocr-payment-receipt", async (req, res) => {
     const cleanMimeType = (mimeType && mimeType.startsWith("image/")) ? mimeType : "image/jpeg";
     const ai = getGenAI();
 
-    const prompt = `You are an expert financial OCR parser. Analyze this bank transfer / mobile wallet payment receipt screenshot (e.g. EasyPaisa, JazzCash, SadaPay, NayaPay, Meezan Bank, HBL, Bank Alfalah, UBL, MCB, Allied Bank, Askari, Faysal, Raast, 1Link, etc.).
-Extract the following payment fields accurately:
-1. "trxId": The Transaction ID, TID, Reference Number (Ref No / Ref ID), Trx ID, or Receipt Number (numeric or alphanumeric).
-2. "accountTitle": The sender / payer account title, sender name, or customer name (e.g. "Asmat Ullah", "Muhammad Ali", etc.).
-3. "accountNumberLast4": The last 4 digits of the sender's account number, mobile wallet number, or IBAN.
-4. "date": The transaction date formatted as YYYY-MM-DD if possible (e.g. "2026-08-21").
-5. "time": The transaction time formatted as HH:MM in 24-hour format if possible (e.g. "14:35").
-6. "dateTime": The exact date and time string from receipt (e.g. "2026-08-21 14:35" or "21 Aug 2026, 02:35 PM").
-7. "amount": The numeric amount paid in PKR / Rs (e.g. 300, 750, 1400, 2600, 50, etc.).
-8. "senderBank": The bank or payment application used (e.g. "EasyPaisa", "JazzCash", "SadaPay", "NayaPay", "Meezan Bank", "HBL", "Bank Alfalah", etc.).
-9. "receiverAccount": The recipient account title or number if visible (e.g. "MovizNow", "Asmat Ullah", etc.).
+    const prompt = `You are an expert financial OCR parser specializing in Pakistani banking and mobile wallet transaction receipts.
+Analyze this payment receipt screenshot with high precision.
+Typical receipt sources: EasyPaisa, JazzCash, SadaPay, NayaPay, Raast, Meezan Bank, HBL, Bank Alfalah, UBL, MCB, Allied Bank, Askari Bank, Standard Chartered, Faysal Bank, etc.
+
+IMPORTANT CONTEXT:
+The payment was SENT TO the merchant/receiver: "${receiverAccountTitle}" (Account: "${receiverAccountNumber}").
+DO NOT confuse the receiver with the sender!
+
+CRITICAL EXTRACTION RULES:
+1. "accountTitle" (SENDER NAME):
+   - MUST be the SENDER / REMITTER / PAYER / FROM name (the customer who sent the money).
+   - Look under "From", "Sent From", "Sender", "Remitter", "Paid By", "Debit Account".
+   - NEVER return the receiver ("${receiverAccountTitle}" or "MovizNow" or "To: ...") as the accountTitle.
+
+2. "accountNumberLast4" (SENDER ACCOUNT DIGITS):
+   - MUST be the last 4 digits of the SENDER'S / REMITTER'S account, IBAN, or mobile number (under "From" / "Sender").
+   - Extract ONLY the last 4 digits (e.g., if sender mobile is "03001234567", return "4567").
+   - NEVER return the receiver's account number ("${receiverAccountNumber.slice(-4)}") here.
+
+3. "trxId" (TRANSACTION ID):
+   - The unique transaction identifier, TID, Ref ID, Reference Number, or Receipt Number.
+   - Return only the actual numeric or alphanumeric code without prefixes like "TRX ID:" or "TID:".
+
+4. "date":
+   - Transaction date formatted as YYYY-MM-DD (e.g. "2026-09-18").
+
+5. "time":
+   - Transaction time formatted in 24-hour HH:MM format (e.g. "14:35").
+
+6. "dateTime":
+   - Exact raw date and time string from receipt (e.g. "18 Sep 2026 at 02:35 PM").
+
+7. "amount":
+   - Numeric amount paid in PKR (e.g. 500, 1000).
+
+8. "senderBank":
+   - Bank or mobile wallet app used by the sender (e.g. "EasyPaisa", "JazzCash", "SadaPay", "NayaPay", "Meezan Bank", "HBL", "Bank Alfalah", etc.).
 
 Return ONLY a valid JSON object matching the requested schema.`;
 
-    const modelsToTry = ["gemini-3.1-flash-lite", "gemini-3.7-flash", "gemini-3.6-flash"];
+    const modelsToTry = ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-3.1-flash-lite"];
     let lastError: any = null;
     let resultText = "";
 
@@ -152,14 +268,58 @@ Return ONLY a valid JSON object matching the requested schema.`;
       parsed = JSON.parse(cleanJson);
     }
 
+    // Clean up extracted fields
+    const rawTrxId = (parsed.trxId || "").replace(/^(TRX\s*ID|TID|REF\s*#?|TRANSACTION\s*ID|RECEIPT\s*#?)[:\s-]*/i, "").trim();
+    let cleanAccountTitle = (parsed.accountTitle || "").trim();
+
+    // Filter out if extracted title was accidentally the receiver's name
+    const receiverNames = [
+      (receiverAccountTitle || "").toLowerCase().trim(),
+      "asmat ullah",
+      "asmatullah",
+      "moviznow",
+      "moviz now"
+    ].filter(Boolean);
+
+    if (receiverNames.some(rn => cleanAccountTitle.toLowerCase().includes(rn))) {
+      cleanAccountTitle = "";
+    }
+
+    // Extract and validate last 4 digits of sender account
+    const rawAccDigits = String(parsed.accountNumberLast4 || "").replace(/\D/g, "");
+    let cleanLast4 = rawAccDigits.slice(-4);
+
+    // Filter out if extracted last 4 was accidentally the receiver's last 4 digits
+    const receiverLast4Set = new Set<string>();
+    if (receiverAccountNumber) {
+      const rDigits = String(receiverAccountNumber).replace(/\D/g, "");
+      if (rDigits.length >= 4) receiverLast4Set.add(rDigits.slice(-4));
+    }
+    receiverLast4Set.add("6423");
+    if (Array.isArray(knownReceiverAccounts)) {
+      for (const k of knownReceiverAccounts) {
+        if (k?.accountNumber) {
+          const kd = String(k.accountNumber).replace(/\D/g, "");
+          if (kd.length >= 4) receiverLast4Set.add(kd.slice(-4));
+        }
+      }
+    }
+
+    if (cleanLast4 && receiverLast4Set.has(cleanLast4)) {
+      cleanLast4 = "";
+    }
+
+    const normalizedDate = normalizeDate(parsed.date, parsed.dateTime);
+    const normalizedTime = normalizeTime(parsed.time, parsed.dateTime);
+
     return res.json({
       success: true,
       extracted: {
-        trxId: parsed.trxId || "",
-        accountTitle: parsed.accountTitle || "",
-        accountNumberLast4: parsed.accountNumberLast4 ? String(parsed.accountNumberLast4).slice(-4) : "",
-        date: parsed.date || "",
-        time: parsed.time || "",
+        trxId: rawTrxId || parsed.trxId || "",
+        accountTitle: cleanAccountTitle,
+        accountNumberLast4: cleanLast4,
+        date: normalizedDate || parsed.date || "",
+        time: normalizedTime || parsed.time || "",
         dateTime: parsed.dateTime || "",
         amount: typeof parsed.amount === "number" ? parsed.amount : (parseFloat(parsed.amount) || 0),
         senderBank: parsed.senderBank || "",
@@ -186,7 +346,7 @@ ordersRouter.post("/sync-gmail-token", async (req, res) => {
     const cleanToken = token.trim();
 
     // Verify token validity with Gmail API directly
-    let detectedEmail = email || "asmatullah9327@gmail.com";
+    let detectedEmail = email || "asmatn628@gmail.com";
     let profileData: any = null;
     try {
       const profileRes = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", {
@@ -282,8 +442,8 @@ ordersRouter.get("/gmail-status", async (req, res) => {
     return res.json({
       connected: !!token,
       isValid: isLiveValid,
-      targetEmail: "asmatullah9327@gmail.com",
-      connectedEmail: connectedEmail || (token ? "asmatullah9327@gmail.com" : null),
+      targetEmail: "asmatn628@gmail.com",
+      connectedEmail: connectedEmail || (token ? "asmatn628@gmail.com" : null),
       messagesTotal,
       lastUpdated: lastGmailTokenUpdate,
       errorDetail: isLiveValid ? null : errorDetail,
@@ -296,6 +456,7 @@ ordersRouter.get("/gmail-status", async (req, res) => {
 // 5. Test Live Bank Email Search endpoint
 ordersRouter.post("/test-bank-search", async (req, res) => {
   try {
+    const { paymentDateTime } = req.body;
     const token = await getActiveGmailToken();
     if (!token) {
       return res.status(400).json({
@@ -304,7 +465,7 @@ ordersRouter.post("/test-bank-search", async (req, res) => {
       });
     }
 
-    const emails = await fetchRecentBankEmails(token);
+    const emails = await fetchRecentBankEmails(token, paymentDateTime);
     return res.json({
       success: true,
       count: emails.length,
@@ -323,10 +484,31 @@ ordersRouter.post("/test-bank-search", async (req, res) => {
 });
 
 // Helper: Fetch recent bank notification emails from Gmail
-async function fetchRecentBankEmails(token: string) {
+async function fetchRecentBankEmails(token: string, searchDate?: string) {
   try {
-    // Search query looking for bank transaction messages received in the last 7 days
-    const query = encodeURIComponent("newer_than:7d (received OR payment OR credit OR transfer OR Rs OR PKR OR EasyPaisa OR JazzCash OR SadaPay OR NayaPay OR Bank OR Meezan OR HBL OR Habib OR Faysal OR MCB OR UBL OR Askari OR Allied OR Alfalah OR trx OR TID OR txn)");
+    let dateFilter = "newer_than:7d";
+    if (searchDate) {
+      const d = new Date(searchDate);
+      if (!isNaN(d.getTime())) {
+        const afterDate = new Date(d);
+        afterDate.setDate(afterDate.getDate() - 1);
+        const beforeDate = new Date(d);
+        beforeDate.setDate(beforeDate.getDate() + 2);
+        
+        const yAfter = afterDate.getFullYear();
+        const mAfter = String(afterDate.getMonth() + 1).padStart(2, '0');
+        const dAfter = String(afterDate.getDate()).padStart(2, '0');
+
+        const yBefore = beforeDate.getFullYear();
+        const mBefore = String(beforeDate.getMonth() + 1).padStart(2, '0');
+        const dBefore = String(beforeDate.getDate()).padStart(2, '0');
+
+        dateFilter = `after:${yAfter}/${mAfter}/${dAfter} before:${yBefore}/${mBefore}/${dBefore}`;
+      }
+    }
+
+    // Search query looking for bank transaction messages
+    const query = encodeURIComponent(`${dateFilter} (received OR payment OR credit OR transfer OR Rs OR PKR OR EasyPaisa OR JazzCash OR SadaPay OR NayaPay OR Bank OR Meezan OR HBL OR Habib OR Faysal OR MCB OR UBL OR Askari OR Allied OR Alfalah OR trx OR TID OR txn)`);
     const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=35`;
 
     const listRes = await fetch(listUrl, {
@@ -410,34 +592,7 @@ async function matchOrderWithGmailEmails(
     };
   }
 
-  // 1. Programmatic Tier 1 check: Exact / Clean TID match
-  const rawTrxId = orderDetails.trxId?.trim() || "";
-  const cleanTrxId = rawTrxId.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-
-  if (cleanTrxId.length >= 4) {
-    for (const email of emails) {
-      const fullText = `${email.subject || ""} ${email.snippet || ""} ${email.bodySnippet || ""}`.toLowerCase();
-      const cleanFullText = fullText.replace(/[^a-zA-Z0-9]/g, "");
-      
-      if (cleanFullText.includes(cleanTrxId)) {
-        // Direct TID match found in email!
-        return {
-          matched: true,
-          confidence: "high",
-          matchTier: "tier1_trx_id",
-          matchedMessageId: email.id,
-          matchedEmailSubject: email.subject || "",
-          matchedEmailDate: email.date || "",
-          matchedEmailSnippet: email.snippet || "",
-          detectedBankName: email.from || "Bank Notification",
-          verifiedTrxId: rawTrxId,
-          reason: `Matched via Transaction ID (TID: ${rawTrxId}) in bank notifications.`,
-        };
-      }
-    }
-  }
-
-  // 2. Pass to Gemini 2.5 Pro for Comprehensive 2-Tier Reasoning
+  // 1. Pass to Gemini 2.5 Pro for Comprehensive Reasoning based on strict rules
   const ai = getGenAI();
   const prompt = `You are an automated bank transaction verification AI for an e-commerce / streaming service.
 Your task is to match user-submitted payment details against a list of recent bank / mobile wallet notifications.
@@ -452,26 +607,24 @@ USER-SUBMITTED ORDER PAYMENT DETAILS:
 RECENT BANK NOTIFICATIONS:
 ${JSON.stringify(emails, null, 2)}
 
-HIERARCHICAL MATCHING RULES (FOLLOW STRICTLY IN THIS EXACT ORDER):
+MATCHING RULES (STRICTLY FOLLOW THESE REQUIREMENTS):
 
-TIER 1 (HIGHEST PRIORITY - TRANSACTION ID MATCH):
-- First, check if the Transaction ID (TID / Trx ID / Ref ID) matches anywhere in the notification.
-- If the TID matches, set matched: true, confidence: "high", matchTier: "tier1_trx_id", and cite the matching TID.
+You must ONLY approve (matched: true) if the following criteria are met:
+1. EXACT DATE: The notification date must match the date provided in the user's "Payment Date & Time".
+2. TIME (+/- 3 MINS): The notification time must be within 3 minutes (before or after) of the time provided in the user's "Payment Date & Time".
+3. EXACT AMOUNT: The payment amount received in PKR / Rs must exactly match ${orderDetails.amount}.
+4. SENDER ACCOUNT TITLE: The sender name or account title must match or closely resemble "${orderDetails.accountTitle}" (fuzzy / case-insensitive).
 
-TIER 2 (FALLBACK FOR OTHER BANK / IBFT / RAAST METHODS):
-- If the Transaction ID is NOT matched (because inter-bank transfers or third-party apps like 1Link / Raast often generate a sender-side reference number that differs from the receiver's bank notification TID):
-- Then check if an incoming credit / payment notification matches:
-  1. EXACT PAYMENT AMOUNT: The amount received in PKR / Rs must match ${orderDetails.amount}.
-  2. ACCOUNT TITLE / SENDER NAME: The sender name or account title in the notification matches or closely resembles "${orderDetails.accountTitle}" (fuzzy / case-insensitive, e.g. "Asmat Ullah", "Muhammad Ali", etc.) OR the sender account digits match.
-  3. EXACT TIME AND DATE: The notification timestamp aligns with "${orderDetails.paymentDateTime}" (same date or within a reasonable time window of a few hours).
-- If Amount + Account Title + Date/Time align, set matched: true, confidence: "high", matchTier: "tier2_fallback_details", and state: "Matched via other bank method: Amount (Rs ${orderDetails.amount}), Account Title (${orderDetails.accountTitle}), and Date/Time alignment."
+Note on Bank / Transaction ID:
+- If the above 4 conditions (Date, Time, Amount, Account Title) are met, you MUST approve the match (matched: true, confidence: "high", matchTier: "tier1_trx_id" or "tier2_fallback_details").
+- Confirm if the bank or transaction ID ("${orderDetails.trxId}") does NOT match (e.g. inter-bank differences), but take it only for reference. It should NOT prevent an approval if Date, Time, Amount, and Title all match perfectly.
+- In your "reason" field, explain the match, and state if the bank/TID matched or differed.
 
-TIER 3 (NO MATCH):
-- If neither Tier 1 nor Tier 2 criteria are satisfied, set matched: false, confidence: "none", matchTier: "none", and explain specifically what did not match. Ensure you act as a direct bank connection, DO NOT mention the words "email", "mailbox", or "Gmail".
+If the 4 main conditions are NOT met (e.g. time is off by more than 3 mins, amount differs, date is wrong, or title is completely different), set matched: false, confidence: "none", matchTier: "none", and explain specifically what failed. Ensure you act as a direct bank connection, DO NOT mention the words "email", "mailbox", or "Gmail".
 
 Return ONLY valid JSON matching the schema.`;
 
-  const modelsToTry = ["gemini-3.1-flash-lite", "gemini-3.7-flash", "gemini-3.6-flash"];
+  const modelsToTry = ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-3.1-flash-lite"];
   let raw = "{}";
   let lastError: any = null;
 
@@ -601,6 +754,10 @@ ordersRouter.post("/verify-and-confirm", async (req, res) => {
       gmailToken: clientGmailToken,
       phone = "",
       verificationAttempt = 1,
+      allowAutoApproval = true,
+      skipAiVerification = false,
+      paymentMethodId = "",
+      paymentMethodName = "",
     } = req.body;
 
     if (!userId) {
@@ -613,35 +770,40 @@ ordersRouter.post("/verify-and-confirm", async (req, res) => {
       return res.status(500).json({ error: "Database not available" });
     }
 
-    // Step A: Check Gmail Token & Fetch Bank Notification Emails
-    // ALWAYS use the server's securely stored admin token, NEVER accept from the client request
-    const activeToken = await getActiveGmailToken();
-    let bankEmails: any[] = [];
-    if (activeToken) {
-      bankEmails = await fetchRecentBankEmails(activeToken);
-    }
+    const shouldRunAiAutoApproval = allowAutoApproval !== false && !skipAiVerification;
 
-    // Step B: Run Gemini AI Auto-Approval Algorithm
+    // Step A & B: Run Gmail Token Check & AI Auto-Approval only if enabled for this payment method
+    let bankEmails: any[] = [];
     let aiVerdict: any = {
       matched: false,
       confidence: "none",
-      reason: activeToken ? "No matching transaction found in bank records" : "Bank verification service connecting",
+      reason: shouldRunAiAutoApproval
+        ? "No matching transaction found in bank records"
+        : "Payment method requires manual approval by admin",
     };
 
-    if (bankEmails.length > 0) {
-      aiVerdict = await matchOrderWithGmailEmails(
-        {
-          trxId: trxId.trim(),
-          accountTitle: accountTitle.trim(),
-          accountNumberLast4: accountNumberLast4.trim(),
-          paymentDateTime: paymentDateTime.trim(),
-          amount: Number(amount) || 0,
-        },
-        bankEmails
-      );
+    if (shouldRunAiAutoApproval) {
+      // ALWAYS use the server's securely stored admin token, NEVER accept from the client request
+      const activeToken = await getActiveGmailToken();
+      if (activeToken) {
+        bankEmails = await fetchRecentBankEmails(activeToken, paymentDateTime);
+      }
+
+      if (bankEmails.length > 0) {
+        aiVerdict = await matchOrderWithGmailEmails(
+          {
+            trxId: trxId.trim(),
+            accountTitle: accountTitle.trim(),
+            accountNumberLast4: accountNumberLast4.trim(),
+            paymentDateTime: paymentDateTime.trim(),
+            amount: Number(amount) || 0,
+          },
+          bankEmails
+        );
+      }
     }
 
-    let isAutoApproved = aiVerdict.matched && (aiVerdict.confidence === "high" || aiVerdict.confidence === "medium");
+    let isAutoApproved = shouldRunAiAutoApproval && aiVerdict.matched && (aiVerdict.confidence === "high" || aiVerdict.confidence === "medium");
     
     // Check for duplicates
     if (isAutoApproved) {
@@ -654,7 +816,8 @@ ordersRouter.post("/verify-and-confirm", async (req, res) => {
       }
     }
 
-    if (!isAutoApproved && verificationAttempt < 3) {
+    // Only retry if auto-approval was requested and failed before attempt limit
+    if (shouldRunAiAutoApproval && !isAutoApproved && verificationAttempt < 3) {
       return res.json({
         success: false,
         autoApproved: false,
@@ -705,8 +868,11 @@ ordersRouter.post("/verify-and-confirm", async (req, res) => {
       accountNumberLast4: accountNumberLast4.trim() || "",
       paymentDateTime: paymentDateTime.trim() || nowIso,
       paymentScreenshotUrl: paymentScreenshotUrl || "",
-      senderBank: senderBank || aiVerdict.detectedBankName || "Bank Transfer",
-      aiVerificationAttempted: true,
+      senderBank: senderBank || aiVerdict.detectedBankName || paymentMethodName || "Bank Transfer",
+      paymentMethodId: paymentMethodId || "",
+      paymentMethodName: paymentMethodName || senderBank || "",
+      allowAutoApproval: shouldRunAiAutoApproval,
+      aiVerificationAttempted: shouldRunAiAutoApproval,
       aiVerificationReason: aiVerdict.reason || "",
       aiConfidence: aiVerdict.confidence || "none",
     };
@@ -870,15 +1036,22 @@ ordersRouter.post("/admin-verify-order", async (req, res) => {
       return res.status(404).json({ error: "Order not found" });
     }
 
+    if (targetOrder.allowAutoApproval === false) {
+      return res.status(400).json({
+        success: false,
+        error: "This payment method is configured for manual review only. Auto-approval is disabled for this method.",
+      });
+    }
+
     const activeToken = await getActiveGmailToken();
     if (!activeToken) {
       return res.status(400).json({
         success: false,
-        error: "Gmail API token is not available. Please connect asmatullah9327@gmail.com in admin settings.",
+        error: "Gmail API token is not available. Please connect asmatn628@gmail.com in admin settings.",
       });
     }
 
-    const bankEmails = await fetchRecentBankEmails(activeToken);
+    const bankEmails = await fetchRecentBankEmails(activeToken, targetOrder.paymentDateTime || targetOrder.createdAt);
     if (!bankEmails.length) {
       return res.json({
         success: true,

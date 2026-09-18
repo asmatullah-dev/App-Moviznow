@@ -300,6 +300,9 @@ export interface Order {
   aiVerificationAttempted?: boolean;
   aiVerificationReason?: string;
   aiConfidence?: string;
+  allowAutoApproval?: boolean;
+  paymentMethodId?: string;
+  paymentMethodName?: string;
 }
 
 export interface BankAccount {
@@ -311,6 +314,7 @@ export interface BankAccount {
   labelColor?: string;
   textColor?: string;
   iconUrl?: string;
+  allowAutoApproval?: boolean;
 }
 
 export interface EmailSettings {

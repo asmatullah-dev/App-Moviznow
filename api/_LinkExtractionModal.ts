@@ -276,8 +276,46 @@ export function parseHubcloudHtmlTitle($: cheerio.CheerioAPI, htmlData: string):
     .replace(/^download\s*/i, "")
     .replace(/\s*-\s*download$/i, "")
     .replace(/\s*-\s*hubcloud$/i, "")
+    .replace(/\b(s\.cfd|cfd|s-cfd)\b/gi, " ")
+    .replace(/(?<!\d)\.(?!\d)/g, " ")
+    .replace(/\.{2,}/g, " ")
+    .replace(/_+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+
+  // Find boundaries to split before the year or the season/episode marker
+  const markerMatch = clean_title.match(/\b(s\d+e\d+|s\d+|season\s*\d+|episode\s*\d+|ep\s*\d+)\b/i);
+  const yearMatch = clean_title.match(/\b(19\d\d|20[0-2]\d)\b/);
+
+  let splitIndex: number | undefined = undefined;
+  if (yearMatch && yearMatch.index !== undefined) {
+    splitIndex = yearMatch.index;
+  }
+  if (markerMatch && markerMatch.index !== undefined) {
+    if (splitIndex === undefined || markerMatch.index < splitIndex) {
+      splitIndex = markerMatch.index;
+    }
+  }
+
+  if (splitIndex !== undefined && splitIndex > 0) {
+    let beforeSplit = clean_title.substring(0, splitIndex).trim();
+    beforeSplit = beforeSplit.replace(/[\(\[\{\-_.\s]+$/, '').trim();
+    if (beforeSplit.length > 1) {
+      clean_title = beforeSplit;
+    }
+  }
+
+  // Clean noise keywords from the title itself
+  const noiseRegex = /\b(480p|720p|1080p|2160p|4k|2k|hdrip|web-dl|webrip|bluray|brrip|dvdrip|hdtv|camrip|dual audio|multi audio|hindi|english|tamil|telugu|punjabi|malayalam|kannada|bengali|marathi|urdu|subtitles|esub|esubs|x264|x265|hevc|aac|ac3|eac3|dts|dd\+?|5\.1|7\.1|2\.0|5\s+1|7\s+1|2\s+0|hdhub4u(\.[a-z]+)?|moviesdrive(\.[a-z]+)?|skymovieshd(\.[a-z]+)?|filmygo(\.[a-z]+)?|filmyfly(\.[a-z]+)?|hubcloud(\.[a-z]+)?|hubdrive(\.[a-z]+)?|ms|mkv|mp4|zip|rar|download|full movie|movie|season \d+|s\d+e?\d*|cfd|s\.cfd|s-cfd)\b/gi;
+  clean_title = clean_title.replace(noiseRegex, '').replace(/[()\[\]{}:_|-]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+  // Capitalize properly
+  if (clean_title) {
+    clean_title = clean_title
+      .split(' ')
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ');
+  }
 
   if (!clean_title || isGenericTitle(clean_title)) {
     clean_title = original_title;
@@ -311,7 +349,46 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000);
 
-async function fetchDirect(url: string, timeout = 6000) {
+export const AI_STUDIO_API_URL = (
+  process.env.AI_STUDIO_API_URL ||
+  "https://ais-pre-ztgr34s3xe3g6vxljx3ldl-684080073915.asia-southeast1.run.app"
+).replace(/\/+$/, "");
+
+export async function fetchFromAiStudioApi(url: string, isVcloud = false, force = false): Promise<any> {
+  // Prevent circular calls if AI Studio is handling the request itself
+  if (process.env.AI_STUDIO_SELF || process.env.K_SERVICE) {
+    return null;
+  }
+  try {
+    const endpoint = `${AI_STUDIO_API_URL}/api/hubcloud/page`;
+    const res = await axios.post(
+      endpoint,
+      { url, isVcloud, force, source: "vercel" },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "X-AI-Studio-Proxy": "vercel",
+        },
+        timeout: 15000,
+        validateStatus: () => true,
+      },
+    );
+    if (res.status === 200 && res.data && res.data.ok && res.data.html && res.data.html.length > 100) {
+      return {
+        data: res.data.html,
+        status: 200,
+        headers: res.headers || {},
+        source: "ai-studio-api",
+      };
+    }
+  } catch (err: any) {
+    console.warn(`[fetchFromAiStudioApi] Warning: Could not fetch ${url} from AI Studio API:`, err.message);
+  }
+  return null;
+}
+
+async function fetchDirect(url: string, timeout = 8000, redirectCount = 0): Promise<any> {
+  if (redirectCount > 3) return { data: "", status: 500, headers: {} };
   const headers = {
     "User-Agent":
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -321,13 +398,19 @@ async function fetchDirect(url: string, timeout = 6000) {
     "Cache-Control": "no-cache",
     Pragma: "no-cache",
   };
-  return axios.get(url, {
+  const res = await axios.get(url, {
     headers,
     validateStatus: () => true,
     timeout,
+    maxRedirects: 5,
     maxContentLength: 5242880,
     maxBodyLength: 5242880,
   });
+  if (res.status >= 300 && res.status < 400 && res.headers.location) {
+    const nextUrl = new URL(res.headers.location, url).toString();
+    return fetchDirect(nextUrl, timeout, redirectCount + 1);
+  }
+  return res;
 }
 
 function isCloudflareResponse(response: any) {
@@ -412,15 +495,37 @@ async function fetchWithApi(url: string, timeout = 12000, isVcloud = false) {
 
 async function fetchHtmlFallback(url: string, isVcloud = false) {
   let response;
-  
-  // Vercel IPs are blocked by Cloudflare, so skip direct fetch to save time
-  if (!process.env.VERCEL) {
+  const isVercel = Boolean(
+    process.env.VERCEL ||
+    process.env.VERCEL_ENV ||
+    process.env.NEXT_PUBLIC_VERCEL_ENV
+  );
+
+  // 1. If running on Vercel, fetch page requests of HubCloud directly from AI Studio API!
+  if (isVercel) {
     try {
-      response = await fetchDirect(url, 6000);
+      response = await fetchFromAiStudioApi(url, isVcloud);
+      if (response && !isCloudflareResponse(response)) return response;
+    } catch (err) {}
+  }
+
+  // 2. If not on Vercel, perform direct fetch on Google Cloud Run (AI Studio environment)
+  if (!isVercel) {
+    try {
+      response = await fetchDirect(url, 8000);
       if (!isCloudflareResponse(response)) return response;
     } catch (err) {}
   }
 
+  // 3. If direct fetch encountered Cloudflare challenge or failed, try AI Studio API as fallback
+  if (!isVercel) {
+    try {
+      const aiStudioResp = await fetchFromAiStudioApi(url, isVcloud);
+      if (aiStudioResp && !isCloudflareResponse(aiStudioResp)) return aiStudioResp;
+    } catch (err) {}
+  }
+
+  // 4. Fallback to API scrapers (ScraperAPI / Microlink / Jina)
   try {
     response = await fetchWithApi(url, 12000, isVcloud);
     if (!isCloudflareResponse(response)) return response;
@@ -471,6 +576,111 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
   }
 }
 
+  // Permissive CORS middleware for all /api/hubcloud routes to allow Vercel frontends & backends
+  linkExtractionRouter.use("/api/hubcloud", (req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization, X-Requested-With, X-AI-Studio-Proxy, Accept, Origin",
+    );
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(204);
+    }
+    next();
+  });
+
+  // Dedicated AI Studio HubCloud Page Fetch Endpoint
+  // Allows Vercel deployments and frontends to fetch raw HTML & parsed metadata seamlessly
+  linkExtractionRouter.all("/api/hubcloud/page", async (req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization, X-Requested-With, X-AI-Studio-Proxy, Accept, Origin",
+    );
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(204);
+    }
+
+    try {
+      const rawUrl =
+        (req.body && (req.body.url || req.body.link)) ||
+        (req.query && (req.query.url || req.query.link));
+
+      if (!rawUrl || typeof rawUrl !== "string") {
+        return res.status(400).json({
+          ok: false,
+          error: "Missing 'url' query parameter or request body field",
+        });
+      }
+
+      const normalizedUrl = normalizeDomain(rawUrl);
+      const isVcloud = Boolean(
+        (req.body && req.body.isVcloud) ||
+        (req.query && req.query.isVcloud) ||
+        normalizedUrl.includes("vcloud"),
+      );
+      const force = Boolean(
+        (req.body && req.body.force) || (req.query && req.query.force),
+      );
+
+      // Perform fetch on AI Studio's Cloud Run environment
+      const response = await fetchHtml(normalizedUrl, isVcloud, force);
+      const htmlData = response?.data || "";
+      const isCf = isCloudflareResponse(response);
+
+      if (isCf || !htmlData || htmlData.length < 50) {
+        return res.status(response?.status || 502).json({
+          ok: false,
+          url: normalizedUrl,
+          status: response?.status || 502,
+          isCloudflare: isCf,
+          error: isCf
+            ? "Cloudflare verification / challenge detected"
+            : "Failed to retrieve page content",
+          source: "ai-studio-api",
+        });
+      }
+
+      // Quick parse for title & size for caller convenience
+      const $ = cheerio.load(htmlData);
+      const parsedMeta = parseHubcloudHtmlTitle($, htmlData);
+
+      let sizeStr =
+        $('td:contains("File Size")').next("td").text() ||
+        $('li:contains("File Size") i').text() ||
+        $('li:contains("File Size")').text() ||
+        $('li:contains("Size") i').text() ||
+        $('li:contains("Size")').text();
+      sizeStr = sizeStr.replace("File Size", "").replace("Size", "").trim();
+
+      return res.json({
+        ok: true,
+        url: normalizedUrl,
+        status: 200,
+        html: htmlData,
+        data: htmlData,
+        isCloudflare: false,
+        title:
+          parsedMeta.clean_title ||
+          parsedMeta.original_title ||
+          $("title").text().trim(),
+        original_title: parsedMeta.original_title,
+        size: sizeStr,
+        source: "ai-studio-api",
+        timestamp: Date.now(),
+      });
+    } catch (err: any) {
+      console.error("[/api/hubcloud/page] Error:", err.message);
+      return res.status(500).json({
+        ok: false,
+        error: err.message || "Failed to fetch page from AI Studio API",
+        source: "ai-studio-api",
+      });
+    }
+  });
+
   linkExtractionRouter.post("/api/hubcloud/extract", async (req, res) => {
     try {
       const { url, forceExtract, isVcloud, force } = req.body;
@@ -494,6 +704,35 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
       const cached = extractionCache.get(cacheKey);
       if (!force && cached && Date.now() - cached.timestamp < CACHE_TTL) {
         return res.json(cached.data);
+      }
+
+      // When hosted on Vercel, delegate HubCloud extraction directly to AI Studio API
+      if (process.env.VERCEL && !req.headers["x-ai-studio-proxy"]) {
+        try {
+          const aiStudioRes = await axios.post(
+            `${AI_STUDIO_API_URL}/api/hubcloud/extract`,
+            { url, forceExtract, isVcloud, force },
+            {
+              headers: {
+                "Content-Type": "application/json",
+                "X-AI-Studio-Proxy": "vercel",
+              },
+              timeout: 18000,
+              validateStatus: () => true,
+            },
+          );
+          if (
+            aiStudioRes.status === 200 &&
+            aiStudioRes.data &&
+            !aiStudioRes.data.isCloudflare &&
+            !aiStudioRes.data.title?.toLowerCase().includes("cloudflare")
+          ) {
+            extractionCache.set(cacheKey, { data: aiStudioRes.data, timestamp: Date.now() });
+            return res.json(aiStudioRes.data);
+          }
+        } catch (err: any) {
+          console.warn("[Vercel -> AI Studio extract proxy failed]:", err.message);
+        }
       }
 
       if (inFlightRequests.has(cacheKey)) {
@@ -975,6 +1214,36 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
         }
         // Cached entry did not contain a valid direct link - delete it and re-extract!
         extractionCache.delete(cacheKey);
+      }
+
+      // When hosted on Vercel, delegate HubCloud direct link extraction directly to AI Studio API
+      if (process.env.VERCEL && !req.headers["x-ai-studio-proxy"]) {
+        try {
+          const aiStudioRes = await axios.post(
+            `${AI_STUDIO_API_URL}/api/hubcloud/direct-link`,
+            { url, checkOnly, isVcloud, force },
+            {
+              headers: {
+                "Content-Type": "application/json",
+                "X-AI-Studio-Proxy": "vercel",
+              },
+              timeout: 22000,
+              validateStatus: () => true,
+            },
+          );
+          if (
+            aiStudioRes.status === 200 &&
+            aiStudioRes.data &&
+            !aiStudioRes.data.isCloudflare
+          ) {
+            if (hasValidDirectLink(aiStudioRes.data, url)) {
+              extractionCache.set(cacheKey, { data: aiStudioRes.data, timestamp: Date.now() });
+            }
+            return res.json(aiStudioRes.data);
+          }
+        } catch (err: any) {
+          console.warn("[Vercel -> AI Studio direct-link proxy failed]:", err.message);
+        }
       }
 
       // In-flight coalescing

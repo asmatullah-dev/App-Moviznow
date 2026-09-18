@@ -36,6 +36,7 @@ import { useAdminContent } from "../../contexts/AdminContentContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { useUsers } from "../../contexts/UsersContext";
 import { isEpisodeRange } from "../../utils/linkScanner";
+import { extractTitleAndYear } from "../../utils/titleMatcher";
 import {
   Content,
   Genre,
@@ -108,7 +109,6 @@ import {
 import { LinkCheckerModal } from "../../components/LinkCheckerModal";
 import { TelegramDownloadModal } from "../../components/TelegramDownloadModal";
 import { AdjustContentsModal } from "../../components/AdjustContentsModal";
-import { BulkContentImporterModal } from "../../components/BulkContentImporterModal";
 import { QualityUpgradeAlertsModal } from "../../components/QualityUpgradeAlertsModal";
 import Modal from "../../components/Modal";
 import ManageModal from "../../components/ManageModal";
@@ -135,6 +135,12 @@ import { memoryStore } from "../../utils/memoryStore";
 import { ContentFormModal } from "../../components/ContentFormModal";
 
 import { BatchFetchModal } from "../../components/BatchFetchModal";
+import { getImportCache, removeImportCache } from "../../utils/importCache";
+import {
+  getBatchMediaPreferences,
+  applyPreferencesToContent,
+  verifyAndFetchTmdbData,
+} from "../../services/tmdbEnricher";
 
 const extractMediaUrls = (content: Content): string[] => {
   const urls: string[] = [];
@@ -859,7 +865,6 @@ export default function ContentManagement() {
 
   useScrollRestoration("admin_content_mgmt_window", true, !loading);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isBulkImporterOpen, setIsBulkImporterOpen] = useState(false);
   const [isQualityAlertsOpen, setIsQualityAlertsOpen] = useState(false);
   const [isSyncConfirmOpen, setIsSyncConfirmOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -1764,6 +1769,8 @@ export default function ContentManagement() {
 
         await saveContent(fullContent);
         safeStorage.removeItem(`movie_details_${currentEditingId}`);
+        removeImportCache(fullContent.title || title, fullContent.year || year);
+        if (title) removeImportCache(title, year);
       } else {
         newDocId = Math.random().toString(36).substr(2, 9); // Generate a unique ID
         cleanedData.id = newDocId;
@@ -1774,6 +1781,8 @@ export default function ContentManagement() {
         cleanedData.order = maxOrder + 1;
 
         await saveContent(cleanedData as Content);
+        removeImportCache(cleanedData.title || title, cleanedData.year || year);
+        if (title) removeImportCache(title, year);
       }
 
       // Add to special collections if checked
@@ -1978,6 +1987,43 @@ export default function ContentManagement() {
         const parsedYear = parseInt(String((metadata as any).year), 10);
         if (!isNaN(parsedYear)) setYear(parsedYear);
       }
+
+      // Populate content fields according to Batch Media modal selection preferences
+      const isTitleSearch = Boolean((metadata as any)?.isTitleSearch);
+      const candidateTitle = (metadata as any)?.title || title;
+      const candidateYear = (metadata as any)?.year || year;
+      const cached = isTitleSearch ? getImportCache(candidateTitle, candidateYear) : null;
+      const tmdbData = isTitleSearch ? ((metadata as any)?.tmdbData || cached?.tmdbData) : undefined;
+      if (tmdbData) {
+        const prefs = getBatchMediaPreferences();
+        if (prefs.title && tmdbData.title) setTitle(tmdbData.title);
+        if (prefs.secondTitle && tmdbData.secondTitle) setSecondTitle(tmdbData.secondTitle);
+        if (prefs.type && tmdbData.type) {
+          setType(tmdbData.type);
+          activeType = tmdbData.type;
+        }
+        if (prefs.year && tmdbData.year) setYear(tmdbData.year);
+        if (prefs.description && (tmdbData.overview || tmdbData.description)) setDescription(tmdbData.overview || tmdbData.description);
+        if (prefs.posterUrl && tmdbData.posterUrl) setPosterUrl(tmdbData.posterUrl);
+        if (prefs.trailerUrl && tmdbData.trailerUrl) setTrailerUrl(tmdbData.trailerUrl);
+        if (prefs.releaseDate && tmdbData.releaseDate) setReleaseDate(tmdbData.releaseDate);
+        if (prefs.country && tmdbData.country) setCountry(tmdbData.country);
+        if (prefs.runtime && tmdbData.runtime) setRuntime(tmdbData.runtime);
+        if (prefs.imdbRating && tmdbData.imdbRating) setImdbRating(tmdbData.imdbRating);
+        if (prefs.imdbLink && tmdbData.imdbLink) setImdbLink(tmdbData.imdbLink);
+        if (prefs.ottPlatform && tmdbData.ottPlatform) setOttPlatform(tmdbData.ottPlatform);
+        if (prefs.cast && Array.isArray(tmdbData.cast) && tmdbData.cast.length > 0) setCast(tmdbData.cast);
+        if (prefs.genres && Array.isArray(tmdbData.genres) && tmdbData.genres.length > 0) {
+          const matchedGenreIds: string[] = [];
+          tmdbData.genres.forEach((g: any) => {
+            const match = genres.find((ag) => ag.name.toLowerCase() === (g.name || '').toLowerCase());
+            if (match && !matchedGenreIds.includes(match.id)) matchedGenreIds.push(match.id);
+          });
+          if (matchedGenreIds.length > 0) {
+            setSelectedGenres((prev) => Array.from(new Set([...prev, ...matchedGenreIds])));
+          }
+        }
+      }
     }
 
     if (activeType === "movie") {
@@ -2005,12 +2051,12 @@ export default function ContentManagement() {
             return;
           }
 
-          // Find an existing link with same name and empty URL
-          const emptyIdx = currentLinks.findIndex(
-            (l) => l.name === newLink.name && (!l.url || !l.url.trim()),
+          // If a link with the same quality name already exists, update/replace it to prevent double qualities
+          const sameNameIdx = currentLinks.findIndex(
+            (l) => l.name.toLowerCase() === newLink.name.toLowerCase(),
           );
-          if (emptyIdx !== -1) {
-            currentLinks[emptyIdx] = newLink;
+          if (sameNameIdx !== -1) {
+            currentLinks[sameNameIdx] = newLink;
           } else {
             currentLinks.push(newLink);
           }
@@ -2036,35 +2082,36 @@ export default function ContentManagement() {
           setSampleUrl(link.url);
         }
 
-        let targetSeason = link.season || metadata?.season;
-        let targetEpisode = link.episode || metadata?.episode;
+        const isZip = link.isFullSeasonZIP || (!link.isFullSeasonMKV && link.url && link.url.toLowerCase().includes(".zip"));
+        const textToScan = `${(link as any).fileName || ''} ${link.name || ''} ${link.url || ''}`;
+        const isMkvFullSeason = link.isFullSeasonMKV || isEpisodeRange(textToScan) || /full season|all episodes|complete/i.test(textToScan);
 
-        // Fallback extraction from link fileName, name, or url if episode or season is not explicitly set
-        if (targetEpisode === undefined || targetSeason === undefined) {
-          const textToScan = `${(link as any).fileName || ''} ${link.name || ''} ${link.url || ''}`;
-          const hasRange = isEpisodeRange(textToScan);
-          if (!hasRange) {
-            const combMatch = textToScan.match(/(?<=^|[^a-zA-Z0-9])s(\d+)\s*e(\d+)(?![a-z0-9])/i) ||
-                              textToScan.match(/season\s*(\d+).*?episode\s*(\d+)/i) ||
-                              textToScan.match(/(?<=^|[^a-zA-Z0-9])dl\s+(\d+)\s+(\d+)(?![a-z0-9])/i);
-            if (combMatch) {
-              if (targetSeason === undefined) targetSeason = parseInt(combMatch[1], 10);
-              if (targetEpisode === undefined) targetEpisode = parseInt(combMatch[2], 10);
-            } else {
-              const sMatch = textToScan.match(/(?<=^|[^a-zA-Z0-9])(?:s(\d+)|season\s*(\d+)|ss\s*(\d+))(?![a-z0-9])/i);
-              const eMatch = textToScan.match(/(?<=^|[^a-zA-Z0-9])(?:e(\d+)|episode\s*(\d+)|ep\s*(\d+))(?![a-z0-9])/i);
-              if (targetSeason === undefined && sMatch) targetSeason = parseInt(sMatch[1] || sMatch[2] || sMatch[3], 10);
-              if (targetEpisode === undefined && eMatch) targetEpisode = parseInt(eMatch[1] || eMatch[2] || eMatch[3], 10);
+        let targetSeason = link.season || metadata?.season;
+        if (!targetSeason) targetSeason = 1;
+
+        let targetEpisode: number | undefined = undefined;
+        if (!isZip && !isMkvFullSeason) {
+          if (link.episode !== undefined) {
+            targetEpisode = link.episode;
+          } else {
+            const parsed = extractTitleAndYear(textToScan);
+            if (parsed.episode !== undefined) {
+              targetEpisode = parsed.episode;
             }
           }
         }
-        if (!targetSeason) targetSeason = 1;
 
         if (targetEpisode !== undefined) {
           link.season = targetSeason;
           link.episode = targetEpisode;
           link.isFullSeasonMKV = false;
           link.isFullSeasonZIP = false;
+        } else {
+          if (isZip) {
+            link.isFullSeasonZIP = true;
+          } else if (isMkvFullSeason) {
+            link.isFullSeasonMKV = true;
+          }
         }
 
         let seasonIdx = updatedSeasons.findIndex(
@@ -2106,22 +2153,19 @@ export default function ContentManagement() {
             return;
           }
 
-          // Merge logic: replace if name matches and URL is empty, otherwise add
-          // Special case for MKV Full Season: match "720p" if new is "720p HEVC"
-          const emptyIdx = targetLinks.findIndex((l) => {
-            const isEmpty = !l.url || !l.url.trim();
-            if (!isEmpty) return false;
-            if (l.name === link.name) return true;
+          // Merge logic: replace if name matches to prevent duplicate quality zip/mkv links
+          const existingIdx = targetLinks.findIndex((l) => {
+            if (l.name.toLowerCase() === link.name.toLowerCase()) return true;
             if (
               !isZip &&
               link.name.endsWith(" HEVC") &&
-              l.name === link.name.replace(" HEVC", "")
+              l.name.toLowerCase() === link.name.replace(" HEVC", "").toLowerCase()
             )
               return true;
             return false;
           });
-          if (emptyIdx !== -1) {
-            targetLinks[emptyIdx] = link;
+          if (existingIdx !== -1) {
+            targetLinks[existingIdx] = link;
           } else {
             targetLinks.push(link);
           }
@@ -2169,12 +2213,12 @@ export default function ContentManagement() {
             return;
           }
 
-          // Merge logic: replace if name matches and URL is empty, otherwise add
-          const emptyIdx = targetLinks.findIndex(
-            (l) => l.name === link.name && (!l.url || !l.url.trim()),
+          // Merge logic: replace if quality name matches to prevent duplicate qualities in the same episode
+          const existingIdx = targetLinks.findIndex(
+            (l) => l.name.toLowerCase() === link.name.toLowerCase(),
           );
-          if (emptyIdx !== -1) {
-            targetLinks[emptyIdx] = link;
+          if (existingIdx !== -1) {
+            targetLinks[existingIdx] = link;
           } else {
             targetLinks.push(link);
           }
@@ -2279,9 +2323,12 @@ export default function ContentManagement() {
         ...contentList.map((c) => c.order || 0),
       );
 
-      batches.forEach((b, index) => {
+      const preferences = getBatchMediaPreferences();
+
+      for (let index = 0; index < batches.length; index++) {
+        const b = batches[index];
         const newId = Math.random().toString(36).substr(2, 9);
-        const contentData: any = {
+        let contentData: any = {
           id: newId,
           title: b.title || "Untitled",
           year: b.year || "",
@@ -2316,34 +2363,36 @@ export default function ContentManagement() {
           const seasonMap = new Map<number, Season>();
 
           b.links.forEach((l: LinkDef) => {
-            let sNum = l.season || b.metadata.season;
-            let epNum = l.episode || b.metadata.episode;
+            const textToScan = `${(l as any).fileName || ''} ${l.name || ''} ${l.url || ''}`;
+            const isZip = l.isFullSeasonZIP || (!l.isFullSeasonMKV && l.url && l.url.toLowerCase().includes(".zip"));
+            const isMkvFullSeason = l.isFullSeasonMKV || isEpisodeRange(textToScan) || /full season|all episodes|complete/i.test(textToScan);
 
-            if (epNum === undefined || sNum === undefined) {
-              const textToScan = `${(l as any).fileName || ''} ${l.name || ''} ${l.url || ''}`;
-              const hasRange = isEpisodeRange(textToScan);
-              if (!hasRange) {
-                const combMatch = textToScan.match(/(?<=^|[^a-zA-Z0-9])s(\d+)\s*e(\d+)(?![a-z0-9])/i) ||
-                                  textToScan.match(/season\s*(\d+).*?episode\s*(\d+)/i) ||
-                                  textToScan.match(/(?<=^|[^a-zA-Z0-9])dl\s+(\d+)\s+(\d+)(?![a-z0-9])/i);
-                if (combMatch) {
-                  if (sNum === undefined) sNum = parseInt(combMatch[1], 10);
-                  if (epNum === undefined) epNum = parseInt(combMatch[2], 10);
-                } else {
-                  const sMatch = textToScan.match(/(?<=^|[^a-zA-Z0-9])(?:s(\d+)|season\s*(\d+)|ss\s*(\d+))(?![a-z0-9])/i);
-                  const eMatch = textToScan.match(/(?<=^|[^a-zA-Z0-9])(?:e(\d+)|episode\s*(\d+)|ep\s*(\d+))(?![a-z0-9])/i);
-                  if (sNum === undefined && sMatch) sNum = parseInt(sMatch[1] || sMatch[2] || sMatch[3], 10);
-                  if (epNum === undefined && eMatch) epNum = parseInt(eMatch[1] || eMatch[2] || eMatch[3], 10);
+            let sNum = l.season || b.metadata.season;
+            if (!sNum) sNum = 1;
+
+            let epNum: number | undefined = undefined;
+            if (!isZip && !isMkvFullSeason) {
+              if (l.episode !== undefined) {
+                epNum = l.episode;
+              } else {
+                const parsed = extractTitleAndYear(textToScan);
+                if (parsed.episode !== undefined) {
+                  epNum = parsed.episode;
                 }
               }
             }
-            if (!sNum) sNum = 1;
 
             if (epNum !== undefined) {
               l.season = sNum;
               l.episode = epNum;
               l.isFullSeasonMKV = false;
               l.isFullSeasonZIP = false;
+            } else {
+              if (isZip) {
+                l.isFullSeasonZIP = true;
+              } else if (isMkvFullSeason) {
+                l.isFullSeasonMKV = true;
+              }
             }
 
             if (!seasonMap.has(sNum)) {
@@ -2373,26 +2422,31 @@ export default function ContentManagement() {
                 s.episodes.push(ep);
                 s.episodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
               }
-              ep.links.push(l);
-              ep.links.sort(
-                (a, b) =>
-                  getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
-              );
-            } else {
-              const isZip = l.isFullSeasonZIP || (!l.isFullSeasonMKV && l.url && l.url.toLowerCase().includes(".zip"));
-              if (isZip) {
-                s.zipLinks.push(l);
-                s.zipLinks.sort(
+              if (!ep.links.some((existing) => existing.url === l.url)) {
+                ep.links.push(l);
+                ep.links.sort(
                   (a, b) =>
                     getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
                 );
+              }
+            } else {
+              if (isZip) {
+                if (!s.zipLinks.some((existing) => existing.url === l.url)) {
+                  s.zipLinks.push(l);
+                  s.zipLinks.sort(
+                    (a, b) =>
+                      getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
+                  );
+                }
               } else {
                 if (!s.mkvLinks) s.mkvLinks = [];
-                s.mkvLinks.push(l);
-                s.mkvLinks.sort(
-                  (a, b) =>
-                    getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
-                );
+                if (!s.mkvLinks.some((existing) => existing.url === l.url)) {
+                  s.mkvLinks.push(l);
+                  s.mkvLinks.sort(
+                    (a, b) =>
+                      getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit),
+                  );
+                }
               }
             }
           });
@@ -2417,11 +2471,43 @@ export default function ContentManagement() {
             contentData.languageIds = matchedLangIds;
         }
 
+        // Apply TMDB Verification and Batch Media Preferences ONLY when searching by title
+        const isTitleSearch = Boolean(b.metadata?.isTitleSearch);
+        let tmdbData: any = isTitleSearch ? (b.metadata?.tmdbData || getImportCache(b.title, b.year)?.tmdbData || null) : null;
+        if (!tmdbData && isTitleSearch && b.title) {
+          try {
+            tmdbData = await verifyAndFetchTmdbData(b.title, b.year, b.metadata?.type);
+          } catch (err) {
+            console.warn("Failed to fetch TMDB data for batch item:", b.title, err);
+          }
+        }
+
+        if (tmdbData && isTitleSearch) {
+          contentData = applyPreferencesToContent(
+            contentData,
+            tmdbData,
+            preferences,
+            genres,
+            languages,
+            qualities
+          );
+        }
+
         const cleanedData = deepClean(contentData);
         itemsToSave.push(cleanedData as Content);
-      });
+      }
 
       await Promise.all(itemsToSave.map((item) => saveContent(item)));
+
+      // Clean 30-min cache after successfully saved to library
+      itemsToSave.forEach((item) => {
+        if (item.title) removeImportCache(item.title, item.year);
+        if (item.secondTitle) removeImportCache(item.secondTitle, item.year);
+      });
+      batches.forEach((b) => {
+        if (b.title) removeImportCache(b.title, b.year);
+      });
+
       setAlertConfig({
         isOpen: true,
         title: "Success",
@@ -6158,6 +6244,14 @@ export default function ContentManagement() {
                   </button>
                 )}
                 <button
+                  onClick={() => setIsQualityAlertsOpen(true)}
+                  className="p-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center justify-center shadow-sm"
+                  title="Smart Quality Upgrade Alerts"
+                  aria-label="Quality Alerts"
+                >
+                  <Sparkles className="w-5 h-5" />
+                </button>
+                <button
                   onClick={handleManualFirestoreRefresh}
                   disabled={isSyncingFromFirestore}
                   className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 flex items-center justify-center shadow-sm"
@@ -6189,23 +6283,6 @@ export default function ContentManagement() {
                 </div>
               </div>
             )}
-            <div className="flex items-center gap-2 flex-nowrap">
-              <button
-                onClick={() => setIsBulkImporterOpen(true)}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2.5 sm:px-4 sm:py-3 rounded-xl font-medium flex items-center justify-center transition-colors whitespace-nowrap shadow-sm text-sm"
-                title="Bulk Content Importer / Multi-site Batch Queue"
-              >
-                <span>Bulk Importer</span>
-              </button>
-
-              <button
-                onClick={() => setIsQualityAlertsOpen(true)}
-                className="bg-amber-600 hover:bg-amber-700 text-white px-3.5 py-2.5 sm:px-4 sm:py-3 rounded-xl font-medium flex items-center justify-center transition-colors whitespace-nowrap shadow-sm text-sm"
-                title="Smart Quality Upgrade Alerts"
-              >
-                <span>Quality Alerts</span>
-              </button>
-            </div>
 
             <button
               onClick={() => {
@@ -6618,6 +6695,10 @@ export default function ContentManagement() {
         onAddLinks={handleAddLinksFromChecker}
         languages={languages}
         qualities={qualities}
+        initialTitle={title}
+        initialYear={year}
+        contentType={type}
+        content={editingId ? contentList.find(c => c.id === editingId) : undefined}
       />
       <LinkCheckerModal
         isOpen={isBatchLinkCheckerOpen}
@@ -7623,15 +7704,6 @@ export default function ContentManagement() {
           </div>
         </div>
       )}
-
-      {/* Bulk Content Importer Modal */}
-      <BulkContentImporterModal
-        isOpen={isBulkImporterOpen}
-        onClose={() => setIsBulkImporterOpen(false)}
-        genres={genres}
-        languages={languages}
-        qualities={qualities}
-      />
 
       {/* Quality Upgrade Alerts Modal */}
       <QualityUpgradeAlertsModal

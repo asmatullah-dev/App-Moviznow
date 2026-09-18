@@ -12,11 +12,26 @@ export const extractTitleAndYear = (rawTitle: string): {
 
   let text = rawTitle.trim();
 
+  // Strip URLs (e.g. https://..., http //..., hubcloud.ist/drive/...)
+  text = text
+    .replace(/https?:?\s*\/\/[^\s]+/gi, ' ')
+    .replace(/\b(?:https?|ftp|hubcloud|vcloud|hubdrive)\.[a-z]{2,6}\/[^\s]+/gi, ' ')
+    .replace(/\b(?:drive|file)\/[a-z0-9_-]+/gi, ' ');
+
   // Strip sample prefix first if present
   text = text.replace(/^(?:sample|sample[-_.\s]+)/i, '').trim();
 
   // Strip prefix words like Download, Watch Online, Stream, etc.
   text = text.replace(/^(download|watch|stream|movie|series)\b\s*/i, '');
+
+  // Strip domain names/suffixes like .cfd, s.cfd, s-cfd
+  text = text.replace(/\b(s\.cfd|cfd|s-cfd)\b/gi, ' ');
+
+  // Convert non-numeric dots to spaces to normalize the text structure early (keeps 5.1, 7.1)
+  text = text.replace(/(?<!\d)\.(?!\d)/g, ' ');
+
+  // Clean consecutive dots, underscores, and dots around numbers early
+  text = text.replace(/\.{2,}/g, ' ').replace(/_+/g, ' ');
 
   // Match 4-digit year (1900-2099)
   const yearMatch = text.match(/\b(19\d\d|20[0-2]\d)\b/);
@@ -24,26 +39,6 @@ export const extractTitleAndYear = (rawTitle: string): {
   if (yearMatch) {
     year = parseInt(yearMatch[1], 10);
   }
-
-  let cleanTitle = text;
-  if (yearMatch && yearMatch.index !== undefined) {
-    let beforeYear = text.substring(0, yearMatch.index).trim();
-    beforeYear = beforeYear.replace(/[\(\[\{\-_]+$/, '').trim();
-    if (beforeYear.length > 1) {
-      cleanTitle = beforeYear;
-    }
-  }
-
-  // Remove resolution, quality, format, audio, language noise keywords
-  const noiseRegex = /\b(480p|720p|1080p|2160p|4k|hdrip|web-dl|webrip|bluray|brrip|dvdrip|hdtv|camrip|dual audio|multi audio|hindi|english|tamil|telugu|punjabi|malayalam|kannada|bengali|marathi|urdu|subtitles|esub|esubs|x264|x265|hevc|aac|mkv|mp4|download|full movie|movie|season \d+|s\d+e?\d*)\b/gi;
-
-  cleanTitle = cleanTitle.replace(noiseRegex, '').replace(/[()\[\]{}:_|-]+/g, ' ').replace(/\s+/g, ' ').trim();
-
-  // Explicitly strip any season markers (S1, S2, S3, S4, S5, S01, S02, S03, Season 1, Season 2, etc.) from title
-  cleanTitle = cleanTitle
-    .replace(/\b(seasons?|s)\s*[-_]?\s*\d{1,2}\b/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim();
 
   // Detect season & episode before noise stripping
   const hasEpRange = isEpisodeRange(rawTitle);
@@ -64,6 +59,65 @@ export const extractTitleAndYear = (rawTitle: string): {
     const eMatch = hasEpRange ? null : rawTitle.match(/(?<=^|[^a-zA-Z0-9])(?:e(\d+)|episode[\s._-]*(\d+)|ep[\s._-]*(\d+))(?![a-z0-9])/i);
     if (sMatch) season = parseInt(sMatch[1] || sMatch[2] || sMatch[3], 10);
     if (eMatch) episode = parseInt(eMatch[1] || eMatch[2] || eMatch[3], 10);
+  }
+
+  // Find boundaries to split before the year or the season/episode marker
+  let cleanTitle = text;
+  let yearIndex: number | undefined = undefined;
+  let markerIndex: number | undefined = undefined;
+
+  if (yearMatch && yearMatch.index !== undefined) {
+    yearIndex = yearMatch.index;
+  }
+
+  // Match season/episode markers like S01E01, S01, season 1, ep 1, etc.
+  const markerMatch = text.match(/\b(s\d+e\d+|s\d+|season\s*\d+|episode\s*\d+|ep\s*\d+)\b/i);
+  if (markerMatch && markerMatch.index !== undefined) {
+    markerIndex = markerMatch.index;
+  }
+
+  // Use the earliest split indicator to isolate the clean series title
+  let splitIndex: number | undefined = undefined;
+  if (yearIndex !== undefined && markerIndex !== undefined) {
+    splitIndex = Math.min(yearIndex, markerIndex);
+  } else if (yearIndex !== undefined) {
+    splitIndex = yearIndex;
+  } else if (markerIndex !== undefined) {
+    splitIndex = markerIndex;
+  }
+
+  if (splitIndex !== undefined && splitIndex > 0) {
+    let beforeSplit = text.substring(0, splitIndex).trim();
+    beforeSplit = beforeSplit.replace(/[\(\[\{\-_.\s]+$/, '').trim();
+    if (beforeSplit.length > 1) {
+      cleanTitle = beforeSplit;
+    }
+  }
+
+  // Remove resolution, quality, format, audio, language noise keywords, domain tags, channel tags
+  const noiseRegex = /\b(480p|720p|1080p|2160p|4k|2k|ds4k|ds-4k|hdrip|web-dl|webrip|bluray|brrip|dvdrip|hdtv|camrip|dual audio|multi audio|hindi|english|tamil|telugu|punjabi|malayalam|kannada|bengali|marathi|urdu|subtitles|esub|esubs|x264|x265|hevc|aac|ac3|eac3|dts|dd\+?|5\.1|7\.1|2\.0|5\s+1|7\s+1|2\s+0|hdhub4u(\.[a-z]+)?|moviesdrive(\.[a-z]+)?|skymovieshd(\.[a-z]+)?|filmygo(\.[a-z]+)?|filmyfly(\.[a-z]+)?|hubcloud(\.[a-z]+)?|hubdrive(\.[a-z]+)?|ms|mkv|mp4|zip|rar|download|full movie|movie|season \d+|s\d+e\d+|cfd|s\.cfd|s-cfd)\b/gi;
+
+  cleanTitle = cleanTitle.replace(noiseRegex, '').replace(/[()\[\]{}:_|-]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+  // Explicitly strip any season markers (S1, S2, S3, S4, S5, S01, S02, S03, Season 1, Season 2, etc.) from title
+  cleanTitle = cleanTitle
+    .replace(/\b(seasons?|s)\s*[-_]?\s*\d{1,2}\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Additional cleanup for remaining lone site tags or domain endings like "hdhub4u ms", "ms", etc.
+  cleanTitle = cleanTitle
+    .replace(/\b(hdhub4u|moviesdrive|skymovies|filmygo|filmyfly|hubcloud|vcloud|hubdrive)\b/gi, '')
+    .replace(/\bms\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Capitalize properly
+  if (cleanTitle) {
+    cleanTitle = cleanTitle
+      .split(' ')
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ');
   }
 
   const formatted = year && cleanTitle ? `${cleanTitle} (${year})` : cleanTitle;

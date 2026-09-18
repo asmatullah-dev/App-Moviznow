@@ -8,7 +8,7 @@ import { useHaptics } from '../hooks/useHaptics';
 
 export function HeaderRefreshButton() {
   const [isRefreshingData, setIsRefreshingData] = useState(() => Boolean((window as any).__isAppDataSyncing));
-  const { refreshProfile, isSyncing } = useAuth();
+  const { user, refreshProfile, isSyncing } = useAuth();
   const { refreshSettings } = useSettings();
   const { t } = useLanguage();
   const { vibrate } = useHaptics();
@@ -47,14 +47,18 @@ export function HeaderRefreshButton() {
     setIsRefreshingData(true);
 
     try {
-      if (typeof (window as any).triggerRefreshAppData === 'function') {
-        await (window as any).triggerRefreshAppData('user_profile_button');
-      } else {
-        await Promise.all([
-          refreshProfile(true, 'manual'),
-          refreshSettings(true),
-        ]);
+      const promises: Promise<any>[] = [];
+      if (user) {
+        promises.push(refreshSettings(true).catch(err => console.warn('Header refreshSettings error:', err)));
       }
+
+      if (typeof (window as any).triggerRefreshAppData === 'function') {
+        promises.push((window as any).triggerRefreshAppData('header_button'));
+      } else if (user) {
+        promises.push(refreshProfile(true, 'manual').catch(() => {}));
+      }
+
+      await Promise.allSettled(promises);
     } catch (err) {
       console.error('Error refreshing app data from header:', err);
     } finally {

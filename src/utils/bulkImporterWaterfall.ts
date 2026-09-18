@@ -9,6 +9,10 @@ import {
 import {
   normalizeUrl,
   filterFilmygoHits,
+  filterMoviesdriveHits,
+  filterHdhub4uHits,
+  filterSkymoviesHits,
+  filterFilmyflyHits,
   getItemQualityCategory,
   extractTitleAndYear,
   isPreciseTitleMatch,
@@ -17,6 +21,8 @@ import {
   pickLowerSizeQualityItem,
   resolveConfirmedQuality,
   parseSizeToBytes,
+  parseSizeInGB,
+  getHitSizeGB,
   ScrapedLinkItem,
   QualityCategory,
   buildQualityLinksPayload,
@@ -37,14 +43,27 @@ import {
 import {
   performFullLinkScan,
   detectMetadataForLink,
+  serverCheckLinksBatch,
   LinkCheckResult,
 } from './linkScanner';
+import {
+  getImportCache,
+  saveImportCache,
+  removeImportCache,
+} from './importCache';
+import {
+  verifyAndFetchTmdbData,
+  VerifiedTmdbMetadata,
+} from '../services/tmdbEnricher';
 
 export {
   deduplicateQualityLinks,
   pickLowerSizeQualityItem,
   resolveConfirmedQuality,
   parseSizeToBytes,
+  getImportCache,
+  saveImportCache,
+  removeImportCache,
 };
 
 export interface WaterfallSearchOptions {
@@ -56,12 +75,15 @@ export interface WaterfallSearchOptions {
   signal?: AbortSignal;
   onProgress?: (msg: string) => void;
   maxPostsPerProvider?: number;
+  skipCache?: boolean;
+  skipTmdbVerification?: boolean;
 }
 
 export interface WaterfallSearchResult {
   links: ScrapedLinkItem[];
   qualityLinks: QualityLinks;
   results: LinkCheckResult[];
+  tmdbData?: VerifiedTmdbMetadata;
   metadata: {
     title?: string;
     year?: number;
@@ -72,6 +94,8 @@ export interface WaterfallSearchResult {
     season?: number;
     episode?: number;
     sampleUrl?: string;
+    tmdbData?: VerifiedTmdbMetadata;
+    [key: string]: any;
   };
   sample?: ScrapedLinkItem;
   providerUsed: string;
@@ -132,9 +156,20 @@ async function scanAndVerifyCandidates(
     metaMap[r.url] = detectMetadataForLink(fullTextContext, r.url, languages, qualities);
   });
 
+  // Fast pre-flight batch checking for non-HubCloud links
+  const nonHubcloudUrls = resolvedUrls
+    .filter((r) => !/(hubcloud|vcloud|hubdrive|drivehub|gdflix|hubcdn|hblinks)/i.test(r.url))
+    .map((r) => r.url);
+
+  if (nonHubcloudUrls.length > 0 && !signal?.aborted) {
+    try {
+      await serverCheckLinksBatch(nonHubcloudUrls, signal);
+    } catch {}
+  }
+
   const checkResults: LinkCheckResult[] = [];
   const queue = [...resolvedUrls];
-  const concurrency = 10;
+  const concurrency = 20;
 
   const worker = async () => {
     while (queue.length > 0) {
@@ -151,9 +186,10 @@ async function scanAndVerifyCandidates(
           undefined,
           undefined,
           undefined,
-          true
+          false
         );
         if (target.isSample) (res as any).isSample = true;
+        (res as any).source = target.source;
         checkResults.push(res);
       } catch (err: any) {
         checkResults.push({
@@ -215,7 +251,7 @@ async function scanAndVerifyCandidates(
 
     const item: ScrapedLinkItem = {
       id: `bulk-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 4)}`,
-      source: 'WaterfallScanner',
+      source: (r as any).source || 'FilmyGo',
       sourceTitle: r.fileName || title,
       url: normalizeUrl(r.finalUrl || r.url),
       quality: qCategory,
@@ -258,13 +294,90 @@ async function scanAndVerifyCandidates(
   };
 }
 
+export function isPixeldrainOrHubcloudLink(item: ScrapedLinkItem | string): boolean {
+  const text = typeof item === 'string'
+    ? item.toLowerCase()
+    : `${item.url || ''} ${item.finalUrl || ''} ${item.fileName || ''} ${item.sourceTitle || ''}`.toLowerCase();
+
+  return (
+    text.includes('pixeldrain') ||
+    text.includes('pixel.drain') ||
+    text.includes('pixeldra.in') ||
+    text.includes('hubcloud') ||
+    text.includes('vcloud') ||
+    text.includes('hubdrive') ||
+    text.includes('drivehub') ||
+    text.includes('hubcdn') ||
+    text.includes('hblinks')
+  );
+}
+
+export function isSatisfiedFilmygoStage(links: ScrapedLinkItem[], type: 'movie' | 'series' = 'movie'): boolean {
+  if (!links || links.length === 0) return false;
+
+  // Filter links strictly to those pointing to Pixeldrain or HubCloud (which extracts/serves Pixeldrain direct links)
+  const pixeldrainLinks = links.filter((l) => isPixeldrainOrHubcloudLink(l));
+  if (pixeldrainLinks.length === 0) return false;
+
+  const linksToUse = pixeldrainLinks;
+
+  if (type === 'series') {
+    const validSeriesLinks = linksToUse.filter((l) => {
+      if (l.isSample) return false;
+      if (l.quality === '1080p') {
+        const sizeGB = getHitSizeGB(l) || parseSizeInGB(l.size) || (l.bytes ? l.bytes / (1024 * 1024 * 1024) : 0);
+        if (sizeGB >= 5.0) return false;
+      }
+      return true;
+    });
+    return hasAnyHdLinks(validSeriesLinks) && validSeriesLinks.length >= 2;
+  }
+
+  // Check 480p (strictly non-sample)
+  const has480p = linksToUse.some((l) => l.quality === '480p' && !l.isSample);
+
+  // Check 720p
+  const nonHevc720p = linksToUse.filter((l) => l.quality === '720p' && !l.isHevc && !l.isSample);
+  const hevc720p = linksToUse.filter((l) => l.quality === '720p' && l.isHevc && !l.isSample);
+  const has720p = nonHevc720p.length > 0 || hevc720p.length > 0;
+
+  let is720pOver145GB = false;
+  if (nonHevc720p.length > 0) {
+    const item720p = nonHevc720p[0];
+    const sizeGB =
+      getHitSizeGB(item720p) ||
+      parseSizeInGB(item720p.size) ||
+      (item720p.bytes ? item720p.bytes / (1024 * 1024 * 1024) : 0);
+    if (sizeGB > 1.45) {
+      is720pOver145GB = true;
+    }
+  }
+
+  // When 720p > 1.45GB, 720p HEVC is required
+  const hasRequired720p = is720pOver145GB
+    ? nonHevc720p.length > 0 && hevc720p.length > 0
+    : has720p;
+
+  // Check 1080p: strictly skip if 5GB or greater (< 5GB required)!
+  const has1080p = linksToUse.some((l) => {
+    if (l.quality !== '1080p' || l.isSample) return false;
+    const sizeGB =
+      getHitSizeGB(l) ||
+      parseSizeInGB(l.size) ||
+      (l.bytes ? l.bytes / (1024 * 1024 * 1024) : 0);
+    return sizeGB < 5.0;
+  });
+
+  return Boolean(has480p && hasRequired720p && has1080p);
+}
+
 /**
  * 5-Stage Multi-Source Waterfall Search:
- * Stage 1: FilmyCab / FilmyGo (if all required HD links found -> FINAL)
- * Stage 2: MoviesDrive (if found all required HD links -> FINAL, else proceed)
- * Stage 3: HDHub4U (if not found all required then proceed, BUT if NO HD version found at all anywhere -> STOP, HD not available yet)
- * Stage 4: SkyMoviesHD (if not all required -> proceed)
- * Stage 5: FilmyFly (final fallback)
+ * Stage 1: FilmyCab / FilmyGo (if 480p, 720p [HEVC if >1.45GB], and 1080p found -> STOP and use FilmyGo links)
+ * Stage 2: MoviesDrive (2nd priority)
+ * Stage 3: HDHub4U (3rd priority & HD availability gatekeeper)
+ * Stage 4: SkyMoviesHD (4th priority)
+ * Stage 5: FilmyFly (5th fallback)
  */
 export async function runWaterfallLinkSearch(
   options: WaterfallSearchOptions
@@ -272,13 +385,17 @@ export async function runWaterfallLinkSearch(
   const {
     title,
     year,
-    type = 'movie',
+    type: initialType = 'movie',
     languages = [],
     qualities = [],
     signal,
     onProgress,
     maxPostsPerProvider = 2,
+    skipCache = false,
+    skipTmdbVerification = false,
   } = options;
+
+  let type = initialType;
 
   const logs: string[] = [];
   const log = (msg: string) => {
@@ -290,20 +407,87 @@ export async function runWaterfallLinkSearch(
   // Pure title ONLY (remove any years or brackets so we query providers by pure title)
   let cleanTitle = (parsed.title || title).trim();
   cleanTitle = cleanTitle
-    .replace(/\s*\(\s*(19\d\d|20[0-2]\d)\s*\)\s*/g, ' ')
-    .replace(/\s*\[\s*(19\d\d|20[0-2]\d)\s*\]\s*/g, ' ')
+    .replace(/\s*\(\s*(19\d\d|20[0-2]\d)\s*\)\s*/gi, ' ')
+    .replace(/\s*\[\s*(19\d\d|20[0-2]\d)\s*\]\s*/gi, ' ')
     .replace(/\b(19\d\d|20[0-2]\d)\b/g, ' ')
+    .replace(/[🎬]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  const searchYear = year || parsed.year;
+  let searchYear = year || parsed.year;
+
+  // 1. Check 30-minute auto-expiring cache first
+  if (!skipCache) {
+    const cached = getImportCache(cleanTitle, searchYear) || getImportCache(title, searchYear);
+    if (cached && cached.links && cached.links.length > 0) {
+      log(`[30-Min Cache Hit] Found cached verified links & TMDB data for "${cached.title}" (${cached.year || 'N/A'}).`);
+      const has480p = cached.links.some((l) => l.quality === '480p');
+      const has720p = cached.links.some((l) => l.quality === '720p');
+      const has1080p = cached.links.some((l) => l.quality === '1080p');
+      const has2160p = cached.links.some((l) => l.quality === '2160p');
+      const hasHdVersion = hasAnyHdLinks(cached.links);
+
+      return {
+        links: cached.links,
+        qualityLinks: cached.qualityLinks || buildQualityLinksPayload(cached.links),
+        results: cached.checkResults || [],
+        tmdbData: cached.tmdbData,
+        metadata: {
+          ...cached.metadata,
+          title: cached.tmdbData?.title || cached.title,
+          year: cached.tmdbData?.year || cached.year,
+          type: cached.tmdbData?.type || cached.type,
+          sampleUrl: cached.sample?.url || (cached as any).sampleUrl,
+          tmdbData: cached.tmdbData,
+        },
+        sample: cached.sample,
+        providerUsed: 'Cached (30-Min Active Cache)',
+        isComplete: Boolean(has480p && has720p && has1080p),
+        has480p,
+        has720p,
+        has1080p,
+        has2160p,
+        hasHdVersion,
+        logs: [
+          `Loaded from 30-min active cache for "${cached.title}"`,
+          `Cached qualities: [480p: ${has480p ? '✓' : '✗'} | 720p: ${has720p ? '✓' : '✗'} | 1080p: ${has1080p ? '✓' : '✗'}]`,
+        ],
+      };
+    }
+  }
+
+  // 2. TMDB Title Verification and Full Data Retrieval
+  let verifiedTmdbData: VerifiedTmdbMetadata | null = null;
+  if (!skipTmdbVerification) {
+    log(`Verifying title "${cleanTitle}" against TMDB...`);
+    try {
+      verifiedTmdbData = await verifyAndFetchTmdbData(cleanTitle, searchYear, type);
+      if (verifiedTmdbData) {
+        log(`✓ TMDB Verified: "${verifiedTmdbData.title}" (${verifiedTmdbData.year || 'N/A'}) [${verifiedTmdbData.type.toUpperCase()}]`);
+        if (verifiedTmdbData.year && !searchYear) {
+          searchYear = verifiedTmdbData.year;
+        }
+        if (verifiedTmdbData.type) {
+          type = verifiedTmdbData.type;
+        }
+      } else {
+        log(`TMDB: No direct match found, proceeding with clean title "${cleanTitle}".`);
+      }
+    } catch (e) {
+      log(`TMDB verification error, proceeding with clean title.`);
+    }
+  }
 
   // Search by pure title ONLY (never with year in query string)
   const queryVariations = [
+    verifiedTmdbData?.title,
     cleanTitle,
     cleanTitle.includes(':') ? cleanTitle.split(':')[0].trim() : '',
+    verifiedTmdbData?.secondTitle,
   ]
-    .filter(Boolean)
-    .filter((v, i, a) => a.indexOf(v) === i);
+    .filter(Boolean) as string[];
+
+  // Deduplicate query variations preserving order
+  const uniqueQueryVariations = queryVariations.filter((v, i, a) => a.indexOf(v) === i);
 
   log(
     `Initiating Waterfall search by title "${cleanTitle}"${
@@ -324,25 +508,101 @@ export async function runWaterfallLinkSearch(
   const skyDomain = getSkymoviesDomain();
   const ffDomain = getFilmyflyDomain();
 
-  const isSatisfiedHD = (links: ScrapedLinkItem[]): boolean => {
-    const has480 = links.some((l) => l.quality === '480p');
-    const has720 = links.some((l) => l.quality === '720p');
-    const has1080 = links.some((l) => l.quality === '1080p');
-    const isHd = hasAnyHdLinks(links);
-    if (type === 'movie') {
-      return isHd && (has720 || has1080) && (has480 || (has720 && has1080));
+  // Helper inside runWaterfallLinkSearch to finalize and automatically cache for 30 minutes
+  function finishWaterfall(
+    rawLinks: ScrapedLinkItem[],
+    results: LinkCheckResult[],
+    meta: any,
+    sample: ScrapedLinkItem | undefined,
+    provider: string,
+    isComp: boolean,
+    outLogs: string[],
+    itemType: 'movie' | 'series',
+    stopReason?: string
+  ): WaterfallSearchResult {
+    const deduplicated = deduplicateQualityLinks(rawLinks, itemType);
+
+    const has480p = deduplicated.some((l) => l.quality === '480p');
+    const has720p = deduplicated.some((l) => l.quality === '720p');
+    const has1080p = deduplicated.some((l) => l.quality === '1080p');
+    const has2160p = deduplicated.some((l) => l.quality === '2160p');
+    const hasHdVersion = hasAnyHdLinks(deduplicated);
+
+    const qualityLinks: QualityLinks = buildQualityLinksPayload(deduplicated);
+
+    // Filter check results to only keep those belonging to deduplicated quality links + sample
+    const dedupedUrlSet = new Set<string>();
+    deduplicated.forEach((d) => {
+      if (d.url) dedupedUrlSet.add(normalizeUrl(d.url));
+    });
+    if (sample?.url) {
+      dedupedUrlSet.add(normalizeUrl(sample.url));
     }
-    return isHd && links.length >= 2;
-  };
+
+    const dedupedResults = results.filter((r) => {
+      const u1 = normalizeUrl(r.url);
+      const u2 = normalizeUrl(r.finalUrl || r.url);
+      return dedupedUrlSet.has(u1) || dedupedUrlSet.has(u2);
+    });
+
+    const finalResults = dedupedResults.length > 0 ? dedupedResults : results;
+
+    const mergedMetadata = {
+      ...meta,
+      title: verifiedTmdbData?.title || meta?.title || cleanTitle,
+      year: verifiedTmdbData?.year || meta?.year || searchYear,
+      type: verifiedTmdbData?.type || meta?.type || itemType,
+      sampleUrl: sample?.url || meta?.sampleUrl,
+      tmdbData: verifiedTmdbData || undefined,
+    };
+
+    const finalResultPayload: WaterfallSearchResult = {
+      links: deduplicated,
+      qualityLinks,
+      results: finalResults,
+      metadata: mergedMetadata,
+      tmdbData: verifiedTmdbData || undefined,
+      sample,
+      providerUsed: provider,
+      isComplete: isComp,
+      has480p,
+      has720p,
+      has1080p,
+      has2160p,
+      hasHdVersion,
+      stoppedReason: stopReason,
+      logs: outLogs,
+    };
+
+    // Cache all data (links and TMDB data) for 30 minutes until saved to library or automatically purged
+    try {
+      saveImportCache({
+        title: verifiedTmdbData?.title || cleanTitle,
+        cleanTitle,
+        year: verifiedTmdbData?.year || searchYear,
+        type: itemType,
+        tmdbData: verifiedTmdbData || undefined,
+        links: deduplicated,
+        qualityLinks,
+        checkResults: finalResults,
+        sample,
+        metadata: mergedMetadata,
+      });
+    } catch (err) {
+      console.error('Failed to save to import cache:', err);
+    }
+
+    return finalResultPayload;
+  }
 
   // ==========================================
   // STAGE 1: FilmyCab / FilmyGo (1st Priority)
   // ==========================================
-  log(`[Stage 1/5] Querying FilmyCab / FilmyGo (${fgDomain}) for "${cleanTitle}"...`);
+  log(`[Stage 1/5] Querying FilmyCab / FilmyGo (${fgDomain}) for title "${cleanTitle}"...`);
   let stage1Candidates: { url: string; source: string; postTitle?: string; isSample?: boolean }[] =
     [];
 
-  for (const q of queryVariations) {
+  for (const q of uniqueQueryVariations) {
     if (signal?.aborted) break;
     try {
       const posts = await scrapeFilmygoPosts(q, 1, signal);
@@ -360,7 +620,7 @@ export async function runWaterfallLinkSearch(
           if (u) {
             stage1Candidates.push({
               url: u,
-              source: 'FilmyCab',
+              source: 'FilmyGo',
               postTitle: p.title,
               isSample: Boolean(h.isSample || h.is_sample || /\bsample\b/i.test(h.file_name || '')),
             });
@@ -372,7 +632,7 @@ export async function runWaterfallLinkSearch(
   }
 
   if (stage1Candidates.length > 0) {
-    log(`FilmyCab: Found ${stage1Candidates.length} candidate links, verifying...`);
+    log(`FilmyGo: Found ${stage1Candidates.length} candidate links, verifying...`);
     const s1Result = await scanAndVerifyCandidates(
       stage1Candidates,
       cleanTitle,
@@ -387,10 +647,10 @@ export async function runWaterfallLinkSearch(
     finalMetadata = { ...finalMetadata, ...s1Result.metadata };
     if (s1Result.sample) finalSample = s1Result.sample;
 
-    if (isSatisfiedHD(s1Result.scrapedItems)) {
-      log(`✓ FilmyCab: All required HD links verified! Waterfall finalized at Stage 1.`);
-      finalProvider = 'FilmyCab (Final)';
-      return buildFinalResult(
+    if (isSatisfiedFilmygoStage(s1Result.scrapedItems, type)) {
+      log(`✓ FilmyGo: Complete set (480p, 720p [HEVC if >1.45GB], and 1080p [<5GB]) found by first stage! Stopping waterfall and using FilmyGo links.`);
+      finalProvider = 'FilmyGo (Complete)';
+      return finishWaterfall(
         allDiscoveredLinks,
         allCheckResults,
         finalMetadata,
@@ -401,17 +661,25 @@ export async function runWaterfallLinkSearch(
         type
       );
     } else {
-      log(`FilmyCab: Some links found, but not all required HD. Proceeding to Stage 2...`);
+      const over5gb1080p = s1Result.scrapedItems.find(
+        (l) => l.quality === '1080p' && (getHitSizeGB(l) >= 5.0 || parseSizeInGB(l.size) >= 5.0)
+      );
+      if (over5gb1080p) {
+        const sz = getHitSizeGB(over5gb1080p) || parseSizeInGB(over5gb1080p.size);
+        log(`FilmyGo: 1080p link (${sz ? sz.toFixed(2) + ' GB' : '>=5GB'}) is 5GB or greater. Skipping and proceeding to next stage for 1080p < 5GB...`);
+      } else {
+        log(`FilmyGo: Missing one or more required qualities (480p, 720p [HEVC if >1.45GB], 1080p [<5GB]). Proceeding to Stage 2 (MoviesDrive)...`);
+      }
     }
   } else {
-    log(`FilmyCab: No matching posts/links found. Proceeding to Stage 2...`);
+    log(`FilmyGo: No matching posts/links found. Proceeding to Stage 2 (MoviesDrive)...`);
   }
 
   // ==========================================
   // STAGE 2: MoviesDrive (2nd Priority)
   // ==========================================
   if (!signal?.aborted) {
-    log(`[Stage 2/5] Querying MoviesDrive (${mdDomain}) for "${cleanTitle}"...`);
+    log(`[Stage 2/5] Querying MoviesDrive (${mdDomain}) for title "${cleanTitle}"...`);
     let stage2Candidates: {
       url: string;
       source: string;
@@ -419,7 +687,7 @@ export async function runWaterfallLinkSearch(
       isSample?: boolean;
     }[] = [];
 
-    for (const q of queryVariations) {
+    for (const q of uniqueQueryVariations) {
       if (signal?.aborted) break;
       try {
         const posts = await scrapeMoviesdrivePosts(q, 1, signal);
@@ -430,7 +698,7 @@ export async function runWaterfallLinkSearch(
         for (const p of verifiedPosts.slice(0, maxPostsPerProvider)) {
           if (signal?.aborted) break;
           const rawHits = await scrapeMoviesdrivePostLinks(p.url, signal);
-          const filtered = filterFilmygoHits(rawHits, p.url);
+          const filtered = filterMoviesdriveHits(rawHits, p.url);
           const toUse = filtered.length > 0 ? filtered : rawHits;
           toUse.forEach((h: any) => {
             const u = h.url || h.href;
@@ -464,10 +732,10 @@ export async function runWaterfallLinkSearch(
       finalMetadata = { ...finalMetadata, ...s2Result.metadata };
       if (s2Result.sample && !finalSample) finalSample = s2Result.sample;
 
-      if (isSatisfiedHD(allDiscoveredLinks)) {
-        log(`✓ MoviesDrive: All required HD links verified! Waterfall finalized at Stage 2.`);
-        finalProvider = 'MoviesDrive (Final)';
-        return buildFinalResult(
+      if (isSatisfiedFilmygoStage(allDiscoveredLinks, type)) {
+        log(`✓ MoviesDrive: All required HD links verified in combination! Finalized at Stage 2.`);
+        finalProvider = 'MoviesDrive / Multi-Source';
+        return finishWaterfall(
           allDiscoveredLinks,
           allCheckResults,
           finalMetadata,
@@ -478,7 +746,7 @@ export async function runWaterfallLinkSearch(
           type
         );
       } else {
-        log(`MoviesDrive: Incomplete HD links. Proceeding to Stage 3 (HDHub4U)...`);
+        log(`MoviesDrive: Incomplete links. Proceeding to Stage 3 (HDHub4U)...`);
       }
     } else {
       log(`MoviesDrive: No matching posts/links found. Proceeding to Stage 3 (HDHub4U)...`);
@@ -489,7 +757,7 @@ export async function runWaterfallLinkSearch(
   // STAGE 3: HDHub4U (3rd Priority & HD Availability Gatekeeper)
   // ==========================================
   if (!signal?.aborted) {
-    log(`[Stage 3/5] Querying HDHub4U (${hdDomain}) for "${cleanTitle}"...`);
+    log(`[Stage 3/5] Querying HDHub4U (${hdDomain}) for title "${cleanTitle}"...`);
     let stage3Candidates: {
       url: string;
       source: string;
@@ -498,7 +766,7 @@ export async function runWaterfallLinkSearch(
     }[] = [];
     let hdHubPosts: any[] = [];
 
-    for (const q of queryVariations) {
+    for (const q of uniqueQueryVariations) {
       if (signal?.aborted) break;
       try {
         const posts = await scrapeHdhub4uPosts(q, signal);
@@ -510,7 +778,7 @@ export async function runWaterfallLinkSearch(
         for (const p of verifiedPosts.slice(0, maxPostsPerProvider)) {
           if (signal?.aborted) break;
           const rawHits = await scrapeHdhub4uPostLinks(p.url, signal);
-          const filtered = filterFilmygoHits(rawHits, p.url);
+          const filtered = filterHdhub4uHits(rawHits, p.url);
           const toUse = filtered.length > 0 ? filtered : rawHits;
           toUse.forEach((h: any) => {
             const u = h.url || h.href;
@@ -544,10 +812,10 @@ export async function runWaterfallLinkSearch(
       finalMetadata = { ...finalMetadata, ...s3Result.metadata };
       if (s3Result.sample && !finalSample) finalSample = s3Result.sample;
 
-      if (isSatisfiedHD(allDiscoveredLinks)) {
-        log(`✓ HDHub4U: All required HD links verified! Waterfall finalized at Stage 3.`);
-        finalProvider = 'HDHub4U (Final)';
-        return buildFinalResult(
+      if (isSatisfiedFilmygoStage(allDiscoveredLinks, type)) {
+        log(`✓ HDHub4U: All required HD links verified in combination! Finalized at Stage 3.`);
+        finalProvider = 'HDHub4U / Multi-Source';
+        return finishWaterfall(
           allDiscoveredLinks,
           allCheckResults,
           finalMetadata,
@@ -569,7 +837,7 @@ export async function runWaterfallLinkSearch(
       stoppedReason = 'HD Version not available yet across web (Halted after HDHub4U check)';
       log(`⚠️ ${stoppedReason}. Halting waterfall search.`);
       finalProvider = 'HDHub4U (No HD Available)';
-      return buildFinalResult(
+      return finishWaterfall(
         allDiscoveredLinks,
         allCheckResults,
         finalMetadata,
@@ -589,7 +857,7 @@ export async function runWaterfallLinkSearch(
   // STAGE 4: SkyMoviesHD (4th Priority)
   // ==========================================
   if (!signal?.aborted) {
-    log(`[Stage 4/5] Querying SkyMoviesHD (${skyDomain}) for "${cleanTitle}"...`);
+    log(`[Stage 4/5] Querying SkyMoviesHD (${skyDomain}) for title "${cleanTitle}"...`);
     let stage4Candidates: {
       url: string;
       source: string;
@@ -597,7 +865,7 @@ export async function runWaterfallLinkSearch(
       isSample?: boolean;
     }[] = [];
 
-    for (const q of queryVariations) {
+    for (const q of uniqueQueryVariations) {
       if (signal?.aborted) break;
       try {
         const posts = await scrapeSkymoviesPosts(q, signal);
@@ -608,7 +876,7 @@ export async function runWaterfallLinkSearch(
         for (const p of verifiedPosts.slice(0, maxPostsPerProvider)) {
           if (signal?.aborted) break;
           const rawHits = await scrapeSkymoviesPostLinks(p.url, signal);
-          const filtered = filterFilmygoHits(rawHits, p.url);
+          const filtered = filterSkymoviesHits(rawHits, p.url);
           const toUse = filtered.length > 0 ? filtered : rawHits;
           toUse.forEach((h: any) => {
             const u = h.url || h.href;
@@ -642,10 +910,10 @@ export async function runWaterfallLinkSearch(
       finalMetadata = { ...finalMetadata, ...s4Result.metadata };
       if (s4Result.sample && !finalSample) finalSample = s4Result.sample;
 
-      if (isSatisfiedHD(allDiscoveredLinks)) {
-        log(`✓ SkyMoviesHD: All required HD links verified! Waterfall finalized at Stage 4.`);
-        finalProvider = 'SkyMoviesHD (Final)';
-        return buildFinalResult(
+      if (isSatisfiedFilmygoStage(allDiscoveredLinks, type)) {
+        log(`✓ SkyMoviesHD: All required HD links verified in combination! Finalized at Stage 4.`);
+        finalProvider = 'SkyMoviesHD / Multi-Source';
+        return finishWaterfall(
           allDiscoveredLinks,
           allCheckResults,
           finalMetadata,
@@ -667,7 +935,7 @@ export async function runWaterfallLinkSearch(
   // STAGE 5: FilmyFly (5th Fallback)
   // ==========================================
   if (!signal?.aborted) {
-    log(`[Stage 5/5] Querying FilmyFly (${ffDomain}) for "${cleanTitle}"...`);
+    log(`[Stage 5/5] Querying FilmyFly (${ffDomain}) for title "${cleanTitle}"...`);
     let stage5Candidates: {
       url: string;
       source: string;
@@ -675,7 +943,7 @@ export async function runWaterfallLinkSearch(
       isSample?: boolean;
     }[] = [];
 
-    for (const q of queryVariations) {
+    for (const q of uniqueQueryVariations) {
       if (signal?.aborted) break;
       try {
         const posts = await scrapeFilmyflyPosts(q, 1, signal);
@@ -686,7 +954,7 @@ export async function runWaterfallLinkSearch(
         for (const p of verifiedPosts.slice(0, maxPostsPerProvider)) {
           if (signal?.aborted) break;
           const rawHits = await scrapeFilmyflyPostLinks(p.url, signal);
-          const filtered = filterFilmygoHits(rawHits, p.url);
+          const filtered = filterFilmyflyHits(rawHits, p.url);
           const toUse = filtered.length > 0 ? filtered : rawHits;
           toUse.forEach((h: any) => {
             const u = h.url || h.href;
@@ -723,55 +991,15 @@ export async function runWaterfallLinkSearch(
   }
 
   finalProvider = allDiscoveredLinks.length > 0 ? 'Multi-Source Combined' : 'None';
-  return buildFinalResult(
+  return finishWaterfall(
     allDiscoveredLinks,
     allCheckResults,
     finalMetadata,
     finalSample,
     finalProvider,
-    isSatisfiedHD(allDiscoveredLinks),
+    isSatisfiedFilmygoStage(allDiscoveredLinks, type),
     logs,
     type,
     stoppedReason
   );
-}
-
-function buildFinalResult(
-  rawLinks: ScrapedLinkItem[],
-  results: LinkCheckResult[],
-  metadata: any,
-  sample: ScrapedLinkItem | undefined,
-  providerUsed: string,
-  isComplete: boolean,
-  logs: string[],
-  type: 'movie' | 'series',
-  stoppedReason?: string
-): WaterfallSearchResult {
-  // Apply deduplication: exactly 1 link per quality category (480p, 720p, 1080p, 2160p), choosing lower size on duplicates
-  const deduplicated = deduplicateQualityLinks(rawLinks, type);
-
-  const has480p = deduplicated.some((l) => l.quality === '480p');
-  const has720p = deduplicated.some((l) => l.quality === '720p');
-  const has1080p = deduplicated.some((l) => l.quality === '1080p');
-  const has2160p = deduplicated.some((l) => l.quality === '2160p');
-  const hasHdVersion = hasAnyHdLinks(deduplicated);
-
-  const qualityLinks: QualityLinks = buildQualityLinksPayload(deduplicated);
-
-  return {
-    links: deduplicated,
-    qualityLinks,
-    results,
-    metadata,
-    sample,
-    providerUsed,
-    isComplete,
-    has480p,
-    has720p,
-    has1080p,
-    has2160p,
-    hasHdVersion,
-    stoppedReason,
-    logs,
-  };
 }

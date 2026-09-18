@@ -85,13 +85,13 @@ export function RefreshAppDataManager() {
 
       let otherUpdated = false;
 
-      // 1. Check settings version
+      // 1. Check settings version: only fetch when chunk meta version of settings changed detected
       const serverSettingsVer = versions.settings || 0;
       const localSettingsVer = safeStorage.getItem('cached_settings_version') || '0';
       const serverSettingsTime = parseVersionTime(serverSettingsVer);
       const localSettingsTime = parseVersionTime(localSettingsVer);
       if ((serverSettingsTime > 0 && serverSettingsTime > localSettingsTime) || !safeStorage.getItem('cached_app_settings')) {
-        await refreshSettings(true).catch(() => {});
+        await refreshSettings(isManualTrigger).catch(() => {});
         otherUpdated = true;
       }
 

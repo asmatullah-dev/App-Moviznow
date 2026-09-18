@@ -9,6 +9,10 @@ import {
 import {
   normalizeUrl,
   filterFilmygoHits,
+  filterMoviesdriveHits,
+  filterHdhub4uHits,
+  filterSkymoviesHits,
+  filterFilmyflyHits,
   getItemQualityCategory,
   extractTitleAndYear,
   isPreciseTitleMatch,
@@ -291,6 +295,8 @@ export async function extractHubcloudDirectLink(url: string): Promise<any> {
   }
 }
 
+const intermediateResolutionCache = new Map<string, { url: string; source: string; postTitle?: string; isSample?: boolean }[]>();
+
 /**
  * Resolves intermediate wrapper links (mdrive, howblogs, filesdl) into direct cloud links.
  */
@@ -300,12 +306,31 @@ export async function resolveIntermediateUrls(
 ): Promise<{ url: string; source: string; postTitle?: string; isSample?: boolean }[]> {
   const resolved: { url: string; source: string; postTitle?: string; isSample?: boolean }[] = [];
   const uniqueUrls = new Set<string>();
+  const candidatesToProcess: { url: string; source: string; postTitle?: string; isSample?: boolean }[] = [];
 
   for (const item of rawCandidates) {
-    if (signal?.aborted) break;
     const norm = normalizeUrl(item.url);
-    if (uniqueUrls.has(norm)) continue;
+    if (!norm || uniqueUrls.has(norm)) continue;
     uniqueUrls.add(norm);
+
+    const cached = intermediateResolutionCache.get(norm);
+    if (cached) {
+      resolved.push(...cached);
+    } else {
+      candidatesToProcess.push({ ...item, url: norm });
+    }
+  }
+
+  if (candidatesToProcess.length === 0) {
+    return resolved;
+  }
+
+  const concurrency = 15;
+  const queue = [...candidatesToProcess];
+
+  const processCandidate = async (item: { url: string; source: string; postTitle?: string; isSample?: boolean }) => {
+    const norm = item.url;
+    const itemResolved: { url: string; source: string; postTitle?: string; isSample?: boolean }[] = [];
 
     try {
       if (norm.includes('mdrive.lol') || norm.includes('mdrvie.lol')) {
@@ -317,7 +342,7 @@ export async function resolveIntermediateUrls(
         const chosen = hubcloud.length > 0 ? hubcloud : nonGdflix;
         chosen.slice(0, 3).forEach((ch) => {
           if (ch.url) {
-            resolved.push({
+            itemResolved.push({
               url: ch.url,
               source: item.source,
               postTitle: item.postTitle,
@@ -325,17 +350,15 @@ export async function resolveIntermediateUrls(
             });
           }
         });
-        continue;
       } else if (norm.includes('howblogs.xyz')) {
         const hbUrl = await scrapeHowblogsLink(norm, signal);
         if (hbUrl) {
-          resolved.push({
+          itemResolved.push({
             url: hbUrl,
             source: item.source,
             postTitle: item.postTitle,
             isSample: item.isSample,
           });
-          continue;
         }
       } else if (
         norm.includes('filesdl.') ||
@@ -344,19 +367,36 @@ export async function resolveIntermediateUrls(
       ) {
         const fUrl = await scrapeFilesdlLink(norm, signal);
         if (fUrl) {
-          resolved.push({
+          itemResolved.push({
             url: fUrl,
             source: item.source,
             postTitle: item.postTitle,
             isSample: item.isSample,
           });
-          continue;
         }
       }
     } catch {}
 
-    resolved.push(item);
-  }
+    if (itemResolved.length === 0) {
+      itemResolved.push(item);
+    }
+
+    intermediateResolutionCache.set(norm, itemResolved);
+    resolved.push(...itemResolved);
+  };
+
+  const worker = async () => {
+    while (queue.length > 0) {
+      if (signal?.aborted) break;
+      const target = queue.shift();
+      if (!target) break;
+      await processCandidate(target);
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, queue.length) }, () => worker())
+  );
 
   return resolved;
 }
@@ -483,7 +523,7 @@ export async function checkContentViaLinkChecker(
           for (const p of verifiedPosts.slice(0, maxPostsPerProvider)) {
             if (signal?.aborted) break;
             const rawHits = await scrapeHdhub4uPostLinks(p.url, signal);
-            const filtered = filterFilmygoHits(rawHits, p.url);
+            const filtered = filterHdhub4uHits(rawHits, p.url);
             const toUse = filtered.length > 0 ? filtered : rawHits;
             toUse.forEach((h: any) => {
               const u = h.url || h.href;
@@ -511,7 +551,7 @@ export async function checkContentViaLinkChecker(
           for (const p of verifiedPosts.slice(0, maxPostsPerProvider)) {
             if (signal?.aborted) break;
             const rawHits = await scrapeSkymoviesPostLinks(p.url, signal);
-            const filtered = filterFilmygoHits(rawHits, p.url);
+            const filtered = filterSkymoviesHits(rawHits, p.url);
             const toUse = filtered.length > 0 ? filtered : rawHits;
             toUse.forEach((h: any) => {
               const u = h.url || h.href;
@@ -539,7 +579,7 @@ export async function checkContentViaLinkChecker(
           for (const p of verifiedPosts.slice(0, maxPostsPerProvider)) {
             if (signal?.aborted) break;
             const rawHits = await scrapeMoviesdrivePostLinks(p.url, signal);
-            const filtered = filterFilmygoHits(rawHits, p.url);
+            const filtered = filterMoviesdriveHits(rawHits, p.url);
             const toUse = filtered.length > 0 ? filtered : rawHits;
             toUse.forEach((h: any) => {
               const u = h.url || h.href;
@@ -567,7 +607,7 @@ export async function checkContentViaLinkChecker(
           for (const p of verifiedPosts.slice(0, maxPostsPerProvider)) {
             if (signal?.aborted) break;
             const rawHits = await scrapeFilmyflyPostLinks(p.url, signal);
-            const filtered = filterFilmygoHits(rawHits, p.url);
+            const filtered = filterFilmyflyHits(rawHits, p.url);
             const toUse = filtered.length > 0 ? filtered : rawHits;
             toUse.forEach((h: any) => {
               const u = h.url || h.href;

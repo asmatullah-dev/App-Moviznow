@@ -17,7 +17,8 @@ const IMDB_STORAGE_PREFIX = 'imdb_rating_v2_';
 const LEGACY_STORAGE_PREFIX = 'imdb_rating_';
 export const RATING_CACHE_TTL_MS = 5 * 24 * 60 * 60 * 1000; // 5 days in milliseconds
 
-const OMDB_API_KEY = import.meta.env.VITE_OMDB_API_KEY || '19daa310';
+const OMDB_API_KEY =
+  (typeof import.meta !== 'undefined' && import.meta?.env?.VITE_OMDB_API_KEY) || '19daa310';
 const OMDB_BASE = 'https://www.omdbapi.com/';
 
 // In-flight fetch deduplication map

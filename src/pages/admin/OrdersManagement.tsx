@@ -18,7 +18,7 @@ const PHONES_CACHE_KEY = 'admin_user_phones_cache';
 
 export default function OrdersManagement() {
   const { profile } = useAuth();
-  const { users: allUsers, updateUserFields } = useUsers();
+  const { users: allUsers, updateUserFields, finalizeUserChanges } = useUsers();
   const { settings } = useSettings();
   const [orders, setOrders] = useState<Order[]>(() => {
     const cached = safeStorage.getItem(CACHE_KEY);
@@ -133,6 +133,18 @@ export default function OrdersManagement() {
     return `*Banks :* Easypaisa, Jazzcash, NayaPay, SadaPay \n*Account Number :* ${settings?.accountNumber || '03416286423'}\n*Account Title :* ${settings?.accountTitle || 'Asmat Ullah'}`;
   };
 
+  const isOrderAutoApprovalSupported = (order: Order) => {
+    if (order.allowAutoApproval === false) return false;
+    if (order.paymentMethodId) {
+      const bank = settings?.bankAccounts?.find(b => b.id === order.paymentMethodId);
+      if (bank && bank.allowAutoApproval === false) return false;
+    } else if (order.senderBank) {
+      const bank = settings?.bankAccounts?.find(b => b.name.toLowerCase() === order.senderBank?.toLowerCase());
+      if (bank && bank.allowAutoApproval === false) return false;
+    }
+    return true;
+  };
+
   useEffect(() => {
     const now = new Date();
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -199,6 +211,7 @@ export default function OrdersManagement() {
       updates.orders = updatedOrders;
 
       updateUserFields(order.userId, updates);
+      await finalizeUserChanges(true);
 
       // Send Order Approved Notification
       fetch('/api/notifications/notify-order-approved', {
@@ -250,6 +263,7 @@ export default function OrdersManagement() {
 
       const updatedOrders = orderUser.orders!.map(o => o.id === orderId ? { ...o, status: 'declined' as const } : o);
       updateUserFields(orderUser.uid, { orders: updatedOrders });
+      await finalizeUserChanges(true);
       if (selectedOrder?.id === orderId) {
         setSelectedOrder({ ...selectedOrder, status: 'declined' });
       }
@@ -268,6 +282,7 @@ export default function OrdersManagement() {
 
       const updatedOrders = orderUser.orders!.filter(o => o.id !== orderId);
       updateUserFields(orderUser.uid, { orders: updatedOrders });
+      await finalizeUserChanges(true);
       if (selectedOrder?.id === orderId) {
         setSelectedOrder(null);
       }
@@ -404,7 +419,7 @@ export default function OrdersManagement() {
             </span>
           </div>
           <p className="text-xs text-zinc-500 mt-1">
-            Orders are matched automatically via Gemini 2.5 Flash against recent bank notifications from asmatullah9327@gmail.com
+            Orders are matched automatically via Gemini 2.5 Flash against recent bank notifications from asmatn628@gmail.com
           </p>
         </div>
         
@@ -535,21 +550,23 @@ export default function OrdersManagement() {
                         <div className="flex items-center justify-end gap-1.5">
                           {order.status === 'pending' && (
                             <>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleAiReVerify(order);
-                                }}
-                                disabled={aiVerifyingId === order.id}
-                                className="p-2 bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20 rounded-xl transition-colors disabled:opacity-50 flex items-center gap-1 text-xs font-bold"
-                                title="Run AI Re-Verification with Gmail"
-                              >
-                                {aiVerifyingId === order.id ? (
-                                  <Loader2 className="w-4 h-4 animate-spin" />
-                                ) : (
-                                  <Zap className="w-4 h-4" />
-                                )}
-                              </button>
+                              {isOrderAutoApprovalSupported(order) && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleAiReVerify(order);
+                                  }}
+                                  disabled={aiVerifyingId === order.id}
+                                  className="p-2 bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20 rounded-xl transition-colors disabled:opacity-50 flex items-center gap-1 text-xs font-bold"
+                                  title="Run AI Re-Verification with Gmail"
+                                >
+                                  {aiVerifyingId === order.id ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <Zap className="w-4 h-4" />
+                                  )}
+                                </button>
+                              )}
                               <button
                                 onClick={(e) => { 
                                   e.stopPropagation(); 
@@ -725,14 +742,14 @@ export default function OrdersManagement() {
                     </div>
 
                     <div className="p-2.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
-                      <span className="text-zinc-400 text-[10px] block uppercase font-bold">Account Title</span>
+                      <span className="text-zinc-400 text-[10px] block uppercase font-bold">Sender Account Title</span>
                       <span className="font-bold text-zinc-900 dark:text-white">
                         {(selectedOrder as any).accountTitle || 'N/A'}
                       </span>
                     </div>
 
                     <div className="p-2.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
-                      <span className="text-zinc-400 text-[10px] block uppercase font-bold">Account (Last 4)</span>
+                      <span className="text-zinc-400 text-[10px] block uppercase font-bold">Sender Account No (Last 4)</span>
                       <span className="font-mono font-bold text-zinc-900 dark:text-white">
                         {(selectedOrder as any).accountNumberLast4 ? `•••• ${(selectedOrder as any).accountNumberLast4}` : 'N/A'}
                       </span>
@@ -823,18 +840,24 @@ export default function OrdersManagement() {
               {/* Actions Footer */}
               {selectedOrder.status === 'pending' ? (
                 <div className="flex flex-wrap items-center justify-between gap-2 mt-6 pt-6 border-t border-zinc-200 dark:border-zinc-800">
-                  <button
-                    onClick={() => handleAiReVerify(selectedOrder)}
-                    disabled={aiVerifyingId === selectedOrder.id}
-                    className="px-4 py-2.5 text-xs font-black rounded-xl bg-purple-500 text-white hover:bg-purple-600 transition-all flex items-center gap-1.5 shadow-md shadow-purple-500/20 cursor-pointer disabled:opacity-50"
-                  >
-                    {aiVerifyingId === selectedOrder.id ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Zap className="w-4 h-4" />
-                    )}
-                    <span>AI Re-Verify with Gmail</span>
-                  </button>
+                  {isOrderAutoApprovalSupported(selectedOrder) ? (
+                    <button
+                      onClick={() => handleAiReVerify(selectedOrder)}
+                      disabled={aiVerifyingId === selectedOrder.id}
+                      className="px-4 py-2.5 text-xs font-black rounded-xl bg-purple-500 text-white hover:bg-purple-600 transition-all flex items-center gap-1.5 shadow-md shadow-purple-500/20 cursor-pointer disabled:opacity-50"
+                    >
+                      {aiVerifyingId === selectedOrder.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Zap className="w-4 h-4" />
+                      )}
+                      <span>AI Re-Verify with Gmail</span>
+                    </button>
+                  ) : (
+                    <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 flex items-center gap-1.5 px-3 py-2 bg-zinc-100 dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700">
+                      <Clock className="w-3.5 h-3.5" /> Manual Review Method (Auto-Approval Disabled)
+                    </span>
+                  )}
 
                   <div className="flex items-center gap-2">
                     <button

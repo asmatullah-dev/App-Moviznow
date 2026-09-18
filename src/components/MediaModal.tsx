@@ -21,8 +21,10 @@ interface MediaModalProps {
 
 import { fetchTmdb } from '../services/tmdbClient';
 
-const OMDB_API_KEY = import.meta.env.VITE_OMDB_API_KEY || '19daa310';
-const YOUTUBE_API_KEY = import.meta.env.VITE_YOUTUBE_API_KEY || '';
+const OMDB_API_KEY =
+  (typeof import.meta !== 'undefined' && import.meta?.env?.VITE_OMDB_API_KEY) || '19daa310';
+const YOUTUBE_API_KEY =
+  (typeof import.meta !== 'undefined' && import.meta?.env?.VITE_YOUTUBE_API_KEY) || '';
 const OMDB_BASE = 'https://www.omdbapi.com/';
 
 export async function searchYouTubeTrailer(title: string, type: string) {

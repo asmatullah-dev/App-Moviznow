@@ -1,5 +1,7 @@
 const TMDB_BASE = 'https://api.themoviedb.org/3';
-const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || 'f71c2391161526fa9d19bd0b2759efaf';
+const TMDB_API_KEY =
+  (typeof import.meta !== 'undefined' && import.meta?.env?.VITE_TMDB_API_KEY) ||
+  'f71c2391161526fa9d19bd0b2759efaf';
 
 // In-memory client cache for fast response times and deduplication
 const tmdbClientCache = new Map<string, { data: any; status: number; ok: boolean; timestamp: number }>();

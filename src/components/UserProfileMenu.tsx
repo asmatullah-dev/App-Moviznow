@@ -19,7 +19,7 @@ import { useContent } from '../contexts/ContentContext';
 import { useHaptics } from '../hooks/useHaptics';
 
 export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogoutModal?: () => void }) => {
-  const { profile, logout, refreshProfile, isSyncing } = useAuth();
+  const { user, profile, logout, refreshProfile, isSyncing } = useAuth();
   const { theme, setTheme } = useTheme();
   const { language, setLanguage, t } = useLanguage();
   const { isInstallable, installApp } = usePWA();
@@ -554,14 +554,16 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                       vibrate(50);
                       setIsRefreshingData(true);
                       try {
-                        if ((window as any).triggerRefreshAppData) {
-                          await (window as any).triggerRefreshAppData('user_profile_button');
-                        } else {
-                          await Promise.all([
-                            refreshProfile(true, 'manual'),
-                            refreshSettings()
-                          ]);
+                        const promises: Promise<any>[] = [];
+                        if (user) {
+                          promises.push(refreshSettings(true).catch(err => console.warn('UserProfile refreshSettings error:', err)));
                         }
+                        if ((window as any).triggerRefreshAppData) {
+                          promises.push((window as any).triggerRefreshAppData('user_profile_button'));
+                        } else if (user) {
+                          promises.push(refreshProfile(true, 'manual').catch(() => {}));
+                        }
+                        await Promise.allSettled(promises);
                       } catch (err) {
                         console.error("Error refreshing app data:", err);
                       } finally {

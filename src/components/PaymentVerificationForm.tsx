@@ -70,6 +70,14 @@ export default function PaymentVerificationForm({
   const [senderBank, setSenderBank] = useState('');
   const [whatsappNumber, setWhatsappNumber] = useState(profile?.phone || '');
 
+  // Selected Bank Account & Auto-Approval status
+  const [selectedBankId, setSelectedBankId] = useState<string | null>(() => {
+    return settings?.bankAccounts?.[0]?.id || null;
+  });
+
+  const activeBank = settings?.bankAccounts?.find(b => b.id === (selectedBankId || settings?.bankAccounts?.[0]?.id)) || settings?.bankAccounts?.[0];
+  const isAutoApprovalSupported = activeBank ? (activeBank.allowAutoApproval !== false) : true;
+
   // Screenshot Upload State
   const [screenshotData, setScreenshotData] = useState<string | null>(null);
   const [isScanningScreenshot, setIsScanningScreenshot] = useState(false);
@@ -94,7 +102,7 @@ export default function PaymentVerificationForm({
       reader.onload = (e) => {
         const img = new Image();
         img.onload = () => {
-          const maxDim = 1600;
+          const maxDim = 2048;
           let width = img.width;
           let height = img.height;
 
@@ -113,8 +121,10 @@ export default function PaymentVerificationForm({
           canvas.height = height;
           const ctx = canvas.getContext('2d');
           if (ctx) {
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
             ctx.drawImage(img, 0, 0, width, height);
-            const optimizedBase64 = canvas.toDataURL('image/jpeg', 0.85);
+            const optimizedBase64 = canvas.toDataURL('image/jpeg', 0.92);
             resolve({ base64: optimizedBase64, mimeType: 'image/jpeg' });
           } else {
             resolve({ base64: e.target?.result as string, mimeType: file.type || 'image/jpeg' });
@@ -157,6 +167,13 @@ export default function PaymentVerificationForm({
         body: JSON.stringify({
           imageBase64: base64,
           mimeType,
+          receiverAccountTitle: settings?.accountTitle || 'Asmat Ullah',
+          receiverAccountNumber: settings?.accountNumber || '03416286423',
+          knownReceiverAccounts: (settings?.bankAccounts || []).map(b => ({
+            name: b.name,
+            accountTitle: b.accountTitle,
+            accountNumber: b.accountNumber,
+          })),
         }),
       });
 
@@ -169,30 +186,40 @@ export default function PaymentVerificationForm({
           setTrxId(ext.trxId);
           detectedAny = true;
         }
+
+        // Account title: only accept if not admin/receiver
         if (ext.accountTitle) {
-          setAccountTitle(ext.accountTitle);
-          detectedAny = true;
-        }
-        if (ext.accountNumberLast4) {
-          setAccountNumberLast4(ext.accountNumberLast4);
-          detectedAny = true;
-        }
-        if (ext.date) {
-          setPaymentDate(ext.date);
-          detectedAny = true;
-        }
-        if (ext.time) {
-          setPaymentTime(ext.time);
-          detectedAny = true;
-        }
-        if (!ext.date && ext.dateTime) {
-          const dtMatch = ext.dateTime.match(/(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2})/);
-          if (dtMatch) {
-            setPaymentDate(dtMatch[1]);
-            setPaymentTime(dtMatch[2]);
+          const lowerTitle = ext.accountTitle.toLowerCase().trim();
+          const isAdminTitle = lowerTitle.includes('asmat') || 
+                               lowerTitle.includes('moviznow') || 
+                               (settings?.accountTitle && lowerTitle.includes(settings.accountTitle.toLowerCase().trim()));
+          if (!isAdminTitle) {
+            setAccountTitle(ext.accountTitle);
             detectedAny = true;
           }
         }
+
+        // Account number last 4: only accept if not admin/receiver
+        if (ext.accountNumberLast4) {
+          const last4 = String(ext.accountNumberLast4).replace(/\D/g, '').slice(-4);
+          const adminLast4 = (settings?.accountNumber || '03416286423').replace(/\D/g, '').slice(-4);
+          const isReceiverAcc = last4 === adminLast4 || last4 === '6423';
+          if (last4 && !isReceiverAcc) {
+            setAccountNumberLast4(last4);
+            detectedAny = true;
+          }
+        }
+
+        if (ext.date && /^\d{4}-\d{2}-\d{2}$/.test(ext.date)) {
+          setPaymentDate(ext.date);
+          detectedAny = true;
+        }
+
+        if (ext.time && /^\d{2}:\d{2}$/.test(ext.time)) {
+          setPaymentTime(ext.time);
+          detectedAny = true;
+        }
+
         if (ext.senderBank) {
           setSenderBank(ext.senderBank);
           detectedAny = true;
@@ -202,13 +229,16 @@ export default function PaymentVerificationForm({
           setOcrSuccess(true);
           setOcrMessage(t('Payment details recognized automatically by AI!'));
         } else {
+          setOcrSuccess(false);
           setOcrMessage(t('Could not extract all details automatically. Please verify or fill in manually.'));
         }
       } else {
+        setOcrSuccess(false);
         setOcrMessage(t('Could not extract all details automatically. Please verify or fill in manually.'));
       }
     } catch (err) {
       console.error('Failed to run Gemini OCR:', err);
+      setOcrSuccess(false);
       setOcrMessage(t('Image attached. Please fill or check the payment fields.'));
     } finally {
       setIsScanningScreenshot(false);
@@ -270,14 +300,14 @@ export default function PaymentVerificationForm({
     if (!accountNumberLast4.trim() || accountNumberLast4.trim().length < 2) {
       setAlertConfig({
         isOpen: true,
-        title: t('Missing Account Digits'),
-        message: t('Please enter the last 4 digits of your account/wallet number.'),
+        title: t('Missing Sender Account Number'),
+        message: t('Please enter the last 4 digits of your sender mobile or bank account number.'),
       });
       return;
     }
 
     setIsSubmitting(true);
-    setVerificationStep('gmail_match');
+    setVerificationStep(isAutoApprovalSupported ? 'gmail_match' : 'finalizing');
 
     try {
       // Check if admin gmail token is cached in local/session
@@ -301,7 +331,11 @@ export default function PaymentVerificationForm({
         accountNumberLast4: accountNumberLast4.trim().slice(-4),
         paymentDateTime: `${paymentDate || ''} ${paymentTime || ''}`.trim(),
         paymentScreenshotUrl: screenshotData || undefined,
-        senderBank: senderBank.trim() || undefined,
+        senderBank: senderBank.trim() || activeBank?.name || undefined,
+        paymentMethodId: activeBank?.id,
+        paymentMethodName: activeBank?.name,
+        allowAutoApproval: isAutoApprovalSupported,
+        skipAiVerification: !isAutoApprovalSupported,
         gmailToken: cachedGmailToken,
       };
 
@@ -323,7 +357,7 @@ export default function PaymentVerificationForm({
           });
           return;
         }
-        throw new Error(result.error || 'Failed to verify order');
+        throw new Error(result.error || 'Failed to process order');
       }
 
       // Refresh auth profile to sync new membership status / active content
@@ -370,6 +404,13 @@ export default function PaymentVerificationForm({
 
           <PaymentMethods 
             copied={false} 
+            selectedBankId={selectedBankId}
+            onSelectBank={(bank) => {
+              setSelectedBankId(bank.id);
+              if (!senderBank || settings?.bankAccounts?.some(b => b.name === senderBank)) {
+                setSenderBank(bank.name);
+              }
+            }}
             onCopy={(text) => {
               if (text) navigator.clipboard.writeText(text);
             }} 
@@ -440,14 +481,22 @@ export default function PaymentVerificationForm({
             {isScanningScreenshot && (
               <div className="mt-2 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-2 text-xs font-bold text-emerald-600 dark:text-emerald-400">
                 <Loader2 className="w-4 h-4 animate-spin text-emerald-500" />
-                <span>AI is extracting Transaction ID, Account Name & Timestamp...</span>
+                <span>{t('AI is reading receipt to detect Sender details, Transaction ID, Date & Time...')}</span>
               </div>
             )}
 
-            {ocrSuccess && (
-              <div className="mt-2 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-2 text-xs font-bold text-emerald-600 dark:text-emerald-400">
-                <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                <span>{ocrMessage || t('Details successfully extracted!')}</span>
+            {ocrMessage && (
+              <div className={`mt-2 p-3 rounded-xl border flex items-center gap-2 text-xs font-bold ${
+                ocrSuccess 
+                  ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                  : 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'
+              }`}>
+                {ocrSuccess ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
+                )}
+                <span>{ocrMessage}</span>
               </div>
             )}
           </div>
@@ -498,7 +547,7 @@ export default function PaymentVerificationForm({
           </div>
         </div>
 
-        {/* Row 2: Account Title & Last 4 Digits */}
+        {/* Row 2: Sender Account Title & Sender Account No */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
           <div>
             <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5 flex items-center gap-1.5">
@@ -518,7 +567,7 @@ export default function PaymentVerificationForm({
           <div>
             <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5 flex items-center gap-1.5">
               <CreditCard className="w-3.5 h-3.5 text-emerald-500" />
-              <span>{t('Account Number (Last 4 Digits)')}</span>
+              <span>{t('Sender Account No (Last 4 Digits)')}</span>
               <span className="text-rose-500">*</span>
             </label>
             <input
@@ -526,9 +575,12 @@ export default function PaymentVerificationForm({
               maxLength={4}
               value={accountNumberLast4}
               onChange={(e) => setAccountNumberLast4(e.target.value.replace(/\D/g, '').slice(0, 4))}
-              placeholder="e.g. 6423"
+              placeholder="e.g. 4567"
               className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm font-semibold font-mono text-zinc-900 dark:text-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all outline-none"
             />
+            <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+              {t('Last 4 digits of your account/wallet from which you sent payment')}
+            </p>
           </div>
         </div>
 
@@ -568,34 +620,64 @@ export default function PaymentVerificationForm({
         </div>
       </div>
 
-      {/* 4. Action Button with Real-time AI Verification Status */}
+      {/* 4. Action Button: Conditionally render AI Auto-Approval vs Manual Verification based on payment method */}
       <div className="space-y-3">
-        <button
-          type="button"
-          onClick={handleSubmitAndVerify}
-          disabled={disabled || isSubmitting || isScanningScreenshot}
-          className="w-full bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2.5 transition-all active:scale-[0.98] disabled:opacity-50 shadow-xl shadow-emerald-500/20 text-sm sm:text-base cursor-pointer"
-        >
-          {isSubmitting ? (
-            <>
-              <Loader2 className="w-5 h-5 animate-spin" />
-              <span>
-                {verificationStep === 'gmail_match' 
-                  ? 'AI verifying transaction securely with bank...' 
-                  : 'Processing Order...'}
-              </span>
-            </>
-          ) : (
-            <>
-              <Zap className="w-5 h-5 text-amber-300 fill-amber-300" />
-              <span>{verificationAttempt >= 3 ? t('Submit for Manual Verification') : t('Confirm Order & Verify with AI')}</span>
-            </>
-          )}
-        </button>
+        {isAutoApprovalSupported ? (
+          <>
+            <button
+              type="button"
+              onClick={handleSubmitAndVerify}
+              disabled={disabled || isSubmitting || isScanningScreenshot}
+              className="w-full bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2.5 transition-all active:scale-[0.98] disabled:opacity-50 shadow-xl shadow-emerald-500/20 text-sm sm:text-base cursor-pointer"
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>
+                    {verificationStep === 'gmail_match' 
+                      ? 'AI verifying transaction securely with bank...' 
+                      : 'Processing Order...'}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Zap className="w-5 h-5 text-amber-300 fill-amber-300" />
+                  <span>{verificationAttempt >= 3 ? t('Submit for Manual Verification') : t('Confirm Order & Verify with AI')}</span>
+                </>
+              )}
+            </button>
 
-        <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
-          ⚡ {t('Orders matching bank receipts are approved immediately by AI.')}
-        </p>
+            <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
+              ⚡ {t('Orders matching bank receipts are approved immediately by AI.')}
+            </p>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={handleSubmitAndVerify}
+              disabled={disabled || isSubmitting || isScanningScreenshot}
+              className="w-full bg-gradient-to-r from-zinc-800 to-zinc-900 hover:from-zinc-700 hover:to-zinc-800 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2.5 transition-all active:scale-[0.98] disabled:opacity-50 shadow-lg text-sm sm:text-base cursor-pointer border border-zinc-700/50"
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>Submitting Order...</span>
+                </>
+              ) : (
+                <>
+                  <Send className="w-5 h-5 text-emerald-400" />
+                  <span>{t('Submit Order for Approval')}</span>
+                </>
+              )}
+            </button>
+
+            <p className="text-center text-xs text-zinc-500 dark:text-zinc-400 flex items-center justify-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+              <span>{t('This payment method requires manual admin approval. Your order will be reviewed shortly.')}</span>
+            </p>
+          </>
+        )}
       </div>
 
       <AlertModal

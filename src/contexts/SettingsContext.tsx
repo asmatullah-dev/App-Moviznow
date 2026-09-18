@@ -1,7 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
-import { db, auth, runWithNetwork } from '../firebase';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth, db, runWithNetwork } from '../firebase';
 import { getChunkMeta, parseVersionTime, getUtcVersion } from '../utils/chunkMeta';
+import { safeStorage } from '../utils/safeStorage';
 
 import { AppSettings } from '../types';
 
@@ -38,10 +40,10 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   isAdminContactEnabled: true,
   isPaymentEnabled: true,
   bankAccounts: [
-    { id: '1', name: 'Easypaisa', accountNumber: '', accountTitle: '', color: '#00c652', labelColor: '#00c652', textColor: '#ffffff', iconUrl: '' },
-    { id: '2', name: 'JazzCash', accountNumber: '', accountTitle: '', color: '#ed1c24', labelColor: '#ed1c24', textColor: '#ffffff', iconUrl: '' },
-    { id: '3', name: 'NayaPay', accountNumber: '', accountTitle: '', color: '#ff6b00', labelColor: '#ff6b00', textColor: '#ffffff', iconUrl: '' },
-    { id: '4', name: 'SadaPay', accountNumber: '', accountTitle: '', color: '#00e6b8', labelColor: '#00e6b8', textColor: '#ffffff', iconUrl: '' }
+    { id: '1', name: 'Easypaisa', accountNumber: '', accountTitle: '', color: '#00c652', labelColor: '#00c652', textColor: '#ffffff', iconUrl: '', allowAutoApproval: true },
+    { id: '2', name: 'JazzCash', accountNumber: '', accountTitle: '', color: '#ed1c24', labelColor: '#ed1c24', textColor: '#ffffff', iconUrl: '', allowAutoApproval: true },
+    { id: '3', name: 'NayaPay', accountNumber: '', accountTitle: '', color: '#ff6b00', labelColor: '#ff6b00', textColor: '#ffffff', iconUrl: '', allowAutoApproval: true },
+    { id: '4', name: 'SadaPay', accountNumber: '', accountTitle: '', color: '#00e6b8', labelColor: '#00e6b8', textColor: '#ffffff', iconUrl: '', allowAutoApproval: true }
   ],
   adminTabsOrder: [
     'Dashboard', 'Analytics', 'Orders', 'Content', 'Users', 
@@ -126,9 +128,9 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return;
       }
 
-      // For guest users (unauthenticated), use local storage or default app settings and skip Firestore network calls
+      // Guest users (unauthenticated) have no access or connection to Firestore!
       if (!auth.currentUser) {
-        const cached = localStorage.getItem('cached_app_settings');
+        const cached = safeStorage.getItem('cached_app_settings') || localStorage.getItem('cached_app_settings');
         if (cached) {
           try {
             setSettings(JSON.parse(cached));
@@ -140,40 +142,67 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return;
       }
 
-      const meta = await getChunkMeta(force);
-      const serverVersionTime = parseVersionTime(meta.settings);
-      const localVersionTime = parseVersionTime(localStorage.getItem('cached_settings_version'));
+      const hasCachedSettings = !!(safeStorage.getItem('cached_app_settings') || localStorage.getItem('cached_app_settings'));
 
-      if (force || !localStorage.getItem('cached_app_settings') || serverVersionTime > localVersionTime) {
-        const docRef = doc(db, 'settings', 'app_settings');
-        // 2500ms timeout race so slow internet never keeps app waiting on settings
-        const fetchPromise = runWithNetwork(() => getDoc(docRef));
-        const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500));
-        
-        const docSnap = await Promise.race([fetchPromise, timeoutPromise]);
-        
-        if (docSnap && docSnap.exists()) {
-          const data = docSnap.data() as AppSettings;
-          if (data) {
-            if (data.supportNumber === '3363284466' || data.supportNumber === '03363284466') {
-              data.supportNumber = '3416286423';
-            }
-            if (!data.whatsappChannelLink) {
-              data.whatsappChannelLink = 'https://whatsapp.com/channel/0029Vb7PxRC9MF96ZZVGdx2n';
-            }
-            if (!data.whatsappClipsLink) {
-              data.whatsappClipsLink = 'https://chat.whatsapp.com/DJvn1Vssg8pCC6JTosnOQQ';
-            }
+      // Check chunk_meta version. Bypasses 15s cooldown if force is true.
+      const meta = await getChunkMeta(force);
+      const serverSettingsVer = meta?.settings;
+      const localSettingsVer = safeStorage.getItem('cached_settings_version') || localStorage.getItem('cached_settings_version');
+
+      const serverVersionTime = parseVersionTime(serverSettingsVer);
+      const localVersionTime = parseVersionTime(localSettingsVer);
+
+      // Only fetch settings document when chunk meta version change is detected (or first load without cache)
+      const isVersionChanged = serverVersionTime > 0 && serverVersionTime > localVersionTime;
+      const shouldFetchDoc = !hasCachedSettings || isVersionChanged;
+
+      if (!shouldFetchDoc) {
+        setLoading(false);
+        return;
+      }
+
+      const docRef = doc(db, 'settings', 'app_settings');
+      // Direct fetch with a safety timeout so slow networks do not indefinitely hang
+      const fetchPromise = runWithNetwork(() => getDoc(docRef));
+      const timeoutMs = force ? 6000 : 4000;
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs));
+      
+      const docSnap = await Promise.race([fetchPromise, timeoutPromise]);
+      
+      if (docSnap && docSnap.exists()) {
+        const data = docSnap.data() as AppSettings;
+        if (data) {
+          if (data.supportNumber === '3363284466' || data.supportNumber === '03363284466') {
+            data.supportNumber = '3416286423';
           }
-          setSettings(data);
-          localStorage.setItem('cached_app_settings', JSON.stringify(data));
-          const serverVersionStr = typeof meta.settings === 'object' ? (meta.settings?.updatedAt || meta.settings?.version || getUtcVersion()) : (meta.settings ? meta.settings.toString() : getUtcVersion());
-          localStorage.setItem('cached_settings_version', serverVersionStr);
-        } else if (!localStorage.getItem('cached_app_settings')) {
-          setSettings(DEFAULT_APP_SETTINGS);
-          localStorage.setItem('cached_app_settings', JSON.stringify(DEFAULT_APP_SETTINGS));
-          localStorage.setItem('cached_settings_version', getUtcVersion());
+          if (!data.whatsappChannelLink) {
+            data.whatsappChannelLink = 'https://whatsapp.com/channel/0029Vb7PxRC9MF96ZZVGdx2n';
+          }
+          if (!data.whatsappClipsLink) {
+            data.whatsappClipsLink = 'https://chat.whatsapp.com/DJvn1Vssg8pCC6JTosnOQQ';
+          }
         }
+        setSettings(data);
+        const serialized = JSON.stringify(data);
+        localStorage.setItem('cached_app_settings', serialized);
+        safeStorage.setItem('cached_app_settings', serialized);
+
+        const serverVersionStr = typeof serverSettingsVer === 'object' 
+          ? (serverSettingsVer?.updatedAt || serverSettingsVer?.version || getUtcVersion()) 
+          : (serverSettingsVer ? serverSettingsVer.toString() : getUtcVersion());
+        localStorage.setItem('cached_settings_version', serverVersionStr);
+        safeStorage.setItem('cached_settings_version', serverVersionStr);
+        
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('settings_refreshed', { detail: data }));
+        }
+      } else if (!hasCachedSettings) {
+        setSettings(DEFAULT_APP_SETTINGS);
+        const defSerialized = JSON.stringify(DEFAULT_APP_SETTINGS);
+        localStorage.setItem('cached_app_settings', defSerialized);
+        safeStorage.setItem('cached_app_settings', defSerialized);
+        localStorage.setItem('cached_settings_version', getUtcVersion());
+        safeStorage.setItem('cached_settings_version', getUtcVersion());
       }
     } catch (error) {
       console.error('Error fetching settings:', error);
@@ -184,6 +213,29 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   useEffect(() => {
     refreshSettings();
+
+    // Refresh when user transitions from guest to authenticated
+    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
+      if (currentUser) {
+        refreshSettings();
+      }
+    });
+
+    const handleSettingsUpdated = (e: any) => {
+      if (e?.detail) {
+        setSettings(e.detail);
+        try {
+          const serialized = JSON.stringify(e.detail);
+          localStorage.setItem('cached_app_settings', serialized);
+          safeStorage.setItem('cached_app_settings', serialized);
+        } catch {}
+      }
+    };
+    window.addEventListener('settings_updated', handleSettingsUpdated);
+    return () => {
+      unsubscribeAuth();
+      window.removeEventListener('settings_updated', handleSettingsUpdated);
+    };
   }, [refreshSettings]);
 
   return (

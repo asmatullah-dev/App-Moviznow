@@ -134,28 +134,65 @@ function solveVddosCookieFromHtml(html: string): string | null {
   return null;
 }
 
-export async function fetchWithVddos(targetUrl: string, customHeaders?: Record<string, string>, timeoutMs = 10000) {
+// Global domain-level vDDoS cookie cache to avoid repetitive challenge solves
+const vddosCookieCache = new Map<string, { cookie: string; timestamp: number }>();
+
+export function getCachedVddosCookie(url: string): string | null {
+  try {
+    const hostname = new URL(url).hostname;
+    const entry = vddosCookieCache.get(hostname);
+    if (entry && Date.now() - entry.timestamp < 30 * 60 * 1000) {
+      return entry.cookie;
+    }
+  } catch (e) {}
+  return null;
+}
+
+export function setCachedVddosCookie(url: string, cookie: string) {
+  try {
+    const hostname = new URL(url).hostname;
+    vddosCookieCache.set(hostname, { cookie, timestamp: Date.now() });
+  } catch (e) {}
+}
+
+export async function fetchWithVddos(targetUrl: string, customHeaders?: Record<string, string>, timeoutMs = 12000) {
   const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+  const cachedCookie = getCachedVddosCookie(targetUrl);
   const baseHeaders = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
     'Referer': targetUrl,
+    ...(cachedCookie ? { 'Cookie': cachedCookie } : {}),
     ...(customHeaders || {})
   };
 
-  let res = await axios.get(targetUrl, {
-    headers: baseHeaders,
-    httpsAgent,
-    timeout: timeoutMs,
-    maxContentLength: 5 * 1024 * 1024,
-    validateStatus: () => true,
-    maxRedirects: 5
-  });
+  let res: any;
+  let html = '';
+  let finalUrl = targetUrl;
 
-  let html = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
-  let finalUrl = res.request?.res?.responseUrl || targetUrl;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      res = await axios.get(targetUrl, {
+        headers: baseHeaders,
+        httpsAgent,
+        timeout: timeoutMs,
+        maxContentLength: 5 * 1024 * 1024,
+        validateStatus: () => true,
+        maxRedirects: 5
+      });
+      html = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+      finalUrl = res.request?.res?.responseUrl || targetUrl;
+      break;
+    } catch (fetchErr: any) {
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 300));
+        continue;
+      }
+      throw fetchErr;
+    }
+  }
 
-  if (isCloudflareHtml(res.status, html)) {
+  if (isCloudflareHtml(res?.status || 0, html)) {
     try {
       console.log(`[fetchWithVddos] Cloudflare detected for ${targetUrl}. Falling back to fetchHtml helper.`);
       const bypassRes = await fetchHtml(targetUrl, false, true);
@@ -168,7 +205,7 @@ export async function fetchWithVddos(targetUrl: string, customHeaders?: Record<s
   }
 
   if (
-    res.status === 202 ||
+    res?.status === 202 ||
     html.includes('vDDoS-zn') ||
     html.includes('vddos') ||
     html.includes('w3IncludeHTML') ||
@@ -187,6 +224,10 @@ export async function fetchWithVddos(targetUrl: string, customHeaders?: Record<s
       cookieVal = cookieVal ? cookieVal + '; ' + sc : sc;
     }
 
+    if (cookieVal) {
+      setCachedVddosCookie(targetUrl, cookieVal);
+    }
+
     let redirectUrl = targetUrl;
     const redirectMatch = html.match(/location\.href\s*=\s*['"]([^'"]+)['"]/i);
     if (redirectMatch) {
@@ -198,29 +239,46 @@ export async function fetchWithVddos(targetUrl: string, customHeaders?: Record<s
       redirectUrl = targetUrl.includes('?') ? targetUrl + '&d=1' : targetUrl + '?d=1';
     }
 
-    try {
-      const followRes = await axios.get(redirectUrl, {
-        headers: {
-          ...baseHeaders,
-          ...(cookieVal ? { 'Cookie': cookieVal } : {}),
-          'Referer': targetUrl
-        },
-        httpsAgent,
-        timeout: timeoutMs,
-        maxContentLength: 5 * 1024 * 1024,
-        validateStatus: () => true,
-        maxRedirects: 5
-      });
+    for (let followAttempt = 0; followAttempt < 2; followAttempt++) {
+      try {
+        const followRes = await axios.get(redirectUrl, {
+          headers: {
+            ...baseHeaders,
+            ...(cookieVal ? { 'Cookie': cookieVal } : {}),
+            'Referer': targetUrl
+          },
+          httpsAgent,
+          timeout: timeoutMs,
+          maxContentLength: 5 * 1024 * 1024,
+          validateStatus: () => true,
+          maxRedirects: 5
+        });
 
-      html = typeof followRes.data === 'string' ? followRes.data : JSON.stringify(followRes.data);
-      res = followRes;
-      finalUrl = followRes.request?.res?.responseUrl || redirectUrl;
-    } catch (err: any) {
-      console.warn(`[fetchWithVddos] Follow redirect error for ${redirectUrl}:`, err.message);
+        const followHtml = typeof followRes.data === 'string' ? followRes.data : JSON.stringify(followRes.data);
+        if (followRes.status === 200 && followHtml.length > 300 && !followHtml.includes('vDDoS-zn') && !followHtml.includes('toNumbers')) {
+          html = followHtml;
+          res = followRes;
+          finalUrl = followRes.request?.res?.responseUrl || redirectUrl;
+          if (followRes.request?.res?.responseUrl) {
+            setCachedVddosCookie(followRes.request.res.responseUrl, cookieVal);
+          }
+          break;
+        } else {
+          html = followHtml;
+          res = followRes;
+          finalUrl = followRes.request?.res?.responseUrl || redirectUrl;
+        }
+      } catch (err: any) {
+        if (followAttempt === 0) {
+          await new Promise((r) => setTimeout(r, 400));
+          continue;
+        }
+        console.warn(`[fetchWithVddos] Follow redirect error for ${redirectUrl}:`, err.message);
+      }
     }
   }
 
-  return { html, status: res.status, finalUrl };
+  return { html, status: res?.status || 200, finalUrl };
 }
 
 export function extractHtmlPagination(html: string, currentUrl: string) {
@@ -342,6 +400,20 @@ async function startServer() {
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=86400");
     res.send("User-agent: Mediapartners-Google\nAllow: /\n\nUser-agent: Google-Adwords-Instant\nAllow: /\n\nUser-agent: *\nAllow: /\nDisallow: /api/\n");
+  });
+
+  // Enable CORS for API routes so Vercel and other frontends can consume AI Studio API
+  app.use((req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization, X-Requested-With, X-AI-Studio-Proxy, Accept, Origin",
+    );
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(204);
+    }
+    next();
   });
 
   app.use(express.json({ limit: "50mb" }));
@@ -888,9 +960,14 @@ async function startServer() {
                   // Clean up sizes with /E (e.g., [440MB/E]) from the main title part
                   finalFileName = finalFileName.replace(/\[?\s*\d+(?:\.\d+)?\s*(?:GB|MB|KB)\/E\s*\]?/gi, '').trim();
                   
-                  // Scrape size if available in the text
+                  // Scrape size if available in the text, prev HTML, mainTitle, anchor text, or following text
                   let size = "Unknown";
-                  const sizeMatch = title.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i) || prev.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i);
+                  const afterLink = parts[i].split('</a>')[0] || '';
+                  const sizeMatch = title.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i) ||
+                                    prev.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i) ||
+                                    afterLink.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i) ||
+                                    mainTitle.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i) ||
+                                    prev.match(/Size:\s*([0-9.]+\s*(?:GB|MB|KB))/i);
                   if (sizeMatch) {
                       size = sizeMatch[1].toUpperCase();
                       // Remove size from filename to make matching easier
@@ -938,7 +1015,17 @@ async function startServer() {
          seenFiles.set(hit.file_name, hit.url);
       }
 
-      res.json({ hits, found: hits.length, all_fetched: true });
+      // Deduplicate hits by URL to ensure zero duplicate links
+      const uniqueHits: any[] = [];
+      const seenUrls = new Set<string>();
+      for (const h of hits) {
+        const norm = (h.url || '').trim().toLowerCase().replace(/\/$/, '');
+        if (!norm || seenUrls.has(norm)) continue;
+        seenUrls.add(norm);
+        uniqueHits.push(h);
+      }
+
+      res.json({ hits: uniqueHits, found: uniqueHits.length, all_fetched: true });
     } catch (error: any) {
       console.error('MDrive extract error:', error);
       res.status(500).json({ error: error.message });
@@ -1161,7 +1248,7 @@ async function startServer() {
       const $ = cheerio.load(text);
 
       // 3. Scan for download links on post pages (MDrive, Workers.dev / Telegraph, direct HubCloud)
-      const rawLinks: { href: string; label: string; isMdrive: boolean; isWorker: boolean; isHubcloud: boolean }[] = [];
+      const rawLinks: { href: string; label: string; size: string | null; isMdrive: boolean; isWorker: boolean; isHubcloud: boolean }[] = [];
       const seenUrls = new Set<string>();
 
       $("a[href]").each((_, el) => {
@@ -1174,13 +1261,66 @@ async function startServer() {
           if (!seenUrls.has(href)) {
             seenUrls.add(href);
             let label = $(el).text().trim().replace(/\s+/g, " ");
+            const anchorText = label;
+            let headingContext = "";
+            let current = $(el);
+            let limit = 20;
+            while (current.length > 0 && limit > 0) {
+              let prev = current.prev();
+              while (prev.length > 0) {
+                const prevText = prev.text().trim().replace(/\s+/g, " ");
+                const isHeadingOption = /(?:single episode|single ep|zip|pack|batch|download|watch online|click here)/i.test(prevText);
+                
+                if (prevText && !isHeadingOption && (
+                  /(?:480p|720p|1080p|2160p|4k|2k)\b/i.test(prevText) ||
+                  /season\s*\d+/i.test(prevText)
+                ) && prevText.length >= 4 && prevText.length < 250) {
+                  headingContext = prevText;
+                  break;
+                }
+
+                const nestedHeader = prev.find("h1, h2, h3, h4, h5, h6, p, div, span").filter((_, child) => {
+                  const ct = $(child).text().trim().replace(/\s+/g, " ");
+                  const isOption = /(?:single episode|single ep|zip|pack|batch|download|watch online|click here)/i.test(ct);
+                  return !isOption && ct.length >= 4 && ct.length < 250 && (
+                    /(?:480p|720p|1080p|2160p|4k|2k)\b/i.test(ct) ||
+                    /season\s*\d+/i.test(ct)
+                  );
+                }).first();
+
+                if (nestedHeader.length > 0) {
+                  headingContext = nestedHeader.text().trim().replace(/\s+/g, " ");
+                  break;
+                }
+
+                prev = prev.prev();
+              }
+              if (headingContext) break;
+              current = current.parent();
+              limit--;
+            }
+
             const parentText = $(el).parent().text().trim().replace(/\s+/g, " ");
-            if (parentText && parentText.length > label.length && parentText.length < 120 && (parentText.includes("Ep") || parentText.includes("Episode") || parentText.includes("Season") || parentText.includes("ZIP") || parentText.includes("Zip"))) {
-              label = parentText;
+            if (headingContext) {
+              label = `${headingContext} | ${label}`;
+            } else {
+              if (parentText && parentText.length > label.length && parentText.length < 120 && (parentText.includes("Ep") || parentText.includes("Episode") || parentText.includes("Season") || parentText.includes("ZIP") || parentText.includes("Zip"))) {
+                label = parentText;
+              }
             }
             if (!label) label = "Download Link";
             label = label.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
-            rawLinks.push({ href, label, isMdrive, isWorker, isHubcloud });
+
+            // Extract file size from anchor text (e.g. Zip [930MB]), parent text, heading label, or surrounding context
+            const surroundText = current.closest("p, div, tr, td, li, section").text().trim().replace(/\s+/g, " ");
+            const sizeMatch = anchorText.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i) ||
+                              parentText.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i) ||
+                              label.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i) ||
+                              headingContext.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i) ||
+                              surroundText.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i);
+            const extractedSize = sizeMatch ? sizeMatch[1].toUpperCase() : null;
+
+            rawLinks.push({ href, label, size: extractedSize, isMdrive, isWorker, isHubcloud });
           }
         }
       });
@@ -1209,7 +1349,7 @@ async function startServer() {
                 return {
                   file_name: finalTitle,
                   url: normalizeDomain(hubUrl),
-                  size: sizeMatch ? sizeMatch[1].toUpperCase() : null,
+                  size: sizeMatch ? sizeMatch[1].toUpperCase() : item.size,
                   is_direct: true
                 };
               }
@@ -1219,28 +1359,52 @@ async function startServer() {
             return {
               file_name: item.label,
               url: item.href,
-              size: null,
+              size: item.size || null,
               is_direct: false
             };
           } else if (item.isMdrive) {
+            const sizeMatch = item.size ? null : item.label.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i);
+            const finalSize = item.size || (sizeMatch ? sizeMatch[1].toUpperCase() : null);
             return {
               file_name: item.label,
               url: normalizeDomain(item.href),
-              size: null,
+              size: finalSize,
               is_direct: false
             };
           } else {
+            const sizeMatch = item.size ? null : item.label.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i);
+            const finalSize = item.size || (sizeMatch ? sizeMatch[1].toUpperCase() : null);
             return {
               file_name: item.label,
               url: normalizeDomain(item.href),
-              size: null,
+              size: finalSize,
               is_direct: true
             };
           }
         }));
 
         if (hits.length > 0) {
-          return res.json({ is_search: false, hits, found: hits.length });
+          const uniqueHits: any[] = [];
+          const seenHitUrls = new Set<string>();
+          for (const h of hits) {
+            const norm = (h.url || '').trim().toLowerCase().replace(/\/$/, '');
+            if (!norm || seenHitUrls.has(norm)) continue;
+            seenHitUrls.add(norm);
+            uniqueHits.push(h);
+          }
+
+          const postPageTitle = $("title").text().trim() || $("h1.entry-title, h1.post-title, h1").first().text().trim();
+          const isMovieByMD = /full\s*movie|\bmovie\b|\bfilm\b/i.test(postPageTitle) || /full\s*movie|\bmovie\b|\bfilm\b/i.test(targetUrl);
+          const isSeriesByMD = /\b(series|season|seasons|s\d+|episode|episodes)\b/i.test(postPageTitle) || /\b(series|season|seasons|s\d+|episode|episodes)\b/i.test(targetUrl);
+
+          return res.json({
+            is_search: false,
+            hits: uniqueHits,
+            found: uniqueHits.length,
+            post_title: postPageTitle,
+            is_movie: isMovieByMD || (!isSeriesByMD && uniqueHits.every(h => !/\b(season|episode|ep\s*\d+|pack|zip|batch)\b/i.test(h.file_name || ""))),
+            is_series: isSeriesByMD && !isMovieByMD
+          });
         }
       }
 
@@ -2624,15 +2788,16 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
           const lower = label.toLowerCase();
           const hasHindiLine = /\bhindi\b.*?\bline\b/.test(lower);
           const isHQ = lower.includes("hq");
+          const hasHevc = lower.includes("hevc") || lower.includes("x265") || lower.includes("10bit") || lower.includes("10-bit") || lower.includes("h265") || lower.includes("h.265");
 
-          if (lower.includes("480p") && lower.includes("hevc")) label = "Download Now 480p HEVC";
-          else if (lower.includes("720p") && lower.includes("hevc")) label = "Download Now 720p HEVC";
-          else if (lower.includes("1080p") && lower.includes("hevc")) label = "Download Now 1080p HEVC";
-          else if (lower.includes("1080p") && isHQ) label = "Download Now 1080p HQ";
-          else if (lower.includes("480p")) label = "Download Now 480p";
-          else if (lower.includes("720p")) label = "Download Now 720p";
-          else if (lower.includes("1080p")) label = "Download Now 1080p";
-          else if (lower.includes("4k") || lower.includes("2160p")) label = "Download Now 4K";
+          if (/\b(480p?|sd)\b/i.test(lower) && hasHevc) label = "Download Now 480p HEVC";
+          else if (/\b(720p?|hd)\b/i.test(lower) && hasHevc) label = "Download Now 720p HEVC";
+          else if (/\b(1080p?|fhd|full\s*hd)\b/i.test(lower) && hasHevc) label = "Download Now 1080p HEVC";
+          else if (/\b(1080p?|fhd|full\s*hd)\b/i.test(lower) && isHQ) label = "Download Now 1080p HQ";
+          else if (/\b(480p?|sd)\b/i.test(lower)) label = "Download Now 480p";
+          else if (/\b(720p?|hd)\b/i.test(lower)) label = "Download Now 720p";
+          else if (/\b(1080p?|fhd|full\s*hd)\b/i.test(lower)) label = "Download Now 1080p";
+          else if (/\b(4k|2160p?|uhd|ultra\s*hd)\b/i.test(lower)) label = "Download Now 4K";
 
           if (hasHindiLine && !label.includes("Hindi (Line)")) {
             label += " Hindi (Line)";
@@ -2687,38 +2852,49 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       };
 
       // Recursive multi-hop resolver for FilmyGo / FilmyCab gates (e.g. FilmyGo -> LinkMake -> FilesDL -> HubCloud)
-      const visited = new Set<string>();
-      visited.add(targetUrl);
-
       async function resolveFilmyGoLink(
         startUrl: string,
         parentLabel: string,
-        depth = 0
+        depth = 0,
+        branchVisited = new Set<string>()
       ): Promise<Array<{ file_name: string; url: string; size: string | null; is_direct: boolean }>> {
-        if (depth > 4 || visited.has(startUrl) || startUrl.toLowerCase().includes("gdflix")) return [];
-        visited.add(startUrl);
+        if (depth > 4 || branchVisited.has(startUrl) || startUrl.toLowerCase().includes("gdflix")) return [];
+        branchVisited.add(startUrl);
 
         try {
           let htmlText = "";
           let finalUrl = startUrl;
 
-          try {
-            const fetched = await fetchWithVddos(startUrl, undefined, 15000);
-            htmlText = fetched.html;
-            finalUrl = fetched.finalUrl || startUrl;
-          } catch (fetchErr) {
+          // Attempt up to 3 times for transient vDDoS challenges or network timeouts
+          for (let fetchAttempt = 0; fetchAttempt < 3; fetchAttempt++) {
             try {
-              const res = await axios.get(startUrl, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-                timeout: 12000,
-                maxRedirects: 5
-              });
-              htmlText = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
-            } catch (e2) {}
+              const fetched = await fetchWithVddos(startUrl, undefined, 16000);
+              htmlText = fetched.html || "";
+              finalUrl = fetched.finalUrl || startUrl;
+              if (htmlText.length > 300 && !htmlText.includes('vDDoS-zn') && !htmlText.includes('toNumbers')) break;
+            } catch (fetchErr) {
+              if (fetchAttempt < 2) {
+                await new Promise((r) => setTimeout(r, (fetchAttempt + 1) * 450));
+                continue;
+              }
+              try {
+                const res = await axios.get(startUrl, {
+                  headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Referer': targetUrl
+                  },
+                  httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+                  timeout: 14000,
+                  maxRedirects: 5
+                });
+                htmlText = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+              } catch (e2) {}
+            }
           }
 
           if (finalUrl && finalUrl !== startUrl) {
-            visited.add(finalUrl);
+            branchVisited.add(finalUrl);
           }
 
           const $doc = cheerio.load(htmlText);
@@ -2742,6 +2918,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
           if (hubMatches.length > 0) {
             const sizeMatch = htmlText.match(/Size:<\/span>\s*<span>([^<]+)<\/span>/i) || 
                               htmlText.match(/Size:\s*([0-9.]+\s*(?:GB|MB|KB))/i) || 
+                              htmlText.match(/Instant Download Link\s*-\s*([0-9.]+\s*(?:GB|MB|KB))/i) ||
                               htmlText.match(/(\d+(?:\.\d+)?\s*(?:GB|MB|KB))/i);
             const size = sizeMatch ? sizeMatch[1].toUpperCase() : null;
 
@@ -2777,7 +2954,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
               return;
             }
 
-            if (visited.has(href)) return;
+            if (branchVisited.has(href)) return;
 
             const lowerHref = href.toLowerCase();
             if (lowerHref.includes("gdflix") || lowerHref.includes("cdn-cgi") || lowerHref.includes("download.php")) return;
@@ -2809,14 +2986,16 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
               if (anchorText && !/^(direct\s*)?download(\s*now)?$/i.test(anchorText)) {
                 let resLabel = "";
                 const isHQ = lowerAnchor.includes("hq");
-                if (lowerAnchor.includes("480p") && lowerAnchor.includes("hevc")) resLabel = "Download Now 480p HEVC";
-                else if (lowerAnchor.includes("720p") && lowerAnchor.includes("hevc")) resLabel = "Download Now 720p HEVC";
-                else if (lowerAnchor.includes("1080p") && lowerAnchor.includes("hevc")) resLabel = "Download Now 1080p HEVC";
-                else if (lowerAnchor.includes("1080p") && isHQ) resLabel = "Download Now 1080p HQ";
-                else if (lowerAnchor.includes("480p")) resLabel = "Download Now 480p";
-                else if (lowerAnchor.includes("720p")) resLabel = "Download Now 720p";
-                else if (lowerAnchor.includes("1080p")) resLabel = "Download Now 1080p";
-                else if (lowerAnchor.includes("4k") || lowerAnchor.includes("2160p")) resLabel = "Download Now 4K";
+                const hasHevc = lowerAnchor.includes("hevc") || lowerAnchor.includes("x265") || lowerAnchor.includes("10bit");
+                
+                if (/\b(480p?|sd)\b/i.test(lowerAnchor) && hasHevc) resLabel = "Download Now 480p HEVC";
+                else if (/\b(720p?|hd)\b/i.test(lowerAnchor) && hasHevc) resLabel = "Download Now 720p HEVC";
+                else if (/\b(1080p?|fhd|full\s*hd)\b/i.test(lowerAnchor) && hasHevc) resLabel = "Download Now 1080p HEVC";
+                else if (/\b(1080p?|fhd|full\s*hd)\b/i.test(lowerAnchor) && isHQ) resLabel = "Download Now 1080p HQ";
+                else if (/\b(480p?|sd)\b/i.test(lowerAnchor)) resLabel = "Download Now 480p";
+                else if (/\b(720p?|hd)\b/i.test(lowerAnchor)) resLabel = "Download Now 720p";
+                else if (/\b(1080p?|fhd|full\s*hd)\b/i.test(lowerAnchor)) resLabel = "Download Now 1080p";
+                else if (/\b(4k|2160p?|uhd|ultra\s*hd)\b/i.test(lowerAnchor)) resLabel = "Download Now 4K";
 
                 if (resLabel) {
                   if (/\bhindi\b.*?\bline\b/i.test(lowerAnchor) || /\bhindi\b.*?\bline\b/i.test(parentLabel)) {
@@ -2835,7 +3014,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
             const rawMatches = htmlText.match(/https?:\/\/[^"'\s<>\[\]]*(?:filesdl|linkmake|hubcloud|vcloud|hubdrive|mdrive|fastdl|filepress)[^"'\s<>\[\]]*/gi) || [];
             for (const rawUrl of rawMatches) {
               const cleanUrl = rawUrl.replace(/&amp;/g, '&');
-              if (!visited.has(cleanUrl) && !cleanUrl.toLowerCase().includes("gdflix") && !cleanUrl.toLowerCase().includes("failed") && !cleanUrl.toLowerCase().includes("download.php")) {
+              if (!branchVisited.has(cleanUrl) && !cleanUrl.toLowerCase().includes("gdflix") && !cleanUrl.toLowerCase().includes("failed") && !cleanUrl.toLowerCase().includes("download.php")) {
                 nestedCandidates.push({ url: cleanUrl, label: parentLabel });
               }
             }
@@ -2847,8 +3026,13 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
 
           if (uniqueCandidates.length > 0) {
             const subResults = await Promise.all(
-              uniqueCandidates.map((cand) =>
-                resolveFilmyGoLink(cand.url, cand.label, depth + 1)
+              uniqueCandidates.map((cand, i) =>
+                new Promise<Array<{ file_name: string; url: string; size: string | null; is_direct: boolean }>>((resolve) => {
+                  setTimeout(async () => {
+                    const res = await resolveFilmyGoLink(cand.url, cand.label, depth + 1, new Set(branchVisited));
+                    resolve(res);
+                  }, i * 60); // 60ms stagger to prevent server TCP/vDDoS concurrency drops
+                })
               )
             );
             const flattened = subResults.flat().filter(h => isHubCloudUrl(h.url));
@@ -2885,8 +3069,13 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       }
 
       const rawResults = await Promise.all(
-        Array.from(fdlData.entries()).map(([fdlUrl, data]) =>
-          resolveFilmyGoLink(fdlUrl, data.label, 0)
+        Array.from(fdlData.entries()).map(([fdlUrl, data], idx) =>
+          new Promise<Array<{ file_name: string; url: string; size: string | null; is_direct: boolean }>>((resolve) => {
+            setTimeout(async () => {
+              const res = await resolveFilmyGoLink(fdlUrl, data.label, 0, new Set([targetUrl]));
+              resolve(res);
+            }, idx * 75);
+          })
         )
       );
 
@@ -4313,6 +4502,50 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         }
       }
 
+      // HUBCLOUD CHECK
+      if (
+        currentHost.includes("hubcloud") ||
+        currentHost.includes("vcloud") ||
+        currentHost.includes("hubdrive") ||
+        currentHost.includes("mdrive") ||
+        currentHost.includes("fastdl") ||
+        currentHost.includes("filepress") ||
+        currentHost.includes("filesdl") ||
+        currentHost.includes("drivehub")
+      ) {
+        try {
+          const hbData = await fetchAndCacheHubcloud(currentUrl);
+          if (hbData) {
+            if (hbData.isNotFound || !hbData.isWorking) {
+              return res.json({
+                ok: false,
+                status: 404,
+                statusLabel: "BROKEN",
+                message: "Cloud file not found or deleted",
+                finalUrl: currentUrl,
+                source: "hubcloud-api",
+                host: currentHost,
+                fileName: hbData.original_title || hbData.title,
+              });
+            } else {
+              return res.json({
+                ok: true,
+                status: 200,
+                statusLabel: "WORKING",
+                message: "Cloud file is available",
+                finalUrl: currentUrl,
+                source: "hubcloud-api",
+                host: currentHost,
+                fileName: hbData.original_title || hbData.title,
+                fileSizeText: hbData.size ? `${hbData.size} ${hbData.unit || ''}`.trim() : undefined,
+              });
+            }
+          }
+        } catch (e) {
+          // Fall through to general check
+        }
+      }
+
       // RAJ / GATE CHECK
       if (currentHost === "hub.raj.lat" || currentHost.endsWith(".raj.lat")) {
         try {
@@ -4519,6 +4752,76 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       }
     } catch (error) {
       console.error("Check Link Error:", error);
+      res.status(500).json({
+        ok: false,
+        statusLabel: "UNKNOWN",
+        message: "Unexpected server error",
+      });
+    }
+  });
+
+  app.post(["/api/check-links-batch", "/check-links-batch"], async (req, res) => {
+    try {
+      const { urls, force } = req.body;
+      if (!urls || !Array.isArray(urls)) {
+        return res.status(400).json({ ok: false, message: "Missing or invalid urls array" });
+      }
+
+      const cleanUrls = Array.from(
+        new Set(urls.filter((u): u is string => typeof u === "string" && Boolean(u.trim())))
+      );
+      const results: Record<string, any> = {};
+      const BATCH_CONCURRENCY = 25;
+      const queue = [...cleanUrls];
+
+      // Internal fetch helper to reuse /api/check-link logic with caching
+      const checkOne = async (urlToCheck: string) => {
+        const cached = checkLinkCache.get(urlToCheck);
+        if (!force && cached && Date.now() - cached.timestamp < CHECK_LINK_CACHE_TTL) {
+          return cached.data;
+        }
+
+        try {
+          const checkRes = await fetch("http://127.0.0.1:3000/api/check-link", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: urlToCheck, force }),
+          });
+          if (checkRes.ok) {
+            const data = await checkRes.json();
+            return data;
+          }
+          return {
+            url: urlToCheck,
+            ok: false,
+            statusLabel: "BROKEN",
+            message: `HTTP ${checkRes.status}`,
+          };
+        } catch (err: any) {
+          return {
+            url: urlToCheck,
+            ok: false,
+            statusLabel: "UNKNOWN",
+            message: err?.message || "Check failed",
+          };
+        }
+      };
+
+      const worker = async () => {
+        while (queue.length > 0) {
+          const u = queue.shift();
+          if (!u) break;
+          results[u] = await checkOne(u);
+        }
+      };
+
+      await Promise.all(
+        Array.from({ length: Math.min(BATCH_CONCURRENCY, cleanUrls.length) }, () => worker())
+      );
+
+      return res.json({ ok: true, count: cleanUrls.length, results });
+    } catch (error) {
+      console.error("Batch Check Link Error:", error);
       res.status(500).json({
         ok: false,
         statusLabel: "UNKNOWN",

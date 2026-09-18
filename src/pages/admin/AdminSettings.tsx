@@ -5,8 +5,9 @@ import { db, storage, auth, requestNotificationPermission } from '../../firebase
 import { useAuth } from '../../contexts/AuthContext';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useAdminContent } from '../../contexts/AdminContentContext';
-import { getUtcVersion } from '../../utils/chunkMeta';
-import { Save, AlertCircle, GripVertical, Plus, Trash2, Layout, Wallet, Phone, Image as ImageIcon, Settings as SettingsIcon, RefreshCw, ShieldCheck, X, Eye, EyeOff, Database, Rocket, Loader2, Bell, BellOff, Info, Mail, Check, Megaphone, Copy, ExternalLink, HelpCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { getUtcVersion, clearChunkMetaCache, getSavedChunkMeta, getNewerUtcVersion, updateChunkMetaLocalCache } from '../../utils/chunkMeta';
+import { safeStorage } from '../../utils/safeStorage';
+import { Save, AlertCircle, GripVertical, Plus, Trash2, Layout, Wallet, Phone, Image as ImageIcon, Settings as SettingsIcon, RefreshCw, ShieldCheck, X, Eye, EyeOff, Database, Rocket, Loader2, Bell, BellOff, Info, Mail, Check, Megaphone, Copy, ExternalLink, HelpCircle, ChevronDown, ChevronUp, Zap, Clock } from 'lucide-react';
 import { clsx } from 'clsx';
 import { Navigate } from 'react-router-dom';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
@@ -313,17 +314,6 @@ export default function AdminSettings() {
 
     const fetchSettings = async () => {
       try {
-        const { getChunkMeta } = await import('../../utils/chunkMeta');
-        const meta = await getChunkMeta();
-        const serverVersion = meta.settings || 0;
-        const localVersion = parseInt(localStorage.getItem('cached_settings_version') || '0', 10);
-        const cachedSettings = localStorage.getItem('cached_app_settings');
-
-        if (cachedSettings && localVersion > 0 && serverVersion <= localVersion) {
-          setLoading(false);
-          return;
-        }
-
         const docRef = doc(db, 'settings', 'app_settings');
         const docSnap = await getDoc(docRef);
 
@@ -356,7 +346,9 @@ export default function AdminSettings() {
         };
 
         setSettings(mergedSettings);
-        localStorage.setItem('cached_app_settings', JSON.stringify(mergedSettings));
+        const serialized = JSON.stringify(mergedSettings);
+        localStorage.setItem('cached_app_settings', serialized);
+        safeStorage.setItem('cached_app_settings', serialized);
       } catch (err) {
         console.error('Error fetching settings:', err);
         setError('Failed to load settings.');
@@ -400,19 +392,28 @@ export default function AdminSettings() {
     }
 
     try {
-      localStorage.setItem('cached_app_settings', JSON.stringify(settings));
+      const prevMeta = getSavedChunkMeta();
+      const prevSettingsVer = prevMeta?.settings;
+      const newSettingsVer = getNewerUtcVersion(prevSettingsVer);
+
+      const serialized = JSON.stringify(settings);
+      localStorage.setItem('cached_app_settings', serialized);
+      safeStorage.setItem('cached_app_settings', serialized);
 
       const { writeBatch } = await import('firebase/firestore');
       const batch = writeBatch(db);
-      const utcNow = getUtcVersion();
       batch.set(doc(db, 'settings', 'app_settings'), settings);
-      batch.set(doc(db, 'chunk_meta', 'versions'), { settings: { updatedAt: utcNow } }, { merge: true });
+      batch.set(doc(db, 'chunk_meta', 'versions'), { settings: { updatedAt: newSettingsVer } }, { merge: true });
       await batch.commit();
       
-      await refreshSettings(true);
+      localStorage.setItem('cached_settings_version', newSettingsVer);
+      safeStorage.setItem('cached_settings_version', newSettingsVer);
+      updateChunkMetaLocalCache({ settings: { updatedAt: newSettingsVer } });
+
+      window.dispatchEvent(new CustomEvent('settings_updated', { detail: settings }));
 
       setSuccess(true);
-      setTimeout(() => setSuccess(false), 3000);
+      setTimeout(() => setSuccess(false), 4000);
     } catch (err: any) {
       console.error('Error saving settings:', err);
       setError('Failed to save settings: ' + (err?.message || String(err)));
@@ -440,7 +441,8 @@ export default function AdminSettings() {
       color: '#3b82f6',
       labelColor: '#3b82f6',
       textColor: '#ffffff',
-      iconUrl: ''
+      iconUrl: '',
+      allowAutoApproval: true
     };
     setSettings({
       ...settings,
@@ -455,7 +457,7 @@ export default function AdminSettings() {
     });
   };
 
-  const updateBankAccount = (id: string, field: keyof BankAccount, value: string) => {
+  const updateBankAccount = (id: string, field: keyof BankAccount, value: any) => {
     setSettings({
       ...settings,
       bankAccounts: settings.bankAccounts.map(b => b.id === id ? { ...b, [field]: value } : b)
@@ -529,12 +531,36 @@ export default function AdminSettings() {
 
   return (
     <div className="max-w-4xl mx-auto pb-20">
-      <div className="mb-8 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
-          <div>
-            <h1 className="text-2xl font-bold text-zinc-900 dark:text-white">App Settings</h1>
-            <p className="text-zinc-500 dark:text-zinc-400 mt-1">Manage global application settings</p>
-          </div>
+      <div className="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-zinc-900 dark:text-white">App Settings</h1>
+          <p className="text-zinc-500 dark:text-zinc-400 mt-1">Manage global application settings</p>
+        </div>
+        <div className="flex items-center gap-3">
+          {success && (
+            <div className="flex items-center gap-2 px-3.5 py-2 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-xl text-xs font-bold animate-in fade-in">
+              <Check className="w-4 h-4 text-emerald-500" />
+              <span>Settings saved!</span>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={(e) => handleSave(e as any)}
+            disabled={saving}
+            className={clsx(
+              "px-5 py-2.5 text-white text-sm font-bold rounded-xl flex items-center gap-2 transition-all active:scale-95 disabled:opacity-50 shadow-md cursor-pointer",
+              success ? "bg-emerald-700 shadow-emerald-600/30" : "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20"
+            )}
+          >
+            {saving ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : success ? (
+              <Check className="w-4 h-4 text-white" />
+            ) : (
+              <Save className="w-4 h-4" />
+            )}
+            <span>{saving ? 'Saving...' : success ? 'Saved!' : 'Save Settings'}</span>
+          </button>
         </div>
       </div>
 
@@ -543,17 +569,6 @@ export default function AdminSettings() {
           <div className="p-4 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-xl flex items-center gap-3">
             <AlertCircle className="w-5 h-5 flex-shrink-0" />
             <p>{error}</p>
-          </div>
-        )}
-
-        {success && (
-          <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 rounded-xl flex items-center gap-3">
-            <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0">
-              <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-              </svg>
-            </div>
-            <p>Settings saved successfully!</p>
           </div>
         )}
 
@@ -1056,18 +1071,29 @@ export default function AdminSettings() {
                 {settings.bankAccounts.map((bank) => (
                   <div key={bank.id} className="p-4 bg-zinc-50 dark:bg-zinc-800 rounded-2xl border border-zinc-200 dark:border-zinc-700 space-y-3 relative group">
                     <div className="flex items-center justify-between">
-                      <div 
-                        style={{ 
-                          backgroundColor: bank.labelColor || `${bank.color}1a`,
-                          borderColor: bank.labelColor ? 'transparent' : `${bank.color}33`,
-                          color: bank.textColor || (bank.labelColor ? '#ffffff' : bank.color)
-                        }}
-                        className="px-4 py-2 rounded-xl border text-xs font-bold uppercase tracking-wider flex items-center gap-3"
-                      >
-                        {bank.iconUrl && (
-                          <img src={bank.iconUrl} alt="" className="w-4 h-4 object-contain" referrerPolicy="no-referrer" />
+                      <div className="flex items-center gap-2">
+                        <div 
+                          style={{ 
+                            backgroundColor: bank.labelColor || `${bank.color}1a`,
+                            borderColor: bank.labelColor ? 'transparent' : `${bank.color}33`,
+                            color: bank.textColor || (bank.labelColor ? '#ffffff' : bank.color)
+                          }}
+                          className="px-4 py-2 rounded-xl border text-xs font-bold uppercase tracking-wider flex items-center gap-3"
+                        >
+                          {bank.iconUrl && (
+                            <img src={bank.iconUrl} alt="" className="w-4 h-4 object-contain" referrerPolicy="no-referrer" />
+                          )}
+                          Preview: {bank.name}
+                        </div>
+                        {bank.allowAutoApproval !== false ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                            <Zap className="w-3 h-3 fill-emerald-500 text-emerald-500" /> Auto
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300">
+                            <Clock className="w-3 h-3 text-zinc-500" /> Manual
+                          </span>
                         )}
-                        Preview: {bank.name}
                       </div>
                       <button
                         type="button"
@@ -1145,6 +1171,30 @@ export default function AdminSettings() {
                             <span className="text-[10px] text-zinc-500 font-mono uppercase">{bank.textColor || '#ffffff'}</span>
                           </div>
                         </div>
+                      </div>
+
+                      {/* Auto-Approval Checkmark / Toggle */}
+                      <div className="pt-2.5 mt-2 border-t border-zinc-200 dark:border-zinc-700 flex items-center justify-between">
+                        <div className="pr-2">
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-900 dark:text-white">
+                            <Zap className={`w-3.5 h-3.5 ${bank.allowAutoApproval !== false ? 'text-amber-500 fill-amber-500' : 'text-zinc-400'}`} />
+                            <span>Support Auto Approval</span>
+                          </div>
+                          <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-tight mt-0.5">
+                            {bank.allowAutoApproval !== false
+                              ? 'AI will automatically verify & approve orders paid through this method'
+                              : 'Orders paid via this method will require manual review by admin'}
+                          </p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={bank.allowAutoApproval !== false}
+                            onChange={(e) => updateBankAccount(bank.id, 'allowAutoApproval', e.target.checked)}
+                            className="sr-only peer"
+                          />
+                          <div className="w-9 h-5 bg-zinc-300 peer-focus:outline-none rounded-full peer dark:bg-zinc-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-zinc-600 peer-checked:bg-emerald-500"></div>
+                        </label>
                       </div>
                     </div>
                   </div>
@@ -1454,7 +1504,7 @@ export default function AdminSettings() {
             <div className="p-4 rounded-xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200/80 dark:border-zinc-700/80 space-y-2">
               <div className="flex items-center justify-between flex-wrap gap-2 text-sm">
                 <span className="text-zinc-500 dark:text-zinc-400">Target Bank Account:</span>
-                <span className="font-semibold text-zinc-900 dark:text-white">asmatullah9327@gmail.com</span>
+                <span className="font-semibold text-zinc-900 dark:text-white">asmatn628@gmail.com</span>
               </div>
               {gmailStatus?.connectedEmail && (
                 <div className="flex items-center justify-between flex-wrap gap-2 text-sm">
@@ -1603,7 +1653,7 @@ export default function AdminSettings() {
                         Go to <strong>APIs & Services &gt; OAuth consent screen</strong>.
                       </li>
                       <li>
-                        Under <strong>Test users</strong>, click <strong>+ ADD USERS</strong>, type <code className="bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">asmatullah9327@gmail.com</code>, and click <strong>Save</strong>.
+                        Under <strong>Test users</strong>, click <strong>+ ADD USERS</strong>, type <code className="bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">asmatn628@gmail.com</code>, and click <strong>Save</strong>.
                       </li>
                       <li>
                         In <strong>Credentials &gt; OAuth 2.0 Client IDs</strong>, edit your Web Client and add this current origin to <strong>Authorized JavaScript origins</strong>:
@@ -1667,7 +1717,7 @@ export default function AdminSettings() {
                         </div>
                       </li>
                       <li>
-                        Click <strong>Authorize APIs</strong> &amp; select <code className="bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">asmatullah9327@gmail.com</code>.
+                        Click <strong>Authorize APIs</strong> &amp; select <code className="bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">asmatn628@gmail.com</code>.
                       </li>
                       <li>
                         In Step 2, click <strong>Exchange authorization code for tokens</strong>.
@@ -1954,19 +2004,40 @@ export default function AdminSettings() {
           </div>
         </div>
 
-        <div className="flex justify-end pt-4">
-          <button
-            type="submit"
-            disabled={saving}
-            className="px-8 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl flex items-center gap-2 transition-all active:scale-95 disabled:opacity-50 shadow-lg shadow-emerald-500/20"
-          >
-            {saving ? (
-              <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+        <div className="sticky bottom-4 z-20 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-md p-4 rounded-2xl border border-zinc-200/80 dark:border-zinc-800/80 shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-3 mt-6">
+          <div className="flex items-center gap-2">
+            {success ? (
+              <div className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-xl text-sm font-bold animate-in fade-in">
+                <Check className="w-4 h-4 text-emerald-500" />
+                <span>Settings saved successfully!</span>
+              </div>
             ) : (
-              <Save className="w-5 h-5" />
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                All changes are synced across devices & cached locally.
+              </p>
             )}
-            Save All Settings
-          </button>
+          </div>
+          <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+            <button
+              type="submit"
+              disabled={saving}
+              className={clsx(
+                "w-full sm:w-auto px-8 py-3 text-white font-bold rounded-xl flex items-center justify-center gap-2.5 transition-all active:scale-95 disabled:opacity-50 shadow-lg cursor-pointer",
+                success
+                  ? "bg-emerald-700 hover:bg-emerald-800 shadow-emerald-600/30"
+                  : "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20"
+              )}
+            >
+              {saving ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : success ? (
+                <Check className="w-5 h-5 text-white" />
+              ) : (
+                <Save className="w-5 h-5" />
+              )}
+              <span>{saving ? 'Saving Settings...' : success ? 'Settings Saved Successfully!' : 'Save All Settings'}</span>
+            </button>
+          </div>
         </div>
       </form>
 

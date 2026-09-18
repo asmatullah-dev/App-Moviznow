@@ -27,7 +27,8 @@ export interface TMDBImagesResult {
 
 import { fetchTmdb } from './tmdbClient';
 
-const YOUTUBE_API_KEY = import.meta.env.VITE_YOUTUBE_API_KEY || '';
+const YOUTUBE_API_KEY =
+  (typeof import.meta !== 'undefined' && import.meta?.env?.VITE_YOUTUBE_API_KEY) || '';
 
 export function normalizeOttPlatformName(raw?: string | null): string | null {
   if (!raw) return null;

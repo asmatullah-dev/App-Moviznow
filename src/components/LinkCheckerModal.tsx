@@ -41,6 +41,11 @@ import {
 import { QualityLinks, Language, Quality, LinkDef, Content } from '../types';
 export type { QualityLinks };
 import { useAdminContent } from '../contexts/AdminContentContext';
+import {
+  runWaterfallLinkSearch,
+  WaterfallSearchResult,
+} from '../utils/bulkImporterWaterfall';
+import { getImportCache, saveImportCache } from '../utils/importCache';
 import { 
   LinkCheckResult, 
   StatusLabel, 
@@ -101,11 +106,17 @@ import {
 
 import {
   filterFilmygoHits,
+  filterMoviesdriveHits,
+  filterHdhub4uHits,
+  filterSkymoviesHits,
+  filterFilmyflyHits,
   rankAndVerifyPosts,
   deduplicateQualityLinks,
   pickLowerSizeQualityItem,
   resolveConfirmedQuality,
   parseSizeToBytes,
+  selectMoviesdriveOrHdhub4uSeriesLinks,
+  isSeriesPostOrHits,
 } from '../utils/linkSelector';
 import type { ScrapedLinkItem } from '../utils/linkSelector';
 import { checkContentViaLinkChecker } from '../utils/scraper';
@@ -164,6 +175,9 @@ type Props = {
   onClose: () => void;
   title?: string;
   initialInput?: string;
+  initialTitle?: string;
+  initialYear?: number | string;
+  contentType?: "movie" | "series";
   autoStart?: boolean;
   isBatchMode?: boolean;
   onAddLinks?: (
@@ -177,6 +191,7 @@ type Props = {
       episode?: number;
       title?: string;
       year?: number;
+      sampleUrl?: string;
     }
   ) => void;
   onBatchAddLinks?: (
@@ -207,11 +222,35 @@ const badgeMap: Record<StatusLabel, string> = {
   SIZE_MISMATCH: "bg-red-500/15 text-red-400 border-red-800/80",
 };
 
+function extractEpisodeNumber(fileName: string, index: number): string {
+  const match = fileName.match(/\b(?:ep|episode|e)\s*0*(\d+)\b/i);
+  if (match) {
+    const num = parseInt(match[1], 10);
+    return `EP ${num < 10 ? '0' + num : num}`;
+  }
+  const match2 = fileName.match(/\bE(\d+)\b/i);
+  if (match2) {
+    const num = parseInt(match2[1], 10);
+    return `EP ${num < 10 ? '0' + num : num}`;
+  }
+  const num = index + 1;
+  return `EP ${num < 10 ? '0' + num : num}`;
+}
+
+function extractDisplayHeading(headingText: string): string {
+  const qMatch = headingText.match(/\b(?:480p|720p|1080p|2160p|4k|2k)[\s\S]*$/i);
+  if (!qMatch) return headingText;
+  return qMatch[0].trim();
+}
+
 export const LinkCheckerModal: React.FC<Props> = ({
   isOpen,
   onClose,
   title = "Link Checker",
   initialInput = "",
+  initialTitle = "",
+  initialYear,
+  contentType,
   autoStart = false,
   isBatchMode = false,
   onAddLinks,
@@ -247,9 +286,25 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
   const [autoClipboard, setAutoClipboard] = useState(false);
   const [clipboardStatus, setClipboardStatus] = useState<"active" | "unfocused" | "denied" | "idle">("idle");
+
+  const getDefaultWaterfallEnabled = useCallback(() => {
+    // Disabled by default when open by batch fetch
+    if (isBatchMode || Boolean(title && /batch/i.test(title))) {
+      return false;
+    }
+    // Enabled by default when open by any existing content
+    if (content || (initialTitle && initialTitle.trim())) {
+      return true;
+    }
+    return false;
+  }, [isBatchMode, title, content, initialTitle]);
+
+  const [titleImportWaterfall, setTitleImportWaterfall] = useState<boolean>(getDefaultWaterfallEnabled);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<LinkCheckResult[]>([]);
   const [selectedUrls, setSelectedUrls] = useState<Set<string>>(new Set());
+  const [detectedSampleUrl, setDetectedSampleUrl] = useState<string | null>(null);
+  const [detectedMetadata, setDetectedMetadata] = useState<any>(null);
   const isHubcloudVariant = (u: string) => /(hubcloud|vcloud|hubdrive|drivehub|gdflix|hubcdn|hblinks)/i.test(u);
 
   const eligibleUrlsForSelect = useMemo(() => {
@@ -286,7 +341,45 @@ export const LinkCheckerModal: React.FC<Props> = ({
   const [mdriveError, setMdriveError] = useState<string | null>(null);
   const [mdriveSelectedIndices, setMdriveSelectedIndices] = useState<Set<number>>(new Set());
   const [mdriveExtractingDirect, setMdriveExtractingDirect] = useState<Record<number, boolean>>({});
+  const [preloadedEpisodes, setPreloadedEpisodes] = useState<Record<string, { file_name: string; url: string; size?: string | null }[]>>({});
+  const [loadingEpisodes, setLoadingEpisodes] = useState<Record<string, boolean>>({});
+  const [expandedEpisodes, setExpandedEpisodes] = useState<Record<string, boolean>>({});
+  const [selectedSubEpisodes, setSelectedSubEpisodes] = useState<Record<string, Set<string>>>({});
   const processedExtractionsRef = React.useRef<Set<string>>(new Set());
+
+  // Preload all mdrive.lol single episodes automatically when mdriveResults is populated
+  React.useEffect(() => {
+    if (mdriveResults.length === 0) return;
+
+    mdriveResults.forEach(item => {
+      const url = item.url;
+      const isMdrive = /(?:mdrive|mdrvie)\.lol\/archive\//i.test(url);
+      const isSingleEpisode = (item.file_name || '').toLowerCase().includes('single episode') || (item.file_name || '').toLowerCase().includes('single ep');
+      
+      if (isMdrive && isSingleEpisode && !preloadedEpisodes[url] && !loadingEpisodes[url]) {
+        setLoadingEpisodes(prev => ({ ...prev, [url]: true }));
+        // Don't show episodes expanded by default - keep collapsed
+        setExpandedEpisodes(prev => ({ ...prev, [url]: false }));
+        
+        fetch(`/api/mdrive?url=${encodeURIComponent(url)}`)
+          .then(res => {
+            if (res.ok) return res.json();
+            throw new Error('Preload failed');
+          })
+          .then(data => {
+            if (data.hits) {
+              setPreloadedEpisodes(prev => ({ ...prev, [url]: data.hits }));
+              // Auto-select all sub-episodes by default
+              setSelectedSubEpisodes(prev => ({ ...prev, [url]: new Set(data.hits.map((h: any) => h.url)) }));
+            }
+          })
+          .catch(err => console.error('Failed to preload sub-episodes automatically:', err))
+          .finally(() => {
+            setLoadingEpisodes(prev => ({ ...prev, [url]: false }));
+          });
+      }
+    });
+  }, [mdriveResults]);
 
   // Quality Filtering & Quick Selection State
   const [showQuickSelect, setShowQuickSelect] = useState(false);
@@ -295,11 +388,11 @@ export const LinkCheckerModal: React.FC<Props> = ({
   const qualityCounts = useMemo(() => {
     const counts = { '480p': 0, '720p': 0, '1080p': 0, '2160p': 0, 'other': 0 };
     mdriveResults.forEach(item => {
-      const text = `${item.file_name || ''} ${item.quality || ''} ${item.url || ''}`.toLowerCase();
-      if (text.includes('480p')) counts['480p']++;
-      else if (text.includes('720p')) counts['720p']++;
-      else if (text.includes('1080p')) counts['1080p']++;
-      else if (text.includes('2160p') || text.includes('4k')) counts['2160p']++;
+      const q = getItemQualityCategory(item);
+      if (q === '480p') counts['480p']++;
+      else if (q === '720p') counts['720p']++;
+      else if (q === '1080p') counts['1080p']++;
+      else if (q === '2160p') counts['2160p']++;
       else counts['other']++;
     });
     return counts;
@@ -312,14 +405,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
     }
     const next = new Set(mdriveSelectedIndices);
     mdriveResults.forEach((item, idx) => {
-      const text = `${item.file_name || ''} ${item.quality || ''} ${item.url || ''}`.toLowerCase();
-      let matches = false;
-      if (quality === '480p' && text.includes('480p')) matches = true;
-      if (quality === '720p' && text.includes('720p')) matches = true;
-      if (quality === '1080p' && text.includes('1080p')) matches = true;
-      if (quality === '2160p' && (text.includes('2160p') || text.includes('4k'))) matches = true;
-
-      if (matches) {
+      const q = getItemQualityCategory(item);
+      if (q === quality) {
         next.add(idx);
       }
     });
@@ -331,11 +418,11 @@ export const LinkCheckerModal: React.FC<Props> = ({
     return mdriveResults
       .map((item, originalIndex) => ({ item, originalIndex }))
       .filter(({ item }) => {
-        const text = `${item.file_name || ''} ${item.quality || ''} ${item.url || ''}`.toLowerCase();
-        if (qualityFilter === '480p') return text.includes('480p');
-        if (qualityFilter === '720p') return text.includes('720p');
-        if (qualityFilter === '1080p') return text.includes('1080p');
-        if (qualityFilter === '2160p') return text.includes('2160p') || text.includes('4k');
+        const q = getItemQualityCategory(item);
+        if (qualityFilter === '480p') return q === '480p';
+        if (qualityFilter === '720p') return q === '720p';
+        if (qualityFilter === '1080p') return q === '1080p';
+        if (qualityFilter === '2160p') return q === '2160p';
         return true;
       });
   }, [mdriveResults, qualityFilter]);
@@ -401,6 +488,334 @@ export const LinkCheckerModal: React.FC<Props> = ({
       hasEpisodes: totalEpisodesCount > 0
     };
   }, [mdriveResults]);
+
+  const moviesdriveSeriesGroups = useMemo(() => {
+    const isSeries = mdriveResults.some(item => {
+      const name = `${item.file_name || ''} ${item.quality || ''} ${item.url || ''}`.toLowerCase();
+      return (
+        name.includes('season') ||
+        name.includes('episode') ||
+        name.includes('ep ') ||
+        name.includes('single ep') ||
+        /\bs\d+\b/i.test(name) ||
+        /\be\d+\b/i.test(name) ||
+        /\bpack\b/i.test(name) ||
+        /\bzip\b/i.test(name) ||
+        /\bbatch\b/i.test(name) ||
+        /\bcomplete\b/i.test(name)
+      );
+    });
+
+    if (!isSeries) return null;
+
+    const seasonsMap = new Map<string, Map<string, {
+      headingText: string;
+      qualityCat: QualityCategory;
+      singleEpisodeItem?: { item: any; originalIndex: number };
+      zipItem?: { item: any; originalIndex: number };
+      directEpisodes: { item: any; originalIndex: number; epNumber?: number }[];
+      others: { item: any; originalIndex: number }[];
+    }>>();
+
+    // Pass 1: Identify and create groups for "Single Episode" items first since they have the most complete headings
+    mdriveResults.forEach((item, originalIndex) => {
+      const label = item.file_name || '';
+      
+      const seasonMatch = label.match(/\b(?:season|s)\s*0*(\d+)\b/i);
+      const seasonName = seasonMatch ? `Season ${seasonMatch[1]}` : "Season 1";
+
+      let headingText = label;
+      let optionText = label;
+      if (label.includes('|')) {
+        const parts = label.split('|');
+        headingText = parts[0].trim();
+        optionText = parts[1].trim();
+      }
+
+      const qCat = getItemQualityCategory(item);
+      const optLower = optionText.toLowerCase();
+      const isSingleEpisode = optLower.includes('single episode') || optLower.includes('single ep');
+
+      if (isSingleEpisode) {
+        const cleanHeading = headingText
+          .replace(/\/\s*E\b/gi, '')
+          .replace(/\/\s*ep(?:isodes?)?\b/gi, '')
+          .replace(/\bSingle\b/gi, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        const qMatch = cleanHeading.match(/\b(?:480p|720p|1080p|2160p|4k|2k)[\s\S]*$/i);
+        const qualityText = qMatch ? qMatch[0] : (qCat !== 'Other' ? qCat : "Other Quality");
+        const groupKey = qualityText.replace(/\[[^\]]*\]/g, '').replace(/\s+/g, ' ').trim().toLowerCase() || 'other';
+
+        if (!seasonsMap.has(seasonName)) {
+          seasonsMap.set(seasonName, new Map());
+        }
+        const qualitiesMap = seasonsMap.get(seasonName)!;
+
+        if (!qualitiesMap.has(groupKey)) {
+          qualitiesMap.set(groupKey, {
+            headingText: headingText,
+            qualityCat: qCat,
+            directEpisodes: [],
+            others: []
+          });
+        }
+        
+        const group = qualitiesMap.get(groupKey)!;
+        group.singleEpisodeItem = { item, originalIndex };
+        group.headingText = headingText;
+      }
+    });
+
+    // Pass 2: Map Zip, Direct Episodes, and Other items to the correct group
+    mdriveResults.forEach((item, originalIndex) => {
+      const label = item.file_name || '';
+      
+      const seasonMatch = label.match(/\b(?:season|s)\s*0*(\d+)\b/i);
+      const seasonName = seasonMatch ? `Season ${seasonMatch[1]}` : "Season 1";
+
+      let headingText = label;
+      let optionText = label;
+      if (label.includes('|')) {
+        const parts = label.split('|');
+        headingText = parts[0].trim();
+        optionText = parts[1].trim();
+      }
+
+      const optLower = optionText.toLowerCase();
+      const isZip = optLower.includes('zip') || optLower.includes('pack') || optLower.includes('batch');
+      const isSingleEpisode = optLower.includes('single episode') || optLower.includes('single ep');
+
+      if (isSingleEpisode) {
+        return; // Already handled in Pass 1
+      }
+
+      const qCat = getItemQualityCategory(item);
+
+      if (!seasonsMap.has(seasonName)) {
+        seasonsMap.set(seasonName, new Map());
+      }
+      const qualitiesMap = seasonsMap.get(seasonName)!;
+
+      let bestGroupKey = "";
+
+      // Smart Matching: find group in the same season that matches our quality/resolution
+      const itemLabelLower = label.toLowerCase();
+      let matchedResolution = "";
+      if (itemLabelLower.includes("2160p") || itemLabelLower.includes("4k")) matchedResolution = "2160p";
+      else if (itemLabelLower.includes("1080p")) matchedResolution = "1080p";
+      else if (itemLabelLower.includes("720p")) matchedResolution = "720p";
+      else if (itemLabelLower.includes("480p")) matchedResolution = "480p";
+      else if (qCat !== "Other") matchedResolution = qCat.toLowerCase();
+
+      if (matchedResolution) {
+        const candidates = Array.from(qualitiesMap.entries()).filter(([key]) => key.includes(matchedResolution));
+        if (candidates.length === 1) {
+          bestGroupKey = candidates[0][0];
+        } else if (candidates.length > 1) {
+          let codec = "";
+          if (itemLabelLower.includes("hevc") || itemLabelLower.includes("x265")) codec = "hevc";
+          else if (itemLabelLower.includes("x264") || itemLabelLower.includes("h264")) codec = "x264";
+          else if (itemLabelLower.includes("web-dl") || itemLabelLower.includes("webdl")) codec = "web-dl";
+
+          if (codec) {
+            const exactCodecMatch = candidates.find(([key]) => key.includes(codec));
+            if (exactCodecMatch) {
+              bestGroupKey = exactCodecMatch[0];
+            }
+          }
+          if (!bestGroupKey) {
+            let minDiff = Infinity;
+            candidates.forEach(([key, group]) => {
+              const refIdx = group.singleEpisodeItem?.originalIndex ?? -1;
+              if (refIdx !== -1) {
+                const diff = Math.abs(originalIndex - refIdx);
+                if (diff < minDiff) {
+                  minDiff = diff;
+                  bestGroupKey = key;
+                }
+              }
+            });
+          }
+        }
+      }
+
+      // Proximity-based fallback if matching is still not found
+      if (!bestGroupKey) {
+        const cleanHeading = headingText
+          .replace(/\/\s*E\b/gi, '')
+          .replace(/\/\s*ep(?:isodes?)?\b/gi, '')
+          .replace(/\bSingle\b/gi, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        const qMatch = cleanHeading.match(/\b(?:480p|720p|1080p|2160p|4k|2k)[\s\S]*$/i);
+        const qualityText = qMatch ? qMatch[0] : (qCat !== 'Other' ? qCat : "Other Quality");
+        bestGroupKey = qualityText.replace(/\[[^\]]*\]/g, '').replace(/\s+/g, ' ').trim().toLowerCase() || 'other';
+      }
+
+      if (!qualitiesMap.has(bestGroupKey)) {
+        qualitiesMap.set(bestGroupKey, {
+          headingText: headingText,
+          qualityCat: qCat,
+          directEpisodes: [],
+          others: []
+        });
+      }
+
+      const group = qualitiesMap.get(bestGroupKey)!;
+      const entry = { item, originalIndex };
+      const info = getItemEpisodeInfo(item);
+      const isDirectEpisode = info.isEpisode && !isSingleEpisode && !isZip;
+
+      if (isZip) {
+        if (!item.size) {
+          const sm = (item.file_name || item.label || '').match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i);
+          if (sm) item.size = sm[1].toUpperCase();
+        }
+        group.zipItem = entry;
+      } else if (isDirectEpisode) {
+        group.directEpisodes.push({ item, originalIndex, epNumber: info.epNumber });
+      } else {
+        group.others.push(entry);
+      }
+    });
+
+    const getQualityPriority = (key: string): number => {
+      const k = key.toLowerCase();
+      if (k.includes('480p')) return 0;
+      if (k.includes('720p')) return 1;
+      if (k.includes('1080p')) return 2;
+      if (k.includes('2160p') || k.includes('4k')) return 3;
+      return 4;
+    };
+
+    const sortedSeasons = new Map<string, Map<string, any>>();
+
+    Array.from(seasonsMap.entries()).sort((a, b) => {
+      const numA = parseInt(a[0].match(/\d+/)?.at(0) || "0", 10);
+      const numB = parseInt(b[0].match(/\d+/)?.at(0) || "0", 10);
+      return numA - numB;
+    }).forEach(([seasonName, qualitiesMap]) => {
+      qualitiesMap.forEach(group => {
+        group.directEpisodes.sort((a: any, b: any) => {
+          if (a.epNumber !== undefined && b.epNumber !== undefined) return a.epNumber - b.epNumber;
+          return a.originalIndex - b.originalIndex;
+        });
+      });
+
+      const sortedQualities = new Map(
+        Array.from(qualitiesMap.entries()).sort((a, b) => {
+          const priA = getQualityPriority(a[0]);
+          const priB = getQualityPriority(b[0]);
+          if (priA !== priB) return priA - priB;
+          return a[0].localeCompare(b[0]);
+        })
+      );
+      sortedSeasons.set(seasonName, sortedQualities);
+    });
+
+    return sortedSeasons;
+  }, [mdriveResults]);
+
+  const toggleSubEpisodeCollapse = async (url: string) => {
+    const isExpanded = !expandedEpisodes[url];
+    setExpandedEpisodes(prev => ({ ...prev, [url]: isExpanded }));
+
+    if (isExpanded && !preloadedEpisodes[url] && !loadingEpisodes[url]) {
+      setLoadingEpisodes(prev => ({ ...prev, [url]: true }));
+      try {
+        const res = await fetch(`/api/mdrive?url=${encodeURIComponent(url)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.hits) {
+            setPreloadedEpisodes(prev => ({ ...prev, [url]: data.hits }));
+          }
+        }
+      } catch (err) {
+        console.error('Failed to preload sub-episodes:', err);
+      } finally {
+        setLoadingEpisodes(prev => ({ ...prev, [url]: false }));
+      }
+    }
+  };
+
+  const toggleSubEpisodeSelection = (parentUrl: string, subUrl: string) => {
+    setSelectedSubEpisodes(prev => {
+      const current = prev[parentUrl] ? new Set(prev[parentUrl]) : new Set<string>();
+      if (current.has(subUrl)) {
+        current.delete(subUrl);
+      } else {
+        current.add(subUrl);
+      }
+      return { ...prev, [parentUrl]: current };
+    });
+  };
+
+  const toggleParentEpisodesSelection = async (item: any, originalIndex?: number) => {
+    const url = item.url;
+    const isLoaded = Boolean(preloadedEpisodes[url]);
+    
+    if (!isLoaded) {
+      if (originalIndex !== undefined) {
+        setMdriveSelectedIndices(prev => {
+          const next = new Set(prev);
+          if (next.has(originalIndex)) {
+            next.delete(originalIndex);
+          } else {
+            next.add(originalIndex);
+          }
+          return next;
+        });
+      }
+      setLoadingEpisodes(prev => ({ ...prev, [url]: true }));
+      setExpandedEpisodes(prev => ({ ...prev, [url]: true }));
+      try {
+        const res = await fetch(`/api/mdrive?url=${encodeURIComponent(url)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.hits && data.hits.length > 0) {
+            setPreloadedEpisodes(prev => ({ ...prev, [url]: data.hits }));
+            setSelectedSubEpisodes(prev => ({
+              ...prev,
+              [url]: new Set(data.hits.map((h: any) => h.url))
+            }));
+            if (originalIndex !== undefined) {
+              setMdriveSelectedIndices(prev => {
+                const next = new Set(prev);
+                next.delete(originalIndex);
+                return next;
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoadingEpisodes(prev => ({ ...prev, [url]: false }));
+      }
+    } else {
+      const subs = preloadedEpisodes[url] || [];
+      const selectedSet = selectedSubEpisodes[url] || new Set();
+      const allSelected = subs.length > 0 && subs.every(sub => selectedSet.has(sub.url));
+      
+      setSelectedSubEpisodes(prev => {
+        const nextSet = new Set<string>();
+        if (!allSelected) {
+          subs.forEach(sub => nextSet.add(sub.url));
+        }
+        return { ...prev, [url]: nextSet };
+      });
+      if (originalIndex !== undefined) {
+        setMdriveSelectedIndices(prev => {
+          const next = new Set(prev);
+          next.delete(originalIndex);
+          return next;
+        });
+      }
+    }
+  };
 
   const toggleQualityEpisodesSelection = (qCat: QualityCategory) => {
     const qList = (parsedMdriveGroups.episodesByQuality.get(qCat) || []).filter(({ item }) => {
@@ -1394,6 +1809,12 @@ export const LinkCheckerModal: React.FC<Props> = ({
       setCustomPageInput("");
     } else if (mdriveUrl) {
       setMdriveUrl(null);
+      setMdriveResults([]);
+      setMdriveSelectedIndices(new Set());
+      setPreloadedEpisodes({});
+      setLoadingEpisodes({});
+      setExpandedEpisodes({});
+      setSelectedSubEpisodes({});
     } else {
       onClose();
     }
@@ -1463,21 +1884,40 @@ export const LinkCheckerModal: React.FC<Props> = ({
     }
   };
 
-  const updateBatchReviewItem = (key: string, field: 'title' | 'year', value: string) => {
-    setBatchReviewItems(prev => prev.map(item => 
-      item.key === key ? { ...item, [field]: value } : item
-    ));
+  const updateBatchReviewItem = (key: string, field: 'title' | 'year' | 'type', value: string) => {
+    setBatchReviewItems(prev => prev.map(item => {
+      if (item.key !== key) return item;
+      if (field === 'type') {
+        return {
+          ...item,
+          metadata: {
+            ...item.metadata,
+            type: value as 'movie' | 'series',
+          }
+        };
+      }
+      return { ...item, [field]: value };
+    }));
   };
 
   const confirmBatchReview = () => {
     if (!onBatchAddLinks) return;
     
-    onBatchAddLinks(batchReviewItems.map(item => ({
-      title: item.title,
-      year: item.year ? parseInt(item.year) : undefined,
-      links: item.links,
-      metadata: item.metadata
-    })));
+    onBatchAddLinks(batchReviewItems.map(item => {
+      const parsedYear = item.year ? parseInt(item.year) : undefined;
+      const isTitleSearch = Boolean(item.metadata?.isTitleSearch);
+      const cached = isTitleSearch ? getImportCache(item.title, parsedYear) : null;
+      return {
+        title: item.title,
+        year: parsedYear,
+        links: item.links,
+        metadata: {
+          ...item.metadata,
+          tmdbData: isTitleSearch ? (item.metadata?.tmdbData || cached?.tmdbData) : undefined,
+          isTitleSearch,
+        }
+      };
+    }));
     reset();
     onClose();
   };
@@ -1489,13 +1929,20 @@ export const LinkCheckerModal: React.FC<Props> = ({
     setMdriveSelectedIndices(new Set());
 
     try {
-      const res = await fetch(`/api/mdrive?url=${encodeURIComponent(targetUrl)}`);
+      const mdDomain = getMoviesdriveDomain();
+      const isMd = targetUrl.includes('moviesdrive') || targetUrl.includes('moviesdrives') || (mdDomain && normalizeUrl(targetUrl).includes(normalizeUrl(mdDomain)));
+      const endpoint = isMd ? `/api/moviesdrive?url=${encodeURIComponent(targetUrl)}` : `/api/mdrive?url=${encodeURIComponent(targetUrl)}`;
+      const res = await fetch(endpoint);
       if (!res.ok) throw new Error('Failed to fetch from MDrive');
       const data = await res.json();
       const hits = (data.hits || []).filter((h: any) => {
         const u = (h.url || '').toLowerCase();
         const name = (h.file_name || '').toLowerCase();
         return !u.includes('gdflix') && !name.includes('gdflix');
+      }).map((h: any) => {
+        if (h.size) return h;
+        const sm = (h.file_name || h.label || '').match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i);
+        return sm ? { ...h, size: sm[1].toUpperCase() } : h;
       });
       setMdriveResults(hits);
 
@@ -1537,61 +1984,65 @@ export const LinkCheckerModal: React.FC<Props> = ({
       }
 
       if (hits.length > 1) {
-        const autoHits = filterFilmygoHits(hits, targetUrl);
-        if (autoHits.length === 1) {
-          const singleLink = autoHits[0].url;
-          processedExtractionsRef.current.add(targetUrl);
-          processedExtractionsRef.current.add(normalizeUrl(targetUrl));
-          
-          const baseLink = targetUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
-          const escapedBase = baseLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}/?`, 'g');
-          
-          const currentInput = inputRef.current;
-          let nextInput = currentInput.replace(regex, singleLink);
-          if (nextInput === currentInput) {
-            nextInput = currentInput.split('\n').map(line => {
-              const trimmed = line.trim();
-              if (!trimmed) return line;
-              if (trimmed === targetUrl.trim() || normalizeUrl(trimmed) === normalizeUrl(targetUrl)) {
-                return singleLink;
-              }
-              return line;
-            }).join('\n');
+        const isFilmygo = targetUrl.includes('filmygo.') || targetUrl.includes('filmycab.') || targetUrl.includes('filesdl.');
+        
+        if (isFilmygo) {
+          // For FilmyGo: always select links no matter series or movie according to selection
+          const autoHits = filterFilmygoHits(hits, targetUrl);
+          if (autoHits.length > 0) {
+            const selectedUrls = autoHits.map(h => h.url).join('\n');
+            processedExtractionsRef.current.add(targetUrl);
+            processedExtractionsRef.current.add(normalizeUrl(targetUrl));
+            const currentInput = inputRef.current;
+            let nextInput = currentInput.replace(targetUrl, selectedUrls);
+            if (nextInput === currentInput) {
+              nextInput = currentInput.split('\n').map(line => {
+                const trimmed = line.trim();
+                if (!trimmed) return line;
+                if (trimmed === targetUrl.trim() || normalizeUrl(trimmed) === normalizeUrl(targetUrl)) {
+                  return selectedUrls;
+                }
+                return line;
+              }).join('\n');
+            }
+            console.log("FilmyGo link auto-selection:", { from: targetUrl, count: autoHits.length });
+            setInput(nextInput);
+            setMdriveUrl(null);
+            setMdriveResults([]);
+            setTimeout(() => {
+              handleCheck(undefined, nextInput);
+            }, 400);
+            return;
           }
-          
-          console.log("MDrive single auto-selection replacement:", { from: targetUrl, to: singleLink });
-          setInput(nextInput);
-          setMdriveUrl(null);
-          setMdriveResults([]);
-          
-          setTimeout(() => {
-            handleCheck(undefined, nextInput);
-          }, 400);
-          return;
         }
 
-        const hasSeries = hasSeriesOrZipIndicator(hits);
+        const autoHits = filterMoviesdriveHits(hits, targetUrl);
+        const autoIndices = new Set<number>();
+        hits.forEach((h: any, idx: number) => {
+          if (autoHits.some((ah: any) => ah.url === h.url)) {
+            autoIndices.add(idx);
+          }
+        });
 
-        if (hasSeries) {
-          // Multiple series episodes/packs: open selection popup for user to pick
-          setMdriveSelectedIndices(new Set());
-          setMdriveUrl(targetUrl);
-          return;
-        }
+        // Determine if verified as movie vs series
+        const isExplicitMovie = 
+          Boolean(data?.is_movie) ||
+          /\b(movie|film)\b/i.test(targetUrl) ||
+          /\b(movie|film)\b/i.test(data?.post_title || '') ||
+          (hits.length > 0 && hits.every((h: any) => !/\b(season|episode|ep\s*\d+|pack|zip|batch|complete|all\s*episodes)\b/i.test(h.file_name || '')));
 
-        if (autoHits.length > 1) {
-          // Auto-select and proceed without UI
+        const isSeries = !isExplicitMovie && (
+          Boolean(data?.is_series) ||
+          isSeriesPostOrHits(hits, targetUrl, data)
+        );
+
+        // Automatically select links for moviesdrive if it is not detected as series and verified as a movie
+        if (!isSeries && autoHits.length > 0) {
           const selectedUrls = autoHits.map(h => h.url).join('\n');
           processedExtractionsRef.current.add(targetUrl);
           processedExtractionsRef.current.add(normalizeUrl(targetUrl));
-          
-          const baseLink = targetUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
-          const escapedBase = baseLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}/?`, 'g');
-          
           const currentInput = inputRef.current;
-          let nextInput = currentInput.replace(regex, selectedUrls);
+          let nextInput = currentInput.replace(targetUrl, selectedUrls);
           if (nextInput === currentInput) {
             nextInput = currentInput.split('\n').map(line => {
               const trimmed = line.trim();
@@ -1602,27 +2053,61 @@ export const LinkCheckerModal: React.FC<Props> = ({
               return line;
             }).join('\n');
           }
-          
-          console.log("MDrive manual auto-selection replacement:", { from: targetUrl, to: selectedUrls });
+          console.log("MoviesDrive movie auto-selection:", { from: targetUrl, count: autoHits.length });
           setInput(nextInput);
           setMdriveUrl(null);
           setMdriveResults([]);
-          
           setTimeout(() => {
             handleCheck(undefined, nextInput);
           }, 400);
           return;
         }
 
-        // Multiple links found, show selection popup with pre-selected indices
-        const autoIndices = new Set<number>();
-        hits.forEach((h: any, idx: number) => {
-          if (autoHits.some((ah: any) => ah.url === h.url)) {
-            autoIndices.add(idx);
+        const isMoviesdriveOrHdhub = 
+          targetUrl.includes('moviesdrive') ||
+          targetUrl.includes('moviesdrives') ||
+          targetUrl.includes('mdrive') ||
+          targetUrl.includes('hdhub4u');
+
+        if (isSeries) {
+          if (isMoviesdriveOrHdhub) {
+            const seriesResult = selectMoviesdriveOrHdhub4uSeriesLinks(hits, targetUrl);
+            if (seriesResult.canAutoSelect && seriesResult.selectedHits.length > 0) {
+              const selectedUrls = seriesResult.selectedHits.map(h => h.url).join('\n');
+              processedExtractionsRef.current.add(targetUrl);
+              processedExtractionsRef.current.add(normalizeUrl(targetUrl));
+              const currentInput = inputRef.current;
+              let nextInput = currentInput.replace(targetUrl, selectedUrls);
+              if (nextInput === currentInput) {
+                nextInput = currentInput.split('\n').map(line => {
+                  const trimmed = line.trim();
+                  if (!trimmed) return line;
+                  if (trimmed === targetUrl.trim() || normalizeUrl(trimmed) === normalizeUrl(targetUrl)) {
+                    return selectedUrls;
+                  }
+                  return line;
+                }).join('\n');
+              }
+              console.log("MoviesDrive/HDHub4U series auto-selection without popup:", { from: targetUrl, count: seriesResult.selectedHits.length });
+              setInput(nextInput);
+              setMdriveUrl(null);
+              setMdriveResults([]);
+              setTimeout(() => {
+                handleCheck(undefined, nextInput);
+              }, 400);
+              return;
+            } else {
+              console.log("MoviesDrive/HDHub4U series fallback to manual selection popup:", { from: targetUrl, reason: seriesResult.reason });
+              setMdriveSelectedIndices(new Set());
+            }
+          } else {
+            setMdriveSelectedIndices(new Set());
           }
-        });
-        setMdriveSelectedIndices(autoIndices);
+        } else {
+          setMdriveSelectedIndices(autoIndices);
+        }
         setMdriveUrl(targetUrl);
+        return;
       } else if (hits.length === 0) {
         // No links found, mark as processed and continue
         processedExtractionsRef.current.add(targetUrl);
@@ -1695,9 +2180,30 @@ export const LinkCheckerModal: React.FC<Props> = ({
   };
 
   const confirmMdriveSelection = () => {
-    if (mdriveUrl && mdriveSelectedIndices.size > 0) {
-      const selectedLinks = mdriveResults.filter((_, i) => mdriveSelectedIndices.has(i));
-      const newLinksText = selectedLinks.map(l => l.url).join('\n');
+    if (mdriveUrl) {
+      const finalUrls: string[] = [];
+
+      mdriveResults.forEach((item, index) => {
+        const optionName = (item.file_name || '').toLowerCase();
+        const isSingleEpisode = optionName.includes('single episode') || optionName.includes('single ep');
+        
+        if (isSingleEpisode) {
+          const subsSet = selectedSubEpisodes[item.url];
+          if (subsSet && subsSet.size > 0) {
+            finalUrls.push(...Array.from(subsSet));
+          } else if (mdriveSelectedIndices.has(index)) {
+            finalUrls.push(item.url);
+          }
+        } else {
+          if (mdriveSelectedIndices.has(index)) {
+            finalUrls.push(item.url);
+          }
+        }
+      });
+
+      if (finalUrls.length === 0) return;
+
+      const newLinksText = finalUrls.join('\n');
       
       // Mark as processed BEFORE replacement to prevent it from being found again
       processedExtractionsRef.current.add(mdriveUrl);
@@ -1714,11 +2220,16 @@ export const LinkCheckerModal: React.FC<Props> = ({
         nextInput = currentInput.trim() ? `${currentInput.trim()}\n${newLinksText}` : newLinksText;
       }
       
-      console.log("MDrive replacement:", { from: mdriveUrl, to: newLinksText, success: nextInput !== currentInput });
+      console.log("MDrive replacement with sub-episodes:", { from: mdriveUrl, to: newLinksText, success: nextInput !== currentInput });
       setInput(nextInput);
       
       setMdriveUrl(null);
       setMdriveResults([]);
+      setMdriveSelectedIndices(new Set());
+      setPreloadedEpisodes({});
+      setLoadingEpisodes({});
+      setExpandedEpisodes({});
+      setSelectedSubEpisodes({});
       
       // Trigger check for everything - this will automatically pick up the next extractions if any exist
       setTimeout(() => {
@@ -1818,11 +2329,143 @@ export const LinkCheckerModal: React.FC<Props> = ({
     // Derive links directly from input or use provided override
     const currentInputSnapshot = initialInputOverride || inputRef.current;
     
-    let currentLinks = onlyUrls || splitLinks(currentInputSnapshot).map(normalizeUrl).filter(Boolean);
+    const seenLinks = new Set<string>();
+    let currentLinks = (onlyUrls || splitLinks(currentInputSnapshot).map(normalizeUrl).filter(Boolean)).filter(u => {
+      const norm = normalizeUrl(u);
+      if (!norm || seenLinks.has(norm)) return false;
+      seenLinks.add(norm);
+      return true;
+    });
     
-    if (!currentLinks.length) {
-      setError("Please paste at least one valid link first.");
+    const lines = currentInputSnapshot.split('\n').map(l => l.trim()).filter(Boolean);
+    const isUrlLine = (l: string) => {
+      const norm = l.toLowerCase();
+      return (
+        norm.startsWith('http://') ||
+        norm.startsWith('https://') ||
+        norm.startsWith('ftp://') ||
+        (!norm.includes(' ') && (norm.includes('.lol') || norm.includes('.com') || norm.includes('.net') || norm.includes('.org') || norm.includes('.in') || norm.includes('.top') || norm.includes('.xyz') || norm.includes('.cab') || norm.includes('.club') || norm.includes('.co') || norm.includes('.app') || norm.includes('.cc') || norm.includes('.dev') || norm.includes('.ph')))
+      );
+    };
+
+    const titleLines = lines.filter(l => !isUrlLine(l));
+
+    if (!currentLinks.length && titleLines.length === 0) {
+      setError("Please paste at least one valid link or enter a title first.");
       setLoading(false);
+      return;
+    }
+
+    // If input is purely titles (Single title or Bulk titles), execute 5-tier waterfall search
+    if (currentLinks.length === 0 && titleLines.length > 0) {
+      if (!titleImportWaterfall) {
+        setError("Title Import Waterfall is disabled. Please paste direct download links or check 'Title Import Waterfall' to search.");
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
+      setError(null);
+      try {
+        if (titleLines.length === 1) {
+          const rawLine = titleLines[0];
+          const { title: extractedTitle, year: extractedYear } = extractTitleAndYear(rawLine);
+          const searchTitle = extractedTitle || rawLine;
+          const searchYear = extractedYear || (typeof initialYear === 'number' ? initialYear : initialYear ? parseInt(String(initialYear), 10) : undefined);
+          const searchType = contentType || (/\b(s\d+|season\s*\d+|series|tv|episode|ep\d+)\b/i.test(rawLine) ? 'series' : 'movie');
+
+          const waterfallResult = await runWaterfallLinkSearch({
+            title: searchTitle,
+            year: searchYear,
+            type: searchType,
+            languages,
+            qualities,
+          });
+
+          if (waterfallResult.results.length > 0) {
+            setResults(waterfallResult.results);
+            setSelectedUrls(new Set(waterfallResult.results.map(r => r.url)));
+            if (waterfallResult.metadata) {
+              setDetectedMetadata({
+                ...waterfallResult.metadata,
+                tmdbData: waterfallResult.tmdbData,
+                isTitleSearch: true,
+              });
+            }
+            if (waterfallResult.sample?.url || waterfallResult.metadata?.sampleUrl) {
+              setDetectedSampleUrl(waterfallResult.sample?.url || waterfallResult.metadata?.sampleUrl);
+            }
+            if (onResults) {
+              onResults(waterfallResult.results);
+            }
+          } else {
+            setError(`No links found for "${searchTitle}" across waterfall sources.`);
+          }
+        } else {
+          // Bulk titles search
+          const batchItems: {
+            key: string;
+            title: string;
+            year: string;
+            links: QualityLinks;
+            metadata: any;
+          }[] = [];
+          const allFoundCheckResults: LinkCheckResult[] = [];
+
+          for (let i = 0; i < titleLines.length; i++) {
+            const rawLine = titleLines[i];
+            const { title: extractedTitle, year: extractedYear } = extractTitleAndYear(rawLine);
+            const searchTitle = extractedTitle || rawLine;
+            const searchYear = extractedYear;
+            const searchType = /\b(s\d+|season\s*\d+|series|tv|episode|ep\d+)\b/i.test(rawLine) ? 'series' : 'movie';
+
+            try {
+              const res = await runWaterfallLinkSearch({
+                title: searchTitle,
+                year: searchYear,
+                type: searchType,
+                languages,
+                qualities,
+              });
+
+              if (res.links.length > 0) {
+                allFoundCheckResults.push(...res.results);
+                batchItems.push({
+                  key: `bulk-${i}-${searchTitle}-${Date.now()}`,
+                  title: res.metadata?.title || searchTitle,
+                  year: res.metadata?.year ? String(res.metadata.year) : (searchYear ? String(searchYear) : ''),
+                  links: res.qualityLinks,
+                  metadata: {
+                    ...res.metadata,
+                    languages: res.metadata?.languages || [],
+                    sampleUrl: res.sample?.url || res.metadata?.sampleUrl,
+                    type: res.metadata?.type || searchType,
+                    tmdbData: res.tmdbData,
+                    isTitleSearch: true,
+                  }
+                });
+              }
+            } catch (err) {
+              console.error(`Error searching bulk title "${searchTitle}":`, err);
+            }
+          }
+
+          if (batchItems.length > 0) {
+            setResults(allFoundCheckResults);
+            setSelectedUrls(new Set(allFoundCheckResults.map(r => r.url)));
+            setBatchReviewItems(batchItems);
+            setIsReviewingBatch(true);
+            if (onResults) {
+              onResults(allFoundCheckResults);
+            }
+          } else {
+            setError("No links found for any of the titles in the list.");
+          }
+        }
+      } catch (e: any) {
+        setError(e.message || "Failed to search title across sources.");
+      } finally {
+        setLoading(false);
+      }
       return;
     }
 
@@ -1859,9 +2502,12 @@ export const LinkCheckerModal: React.FC<Props> = ({
       try {
         // Take up to 5 links at once
         const batch = extractableLinks.slice(0, 5);
-        const results = await Promise.all(batch.map(async (targetUrl) => {
+        const results = await Promise.all(batch.map(async (targetUrl, batchIdx) => {
+          if (batchIdx > 0) {
+            await new Promise((r) => setTimeout(r, batchIdx * 100));
+          }
           const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), 25000);
+          const timer = setTimeout(() => controller.abort(), 35000);
           try {
             const normUrl = normalizeUrl(targetUrl);
             if (normUrl.includes('mdrive.lol') || normUrl.includes('mdrvie.lol')) {
@@ -1995,6 +2641,10 @@ export const LinkCheckerModal: React.FC<Props> = ({
               const u = (h.url || '').toLowerCase();
               const name = (h.file_name || '').toLowerCase();
               return !u.includes('gdflix') && !name.includes('gdflix');
+            }).map((h: any) => {
+              if (h.size) return h;
+              const sm = (h.file_name || h.label || '').match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i);
+              return sm ? { ...h, size: sm[1].toUpperCase() } : h;
             });
             if (hits.length > 0) {
               const hubcloudHits = hits.filter((h: any) => /(hubcloud|vcloud|hubdrive|drivehub|hubcdn|hblinks)/i.test(h.url || ''));
@@ -2017,83 +2667,221 @@ export const LinkCheckerModal: React.FC<Props> = ({
                 continue;
               }
 
-              const autoHits = filterFilmygoHits(hits, res.original);
-              const autoIndices = new Set<number>();
-              hits.forEach((h: any, idx: number) => {
-                if (autoHits.some((ah: any) => ah.url === h.url)) {
-                  autoIndices.add(idx);
-                }
-              });
-
-              // Ensure sample hit is included in autoHits and selected in UI
-              const sampleHit = hits.find((h: any) => h.is_sample || h.isSample || /\bsample\b/i.test(h.file_name || '') || /\bsample\b/i.test(h.quality || ''));
-              if (sampleHit) {
-                const sampleIdx = hits.findIndex((h: any) => h.url === sampleHit.url);
-                if (sampleIdx !== -1) {
-                  autoIndices.add(sampleIdx);
-                }
-                if (!autoHits.some((ah: any) => ah.url === sampleHit.url)) {
-                  autoHits.push(sampleHit);
+              // ==========================================================
+              // DOMAIN 1: FilmyGo (Strictly isolated domain logic)
+              // Always select links no matter series or movie according to selection rules!
+              // ==========================================================
+              if (res.type === 'filmygo' || res.original.includes('filmygo.') || res.original.includes('filmycab.') || res.original.includes('filesdl.')) {
+                const autoHits = filterFilmygoHits(hits, res.original);
+                if (autoHits.length > 0) {
+                  const selectedUrls = autoHits.map(h => h.url).join('\n');
+                  replaceOriginalUrl(res.original, selectedUrls);
+                  console.log(`FilmyGo auto-selected ${autoHits.length} hits without modal popup:`, { from: res.original, count: autoHits.length });
+                  continue;
+                } else if (hits.length === 1) {
+                  replaceOriginalUrl(res.original, hits[0].url);
+                  console.log("FilmyGo single link auto-replacement:", hits[0].url);
+                  continue;
+                } else {
+                  setMdriveUrl(res.original);
+                  setMdriveResults(hits);
+                  setMdriveSelectedIndices(new Set());
+                  pausedForUI = true;
+                  break;
                 }
               }
 
-              if (res.type === 'mdrive' && autoHits.length === 1) {
-                replaceOriginalUrl(res.original, autoHits[0].url);
-                console.log("MDrive single autoHit auto-extraction successful:", autoHits[0].url);
+              // ==========================================================
+              // DOMAIN 2: MoviesDrive (Strictly isolated domain logic)
+              // ==========================================================
+              if (res.type === 'mdrive' || res.type === 'moviesdrive' || res.original.includes('moviesdrive.') || res.original.includes('moviesdrives.')) {
+                if (hits.length === 1) {
+                  replaceOriginalUrl(res.original, hits[0].url);
+                  console.log("MDrive single link auto-replacement successful:", hits[0].url);
+                  continue;
+                }
+
+                const autoHits = filterMoviesdriveHits(hits, res.original);
+                const autoIndices = new Set<number>();
+                hits.forEach((h: any, idx: number) => {
+                  if (autoHits.some((ah: any) => ah.url === h.url)) {
+                    autoIndices.add(idx);
+                  }
+                });
+
+                // Verify if it is verified as a movie by MoviesDrive and not series
+                const isExplicitMovie = 
+                  Boolean((res as any).data?.is_movie) ||
+                  /\b(movie|film)\b/i.test(res.original) ||
+                  /\b(movie|film)\b/i.test((res as any).data?.post_title || '') ||
+                  (hits.length > 0 && hits.every((h: any) => !/\b(season|episode|ep\s*\d+|pack|zip|batch|complete|all\s*episodes)\b/i.test(h.file_name || '')));
+
+                const isSeries = !isExplicitMovie && (
+                  Boolean((res as any).data?.is_series) ||
+                  isSeriesPostOrHits(hits, res.original, (res as any).data)
+                );
+
+                // Automatically select links for moviesdrive if it is not detected as series and verified as a movie
+                if (!isSeries && autoHits.length > 0) {
+                  const selectedUrls = autoHits.map((h: any) => h.url).join('\n');
+                  replaceOriginalUrl(res.original, selectedUrls);
+                  console.log(`MoviesDrive auto-selected ${autoHits.length} movie hits without modal popup:`, { from: res.original, count: autoHits.length });
+                  continue;
+                } else {
+                  if (isSeries) {
+                    const seriesResult = selectMoviesdriveOrHdhub4uSeriesLinks(hits, res.original);
+                    if (seriesResult.canAutoSelect && seriesResult.selectedHits.length > 0) {
+                      const selectedUrls = seriesResult.selectedHits.map((h: any) => h.url).join('\n');
+                      replaceOriginalUrl(res.original, selectedUrls);
+                      console.log(`MoviesDrive series auto-selected ${seriesResult.selectedHits.length} hits without modal popup:`, { from: res.original });
+                      continue;
+                    } else {
+                      console.log(`MoviesDrive series fallback to manual selection:`, { from: res.original, reason: seriesResult.reason });
+                      setMdriveSelectedIndices(new Set());
+                    }
+                  } else {
+                    setMdriveSelectedIndices(autoIndices);
+                  }
+                  setMdriveUrl(res.original);
+                  setMdriveResults(hits);
+                  pausedForUI = true;
+                  break;
+                }
+              }
+
+              // ==========================================================
+              // DOMAIN 3: HDHub4U (Strictly isolated domain logic)
+              // ==========================================================
+              if (res.type === 'hdhub4u' || res.original.includes('hdhub4u')) {
+                const isExplicitMovie = 
+                  Boolean((res as any).data?.is_movie) ||
+                  /\b(movie|film)\b/i.test(res.original) ||
+                  /\b(movie|film)\b/i.test((res as any).data?.post_title || '') ||
+                  (hits.length > 0 && hits.every((h: any) => !/\b(season|episode|ep\s*\d+|pack|zip|batch|complete|all\s*episodes)\b/i.test(h.file_name || '')));
+
+                const isSeries = !isExplicitMovie && (
+                  Boolean((res as any).data?.is_series) ||
+                  isSeriesPostOrHits(hits, res.original, (res as any).data)
+                );
+
+                if (isSeries && hits.length > 1) {
+                  const seriesResult = selectMoviesdriveOrHdhub4uSeriesLinks(hits, res.original);
+                  if (seriesResult.canAutoSelect && seriesResult.selectedHits.length > 0) {
+                    const selectedUrls = seriesResult.selectedHits.map((h: any) => h.url).join('\n');
+                    replaceOriginalUrl(res.original, selectedUrls);
+                    console.log(`HDHub4U series auto-selected ${seriesResult.selectedHits.length} hits without modal popup:`, { from: res.original });
+                    continue;
+                  } else {
+                    console.log(`HDHub4U series fallback to manual selection:`, { from: res.original, reason: seriesResult.reason });
+                    setMdriveSelectedIndices(new Set());
+                    setMdriveUrl(res.original);
+                    setMdriveResults(hits);
+                    pausedForUI = true;
+                    break;
+                  }
+                }
+
+                const autoHits = filterHdhub4uHits(hits, res.original);
+                if (autoHits.length > 0) {
+                  const selectedUrls = autoHits.map(h => h.url).join('\n');
+                  replaceOriginalUrl(res.original, selectedUrls);
+                  console.log(`HDHub4U auto-selected ${autoHits.length} movie hits without modal popup:`, { from: res.original, count: autoHits.length });
+                  continue;
+                } else if (hits.length === 1) {
+                  replaceOriginalUrl(res.original, hits[0].url);
+                  console.log("HDHub4U single link auto-replacement:", hits[0].url);
+                  continue;
+                } else {
+                  setMdriveUrl(res.original);
+                  setMdriveResults(hits);
+                  setMdriveSelectedIndices(new Set());
+                  pausedForUI = true;
+                  break;
+                }
+              }
+
+              // ==========================================================
+              // DOMAIN 4: SkyMoviesHD (Strictly isolated domain logic)
+              // ==========================================================
+              if (res.type === 'skymovieshd' || res.original.includes('skymovies')) {
+                const autoHits = filterSkymoviesHits(hits, res.original);
+                const hasSeries = hasSeriesOrZipIndicator(hits);
+
+                if (hasSeries && hits.length > 1) {
+                  setMdriveUrl(res.original);
+                  setMdriveResults(hits);
+                  setMdriveSelectedIndices(new Set());
+                  pausedForUI = true;
+                  break;
+                }
+
+                if (autoHits.length > 0) {
+                  const selectedUrls = autoHits.map(h => h.url).join('\n');
+                  replaceOriginalUrl(res.original, selectedUrls);
+                  console.log(`SkyMoviesHD auto-selected ${autoHits.length} hits without modal popup:`, { from: res.original, count: autoHits.length });
+                  continue;
+                } else if (hits.length === 1) {
+                  replaceOriginalUrl(res.original, hits[0].url);
+                  console.log("SkyMoviesHD single link auto-replacement:", hits[0].url);
+                  continue;
+                } else {
+                  setMdriveUrl(res.original);
+                  setMdriveResults(hits);
+                  setMdriveSelectedIndices(new Set());
+                  pausedForUI = true;
+                  break;
+                }
+              }
+
+              // ==========================================================
+              // DOMAIN 5: FilmyFly (Strictly isolated domain logic)
+              // ==========================================================
+              if (res.type === 'filmyfly' || res.original.includes('filmyfly')) {
+                const autoHits = filterFilmyflyHits(hits, res.original);
+                const hasSeries = hasSeriesOrZipIndicator(hits);
+
+                if (hasSeries && hits.length > 1) {
+                  setMdriveUrl(res.original);
+                  setMdriveResults(hits);
+                  setMdriveSelectedIndices(new Set());
+                  pausedForUI = true;
+                  break;
+                }
+
+                if (autoHits.length > 0) {
+                  const selectedUrls = autoHits.map(h => h.url).join('\n');
+                  replaceOriginalUrl(res.original, selectedUrls);
+                  console.log(`FilmyFly auto-selected ${autoHits.length} hits without modal popup:`, { from: res.original, count: autoHits.length });
+                  continue;
+                } else if (hits.length === 1) {
+                  replaceOriginalUrl(res.original, hits[0].url);
+                  console.log("FilmyFly single link auto-replacement:", hits[0].url);
+                  continue;
+                } else {
+                  setMdriveUrl(res.original);
+                  setMdriveResults(hits);
+                  setMdriveSelectedIndices(new Set());
+                  pausedForUI = true;
+                  break;
+                }
+              }
+
+              // Fallback for any other generic provider
+              const autoHits = filterMoviesdriveHits(hits, res.original);
+              if (autoHits.length > 0) {
+                const selectedUrls = autoHits.map(h => h.url).join('\n');
+                replaceOriginalUrl(res.original, selectedUrls);
+                console.log(`${res.type} auto-selected ${autoHits.length} hits without modal popup:`, { from: res.original, count: autoHits.length });
                 continue;
-              }
-
-              const hasSeries = hasSeriesOrZipIndicator(hits);
-
-              if (hasSeries && hits.length > 1) {
+              } else if (hits.length === 1) {
+                replaceOriginalUrl(res.original, hits[0].url);
+                continue;
+              } else {
                 setMdriveUrl(res.original);
                 setMdriveResults(hits);
                 setMdriveSelectedIndices(new Set());
                 pausedForUI = true;
                 break;
-              }
-
-              if (res.type === 'filmygo') {
-                if (autoHits.length > 0) {
-                  const selectedUrls = autoHits.map(h => h.url).join('\n');
-                  replaceOriginalUrl(res.original, selectedUrls);
-                  console.log(`FilmyGo auto-selected ${autoHits.length} hits without modal popup:`, { from: res.original, count: autoHits.length });
-                } else {
-                  // Show selection UI if autoHits is empty but hits exist
-                  setMdriveUrl(res.original);
-                  setMdriveResults(hits);
-                  setMdriveSelectedIndices(autoIndices);
-                  pausedForUI = true;
-                  break;
-                }
-              } else if (res.type === 'mdrive') {
-                if (autoHits.length > 0) {
-                  const selectedUrls = autoHits.map(h => h.url).join('\n');
-                  replaceOriginalUrl(res.original, selectedUrls);
-                  console.log(`MDrive auto-selected ${autoHits.length} hits without modal popup:`, { from: res.original, count: autoHits.length });
-                } else {
-                  setMdriveUrl(res.original);
-                  setMdriveResults(hits);
-                  setMdriveSelectedIndices(autoIndices);
-                  pausedForUI = true;
-                  break;
-                }
-              } else {
-                if (autoHits.length > 0) {
-                  const selectedUrls = autoHits.map(h => h.url).join('\n');
-                  replaceOriginalUrl(res.original, selectedUrls);
-                  console.log(`${res.type} auto-selected ${autoHits.length} hits without modal popup:`, { from: res.original, count: autoHits.length });
-                } else if (hits.length === 1) {
-                  const singleLink = hits[0].url;
-                  replaceOriginalUrl(res.original, singleLink);
-                  console.log(`${res.type === 'moviesdrive' ? 'MoviesDrive' : 'SkymoviesHD'} auto-replacement successful:`, { from: res.original, to: singleLink });
-                } else {
-                  setMdriveUrl(res.original);
-                  setMdriveResults(hits);
-                  setMdriveSelectedIndices(autoIndices);
-                  pausedForUI = true;
-                  break; 
-                }
               }
             } else {
               // 0 hits
@@ -2230,90 +3018,42 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
       const sortedFinal = sortResultsByEpisodeAndQuality(finalResults);
 
+      const seenFinalUrls = new Set<string>();
+      const dedupedSortedFinal = sortedFinal.filter(r => {
+        const norm = normalizeUrl(r.url);
+        if (!norm || seenFinalUrls.has(norm)) return false;
+        seenFinalUrls.add(norm);
+        return true;
+      });
+
       setResults(prev => {
         if (onlyUrls?.length) {
           const keep = prev.filter((r) => !onlyUrls.includes(r.url));
-          const merged = sortResultsByEpisodeAndQuality([...keep, ...sortedFinal]);
-          return merged.map(r => ({
+          const merged = sortResultsByEpisodeAndQuality([...keep, ...dedupedSortedFinal]);
+          const seenMerged = new Set<string>();
+          const dedupedMerged = merged.filter(r => {
+            const norm = normalizeUrl(r.url);
+            if (!norm || seenMerged.has(norm)) return false;
+            seenMerged.add(norm);
+            return true;
+          });
+          return dedupedMerged.map(r => ({
             ...r,
-            mismatchWarnings: buildMismatchWarnings(r, merged, languages, qualities),
-            confidenceScore: Math.max(0, 100 - (buildMismatchWarnings(r, merged, languages, qualities).length * 18)),
+            mismatchWarnings: buildMismatchWarnings(r, dedupedMerged, languages, qualities),
+            confidenceScore: Math.max(0, 100 - (buildMismatchWarnings(r, dedupedMerged, languages, qualities).length * 18)),
           }));
         }
-        return sortedFinal;
+        return dedupedSortedFinal;
       });
 
       if (onResults) {
-        onResults(sortedFinal);
+        onResults(dedupedSortedFinal);
       }
     } catch (e: any) {
       setError(e?.message || "Unknown error while checking links.");
     } finally {
       setLoading(false);
     }
-  };
-
-  const extractTitleAndYear = (text: string) => {
-    let year: number | undefined;
-    let title: string | undefined;
-
-    let cleanText = text.trim();
-    cleanText = cleanText.replace(/^(?:sample|sample[-_.\s]+)/i, "").trim();
-    cleanText = cleanText.replace(/^(download|watch|stream|movie|series)\b\s*/i, "");
-
-    // Detect year - look for 4 digits that start with 19 or 20
-    const yearPattern = /(?:\D|^)(19\d{2}|20\d{2})(?:\D|$)/;
-    const yearMatch = cleanText.match(yearPattern);
-
-    if (yearMatch) {
-      year = parseInt(yearMatch[1], 10);
-      const yearIndex = cleanText.indexOf(yearMatch[1]);
-      title = cleanText.substring(0, yearIndex).trim();
-    } else {
-      // No year, look for quality/print/language markers
-      const noiseMarkers = [
-        '\\d{3,4}p', '[0-9]k', 'web[-.\\s_]?(dl|rip)', 
-        'hd[-.\\s_]?rip', 'blu[-.\\s_]?ray', 'bd[-.\\s_]?rip', 
-        'br[-.\\s_]?rip', 'hdtc', 'hdcam', 'dvdrip', 'webrip',
-        'hq', 'proper', 'repack', 'internal', 'hevc', 'x264', 'x265', 'aac', 'ac3',
-        'dual[-.\\s_]?audio', 'multi[-.\\s_]?audio',
-        'hindi', 'english', 'tamil', 'telugu', 'malayalam', 'kannada', 'urdu', 'punjabi',
-        's\\d+e\\d+', 's\\d+', 'season', 'episode'
-      ];
-      
-      const markerRegex = new RegExp(`\\b(${noiseMarkers.join('|')})\\b`, 'i');
-      const markerMatch = cleanText.match(markerRegex);
-      
-      if (markerMatch) {
-        title = cleanText.substring(0, markerMatch.index).trim();
-      } else {
-        title = cleanText.trim();
-      }
-    }
-
-    if (title) {
-      // Strip extensions and noise
-      title = title
-        .replace(/\.(mkv|mp4|zip|rar|avi|mov|wmv|flv|ts)$/i, '')
-        .replace(/[\[\]\(\)\{\}\.\-_/]/g, ' ') 
-        .replace(/\s+/g, ' ')
-        .trim();
-
-      // Clean up common prefix noise like "🎬", "*", etc
-      title = title.replace(/^[🎬\s\*]+/, '');
-
-      // Explicitly strip any season markers (S1, S2, S3, S4, S5, S01, S02, S03, Season 1, Season 2, etc.) from title
-      title = title
-        .replace(/\b(seasons?|s)\s*[-_]?\s*\d{1,2}\b/gi, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-
-      // Capitalize
-      title = title.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
-      return { title: title || undefined, year };
-    }
-
-    return { title: undefined, year };
   };
 
   const handleAddLinks = () => {
@@ -2418,7 +3158,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
       return linkItem;
     });
     
-    if (isBatchMode && onBatchAddLinks) {
+     if (isBatchMode && onBatchAddLinks) {
        const batchesMap = new Map<string, { 
          title: string; 
          year: number | undefined; 
@@ -2429,7 +3169,6 @@ export const LinkCheckerModal: React.FC<Props> = ({
            subtitles: boolean;
            type: "movie" | "series";
            season?: number;
-           episode?: number;
          }
        }>();
        
@@ -2437,13 +3176,29 @@ export const LinkCheckerModal: React.FC<Props> = ({
          const r = validResults[idx];
          const isSampleLink = ql.isSample || r.isSample || (r as any).is_sample || /\bsample\b/i.test(r.fileName || '');
          const cleanFileName = (r.fileName || "").replace(/^SAMPLE[-_.\s]*/i, "").trim();
-         const sourceText = `${cleanFileName || r.fileName || ""} ${r.url || ""}`;
-         const { title: extractedTitle, year: extractedYear } = extractTitleAndYear(sourceText);
-         const year = extractedYear || r.year;
-         const title = extractedTitle;
+         const hubcloudTitle = cleanFileName || (r as any).sourceTitle || r.fileName || "";
+         const sourceText = hubcloudTitle ? hubcloudTitle : `${(r as any).rawQuality || ""} ${r.url || ""}`;
+         const { title: extractedTitle, year: extractedYear, season: parsedS, episode: parsedE } = extractTitleAndYear(sourceText);
+         const rawYear = extractedYear || r.year || initialYear;
+        const year = typeof rawYear === 'string' ? (parseInt(rawYear, 10) || undefined) : rawYear;
+         const title = (contentType && contentType === 'series' && initialTitle) ? initialTitle : (extractedTitle || initialTitle);
          const derivedTitle = title || `Untitled ${new Date().getFullYear()}`;
-         const isSeries = !!(ql.season || ql.episode);
-         const key = isSeries ? derivedTitle : `${derivedTitle}|${year || ''}`;
+
+         const isExplicitMovie = /\b(movie|film)\b/i.test(sourceText) && !/\bs\d+\s*e\d+\b/i.test(sourceText);
+         const isSeries = contentType ? (contentType === 'series') : (
+           !isExplicitMovie && !!(
+             ql.season ||
+             ql.episode ||
+             ql.isFullSeasonMKV ||
+             ql.isFullSeasonZIP ||
+             parsedS !== undefined ||
+             parsedE !== undefined ||
+             /(?:(?<=^|[^a-zA-Z0-9])(?:s\d+\s*e\d+|season\s*[-_.]?\s*\d+|s\d+)(?![a-zA-Z0-9])|full\s*season|all\s*episodes|complete\s*season)/i.test(sourceText)
+           )
+         );
+
+         const normTitle = normalizeTitle(derivedTitle) || 'untitled';
+         const key = isSeries ? `series:${normTitle}` : `movie:${normTitle}|${year || ''}`;
 
          if (!batchesMap.has(key)) {
             batchesMap.set(key, { 
@@ -2453,26 +3208,31 @@ export const LinkCheckerModal: React.FC<Props> = ({
               detectMetadata: {
                 languages: new Set<string>(),
                 subtitles: false,
-                type: "movie"
+                type: isSeries ? "series" : "movie"
               }
             });
          }
          
          const batch = batchesMap.get(key)!;
+
+         // Ensure better clean title if generic
+         if (derivedTitle && (!batch.title || batch.title.startsWith("Untitled"))) {
+           batch.title = derivedTitle;
+         }
+         if (year && !batch.year) {
+           batch.year = year;
+         }
+
          if (!batch.links.some(l => l.url === ql.url)) {
            batch.links.push(ql);
          }
 
          if (isSampleLink && ql.url) {
            (batch.detectMetadata as any).sampleUrl = ql.url;
-           // If batch title was generic or empty, use the clean title from sample link
-           if (title && (!batch.title || batch.title.startsWith("Untitled"))) {
-             batch.title = title;
-           }
          }
 
          // Update detection per batch (if movie, keep movie, if any link is series, whole batch is series)
-         if (ql.season || ql.episode || ql.isFullSeasonMKV || ql.isFullSeasonZIP || /full season|all episodes|complete/i.test(sourceText)) {
+         if (isSeries) {
            batch.detectMetadata.type = "series";
          }
          
@@ -2487,22 +3247,30 @@ export const LinkCheckerModal: React.FC<Props> = ({
            batch.detectMetadata.subtitles = true;
          }
 
-         // Apply detected S/E to batch metadata if not already set (fallback for creation)
-         if (ql.season && !batch.detectMetadata.season) batch.detectMetadata.season = ql.season;
-         if (ql.episode && !batch.detectMetadata.episode) batch.detectMetadata.episode = ql.episode;
+         // Apply detected Season to batch metadata if not already set
+         const detectedSeason = ql.season || parsedS;
+         if (detectedSeason && !batch.detectMetadata.season) {
+           batch.detectMetadata.season = detectedSeason;
+         }
        });
 
-       const itemsToReview = Array.from(batchesMap.entries()).map(([key, b]) => ({
-         key,
-         title: b.title,
-         year: b.year ? String(b.year) : '',
-         links: b.links,
-         metadata: {
-           ...b.detectMetadata,
-           languages: Array.from(b.detectMetadata.languages),
-           sampleUrl: (b.detectMetadata as any).sampleUrl
-         }
-       }));
+       const itemsToReview = Array.from(batchesMap.entries()).map(([key, b]) => {
+         const isTitleSearch = Boolean((detectedMetadata as any)?.isTitleSearch);
+         const cached = isTitleSearch ? getImportCache(b.title, b.year) : null;
+         return {
+           key,
+           title: b.title,
+           year: b.year ? String(b.year) : '',
+           links: b.links,
+           metadata: {
+             ...b.detectMetadata,
+             languages: Array.from(b.detectMetadata.languages),
+             sampleUrl: (b.detectMetadata as any).sampleUrl,
+             tmdbData: isTitleSearch ? ((b.detectMetadata as any).tmdbData || (detectedMetadata as any)?.tmdbData || cached?.tmdbData) : undefined,
+             isTitleSearch,
+           }
+         };
+       });
 
        setBatchReviewItems(itemsToReview);
        setIsReviewingBatch(true);
@@ -2565,7 +3333,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
       if (isSeriesLink) seriesCount++;
     });
 
-    if (seriesCount >= 3 || validResults.some(r => r.isFullSeasonMKV || r.isFullSeasonZIP || (r.season === 1 && r.episode === 1) || /full season|all episodes|complete/i.test(`${r.fileName || ""} ${r.finalUrl || ""}`))) {
+    if (contentType) {
+       detectedType = contentType;
+    } else if (seriesCount >= 3 || validResults.some(r => r.isFullSeasonMKV || r.isFullSeasonZIP || (r.season === 1 && r.episode === 1) || /full season|all episodes|complete/i.test(`${r.fileName || ""} ${r.finalUrl || ""}`))) {
        detectedType = "series";
     }
 
@@ -2574,29 +3344,35 @@ export const LinkCheckerModal: React.FC<Props> = ({
     if (sampleResult && sampleResult.fileName) {
       cleanSampleName = sampleResult.fileName.replace(/^SAMPLE[-_.\s]*/i, "").trim();
     }
-    const combinedNames = (cleanSampleName ? cleanSampleName + " " : "") + validResults.map(r => r.fileName || '').join(' ') + ' ' + input;
-    const { title: extractedTitle, year: extractedYear } = extractTitleAndYear(cleanSampleName || combinedNames);
+    const nonSampleResults = validResults.filter(r => !r.isSample && !(r as any).is_sample && !/\bsample\b/i.test(r.fileName || ''));
+    const firstHubcloudFileName = nonSampleResults.find(r => r.fileName)?.fileName || validResults.find(r => r.fileName)?.fileName;
+    const hubcloudSourceText = cleanSampleName || firstHubcloudFileName || validResults.map(r => r.fileName || '').filter(Boolean).join(' ');
+    const { title: extractedTitle, year: extractedYear } = extractTitleAndYear(hubcloudSourceText || input);
     
     // Fallback to first working result's year if available
     const fallbackYear = validResults.find(r => r.year)?.year;
-    const year = extractedYear || fallbackYear;
-    const title = extractedTitle;
-    const sampleUrl = sampleResult ? normalizeUrl(sampleResult.finalUrl || sampleResult.url) : undefined;
+    const year = (contentType && initialYear) ? (typeof initialYear === 'number' ? initialYear : parseInt(String(initialYear), 10)) : (detectedMetadata?.year || extractedYear || fallbackYear || (typeof initialYear === 'number' ? initialYear : initialYear ? parseInt(String(initialYear), 10) : undefined));
+    const title = (contentType && initialTitle) ? initialTitle : (detectedMetadata?.title || extractedTitle || initialTitle);
+    const sampleUrl = detectedSampleUrl || (sampleResult ? normalizeUrl(sampleResult.finalUrl || sampleResult.url) : undefined) || detectedMetadata?.sampleUrl;
 
     if (onAddLinks) {
       onAddLinks(qualityLinks, {
-        languages: Array.from(detectedLangs),
-        printQuality: detectedPrintQuality,
-        subtitles: detectedSubtitles,
-        type: detectedType,
-        season: detectedSeason,
-        episode: detectedEpisode,
+        languages: detectedMetadata?.languages?.length ? detectedMetadata.languages : Array.from(detectedLangs),
+        printQuality: detectedMetadata?.printQuality || detectedPrintQuality,
+        subtitles: detectedMetadata?.subtitles !== undefined ? detectedMetadata.subtitles : detectedSubtitles,
+        type: detectedMetadata?.type || contentType || detectedType,
+        season: detectedMetadata?.season !== undefined ? detectedMetadata.season : detectedSeason,
+        episode: detectedMetadata?.episode !== undefined ? detectedMetadata.episode : detectedEpisode,
         // @ts-ignore
         title,
         // @ts-ignore
         year,
         // @ts-ignore
-        sampleUrl
+        sampleUrl,
+        // @ts-ignore
+        tmdbData: (detectedMetadata as any)?.isTitleSearch ? ((detectedMetadata as any)?.tmdbData || getImportCache(title, year)?.tmdbData) : undefined,
+        // @ts-ignore
+        isTitleSearch: Boolean((detectedMetadata as any)?.isTitleSearch),
       });
     }
     reset();
@@ -2639,8 +3415,12 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
   useEffect(() => {
     if (isOpen) {
+      setTitleImportWaterfall(getDefaultWaterfallEnabled());
       if (initialInput) {
         setInput(initialInput);
+      } else if (initialTitle) {
+        const formattedTitle = initialYear ? `${initialTitle} (${initialYear})` : initialTitle;
+        setInput(formattedTitle);
       } else {
         setInput('');
       }
@@ -2651,6 +3431,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
       setIsReviewingBatch(false);
       setBatchReviewItems([]);
       setAutoClipboard(false);
+      setDetectedSampleUrl(null);
+      setDetectedMetadata(null);
       setMdriveUrl(null);
       setMdriveResults([]);
       setMdriveSelectedIndices(new Set());
@@ -2662,17 +3444,20 @@ export const LinkCheckerModal: React.FC<Props> = ({
       setMoviesdriveSearchQuery("");
       processedExtractionsRef.current = new Set();
 
-      if (autoStart && initialInput && autoStartedInputRef.current !== initialInput) {
-        const initialLinks = splitLinks(initialInput).map(normalizeUrl).filter(Boolean);
+      const autoTarget = initialInput || (initialTitle ? (initialYear ? `${initialTitle} (${initialYear})` : initialTitle) : '');
+      if (autoStart && autoTarget && autoStartedInputRef.current !== autoTarget) {
+        const initialLinks = splitLinks(autoTarget).map(normalizeUrl).filter(Boolean);
+        autoStartedInputRef.current = autoTarget;
         if (initialLinks.length > 0) {
-          autoStartedInputRef.current = initialInput;
-          handleCheck(initialLinks, initialInput);
+          handleCheck(initialLinks, autoTarget);
+        } else if (initialTitle) {
+          handleCheck(undefined, autoTarget);
         }
       }
     } else {
       autoStartedInputRef.current = null;
     }
-  }, [isOpen, initialInput, autoStart, disableAutoClipboard]);
+  }, [isOpen, initialInput, initialTitle, initialYear, autoStart, disableAutoClipboard]);
 
   useEffect(() => {
     if (!isOpen || disableAutoClipboard || !autoClipboard) {
@@ -2744,9 +3529,15 @@ export const LinkCheckerModal: React.FC<Props> = ({
     setExpanded({});
     setIsReviewingBatch(false);
     setBatchReviewItems([]);
+    setDetectedSampleUrl(null);
+    setDetectedMetadata(null);
     setMdriveUrl(null);
     setMdriveResults([]);
     setMdriveSelectedIndices(new Set());
+    setPreloadedEpisodes({});
+    setLoadingEpisodes({});
+    setExpandedEpisodes({});
+    setSelectedSubEpisodes({});
     setMoviesdriveSearchUrl(null);
     setMoviesdriveSearchPosts([]);
     setAllAccumulatedPosts(new Map());
@@ -3893,11 +4684,11 @@ export const LinkCheckerModal: React.FC<Props> = ({
                         {(() => {
                           const matchesQuality = (item: any) => {
                             if (qualityFilter === 'all') return true;
-                            const text = `${item.file_name || ''} ${item.quality || ''} ${item.url || ''}`.toLowerCase();
-                            if (qualityFilter === '480p') return text.includes('480p');
-                            if (qualityFilter === '720p') return text.includes('720p');
-                            if (qualityFilter === '1080p') return text.includes('1080p');
-                            if (qualityFilter === '2160p') return text.includes('2160p') || text.includes('4k');
+                            const q = getItemQualityCategory(item);
+                            if (qualityFilter === '480p') return q === '480p';
+                            if (qualityFilter === '720p') return q === '720p';
+                            if (qualityFilter === '1080p') return q === '1080p';
+                            if (qualityFilter === '2160p') return q === '2160p';
                             return true;
                           };
 
@@ -3908,10 +4699,11 @@ export const LinkCheckerModal: React.FC<Props> = ({
                             const isSampleItem = !!(item.is_sample || item.isSample || text.includes('sample'));
                             
                             let qBadge = null;
-                            if (text.includes('480p')) qBadge = <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 shrink-0">480p</span>;
-                            else if (text.includes('720p')) qBadge = <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 shrink-0">720p</span>;
-                            else if (text.includes('1080p')) qBadge = <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/30 shrink-0">1080p</span>;
-                            else if (text.includes('2160p') || text.includes('4k')) qBadge = <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 shrink-0">4K</span>;
+                            const qCat = getItemQualityCategory(item);
+                            if (qCat === '480p') qBadge = <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 shrink-0">480p</span>;
+                            else if (qCat === '720p') qBadge = <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 shrink-0">720p</span>;
+                            else if (qCat === '1080p') qBadge = <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/30 shrink-0">1080p</span>;
+                            else if (qCat === '2160p') qBadge = <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 shrink-0">4K</span>;
 
                             const hasHevc = text.includes('hevc') || text.includes('x265') || text.includes('h265') || text.includes('h.265') || text.includes('10bit') || text.includes('10-bit');
                             const sizeVal = item.size || item.file_size;
@@ -4013,214 +4805,350 @@ export const LinkCheckerModal: React.FC<Props> = ({
                             );
                           };
 
-                          if (!parsedMdriveGroups.hasEpisodes) {
+                          if (moviesdriveSeriesGroups) {
                             return (
-                              <div className="grid gap-2">
-                                {filteredMdriveResults.map(({ item, originalIndex: i }) => 
-                                  renderItemCard(item, i, undefined, false)
-                                )}
+                              <div className="space-y-6">
+                                {Array.from(moviesdriveSeriesGroups.entries()).map(([seasonName, qualitiesMap]) => (
+                                  <div key={seasonName} className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/30 p-5 space-y-4">
+                                    <div className="flex items-center gap-2 border-b border-zinc-200/60 dark:border-zinc-800/60 pb-3">
+                                      <Tv className="w-5 h-5 text-indigo-500" />
+                                      <span className="text-sm font-black text-zinc-900 dark:text-white uppercase tracking-wider">
+                                        {seasonName}
+                                      </span>
+                                    </div>
+
+                                    <div className="space-y-6">
+                                      {Array.from(qualitiesMap.entries()).map(([qualityText, group]) => {
+                                        const qConfig = QUALITY_COLORS[group.qualityCat] || QUALITY_COLORS['Other'];
+                                        
+                                        const singleEpisodeUrl = group.singleEpisodeItem?.item.url;
+                                        const isPreloaded = singleEpisodeUrl ? Boolean(preloadedEpisodes[singleEpisodeUrl]) : false;
+                                        const isLoading = singleEpisodeUrl ? Boolean(loadingEpisodes[singleEpisodeUrl]) : false;
+                                        const isExpanded = singleEpisodeUrl ? Boolean(expandedEpisodes[singleEpisodeUrl]) : false;
+                                        
+                                        const subList = singleEpisodeUrl ? (preloadedEpisodes[singleEpisodeUrl] || []) : [];
+                                        const selectedSubs = singleEpisodeUrl ? (selectedSubEpisodes[singleEpisodeUrl] || new Set<string>()) : new Set<string>();
+                                        const allSubsSelected = subList.length > 0 && subList.every(sub => selectedSubs.has(sub.url));
+                                        const someSubsSelected = subList.length > 0 && subList.some(sub => selectedSubs.has(sub.url)) && !allSubsSelected;
+
+                                        const isZipSelected = group.zipItem ? mdriveSelectedIndices.has(group.zipItem.originalIndex) : false;
+
+                                        return (
+                                          <div key={qualityText} className="space-y-2.5">
+                                            {/* Quality Sub-header */}
+                                            <div className="flex items-center gap-2 px-1">
+                                              <span className={`px-2.5 py-0.5 rounded text-[10px] font-black border ${qConfig.badge}`}>
+                                                {group.qualityCat === '2160p' ? '4K' : group.qualityCat}
+                                              </span>
+                                              <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                                                {extractDisplayHeading(group.headingText)}
+                                              </span>
+                                            </div>
+
+                                            {/* Non-nested list of options */}
+                                            <div className="border border-zinc-200 dark:border-zinc-800/80 rounded-xl overflow-hidden bg-white dark:bg-zinc-950 divide-y divide-zinc-100 dark:divide-zinc-800/60">
+                                              
+                                              {/* Zip Row (First) */}
+                                              {group.zipItem && (
+                                                <div 
+                                                  onClick={() => {
+                                                    setMdriveSelectedIndices(prev => {
+                                                      const next = new Set(prev);
+                                                      if (isZipSelected) {
+                                                        next.delete(group.zipItem!.originalIndex);
+                                                      } else {
+                                                        next.add(group.zipItem!.originalIndex);
+                                                      }
+                                                      return next;
+                                                    });
+                                                  }}
+                                                  className="p-3.5 flex items-center justify-between gap-3 hover:bg-zinc-50 dark:hover:bg-zinc-900/40 cursor-pointer transition select-none"
+                                                >
+                                                  <div className="flex items-start gap-3 min-w-0">
+                                                    <input
+                                                      type="checkbox"
+                                                      checked={isZipSelected}
+                                                      onChange={() => {}} // toggled by row click
+                                                      className="mt-0.5 h-4 w-4 rounded border-zinc-300 dark:border-zinc-700 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                                    />
+                                                    <div className="min-w-0">
+                                                      <span className="text-xs font-bold text-zinc-900 dark:text-white block truncate">
+                                                        Zip [{group.zipItem.item.size || group.zipItem.item.file_name?.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i)?.[1]?.toUpperCase() || group.zipItem.item.label?.match(/\[?\s*(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\s*\]?/i)?.[1]?.toUpperCase() || "Full Pack"}]
+                                                      </span>
+                                                      <span className="text-[10px] text-zinc-500 block truncate">
+                                                        Single zip file download
+                                                      </span>
+                                                    </div>
+                                                  </div>
+                                                </div>
+                                              )}
+
+                                              {/* Single Episode Row (Second) */}
+                                              {group.singleEpisodeItem && (
+                                                <div>
+                                                  <div 
+                                                    onClick={() => toggleParentEpisodesSelection(group.singleEpisodeItem!.item, group.singleEpisodeItem!.originalIndex)}
+                                                    className="p-3.5 flex items-center justify-between gap-3 hover:bg-zinc-50 dark:hover:bg-zinc-900/40 cursor-pointer transition select-none"
+                                                  >
+                                                    <div className="flex items-center gap-3 min-w-0">
+                                                      <input
+                                                        type="checkbox"
+                                                        checked={allSubsSelected || (group.singleEpisodeItem ? mdriveSelectedIndices.has(group.singleEpisodeItem.originalIndex) : false)}
+                                                        ref={el => {
+                                                          if (el) {
+                                                            el.indeterminate = someSubsSelected;
+                                                          }
+                                                        }}
+                                                        onChange={() => {}} // toggled by row click
+                                                        className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-700 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                                      />
+                                                      <div className="min-w-0">
+                                                        <span className="text-xs font-bold text-zinc-900 dark:text-white block truncate">
+                                                          {group.qualityCat === 'Other' ? 'Other' : group.qualityCat} Single Episode
+                                                        </span>
+                                                        <span className="text-[10px] text-zinc-500 block truncate">
+                                                          Click expand to show and choose individual episodes
+                                                        </span>
+                                                      </div>
+                                                    </div>
+                                                    
+                                                    <button
+                                                      type="button"
+                                                      onClick={(e) => {
+                                                        e.stopPropagation(); // prevent parent checkbox toggle
+                                                        toggleSubEpisodeCollapse(singleEpisodeUrl!);
+                                                      }}
+                                                      className="text-[11px] font-bold text-indigo-500 hover:text-indigo-400 flex items-center gap-1.5 shrink-0 px-2.5 py-1.5 bg-indigo-50 dark:bg-indigo-950/40 rounded-lg hover:scale-102 active:scale-98 transition-all"
+                                                    >
+                                                      {isLoading ? (
+                                                        <LoaderIcon className="w-3.5 h-3.5 animate-spin text-indigo-500" />
+                                                      ) : isExpanded ? (
+                                                        <>
+                                                          <span>Hide Episodes</span>
+                                                          <ChevronUp className="w-3.5 h-3.5" />
+                                                        </>
+                                                      ) : (
+                                                        <>
+                                                          <span>Show Episodes ({subList.length || '...' })</span>
+                                                          <ChevronDown className="w-3.5 h-3.5" />
+                                                        </>
+                                                      )}
+                                                    </button>
+                                                  </div>
+
+                                                  {/* Expandable Sub-Episodes list */}
+                                                  {isExpanded && (
+                                                    <div className="border-t border-zinc-100 dark:border-zinc-800/60 bg-zinc-50/40 dark:bg-zinc-900/20 p-2.5 space-y-1.5 max-h-60 overflow-y-auto custom-scrollbar">
+                                                      {isLoading ? (
+                                                        <div className="flex items-center justify-center py-6 gap-2 text-zinc-500 text-xs font-semibold">
+                                                          <LoaderIcon className="w-4 h-4 animate-spin text-indigo-500" />
+                                                          Loading episodes...
+                                                        </div>
+                                                      ) : subList.length === 0 ? (
+                                                        <div className="text-zinc-500 text-[11px] py-3 text-center italic">
+                                                          No episodes found
+                                                        </div>
+                                                      ) : (
+                                                        <div className="space-y-1">
+                                                          {subList.map((sub, sIdx) => {
+                                                            const isSubSel = selectedSubs.has(sub.url);
+                                                            return (
+                                                              <div 
+                                                                onClick={() => toggleSubEpisodeSelection(singleEpisodeUrl!, sub.url)}
+                                                                key={sIdx} 
+                                                                className={`flex items-center justify-between gap-3 p-2.5 rounded-lg border text-xs transition-all cursor-pointer select-none ${
+                                                                  isSubSel 
+                                                                    ? 'border-indigo-500/20 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-semibold shadow-xs' 
+                                                                    : 'border-transparent hover:bg-zinc-100 dark:hover:bg-zinc-800/60 text-zinc-700 dark:text-zinc-300'
+                                                                }`}
+                                                              >
+                                                                <div className="flex items-center gap-2.5 min-w-0">
+                                                                  <input
+                                                                    type="checkbox"
+                                                                    checked={isSubSel}
+                                                                    readOnly
+                                                                    className="h-3.5 w-3.5 rounded border-zinc-300 dark:border-zinc-700 text-indigo-600 focus:ring-indigo-500 cursor-pointer pointer-events-none"
+                                                                  />
+                                                                  <span className={`text-[10px] font-black px-1.5 py-0.5 rounded border shrink-0 select-none font-mono ${qConfig.badge}`}>
+                                                                    {extractEpisodeNumber(sub.file_name, sIdx)}
+                                                                  </span>
+                                                                  <span className="truncate" title={sub.file_name}>
+                                                                    {sub.file_name}
+                                                                  </span>
+                                                                </div>
+                                                                {sub.size && (
+                                                                  <span className="text-[10px] font-mono bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-500 dark:text-zinc-400 shrink-0 font-bold border border-zinc-200/40 dark:border-zinc-700/40">
+                                                                    {sub.size}
+                                                                  </span>
+                                                                )}
+                                                              </div>
+                                                            );
+                                                          })}
+                                                        </div>
+                                                      )}
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              )}
+
+                                              {/* Direct Episodes Row */}
+                                              {group.directEpisodes.length > 0 && (() => {
+                                                const directKey = `${seasonName}-${qualityText}-direct`;
+                                                const isDirectExpanded = Boolean(expandedEpisodes[directKey]);
+                                                const directIndices = group.directEpisodes.map(d => d.originalIndex);
+                                                const allDirectSelected = directIndices.length > 0 && directIndices.every(idx => mdriveSelectedIndices.has(idx));
+                                                const someDirectSelected = directIndices.length > 0 && directIndices.some(idx => mdriveSelectedIndices.has(idx)) && !allDirectSelected;
+
+                                                return (
+                                                  <div>
+                                                    <div 
+                                                      onClick={() => toggleSubEpisodeCollapse(directKey)}
+                                                      className="p-3.5 flex items-center justify-between gap-3 hover:bg-zinc-50 dark:hover:bg-zinc-900/40 cursor-pointer transition select-none"
+                                                    >
+                                                      <div className="flex items-center gap-3 min-w-0">
+                                                        <input
+                                                          type="checkbox"
+                                                          checked={allDirectSelected}
+                                                          ref={el => {
+                                                            if (el) el.indeterminate = someDirectSelected;
+                                                          }}
+                                                          onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setMdriveSelectedIndices(prev => {
+                                                              const next = new Set(prev);
+                                                              if (allDirectSelected) {
+                                                                directIndices.forEach(idx => next.delete(idx));
+                                                              } else {
+                                                                directIndices.forEach(idx => next.add(idx));
+                                                              }
+                                                              return next;
+                                                            });
+                                                          }}
+                                                          onChange={() => {}}
+                                                          className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-700 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                                        />
+                                                        <div className="min-w-0">
+                                                          <span className="text-xs font-bold text-zinc-900 dark:text-white block truncate">
+                                                            {group.qualityCat === '2160p' ? '4K' : group.qualityCat} Episodes ({group.directEpisodes.length} Episodes)
+                                                          </span>
+                                                          <span className="text-[10px] text-zinc-500 block truncate">
+                                                            Click expand to view and select individual episodes
+                                                          </span>
+                                                        </div>
+                                                      </div>
+
+                                                      <div className="flex items-center gap-2">
+                                                        <span className="text-[11px] font-bold text-zinc-500 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full border border-zinc-200 dark:border-zinc-700">
+                                                          {group.directEpisodes.filter(d => mdriveSelectedIndices.has(d.originalIndex)).length} / {group.directEpisodes.length} selected
+                                                        </span>
+                                                        <button 
+                                                          type="button" 
+                                                          className="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+                                                        >
+                                                          {isDirectExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                                                        </button>
+                                                      </div>
+                                                    </div>
+
+                                                    {/* Expanded Direct Episodes List */}
+                                                    {isDirectExpanded && (
+                                                      <div className="p-3 bg-zinc-50/50 dark:bg-zinc-900/20 space-y-1">
+                                                        {group.directEpisodes.map((d, dIdx) => {
+                                                          const isEpSel = mdriveSelectedIndices.has(d.originalIndex);
+                                                          const epNum = d.epNumber !== undefined ? d.epNumber : (dIdx + 1);
+                                                          return (
+                                                            <div 
+                                                              key={d.originalIndex}
+                                                              onClick={() => {
+                                                                setMdriveSelectedIndices(prev => {
+                                                                  const next = new Set(prev);
+                                                                  if (next.has(d.originalIndex)) next.delete(d.originalIndex);
+                                                                  else next.add(d.originalIndex);
+                                                                  return next;
+                                                                });
+                                                              }}
+                                                              className={`flex items-center justify-between gap-3 p-2.5 rounded-lg border text-xs transition-all cursor-pointer select-none ${
+                                                                isEpSel 
+                                                                  ? 'border-indigo-500/20 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-semibold shadow-xs' 
+                                                                  : 'border-transparent hover:bg-zinc-100 dark:hover:bg-zinc-800/60 text-zinc-700 dark:text-zinc-300'
+                                                              }`}
+                                                            >
+                                                              <div className="flex items-center gap-2.5 min-w-0">
+                                                                <input
+                                                                  type="checkbox"
+                                                                  checked={isEpSel}
+                                                                  readOnly
+                                                                  className="h-3.5 w-3.5 rounded border-zinc-300 dark:border-zinc-700 text-indigo-600 focus:ring-indigo-500 cursor-pointer pointer-events-none"
+                                                                />
+                                                                <span className={`text-[10px] font-black px-1.5 py-0.5 rounded border shrink-0 select-none font-mono ${qConfig.badge}`}>
+                                                                  {extractEpisodeNumber(d.item.file_name, dIdx) || `E${epNum < 10 ? '0' : ''}${epNum}`}
+                                                                </span>
+                                                                <span className="truncate" title={d.item.file_name}>
+                                                                  {d.item.file_name}
+                                                                </span>
+                                                              </div>
+                                                              {d.item.size && (
+                                                                <span className="text-[10px] font-mono bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-500 dark:text-zinc-400 shrink-0 font-bold border border-zinc-200/40 dark:border-zinc-700/40">
+                                                                  {d.item.size}
+                                                                </span>
+                                                              )}
+                                                            </div>
+                                                          );
+                                                        })}
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                );
+                                              })()}
+                                            </div>
+
+                                            {/* Others inside quality */}
+                                            {group.others.length > 0 && (
+                                              <div className="space-y-1.5 pt-2 px-1">
+                                                {group.others.map(({ item, originalIndex }) => (
+                                                  <div 
+                                                    key={originalIndex} 
+                                                    onClick={() => {
+                                                      setMdriveSelectedIndices(prev => {
+                                                        const next = new Set(prev);
+                                                        if (next.has(originalIndex)) next.delete(originalIndex);
+                                                        else next.add(originalIndex);
+                                                        return next;
+                                                      });
+                                                    }}
+                                                    className="flex items-center gap-2.5 p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-900/60 rounded-lg cursor-pointer transition select-none"
+                                                  >
+                                                    <input
+                                                      type="checkbox"
+                                                      checked={mdriveSelectedIndices.has(originalIndex)}
+                                                      onChange={() => {}} // toggled by row click
+                                                      className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-700 text-orange-600 focus:ring-orange-500 cursor-pointer"
+                                                    />
+                                                    <span className="text-xs text-zinc-600 dark:text-zinc-400 truncate">
+                                                      {item.file_name}
+                                                    </span>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                ))}
                               </div>
                             );
                           }
 
-                          // When episodes exist, render in distinct groups
-                          const visiblePacks = parsedMdriveGroups.packs.filter(({ item }) => matchesQuality(item));
-                          const visibleOthers = parsedMdriveGroups.others.filter(({ item }) => matchesQuality(item));
-
                           return (
-                            <div className="space-y-4">
-                              {/* 1. Complete Season Packs Section */}
-                              {contentTypeFilter !== 'episodes' && visiblePacks.length > 0 && (
-                                <div className="rounded-2xl border border-purple-500/30 bg-purple-500/5 p-3.5 space-y-2.5">
-                                  <div className="flex items-center justify-between px-1">
-                                    <div className="flex items-center gap-2">
-                                      <Package className="w-4 h-4 text-purple-500" />
-                                      <span className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider">
-                                        Complete Season Packs
-                                      </span>
-                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-600 dark:text-purple-400">
-                                        {visiblePacks.length} {visiblePacks.length === 1 ? 'pack' : 'packs'}
-                                      </span>
-                                    </div>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const allPacksSel = visiblePacks.every(({ originalIndex }) => mdriveSelectedIndices.has(originalIndex));
-                                        setMdriveSelectedIndices(prev => {
-                                          const next = new Set(prev);
-                                          if (allPacksSel) visiblePacks.forEach(({ originalIndex }) => next.delete(originalIndex));
-                                          else visiblePacks.forEach(({ originalIndex }) => next.add(originalIndex));
-                                          return next;
-                                        });
-                                      }}
-                                      className="text-[11px] font-bold text-purple-600 dark:text-purple-400 hover:underline px-2 py-0.5"
-                                    >
-                                      {visiblePacks.every(({ originalIndex }) => mdriveSelectedIndices.has(originalIndex)) ? 'Deselect Packs' : 'Select All Packs'}
-                                    </button>
-                                  </div>
-                                  <div className="grid gap-2">
-                                    {visiblePacks.map(({ item, originalIndex, info }) => renderItemCard(item, originalIndex, info, false))}
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* 2. Individual Episodes Section */}
-                              {contentTypeFilter !== 'packs' && (
-                                <div className="space-y-3 pt-1">
-                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between px-1 border-b border-zinc-200 dark:border-zinc-800 pb-2.5 gap-2">
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                      <Tv className="w-4 h-4 text-indigo-500" />
-                                      <span className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider">
-                                        Episodes ({parsedMdriveGroups.sortedEpKeys.length} Episodes)
-                                      </span>
-                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-600 dark:text-indigo-400">
-                                        {parsedMdriveGroups.totalEpisodesCount} Links
-                                      </span>
-                                    </div>
-                                    <div className="flex items-center gap-2 flex-wrap self-end sm:self-auto">
-                                      {/* Grouping switcher */}
-                                      <div className="flex items-center bg-zinc-200/60 dark:bg-zinc-800/60 p-0.5 rounded-lg text-[11px] font-bold">
-                                        <button
-                                          type="button"
-                                          onClick={() => setEpisodeGroupingMode('quality')}
-                                          className={`px-2.5 py-1 rounded-md transition ${
-                                            episodeGroupingMode === 'quality'
-                                              ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-xs'
-                                              : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
-                                          }`}
-                                        >
-                                          By Quality (720p...)
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => setEpisodeGroupingMode('episode')}
-                                          className={`px-2.5 py-1 rounded-md transition ${
-                                            episodeGroupingMode === 'episode'
-                                              ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-xs'
-                                              : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
-                                          }`}
-                                        >
-                                          By Episode
-                                        </button>
-                                      </div>
-
-                                      <button
-                                        type="button"
-                                        onClick={selectAllEpisodes}
-                                        className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline px-2 py-0.5"
-                                      >
-                                        Select All Episodes
-                                      </button>
-                                    </div>
-                                  </div>
-
-                                  {/* Quality Grouping Mode (720p together, 1080p together, etc.) */}
-                                  {episodeGroupingMode === 'quality' ? (
-                                    <div className="space-y-4">
-                                      {parsedMdriveGroups.activeQualityCategories.map((qCat) => {
-                                        const qLinks = (parsedMdriveGroups.episodesByQuality.get(qCat) || []).filter(({ item }) => matchesQuality(item));
-                                        if (qLinks.length === 0) return null;
-                                        const allQSelected = qLinks.length > 0 && qLinks.every(({ originalIndex }) => mdriveSelectedIndices.has(originalIndex));
-                                        const qConfig = QUALITY_COLORS[qCat] || QUALITY_COLORS['Other'];
-                                        const qLabel = QUALITY_LABELS[qCat] || qCat;
-
-                                        return (
-                                          <div
-                                            key={qCat}
-                                            className={`rounded-2xl border ${qConfig.border} ${qConfig.bg} p-3.5 space-y-3 transition-colors duration-200`}
-                                          >
-                                            <div className="flex items-center justify-between px-1 flex-wrap gap-2">
-                                              <div className="flex items-center gap-2">
-                                                <span className={`px-2.5 py-1 rounded-lg text-xs font-black border ${qConfig.badge}`}>
-                                                  {qLabel}
-                                                </span>
-                                                <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
-                                                  {qLinks.length} {qLinks.length === 1 ? 'episode link' : 'episodes'}
-                                                </span>
-                                              </div>
-                                              <button
-                                                type="button"
-                                                onClick={() => toggleQualityEpisodesSelection(qCat)}
-                                                className={`text-xs font-bold px-3 py-1 rounded-lg border transition shadow-xs ${
-                                                  allQSelected
-                                                    ? 'bg-rose-500/15 hover:bg-rose-500/25 text-rose-600 dark:text-rose-400 border-rose-500/30'
-                                                    : `${qConfig.buttonBg} ${qConfig.buttonText}`
-                                                }`}
-                                              >
-                                                {allQSelected ? `Deselect All ${qCat}` : `Select All ${qCat} (${qLinks.length})`}
-                                              </button>
-                                            </div>
-                                            <div className="grid gap-2">
-                                              {qLinks.map(({ item, originalIndex, info }) => renderItemCard(item, originalIndex, info, true))}
-                                            </div>
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  ) : (
-                                    /* Episode-first Grouping Mode */
-                                    <div className="space-y-3">
-                                      {parsedMdriveGroups.sortedEpKeys.map((epNum) => {
-                                        const epLinks = (parsedMdriveGroups.episodesMap.get(epNum) || []).filter(({ item }) => matchesQuality(item));
-                                        if (epLinks.length === 0) return null;
-                                        const allEpSelected = epLinks.every(({ originalIndex }) => mdriveSelectedIndices.has(originalIndex));
-                                        const label = epLinks[0]?.info.label || `Episode ${epNum}`;
-
-                                        return (
-                                          <div key={epNum} className="rounded-2xl border border-zinc-200/90 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/40 p-3 space-y-2">
-                                            <div className="flex items-center justify-between px-1">
-                                              <div className="flex items-center gap-2">
-                                                <span className="px-2.5 py-0.5 rounded-md text-xs font-black bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30">
-                                                  {label}
-                                                </span>
-                                                <span className="text-[11px] font-medium text-zinc-500">
-                                                  {epLinks.length} {epLinks.length === 1 ? 'quality' : 'qualities'} available
-                                                </span>
-                                              </div>
-                                              <button
-                                                type="button"
-                                                onClick={() => toggleEpisodeSelection(epNum)}
-                                                className={`text-[11px] font-bold px-2 py-0.5 rounded-md transition ${
-                                                  allEpSelected 
-                                                    ? 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30'
-                                                    : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800'
-                                                }`}
-                                              >
-                                                {allEpSelected ? 'Deselect Ep' : 'Select Ep'}
-                                              </button>
-                                            </div>
-                                            <div className="grid gap-2">
-                                              {epLinks.map(({ item, originalIndex, info }) => renderItemCard(item, originalIndex, info, false))}
-                                            </div>
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-
-                              {/* 3. General / Other Links Section */}
-                              {contentTypeFilter === 'all' && visibleOthers.length > 0 && (
-                                <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/30 p-3 space-y-2">
-                                  <div className="flex items-center justify-between px-1">
-                                    <div className="flex items-center gap-2">
-                                      <Film className="w-4 h-4 text-zinc-500" />
-                                      <span className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider">
-                                        Other Links
-                                      </span>
-                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
-                                        {visibleOthers.length}
-                                      </span>
-                                    </div>
-                                  </div>
-                                  <div className="grid gap-2">
-                                    {visibleOthers.map(({ item, originalIndex, info }) => renderItemCard(item, originalIndex, info, true))}
-                                  </div>
-                                </div>
+                            <div className="grid gap-2">
+                              {filteredMdriveResults.map(({ item, originalIndex: i }) => 
+                                renderItemCard(item, i, undefined, false)
                               )}
                             </div>
                           );
+
                         })()}
                       </div>
                     )}
@@ -4234,10 +5162,10 @@ export const LinkCheckerModal: React.FC<Props> = ({
                       </button>
                       <button
                         onClick={confirmMdriveSelection}
-                        disabled={mdriveSelectedIndices.size === 0}
+                        disabled={mdriveSelectedIndices.size === 0 && !Object.values(selectedSubEpisodes).some(s => s.size > 0)}
                         className="bg-cyan-500 hover:bg-cyan-600 disabled:opacity-50 text-white px-8 py-2.5 rounded-2xl font-bold flex items-center gap-2 transition-all shadow-lg shadow-cyan-500/20"
                       >
-                        Add {mdriveSelectedIndices.size} Extracted Links
+                        Add {mdriveSelectedIndices.size + Object.values(selectedSubEpisodes).reduce((acc, s) => acc + s.size, 0)} Extracted Links
                       </button>
                     </div>
                   </div>
@@ -4255,31 +5183,51 @@ export const LinkCheckerModal: React.FC<Props> = ({
                   <label className="text-sm font-medium text-zinc-700 dark:text-zinc-200">Paste one or multiple links / full movie post</label>
                   <textarea ref={textareaRef} value={input} onChange={(e) => setInput(e.target.value)} placeholder="Paste links or a full movie post here..." rows={6} className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-4 py-3 text-sm text-zinc-900 dark:text-white placeholder:text-zinc-500 outline-none focus:ring-2 focus:ring-cyan-500 transition-colors duration-300" />
 
-                  {!disableAutoClipboard && (
-                    <div className="flex flex-col gap-2">
+                  <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pt-1">
+                    <label 
+                      htmlFor="title-import-waterfall-checkbox" 
+                      className="inline-flex items-center gap-2 text-sm font-medium text-zinc-700 dark:text-zinc-300 cursor-pointer select-none"
+                    >
+                      <input
+                        id="title-import-waterfall-checkbox"
+                        type="checkbox"
+                        checked={titleImportWaterfall}
+                        onChange={(e) => setTitleImportWaterfall(e.target.checked)}
+                        className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                      />
+                      <span className="flex items-center gap-1.5">
+                        Title Import Waterfall
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${titleImportWaterfall ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 border border-zinc-200/40 dark:border-zinc-700/40'}`}>
+                          {titleImportWaterfall ? 'Enabled' : 'Disabled'}
+                        </span>
+                      </span>
+                    </label>
+
+                    {!disableAutoClipboard && (
                       <label className="inline-flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300 cursor-pointer select-none">
                         <input
                           type="checkbox"
                           checked={autoClipboard}
                           onChange={(e) => setAutoClipboard(e.target.checked)}
-                          className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-cyan-500 focus:ring-cyan-500"
+                          className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-cyan-500 focus:ring-cyan-500 cursor-pointer"
                         />
                         Auto-detect and paste links from clipboard (Every 3s)
                       </label>
-                      {autoClipboard && (
-                        <div className="text-xs pl-6 transition-all duration-300">
-                          {clipboardStatus === "denied" ? (
-                            <span className="text-rose-600 dark:text-rose-400 font-medium flex items-center gap-1.5 animate-fade-in">
-                              <span className="inline-block w-2 h-2 rounded-full bg-rose-500" />
-                              Access restricted (Please grant clipboard permission)
-                            </span>
-                          ) : (
-                            <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1.5 animate-fade-in">
-                              <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                              Active (Monitoring clipboard)
-                            </span>
-                          )}
-                        </div>
+                    )}
+                  </div>
+
+                  {!disableAutoClipboard && autoClipboard && (
+                    <div className="text-xs pl-6 transition-all duration-300 -mt-1">
+                      {clipboardStatus === "denied" ? (
+                        <span className="text-rose-600 dark:text-rose-400 font-medium flex items-center gap-1.5 animate-fade-in">
+                          <span className="inline-block w-2 h-2 rounded-full bg-rose-500" />
+                          Access restricted (Please grant clipboard permission)
+                        </span>
+                      ) : (
+                        <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1.5 animate-fade-in">
+                          <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                          Active (Monitoring clipboard)
+                        </span>
                       )}
                     </div>
                   )}

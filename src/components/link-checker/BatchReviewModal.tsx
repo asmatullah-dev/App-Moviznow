@@ -19,7 +19,7 @@ export interface BatchReviewItem {
 
 interface BatchReviewModalProps {
   batchReviewItems: BatchReviewItem[];
-  updateBatchReviewItem: (key: string, field: 'title' | 'year', value: string) => void;
+  updateBatchReviewItem: (key: string, field: 'title' | 'year' | 'type', value: string) => void;
   removeBatchReviewItem: (key: string) => void;
   onCancel: () => void;
   onConfirm: () => void;
@@ -97,15 +97,24 @@ export const BatchReviewModal: React.FC<BatchReviewModalProps> = ({
                 </button>
               </div>
               <div className="flex flex-wrap gap-2">
-                <span
-                  className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateBatchReviewItem(
+                      item.key,
+                      'type',
+                      item.metadata.type === 'series' ? 'movie' : 'series'
+                    )
+                  }
+                  title="Click to toggle type (movie/series)"
+                  className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
                     item.metadata.type === 'series'
-                      ? 'bg-indigo-500/15 text-indigo-500 border-indigo-500/30'
-                      : 'bg-blue-500/15 text-blue-500 border-blue-500/30'
+                      ? 'bg-indigo-500/15 text-indigo-500 border-indigo-500/30 hover:bg-indigo-500/25'
+                      : 'bg-blue-500/15 text-blue-500 border-blue-500/30 hover:bg-blue-500/25'
                   }`}
                 >
-                  {item.metadata.type}
-                </span>
+                  {item.metadata.type} ✎
+                </button>
                 {item.metadata.languages.map((l) => (
                   <span
                     key={l}

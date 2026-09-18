@@ -1,20 +1,38 @@
 import React, { useState } from 'react';
-import { Check, Copy } from 'lucide-react';
+import { Check, Copy, Zap, Clock } from 'lucide-react';
 import { useSettings } from '../contexts/SettingsContext';
+import { BankAccount } from '../types';
 
 interface PaymentMethodsProps {
   copied: boolean;
   onCopy: (text?: string) => void;
+  selectedBankId?: string | null;
+  onSelectBank?: (bank: BankAccount) => void;
 }
 
-export default function PaymentMethods({ copied, onCopy }: PaymentMethodsProps) {
+export default function PaymentMethods({ 
+  copied, 
+  onCopy,
+  selectedBankId: externalSelectedBankId,
+  onSelectBank
+}: PaymentMethodsProps) {
   const { settings } = useSettings();
-  const [selectedBankId, setSelectedBankId] = useState<string | null>(null);
+  const [internalSelectedBankId, setInternalSelectedBankId] = useState<string | null>(null);
   
   if (!settings) return null;
 
-  const currentBankId = selectedBankId || settings.bankAccounts?.[0]?.id;
-  const selectedBank = settings.bankAccounts?.find(b => b.id === currentBankId);
+  const currentBankId = externalSelectedBankId !== undefined 
+    ? (externalSelectedBankId || settings.bankAccounts?.[0]?.id)
+    : (internalSelectedBankId || settings.bankAccounts?.[0]?.id);
+    
+  const selectedBank = settings.bankAccounts?.find(b => b.id === currentBankId) || settings.bankAccounts?.[0];
+
+  const handleSelect = (bank: BankAccount) => {
+    setInternalSelectedBankId(bank.id);
+    if (onSelectBank) {
+      onSelectBank(bank);
+    }
+  };
 
   const isIBAN = (value: string) => {
     return /^[A-Z]{2}[0-9]{2}[A-Z0-9]{4,30}$/i.test(value.replace(/\s/g, ''));
@@ -32,25 +50,44 @@ export default function PaymentMethods({ copied, onCopy }: PaymentMethodsProps) 
   }
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-3">
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 sm:grid-cols-2 gap-3">
         {settings.bankAccounts?.map((bank) => {
           const isSelected = bank.id === currentBankId;
+          const isAuto = bank.allowAutoApproval !== false;
           return (
             <button 
               key={bank.id}
-              onClick={() => setSelectedBankId(bank.id)}
+              type="button"
+              onClick={() => handleSelect(bank)}
               style={{ 
                 backgroundColor: isSelected ? (bank.textColor || '#ffffff') : (bank.labelColor || bank.color),
                 borderColor: isSelected ? (bank.labelColor || bank.color) : 'transparent',
                 color: isSelected ? (bank.labelColor || bank.color) : (bank.textColor || '#ffffff')
               }}
-              className={`flex items-center gap-3 px-5 py-3 rounded-2xl border text-sm font-bold shadow-sm transition-all active:scale-95 ${isSelected ? 'ring-2 ring-emerald-500 ring-offset-2 dark:ring-offset-black' : ''}`}
+              className={`flex items-center justify-between px-4 py-3 rounded-2xl border text-sm font-bold shadow-sm transition-all active:scale-95 cursor-pointer ${isSelected ? 'ring-2 ring-emerald-500 ring-offset-2 dark:ring-offset-black scale-[1.02]' : 'opacity-90 hover:opacity-100'}`}
             >
-              {bank.iconUrl && (
-                <img src={bank.iconUrl} alt="" className="w-5 h-5 object-contain" referrerPolicy="no-referrer" />
+              <div className="flex items-center gap-2 truncate">
+                {bank.iconUrl && (
+                  <img src={bank.iconUrl} alt="" className="w-5 h-5 object-contain shrink-0" referrerPolicy="no-referrer" />
+                )}
+                <span className="truncate">{bank.name}</span>
+              </div>
+              {isAuto ? (
+                <span 
+                  title="Auto Approval Supported" 
+                  className={`text-[10px] font-black px-1.5 py-0.5 rounded-md shrink-0 flex items-center gap-0.5 ${isSelected ? 'bg-black/10 dark:bg-white/10' : 'bg-white/20'}`}
+                >
+                  <Zap className="w-2.5 h-2.5 fill-current" /> Auto
+                </span>
+              ) : (
+                <span 
+                  title="Manual Approval Method" 
+                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md shrink-0 flex items-center gap-0.5 ${isSelected ? 'bg-black/10 dark:bg-white/10' : 'bg-black/20'}`}
+                >
+                  Manual
+                </span>
               )}
-              {bank.name}
             </button>
           );
         })}
@@ -87,13 +124,33 @@ export default function PaymentMethods({ copied, onCopy }: PaymentMethodsProps) 
               </div>
               <button 
                 onClick={() => onCopy(selectedBank?.accountNumber || settings.accountNumber)}
-                className="flex-shrink-0 flex items-center gap-2 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-lg transition-all text-xs font-bold border border-zinc-200 dark:border-zinc-700"
+                className="flex-shrink-0 flex items-center gap-2 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-lg transition-all text-xs font-bold border border-zinc-200 dark:border-zinc-700 cursor-pointer"
               >
                 {copied ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
                 {copied ? 'Copied' : 'Copy'}
               </button>
             </div>
           </div>
+
+          {/* Verification Capability Indicator */}
+          {selectedBank && (
+            <div className="mt-4 pt-3 border-t border-zinc-200/80 dark:border-zinc-800/80 flex items-center justify-between text-xs">
+              {selectedBank.allowAutoApproval !== false ? (
+                <div className="flex items-center gap-1.5 font-bold text-emerald-600 dark:text-emerald-400">
+                  <Zap className="w-3.5 h-3.5 fill-emerald-500 text-emerald-500" />
+                  <span>⚡ Instant AI Auto-Approval Supported</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 font-bold text-zinc-600 dark:text-zinc-400">
+                  <Clock className="w-3.5 h-3.5 text-zinc-500" />
+                  <span>Manual Admin Review Required</span>
+                </div>
+              )}
+              <span className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400">
+                {selectedBank.allowAutoApproval !== false ? 'Verified via Bank API' : 'Manual verification'}
+              </span>
+            </div>
+          )}
         </div>
       </div>
     </div>
