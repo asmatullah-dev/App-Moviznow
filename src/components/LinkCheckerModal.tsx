@@ -5655,7 +5655,14 @@ export const LinkCheckerModal: React.FC<Props> = ({
                                       <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 mr-1 flex items-center gap-1.5"><Server className="h-3.5 w-3.5" /> Downloads:</span>
                                       {result.candidates && result.candidates.length > 0 ? (
                                         <>
-                                          {result.candidates.map((cand, idx) => {
+                                          {result.candidates.filter((cand) => {
+                                            const lowerT = (cand.text || '').toLowerCase();
+                                            const lowerH = (cand.href || '').toLowerCase();
+                                            return !lowerT.includes('login') && !lowerH.includes('login') &&
+                                                   !lowerT.includes('moviesdrive') && !lowerH.includes('moviesdrive') &&
+                                                   !lowerT.includes('mdrive') && !lowerH.includes('mdrive') &&
+                                                   !lowerT.includes('telegram') && !lowerH.includes('telegram');
+                                          }).map((cand, idx) => {
                                             let name = cand.text.replace(/download/i, '').replace(/\[|\]/g, '').trim();
                                             if (!name) return null;
                                             const isPixeldrain = name.toLowerCase().includes("pixeldrain") || cand.href.toLowerCase().includes("pixeldrain");

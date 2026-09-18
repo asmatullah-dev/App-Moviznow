@@ -2016,7 +2016,16 @@ export default function MovieDetails() {
               if (data.url && data.url !== targetUrl && !isHubcloudRawLink(data.url)) {
                 finalUrl = data.url;
                 finalTinyUrl = undefined;
-                finalCandidates = data.candidates;
+                finalCandidates = Array.isArray(data.candidates)
+                  ? data.candidates.filter((c: any) => {
+                      const lowerT = (c.text || '').toLowerCase();
+                      const lowerH = (c.href || '').toLowerCase();
+                      return !lowerT.includes('login') && !lowerH.includes('login') &&
+                             !lowerT.includes('moviesdrive') && !lowerH.includes('moviesdrive') &&
+                             !lowerT.includes('mdrive') && !lowerH.includes('mdrive') &&
+                             !lowerT.includes('telegram') && !lowerH.includes('telegram');
+                    })
+                  : data.candidates;
                 finalSize = data.size;
 
                 const cacheEntry = {
@@ -4013,7 +4022,14 @@ export default function MovieDetails() {
               )}
 
               <div className="flex flex-col gap-3">
-                {linkPopup.candidates && linkPopup.candidates.length > 0 && (
+                {linkPopup.candidates && linkPopup.candidates.filter(c => {
+                  const lowerT = (c.text || '').toLowerCase();
+                  const lowerH = (c.href || '').toLowerCase();
+                  return !lowerT.includes('login') && !lowerH.includes('login') &&
+                         !lowerT.includes('moviesdrive') && !lowerH.includes('moviesdrive') &&
+                         !lowerT.includes('mdrive') && !lowerH.includes('mdrive') &&
+                         !lowerT.includes('telegram') && !lowerH.includes('telegram');
+                }).length > 0 && (
                   <div className="mb-1">
                     <label className="block text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-2">
                       {t('Select Server')}:
@@ -4025,7 +4041,14 @@ export default function MovieDetails() {
                       }
                       className="w-full bg-zinc-100 dark:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-700/60 rounded-xl p-3 text-sm font-medium text-zinc-900 dark:text-white outline-none ring-2 ring-transparent focus:ring-emerald-500 transition-all cursor-pointer"
                     >
-                      {linkPopup.candidates.map((c, i) => (
+                      {linkPopup.candidates.filter(c => {
+                        const lowerT = (c.text || '').toLowerCase();
+                        const lowerH = (c.href || '').toLowerCase();
+                        return !lowerT.includes('login') && !lowerH.includes('login') &&
+                               !lowerT.includes('moviesdrive') && !lowerH.includes('moviesdrive') &&
+                               !lowerT.includes('mdrive') && !lowerH.includes('mdrive') &&
+                               !lowerT.includes('telegram') && !lowerH.includes('telegram');
+                      }).map((c, i) => (
                         <option key={i} value={c.href}>
                           {c.text
                             .replace(/download|download file/gi, "")

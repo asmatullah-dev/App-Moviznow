@@ -839,7 +839,15 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
             }
           });
         }
-        if (href && !text.includes("telegram") && !href.includes("telegram") && !seenCandidateUrls.has(href)) {
+        const lowerHref = (href || "").toLowerCase();
+        const lowerText = (text || "").toLowerCase();
+        const isExcluded =
+          lowerText.includes("telegram") || lowerHref.includes("telegram") ||
+          lowerText.includes("login") || lowerHref.includes("login") ||
+          lowerText.includes("moviesdrive") || lowerHref.includes("moviesdrive") ||
+          lowerText.includes("mdrive") || lowerHref.includes("mdrive");
+
+        if (href && !isExcluded && !seenCandidateUrls.has(href)) {
           seenCandidateUrls.add(href);
           candidateLinks.push({ text, href });
         }
@@ -881,7 +889,22 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
 
       /* Skipping expensive checks to speed up extraction */
 
-      const returnCandidates = candidateLinks.map((c) => {
+      const returnCandidates = candidateLinks
+        .filter((c) => {
+          const lText = (c.text || "").toLowerCase();
+          const lHref = (c.href || "").toLowerCase();
+          return (
+            !lText.includes("login") &&
+            !lHref.includes("login") &&
+            !lText.includes("moviesdrive") &&
+            !lHref.includes("moviesdrive") &&
+            !lText.includes("mdrive") &&
+            !lHref.includes("mdrive") &&
+            !lText.includes("telegram") &&
+            !lHref.includes("telegram")
+          );
+        })
+        .map((c) => {
         let href = c.href;
         if (
           /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+)/i.test(

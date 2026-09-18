@@ -995,7 +995,14 @@ export async function performFullLinkScan(
           try {
             dLinkData = await dLinkRes.value.json();
             if (dLinkData && dLinkData.candidates && Array.isArray(dLinkData.candidates) && dLinkData.candidates.length > 0) {
-              candidatesInfo = dLinkData.candidates;
+              candidatesInfo = dLinkData.candidates.filter((c: any) => {
+                const lowerT = (c.text || '').toLowerCase();
+                const lowerH = (c.href || '').toLowerCase();
+                return !lowerT.includes('login') && !lowerH.includes('login') &&
+                       !lowerT.includes('moviesdrive') && !lowerH.includes('moviesdrive') &&
+                       !lowerT.includes('mdrive') && !lowerH.includes('mdrive') &&
+                       !lowerT.includes('telegram') && !lowerH.includes('telegram');
+              });
             }
           } catch (e) {
             console.error("Direct link parsing error", e);
