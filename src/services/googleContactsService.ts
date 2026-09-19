@@ -111,62 +111,91 @@ export function extractDobFromGoogleContact(birthdays?: any[]): string | undefin
 }
 
 /**
- * Updates or uploads a photo/avatar for a Google Contact using the Google People API (:updateContactPhoto)
+ * Updates or uploads a photo/avatar for a Google Contact using the Google People API (:updateContactPhoto).
+ * Prioritizes the server-side proxy which eliminates browser CORS & referer blocking,
+ * processes the image with sharp to a clean 500x500 JPEG, and uploads to Google People API.
  */
 export async function updateGoogleContactPhoto(
   resourceName: string,
   photoUrl: string,
   accessToken: string
-): Promise<boolean> {
-  if (!resourceName || !photoUrl) return false;
+): Promise<{ success: boolean; error?: string }> {
+  if (!resourceName || !photoUrl || !accessToken) {
+    return { success: false, error: 'Missing required parameters' };
+  }
 
+  const cleanResourceName = resourceName.startsWith('people/')
+    ? resourceName
+    : `people/${resourceName}`;
+
+  // 1. Primary: Use backend proxy to download, resize, convert to clean JPEG, and upload
+  try {
+    const res = await fetch('/api/contacts/update-photo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        resourceName: cleanResourceName,
+        photoUrl,
+        accessToken
+      })
+    });
+
+    if (res.ok) {
+      console.log(`[Google Contacts Photo] Successfully updated photo for ${cleanResourceName} via backend proxy`);
+      return { success: true };
+    } else {
+      const errData = await res.json().catch(() => ({}));
+      console.warn(`[Google Contacts Photo] Backend update failed (${res.status}):`, errData);
+    }
+  } catch (backendErr) {
+    console.warn(`[Google Contacts Photo] Backend proxy error, attempting client fallback:`, backendErr);
+  }
+
+  // 2. Client-side fallback (if backend is temporarily unavailable)
   try {
     let base64Photo = '';
 
     if (photoUrl.startsWith('data:image/')) {
       base64Photo = photoUrl.split(',')[1] || '';
     } else if (photoUrl.startsWith('http://') || photoUrl.startsWith('https://')) {
-      const response = await fetch(photoUrl);
-      if (!response.ok) {
-        console.warn(`[Google Contacts Photo] Could not fetch avatar from ${photoUrl} (${response.status})`);
-        return false;
+      const response = await fetch(photoUrl, { referrerPolicy: 'no-referrer' });
+      if (response.ok) {
+        const arrayBuffer = await response.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuffer);
+        let binary = '';
+        const chunkSize = 8192;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          const chunk = bytes.subarray(i, i + chunkSize);
+          binary += String.fromCharCode.apply(null, chunk as any);
+        }
+        base64Photo = btoa(binary);
       }
-      const arrayBuffer = await response.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuffer);
-      let binary = '';
-      for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      base64Photo = btoa(binary);
     }
 
-    if (!base64Photo) return false;
+    if (base64Photo) {
+      const updateUrl = `https://people.googleapis.com/v1/${cleanResourceName}:updateContactPhoto`;
+      const res = await fetch(updateUrl, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          photoBytes: base64Photo,
+          personFields: 'photos'
+        })
+      });
 
-    const updateUrl = `https://people.googleapis.com/v1/${resourceName}:updateContactPhoto`;
-    const res = await fetch(updateUrl, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        photoBytes: base64Photo,
-        personFields: 'photos'
-      })
-    });
-
-    if (res.ok) {
-      console.log(`[Google Contacts Photo] Successfully updated photo for ${resourceName}`);
-      return true;
-    } else {
-      const errText = await res.text();
-      console.warn(`[Google Contacts Photo] Failed to update photo for ${resourceName}: ${errText}`);
-      return false;
+      if (res.ok) {
+        console.log(`[Google Contacts Photo] Successfully updated photo for ${cleanResourceName} via client fallback`);
+        return { success: true };
+      }
     }
-  } catch (err) {
-    console.warn(`[Google Contacts Photo] Exception while updating photo for ${resourceName}:`, err);
-    return false;
+  } catch (clientErr) {
+    console.warn(`[Google Contacts Photo] Client fallback error for ${cleanResourceName}:`, clientErr);
   }
+
+  return { success: false, error: 'Failed to update contact photo' };
 }
 
 function loadGoogleGsiScript(): Promise<void> {
@@ -264,9 +293,10 @@ export function normalizePhone(phoneStr: string | null | undefined): PhoneNormal
  *   and keeps the remaining text ({Name} ({City}) and everything after) UNTOUCHED!
  */
 export function formatContactName(user: UserProfile, existingContactName?: string | null): string {
-  const isVip = user.role === 'vip';
-  const tierLetter = isVip ? 'V' : 'B';
-  const prefixCode = `A${tierLetter}`; // AV or AB
+  const roleLower = (user.role || '').toLowerCase();
+  const isVip = roleLower === 'vip';
+  const tierLetter = isVip ? 'V' : (roleLower === 'user' ? 'U' : 'B');
+  const prefixCode = `A${tierLetter}`; // AV, AB, or AU
 
   const expired = user.status === 'expired' || (!!user.expiryDate && user.expiryDate !== 'Lifetime' && isUserExpired(user.expiryDate));
   const statusPrefix = expired ? 'Exd ' : '';
@@ -662,19 +692,7 @@ export async function syncSingleUserContact(
   user: UserProfile,
   accessToken: string,
   cachedConnections?: GoogleContactPerson[]
-): Promise<{ success: boolean; created: boolean; updated: boolean; contactName: string; phoneUsed: string; error?: string }> {
-  const normalizedRole = (user.role || '').toString().trim().toLowerCase();
-  if (normalizedRole !== 'vip' && normalizedRole !== 'basic') {
-    return {
-      success: false,
-      created: false,
-      updated: false,
-      contactName: '',
-      phoneUsed: user.phone || '',
-      error: 'User role is not VIP or Basic (Only VIP and Basic roles are synced)'
-    };
-  }
-
+): Promise<{ success: boolean; created: boolean; updated: boolean; photoUpdated?: boolean; contactName: string; phoneUsed: string; error?: string }> {
   if (!user.phone) {
     return {
       success: false,
@@ -703,7 +721,7 @@ export async function syncSingleUserContact(
   const photoToUpload = user.photoURL && user.photoURL.trim() !== ''
     ? user.photoURL.trim()
     : nameForAvatar
-      ? `https://ui-avatars.com/api/?name=${encodeURIComponent(nameForAvatar.trim())}&background=random&size=256`
+      ? `https://ui-avatars.com/api/?name=${encodeURIComponent(nameForAvatar.trim())}&background=random&size=500`
       : undefined;
 
   try {
@@ -920,9 +938,11 @@ export async function syncSingleUserContact(
       }
 
       // Sync profile picture if available
+      let photoUpdated = false;
       if (photoToUpload && existingPerson.resourceName) {
         try {
-          await updateGoogleContactPhoto(existingPerson.resourceName, photoToUpload, accessToken);
+          const photoRes = await updateGoogleContactPhoto(existingPerson.resourceName, photoToUpload, accessToken);
+          photoUpdated = !!photoRes?.success;
         } catch (e) {
           console.warn(`[Google Contacts Sync] Could not sync photo for ${existingPerson.resourceName}:`, e);
         }
@@ -932,6 +952,7 @@ export async function syncSingleUserContact(
         success: true,
         created: false,
         updated: true,
+        photoUpdated,
         contactName: formattedName,
         phoneUsed: normalized
       };
@@ -997,10 +1018,12 @@ export async function syncSingleUserContact(
       }
 
       // Sync profile picture if available for newly created contact
+      let photoUpdated = false;
       const createdResourceName = createdPerson?.resourceName;
       if (photoToUpload && createdResourceName) {
         try {
-          await updateGoogleContactPhoto(createdResourceName, photoToUpload, accessToken);
+          const photoRes = await updateGoogleContactPhoto(createdResourceName, photoToUpload, accessToken);
+          photoUpdated = !!photoRes?.success;
         } catch (e) {
           console.warn(`[Google Contacts Sync] Could not sync photo for new contact ${createdResourceName}:`, e);
         }
@@ -1010,6 +1033,7 @@ export async function syncSingleUserContact(
         success: true,
         created: true,
         updated: false,
+        photoUpdated,
         contactName: formattedName,
         phoneUsed: normalized
       };
@@ -1034,9 +1058,10 @@ export async function syncMultipleUsersContacts(
   users: UserProfile[],
   accessToken: string,
   onProgress?: (current: number, total: number) => void
-): Promise<{ total: number; synced: number; created: number; updated: number; failed: number; errors: string[] }> {
+): Promise<{ total: number; synced: number; created: number; updated: number; photosUpdated: number; failed: number; errors: string[] }> {
   let created = 0;
   let updated = 0;
+  let photosUpdated = 0;
   let failed = 0;
   const errors: string[] = [];
 
@@ -1064,6 +1089,7 @@ export async function syncMultipleUsersContacts(
     if (res.success) {
       if (res.created) created++;
       if (res.updated) updated++;
+      if (res.photoUpdated) photosUpdated++;
     } else {
       failed++;
       errors.push(`${u.displayName || u.phone}: ${res.error}`);
@@ -1075,6 +1101,7 @@ export async function syncMultipleUsersContacts(
     synced: created + updated,
     created,
     updated,
+    photosUpdated,
     failed,
     errors
   };

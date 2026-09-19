@@ -124,9 +124,6 @@ export default function UserManagement() {
   }, [contactsToken]);
 
   const autoSyncUserToContacts = useCallback(async (userToSync: UserProfile) => {
-    const roleNorm = (userToSync.role || '').toLowerCase();
-    if (roleNorm !== 'vip' && roleNorm !== 'basic') return;
-    
     // Attempt to restore token if expired/missing in sessionStorage
     const restored = await loadAndVerifyStoredContactsToken();
     const token = restored.accessToken;
@@ -134,7 +131,7 @@ export default function UserManagement() {
     try {
       const res = await syncSingleUserContact(userToSync, token);
       if (res.success) {
-        console.log(`[Google Contacts Auto-Sync] Synced ${userToSync.displayName || userToSync.phone} -> ${res.contactName}`);
+        console.log(`[Google Contacts Auto-Sync] Synced ${userToSync.displayName || userToSync.phone} -> ${res.contactName} (Photo updated: ${res.photoUpdated ? 'yes' : 'no'})`);
       }
     } catch (err) {
       console.warn('[Google Contacts Auto-Sync Error]:', err);
@@ -197,11 +194,10 @@ export default function UserManagement() {
 
     const usersToSync = allUsers.filter(u => {
       if (!uidsToSync.includes(u.uid)) return false;
-      const role = (u.role || '').toLowerCase();
-      return role === 'vip' || role === 'basic';
+      return !!u.phone;
     });
     if (usersToSync.length === 0) {
-      setAlertConfig({ isOpen: true, title: 'No Eligible Users', message: 'Google Contacts sync is enabled only for users with VIP or Basic roles.' });
+      setAlertConfig({ isOpen: true, title: 'No Eligible Users', message: 'Selected users must have a phone or WhatsApp number to sync with Google Contacts.' });
       return;
     }
 
@@ -215,7 +211,7 @@ export default function UserManagement() {
 
       setContactsSyncResult({
         title: 'Google Contacts Sync Complete',
-        message: `Processed ${res.total} user(s):\n• Synced: ${res.synced} contact(s)\n  - Created: ${res.created}\n  - Updated: ${res.updated}${res.failed > 0 ? `\n• Failed / No Phone: ${res.failed}` : ''}`
+        message: `Processed ${res.total} user(s):\n• Synced: ${res.synced} contact(s)\n  - Created: ${res.created}\n  - Updated: ${res.updated}${res.photosUpdated > 0 ? `\n  - Profile Photos Synced: ${res.photosUpdated}` : ''}${res.failed > 0 ? `\n• Failed / No Phone: ${res.failed}` : ''}`
       });
     } catch (err: any) {
       setAlertConfig({ isOpen: true, title: 'Sync Error', message: err?.message || 'Failed to bulk sync contacts.' });

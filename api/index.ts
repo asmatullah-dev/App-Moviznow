@@ -10,6 +10,7 @@ import { getFirestore } from "firebase-admin/firestore";
 import axios from "axios";
 import https from "https";
 import * as cheerio from "cheerio";
+import sharp from "sharp";
 import { normalizeDomain } from "./_domainUtils.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -4220,6 +4221,105 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
     } catch (error) {
       console.error("Admin Delete User Error:", error);
       res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
+  // Google Contacts - Update Contact Photo Endpoint
+  // Proxies image download bypassing CORS & referer checks, converts format via sharp to clean 500x500 JPEG, and updates Google People API
+  app.post(["/api/contacts/update-photo", "/contacts/update-photo"], async (req, res) => {
+    try {
+      const { resourceName, photoUrl, photoBytes, accessToken } = req.body;
+      if (!resourceName || !accessToken) {
+        return res.status(400).json({ error: "resourceName and accessToken are required" });
+      }
+      if (!photoUrl && !photoBytes) {
+        return res.status(400).json({ error: "photoUrl or photoBytes is required" });
+      }
+
+      const cleanResourceName = resourceName.startsWith("people/")
+        ? resourceName
+        : `people/${resourceName}`;
+
+      let imageBuffer: Buffer | null = null;
+
+      if (photoBytes) {
+        imageBuffer = Buffer.from(photoBytes, "base64");
+      } else if (typeof photoUrl === "string") {
+        const trimmedUrl = photoUrl.trim();
+        if (trimmedUrl.startsWith("data:image/")) {
+          const commaIdx = trimmedUrl.indexOf(",");
+          if (commaIdx !== -1) {
+            imageBuffer = Buffer.from(trimmedUrl.slice(commaIdx + 1), "base64");
+          }
+        } else if (trimmedUrl.startsWith("http://") || trimmedUrl.startsWith("https://")) {
+          let fetchUrl = trimmedUrl;
+          if (fetchUrl.includes("googleusercontent.com")) {
+            fetchUrl = fetchUrl.replace(/=s\d+(-c)?$/, "") + "=s500-c";
+          }
+          const imgResp = await axios.get(fetchUrl, {
+            responseType: "arraybuffer",
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+              "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+            },
+            timeout: 15000,
+            maxContentLength: 15 * 1024 * 1024
+          });
+          imageBuffer = Buffer.from(imgResp.data);
+        }
+      }
+
+      if (!imageBuffer || imageBuffer.length === 0) {
+        return res.status(400).json({ error: "Could not retrieve image data from the provided photoUrl" });
+      }
+
+      // Process and convert image to clean 500x500 JPEG using sharp
+      let finalBase64 = "";
+      try {
+        const processed = await sharp(imageBuffer)
+          .resize(500, 500, { fit: "cover", position: "center" })
+          .jpeg({ quality: 88, mozjpeg: true })
+          .toBuffer();
+        finalBase64 = processed.toString("base64");
+      } catch (sharpErr) {
+        console.warn("[Contacts Photo API] Sharp processing warning, attempting raw buffer conversion:", sharpErr);
+        finalBase64 = imageBuffer.toString("base64");
+      }
+
+      if (!finalBase64) {
+        return res.status(400).json({ error: "Failed to generate photo bytes for upload" });
+      }
+
+      // Call Google People API :updateContactPhoto via HTTP PATCH
+      const updateUrl = `https://people.googleapis.com/v1/${cleanResourceName}:updateContactPhoto`;
+      const googleResp = await axios.patch(
+        updateUrl,
+        {
+          photoBytes: finalBase64,
+          personFields: "photos"
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json"
+          },
+          validateStatus: () => true
+        }
+      );
+
+      if (googleResp.status >= 200 && googleResp.status < 300) {
+        console.log(`[Contacts Photo API] Successfully updated photo for ${cleanResourceName}`);
+        return res.json({ success: true, photos: googleResp.data?.photos });
+      } else {
+        console.warn(`[Contacts Photo API] Google API error (${googleResp.status}):`, googleResp.data);
+        return res.status(googleResp.status).json({
+          error: "Google People API error updating photo",
+          details: googleResp.data
+        });
+      }
+    } catch (err: any) {
+      console.error("[Contacts Photo API] Internal error updating contact photo:", err?.message || err);
+      return res.status(500).json({ error: err?.message || "Failed to update contact photo" });
     }
   });
 
