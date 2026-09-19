@@ -33,7 +33,7 @@ try {
       projectId: firebaseConfig.projectId,
     });
   }
-  db = getFirestore(admin.app(), (firebaseConfig as any).firestoreDatabaseId);
+  db = getFirestore(admin.app(), (firebaseConfig as any).firestoreDatabaseId || "moviznow-app");
   try {
     db.settings({ ignoreUndefinedProperties: true });
   } catch {}
@@ -4851,7 +4851,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
     if (movieMatch) {
       const movieId = movieMatch[1];
       try {
-        const { projectId, firestoreDatabaseId, apiKey } = firebaseConfig;
+        const { projectId, firestoreDatabaseId, apiKey } = firebaseConfig as any;
         const dbId = firestoreDatabaseId || "(default)";
         const apiUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${dbId}/documents/content/${movieId}?key=${apiKey}`;
 

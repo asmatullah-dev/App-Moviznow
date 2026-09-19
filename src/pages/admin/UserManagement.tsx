@@ -3,7 +3,7 @@ import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
 import { collection, doc, updateDoc, getDoc, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit, deleteField, increment} from 'firebase/firestore';
 import { UserProfile, Role, Status, AnalyticsEvent, Content } from '../../types';
-import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, Bell, Mail, RefreshCw, Link2 as LinkIcon, Copy } from 'lucide-react';
+import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, Bell, Mail, RefreshCw, Link2 as LinkIcon, Copy, Users, CheckCircle } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -24,6 +24,14 @@ import { useLocation, useNavigate } from 'react-router-dom';
 
 import { useUsers, isUserExpired } from '../../contexts/UsersContext';
 import { getUtcVersion } from '../../utils/chunkMeta';
+import {
+  getStoredContactsToken,
+  getConnectedAccountEmail,
+  connectGoogleContacts,
+  disconnectGoogleContacts,
+  syncSingleUserContact,
+  syncMultipleUsersContacts
+} from '../../services/googleContactsService';
 
 type SortField = 'createdAt' | 'displayName' | 'phone' | 'expiryDate' | 'lastActive';
 type SortOrder = 'asc' | 'desc';
@@ -91,6 +99,105 @@ export default function UserManagement() {
   const [processing, setProcessing] = useState<Record<string, boolean>>({});
   const [userReviews, setUserReviews] = useState<Record<string, {rating: number, text: string}[]>>({});
 
+  // Google Contacts State & Handlers
+  const [contactsToken, setContactsToken] = useState<string | null>(() => getStoredContactsToken());
+  const [contactsAccountEmail, setContactsAccountEmail] = useState<string | null>(() => getConnectedAccountEmail());
+  const [isContactsPanelOpen, setIsContactsPanelOpen] = useState(false);
+  const [isConnectingContacts, setIsConnectingContacts] = useState(false);
+  const [isSyncingContacts, setIsSyncingContacts] = useState(false);
+  const [contactsSyncProgress, setContactsSyncProgress] = useState<{ current: number; total: number } | null>(null);
+  const [contactsSyncResult, setContactsSyncResult] = useState<{ title: string; message: string } | null>(null);
+
+  const autoSyncUserToContacts = useCallback(async (userToSync: UserProfile) => {
+    const roleNorm = (userToSync.role || '').toLowerCase();
+    if (roleNorm !== 'vip' && roleNorm !== 'basic') return;
+    const token = getStoredContactsToken();
+    if (!token || !userToSync.phone) return;
+    try {
+      const res = await syncSingleUserContact(userToSync, token);
+      if (res.success) {
+        console.log(`[Google Contacts Auto-Sync] Synced ${userToSync.displayName || userToSync.phone} -> ${res.contactName}`);
+      }
+    } catch (err) {
+      console.warn('[Google Contacts Auto-Sync Error]:', err);
+    }
+  }, []);
+
+  const handleConnectContacts = async () => {
+    setIsConnectingContacts(true);
+    try {
+      const conn = await connectGoogleContacts('wmoviznow@gmail.com');
+      setContactsToken(conn.accessToken);
+      setContactsAccountEmail(conn.email);
+      setAlertConfig({ isOpen: true, title: 'Google Contacts Connected', message: `Connected successfully with ${conn.email}. Contacts will now auto-sync on user edits, additions, status changes, or membership extensions.` });
+    } catch (err: any) {
+      console.error('Failed to connect Google Contacts:', err);
+      setAlertConfig({ isOpen: true, title: 'Connection Error', message: err?.message || 'Failed to connect Google Contacts account.' });
+    } finally {
+      setIsConnectingContacts(false);
+    }
+  };
+
+  const handleDisconnectContacts = () => {
+    disconnectGoogleContacts();
+    setContactsToken(null);
+    setContactsAccountEmail(null);
+  };
+
+  const handleBulkSyncContacts = async (targetUids?: string[]) => {
+    const uidsToSync = targetUids && targetUids.length > 0 ? targetUids : selectedUsers;
+    if (uidsToSync.length === 0) {
+      setAlertConfig({ isOpen: true, title: 'No Users Selected', message: 'Please select users to sync to Google Contacts.' });
+      return;
+    }
+
+    let token = getStoredContactsToken();
+    if (!token) {
+      try {
+        setIsConnectingContacts(true);
+        const conn = await connectGoogleContacts('wmoviznow@gmail.com');
+        token = conn.accessToken;
+        setContactsToken(conn.accessToken);
+        setContactsAccountEmail(conn.email);
+      } catch (err: any) {
+        setIsConnectingContacts(false);
+        setAlertConfig({ isOpen: true, title: 'Connection Required', message: 'Please connect your Google Contacts account to sync contacts.' });
+        return;
+      } finally {
+        setIsConnectingContacts(false);
+      }
+    }
+
+    const usersToSync = allUsers.filter(u => {
+      if (!uidsToSync.includes(u.uid)) return false;
+      const role = (u.role || '').toLowerCase();
+      return role === 'vip' || role === 'basic';
+    });
+    if (usersToSync.length === 0) {
+      setAlertConfig({ isOpen: true, title: 'No Eligible Users', message: 'Google Contacts sync is enabled only for users with VIP or Basic roles.' });
+      return;
+    }
+
+    setIsSyncingContacts(true);
+    setContactsSyncProgress({ current: 0, total: usersToSync.length });
+
+    try {
+      const res = await syncMultipleUsersContacts(usersToSync, token, (current, total) => {
+        setContactsSyncProgress({ current, total });
+      });
+
+      setContactsSyncResult({
+        title: 'Google Contacts Sync Complete',
+        message: `Processed ${res.total} user(s):\n• Synced: ${res.synced} contact(s)\n  - Created: ${res.created}\n  - Updated: ${res.updated}${res.failed > 0 ? `\n• Failed / No Phone: ${res.failed}` : ''}`
+      });
+    } catch (err: any) {
+      setAlertConfig({ isOpen: true, title: 'Sync Error', message: err?.message || 'Failed to bulk sync contacts.' });
+    } finally {
+      setIsSyncingContacts(false);
+      setContactsSyncProgress(null);
+    }
+  };
+
   useEffect(() => {
     const loadReviews = () => {
       try {
@@ -135,9 +242,9 @@ export default function UserManagement() {
     if (!dateStr) return 'N/A';
     if (dateStr === 'Lifetime') return 'Lifetime';
 
-    // If dateStr is strictly YYYY-MM-DD (date only), format in local time to prevent UTC day shift
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr.trim())) {
-      const parts = dateStr.trim().split('-');
+    const cleanDateStr = dateStr.split('T')[0].trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(cleanDateStr)) {
+      const parts = cleanDateStr.split('-');
       const year = parseInt(parts[0], 10);
       const month = parseInt(parts[1], 10) - 1;
       const day = parseInt(parts[2], 10);
@@ -145,7 +252,6 @@ export default function UserManagement() {
       return isNaN(d.getTime()) ? 'Invalid Date' : format(d, fmt);
     }
 
-    // Full ISO timestamp or string with time
     const d = new Date(dateStr);
     if (!isNaN(d.getTime())) {
       return format(d, fmt);
@@ -620,7 +726,10 @@ export default function UserManagement() {
         // Active status requires an expiry date — default to 30 days if left empty
         const defaultExp = new Date();
         defaultExp.setDate(defaultExp.getDate() + 30);
-        const dateStr = defaultExp.toISOString().split('T')[0];
+        const yyyy = defaultExp.getFullYear();
+        const mm = String(defaultExp.getMonth() + 1).padStart(2, '0');
+        const dd = String(defaultExp.getDate()).padStart(2, '0');
+        const dateStr = `${yyyy}-${mm}-${dd}`;
         updateData.expiryDate = `${dateStr}T23:59:59.999Z`;
       } else {
         updateData.expiryDate = null;
@@ -668,13 +777,32 @@ export default function UserManagement() {
       updateUserFields(currentEditingId, updateData);
       await finalizeUserChanges(true);
 
+      // Auto-sync user to Google Contacts if connected
+      const mergedUserForSync: UserProfile = { ...selectedUser, ...updateData, uid: currentEditingId };
+      autoSyncUserToContacts(mergedUserForSync);
+
       // If status became expired and was previously active, immediately send expiry notifications
       if (isBecomingExpired && selectedUser.status === 'active') {
         sendImmediateExpiryNotifications([currentEditingId]);
       }
 
-      // Send membership update notification to enabled services if expiry date changed
-      if (updateData.expiryDate !== undefined && updateData.expiryDate !== selectedUser.expiryDate) {
+      // Normalize expiry dates to YYYY-MM-DD or 'Lifetime' or 'none' to check if actually changed
+      const normalizeExp = (exp: string | null | undefined) => {
+        if (!exp) return 'none';
+        if (exp === 'Lifetime') return 'Lifetime';
+        return exp.split('T')[0].trim();
+      };
+
+      const oldExpNorm = normalizeExp(selectedUser.expiryDate);
+      const newExpNorm = normalizeExp(updateData.expiryDate);
+      const isExpiryDateChanged = oldExpNorm !== newExpNorm;
+
+      const oldStatus = selectedUser.status || 'active';
+      const newStatus = updateData.status || oldStatus;
+      const isStatusChanged = oldStatus !== newStatus;
+
+      // Send membership update notification to enabled services only if expiry date or status actually changed
+      if (isExpiryDateChanged || isStatusChanged) {
         fetch('/api/notifications/notify-membership-update', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1256,6 +1384,10 @@ export default function UserManagement() {
       if (Object.keys(batchUpdates).length > 0) {
         updateMultipleUserFields(batchUpdates);
         await finalizeUserChanges(true);
+        currentSelected.forEach(uid => {
+          const u = users.find(usr => usr.uid === uid);
+          if (u) autoSyncUserToContacts({ ...u, status });
+        });
       }
 
       if (status === 'expired' && expiredUidsToSend.length > 0) {
@@ -1289,6 +1421,10 @@ export default function UserManagement() {
       if (Object.keys(batchUpdates).length > 0) {
         updateMultipleUserFields(batchUpdates);
         await finalizeUserChanges(true);
+        currentSelected.forEach(uid => {
+          const u = users.find(usr => usr.uid === uid);
+          if (u) autoSyncUserToContacts({ ...u, role });
+        });
       }
     } catch (error) {
       console.error('Error updating user roles:', error);
@@ -1512,7 +1648,10 @@ export default function UserManagement() {
             } else if (newUserForm.status === 'active' && (newUserForm.role as string) !== 'owner' && (newUserForm.role as string) !== 'admin') {
               const defaultExp = new Date();
               defaultExp.setDate(defaultExp.getDate() + 30);
-              const dateStr = defaultExp.toISOString().split('T')[0];
+              const yyyy = defaultExp.getFullYear();
+              const mm = String(defaultExp.getMonth() + 1).padStart(2, '0');
+              const dd = String(defaultExp.getDate()).padStart(2, '0');
+              const dateStr = `${yyyy}-${mm}-${dd}`;
               defaultExpiryDate = `${dateStr}T23:59:59.999Z`;
             }
 
@@ -1528,6 +1667,7 @@ export default function UserManagement() {
             }
             updateUserFields(existingUser.uid, updateData);
             await finalizeUserChanges(true);
+            autoSyncUserToContacts({ ...existingUser, ...updateData });
             setAlertConfig({ isOpen: true, title: 'Success', message: `Existing user account (${existingUser.email || existingUser.phone}) updated successfully.` });
             setProcessing(prev => ({ ...prev, addUser: false }));
             return;
@@ -1543,7 +1683,10 @@ export default function UserManagement() {
           } else if (newUserForm.status === 'active' && newUserForm.role !== 'owner' && newUserForm.role !== 'admin') {
             const defaultExp = new Date();
             defaultExp.setDate(defaultExp.getDate() + 30);
-            const dateStr = defaultExp.toISOString().split('T')[0];
+            const yyyy = defaultExp.getFullYear();
+            const mm = String(defaultExp.getMonth() + 1).padStart(2, '0');
+            const dd = String(defaultExp.getDate()).padStart(2, '0');
+            const dateStr = `${yyyy}-${mm}-${dd}`;
             defaultExpiryDate = `${dateStr}T23:59:59.999Z`;
           }
 
@@ -1570,6 +1713,7 @@ export default function UserManagement() {
           batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [newUserId]: getUtcVersion() } }, { merge: true });
           await batch.commit();
           
+          autoSyncUserToContacts(newUserData);
           setAlertConfig({ isOpen: true, title: 'Success', message: 'Pending user added successfully.' });
           refreshUsers(true).catch(console.error);
         }
@@ -1669,9 +1813,109 @@ export default function UserManagement() {
               icon={<UserPlus className="w-5 h-5" />}
               title={(profile?.role === 'admin' || profile?.role === 'owner') ? 'Add User' : 'Add Pending User'}
             />
+            <button
+              onClick={() => setIsContactsPanelOpen(prev => !prev)}
+              className={clsx(
+                "flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer select-none",
+                contactsToken
+                  ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/30 hover:bg-indigo-500/20"
+                  : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700"
+              )}
+              title={contactsToken ? `Google Contacts Connected (${contactsAccountEmail || 'wmoviznow@gmail.com'})` : "Google Contacts Not Connected"}
+            >
+              <Users className="w-4 h-4" />
+              <span className="hidden sm:inline">Contacts</span>
+              {contactsToken ? (
+                <span className="flex items-center justify-center w-4 h-4 rounded-full bg-emerald-500 text-white text-[10px] font-bold">
+                  ✓
+                </span>
+              ) : (
+                <span className="flex items-center justify-center w-4 h-4 rounded-full bg-red-500 text-white text-[10px] font-bold">
+                  ✕
+                </span>
+              )}
+            </button>
           </div>
         )}
       </div>
+
+      {/* Google Contacts Integration Status & Sync Bar (Collapsible) */}
+      <AnimatePresence>
+        {isContactsPanelOpen && (
+          <motion.div
+            initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+            animate={{ opacity: 1, height: 'auto', marginBottom: 24 }}
+            exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="p-4 rounded-2xl border border-indigo-500/20 bg-indigo-50/50 dark:bg-indigo-950/20 backdrop-blur-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative">
+              <button
+                onClick={() => setIsContactsPanelOpen(false)}
+                className="absolute top-3 right-3 p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 rounded-lg transition-colors cursor-pointer"
+                title="Collapse Panel"
+              >
+                <X className="w-4 h-4" />
+              </button>
+              <div className="flex items-center gap-3 pr-8">
+                <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 text-sm">Google Contacts Sync</h3>
+                    {contactsToken ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                        <CheckCircle className="w-3 h-3" /> Connected
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                        Not Connected
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">
+                    {contactsToken
+                      ? `Syncing VIP & Basic users with ${contactsAccountEmail || 'wmoviznow@gmail.com'}. Auto-sync active on user edits, additions, expirations, & date changes.`
+                      : 'Connect wmoviznow@gmail.com to auto-sync VIP & Basic users to Google Contacts with standardized Pakistani phone numbers (+92...).'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {contactsToken ? (
+                  <>
+                    <Button
+                      onClick={() => handleBulkSyncContacts(filteredAndSortedUsers.map(u => u.uid))}
+                      variant="emerald"
+                      className="px-3 py-1.5 text-xs"
+                      loading={isSyncingContacts}
+                      icon={<RefreshCw className={`w-4 h-4 ${isSyncingContacts ? 'animate-spin' : ''}`} />}
+                    >
+                      Sync All Filtered ({filteredAndSortedUsers.length})
+                    </Button>
+                    <Button
+                      onClick={handleDisconnectContacts}
+                      variant="ghost"
+                      className="px-3 py-1.5 text-xs text-zinc-500 hover:text-red-500"
+                    >
+                      Disconnect
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    onClick={handleConnectContacts}
+                    variant="emerald"
+                    className="px-3 py-1.5 text-xs"
+                    loading={isConnectingContacts}
+                    icon={<Users className="w-4 h-4" />}
+                  >
+                    Connect wmoviznow@gmail.com
+                  </Button>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Sticky Header: Search and Filters */}
       <div className="sticky top-16 md:top-0 z-30 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 -mx-4 md:-mx-8 px-4 md:px-8 py-3 mb-6 transition-colors duration-300">
@@ -1697,7 +1941,9 @@ export default function UserManagement() {
                   <select
                     onChange={(e) => {
                       if (e.target.value) {
-                        if (e.target.value === 'merge') {
+                        if (e.target.value === 'sync_contacts') {
+                          handleBulkSyncContacts(selectedUsers);
+                        } else if (e.target.value === 'merge') {
                           handleMergeUsers();
                         } else if (e.target.value === 'delete_selected') {
                           handleBulkDeleteUsers();
@@ -1713,6 +1959,9 @@ export default function UserManagement() {
                     className="bg-transparent border-none text-xs focus:outline-none text-emerald-500 font-medium cursor-pointer"
                   >
                     <option value="">Bulk Actions</option>
+                    <optgroup label="Google Contacts" className="text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900">
+                      <option value="sync_contacts">Sync Contacts to Google Contacts ({selectedUsers.length})</option>
+                    </optgroup>
                     <optgroup label="Change Status" className="text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900">
                       <option value="active">Set Active</option>
                       <option value="pending">Set Pending</option>
@@ -1744,20 +1993,6 @@ export default function UserManagement() {
                     </optgroup>
                   </select>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleBulkDeleteUsers}
-                  disabled={processing.delete || processing.bulk}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-red-500 hover:text-white bg-red-500/10 hover:bg-red-600 border border-red-500/30 rounded-lg transition-colors disabled:opacity-50 shrink-0 cursor-pointer"
-                  title="Delete all selected users and their data"
-                >
-                  {processing.delete || processing.bulk ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Trash2 className="w-3.5 h-3.5" />
-                  )}
-                  <span>Delete ({selectedUsers.length})</span>
-                </button>
               </div>
             )}
             <div className="flex gap-2 flex-1 overflow-x-auto pb-1 md:pb-0 items-center">
@@ -1995,6 +2230,16 @@ export default function UserManagement() {
                         disabled={processing[`reminder_${user.uid}`]}
                       >
                         {processing[`reminder_${user.uid}`] ? <Loader2 className="w-4 h-4 animate-spin" /> : <MessageCircle className="w-4 h-4" />}
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleBulkSyncContacts([user.uid]);
+                        }}
+                        className="p-1.5 text-indigo-500 hover:bg-indigo-500/10 rounded-lg transition-colors"
+                        title="Sync Contact to Google Contacts"
+                      >
+                        <Users className="w-4 h-4" />
                       </button>
                       {user.role !== 'owner' && user.uid !== profile?.uid && (
                         <>
@@ -3289,6 +3534,40 @@ export default function UserManagement() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Google Contacts Sync Progress Modal */}
+      {isSyncingContacts && contactsSyncProgress && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 w-full max-w-sm text-center space-y-4">
+            <div className="mx-auto w-12 h-12 rounded-full bg-indigo-500/10 text-indigo-500 flex items-center justify-center">
+              <RefreshCw className="w-6 h-6 animate-spin" />
+            </div>
+            <div>
+              <h3 className="font-bold text-lg text-zinc-900 dark:text-zinc-100">Syncing Google Contacts</h3>
+              <p className="text-xs text-zinc-500 mt-1">
+                Processing {contactsSyncProgress.current} of {contactsSyncProgress.total} contacts...
+              </p>
+            </div>
+            <div className="w-full bg-zinc-100 dark:bg-zinc-800 rounded-full h-2 overflow-hidden">
+              <div
+                className="bg-indigo-500 h-full transition-all duration-300"
+                style={{ width: `${Math.round((contactsSyncProgress.current / contactsSyncProgress.total) * 100)}%` }}
+              />
+            </div>
+            <p className="text-[11px] text-zinc-400">Please leave this window open until sync completes.</p>
+          </div>
+        </div>
+      )}
+
+      {/* Google Contacts Sync Result Modal */}
+      {contactsSyncResult && (
+        <AlertModal
+          isOpen={!!contactsSyncResult}
+          title={contactsSyncResult.title}
+          message={contactsSyncResult.message}
+          onClose={() => setContactsSyncResult(null)}
+        />
       )}
     </div>
   );

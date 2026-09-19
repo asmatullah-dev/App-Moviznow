@@ -18,21 +18,8 @@ export function RefreshAppDataManager() {
 
     const isManualTrigger = reason === 'catalog_button' || reason === 'user_profile_button' || reason === 'manual' || reason === 'header_button';
 
-    // For guest users (unauthenticated), populate content library from static export JSON and skip Firestore network calls!
+    // For guest users (unauthenticated), skip sync completely as guests have no Firestore connection
     if (!user) {
-      seedStaticExportData();
-      localStorage.setItem('last_unified_10h_refresh_sync_time_v2_guest', Date.now().toString());
-      if (reason !== 'app_open' && reason !== '10_hour_sync') {
-        window.dispatchEvent(new CustomEvent('sync_status', {
-          detail: {
-            status: isManualTrigger ? 'success' : 'up-to-date',
-            isInitialLoad: false,
-            isManual: isManualTrigger,
-            updatedCount: 0,
-            message: isManualTrigger ? 'Refresh successfully' : 'Data is up to date'
-          }
-        }));
-      }
       return;
     }
 

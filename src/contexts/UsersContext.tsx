@@ -72,7 +72,10 @@ export function normalizeUserStatusAndExpiry(u: UserProfile): UserProfile {
     if (u.status === 'active') {
       const defaultExp = new Date();
       defaultExp.setDate(defaultExp.getDate() + 30);
-      return { ...u, expiryDate: defaultExp.toISOString() };
+      const yyyy = defaultExp.getFullYear();
+      const mm = String(defaultExp.getMonth() + 1).padStart(2, '0');
+      const dd = String(defaultExp.getDate()).padStart(2, '0');
+      return { ...u, expiryDate: `${yyyy}-${mm}-${dd}T23:59:59.999Z` };
     }
     if (u.status !== 'suspended' && u.status !== 'pending') {
       return { ...u, status: 'expired' };

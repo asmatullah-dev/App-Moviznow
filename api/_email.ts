@@ -79,7 +79,7 @@ export function getDb(): admin.firestore.Firestore | null {
         projectId: firebaseConfig.projectId,
       });
     }
-    firestoreInstance = getFirestore(adminApp, (firebaseConfig as any).firestoreDatabaseId);
+    firestoreInstance = getFirestore(adminApp, (firebaseConfig as any).firestoreDatabaseId || "moviznow-app");
     try {
       firestoreInstance.settings({ ignoreUndefinedProperties: true });
     } catch {}

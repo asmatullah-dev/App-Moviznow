@@ -185,11 +185,14 @@ export default function OrdersManagement() {
         if (userData.expiryDate && userData.expiryDate !== 'Lifetime' && !isUserExpired(userData.expiryDate)) {
           const parts = userData.expiryDate.split('T')[0].split('-');
           if (parts.length === 3) {
-            baseDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]), 23, 59, 59, 999);
+            baseDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
           }
         }
         baseDate.setMonth(baseDate.getMonth() + months);
-        const dateStr = baseDate.toISOString().split('T')[0];
+        const yyyy = baseDate.getFullYear();
+        const mm = String(baseDate.getMonth() + 1).padStart(2, '0');
+        const dd = String(baseDate.getDate()).padStart(2, '0');
+        const dateStr = `${yyyy}-${mm}-${dd}`;
 
         const targetRole = order.planRole || (order.planName?.toLowerCase().includes('basic') ? 'basic' : 'vip');
         updates.role = targetRole;

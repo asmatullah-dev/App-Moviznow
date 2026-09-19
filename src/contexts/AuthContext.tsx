@@ -858,7 +858,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   // Active status without explicit expiry date: default to 30 days
                   const defaultExp = new Date();
                   defaultExp.setDate(defaultExp.getDate() + 30);
-                  const dateIso = defaultExp.toISOString();
+                  const yyyy = defaultExp.getFullYear();
+                  const mm = String(defaultExp.getMonth() + 1).padStart(2, '0');
+                  const dd = String(defaultExp.getDate()).padStart(2, '0');
+                  const dateIso = `${yyyy}-${mm}-${dd}T23:59:59.999Z`;
                   updates.expiryDate = dateIso;
                   data.expiryDate = dateIso;
                   if (mergedProfile) mergedProfile.expiryDate = dateIso;

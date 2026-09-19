@@ -546,44 +546,44 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                 )}
 
                 <div className="pt-2 mt-2 border-t border-zinc-200/80 dark:border-zinc-800/80 space-y-1">
-                  <button 
-                    id="user-profile-refresh-app-data-btn"
-                    disabled={isSyncing || isRefreshingData}
-                    onClick={async () => {
-                      if (isSyncing || isRefreshingData) return;
-                      vibrate(50);
-                      setIsRefreshingData(true);
-                      try {
-                        const promises: Promise<any>[] = [];
-                        if (user) {
+                  {user && (
+                    <button 
+                      id="user-profile-refresh-app-data-btn"
+                      disabled={isSyncing || isRefreshingData}
+                      onClick={async () => {
+                        if (isSyncing || isRefreshingData) return;
+                        vibrate(50);
+                        setIsRefreshingData(true);
+                        try {
+                          const promises: Promise<any>[] = [];
                           promises.push(refreshSettings(true).catch(err => console.warn('UserProfile refreshSettings error:', err)));
+                          if ((window as any).triggerRefreshAppData) {
+                            promises.push((window as any).triggerRefreshAppData('user_profile_button'));
+                          } else {
+                            promises.push(refreshProfile(true, 'manual').catch(() => {}));
+                          }
+                          await Promise.allSettled(promises);
+                        } catch (err) {
+                          console.error("Error refreshing app data:", err);
+                        } finally {
+                          setIsRefreshingData(false);
+                          setIsOpen(false);
                         }
-                        if ((window as any).triggerRefreshAppData) {
-                          promises.push((window as any).triggerRefreshAppData('user_profile_button'));
-                        } else if (user) {
-                          promises.push(refreshProfile(true, 'manual').catch(() => {}));
-                        }
-                        await Promise.allSettled(promises);
-                      } catch (err) {
-                        console.error("Error refreshing app data:", err);
-                      } finally {
-                        setIsRefreshingData(false);
-                        setIsOpen(false);
-                      }
-                    }} 
-                    className={clsx(
-                      "w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer",
-                      (isSyncing || isRefreshingData) 
-                        ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 cursor-not-allowed opacity-90"
-                        : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800/60"
-                    )}
-                    title="Refresh Content & Account Sync"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <RefreshCw className={clsx("w-3.5 h-3.5", (isSyncing || isRefreshingData) ? "animate-spin text-emerald-500" : "text-zinc-400")} /> 
-                      <span>{(isSyncing || isRefreshingData) ? t("Refreshing...") : t("Refresh App Data")}</span>
-                    </div>
-                  </button>
+                      }} 
+                      className={clsx(
+                        "w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer",
+                        (isSyncing || isRefreshingData) 
+                          ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 cursor-not-allowed opacity-90"
+                          : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800/60"
+                      )}
+                      title="Refresh Content & Account Sync"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <RefreshCw className={clsx("w-3.5 h-3.5", (isSyncing || isRefreshingData) ? "animate-spin text-emerald-500" : "text-zinc-400")} /> 
+                        <span>{(isSyncing || isRefreshingData) ? t("Refreshing...") : t("Refresh App Data")}</span>
+                      </div>
+                    </button>
+                  )}
 
                   {!profile ? (
                     <button

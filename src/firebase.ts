@@ -33,7 +33,7 @@ export const app = initializeApp(appConfig);
 
 export const db = initializeFirestore(app, {
   localCache: typeof window !== 'undefined' ? memoryLocalCache() : undefined
-}, (appConfig as any).firestoreDatabaseId);
+}, (appConfig as any).firestoreDatabaseId || 'moviznow-app');
 
 if (typeof window !== 'undefined') {
   // Ensure legacy document snapshot caches are removed

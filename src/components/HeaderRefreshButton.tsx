@@ -7,11 +7,12 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { useHaptics } from '../hooks/useHaptics';
 
 export function HeaderRefreshButton() {
-  const [isRefreshingData, setIsRefreshingData] = useState(() => Boolean((window as any).__isAppDataSyncing));
   const { user, refreshProfile, isSyncing } = useAuth();
   const { refreshSettings } = useSettings();
   const { t } = useLanguage();
   const { vibrate } = useHaptics();
+
+  const [isRefreshingData, setIsRefreshingData] = useState(() => Boolean((window as any).__isAppDataSyncing));
 
   useEffect(() => {
     let safetyTimeout: NodeJS.Timeout | null = null;
@@ -42,19 +43,17 @@ export function HeaderRefreshButton() {
   }, []);
 
   const handleRefresh = useCallback(async () => {
-    if (isSyncing || isRefreshingData) return;
+    if (!user || isSyncing || isRefreshingData) return;
     vibrate(50);
     setIsRefreshingData(true);
 
     try {
       const promises: Promise<any>[] = [];
-      if (user) {
-        promises.push(refreshSettings(true).catch(err => console.warn('Header refreshSettings error:', err)));
-      }
+      promises.push(refreshSettings(true).catch(err => console.warn('Header refreshSettings error:', err)));
 
       if (typeof (window as any).triggerRefreshAppData === 'function') {
         promises.push((window as any).triggerRefreshAppData('header_button'));
-      } else if (user) {
+      } else {
         promises.push(refreshProfile(true, 'manual').catch(() => {}));
       }
 
@@ -64,7 +63,12 @@ export function HeaderRefreshButton() {
     } finally {
       setIsRefreshingData(false);
     }
-  }, [isSyncing, isRefreshingData, vibrate, refreshProfile, refreshSettings]);
+  }, [user, isSyncing, isRefreshingData, vibrate, refreshProfile, refreshSettings]);
+
+  // Don't show header refresh button when no user is logged in (guest mode)
+  if (!user) {
+    return null;
+  }
 
   const isBusy = isSyncing || isRefreshingData;
 
