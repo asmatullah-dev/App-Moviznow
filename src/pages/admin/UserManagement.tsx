@@ -30,7 +30,8 @@ import {
   connectGoogleContacts,
   disconnectGoogleContacts,
   syncSingleUserContact,
-  syncMultipleUsersContacts
+  syncMultipleUsersContacts,
+  loadAndVerifyStoredContactsToken
 } from '../../services/googleContactsService';
 
 type SortField = 'createdAt' | 'displayName' | 'phone' | 'expiryDate' | 'lastActive';
@@ -108,10 +109,27 @@ export default function UserManagement() {
   const [contactsSyncProgress, setContactsSyncProgress] = useState<{ current: number; total: number } | null>(null);
   const [contactsSyncResult, setContactsSyncResult] = useState<{ title: string; message: string } | null>(null);
 
+  // Load token from Firestore if not available in state/sessionStorage on mount
+  useEffect(() => {
+    const checkAndRestoreToken = async () => {
+      if (!contactsToken) {
+        const restored = await loadAndVerifyStoredContactsToken();
+        if (restored.accessToken) {
+          setContactsToken(restored.accessToken);
+          setContactsAccountEmail(restored.email);
+        }
+      }
+    };
+    checkAndRestoreToken();
+  }, [contactsToken]);
+
   const autoSyncUserToContacts = useCallback(async (userToSync: UserProfile) => {
     const roleNorm = (userToSync.role || '').toLowerCase();
     if (roleNorm !== 'vip' && roleNorm !== 'basic') return;
-    const token = getStoredContactsToken();
+    
+    // Attempt to restore token if expired/missing in sessionStorage
+    const restored = await loadAndVerifyStoredContactsToken();
+    const token = restored.accessToken;
     if (!token || !userToSync.phone) return;
     try {
       const res = await syncSingleUserContact(userToSync, token);
@@ -152,6 +170,15 @@ export default function UserManagement() {
     }
 
     let token = getStoredContactsToken();
+    if (!token) {
+      const restored = await loadAndVerifyStoredContactsToken();
+      token = restored.accessToken;
+      if (token) {
+        setContactsToken(restored.accessToken);
+        setContactsAccountEmail(restored.email);
+      }
+    }
+
     if (!token) {
       try {
         setIsConnectingContacts(true);

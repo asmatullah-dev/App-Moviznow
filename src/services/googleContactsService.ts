@@ -1,7 +1,7 @@
 import firebaseConfig from '../../firebase-applet-config.json';
 import { UserProfile } from '../types';
 import { isUserExpired } from '../contexts/UsersContext';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 
 const CONTACTS_SCOPE = 'https://www.googleapis.com/auth/contacts';
@@ -339,6 +339,65 @@ export function formatContactName(user: UserProfile, existingContactName?: strin
 }
 
 /**
+ * Saves Google Contacts OAuth token details to Firestore for persistence across sessions/tabs.
+ */
+export async function saveContactsTokenToFirestore(accessToken: string, expiry: string, email: string): Promise<void> {
+  try {
+    const docRef = doc(db, 'settings', 'google_contacts');
+    await setDoc(docRef, {
+      accessToken,
+      expiry,
+      email,
+      updatedAt: new Date().toISOString()
+    });
+    console.log('[Google Contacts] Token saved to Firestore');
+  } catch (err) {
+    console.warn('[Google Contacts] Error saving token to Firestore:', err);
+  }
+}
+
+/**
+ * Loads and verifies the Google Contacts token, checking sessionStorage first, then falling back to Firestore.
+ * If a valid token is found in Firestore, it caches it in sessionStorage and returns it.
+ */
+export async function loadAndVerifyStoredContactsToken(): Promise<{ accessToken: string | null; email: string | null }> {
+  // Check sessionStorage first
+  const token = sessionStorage.getItem(STORAGE_TOKEN_KEY);
+  const expiry = sessionStorage.getItem(STORAGE_EXPIRY_KEY);
+  const email = sessionStorage.getItem(STORAGE_EMAIL_KEY);
+  if (token && expiry && Date.now() < parseInt(expiry, 10)) {
+    return { accessToken: token, email: email || null };
+  }
+
+  // Fallback to Firestore
+  try {
+    const docRef = doc(db, 'settings', 'google_contacts');
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      const fToken = data.accessToken;
+      const fExpiry = data.expiry;
+      const fEmail = data.email;
+
+      if (fToken && fExpiry && Date.now() < parseInt(fExpiry, 10)) {
+        // Cache in sessionStorage for synchronous getters
+        sessionStorage.setItem(STORAGE_TOKEN_KEY, fToken);
+        sessionStorage.setItem(STORAGE_EXPIRY_KEY, fExpiry);
+        if (fEmail) {
+          sessionStorage.setItem(STORAGE_EMAIL_KEY, fEmail);
+        }
+        console.log('[Google Contacts] Valid token restored from Firestore and cached in sessionStorage');
+        return { accessToken: fToken, email: fEmail || null };
+      }
+    }
+  } catch (err) {
+    console.warn('[Google Contacts] Error loading token from Firestore:', err);
+  }
+
+  return { accessToken: null, email: null };
+}
+
+/**
  * Gets cached Google Contacts access token if available and valid.
  */
 export function getStoredContactsToken(): string | null {
@@ -413,6 +472,9 @@ export async function connectGoogleContacts(accountHint: string = 'wmoviznow@gma
           sessionStorage.setItem(STORAGE_EXPIRY_KEY, expiry);
           sessionStorage.setItem(STORAGE_EMAIL_KEY, email);
 
+          // Save to Firestore for persistence
+          await saveContactsTokenToFirestore(accessToken, expiry, email);
+
           resolve({ accessToken, email });
         },
         error_callback: (err: any) => {
@@ -434,6 +496,12 @@ export function disconnectGoogleContacts(): void {
   sessionStorage.removeItem(STORAGE_TOKEN_KEY);
   sessionStorage.removeItem(STORAGE_EXPIRY_KEY);
   sessionStorage.removeItem(STORAGE_EMAIL_KEY);
+
+  // Clear Firestore document
+  const docRef = doc(db, 'settings', 'google_contacts');
+  deleteDoc(docRef).catch(err => {
+    console.warn('[Google Contacts] Error deleting token from Firestore:', err);
+  });
 }
 
 export interface GoogleContactPerson {
