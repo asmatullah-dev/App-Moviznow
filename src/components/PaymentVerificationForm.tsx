@@ -187,25 +187,23 @@ export default function PaymentVerificationForm({
           detectedAny = true;
         }
 
-        // Account title: only accept if not admin/receiver
-        if (ext.accountTitle) {
-          const lowerTitle = ext.accountTitle.toLowerCase().trim();
-          const isAdminTitle = lowerTitle.includes('asmat') || 
-                               lowerTitle.includes('moviznow') || 
-                               (settings?.accountTitle && lowerTitle.includes(settings.accountTitle.toLowerCase().trim()));
-          if (!isAdminTitle) {
-            setAccountTitle(ext.accountTitle);
-            detectedAny = true;
-          }
+        // Account title (Sender Name)
+        if (ext.accountTitle && ext.accountTitle.trim()) {
+          setAccountTitle(ext.accountTitle.trim());
+          detectedAny = true;
         }
 
-        // Account number last 4: only accept if not admin/receiver
+        // Account number last 4 digits (Sender Account / Mobile)
         if (ext.accountNumberLast4) {
           const last4 = String(ext.accountNumberLast4).replace(/\D/g, '').slice(-4);
-          const adminLast4 = (settings?.accountNumber || '03416286423').replace(/\D/g, '').slice(-4);
-          const isReceiverAcc = last4 === adminLast4 || last4 === '6423';
-          if (last4 && !isReceiverAcc) {
+          if (last4) {
             setAccountNumberLast4(last4);
+            detectedAny = true;
+          }
+        } else if (ext.senderAccount) {
+          const digits = String(ext.senderAccount).replace(/\D/g, '');
+          if (digits.length >= 4) {
+            setAccountNumberLast4(digits.slice(-4));
             detectedAny = true;
           }
         }

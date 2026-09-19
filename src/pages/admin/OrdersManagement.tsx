@@ -419,7 +419,7 @@ export default function OrdersManagement() {
             </span>
           </div>
           <p className="text-xs text-zinc-500 mt-1">
-            Orders are matched automatically via Gemini 2.5 Flash against recent bank notifications from asmatn628@gmail.com
+            Orders are matched automatically via Gemini 3.5 / Flash against recent bank notifications from asmatn628@gmail.com
           </p>
         </div>
         

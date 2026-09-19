@@ -164,47 +164,42 @@ ordersRouter.post("/ocr-payment-receipt", async (req, res) => {
     const cleanMimeType = (mimeType && mimeType.startsWith("image/")) ? mimeType : "image/jpeg";
     const ai = getGenAI();
 
-    const prompt = `You are an expert financial OCR parser specializing in Pakistani banking and mobile wallet transaction receipts.
-Analyze this payment receipt screenshot with high precision.
-Typical receipt sources: EasyPaisa, JazzCash, SadaPay, NayaPay, Raast, Meezan Bank, HBL, Bank Alfalah, UBL, MCB, Allied Bank, Askari Bank, Standard Chartered, Faysal Bank, etc.
+    const prompt = `You are a financial OCR intelligence model specialized in Pakistani digital banking receipts (EasyPaisa, JazzCash, SadaPay, NayaPay, Raast, Meezan, HBL, Bank Alfalah, UBL, MCB, Allied, Askari, Faysal, SCB, etc.).
 
-IMPORTANT CONTEXT:
-The payment was SENT TO the merchant/receiver: "${receiverAccountTitle}" (Account: "${receiverAccountNumber}").
-DO NOT confuse the receiver with the sender!
+Your task is divided into 2 steps:
 
-CRITICAL EXTRACTION RULES:
-1. "accountTitle" (SENDER NAME):
-   - MUST be the SENDER / REMITTER / PAYER / FROM name (the customer who sent the money).
-   - Look under "From", "Sent From", "Sender", "Remitter", "Paid By", "Debit Account".
-   - NEVER return the receiver ("${receiverAccountTitle}" or "MovizNow" or "To: ...") as the accountTitle.
+STEP 1: THOROUGH TEXT READING
+Transcribe ALL text, headings, labels, names, numbers, badges, and timestamps visible anywhere in the image into "rawTextSummary".
 
-2. "accountNumberLast4" (SENDER ACCOUNT DIGITS):
-   - MUST be the last 4 digits of the SENDER'S / REMITTER'S account, IBAN, or mobile number (under "From" / "Sender").
-   - Extract ONLY the last 4 digits (e.g., if sender mobile is "03001234567", return "4567").
-   - NEVER return the receiver's account number ("${receiverAccountNumber.slice(-4)}") here.
+STEP 2: SEMANTIC ROLE REASONING & EXTRACTION
+Analyze the transcribed text and determine the exact transaction roles:
 
-3. "trxId" (TRANSACTION ID):
-   - The unique transaction identifier, TID, Ref ID, Reference Number, or Receipt Number.
-   - Return only the actual numeric or alphanumeric code without prefixes like "TRX ID:" or "TID:".
+1. SENDER / PAYER ROLE ("From" / "Sent by"):
+   - Any label such as "From", "Sent by", "Sender", "Sender Name", "Debit Account Title", "Debit Account #", "Remitter", "Paid by", "Payer", "Transferred From", "Debit A/C", or a user profile avatar/name at the top represents the SENDER.
+   - Set "accountTitle" to this sender's name / title.
+   - Set "senderAccount" to this sender's account number, mobile wallet number (e.g. 03001234567 or masked 0300****567), Raast ID, or IBAN.
+   - Set "accountNumberLast4" to the last 4 digits of this sender's account/mobile (e.g. "4567").
 
-4. "date":
-   - Transaction date formatted as YYYY-MM-DD (e.g. "2026-09-18").
+2. RECIPIENT ROLE ("To" / "Sent to"):
+   - Any label such as "To", "Sent to", "Receiver", "Beneficiary", "Credit Account", "Transferred To", "Deposit To", "Merchant" represents the RECIPIENT.
+   - Set "receiverAccountTitle" to the recipient's name (e.g. "${receiverAccountTitle}").
+   - Set "receiverAccountNumber" to the recipient's account/mobile number.
 
-5. "time":
-   - Transaction time formatted in 24-hour HH:MM format (e.g. "14:35").
+3. TRANSACTION IDENTIFIER:
+   - Look for labels "TID", "TRX ID", "Trans ID", "Transaction ID", "Reference No.", "Ref #", "Receipt #", "FT Number", "STAN", "Batch".
+   - Set "trxId" to the raw alphanumeric identifier.
 
-6. "dateTime":
-   - Exact raw date and time string from receipt (e.g. "18 Sep 2026 at 02:35 PM").
-
-7. "amount":
-   - Numeric amount paid in PKR (e.g. 500, 1000).
-
-8. "senderBank":
-   - Bank or mobile wallet app used by the sender (e.g. "EasyPaisa", "JazzCash", "SadaPay", "NayaPay", "Meezan Bank", "HBL", "Bank Alfalah", etc.).
+4. AMOUNT & TIMESTAMP:
+   - "amount": The numeric amount transferred in PKR.
+   - "date": Date in YYYY-MM-DD.
+   - "time": Time in 24h HH:MM.
+   - "dateTime": Exact timestamp string.
+   - "senderBank": Bank/wallet app name (EasyPaisa, JazzCash, SadaPay, NayaPay, Meezan, HBL, Bank Alfalah, etc.).
 
 Return ONLY a valid JSON object matching the requested schema.`;
 
-    const modelsToTry = ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-3.1-flash-lite"];
+    // Prioritize Gemini 3.6 Flash, fallback to 3.5 Flash, then 3.1 Pro
+    const modelsToTry = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-3.1-pro"];
     let lastError: any = null;
     let resultText = "";
 
@@ -233,16 +228,21 @@ Return ONLY a valid JSON object matching the requested schema.`;
             responseSchema: {
               type: Type.OBJECT,
               properties: {
+                rawTextSummary: { type: Type.STRING, description: "All visible text transcribed from the receipt image" },
+                semanticRoleBreakdown: { type: Type.STRING, description: "AI reasoning mapping which lines represent From/Sender, To/Receiver, and TID" },
                 trxId: { type: Type.STRING, description: "Transaction ID / Reference Number" },
-                accountTitle: { type: Type.STRING, description: "Sender / Payer Account Title" },
-                accountNumberLast4: { type: Type.STRING, description: "Last 4 digits of sender account / wallet" },
+                accountTitle: { type: Type.STRING, description: "Sender / Payer Account Title (From / Sent by / Remitter / Debit)" },
+                accountNumberLast4: { type: Type.STRING, description: "Last 4 digits of sender account / wallet / mobile" },
+                senderAccount: { type: Type.STRING, description: "Full or masked sender account / mobile number" },
                 date: { type: Type.STRING, description: "Date in YYYY-MM-DD format" },
                 time: { type: Type.STRING, description: "Time in HH:MM format" },
                 dateTime: { type: Type.STRING, description: "Exact date and time from receipt" },
                 amount: { type: Type.NUMBER, description: "Numeric amount paid in PKR" },
                 senderBank: { type: Type.STRING, description: "Bank or wallet name" },
-                receiverAccount: { type: Type.STRING, description: "Recipient account details" },
+                receiverAccountTitle: { type: Type.STRING, description: "Recipient account title (To / Sent to)" },
+                receiverAccountNumber: { type: Type.STRING, description: "Recipient account number" },
               },
+              required: ["accountTitle", "trxId", "amount", "rawTextSummary", "semanticRoleBreakdown"],
             },
           },
         });
@@ -272,42 +272,15 @@ Return ONLY a valid JSON object matching the requested schema.`;
     const rawTrxId = (parsed.trxId || "").replace(/^(TRX\s*ID|TID|REF\s*#?|TRANSACTION\s*ID|RECEIPT\s*#?)[:\s-]*/i, "").trim();
     let cleanAccountTitle = (parsed.accountTitle || "").trim();
 
-    // Filter out if extracted title was accidentally the receiver's name
-    const receiverNames = [
-      (receiverAccountTitle || "").toLowerCase().trim(),
-      "asmat ullah",
-      "asmatullah",
-      "moviznow",
-      "moviz now"
-    ].filter(Boolean);
-
-    if (receiverNames.some(rn => cleanAccountTitle.toLowerCase().includes(rn))) {
-      cleanAccountTitle = "";
-    }
-
     // Extract and validate last 4 digits of sender account
-    const rawAccDigits = String(parsed.accountNumberLast4 || "").replace(/\D/g, "");
-    let cleanLast4 = rawAccDigits.slice(-4);
-
-    // Filter out if extracted last 4 was accidentally the receiver's last 4 digits
-    const receiverLast4Set = new Set<string>();
-    if (receiverAccountNumber) {
-      const rDigits = String(receiverAccountNumber).replace(/\D/g, "");
-      if (rDigits.length >= 4) receiverLast4Set.add(rDigits.slice(-4));
-    }
-    receiverLast4Set.add("6423");
-    if (Array.isArray(knownReceiverAccounts)) {
-      for (const k of knownReceiverAccounts) {
-        if (k?.accountNumber) {
-          const kd = String(k.accountNumber).replace(/\D/g, "");
-          if (kd.length >= 4) receiverLast4Set.add(kd.slice(-4));
-        }
+    let rawAccDigits = String(parsed.accountNumberLast4 || "").replace(/\D/g, "");
+    if (!rawAccDigits && parsed.senderAccount) {
+      const senderDigits = String(parsed.senderAccount).replace(/\D/g, "");
+      if (senderDigits.length >= 4) {
+        rawAccDigits = senderDigits.slice(-4);
       }
     }
-
-    if (cleanLast4 && receiverLast4Set.has(cleanLast4)) {
-      cleanLast4 = "";
-    }
+    const cleanLast4 = rawAccDigits.slice(-4);
 
     const normalizedDate = normalizeDate(parsed.date, parsed.dateTime);
     const normalizedTime = normalizeTime(parsed.time, parsed.dateTime);
@@ -318,12 +291,14 @@ Return ONLY a valid JSON object matching the requested schema.`;
         trxId: rawTrxId || parsed.trxId || "",
         accountTitle: cleanAccountTitle,
         accountNumberLast4: cleanLast4,
+        senderAccount: parsed.senderAccount || "",
         date: normalizedDate || parsed.date || "",
         time: normalizedTime || parsed.time || "",
         dateTime: parsed.dateTime || "",
         amount: typeof parsed.amount === "number" ? parsed.amount : (parseFloat(parsed.amount) || 0),
         senderBank: parsed.senderBank || "",
-        receiverAccount: parsed.receiverAccount || "",
+        receiverAccountTitle: parsed.receiverAccountTitle || "",
+        receiverAccountNumber: parsed.receiverAccountNumber || "",
       },
     });
   } catch (error: any) {
@@ -572,7 +547,7 @@ async function fetchRecentBankEmails(token: string, searchDate?: string) {
   }
 }
 
-// Helper: AI Reconciliation using Gemini 2.5 Pro with strict 2-tier matching
+// Helper: AI Reconciliation using Gemini 3 Flash / Gemini 3.1 Flash Lite with strict 2-tier matching
 async function matchOrderWithGmailEmails(
   orderDetails: {
     trxId: string;
@@ -592,7 +567,7 @@ async function matchOrderWithGmailEmails(
     };
   }
 
-  // 1. Pass to Gemini 2.5 Pro for Comprehensive Reasoning based on strict rules
+  // 1. Pass to Gemini 3 Flash for Comprehensive Reasoning based on strict rules
   const ai = getGenAI();
   const prompt = `You are an automated bank transaction verification AI for an e-commerce / streaming service.
 Your task is to match user-submitted payment details against a list of recent bank / mobile wallet notifications.
@@ -617,14 +592,22 @@ You must ONLY approve (matched: true) if the following criteria are met:
 
 Note on Bank / Transaction ID:
 - If the above 4 conditions (Date, Time, Amount, Account Title) are met, you MUST approve the match (matched: true, confidence: "high", matchTier: "tier1_trx_id" or "tier2_fallback_details").
-- Confirm if the bank or transaction ID ("${orderDetails.trxId}") does NOT match (e.g. inter-bank differences), but take it only for reference. It should NOT prevent an approval if Date, Time, Amount, and Title all match perfectly.
-- In your "reason" field, explain the match, and state if the bank/TID matched or differed.
+- In your "reason" field for a successful match, provide a concise confirmation.
 
-If the 4 main conditions are NOT met (e.g. time is off by more than 3 mins, amount differs, date is wrong, or title is completely different), set matched: false, confidence: "none", matchTier: "none", and explain specifically what failed. Ensure you act as a direct bank connection, DO NOT mention the words "email", "mailbox", or "Gmail".
+CRITICAL PRIVACY & SIMPLICITY RULES FOR "reason" FIELD (WHEN NOT MATCHED):
+- NEVER disclose, leak, or mention other sender names, third-party account titles, or unrelated transaction IDs from the bank notifications.
+- When the sender account title does not match, DO NOT reveal what name was found in the bank notification or mention any transaction IDs. SIMPLY respond with:
+  "The sender account title '${orderDetails.accountTitle || "provided"}' is not found in the records."
+- When the amount does not match, simply state: "No transaction found for the specified amount."
+- When the date or time does not match, simply state: "No transaction found matching the specified date and time."
+- If no transaction matches at all, simply state: "Transaction not found in bank records."
+- Keep the reason strictly short, simple, direct, and completely free of third-party transaction details or internal IDs.
+- Never mention the words "email", "mailbox", or "Gmail".
 
 Return ONLY valid JSON matching the schema.`;
 
-  const modelsToTry = ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-3.1-flash-lite"];
+  // Prioritize Gemini 3.6 Flash, fallback to 3.5 Flash, then 3.1 Pro
+  const modelsToTry = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-3.1-pro"];
   let raw = "{}";
   let lastError: any = null;
 
@@ -663,7 +646,15 @@ Return ONLY valid JSON matching the schema.`;
   }
 
   try {
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    // Post-processing guard to ensure no internal leakage in the reason
+    if (!parsed.matched && parsed.reason) {
+      const lower = parsed.reason.toLowerCase();
+      if (lower.includes("does not match the provided") || lower.includes("found in the transaction records") || lower.includes("associated with a payment from")) {
+        parsed.reason = `The sender account title '${orderDetails.accountTitle || "provided"}' is not found in the records.`;
+      }
+    }
+    return parsed;
   } catch (err) {
     console.error("Failed to parse Gemini matching response:", err);
     return {
