@@ -8,6 +8,7 @@ const CONTACTS_SCOPE = 'https://www.googleapis.com/auth/contacts';
 const STORAGE_TOKEN_KEY = 'gcontacts_access_token';
 const STORAGE_EXPIRY_KEY = 'gcontacts_token_expiry';
 const STORAGE_EMAIL_KEY = 'gcontacts_account_email';
+const STORAGE_AUTHORIZED_KEY = 'gcontacts_is_authorized';
 
 // Memory cache for contact group resource names during session
 const groupResourceCache: Record<string, string> = {};
@@ -288,9 +289,14 @@ export function normalizePhone(phoneStr: string | null | undefined): PhoneNormal
  *   Not expired: ABYY/MM/DD {Name} ({City}) eg AB26/10/13 Ikram Raza (Lahore)
  *   Expired: Exd ABYY/MM/DD {Name} ({City}) eg Exd AB26/10/13 Ikram Raza (Lahore)
  *
+ * If city is missing:
+ *   Save or update contact in name (city) eg Ahmad Ali (City)
+ *   Not expired: AVYY/MM/DD {Name} (City) eg AV26/10/13 Ahmad Ali (City)
+ *   Expired: Exd AVYY/MM/DD {Name} (City) eg Exd AV26/10/13 Ahmad Ali (City)
+ *
  * If existingContactName is provided:
- *   Replaces ONLY the status (Exd ) and prefix date (AVYY/MM/DD / ABYY/MM/DD)
- *   and keeps the remaining text ({Name} ({City}) and everything after) UNTOUCHED!
+ *   Replaces the status (Exd ) and prefix date (AVYY/MM/DD / ABYY/MM/DD),
+ *   preserves/cleans {Name}, and updates the parenthesized ({City}) part.
  */
 export function formatContactName(user: UserProfile, existingContactName?: string | null): string {
   const roleLower = (user.role || '').toLowerCase();
@@ -336,9 +342,14 @@ export function formatContactName(user: UserProfile, existingContactName?: strin
 
   const newPrefix = `${statusPrefix}${prefixCode}${datePart}`;
 
+  // If city is missing, save or update contact in name (city) eg Ahmad Ali (City)
+  const rawCity = user.city?.trim();
+  const hasValidCity = Boolean(rawCity && rawCity.toLowerCase() !== 'city');
+  const targetCity = hasValidCity ? (rawCity as string) : 'City';
+
   if (existingContactName && existingContactName.trim()) {
     const trimmedExisting = existingContactName.trim();
-    // Matches status prefix (Exd ), tier code (AV/AB), and date (YY/MM/DD)
+    // Matches status prefix (Exd ), tier code (AV/AB/AU), and date (YY/MM/DD)
     const prefixRegex = /^(?:Exd\s+)?(?:[A-Za-z]{2})?\s*\d{2,4}[\/\.-]\d{2}[\/\.-]\d{2,4}\s*/i;
     const restOfName = trimmedExisting.replace(prefixRegex, '').trim();
 
@@ -347,109 +358,210 @@ export function formatContactName(user: UserProfile, existingContactName?: strin
       const cityMatch = restOfName.match(cityRegex);
 
       let baseName = restOfName;
-      let existingCityInParen: string | null = null;
-
       if (cityMatch) {
-        baseName = restOfName.slice(0, cityMatch.index).trim();
-        existingCityInParen = cityMatch[1].trim();
+        const insideParen = cityMatch[1].trim();
+        // Only strip if inside parenthesis is a city (not pure digits or phone number)
+        if (!/^[\d\s\+\-\(\)]+$/.test(insideParen)) {
+          baseName = restOfName.slice(0, cityMatch.index).trim();
+        }
       }
 
-      const targetCity = user.city?.trim() || existingCityInParen || 'Lahore';
-      const nameWithCity = targetCity ? `${baseName} (${targetCity})` : baseName;
+      // If user profile has displayName, but baseName is generic 'User' or empty, use displayName
+      if ((!baseName || baseName.toLowerCase() === 'user') && user.displayName?.trim()) {
+        baseName = user.displayName.trim();
+        const dnMatch = baseName.match(/\s*\(([^)]+)\)$/);
+        if (dnMatch && !/^[\d\s\+\-\(\)]+$/.test(dnMatch[1])) {
+          baseName = baseName.slice(0, dnMatch.index).trim();
+        }
+      }
 
+      const nameWithCity = `${baseName || 'User'} (${targetCity})`;
       return `${newPrefix} ${nameWithCity}`;
     }
   }
 
   // Default format for new contacts
-  const name = user.displayName?.trim() || user.email?.split('@')[0] || 'User';
-  const city = user.city?.trim() || 'Lahore';
+  let name = user.displayName?.trim() || user.email?.split('@')[0] || (user.phone ? `User (${user.phone.trim()})` : 'User');
+  // Strip trailing parenthesized city from name if user already entered "(City)" or "(Lahore)" in displayName
+  const nameCityMatch = name.match(/\s*\(([^)]+)\)$/);
+  if (nameCityMatch && !/^[\d\s\+\-\(\)]+$/.test(nameCityMatch[1]) && !name.toLowerCase().startsWith('user (')) {
+    name = name.slice(0, nameCityMatch.index).trim();
+  }
 
-  return `${newPrefix} ${name} (${city})`;
+  return `${newPrefix} ${name} (${targetCity})`;
 }
 
 /**
- * Saves Google Contacts OAuth token details to Firestore for persistence across sessions/tabs.
+ * Saves Google Contacts OAuth token details to Firestore and localStorage for persistence across sessions, tabs, and devices.
  */
-export async function saveContactsTokenToFirestore(accessToken: string, expiry: string, email: string): Promise<void> {
+export async function saveContactsTokenToFirestore(accessToken: string, expiry: string | number, email: string): Promise<void> {
+  const expiryNum = typeof expiry === 'string' ? parseInt(expiry, 10) : expiry;
+  
+  // Cache in localStorage for immediate client-side availability
+  try {
+    localStorage.setItem(STORAGE_TOKEN_KEY, accessToken);
+    localStorage.setItem(STORAGE_EXPIRY_KEY, String(expiryNum));
+    localStorage.setItem(STORAGE_EMAIL_KEY, email);
+    localStorage.setItem(STORAGE_AUTHORIZED_KEY, 'true');
+    // Also set sessionStorage for legacy compatibility
+    sessionStorage.setItem(STORAGE_TOKEN_KEY, accessToken);
+    sessionStorage.setItem(STORAGE_EXPIRY_KEY, String(expiryNum));
+    sessionStorage.setItem(STORAGE_EMAIL_KEY, email);
+  } catch (e) {
+    console.warn('[Google Contacts] LocalStorage write error:', e);
+  }
+
   try {
     const docRef = doc(db, 'settings', 'google_contacts');
     await setDoc(docRef, {
       accessToken,
-      expiry,
+      expiry: expiryNum,
       email,
+      isAuthorized: true,
       updatedAt: new Date().toISOString()
-    });
-    console.log('[Google Contacts] Token saved to Firestore');
+    }, { merge: true });
+    console.log('[Google Contacts] Token and authorization state permanently saved to Firestore');
   } catch (err) {
     console.warn('[Google Contacts] Error saving token to Firestore:', err);
   }
 }
 
 /**
- * Loads and verifies the Google Contacts token, checking sessionStorage first, then falling back to Firestore.
- * If a valid token is found in Firestore, it caches it in sessionStorage and returns it.
+ * Attempts to silently refresh the Google Contacts OAuth access token in the background.
+ * In Google Identity Services (GIS), tokenClient.requestAccessToken always triggers a browser popup window.
+ * To strictly prevent unprompted popups when navigating tabs, automated background GIS requests are disabled.
+ * Re-authentication occurs via user-initiated actions (clicking Connect, Re-verify, or Sync).
  */
-export async function loadAndVerifyStoredContactsToken(): Promise<{ accessToken: string | null; email: string | null }> {
-  // Check sessionStorage first
-  const token = sessionStorage.getItem(STORAGE_TOKEN_KEY);
-  const expiry = sessionStorage.getItem(STORAGE_EXPIRY_KEY);
-  const email = sessionStorage.getItem(STORAGE_EMAIL_KEY);
-  if (token && expiry && Date.now() < parseInt(expiry, 10)) {
-    return { accessToken: token, email: email || null };
+export async function refreshContactsTokenSilently(_accountEmail?: string): Promise<{ accessToken: string; email: string } | null> {
+  // Silent GIS token acquisition without a user gesture triggers unwanted browser popups or is blocked.
+  // Return null to prevent opening unprompted popups.
+  return null;
+}
+
+/**
+ * Ensures a valid Google Contacts access token is available.
+ * 1. Checks localStorage with a safety buffer.
+ * 2. Checks Firestore document `settings/google_contacts` (syncs tokens across all tabs/browsers).
+ * 3. In non-interactive mode (forceInteractiveIfFailed = false): NEVER opens a popup window.
+ *    Returns the cached/stored token and authorization state directly.
+ * 4. Only if forceInteractiveIfFailed is true (explicit user click) and token is invalid/expired,
+ *    initiates an interactive Google connection popup.
+ */
+export async function ensureValidContactsToken(forceInteractiveIfFailed = false): Promise<{ accessToken: string | null; email: string | null }> {
+  const BUFFER_MS = 2 * 60 * 1000; // 2 minutes buffer before token expires
+  const now = Date.now();
+
+  // 1. Check localStorage first
+  const localToken = localStorage.getItem(STORAGE_TOKEN_KEY) || sessionStorage.getItem(STORAGE_TOKEN_KEY);
+  const localExpiryStr = localStorage.getItem(STORAGE_EXPIRY_KEY) || sessionStorage.getItem(STORAGE_EXPIRY_KEY);
+  const localEmail = localStorage.getItem(STORAGE_EMAIL_KEY) || sessionStorage.getItem(STORAGE_EMAIL_KEY);
+  const isAuthorizedLocal = localStorage.getItem(STORAGE_AUTHORIZED_KEY) === 'true';
+
+  if (localToken && localExpiryStr) {
+    const localExpiry = parseInt(localExpiryStr, 10);
+    if (!isNaN(localExpiry) && now < (localExpiry - BUFFER_MS)) {
+      return { accessToken: localToken, email: localEmail || 'wmoviznow@gmail.com' };
+    }
   }
 
-  // Fallback to Firestore
+  // 2. Check Firestore `settings/google_contacts`
+  let firestoreAuthData: any = null;
   try {
     const docRef = doc(db, 'settings', 'google_contacts');
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
-      const data = docSnap.data();
-      const fToken = data.accessToken;
-      const fExpiry = data.expiry;
-      const fEmail = data.email;
+      firestoreAuthData = docSnap.data();
+      const fToken = firestoreAuthData.accessToken;
+      const fExpiry = parseInt(String(firestoreAuthData.expiry || 0), 10);
+      const fEmail = firestoreAuthData.email || localEmail || 'wmoviznow@gmail.com';
+      const isAuthInDb = firestoreAuthData.isAuthorized !== false && (!!fToken || !!fEmail);
 
-      if (fToken && fExpiry && Date.now() < parseInt(fExpiry, 10)) {
-        // Cache in sessionStorage for synchronous getters
-        sessionStorage.setItem(STORAGE_TOKEN_KEY, fToken);
-        sessionStorage.setItem(STORAGE_EXPIRY_KEY, fExpiry);
-        if (fEmail) {
-          sessionStorage.setItem(STORAGE_EMAIL_KEY, fEmail);
-        }
-        console.log('[Google Contacts] Valid token restored from Firestore and cached in sessionStorage');
-        return { accessToken: fToken, email: fEmail || null };
+      if (fToken && !isNaN(fExpiry) && now < (fExpiry - BUFFER_MS) && isAuthInDb) {
+        // Cache valid token from Firestore to localStorage
+        try {
+          localStorage.setItem(STORAGE_TOKEN_KEY, fToken);
+          localStorage.setItem(STORAGE_EXPIRY_KEY, String(fExpiry));
+          localStorage.setItem(STORAGE_EMAIL_KEY, fEmail);
+          localStorage.setItem(STORAGE_AUTHORIZED_KEY, 'true');
+        } catch (e) {}
+        return { accessToken: fToken, email: fEmail };
       }
     }
   } catch (err) {
-    console.warn('[Google Contacts] Error loading token from Firestore:', err);
+    console.warn('[Google Contacts] Error reading Firestore token:', err);
   }
 
-  return { accessToken: null, email: null };
+  const savedEmail = firestoreAuthData?.email || localEmail || 'wmoviznow@gmail.com';
+  const wasAuthorized = isAuthorizedLocal || firestoreAuthData?.isAuthorized === true || !!firestoreAuthData?.accessToken;
+  const fallbackToken = localToken || firestoreAuthData?.accessToken;
+
+  // 3. In non-interactive mode (tab open, mount, background checks):
+  // NEVER open a Google popup window! Return existing token and authorization info.
+  if (!forceInteractiveIfFailed) {
+    if (fallbackToken && wasAuthorized) {
+      return { accessToken: fallbackToken, email: savedEmail };
+    }
+    return { accessToken: null, email: wasAuthorized ? savedEmail : null };
+  }
+
+  // 4. Only if user explicitly clicked an action (forceInteractiveIfFailed === true):
+  try {
+    const conn = await connectGoogleContacts(savedEmail || 'wmoviznow@gmail.com', false);
+    return { accessToken: conn.accessToken, email: conn.email };
+  } catch (err) {
+    console.warn('[Google Contacts] Interactive connect attempt failed:', err);
+  }
+
+  // 5. Fallback: if we have an existing token from Firestore or localStorage, return it
+  if (fallbackToken && wasAuthorized) {
+    return { accessToken: fallbackToken, email: savedEmail };
+  }
+
+  return { accessToken: null, email: savedEmail || null };
 }
 
 /**
- * Gets cached Google Contacts access token if available and valid.
+ * Loads and verifies the Google Contacts token, checking localStorage, Firestore, and auto-renewing silently if needed.
+ */
+export async function loadAndVerifyStoredContactsToken(): Promise<{ accessToken: string | null; email: string | null }> {
+  return ensureValidContactsToken(false);
+}
+
+/**
+ * Gets cached Google Contacts access token if available in localStorage or sessionStorage.
  */
 export function getStoredContactsToken(): string | null {
-  const token = sessionStorage.getItem(STORAGE_TOKEN_KEY);
-  const expiry = sessionStorage.getItem(STORAGE_EXPIRY_KEY);
-  if (token && expiry && Date.now() < parseInt(expiry, 10)) {
-    return token;
-  }
-  return null;
+  const token = localStorage.getItem(STORAGE_TOKEN_KEY) || sessionStorage.getItem(STORAGE_TOKEN_KEY);
+  return token || null;
 }
 
 /**
  * Gets email of connected Google Contacts account.
  */
 export function getConnectedAccountEmail(): string | null {
-  return sessionStorage.getItem(STORAGE_EMAIL_KEY) || null;
+  return localStorage.getItem(STORAGE_EMAIL_KEY) || sessionStorage.getItem(STORAGE_EMAIL_KEY) || null;
 }
 
 /**
- * Connects to Google Contacts via GIS Token Client without altering Firebase Auth state.
+ * Returns true if Google Contacts has been authorized.
  */
-export async function connectGoogleContacts(accountHint: string = 'wmoviznow@gmail.com'): Promise<{ accessToken: string; email: string }> {
+export function isGoogleContactsAuthorized(): boolean {
+  if (localStorage.getItem(STORAGE_AUTHORIZED_KEY) === 'false') return false;
+  return (
+    localStorage.getItem(STORAGE_AUTHORIZED_KEY) === 'true' ||
+    !!localStorage.getItem(STORAGE_TOKEN_KEY) ||
+    !!sessionStorage.getItem(STORAGE_TOKEN_KEY)
+  );
+}
+
+/**
+ * Connects to Google Contacts via GIS Token Client and persists credentials to Firestore & localStorage.
+ * Does NOT force consent dialog if user already consented.
+ */
+export async function connectGoogleContacts(
+  accountHint: string = 'wmoviznow@gmail.com',
+  forceConsent: boolean = false
+): Promise<{ accessToken: string; email: string }> {
   const clientId = (firebaseConfig as any).oAuthClientId;
   if (!clientId) {
     throw new Error('OAuth Client ID is missing in configuration.');
@@ -468,7 +580,6 @@ export async function connectGoogleContacts(accountHint: string = 'wmoviznow@gma
       const tokenClient = googleObj.accounts.oauth2.initTokenClient({
         client_id: clientId,
         scope: CONTACTS_SCOPE,
-        hint: accountHint,
         callback: async (tokenResponse: any) => {
           if (tokenResponse.error) {
             reject(new Error(tokenResponse.error_description || tokenResponse.error));
@@ -496,13 +607,9 @@ export async function connectGoogleContacts(accountHint: string = 'wmoviznow@gma
           }
 
           const expiresIn = parseInt(tokenResponse.expires_in || '3500', 10);
-          const expiry = (Date.now() + (expiresIn - 100) * 1000).toString();
+          const expiry = (Date.now() + (expiresIn - 60) * 1000).toString();
 
-          sessionStorage.setItem(STORAGE_TOKEN_KEY, accessToken);
-          sessionStorage.setItem(STORAGE_EXPIRY_KEY, expiry);
-          sessionStorage.setItem(STORAGE_EMAIL_KEY, email);
-
-          // Save to Firestore for persistence
+          // Permanently save to Firestore and localStorage
           await saveContactsTokenToFirestore(accessToken, expiry, email);
 
           resolve({ accessToken, email });
@@ -512,7 +619,11 @@ export async function connectGoogleContacts(accountHint: string = 'wmoviznow@gma
         }
       });
 
-      tokenClient.requestAccessToken({ prompt: 'select_account', hint: accountHint });
+      const requestOptions: any = { hint: accountHint };
+      if (forceConsent) {
+        requestOptions.prompt = 'consent';
+      }
+      tokenClient.requestAccessToken(requestOptions);
     } catch (err) {
       reject(err);
     }
@@ -520,17 +631,29 @@ export async function connectGoogleContacts(accountHint: string = 'wmoviznow@gma
 }
 
 /**
- * Disconnects Google Contacts session.
+ * Disconnects Google Contacts session and removes stored credentials from Firestore and localStorage.
  */
 export function disconnectGoogleContacts(): void {
-  sessionStorage.removeItem(STORAGE_TOKEN_KEY);
-  sessionStorage.removeItem(STORAGE_EXPIRY_KEY);
-  sessionStorage.removeItem(STORAGE_EMAIL_KEY);
+  try {
+    localStorage.removeItem(STORAGE_TOKEN_KEY);
+    localStorage.removeItem(STORAGE_EXPIRY_KEY);
+    localStorage.removeItem(STORAGE_EMAIL_KEY);
+    localStorage.setItem(STORAGE_AUTHORIZED_KEY, 'false');
+    sessionStorage.removeItem(STORAGE_TOKEN_KEY);
+    sessionStorage.removeItem(STORAGE_EXPIRY_KEY);
+    sessionStorage.removeItem(STORAGE_EMAIL_KEY);
+  } catch (e) {}
 
-  // Clear Firestore document
+  // Update Firestore document to indicate deauthorization
   const docRef = doc(db, 'settings', 'google_contacts');
-  deleteDoc(docRef).catch(err => {
-    console.warn('[Google Contacts] Error deleting token from Firestore:', err);
+  setDoc(docRef, {
+    isAuthorized: false,
+    accessToken: '',
+    expiry: 0,
+    email: '',
+    updatedAt: new Date().toISOString()
+  }, { merge: true }).catch(err => {
+    console.warn('[Google Contacts] Error updating deauthorization in Firestore:', err);
   });
 }
 
@@ -560,9 +683,13 @@ export async function fetchAllGoogleContacts(accessToken: string): Promise<Googl
         url += `&pageToken=${encodeURIComponent(pageToken)}`;
       }
 
-      const res = await fetch(url, {
+      let res = await fetch(url, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
+
+      if (res.status === 401) {
+        console.warn('[Google Contacts] 401 Unauthorized in fetchAllGoogleContacts. Token may be expired. Please re-authenticate via the Contacts button.');
+      }
 
       if (!res.ok) {
         const errText = await res.text();
@@ -763,7 +890,10 @@ export async function syncSingleUserContact(
       if (existingDisplayName) {
         const cityMatch = existingDisplayName.match(/\s*\(([^)]+)\)$/);
         if (cityMatch && cityMatch[1]) {
-          extractedCity = cityMatch[1].trim();
+          const candidateCity = cityMatch[1].trim();
+          if (candidateCity.toLowerCase() !== 'city' && !/^[\d\s\+\-\(\)]+$/.test(candidateCity)) {
+            extractedCity = candidateCity;
+          }
         }
       }
 
@@ -874,6 +1004,10 @@ export async function syncSingleUserContact(
         body: JSON.stringify(updateBody)
       });
 
+      if (res.status === 401) {
+        console.warn('[Google Contacts] 401 Unauthorized in updateContact. Token may be expired.');
+      }
+
       // Fallback if update fails: retry with basic updateFields
       if (!res.ok) {
         const errText = await res.text();
@@ -924,7 +1058,7 @@ export async function syncSingleUserContact(
         if (extractedDob && (!user.dob || user.dob.trim() === '')) {
           missingUpdates.dob = extractedDob;
         }
-        if (extractedCity && (!user.city || user.city.trim() === '')) {
+        if (extractedCity && extractedCity.toLowerCase() !== 'city' && (!user.city || user.city.trim() === '')) {
           missingUpdates.city = extractedCity;
         }
         if (Object.keys(missingUpdates).length > 0) {
@@ -993,6 +1127,10 @@ export async function syncSingleUserContact(
         },
         body: JSON.stringify(createBody)
       });
+
+      if (res.status === 401) {
+        console.warn('[Google Contacts] 401 Unauthorized in createContact. Token may be expired.');
+      }
 
       // Fallback if creating with memberships fails: create without memberships
       if (!res.ok) {

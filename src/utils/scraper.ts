@@ -123,12 +123,17 @@ export async function scrapeMoviesdrivePostLinks(
  */
 export async function scrapeHdhub4uPosts(
   query: string,
+  pageOrSignal: number | AbortSignal = 1,
   signal?: AbortSignal
 ): Promise<ProviderPost[]> {
   try {
+    const page = typeof pageOrSignal === 'number' ? pageOrSignal : 1;
+    const sig = typeof pageOrSignal === 'number' ? signal : pageOrSignal;
     const domain = getHdhub4uDomain();
-    const sUrl = `${domain}/search.html?q=${encodeURIComponent(query)}`;
-    const res = await fetch(`/api/hdhub4u?url=${encodeURIComponent(sUrl)}`, { signal });
+    const sUrl = page > 1 
+      ? `${domain}/search.html?q=${encodeURIComponent(query)}&page=${page}`
+      : `${domain}/search.html?q=${encodeURIComponent(query)}`;
+    const res = await fetch(`/api/hdhub4u?url=${encodeURIComponent(sUrl)}`, { signal: sig });
     if (!res.ok) return [];
     const data = await res.json();
     return data.posts || [];
@@ -159,12 +164,17 @@ export async function scrapeHdhub4uPostLinks(
  */
 export async function scrapeSkymoviesPosts(
   query: string,
+  pageOrSignal: number | AbortSignal = 1,
   signal?: AbortSignal
 ): Promise<ProviderPost[]> {
   try {
+    const page = typeof pageOrSignal === 'number' ? pageOrSignal : 1;
+    const sig = typeof pageOrSignal === 'number' ? signal : pageOrSignal;
     const domain = getSkymoviesDomain();
-    const sUrl = `${domain}/search.php?search=${encodeURIComponent(query)}&cat=All`;
-    const res = await fetch(`/api/skymovieshd?url=${encodeURIComponent(sUrl)}`, { signal });
+    const sUrl = page > 1
+      ? `${domain}/search.php?search=${encodeURIComponent(query)}&page=${page}&cat=All`
+      : `${domain}/search.php?search=${encodeURIComponent(query)}&cat=All`;
+    const res = await fetch(`/api/skymovieshd?url=${encodeURIComponent(sUrl)}`, { signal: sig });
     if (!res.ok) return [];
     const data = await res.json();
     return data.posts || [];
@@ -325,7 +335,7 @@ export async function resolveIntermediateUrls(
     return resolved;
   }
 
-  const concurrency = 15;
+  const concurrency = 25;
   const queue = [...candidatesToProcess];
 
   const processCandidate = async (item: { url: string; source: string; postTitle?: string; isSample?: boolean }) => {
@@ -333,8 +343,13 @@ export async function resolveIntermediateUrls(
     const itemResolved: { url: string; source: string; postTitle?: string; isSample?: boolean }[] = [];
 
     try {
+      const candidateTimeoutController = new AbortController();
+      const timeoutId = setTimeout(() => candidateTimeoutController.abort(), 6000);
+      const combinedSignal = signal ? AbortSignal.any([signal, candidateTimeoutController.signal]) : candidateTimeoutController.signal;
+
       if (norm.includes('mdrive.lol') || norm.includes('mdrvie.lol')) {
-        const mHits = await scrapeMdriveLinks(norm, signal);
+        const mHits = await scrapeMdriveLinks(norm, combinedSignal);
+        clearTimeout(timeoutId);
         const nonGdflix = mHits.filter((h) => !/(gdflix)/i.test(h.url || ''));
         const hubcloud = nonGdflix.filter((h) =>
           /(hubcloud|vcloud|hubdrive|drivehub|hubcdn|hblinks)/i.test(h.url || '')
@@ -351,7 +366,8 @@ export async function resolveIntermediateUrls(
           }
         });
       } else if (norm.includes('howblogs.xyz')) {
-        const hbUrl = await scrapeHowblogsLink(norm, signal);
+        const hbUrl = await scrapeHowblogsLink(norm, combinedSignal);
+        clearTimeout(timeoutId);
         if (hbUrl) {
           itemResolved.push({
             url: hbUrl,
@@ -365,7 +381,8 @@ export async function resolveIntermediateUrls(
         norm.includes('filesdl.in') ||
         norm.includes('filesdl.top')
       ) {
-        const fUrl = await scrapeFilesdlLink(norm, signal);
+        const fUrl = await scrapeFilesdlLink(norm, combinedSignal);
+        clearTimeout(timeoutId);
         if (fUrl) {
           itemResolved.push({
             url: fUrl,
@@ -374,6 +391,8 @@ export async function resolveIntermediateUrls(
             isSample: item.isSample,
           });
         }
+      } else {
+        clearTimeout(timeoutId);
       }
     } catch {}
 

@@ -4312,10 +4312,52 @@ export default function ContentManagement() {
         );
       })?.id;
     };
-    const findLanguageId = (name: string) =>
-      languages.find((l) => l.name.toLowerCase() === name.toLowerCase())?.id;
-    const findQualityId = (name: string) =>
-      qualities.find((q) => q.name.toLowerCase() === name.toLowerCase())?.id;
+    const findLanguageId = (name: string) => {
+      const lower = name.toLowerCase().trim();
+      const norm = lower.replace(/[\.\-\s_()\[\]]+/g, "");
+      // Exact match
+      const exact = languages.find((l) => l.name.toLowerCase() === lower);
+      if (exact) return exact.id;
+
+      // Line match
+      if (lower.includes("line")) {
+        const lineMatch = languages.find((l) => {
+          const lNorm = l.name.toLowerCase().replace(/[\.\-\s_()\[\]]+/g, "");
+          return lNorm.includes("line") && (lower.includes("hindi") ? lNorm.includes("hindi") : true);
+        });
+        if (lineMatch) return lineMatch.id;
+      }
+
+      return languages.find(
+        (l) => l.name.toLowerCase().replace(/[\.\-\s_()\[\]]+/g, "") === norm,
+      )?.id;
+    };
+
+    const findQualityId = (name: string) => {
+      const lower = name.toLowerCase().trim();
+      const norm = lower.replace(/[\.\-\s_/()\[\]]+/g, "");
+      const exact = qualities.find((q) => q.name.toLowerCase() === lower);
+      if (exact) return exact.id;
+
+      if (norm.includes("v2") || norm.includes("hq")) {
+        const v2HqMatch = qualities.find((q) => {
+          const qNorm = q.name.toLowerCase().replace(/[\.\-\s_/()\[\]]+/g, "");
+          return (
+            (qNorm.includes("v2") && qNorm.includes("hdtc")) ||
+            (qNorm.includes("hq") && qNorm.includes("hdtc")) ||
+            qNorm.includes("v2/hqhdtc") ||
+            qNorm.includes("v2hqhdtc") ||
+            qNorm.includes("v2hdtc") ||
+            qNorm.includes("hqhdtc")
+          );
+        });
+        if (v2HqMatch) return v2HqMatch.id;
+      }
+
+      return qualities.find(
+        (q) => q.name.toLowerCase().replace(/[\.\-\s_/()\[\]]+/g, "") === norm,
+      )?.id;
+    };
 
     let currentSeason: Season | null = null;
     let currentEpisode: Episode | null = null;
@@ -4343,10 +4385,15 @@ export default function ContentManagement() {
           "blu[-.\\s_]?ray",
           "bd[-.\\s_]?rip",
           "br[-.\\s_]?rip",
+          "v\\d+[-.\\s_]?hdtc",
+          "v\\d+",
+          "hq[-.\\s_]?hdtc",
           "hdtc",
           "hdcam",
           "dvdrip",
           "webrip",
+          "lines?",
+          "line",
           "hevc",
           "x264",
           "x265",

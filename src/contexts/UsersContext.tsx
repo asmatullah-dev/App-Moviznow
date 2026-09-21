@@ -4,6 +4,7 @@ import { db, runWithNetwork } from '../firebase';
 import { UserProfile } from '../types';
 import { useAuth } from './AuthContext';
 import { safeStorage } from '../utils/safeStorage';
+import { isNoticeSentOlderThanDays, clearNoticeRecord } from '../utils/expiryNotificationTracker';
 import { getUtcVersion, parseVersionTime, getChunkMeta, updateChunkMetaLocalCache } from '../utils/chunkMeta';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
 import { getUserDisplayName } from '../utils/userUtils';
@@ -86,15 +87,32 @@ export function normalizeUserStatusAndExpiry(u: UserProfile): UserProfile {
   if (u.expiryDate !== 'Lifetime') {
     if (isUserExpired(u.expiryDate)) {
       if (u.status !== 'suspended') {
+        // Automatically delete sent notification data if more than 15 days have passed since notification was sent
+        const isOlderThan15Days = u.expiryNoticeSentDate && isNoticeSentOlderThanDays(u.expiryNoticeSentDate, 15);
+        if (isOlderThan15Days) {
+          clearNoticeRecord(u.uid);
+          return {
+            ...u,
+            status: 'expired',
+            expiryNoticeSent: false,
+            expiryNoticeSentDate: undefined,
+            lastExpiryNoticeFor: undefined,
+            lastExpiryNoticeSentAt: undefined,
+          };
+        }
         return { ...u, status: 'expired' };
       }
     } else {
       if (u.status !== 'suspended' && u.status !== 'pending') {
-        const resetNotice = u.expiryNoticeSent && u.lastExpiryNoticeFor && u.expiryDate !== u.lastExpiryNoticeFor;
+        // User has a valid/renewed membership: always clear sent notification data so they can be notified again on their new expiry date
+        clearNoticeRecord(u.uid);
         return {
           ...u,
           status: 'active',
-          ...(resetNotice ? { expiryNoticeSent: false, expiryNoticeSentDate: undefined } : {})
+          expiryNoticeSent: false,
+          expiryNoticeSentDate: undefined,
+          lastExpiryNoticeFor: undefined,
+          lastExpiryNoticeSentAt: undefined,
         };
       }
     }

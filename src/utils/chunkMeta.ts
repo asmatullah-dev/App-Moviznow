@@ -151,7 +151,7 @@ const shouldFetchMeta = () => {
      return true;
   }
   
-  return true;
+  return false;
 };
 
 /**

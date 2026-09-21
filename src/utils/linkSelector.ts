@@ -1456,9 +1456,10 @@ export function extractTitleAndYear(text: string): {
     if (eMatch && !isEpRange) episode = parseInt(eMatch[1], 10);
   }
 
-  // Detect year - look for 4 digits (19xx or 20xx)
-  const yearPattern = /(?:\D|^)(19\d{2}|20\d{2})(?:\D|$)/;
-  const yearMatch = cleanText.match(yearPattern);
+  // Detect year - look for bracketed year first (e.g. (2024), [2024]), or 4 digits (19xx or 20xx)
+  const bracketYearMatch = cleanText.match(/[\(\[]\s*(19\d{2}|20[0-2]\d)\s*[\)\]]/);
+  const yearPattern = /(?:\D|^)(19\d{2}|20[0-2]\d)(?:\D|$)/;
+  const yearMatch = bracketYearMatch || cleanText.match(yearPattern);
 
   if (yearMatch) {
     year = parseInt(yearMatch[1], 10);
@@ -1468,7 +1469,8 @@ export function extractTitleAndYear(text: string): {
     const noiseMarkers = [
       '\\d{3,4}p', '[0-9]k', 'web[-.\\s_]?(dl|rip)',
       'hd[-.\\s_]?rip', 'blu[-.\\s_]?ray', 'bd[-.\\s_]?rip',
-      'br[-.\\s_]?rip', 'hdtc', 'hdcam', 'dvdrip', 'webrip',
+      'br[-.\\s_]?rip', 'v\\d+[-.\\s_]?hdtc', 'v\\d+', 'hq[-.\\s_]?hdtc', 'hdtc', 'hdcam', 'dvdrip', 'webrip',
+      'lines?', 'line',
       'hq', 'proper', 'repack', 'internal', 'hevc', 'x264', 'x265', 'aac', 'ac3',
       'dual[-.\\s_]?audio', 'multi[-.\\s_]?audio',
       'hindi', 'english', 'tamil', 'telugu', 'malayalam', 'kannada', 'urdu', 'punjabi',
@@ -1563,8 +1565,17 @@ export function rankAndVerifyPosts(posts: any[], targetTitle: string, expectedYe
     let yearConflict = false;
 
     if (expectedYear) {
-      if (parsed.year) {
-        const diff = Math.abs(parsed.year - expectedYear);
+      let detectedYear = parsed.year;
+      // Also inspect post URL for release year if post title text omitted it
+      if (!detectedYear && p.url) {
+        const urlYearMatch = p.url.match(/(?:\D|^)(19\d{2}|20[0-2]\d)(?:\D|$)/);
+        if (urlYearMatch) {
+          detectedYear = parseInt(urlYearMatch[1], 10);
+        }
+      }
+
+      if (detectedYear) {
+        const diff = Math.abs(detectedYear - expectedYear);
         if (diff === 0) {
           yearScore = 100;
         } else if (diff === 1) {
@@ -1574,7 +1585,8 @@ export function rankAndVerifyPosts(posts: any[], targetTitle: string, expectedYe
           yearConflict = true;
         }
       } else {
-        yearScore = 20;
+        // No year detected in post title or URL
+        yearScore = 0;
       }
     }
 
@@ -1587,18 +1599,34 @@ export function rankAndVerifyPosts(posts: any[], targetTitle: string, expectedYe
     };
   });
 
-  const matchingYearPosts = scored.filter((s) => s.yearScore >= 80);
-  const validScored = (expectedYear && matchingYearPosts.length > 0)
-    ? scored.filter((s) => !s.yearConflict)
-    : scored;
+  // Filter out any post that is not a precise title match or has conflicting year
+  const matchingPosts = scored.filter((s) => s.isMatch && !s.yearConflict);
+  if (matchingPosts.length === 0) {
+    return [];
+  }
 
-  validScored.sort((a, b) => {
-    if (a.isMatch !== b.isMatch) return a.isMatch ? -1 : 1;
-    if (a.yearScore !== b.yearScore) return b.yearScore - a.yearScore;
-    return 0;
+  // When expectedYear is specified: strictly confirm with year!
+  // Only accept posts that confirmed the year (exact match or diff <= 1).
+  // If no post on the current page confirmed the year, return [] so the waterfall search
+  // continues searching subsequent pages (page 2, 3, etc.) or fallback queries until correctly found.
+  if (expectedYear) {
+    const confirmedYearPosts = matchingPosts.filter((s) => s.yearScore >= 80);
+    if (confirmedYearPosts.length > 0) {
+      confirmedYearPosts.sort((a, b) => b.yearScore - a.yearScore);
+      return confirmedYearPosts.map((s) => s.post);
+    }
+    // No post confirmed the year on this page yet
+    return [];
+  }
+
+  // If no expectedYear was provided, sort by exact title match
+  matchingPosts.sort((a, b) => {
+    const aExact = a.parsed.title?.toLowerCase() === cleanTarget.toLowerCase() ? 1 : 0;
+    const bExact = b.parsed.title?.toLowerCase() === cleanTarget.toLowerCase() ? 1 : 0;
+    return bExact - aExact;
   });
 
-  return validScored.map((s) => s.post);
+  return matchingPosts.map((s) => s.post);
 }
 
 /**

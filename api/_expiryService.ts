@@ -511,6 +511,9 @@ export async function checkAndSendExpiryNotifications(targetUserIds?: string | s
   try {
     const emailConfig = await getEmailConfig();
 
+    // Automatically delete expiry notifications and chunk entries older than 5 days
+    await cleanupOldExpiryNotificationData(firestore);
+
     if (hasTargets) {
       const uidsToProcess = Array.isArray(targetUserIds) ? targetUserIds : [targetUserIds as string];
       const docs: admin.firestore.DocumentSnapshot[] = [];
@@ -524,11 +527,11 @@ export async function checkAndSendExpiryNotifications(targetUserIds?: string | s
         }
       }
       if (docs.length === 0) return result;
-      return await processUserDocs(docs, firestore, emailConfig, result);
+      return await processUserDocs(docs, firestore, emailConfig, result, true);
     }
 
     const usersSnap = await firestore.collection("users").get();
-    return await processUserDocs(usersSnap.docs, firestore, emailConfig, result);
+    return await processUserDocs(usersSnap.docs, firestore, emailConfig, result, false);
   } catch (err: any) {
     console.error("[Expiry Service Error]:", err);
     result.errors.push(err.message || String(err));
@@ -536,11 +539,88 @@ export async function checkAndSendExpiryNotifications(targetUserIds?: string | s
   }
 }
 
+/**
+ * Automatically prunes in-app and email expiry notification records older than 15 days
+ * from notification_chunks (app_chunk_0, Email_chunk_0) and notifications collection.
+ */
+async function cleanupOldExpiryNotificationData(firestore: admin.firestore.Firestore): Promise<void> {
+  try {
+    const now = Date.now();
+    const FIFTEEN_DAYS_MS = 15 * 24 * 60 * 60 * 1000;
+    const cutoffTime = now - FIFTEEN_DAYS_MS;
+
+    // 1. Clean app_chunk_0 for in-app expiry notifications > 15 days
+    try {
+      const appChunkRef = firestore.collection("notification_chunks").doc("app_chunk_0");
+      const appChunkSnap = await appChunkRef.get();
+      if (appChunkSnap.exists) {
+        const items = appChunkSnap.data()?.items || {};
+        let modified = false;
+        const newItems = { ...items };
+
+        for (const [id, item] of Object.entries(items) as [string, any][]) {
+          if (id.startsWith("expiry_") || (item?.type === "custom" && item?.title?.includes("Membership Expired"))) {
+            const created = item?.createdAt ? new Date(item.createdAt).getTime() : 0;
+            if (created && created < cutoffTime) {
+              delete newItems[id];
+              modified = true;
+            }
+          }
+        }
+
+        if (modified) {
+          await appChunkRef.update({
+            items: newItems,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          console.log("[Expiry Service] Pruned expired in-app notifications older than 15 days from app_chunk_0");
+        }
+      }
+    } catch (chunkErr) {
+      console.warn("[Expiry Service] Failed to prune app_chunk_0:", chunkErr);
+    }
+
+    // 2. Clean Email_chunk_0 for email expiry notifications > 15 days
+    try {
+      const emailChunkRef = firestore.collection("notification_chunks").doc("Email_chunk_0");
+      const emailChunkSnap = await emailChunkRef.get();
+      if (emailChunkSnap.exists) {
+        const items = emailChunkSnap.data()?.items || {};
+        let modified = false;
+        const newItems = { ...items };
+
+        for (const [id, item] of Object.entries(items) as [string, any][]) {
+          if (id.startsWith("email_expiry_") || item?.type === "email_notice") {
+            const created = item?.createdAt ? new Date(item.createdAt).getTime() : 0;
+            if (created && created < cutoffTime) {
+              delete newItems[id];
+              modified = true;
+            }
+          }
+        }
+
+        if (modified) {
+          await emailChunkRef.update({
+            items: newItems,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          console.log("[Expiry Service] Pruned email expiry notices older than 15 days from Email_chunk_0");
+        }
+      }
+    } catch (emailChunkErr) {
+      console.warn("[Expiry Service] Failed to prune Email_chunk_0:", emailChunkErr);
+    }
+  } catch (err) {
+    console.warn("[Expiry Service] Error during cleanupOldExpiryNotificationData:", err);
+  }
+}
+
 async function processUserDocs(
   docs: admin.firestore.DocumentSnapshot[],
   firestore: admin.firestore.Firestore,
   emailConfig: any,
-  result: ExpiryCheckResult
+  result: ExpiryCheckResult,
+  isExplicitTarget: boolean = false
 ): Promise<ExpiryCheckResult> {
   const now = new Date();
   // Today's YYYY-MM-DD in UTC and local boundary
@@ -574,8 +654,9 @@ async function processUserDocs(
 
     // Determine if user is expired (either explicitly status === 'expired' or expiry date passed)
     let isExpired = data.status === "expired";
+    let daysSinceExpiry = 0;
 
-    if (!isExpired && expiryDateStr) {
+    if (expiryDateStr) {
       const parts = expiryDateStr.split("-");
       if (parts.length === 3) {
         const expiryYear = parseInt(parts[0], 10);
@@ -589,11 +670,54 @@ async function processUserDocs(
         if (now >= expiryBoundary || todayStr > expiryDateStr) {
           isExpired = true;
         }
+        daysSinceExpiry = (now.getTime() - expiryBoundary.getTime()) / (24 * 60 * 60 * 1000);
       }
     }
 
-    if (!isExpired) {
-      // Not yet expired
+    // 1. If user is NOT expired (they renewed membership or have active time remaining):
+    // Always clear leftover expiry notification flags so they can be notified again on their new expiry date!
+    if (!isExpired || daysSinceExpiry < 0) {
+      if (data.expiryNoticeSent || data.expiryNoticeSentDate || data.lastExpiryNoticeFor) {
+        console.log(`[Expiry Service] User ${uid} has valid/renewed membership. Clearing previous expiry notice data.`);
+        await firestore.collection("users").doc(uid).update({
+          expiryNoticeSent: false,
+          expiryNoticeSentDate: admin.firestore.FieldValue.delete(),
+          lastExpiryNoticeFor: admin.firestore.FieldValue.delete(),
+          lastExpiryNoticeSentAt: admin.firestore.FieldValue.delete(),
+        }).catch(() => {});
+      }
+      continue;
+    }
+
+    // 2. Automatically delete sent notification data if more than 15 days have passed since notification was sent
+    if (data.expiryNoticeSentDate) {
+      const sentParts = String(data.expiryNoticeSentDate).split("T")[0].split("-");
+      if (sentParts.length === 3) {
+        const sentYear = parseInt(sentParts[0], 10);
+        const sentMonth = parseInt(sentParts[1], 10) - 1;
+        const sentDay = parseInt(sentParts[2], 10);
+        const sentBoundary = new Date(sentYear, sentMonth, sentDay, 0, 0, 0, 0);
+        const daysSinceSent = (now.getTime() - sentBoundary.getTime()) / (24 * 60 * 60 * 1000);
+        if (daysSinceSent > 15) {
+          console.log(`[Expiry Service] Deleting notification sent data older than 15 days (${daysSinceSent.toFixed(1)} days) for user ${uid}`);
+          await firestore.collection("users").doc(uid).update({
+            expiryNoticeSent: false,
+            expiryNoticeSentDate: admin.firestore.FieldValue.delete(),
+            lastExpiryNoticeFor: admin.firestore.FieldValue.delete(),
+            lastExpiryNoticeSentAt: admin.firestore.FieldValue.delete(),
+          }).catch(() => {});
+          data.expiryNoticeSent = false;
+          delete data.expiryNoticeSentDate;
+          delete data.lastExpiryNoticeFor;
+          delete data.lastExpiryNoticeSentAt;
+        }
+      }
+    }
+
+    // 3. ONLY send new expired status that has less than 5 days of Expiry!
+    // If account expired more than 5 days ago (> 5 days), do not send unless explicitly targeted by admin!
+    if (!isExplicitTarget && daysSinceExpiry > 5) {
+      console.log(`[Expiry Service] Skipping user ${uid}: expired ${daysSinceExpiry.toFixed(1)} days ago (> 5 days limit for new expired notifications)`);
       continue;
     }
 
@@ -604,11 +728,11 @@ async function processUserDocs(
     const lastNoticeNormalized = typeof data.lastExpiryNoticeFor === "string" ? data.lastExpiryNoticeFor.split("T")[0] : "";
     const noticeSentDateNormalized = typeof data.expiryNoticeSentDate === "string" ? data.expiryNoticeSentDate.split("T")[0] : "";
 
-    // Quick initial check before running transaction (skip if already notified for this exact expiry date)
+    // Quick initial check before running transaction (skip if already notified recently for this exact expiry date)
     if (
-      lastNoticeNormalized === targetNormalized ||
-      noticeSentDateNormalized === targetNormalized ||
-      (data.expiryNoticeSent === true && (lastNoticeNormalized === targetNormalized || noticeSentDateNormalized === targetNormalized))
+      !isExplicitTarget &&
+      data.expiryNoticeSent === true &&
+      (lastNoticeNormalized === targetNormalized || noticeSentDateNormalized === targetNormalized)
     ) {
       result.skippedAlreadyNotified++;
       continue;
@@ -634,12 +758,25 @@ async function processUserDocs(
         const freshLastNotice = typeof freshData.lastExpiryNoticeFor === "string" ? freshData.lastExpiryNoticeFor.split("T")[0] : "";
         const freshSentDate = typeof freshData.expiryNoticeSentDate === "string" ? freshData.expiryNoticeSentDate.split("T")[0] : "";
 
+        // Check if fresh sent notice is older than 15 days
+        let isFreshNoticeOlderThan15Days = false;
+        if (freshSentDate) {
+          const fsParts = freshSentDate.split("-");
+          if (fsParts.length === 3) {
+            const fsDate = new Date(parseInt(fsParts[0], 10), parseInt(fsParts[1], 10) - 1, parseInt(fsParts[2], 10), 0, 0, 0, 0);
+            if ((now.getTime() - fsDate.getTime()) / (24 * 60 * 60 * 1000) > 15) {
+              isFreshNoticeOlderThan15Days = true;
+            }
+          }
+        }
+
         if (
-          freshLastNotice === freshExpiryStr ||
-          freshSentDate === freshExpiryStr ||
-          (freshData.expiryNoticeSent === true && (freshLastNotice === freshExpiryStr || freshSentDate === freshExpiryStr))
+          !isExplicitTarget &&
+          !isFreshNoticeOlderThan15Days &&
+          (freshLastNotice === freshExpiryStr || freshSentDate === freshExpiryStr ||
+           (freshData.expiryNoticeSent === true && (freshLastNotice === freshExpiryStr || freshSentDate === freshExpiryStr)))
         ) {
-          // Already claimed/notified by another concurrent process
+          // Already claimed/notified recently by another concurrent process
           claimed = false;
           return;
         }

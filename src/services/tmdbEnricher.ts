@@ -1,5 +1,5 @@
 import { Content, Genre, Language, Quality, QualityLinks, Season } from '../types';
-import { extractTitleAndYear } from '../utils/titleMatcher';
+import { extractTitleAndYear, isPreciseTitleMatch } from '../utils/titleMatcher';
 import {
   searchTMDBByTitle,
   fetchTMDBDetails,
@@ -158,22 +158,30 @@ export async function verifyAndFetchTmdbData(
 
     let bestMatch = tmdbResults[0];
 
-    // Check for exact title and year match
+    // Check for exact title and year match using isPreciseTitleMatch
     const exactTitleYear = tmdbResults.find((res: any) => {
-      const matchTitle = normalizeStr(res.item.title || res.item.name || res.item.original_title || res.item.original_name);
+      const matchTitle = res.item.title || res.item.name || res.item.original_title || res.item.original_name || '';
       const matchYear = (res.item.release_date || res.item.first_air_date || '').split('-')[0];
-      return matchTitle === targetTitleNorm && (!searchYear || matchYear === searchYear);
+      const titleMatches = isPreciseTitleMatch(matchTitle, cleanQuery) || normalizeStr(matchTitle) === targetTitleNorm;
+      return titleMatches && (!searchYear || matchYear === searchYear);
     });
 
     if (exactTitleYear) {
       bestMatch = exactTitleYear;
-    } else if (!isNaN(targetYearNum)) {
-      const closeYear = tmdbResults.find((res: any) => {
-        const matchTitle = normalizeStr(res.item.title || res.item.name || res.item.original_title || res.item.original_name);
+    } else {
+      const titleOnlyMatch = tmdbResults.find((res: any) => {
+        const matchTitle = res.item.title || res.item.name || res.item.original_title || res.item.original_name || '';
         const matchYearNum = parseInt((res.item.release_date || res.item.first_air_date || '').split('-')[0], 10);
-        return matchTitle === targetTitleNorm && !isNaN(matchYearNum) && Math.abs(matchYearNum - targetYearNum) <= 2;
+        const titleMatches = isPreciseTitleMatch(matchTitle, cleanQuery) || normalizeStr(matchTitle) === targetTitleNorm;
+        if (!titleMatches) return false;
+        if (!isNaN(targetYearNum) && !isNaN(matchYearNum)) {
+          return Math.abs(matchYearNum - targetYearNum) <= 2;
+        }
+        return true;
       });
-      if (closeYear) bestMatch = closeYear;
+      if (titleOnlyMatch) {
+        bestMatch = titleOnlyMatch;
+      }
     }
 
     const top = bestMatch.item;

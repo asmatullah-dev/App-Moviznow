@@ -95,7 +95,7 @@ export const extractTitleAndYear = (rawTitle: string): {
   }
 
   // Remove resolution, quality, format, audio, language noise keywords, domain tags, channel tags
-  const noiseRegex = /\b(480p|720p|1080p|2160p|4k|2k|ds4k|ds-4k|hdrip|web-dl|webrip|bluray|brrip|dvdrip|hdtv|camrip|dual audio|multi audio|hindi|english|tamil|telugu|punjabi|malayalam|kannada|bengali|marathi|urdu|subtitles|esub|esubs|x264|x265|hevc|aac|ac3|eac3|dts|dd\+?|5\.1|7\.1|2\.0|5\s+1|7\s+1|2\s+0|hdhub4u(\.[a-z]+)?|moviesdrive(\.[a-z]+)?|skymovieshd(\.[a-z]+)?|filmygo(\.[a-z]+)?|filmyfly(\.[a-z]+)?|hubcloud(\.[a-z]+)?|hubdrive(\.[a-z]+)?|ms|mkv|mp4|zip|rar|download|full movie|movie|season \d+|s\d+e\d+|cfd|s\.cfd|s-cfd)\b/gi;
+  const noiseRegex = /\b(480p|720p|1080p|2160p|4k|2k|ds4k|ds-4k|hdrip|web-dl|webrip|web-?dlrip|bluray|brrip|dvdrip|hdtv|camrip|dual audio|multi audio|hindi|english|tamil|telugu|punjabi|malayalam|kannada|bengali|marathi|urdu|subtitles|esub|esubs|x264|x265|hevc|aac|ac3|eac3|dts|dd\+?|5\.1|7\.1|2\.0|5\s+1|7\s+1|2\s+0|hdhub4u(\.[a-z]+)?|moviesdrive(\.[a-z]+)?|skymovieshd(\.[a-z]+)?|filmygo(\.[a-z]+)?|filmyfly(\.[a-z]+)?|hubcloud(\.[a-z]+)?|hubdrive(\.[a-z]+)?|ms|mkv|mp4|zip|rar|download|full movie|movie|season \d+|s\d+e\d+|cfd|s\.cfd|s-cfd|org|cleaned?|hq|uncut|remastered|extended|directors?\s*cut|proper|dubbed|web\s*series)\b/gi;
 
   cleanTitle = cleanTitle.replace(noiseRegex, '').replace(/[()\[\]{}:_|-]+/g, ' ').replace(/\s+/g, ' ').trim();
 
@@ -176,7 +176,7 @@ export const tokenizeCleanForMatch = (str: string): string[] => {
   return normalizeNumerals(str)
     .toLowerCase()
     .replace(/&/g, ' and ')
-    .replace(/\b(a|an|the|of|in|for|and|to|movie|film|series)\b/gi, ' ')
+    .replace(/\b(a|an|the|of|in|for|and|to|movie|film|series|hindi|english|tamil|telugu|kannada|malayalam|punjabi|bengali|marathi|urdu|dual|multi|audio|dubbed|org|cleaned?|hq|uncut|remastered|extended|directors?\s*cut|proper|complete|all\s*episodes|season\s*\d+|s\d+|ep\s*\d+|e\d+|full\s*movie|hdrip|webrip|web-?dl|bluray|brrip|dvdrip|hevc|x264|x265|10bit|aac|esubs?)\b/gi, ' ')
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
     .filter((w) => w.length > 0);
@@ -231,6 +231,20 @@ export const isPreciseTitleMatch = (postCleanTitle: string, contentRawTitle: str
 
   // Exact token match
   if (pTokens.join(' ') === cTokens.join(' ')) return true;
+
+  // Token containment: all core target tokens are present in post tokens in order
+  if (cTokens.length >= 1 && pTokens.length >= cTokens.length) {
+    let cIdx = 0;
+    for (let i = 0; i < pTokens.length; i++) {
+      if (pTokens[i] === cTokens[cIdx]) {
+        cIdx++;
+        if (cIdx === cTokens.length) break;
+      }
+    }
+    if (cIdx === cTokens.length) {
+      if (pSeq === cSeq) return true;
+    }
+  }
 
   // Single-word typo or minor punctuation difference if word counts match
   if (pTokens.length === cTokens.length && normP.length >= 6 && normC.length >= 6) {

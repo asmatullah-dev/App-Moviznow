@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
-import { collection, doc, updateDoc, getDoc, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit, deleteField, increment} from 'firebase/firestore';
+import { collection, doc, updateDoc, getDoc, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit, deleteField, increment, onSnapshot } from 'firebase/firestore';
 import { UserProfile, Role, Status, AnalyticsEvent, Content } from '../../types';
-import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, Bell, Mail, RefreshCw, Link2 as LinkIcon, Copy, Users, CheckCircle } from 'lucide-react';
+import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, Bell, Mail, RefreshCw, Link2 as LinkIcon, Copy, Users, CheckCircle, ShieldCheck } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -23,10 +23,25 @@ import { PhoneWhitelistManager } from '../../components/PhoneWhitelistManager';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { useUsers, isUserExpired } from '../../contexts/UsersContext';
+import {
+  isExpiredWithinDays,
+  isNoticeSentOlderThanDays,
+  isNoticeSentRecently,
+  recordNoticeSent,
+  clearNoticeRecord,
+  cleanLocalStorageNotices,
+  updateLastCheckedTimestamp,
+  canRunDailyAutoExpiryCheck,
+  recordAutoExpiryCheckedToday,
+  hasCheckedAutoExpiryToday,
+  isWithinExpiryCheckTimeWindow,
+} from '../../utils/expiryNotificationTracker';
 import { getUtcVersion } from '../../utils/chunkMeta';
 import {
   getStoredContactsToken,
   getConnectedAccountEmail,
+  isGoogleContactsAuthorized,
+  ensureValidContactsToken,
   connectGoogleContacts,
   disconnectGoogleContacts,
   syncSingleUserContact,
@@ -102,34 +117,73 @@ export default function UserManagement() {
 
   // Google Contacts State & Handlers
   const [contactsToken, setContactsToken] = useState<string | null>(() => getStoredContactsToken());
-  const [contactsAccountEmail, setContactsAccountEmail] = useState<string | null>(() => getConnectedAccountEmail());
+  const [contactsAccountEmail, setContactsAccountEmail] = useState<string | null>(() => getConnectedAccountEmail() || 'wmoviznow@gmail.com');
+  const [isContactsAuthorized, setIsContactsAuthorized] = useState<boolean>(() => isGoogleContactsAuthorized());
   const [isContactsPanelOpen, setIsContactsPanelOpen] = useState(false);
   const [isConnectingContacts, setIsConnectingContacts] = useState(false);
   const [isSyncingContacts, setIsSyncingContacts] = useState(false);
   const [contactsSyncProgress, setContactsSyncProgress] = useState<{ current: number; total: number } | null>(null);
   const [contactsSyncResult, setContactsSyncResult] = useState<{ title: string; message: string } | null>(null);
 
-  // Load token from Firestore if not available in state/sessionStorage on mount
+  // Synchronize Google Contacts authorization state in real-time from Firestore across all tabs & browser sessions
   useEffect(() => {
-    const checkAndRestoreToken = async () => {
-      if (!contactsToken) {
-        const restored = await loadAndVerifyStoredContactsToken();
-        if (restored.accessToken) {
-          setContactsToken(restored.accessToken);
-          setContactsAccountEmail(restored.email);
+    let isMounted = true;
+    // 1. Initial non-interactive state load on mount (no popup)
+    const verifyInitial = async () => {
+      const valid = await ensureValidContactsToken(false);
+      if (isMounted) {
+        if (valid.accessToken) {
+          setContactsToken(valid.accessToken);
+          setIsContactsAuthorized(true);
+        } else {
+          setIsContactsAuthorized(isGoogleContactsAuthorized());
         }
+        if (valid.email) setContactsAccountEmail(valid.email);
       }
     };
-    checkAndRestoreToken();
-  }, [contactsToken]);
+    verifyInitial();
+
+    // 2. Real-time Firestore snapshot listener for multi-tab / multi-device synchronization
+    const docRef = doc(db, 'settings', 'google_contacts');
+    const unsubscribe = onSnapshot(docRef, async (snap) => {
+      if (!isMounted) return;
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.isAuthorized === false) {
+          setContactsToken(null);
+          setIsContactsAuthorized(false);
+          return;
+        }
+
+        const fToken = data.accessToken;
+        const fEmail = data.email || 'wmoviznow@gmail.com';
+        const isAuth = data.isAuthorized === true || !!fToken;
+
+        setIsContactsAuthorized(isAuth);
+        if (fEmail) setContactsAccountEmail(fEmail);
+
+        if (fToken) {
+          setContactsToken(fToken);
+        }
+      }
+    }, (err) => {
+      console.warn('[Google Contacts] Firestore sync listener warning:', err);
+    });
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
+  }, []);
 
   const autoSyncUserToContacts = useCallback(async (userToSync: UserProfile) => {
-    // Attempt to restore token if expired/missing in sessionStorage
-    const restored = await loadAndVerifyStoredContactsToken();
-    const token = restored.accessToken;
-    if (!token || !userToSync.phone) return;
+    if (!userToSync.phone) return;
+    // Transparently ensures valid token or silently refreshes without interrupting the user
+    const { accessToken } = await ensureValidContactsToken(false);
+    if (!accessToken) return;
+
     try {
-      const res = await syncSingleUserContact(userToSync, token);
+      const res = await syncSingleUserContact(userToSync, accessToken);
       if (res.success) {
         console.log(`[Google Contacts Auto-Sync] Synced ${userToSync.displayName || userToSync.phone} -> ${res.contactName} (Photo updated: ${res.photoUpdated ? 'yes' : 'no'})`);
       }
@@ -141,10 +195,15 @@ export default function UserManagement() {
   const handleConnectContacts = async () => {
     setIsConnectingContacts(true);
     try {
-      const conn = await connectGoogleContacts('wmoviznow@gmail.com');
+      const conn = await connectGoogleContacts('wmoviznow@gmail.com', false);
       setContactsToken(conn.accessToken);
+      setIsContactsAuthorized(true);
       setContactsAccountEmail(conn.email);
-      setAlertConfig({ isOpen: true, title: 'Google Contacts Connected', message: `Connected successfully with ${conn.email}. Contacts will now auto-sync on user edits, additions, status changes, or membership extensions.` });
+      setAlertConfig({
+        isOpen: true,
+        title: 'Google Contacts Connected & Saved',
+        message: `Authorization successfully saved in Firestore for ${conn.email}.\n\nTokens are automatically renewed in the background so you will not need to reauthorize again!`
+      });
     } catch (err: any) {
       console.error('Failed to connect Google Contacts:', err);
       setAlertConfig({ isOpen: true, title: 'Connection Error', message: err?.message || 'Failed to connect Google Contacts account.' });
@@ -153,9 +212,33 @@ export default function UserManagement() {
     }
   };
 
+  const handleRefreshContactsAuth = async () => {
+    setIsConnectingContacts(true);
+    try {
+      const refreshed = await ensureValidContactsToken(true);
+      if (refreshed.accessToken) {
+        setContactsToken(refreshed.accessToken);
+        setIsContactsAuthorized(true);
+        if (refreshed.email) setContactsAccountEmail(refreshed.email);
+        setAlertConfig({
+          isOpen: true,
+          title: 'Authorization Verified',
+          message: `Active token refreshed and verified for ${refreshed.email || contactsAccountEmail || 'wmoviznow@gmail.com'}. Saved in Firestore.`
+        });
+      } else {
+        throw new Error('Could not refresh token automatically.');
+      }
+    } catch (err: any) {
+      setAlertConfig({ isOpen: true, title: 'Refresh Error', message: err?.message || 'Could not verify token. Please click Connect to re-link account.' });
+    } finally {
+      setIsConnectingContacts(false);
+    }
+  };
+
   const handleDisconnectContacts = () => {
     disconnectGoogleContacts();
     setContactsToken(null);
+    setIsContactsAuthorized(false);
     setContactsAccountEmail(null);
   };
 
@@ -166,31 +249,18 @@ export default function UserManagement() {
       return;
     }
 
-    let token = getStoredContactsToken();
-    if (!token) {
-      const restored = await loadAndVerifyStoredContactsToken();
-      token = restored.accessToken;
-      if (token) {
-        setContactsToken(restored.accessToken);
-        setContactsAccountEmail(restored.email);
-      }
+    // Always ensure fresh valid token (silently refreshes if expired)
+    setIsConnectingContacts(true);
+    let { accessToken } = await ensureValidContactsToken(true);
+    setIsConnectingContacts(false);
+
+    if (!accessToken) {
+      setAlertConfig({ isOpen: true, title: 'Connection Required', message: 'Please connect your Google Contacts account to sync contacts.' });
+      return;
     }
 
-    if (!token) {
-      try {
-        setIsConnectingContacts(true);
-        const conn = await connectGoogleContacts('wmoviznow@gmail.com');
-        token = conn.accessToken;
-        setContactsToken(conn.accessToken);
-        setContactsAccountEmail(conn.email);
-      } catch (err: any) {
-        setIsConnectingContacts(false);
-        setAlertConfig({ isOpen: true, title: 'Connection Required', message: 'Please connect your Google Contacts account to sync contacts.' });
-        return;
-      } finally {
-        setIsConnectingContacts(false);
-      }
-    }
+    setContactsToken(accessToken);
+    setIsContactsAuthorized(true);
 
     const usersToSync = allUsers.filter(u => {
       if (!uidsToSync.includes(u.uid)) return false;
@@ -205,7 +275,7 @@ export default function UserManagement() {
     setContactsSyncProgress({ current: 0, total: usersToSync.length });
 
     try {
-      const res = await syncMultipleUsersContacts(usersToSync, token, (current, total) => {
+      const res = await syncMultipleUsersContacts(usersToSync, accessToken, (current, total) => {
         setContactsSyncProgress({ current, total });
       });
 
@@ -366,22 +436,11 @@ export default function UserManagement() {
 
     console.log(`[UserManagement] Triggering immediate expiry email & push notifications for ${validUids.length} user(s):`, validUids);
 
-    // 1. Immediately flag user updates locally & in pending updates
-    const batchUpdates: Record<string, Partial<UserProfile>> = {};
+    // 1. Immediately record in safeStorage / localStorage to prevent repeat triggers and avoid spamming Firestore
     validUids.forEach(uid => {
       const u = sourceUsers.find(user => user.uid === uid);
-      batchUpdates[uid] = {
-        status: 'expired',
-        expiryNoticeSent: true,
-        expiryNoticeSentDate: todayStr,
-        lastExpiryNoticeFor: u?.expiryDate || todayStr,
-      };
+      recordNoticeSent(uid, u?.expiryDate || todayStr);
     });
-
-    updateMultipleUserFields(batchUpdates);
-    
-    // Commit to Firestore
-    finalizeUserChanges(true).catch(err => console.warn("Failed to persist expiry flags on Firestore:", err));
 
     // 2. Call backend expiry service immediately
     try {
@@ -395,10 +454,145 @@ export default function UserManagement() {
       });
       const resData = await res.json();
       console.log("[UserManagement] Immediate expiry notification response:", resData);
+
+      // 3. Mark user updates locally & in pending updates for Firestore sync
+      const batchUpdates: Record<string, Partial<UserProfile>> = {};
+      validUids.forEach(uid => {
+        const u = sourceUsers.find(user => user.uid === uid);
+        batchUpdates[uid] = {
+          status: 'expired',
+          expiryNoticeSent: true,
+          expiryNoticeSentDate: todayStr,
+          lastExpiryNoticeFor: u?.expiryDate || todayStr,
+          lastExpiryNoticeSentAt: new Date().toISOString(),
+        };
+      });
+
+      updateMultipleUserFields(batchUpdates);
+      finalizeUserChanges(true).catch(err => console.warn("Failed to persist expiry flags on Firestore:", err));
     } catch (err) {
       console.error("[UserManagement] Error triggering immediate expiry notification:", err);
     }
   }, [profile?.uid, profile?.role, allUsers, updateMultipleUserFields, finalizeUserChanges]);
+
+  // Helper to delete sent notification data older than 15 days (from safeStorage/localStorage and Firestore)
+  const cleanSentNotificationDataOlderThan15Days = useCallback(async (userList?: UserProfile[]) => {
+    // 1. Clean safeStorage/localStorage records older than 15 days
+    cleanLocalStorageNotices(15);
+
+    const sourceUsers = userList && userList.length > 0 ? userList : allUsers;
+    if (!sourceUsers || sourceUsers.length === 0) return;
+
+    const batchUpdates: Record<string, Partial<UserProfile>> = {};
+
+    sourceUsers.forEach(u => {
+      if (!u || !u.uid) return;
+
+      // If user is active / renewed, clear any previous notice data
+      if (u.status === 'active' && (u.expiryNoticeSent || u.expiryNoticeSentDate || u.lastExpiryNoticeFor)) {
+        clearNoticeRecord(u.uid);
+        batchUpdates[u.uid] = {
+          expiryNoticeSent: false,
+          expiryNoticeSentDate: undefined,
+          lastExpiryNoticeFor: undefined,
+          lastExpiryNoticeSentAt: undefined,
+        };
+        return;
+      }
+
+      // If notice was sent more than 15 days ago, delete that sent notification data
+      if (u.expiryNoticeSentDate && isNoticeSentOlderThanDays(u.expiryNoticeSentDate, 15)) {
+        clearNoticeRecord(u.uid);
+        batchUpdates[u.uid] = {
+          expiryNoticeSent: false,
+          expiryNoticeSentDate: undefined,
+          lastExpiryNoticeFor: undefined,
+          lastExpiryNoticeSentAt: undefined,
+        };
+      }
+    });
+
+    if (Object.keys(batchUpdates).length > 0) {
+      console.log(`[UserManagement] Deleting sent notification data older than 15 days for ${Object.keys(batchUpdates).length} user(s).`);
+      updateMultipleUserFields(batchUpdates);
+      finalizeUserChanges(true).catch(err => console.warn("Failed to persist notification cleanup on Firestore:", err));
+    }
+  }, [allUsers, updateMultipleUserFields, finalizeUserChanges]);
+
+  // Helper to check for new expired users (< 5 days of expiry) and send notifications
+  const checkAndSendExpiredNotifications = useCallback(async (userList?: UserProfile[]) => {
+    if (!profile?.uid || (profile.role !== 'admin' && profile.role !== 'owner')) return;
+    const sourceUsers = userList && userList.length > 0 ? userList : allUsers;
+    if (!sourceUsers || sourceUsers.length === 0) return;
+
+    const unnotifiedExpiredUids: string[] = [];
+
+    sourceUsers.forEach(u => {
+      if (!u || !u.uid || u.role === 'admin' || u.role === 'owner') return;
+
+      const isExpired = u.status === 'expired' || isUserExpired(u.expiryDate);
+      if (!isExpired) return;
+
+      // CRITICAL RULE: "only send new expired status that has less than 5 days of Expiry"
+      // Accounts expired more than 5 days ago are skipped!
+      const isNewExpired = isExpiredWithinDays(u.expiryDate, 5);
+      if (!isNewExpired) return;
+
+      // Check if notification was already sent recently (within 15 days) in safeStorage / localStorage
+      const alreadySentLocally = isNoticeSentRecently(u.uid, u.expiryDate, 15);
+      if (alreadySentLocally) return;
+
+      // Check if user document already has an active notice sent within 15 days for this expiry
+      const alreadySentOnUser = u.expiryNoticeSent && u.expiryNoticeSentDate && !isNoticeSentOlderThanDays(u.expiryNoticeSentDate, 15);
+      if (alreadySentOnUser) return;
+
+      unnotifiedExpiredUids.push(u.uid);
+    });
+
+    if (unnotifiedExpiredUids.length > 0) {
+      console.log(`[UserManagement] Found ${unnotifiedExpiredUids.length} newly expired user(s) (< 5 days) requiring notification:`, unnotifiedExpiredUids);
+      sendImmediateExpiryNotifications(unnotifiedExpiredUids, sourceUsers);
+    }
+  }, [profile?.uid, profile?.role, allUsers, sendImmediateExpiryNotifications]);
+
+  // Combined daily auto expiry check: runs ONLY during 5:00 AM - 9:00 AM once a day.
+  // Immediately records flag in local storage to prevent repeat execution and avoids connecting to Firestore again.
+  const runDailyAutoExpiryCheck = useCallback(async (userList?: UserProfile[]) => {
+    if (!profile?.uid || (profile.role !== 'admin' && profile.role !== 'owner')) return;
+
+    if (!canRunDailyAutoExpiryCheck()) {
+      return;
+    }
+
+    // Flag recorded in local storage immediately to prevent multiple runs today
+    recordAutoExpiryCheckedToday();
+    console.log("[UserManagement] Running daily auto expiry notification check (5:00 AM - 9:00 AM window). Flag recorded in local storage.");
+
+    const sourceUsers = userList && userList.length > 0 ? userList : allUsers;
+
+    // Step 1: Delete data of sent notifications older than 15 days
+    await cleanSentNotificationDataOlderThan15Days(sourceUsers);
+
+    // Step 2: Check and send notifications for newly expired users (< 5 days of expiry)
+    await checkAndSendExpiredNotifications(sourceUsers);
+
+    updateLastCheckedTimestamp();
+  }, [profile?.uid, profile?.role, allUsers, cleanSentNotificationDataOlderThan15Days, checkAndSendExpiredNotifications]);
+
+  // Periodic check during User Management tab session:
+  // Only runs auto check if 5:00 AM - 9:00 AM window is active and today's check hasn't run yet.
+  useEffect(() => {
+    if (authLoading) return;
+    if (profile?.role !== 'admin' && profile?.role !== 'owner') return;
+
+    const interval = setInterval(() => {
+      if (canRunDailyAutoExpiryCheck()) {
+        runDailyAutoExpiryCheck();
+      }
+    }, 60000); // check every 60 seconds while on User Management tab
+
+    return () => clearInterval(interval);
+  }, [authLoading, profile?.role, runDailyAutoExpiryCheck]);
 
   // Track status changes to 'expired' across user updates and trigger immediate notifications
   useEffect(() => {
@@ -409,8 +603,11 @@ export default function UserManagement() {
       if (u && u.uid && u.role !== 'admin' && u.role !== 'owner') {
         const prevStatus = prevUsersMapRef.current.get(u.uid);
         if (prevStatus !== undefined && prevStatus !== 'expired' && u.status === 'expired') {
-          changedToExpiredUidsRef.current.add(u.uid);
-          immediateExpiredUids.push(u.uid);
+          // Only send if it has less than 5 days of expiry and not already sent recently
+          if (isExpiredWithinDays(u.expiryDate, 5) && !isNoticeSentRecently(u.uid, u.expiryDate, 5)) {
+            changedToExpiredUidsRef.current.add(u.uid);
+            immediateExpiredUids.push(u.uid);
+          }
         }
         prevUsersMapRef.current.set(u.uid, u.status || '');
       }
@@ -425,8 +622,8 @@ export default function UserManagement() {
   // Fetch fresh data on mount and force sync on unmount
   const profileRef = useRef(profile);
   profileRef.current = profile;
-  const sendImmediateExpiryNotificationsRef = useRef(sendImmediateExpiryNotifications);
-  sendImmediateExpiryNotificationsRef.current = sendImmediateExpiryNotifications;
+  const runDailyAutoExpiryCheckRef = useRef(runDailyAutoExpiryCheck);
+  runDailyAutoExpiryCheckRef.current = runDailyAutoExpiryCheck;
   const hasSyncedOnMountRef = useRef(false);
 
   useEffect(() => {
@@ -437,9 +634,6 @@ export default function UserManagement() {
 
     const syncOnMount = async () => {
       try {
-        // Record initial statuses before refresh
-        const initialMap = new Map((allUsers || []).map(u => [u.uid, u.status]));
-
         // If there are pending changes from previous session/offline, finalize them first
         const pendingStr = safeStorage.getItem('pending_user_updates');
         if (pendingStr) {
@@ -457,29 +651,16 @@ export default function UserManagement() {
         const res = await refreshUsers(false);
         const freshUsers = res?.users || allUsers || [];
 
-        // Check for users whose status changed to 'expired' or who are expired without having received notice
+        // Check for expiry send in opening of user management tab:
+        // Only checks during time period 5 AM to 9 AM once a day.
+        // After checking once, flag is recorded in local storage to avoid connecting to Firestore again.
         const currentProfile = profileRef.current;
         if ((currentProfile?.role === 'admin' || currentProfile?.role === 'owner') && !isInitialMountCheckDoneRef.current) {
           isInitialMountCheckDoneRef.current = true;
-          const todayStr = new Date().toISOString().split('T')[0];
-          const unnotifiedExpiredUids: string[] = [];
-
-          freshUsers.forEach(u => {
-            if (u && u.uid && u.role !== 'admin' && u.role !== 'owner') {
-              const prevStatus = initialMap.get(u.uid);
-              const isExpired = u.status === 'expired' || isUserExpired(u.expiryDate);
-              const expStr = u.expiryDate ? u.expiryDate.split('T')[0] : todayStr;
-              const notYetNotified = !u.expiryNoticeSent || (u.expiryNoticeSentDate !== expStr && u.lastExpiryNoticeFor !== (u.expiryDate || todayStr));
-
-              if (isExpired && (prevStatus === 'active' || notYetNotified)) {
-                unnotifiedExpiredUids.push(u.uid);
-              }
-            }
-          });
-
-          if (unnotifiedExpiredUids.length > 0) {
-            console.log(`[UserManagement Mount] Found ${unnotifiedExpiredUids.length} expired user(s) requiring immediate notification on tab open:`, unnotifiedExpiredUids);
-            sendImmediateExpiryNotificationsRef.current(unnotifiedExpiredUids, freshUsers);
+          if (canRunDailyAutoExpiryCheck()) {
+            runDailyAutoExpiryCheckRef.current(freshUsers);
+          } else {
+            console.log("[UserManagement] Auto expiry check bypassed on tab open. (Only runs once daily between 5:00 AM and 9:00 AM; avoiding connecting to Firestore).");
           }
         }
 
@@ -784,13 +965,13 @@ export default function UserManagement() {
       const isBecomingExpired = (updateData.status === 'expired' || (updateData.expiryDate && isUserExpired(updateData.expiryDate))) && ((selectedUser.role as string) !== 'owner' && (selectedUser.role as string) !== 'admin');
       
       if (isBecomingExpired) {
-        const todayStr = new Date().toISOString().split('T')[0];
         updateData.status = 'expired';
-        updateData.expiryNoticeSent = true;
-        updateData.expiryNoticeSentDate = todayStr;
-        updateData.lastExpiryNoticeFor = updateData.expiryDate || selectedUser.expiryDate || todayStr;
       } else if (updateData.status === 'active') {
         updateData.expiryNoticeSent = false;
+        updateData.expiryNoticeSentDate = undefined;
+        updateData.lastExpiryNoticeFor = undefined;
+        updateData.lastExpiryNoticeSentAt = undefined;
+        clearNoticeRecord(editingId);
       }
 
       const currentEditingId = editingId;
@@ -804,9 +985,12 @@ export default function UserManagement() {
       const mergedUserForSync: UserProfile = { ...selectedUser, ...updateData, uid: currentEditingId };
       autoSyncUserToContacts(mergedUserForSync);
 
-      // If status became expired and was previously active, immediately send expiry notifications
+      // If status became expired and was previously active, check 5-day limit and immediately send expiry notifications
       if (isBecomingExpired && selectedUser.status === 'active') {
-        sendImmediateExpiryNotifications([currentEditingId]);
+        const targetExp = updateData.expiryDate || selectedUser.expiryDate;
+        if (isExpiredWithinDays(targetExp, 5) && !isNoticeSentRecently(currentEditingId, targetExp, 5)) {
+          sendImmediateExpiryNotifications([currentEditingId]);
+        }
       }
 
       // Normalize expiry dates to YYYY-MM-DD or 'Lifetime' or 'none' to check if actually changed
@@ -1391,14 +1575,17 @@ export default function UserManagement() {
         if (user?.role !== 'owner' && user?.role !== 'admin') {
           const userUpdates: Partial<UserProfile> = { status };
           if (status === 'expired') {
-            userUpdates.expiryNoticeSent = true;
-            userUpdates.expiryNoticeSentDate = todayStr;
-            userUpdates.lastExpiryNoticeFor = user?.expiryDate || todayStr;
-            if (user?.status === 'active') {
-              expiredUidsToSend.push(uid);
+            if (isExpiredWithinDays(user?.expiryDate, 5) && !isNoticeSentRecently(uid, user?.expiryDate, 5)) {
+              if (user?.status === 'active') {
+                expiredUidsToSend.push(uid);
+              }
             }
           } else if (status === 'active') {
             userUpdates.expiryNoticeSent = false;
+            userUpdates.expiryNoticeSentDate = undefined;
+            userUpdates.lastExpiryNoticeFor = undefined;
+            userUpdates.lastExpiryNoticeSentAt = undefined;
+            clearNoticeRecord(uid);
           }
           batchUpdates[uid] = userUpdates;
         }
@@ -1840,21 +2027,21 @@ export default function UserManagement() {
               onClick={() => setIsContactsPanelOpen(prev => !prev)}
               className={clsx(
                 "flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer select-none",
-                contactsToken
+                isContactsAuthorized
                   ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/30 hover:bg-indigo-500/20"
                   : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700"
               )}
-              title={contactsToken ? `Google Contacts Connected (${contactsAccountEmail || 'wmoviznow@gmail.com'})` : "Google Contacts Not Connected"}
+              title={isContactsAuthorized ? `Google Contacts Connected (${contactsAccountEmail || 'wmoviznow@gmail.com'})` : "Google Contacts Not Connected"}
             >
               <Users className="w-4 h-4" />
               <span className="hidden sm:inline">Contacts</span>
-              {contactsToken ? (
+              {isContactsAuthorized ? (
                 <span className="flex items-center justify-center w-4 h-4 rounded-full bg-emerald-500 text-white text-[10px] font-bold">
                   ✓
                 </span>
               ) : (
-                <span className="flex items-center justify-center w-4 h-4 rounded-full bg-red-500 text-white text-[10px] font-bold">
-                  ✕
+                <span className="flex items-center justify-center w-4 h-4 rounded-full bg-amber-500 text-white text-[10px] font-bold">
+                  !
                 </span>
               )}
             </button>
@@ -1886,9 +2073,9 @@ export default function UserManagement() {
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 text-sm">Google Contacts Sync</h3>
-                    {contactsToken ? (
+                    {isContactsAuthorized ? (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                        <CheckCircle className="w-3 h-3" /> Connected
+                        <CheckCircle className="w-3 h-3" /> Connected & Saved in Firestore
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
@@ -1897,14 +2084,14 @@ export default function UserManagement() {
                     )}
                   </div>
                   <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">
-                    {contactsToken
-                      ? `Syncing VIP & Basic users with ${contactsAccountEmail || 'wmoviznow@gmail.com'}. Auto-sync active on user edits, additions, expirations, & date changes.`
-                      : 'Connect wmoviznow@gmail.com to auto-sync VIP & Basic users to Google Contacts with standardized Pakistani phone numbers (+92...).'}
+                    {isContactsAuthorized
+                      ? `Connected to ${contactsAccountEmail || 'wmoviznow@gmail.com'}. Authorization is saved in Firestore and automatically renewed in the background. Auto-sync is active on user edits, additions, expirations, and status changes.`
+                      : 'Connect wmoviznow@gmail.com to persist authorization in Firestore and auto-sync VIP & Basic users to Google Contacts.'}
                   </p>
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                {contactsToken ? (
+                {isContactsAuthorized ? (
                   <>
                     <Button
                       onClick={() => handleBulkSyncContacts(filteredAndSortedUsers.map(u => u.uid))}
@@ -1914,6 +2101,15 @@ export default function UserManagement() {
                       icon={<RefreshCw className={`w-4 h-4 ${isSyncingContacts ? 'animate-spin' : ''}`} />}
                     >
                       Sync All Filtered ({filteredAndSortedUsers.length})
+                    </Button>
+                    <Button
+                      onClick={handleRefreshContactsAuth}
+                      variant="secondary"
+                      className="px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300"
+                      loading={isConnectingContacts}
+                      title="Re-verify or refresh OAuth token in Firestore"
+                    >
+                      Re-verify Auth
                     </Button>
                     <Button
                       onClick={handleDisconnectContacts}

@@ -896,6 +896,10 @@ ordersRouter.post("/verify-and-confirm", async (req, res) => {
         userUpdates.status = "active";
         userUpdates.expiryDate = computedExpiryDate;
         userUpdates.trialActivated = true;
+        userUpdates.expiryNoticeSent = false;
+        userUpdates.expiryNoticeSentDate = admin.firestore.FieldValue.delete();
+        userUpdates.lastExpiryNoticeFor = admin.firestore.FieldValue.delete();
+        userUpdates.lastExpiryNoticeSentAt = admin.firestore.FieldValue.delete();
       } else if (type === "content" && Array.isArray(items)) {
         const prevContent = Array.isArray(existingUserData.assignedContent) ? existingUserData.assignedContent : [];
         const newContentIds = items.map((i: any) => i.id || i.contentId).filter(Boolean);
@@ -1116,6 +1120,10 @@ ordersRouter.post("/admin-verify-order", async (req, res) => {
         userUpdates.status = "active";
         userUpdates.expiryDate = computedExpiry;
         userUpdates.trialActivated = true;
+        userUpdates.expiryNoticeSent = false;
+        userUpdates.expiryNoticeSentDate = admin.firestore.FieldValue.delete();
+        userUpdates.lastExpiryNoticeFor = admin.firestore.FieldValue.delete();
+        userUpdates.lastExpiryNoticeSentAt = admin.firestore.FieldValue.delete();
       } else if (targetOrder.type === "content" && Array.isArray(targetOrder.items)) {
         const prevContent = Array.isArray(userData.assignedContent) ? userData.assignedContent : [];
         const newContentIds = targetOrder.items.map((i: any) => i.id || i.contentId).filter(Boolean);

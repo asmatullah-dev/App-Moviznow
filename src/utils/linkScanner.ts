@@ -258,13 +258,17 @@ export function formatQuality(q?: string) {
 export function normalizePrintQuality(text?: string, qualities?: Quality[]) {
   if (!text) return undefined;
 
+  const isV2OrHqHdtc = /(?:v2[\.\-\s_/]*hq[\.\-\s_/]*hdtc|hq[\.\-\s_/]*v2[\.\-\s_/]*hdtc|v2[\.\-\s_/]*hdtc|hdtc[\.\-\s_/]*v2|hq[\.\-\s_/]*hdtc|hdtc[\.\-\s_/]*hq|\bv2\b[^\n\r]*\bhdtc\b|\bhdtc\b[^\n\r]*\bv2\b|\bhq\b[^\n\r]*\bhdtc\b|\bhdtc\b[^\n\r]*\bhq\b)/i.test(
+    text,
+  );
+
   let detected: string | undefined;
-  if (/(web[\.\-\s_]*rip)/i.test(text)) detected = "WEB-Rip";
+  if (isV2OrHqHdtc) detected = "V2/HQ HDTC";
+  else if (/(web[\.\-\s_]*rip)/i.test(text)) detected = "WEB-Rip";
   else if (/(hd[\.\-\s_]*rip)/i.test(text)) detected = "HD-Rip";
   else if (/(blu[\.\-\s_]*ray|bd[\.\-\s_]*rip|br[\.\-\s_]*rip)/i.test(text))
     detected = "Blu-Ray";
   else if (/(web[\.\-\s_]*dl)/i.test(text)) detected = "WEB-DL";
-  else if (/(hq[\.\-\s_]*hdtc)/i.test(text)) detected = "HQ HDTC";
   else if (/(hdtc)/i.test(text)) detected = "HDTC";
   else if (/(hdcam)/i.test(text)) detected = "HDCAM";
   else if (/(dvd[\.\-\s_]*rip)/i.test(text)) detected = "DVDRip";
@@ -273,22 +277,37 @@ export function normalizePrintQuality(text?: string, qualities?: Quality[]) {
   // If we have a list of qualities, try to find the exact name from the list
   // by comparing normalized versions (ignoring hyphens, spaces, etc.)
   if (qualities && qualities.length > 0) {
+    if (isV2OrHqHdtc) {
+      const v2HqMatch = qualities.find((q) => {
+        const qNorm = q.name.toLowerCase().replace(/[\.\-\s_/]+/g, "");
+        return (
+          (qNorm.includes("v2") && qNorm.includes("hdtc")) ||
+          (qNorm.includes("hq") && qNorm.includes("hdtc")) ||
+          qNorm.includes("v2/hqhdtc") ||
+          qNorm.includes("v2hqhdtc") ||
+          qNorm.includes("v2hdtc") ||
+          qNorm.includes("hqhdtc")
+        );
+      });
+      if (v2HqMatch) return v2HqMatch.name;
+    }
+
     if (detected) {
       const normalizedDetected = detected
-        .replace(/[\.\-\s_]+/g, "")
+        .replace(/[\.\-\s_/]+/g, "")
         .toLowerCase();
       const match = qualities.find(
         (q) =>
-          q.name.replace(/[\.\-\s_]+/g, "").toLowerCase() ===
+          q.name.replace(/[\.\-\s_/]+/g, "").toLowerCase() ===
           normalizedDetected,
       );
       if (match) return match.name;
     }
 
     // Try matching list items directly against text if no detected label yet
-    const normalizedText = text.replace(/[\.\-\s_]+/g, "").toLowerCase();
+    const normalizedText = text.replace(/[\.\-\s_/]+/g, "").toLowerCase();
     for (const q of qualities) {
-      const normalizedQuality = q.name.replace(/[\.\-\s_]+/g, "").toLowerCase();
+      const normalizedQuality = q.name.replace(/[\.\-\s_/]+/g, "").toLowerCase();
       if (
         normalizedQuality.length > 2 &&
         normalizedText.includes(normalizedQuality)
@@ -299,6 +318,237 @@ export function normalizePrintQuality(text?: string, qualities?: Quality[]) {
   }
 
   return detected;
+}
+
+export function detectLanguageListFromText(
+  text?: string,
+  languages?: Language[],
+): string[] {
+  if (!text) return [];
+  const lower = text.toLowerCase();
+  const normalizedLower = lower.replace(/[\.\-\s_]+/g, "");
+
+  // Detect if line audio / clean line / lines is present in the filename / text context
+  const isLineAudio =
+    /\b(lines?|line[\.\-\s_]*audio|clean[\.\-\s_]*line|hq[\.\-\s_]*line|line[\.\-\s_]*dub(?:bed)?)\b/i.test(
+      text,
+    ) || /\b(line|lines)\b/i.test(lower.replace(/[\.\-_]/g, " "));
+
+  const foundLangs: string[] = [];
+  const langShortCodes: Record<string, string[]> = {
+    Hindi: ["hin", "hi"],
+    English: ["eng", "en"],
+    Punjabi: ["pun", "pa"],
+    Tamil: ["tam", "ta"],
+    Telugu: ["tel", "te"],
+    Urdu: ["urd", "ur"],
+    Marathi: ["mar", "mr"],
+    Bengali: ["ben", "bn"],
+    Gujarati: ["guj", "gu"],
+    Kannada: ["kan", "kn"],
+    Malayalam: ["mal", "ml"],
+    Odia: ["odi", "or"],
+    Assamese: ["asm", "as"],
+    Spanish: ["spa", "es"],
+    French: ["fre", "fra", "fr"],
+    German: ["ger", "deu", "de"],
+    Italian: ["ita", "it"],
+    Japanese: ["jpn", "ja"],
+    Korean: ["kor", "ko"],
+    Chinese: ["chi", "zho", "zh"],
+    Arabic: ["ara", "ar"],
+    Russian: ["rus", "ru"],
+    Portuguese: ["por", "pt"],
+    Dutch: ["dut", "nld"],
+    Turkish: ["tur", "tr"],
+    Vietnamese: ["vie", "vi"],
+    Thai: ["tha", "th"],
+    Indonesian: ["ind", "id"],
+    Malay: ["may", "msa", "ms"],
+    Filipino: ["fil", "tl"],
+    Persian: ["per", "fas", "fa"],
+    Polish: ["pol", "pl"],
+    Ukrainian: ["ukr", "uk"],
+    Greek: ["gre", "ell", "el"],
+    Hebrew: ["heb", "he"],
+    Swedish: ["swe", "sv"],
+    Danish: ["dan", "da"],
+    Norwegian: ["nor", "no"],
+    Finnish: ["fin", "fi"],
+    Czech: ["cze", "ces", "cs"],
+    Hungarian: ["hun", "hu"],
+    Romanian: ["rum", "ron", "ro"],
+    Bulgarian: ["bul", "bg"],
+    Serbian: ["srp", "sr"],
+    Croatian: ["hrv", "hr"],
+    Slovak: ["slo", "slk", "sk"],
+    Slovenian: ["slv", "sl"],
+    Lithuanian: ["lit", "lt"],
+    Latvian: ["lav", "lv"],
+    Estonian: ["est", "et"],
+    Icelandic: ["ice", "isl", "is"],
+    Irish: ["gle", "ga"],
+    Welsh: ["wel", "cym", "cy"],
+    "Scottish Gaelic": ["gla", "gd"],
+    Basque: ["baq", "eus", "eu"],
+    Catalan: ["cat", "ca"],
+    Galician: ["glg", "gl"],
+    Afrikaans: ["afr", "af"],
+    Swahili: ["swa", "sw"],
+    Zulu: ["zul", "zu"],
+    Xhosa: ["xho", "xh"],
+    Amharic: ["amh", "am"],
+    Somali: ["som", "so"],
+    Yoruba: ["yor", "yo"],
+    Igbo: ["ibo", "ig"],
+    Hausa: ["hau", "ha"],
+    Nepali: ["nep", "ne"],
+    Sinhala: ["sin", "si"],
+    Burmese: ["bur", "mya", "my"],
+    Khmer: ["khm", "km"],
+    Lao: ["lao", "lo"],
+    Tibetan: ["tib", "bod", "bo"],
+    Mongolian: ["mon", "mn"],
+    Uzbek: ["uzb", "uz"],
+    Kazakh: ["kaz", "kk"],
+    Kyrgyz: ["kir", "ky"],
+    Tajik: ["tgk", "tg"],
+    Turkmen: ["tuk", "tk"],
+    Azerbaijani: ["aze", "az"],
+    Armenian: ["arm", "hye", "hy"],
+    Georgian: ["geo", "kat", "ka"],
+    Pashto: ["pus", "ps"],
+    Kurdish: ["kur", "ku"],
+    Sindhi: ["snd", "sd"],
+    Kashmiri: ["kas", "ks"],
+  };
+
+  // Check if Hindi is in text
+  const isHindiPresent =
+    /\b(hindi|hin)\b/i.test(text) ||
+    normalizedLower.includes("hindi") ||
+    /(?<=^|[^a-zA-Z0-9])hi(?![a-zA-Z0-9])/i.test(text);
+
+  if (isHindiPresent) {
+    if (isLineAudio) {
+      // Find "Hindi (line)" or similar in languages if available
+      const lineHindiLang = languages?.find((l) => {
+        const lNorm = l.name.toLowerCase().replace(/[\.\-\s_()\[\]]+/g, "");
+        return lNorm.includes("hindi") && lNorm.includes("line");
+      });
+      if (lineHindiLang) {
+        foundLangs.push(lineHindiLang.name);
+      } else {
+        foundLangs.push("Hindi (line)");
+      }
+    } else {
+      const regHindiLang = languages?.find((l) => {
+        const lNorm = l.name.toLowerCase().replace(/[\.\-\s_()\[\]]+/g, "");
+        return lNorm === "hindi";
+      });
+      if (regHindiLang) {
+        foundLangs.push(regHindiLang.name);
+      } else {
+        foundLangs.push("Hindi");
+      }
+    }
+  }
+
+  // Helper for checking other languages
+  const checkSingleLang = (langName: string) => {
+    const lLower = langName.toLowerCase();
+    // Skip Hindi as handled specifically with line logic
+    if (lLower.includes("hindi")) return;
+
+    const normalizedLang = lLower.replace(/[\.\-\s_()\[\]]+/g, "");
+    if (normalizedLower.includes(normalizedLang)) {
+      if (!foundLangs.includes(langName)) foundLangs.push(langName);
+      return;
+    }
+
+    const codes = langShortCodes[langName] || [];
+    for (const code of codes) {
+      const codeRegex = new RegExp(
+        `(?<=^|[^a-zA-Z0-9])${code}(?![a-zA-Z0-9])`,
+        "i",
+      );
+      if (codeRegex.test(text)) {
+        if (!foundLangs.includes(langName)) foundLangs.push(langName);
+        break;
+      }
+    }
+  };
+
+  if (languages && languages.length > 0) {
+    languages.forEach((lang) => checkSingleLang(lang.name));
+  } else {
+    const defaultLangs = [
+      "English",
+      "Malayalam",
+      "Tamil",
+      "Telugu",
+      "Punjabi",
+      "Kannada",
+      "Bengali",
+      "Marathi",
+      "Gujarati",
+      "Urdu",
+      "Korean",
+      "Japanese",
+      "Chinese",
+      "Spanish",
+      "French",
+      "German",
+      "Russian",
+    ];
+    defaultLangs.forEach((lang) => checkSingleLang(lang));
+  }
+
+  if (/dual[ ._-]?audio/i.test(text)) {
+    if (foundLangs.length > 0) {
+      if (
+        foundLangs.length === 1 &&
+        !foundLangs.some((l) => l.toLowerCase().includes("english"))
+      ) {
+        const engLang =
+          languages?.find((l) => l.name.toLowerCase() === "english")?.name ||
+          "English";
+        foundLangs.push(engLang);
+      }
+    } else {
+      if (isLineAudio) {
+        const lineHindiLang =
+          languages?.find(
+            (l) =>
+              l.name.toLowerCase().includes("hindi") &&
+              l.name.toLowerCase().includes("line"),
+          )?.name || "Hindi (line)";
+        const engLang =
+          languages?.find((l) => l.name.toLowerCase() === "english")?.name ||
+          "English";
+        foundLangs.push(lineHindiLang, engLang);
+      } else {
+        const regHindi =
+          languages?.find((l) => l.name.toLowerCase() === "hindi")?.name ||
+          "Hindi";
+        const engLang =
+          languages?.find((l) => l.name.toLowerCase() === "english")?.name ||
+          "English";
+        foundLangs.push(regHindi, engLang);
+      }
+    }
+  }
+
+  return foundLangs;
+}
+
+export function detectAudioLanguages(
+  text?: string,
+  languages?: Language[],
+): string | undefined {
+  if (!text) return undefined;
+  const langs = detectLanguageListFromText(text, languages);
+  return langs.length > 0 ? langs.join(" / ") : undefined;
 }
 
 export function detectMetadataForLink(
@@ -350,122 +600,7 @@ export function detectMetadataForLink(
     lower.match(/\b(x265|x264|h[\.\-_]?265|h[\.\-_]?264|hevc|10bit|10-bit|av1)\b/i)?.[1],
   );
 
-  const audio = (() => {
-    const foundLangs = [] as string[];
-    const langShortCodes: Record<string, string[]> = {
-      Hindi: ["hin", "hi"],
-      English: ["eng", "en"],
-      Punjabi: ["pun", "pa"],
-      Tamil: ["tam", "ta"],
-      Telugu: ["tel", "te"],
-      Urdu: ["urd", "ur"],
-      Marathi: ["mar", "mr"],
-      Bengali: ["ben", "bn"],
-      Gujarati: ["guj", "gu"],
-      Kannada: ["kan", "kn"],
-      Malayalam: ["mal", "ml"],
-      Odia: ["odi", "or"],
-      Assamese: ["asm", "as"],
-      Spanish: ["spa", "es"],
-      French: ["fre", "fra", "fr"],
-      German: ["ger", "deu", "de"],
-      Italian: ["ita", "it"],
-      Japanese: ["jpn", "ja"],
-      Korean: ["kor", "ko"],
-      Chinese: ["chi", "zho", "zh"],
-      Arabic: ["ara", "ar"],
-      Russian: ["rus", "ru"],
-      Portuguese: ["por", "pt"],
-      Dutch: ["dut", "nld"],
-      Turkish: ["tur", "tr"],
-      Vietnamese: ["vie", "vi"],
-      Thai: ["tha", "th"],
-      Indonesian: ["ind", "id"],
-      Malay: ["may", "msa", "ms"],
-      Filipino: ["fil", "tl"],
-      Persian: ["per", "fas", "fa"],
-      Polish: ["pol", "pl"],
-      Ukrainian: ["ukr", "uk"],
-      Greek: ["gre", "ell", "el"],
-      Hebrew: ["heb", "he"],
-      Swedish: ["swe", "sv"],
-      Danish: ["dan", "da"],
-      Norwegian: ["nor", "no"],
-      Finnish: ["fin", "fi"],
-      Czech: ["cze", "ces", "cs"],
-      Hungarian: ["hun", "hu"],
-      Romanian: ["rum", "ron", "ro"],
-      Bulgarian: ["bul", "bg"],
-      Serbian: ["srp", "sr"],
-      Croatian: ["hrv", "hr"],
-      Slovak: ["slo", "slk", "sk"],
-      Slovenian: ["slv", "sl"],
-      Lithuanian: ["lit", "lt"],
-      Latvian: ["lav", "lv"],
-      Estonian: ["est", "et"],
-      Icelandic: ["ice", "isl", "is"],
-      Irish: ["gle", "ga"],
-      Welsh: ["wel", "cym", "cy"],
-      "Scottish Gaelic": ["gla", "gd"],
-      Basque: ["baq", "eus", "eu"],
-      Catalan: ["cat", "ca"],
-      Galician: ["glg", "gl"],
-      Afrikaans: ["afr", "af"],
-      Swahili: ["swa", "sw"],
-      Zulu: ["zul", "zu"],
-      Xhosa: ["xho", "xh"],
-      Amharic: ["amh", "am"],
-      Somali: ["som", "so"],
-      Yoruba: ["yor", "yo"],
-      Igbo: ["ibo", "ig"],
-      Hausa: ["hau", "ha"],
-      Nepali: ["nep", "ne"],
-      Sinhala: ["sin", "si"],
-      Burmese: ["bur", "mya", "my"],
-      Khmer: ["khm", "km"],
-      Lao: ["lao", "lo"],
-      Tibetan: ["tib", "bod", "bo"],
-      Mongolian: ["mon", "mn"],
-      Uzbek: ["uzb", "uz"],
-      Kazakh: ["kaz", "kk"],
-      Kyrgyz: ["kir", "ky"],
-      Tajik: ["tgk", "tg"],
-      Turkmen: ["tuk", "tk"],
-      Azerbaijani: ["aze", "az"],
-      Armenian: ["arm", "hye", "hy"],
-      Georgian: ["geo", "kat", "ka"],
-      Pashto: ["pus", "ps"],
-      Kurdish: ["kur", "ku"],
-      Sindhi: ["snd", "sd"],
-      Kashmiri: ["kas", "ks"],
-    };
-
-    const checkLang = (langName: string) => {
-      const normalizedLower = lower.replace(/[\.\-\s_]+/g, "");
-      const normalizedLang = langName.replace(/[\.\-\s_]+/g, "").toLowerCase();
-      if (normalizedLower.includes(normalizedLang)) {
-        foundLangs.push(langName);
-      } else {
-        const codes = langShortCodes[langName] || [];
-        for (const code of codes) {
-          const codeRegex = new RegExp(
-            `(?<=^|[^a-zA-Z0-9])${code}(?![a-zA-Z0-9])`,
-            "i",
-          );
-          if (codeRegex.test(lower)) {
-            foundLangs.push(langName);
-            break;
-          }
-        }
-      }
-    };
-
-    if (languages && languages.length > 0) {
-      languages.forEach((lang) => checkLang(lang.name));
-    }
-
-    return foundLangs.length > 0 ? foundLangs.join(" / ") : undefined;
-  })();
+  const audio = detectAudioLanguages(lower, languages);
 
   const hasRange = isEpisodeRange(lower);
   const isMKV = lower.includes(".mkv") || (hasRange && !lower.includes(".zip"));
@@ -713,144 +848,7 @@ export function detectFromFilename(
     source.match(/\b(x265|x264|h[\.\-_]?265|h[\.\-_]?264|hevc|10bit|10-bit|av1)\b/i)?.[1],
   );
 
-  const audio = (() => {
-    const foundLangs = [] as string[];
-
-    const langShortCodes: Record<string, string[]> = {
-      Hindi: ["hin", "hi"],
-      English: ["eng", "en"],
-      Punjabi: ["pun", "pa"],
-      Tamil: ["tam", "ta"],
-      Telugu: ["tel", "te"],
-      Urdu: ["urd", "ur"],
-      Marathi: ["mar", "mr"],
-      Bengali: ["ben", "bn"],
-      Gujarati: ["guj", "gu"],
-      Kannada: ["kan", "kn"],
-      Malayalam: ["mal", "ml"],
-      Odia: ["odi", "or"],
-      Assamese: ["asm", "as"],
-      Spanish: ["spa", "es"],
-      French: ["fre", "fra", "fr"],
-      German: ["ger", "deu", "de"],
-      Italian: ["ita", "it"],
-      Japanese: ["jpn", "ja"],
-      Korean: ["kor", "ko"],
-      Chinese: ["chi", "zho", "zh"],
-      Arabic: ["ara", "ar"],
-      Russian: ["rus", "ru"],
-      Portuguese: ["por", "pt"],
-      Dutch: ["dut", "nld"],
-      Turkish: ["tur", "tr"],
-      Vietnamese: ["vie", "vi"],
-      Thai: ["tha", "th"],
-      Indonesian: ["ind", "id"],
-      Malay: ["may", "msa", "ms"],
-      Filipino: ["fil", "tl"],
-      Persian: ["per", "fas", "fa"],
-      Polish: ["pol", "pl"],
-      Ukrainian: ["ukr", "uk"],
-      Greek: ["gre", "ell", "el"],
-      Hebrew: ["heb", "he"],
-      Swedish: ["swe", "sv"],
-      Danish: ["dan", "da"],
-      Norwegian: ["nor", "no"],
-      Finnish: ["fin", "fi"],
-      Czech: ["cze", "ces", "cs"],
-      Hungarian: ["hun", "hu"],
-      Romanian: ["rum", "ron", "ro"],
-      Bulgarian: ["bul", "bg"],
-      Serbian: ["srp", "sr"],
-      Croatian: ["hrv", "hr"],
-      Slovak: ["slo", "slk", "sk"],
-      Slovenian: ["slv", "sl"],
-      Lithuanian: ["lit", "lt"],
-      Latvian: ["lav", "lv"],
-      Estonian: ["est", "et"],
-      Icelandic: ["ice", "isl", "is"],
-      Irish: ["gle", "ga"],
-      Welsh: ["wel", "cym", "cy"],
-      "Scottish Gaelic": ["gla", "gd"],
-      Basque: ["baq", "eus", "eu"],
-      Catalan: ["cat", "ca"],
-      Galician: ["glg", "gl"],
-      Afrikaans: ["afr", "af"],
-      Swahili: ["swa", "sw"],
-      Zulu: ["zul", "zu"],
-      Xhosa: ["xho", "xh"],
-      Amharic: ["amh", "am"],
-      Somali: ["som", "so"],
-      Yoruba: ["yor", "yo"],
-      Igbo: ["ibo", "ig"],
-      Hausa: ["hau", "ha"],
-      Nepali: ["nep", "ne"],
-      Sinhala: ["sin", "si"],
-      Burmese: ["bur", "mya", "my"],
-      Khmer: ["khm", "km"],
-      Lao: ["lao", "lo"],
-      Tibetan: ["tib", "bod", "bo"],
-      Mongolian: ["mon", "mn"],
-      Uzbek: ["uzb", "uz"],
-      Kazakh: ["kaz", "kk"],
-      Kyrgyz: ["kir", "ky"],
-      Tajik: ["tgk", "tg"],
-      Turkmen: ["tuk", "tk"],
-      Azerbaijani: ["aze", "az"],
-      Armenian: ["arm", "hye", "hy"],
-      Georgian: ["geo", "kat", "ka"],
-      Pashto: ["pus", "ps"],
-      Kurdish: ["kur", "ku"],
-      Sindhi: ["snd", "sd"],
-      Kashmiri: ["kas", "ks"],
-    };
-
-    const checkLang = (langName: string) => {
-      const normalizedLower = source.replace(/[\.\-\s_]+/g, "");
-      const normalizedLang = langName.replace(/[\.\-\s_]+/g, "").toLowerCase();
-      if (normalizedLower.includes(normalizedLang)) {
-        foundLangs.push(langName);
-      } else {
-        const codes = langShortCodes[langName] || [];
-        for (const code of codes) {
-          const codeRegex = new RegExp(
-            `(?<=^|[^a-zA-Z0-9])${code}(?![a-zA-Z0-9])`,
-            "i",
-          );
-          if (codeRegex.test(source)) {
-            foundLangs.push(langName);
-            break;
-          }
-        }
-      }
-    };
-
-    if (languages && languages.length > 0) {
-      languages.forEach((lang) => checkLang(lang.name));
-    } else {
-      const defaultLangs = [
-        "Hindi",
-        "English",
-        "Urdu",
-        "Tamil",
-        "Telugu",
-        "Punjabi",
-      ];
-      defaultLangs.forEach((lang) => checkLang(lang));
-    }
-
-    if (/dual[ ._-]?audio/i.test(source)) {
-      if (foundLangs.length > 0) {
-        if (foundLangs.length === 1 && !foundLangs.includes("English")) {
-          foundLangs.push("English");
-        }
-        return foundLangs.join(" / ");
-      } else {
-        return "Hindi / English";
-      }
-    }
-
-    return foundLangs.length ? foundLangs.join(" / ") : undefined;
-  })();
+  const audio = detectAudioLanguages(source, languages);
 
   const subtitle = /subtitles|subs|softsub|hardsub|esub|esubs|msub|msubs/i.test(
     source,

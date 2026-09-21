@@ -55,6 +55,7 @@ import {
   verifyAndFetchTmdbData,
   VerifiedTmdbMetadata,
 } from '../services/tmdbEnricher';
+import { isMissingPixeldrain } from './episodeAndQuality';
 
 export {
   deduplicateQualityLinks,
@@ -148,7 +149,16 @@ async function scanAndVerifyCandidates(
     return { scrapedItems: [], checkResults: [], metadata: { title, year, languages: [], type } };
   }
 
-  const resolvedUrls = await resolveIntermediateUrls(candidates, signal);
+  const uniqueCandidateMap = new Map<string, { url: string; source: string; postTitle?: string; isSample?: boolean }>();
+  candidates.forEach((c) => {
+    const norm = normalizeUrl(c.url);
+    if (norm && !uniqueCandidateMap.has(norm)) {
+      uniqueCandidateMap.set(norm, c);
+    }
+  });
+  const dedupedCandidates = Array.from(uniqueCandidateMap.values());
+
+  const resolvedUrls = await resolveIntermediateUrls(dedupedCandidates, signal);
 
   const metaMap: Record<string, any> = {};
   const fullTextContext = resolvedUrls.map((r) => `${r.postTitle || ''} ${r.url}`).join('\n');
@@ -169,7 +179,7 @@ async function scanAndVerifyCandidates(
 
   const checkResults: LinkCheckResult[] = [];
   const queue = [...resolvedUrls];
-  const concurrency = 20;
+  const concurrency = 30;
 
   const worker = async () => {
     while (queue.length > 0) {
@@ -183,7 +193,7 @@ async function scanAndVerifyCandidates(
           metaMap,
           languages,
           qualities,
-          undefined,
+          signal,
           undefined,
           undefined,
           false
@@ -214,7 +224,7 @@ async function scanAndVerifyCandidates(
       r.statusLabel === 'MISSING_FILENAME' ||
       r.statusLabel === 'MISSING_METADATA' ||
       r.statusLabel === 'SIZE_MISMATCH';
-    return isWorking && r.url;
+    return isWorking && r.url && !isMissingPixeldrain(r);
   });
 
   const scrapedItems: ScrapedLinkItem[] = [];
@@ -226,6 +236,20 @@ async function scanAndVerifyCandidates(
   validResults.forEach((r, idx) => {
     const sourceText = `${r.fileName || ''} ${r.finalUrl || r.url || ''}`.toLowerCase();
     const isSample = Boolean(r.isSample || (r as any).is_sample || /\bsample\b/i.test(sourceText));
+
+    // If expected release year is specified, reject any link whose filename/URL explicitly conflicts with the year
+    if (year) {
+      const linkText = `${r.fileName || ''} ${r.finalUrl || r.url || ''}`;
+      const yearMatches = linkText.match(/\b(19\d{2}|20[0-2]\d)\b/g);
+      if (yearMatches && yearMatches.length > 0) {
+        const yearsFound = yearMatches.map(y => parseInt(y, 10));
+        const hasMatchingYear = yearsFound.some(y => Math.abs(y - year) <= 1);
+        const hasConflictingYear = yearsFound.some(y => Math.abs(y - year) > 1);
+        if (!hasMatchingYear && hasConflictingYear) {
+          return;
+        }
+      }
+    }
 
     const qCategory = getItemQualityCategory(r);
     const qualityStr = r.qualityLabel || qCategory;
@@ -343,19 +367,24 @@ export function isSatisfiedFilmygoStage(links: ScrapedLinkItem[], type: 'movie' 
 
   let is720pOver145GB = false;
   if (nonHevc720p.length > 0) {
-    const item720p = nonHevc720p[0];
+    const smallest720p = nonHevc720p.reduce((min, cur) => {
+      const szMin = getHitSizeGB(min) || parseSizeInGB(min.size) || (min.bytes ? min.bytes / (1024 * 1024 * 1024) : 0);
+      const szCur = getHitSizeGB(cur) || parseSizeInGB(cur.size) || (cur.bytes ? cur.bytes / (1024 * 1024 * 1024) : 0);
+      return (szCur > 0 && (szMin === 0 || szCur < szMin)) ? cur : min;
+    }, nonHevc720p[0]);
+
     const sizeGB =
-      getHitSizeGB(item720p) ||
-      parseSizeInGB(item720p.size) ||
-      (item720p.bytes ? item720p.bytes / (1024 * 1024 * 1024) : 0);
+      getHitSizeGB(smallest720p) ||
+      parseSizeInGB(smallest720p.size) ||
+      (smallest720p.bytes ? smallest720p.bytes / (1024 * 1024 * 1024) : 0);
     if (sizeGB > 1.45) {
       is720pOver145GB = true;
     }
   }
 
-  // When 720p > 1.45GB, 720p HEVC is required
+  // If 720p is greater than 1.45GB, then 720p HEVC is strictly COMPULSORY to get
   const hasRequired720p = is720pOver145GB
-    ? nonHevc720p.length > 0 && hevc720p.length > 0
+    ? hevc720p.length > 0
     : has720p;
 
   // Check 1080p: strictly skip if 5GB or greater (< 5GB required)!
@@ -523,10 +552,21 @@ export async function runWaterfallLinkSearch(
     const deduplicated = deduplicateQualityLinks(rawLinks, itemType);
 
     const has480p = deduplicated.some((l) => l.quality === '480p');
-    const has720p = deduplicated.some((l) => l.quality === '720p');
+    const nonHevc720 = deduplicated.find((l) => l.quality === '720p' && !l.isHevc);
+    const hevc720 = deduplicated.find((l) => l.quality === '720p' && l.isHevc);
+    const size720GB = nonHevc720
+      ? (getHitSizeGB(nonHevc720) || parseSizeInGB(nonHevc720.size) || (nonHevc720.bytes ? nonHevc720.bytes / (1024 * 1024 * 1024) : 0))
+      : 0;
+    const is720Over145 = size720GB > 1.45;
+    const hasRequired720 = is720Over145 ? Boolean(hevc720) : Boolean(nonHevc720 || hevc720);
+    const has720p = Boolean(nonHevc720 || hevc720);
     const has1080p = deduplicated.some((l) => l.quality === '1080p');
     const has2160p = deduplicated.some((l) => l.quality === '2160p');
     const hasHdVersion = hasAnyHdLinks(deduplicated);
+
+    const isComplete = itemType === 'series'
+      ? (hasAnyHdLinks(deduplicated) && deduplicated.length >= 2)
+      : (isComp && Boolean(has480p && hasRequired720 && has1080p));
 
     const qualityLinks: QualityLinks = buildQualityLinksPayload(deduplicated);
 
@@ -564,7 +604,7 @@ export async function runWaterfallLinkSearch(
       tmdbData: verifiedTmdbData || undefined,
       sample,
       providerUsed: provider,
-      isComplete: isComp,
+      isComplete,
       has480p,
       has720p,
       has1080p,
@@ -595,41 +635,99 @@ export async function runWaterfallLinkSearch(
     return finalResultPayload;
   }
 
+  // Fast concurrent query helper for waterfall providers: searches by pure title without year,
+  // and keeps finding across pages until correctly found title+year
+  async function queryProviderFast(
+    providerName: string,
+    searchFn: (query: string, page: number, signal?: AbortSignal) => Promise<any[]>,
+    getLinksFn: (postUrl: string, signal?: AbortSignal) => Promise<any[]>,
+    filterFn: (hits: any[], pageUrl?: string) => any[],
+    maxPagesToSearch = 4
+  ): Promise<{ candidates: { url: string; source: string; postTitle?: string; isSample?: boolean }[]; posts: any[] }> {
+    if (signal?.aborted) return { candidates: [], posts: [] };
+
+    let verifiedPosts: any[] = [];
+
+    // Searches a specific query across pages 1..maxPagesToSearch until confirmed title+year is found
+    async function searchAcrossPages(q: string): Promise<any[]> {
+      for (let page = 1; page <= maxPagesToSearch; page++) {
+        if (signal?.aborted) break;
+        try {
+          const posts = await searchFn(q, page, signal);
+          if (posts && posts.length > 0) {
+            const verified = rankAndVerifyPosts(posts, cleanTitle, searchYear);
+            if (verified && verified.length > 0) {
+              log(`✓ [${providerName}] Found ${verified.length} confirmed post(s) matching "${cleanTitle}"${searchYear ? ` (${searchYear})` : ''} on page ${page}.`);
+              return verified;
+            }
+          } else {
+            // No posts returned on this page, stop paging for this query
+            break;
+          }
+        } catch {
+          break;
+        }
+      }
+      return [];
+    }
+
+    // 1. Search primary query variation across pages (page 1, 2, 3...)
+    const primaryQuery = uniqueQueryVariations[0];
+    if (primaryQuery) {
+      verifiedPosts = await searchAcrossPages(primaryQuery);
+    }
+
+    // 2. If not found yet and fallback queries exist, try them across pages
+    if (verifiedPosts.length === 0 && uniqueQueryVariations.length > 1) {
+      const fallbackQueries = uniqueQueryVariations.slice(1);
+      for (const fq of fallbackQueries) {
+        if (signal?.aborted) break;
+        verifiedPosts = await searchAcrossPages(fq);
+        if (verifiedPosts.length > 0) {
+          break;
+        }
+      }
+    }
+
+    if (verifiedPosts.length === 0) return { candidates: [], posts: [] };
+
+    const postsToScrape = verifiedPosts.slice(0, maxPostsPerProvider);
+    const postResults = await Promise.all(
+      postsToScrape.map(async (p) => {
+        try {
+          const rawHits = await getLinksFn(p.url, signal);
+          const filtered = filterFn(rawHits, p.url);
+          const toUse = filtered.length > 0 ? filtered : rawHits;
+          return toUse.map((h: any) => {
+            const u = h.url || h.href;
+            if (!u) return null;
+            return {
+              url: u,
+              source: providerName,
+              postTitle: p.title,
+              isSample: Boolean(h.isSample || h.is_sample || /\bsample\b/i.test(h.file_name || '')),
+            };
+          }).filter(Boolean) as { url: string; source: string; postTitle?: string; isSample?: boolean }[];
+        } catch {
+          return [];
+        }
+      })
+    );
+
+    return { candidates: postResults.flat(), posts: verifiedPosts };
+  }
+
   // ==========================================
   // STAGE 1: FilmyCab / FilmyGo (1st Priority)
   // ==========================================
   log(`[Stage 1/5] Querying FilmyCab / FilmyGo (${fgDomain}) for title "${cleanTitle}"...`);
-  let stage1Candidates: { url: string; source: string; postTitle?: string; isSample?: boolean }[] =
-    [];
-
-  for (const q of uniqueQueryVariations) {
-    if (signal?.aborted) break;
-    try {
-      const posts = await scrapeFilmygoPosts(q, 1, signal);
-      if (!posts.length) continue;
-
-      const verifiedPosts = rankAndVerifyPosts(posts, cleanTitle, searchYear);
-
-      for (const p of verifiedPosts.slice(0, maxPostsPerProvider)) {
-        if (signal?.aborted) break;
-        const rawHits = await scrapeFilmygoPostLinks(p.url, signal);
-        const filtered = filterFilmygoHits(rawHits, p.url);
-        const toUse = filtered.length > 0 ? filtered : rawHits;
-        toUse.forEach((h: any) => {
-          const u = h.url || h.href;
-          if (u) {
-            stage1Candidates.push({
-              url: u,
-              source: 'FilmyGo',
-              postTitle: p.title,
-              isSample: Boolean(h.isSample || h.is_sample || /\bsample\b/i.test(h.file_name || '')),
-            });
-          }
-        });
-      }
-      if (stage1Candidates.length > 0) break;
-    } catch (e) {}
-  }
+  const s1Fast = await queryProviderFast(
+    'FilmyGo',
+    (q, page, sig) => scrapeFilmygoPosts(q, page, sig),
+    scrapeFilmygoPostLinks,
+    filterFilmygoHits
+  );
+  const stage1Candidates = s1Fast.candidates;
 
   if (stage1Candidates.length > 0) {
     log(`FilmyGo: Found ${stage1Candidates.length} candidate links, verifying...`);
@@ -648,7 +746,7 @@ export async function runWaterfallLinkSearch(
     if (s1Result.sample) finalSample = s1Result.sample;
 
     if (isSatisfiedFilmygoStage(s1Result.scrapedItems, type)) {
-      log(`✓ FilmyGo: Complete set (480p, 720p [HEVC if >1.45GB], and 1080p [<5GB]) found by first stage! Stopping waterfall and using FilmyGo links.`);
+      log(`✓ FilmyGo: Complete set (480p, 720p [HEVC if >1.45GB is compulsory], and 1080p [<5GB]) found by first stage! Stopping waterfall.`);
       finalProvider = 'FilmyGo (Complete)';
       return finishWaterfall(
         allDiscoveredLinks,
@@ -668,7 +766,7 @@ export async function runWaterfallLinkSearch(
         const sz = getHitSizeGB(over5gb1080p) || parseSizeInGB(over5gb1080p.size);
         log(`FilmyGo: 1080p link (${sz ? sz.toFixed(2) + ' GB' : '>=5GB'}) is 5GB or greater. Skipping and proceeding to next stage for 1080p < 5GB...`);
       } else {
-        log(`FilmyGo: Missing one or more required qualities (480p, 720p [HEVC if >1.45GB], 1080p [<5GB]). Proceeding to Stage 2 (MoviesDrive)...`);
+        log(`FilmyGo: Missing one or more required qualities (480p, 720p [HEVC if >1.45GB is compulsory], 1080p [<5GB]). Proceeding to Stage 2 (MoviesDrive)...`);
       }
     }
   } else {
@@ -680,41 +778,13 @@ export async function runWaterfallLinkSearch(
   // ==========================================
   if (!signal?.aborted) {
     log(`[Stage 2/5] Querying MoviesDrive (${mdDomain}) for title "${cleanTitle}"...`);
-    let stage2Candidates: {
-      url: string;
-      source: string;
-      postTitle?: string;
-      isSample?: boolean;
-    }[] = [];
-
-    for (const q of uniqueQueryVariations) {
-      if (signal?.aborted) break;
-      try {
-        const posts = await scrapeMoviesdrivePosts(q, 1, signal);
-        if (!posts.length) continue;
-
-        const verifiedPosts = rankAndVerifyPosts(posts, cleanTitle, searchYear);
-
-        for (const p of verifiedPosts.slice(0, maxPostsPerProvider)) {
-          if (signal?.aborted) break;
-          const rawHits = await scrapeMoviesdrivePostLinks(p.url, signal);
-          const filtered = filterMoviesdriveHits(rawHits, p.url);
-          const toUse = filtered.length > 0 ? filtered : rawHits;
-          toUse.forEach((h: any) => {
-            const u = h.url || h.href;
-            if (u) {
-              stage2Candidates.push({
-                url: u,
-                source: 'MoviesDrive',
-                postTitle: p.title,
-                isSample: Boolean(h.isSample || h.is_sample),
-              });
-            }
-          });
-        }
-        if (stage2Candidates.length > 0) break;
-      } catch (e) {}
-    }
+    const s2Fast = await queryProviderFast(
+      'MoviesDrive',
+      (q, page, sig) => scrapeMoviesdrivePosts(q, page, sig),
+      scrapeMoviesdrivePostLinks,
+      filterMoviesdriveHits
+    );
+    const stage2Candidates = s2Fast.candidates;
 
     if (stage2Candidates.length > 0) {
       log(`MoviesDrive: Found ${stage2Candidates.length} candidate links, verifying...`);
@@ -758,43 +828,14 @@ export async function runWaterfallLinkSearch(
   // ==========================================
   if (!signal?.aborted) {
     log(`[Stage 3/5] Querying HDHub4U (${hdDomain}) for title "${cleanTitle}"...`);
-    let stage3Candidates: {
-      url: string;
-      source: string;
-      postTitle?: string;
-      isSample?: boolean;
-    }[] = [];
-    let hdHubPosts: any[] = [];
-
-    for (const q of uniqueQueryVariations) {
-      if (signal?.aborted) break;
-      try {
-        const posts = await scrapeHdhub4uPosts(q, signal);
-        if (!posts.length) continue;
-
-        const verifiedPosts = rankAndVerifyPosts(posts, cleanTitle, searchYear);
-        hdHubPosts = verifiedPosts;
-
-        for (const p of verifiedPosts.slice(0, maxPostsPerProvider)) {
-          if (signal?.aborted) break;
-          const rawHits = await scrapeHdhub4uPostLinks(p.url, signal);
-          const filtered = filterHdhub4uHits(rawHits, p.url);
-          const toUse = filtered.length > 0 ? filtered : rawHits;
-          toUse.forEach((h: any) => {
-            const u = h.url || h.href;
-            if (u) {
-              stage3Candidates.push({
-                url: u,
-                source: 'HDHub4U',
-                postTitle: p.title,
-                isSample: Boolean(h.isSample || h.is_sample),
-              });
-            }
-          });
-        }
-        if (stage3Candidates.length > 0) break;
-      } catch (e) {}
-    }
+    const s3Fast = await queryProviderFast(
+      'HDHub4U',
+      (q, page, sig) => scrapeHdhub4uPosts(q, page, sig),
+      scrapeHdhub4uPostLinks,
+      filterHdhub4uHits
+    );
+    const stage3Candidates = s3Fast.candidates;
+    const hdHubPosts = s3Fast.posts;
 
     if (stage3Candidates.length > 0) {
       log(`HDHub4U: Found ${stage3Candidates.length} candidate links, verifying...`);
@@ -829,8 +870,6 @@ export async function runWaterfallLinkSearch(
     }
 
     // HD AVAILABILITY GATEKEEPER CHECK:
-    // If after HDHub4U we still have NOT found ANY HD version across all 3 providers,
-    // it means HD is not released yet anywhere on the web -> Halt waterfall.
     const hasAnyHdSoFar =
       hasAnyHdLinks(allDiscoveredLinks) || hdHubPosts.some((p) => isHdPrint(p.title || ''));
     if (!hasAnyHdSoFar) {
@@ -858,41 +897,13 @@ export async function runWaterfallLinkSearch(
   // ==========================================
   if (!signal?.aborted) {
     log(`[Stage 4/5] Querying SkyMoviesHD (${skyDomain}) for title "${cleanTitle}"...`);
-    let stage4Candidates: {
-      url: string;
-      source: string;
-      postTitle?: string;
-      isSample?: boolean;
-    }[] = [];
-
-    for (const q of uniqueQueryVariations) {
-      if (signal?.aborted) break;
-      try {
-        const posts = await scrapeSkymoviesPosts(q, signal);
-        if (!posts.length) continue;
-
-        const verifiedPosts = rankAndVerifyPosts(posts, cleanTitle, searchYear);
-
-        for (const p of verifiedPosts.slice(0, maxPostsPerProvider)) {
-          if (signal?.aborted) break;
-          const rawHits = await scrapeSkymoviesPostLinks(p.url, signal);
-          const filtered = filterSkymoviesHits(rawHits, p.url);
-          const toUse = filtered.length > 0 ? filtered : rawHits;
-          toUse.forEach((h: any) => {
-            const u = h.url || h.href;
-            if (u) {
-              stage4Candidates.push({
-                url: u,
-                source: 'SkyMoviesHD',
-                postTitle: p.title,
-                isSample: Boolean(h.isSample || h.is_sample),
-              });
-            }
-          });
-        }
-        if (stage4Candidates.length > 0) break;
-      } catch (e) {}
-    }
+    const s4Fast = await queryProviderFast(
+      'SkyMoviesHD',
+      (q, page, sig) => scrapeSkymoviesPosts(q, page, sig),
+      scrapeSkymoviesPostLinks,
+      filterSkymoviesHits
+    );
+    const stage4Candidates = s4Fast.candidates;
 
     if (stage4Candidates.length > 0) {
       log(`SkyMoviesHD: Found ${stage4Candidates.length} candidate links, verifying...`);
@@ -936,41 +947,13 @@ export async function runWaterfallLinkSearch(
   // ==========================================
   if (!signal?.aborted) {
     log(`[Stage 5/5] Querying FilmyFly (${ffDomain}) for title "${cleanTitle}"...`);
-    let stage5Candidates: {
-      url: string;
-      source: string;
-      postTitle?: string;
-      isSample?: boolean;
-    }[] = [];
-
-    for (const q of uniqueQueryVariations) {
-      if (signal?.aborted) break;
-      try {
-        const posts = await scrapeFilmyflyPosts(q, 1, signal);
-        if (!posts.length) continue;
-
-        const verifiedPosts = rankAndVerifyPosts(posts, cleanTitle, searchYear);
-
-        for (const p of verifiedPosts.slice(0, maxPostsPerProvider)) {
-          if (signal?.aborted) break;
-          const rawHits = await scrapeFilmyflyPostLinks(p.url, signal);
-          const filtered = filterFilmyflyHits(rawHits, p.url);
-          const toUse = filtered.length > 0 ? filtered : rawHits;
-          toUse.forEach((h: any) => {
-            const u = h.url || h.href;
-            if (u) {
-              stage5Candidates.push({
-                url: u,
-                source: 'FilmyFly',
-                postTitle: p.title,
-                isSample: Boolean(h.isSample || h.is_sample),
-              });
-            }
-          });
-        }
-        if (stage5Candidates.length > 0) break;
-      } catch (e) {}
-    }
+    const s5Fast = await queryProviderFast(
+      'FilmyFly',
+      (q, page, sig) => scrapeFilmyflyPosts(q, page, sig),
+      scrapeFilmyflyPostLinks,
+      filterFilmyflyHits
+    );
+    const stage5Candidates = s5Fast.candidates;
 
     if (stage5Candidates.length > 0) {
       log(`FilmyFly: Found ${stage5Candidates.length} candidate links, verifying...`);

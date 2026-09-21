@@ -369,8 +369,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
           .then(data => {
             if (data.hits) {
               setPreloadedEpisodes(prev => ({ ...prev, [url]: data.hits }));
-              // Auto-select all sub-episodes by default
-              setSelectedSubEpisodes(prev => ({ ...prev, [url]: new Set(data.hits.map((h: any) => h.url)) }));
+              // Do NOT automatically pre-select sub-episodes so manual selection modal stays clean
             }
           })
           .catch(err => console.error('Failed to preload sub-episodes automatically:', err))
@@ -2099,9 +2098,11 @@ export const LinkCheckerModal: React.FC<Props> = ({
             } else {
               console.log("MoviesDrive/HDHub4U series fallback to manual selection popup:", { from: targetUrl, reason: seriesResult.reason });
               setMdriveSelectedIndices(new Set());
+              setSelectedSubEpisodes({});
             }
           } else {
             setMdriveSelectedIndices(new Set());
+            setSelectedSubEpisodes({});
           }
         } else {
           setMdriveSelectedIndices(autoIndices);
@@ -2373,12 +2374,14 @@ export const LinkCheckerModal: React.FC<Props> = ({
           const searchYear = extractedYear || (typeof initialYear === 'number' ? initialYear : initialYear ? parseInt(String(initialYear), 10) : undefined);
           const searchType = contentType || (/\b(s\d+|season\s*\d+|series|tv|episode|ep\d+)\b/i.test(rawLine) ? 'series' : 'movie');
 
+          const hasPoster = Boolean(content?.posterUrl);
           const waterfallResult = await runWaterfallLinkSearch({
             title: searchTitle,
             year: searchYear,
             type: searchType,
             languages,
             qualities,
+            skipTmdbVerification: hasPoster,
           });
 
           if (waterfallResult.results.length > 0) {
@@ -2738,6 +2741,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                     } else {
                       console.log(`MoviesDrive series fallback to manual selection:`, { from: res.original, reason: seriesResult.reason });
                       setMdriveSelectedIndices(new Set());
+                      setSelectedSubEpisodes({});
                     }
                   } else {
                     setMdriveSelectedIndices(autoIndices);
@@ -2774,6 +2778,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                   } else {
                     console.log(`HDHub4U series fallback to manual selection:`, { from: res.original, reason: seriesResult.reason });
                     setMdriveSelectedIndices(new Set());
+                    setSelectedSubEpisodes({});
                     setMdriveUrl(res.original);
                     setMdriveResults(hits);
                     pausedForUI = true;
@@ -2795,6 +2800,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                   setMdriveUrl(res.original);
                   setMdriveResults(hits);
                   setMdriveSelectedIndices(new Set());
+                  setSelectedSubEpisodes({});
                   pausedForUI = true;
                   break;
                 }
@@ -2966,7 +2972,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
             const isSelectable = result.statusLabel === "WORKING" || result.statusLabel === "SMALL_FILE" || result.statusLabel === "MISSING_FILENAME" || result.statusLabel === "MISSING_METADATA" || result.statusLabel === "SIZE_MISMATCH";
 
             if (isSelectable) {
-              if (!isHubcloud || hasPixeldrain) {
+              if ((!isHubcloud || hasPixeldrain) && !isMissingPixeldrain(result)) {
                 setSelectedUrls((prev) => new Set(prev).add(result.url));
               }
             }
@@ -3715,7 +3721,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
   }, [sortedResults]);
 
   const toggleCheckedEpisodeSelection = (epNum: number) => {
-    const epUrls = (parsedSortedGroups.episodesMap.get(epNum) || []).map(e => e.result.url);
+    const epUrls = (parsedSortedGroups.episodesMap.get(epNum) || [])
+      .filter(e => !isMissingPixeldrain(e.result))
+      .map(e => e.result.url);
     const allSel = epUrls.length > 0 && epUrls.every(u => selectedUrls.has(u));
     setSelectedUrls(prev => {
       const next = new Set(prev);
@@ -3729,7 +3737,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
   };
 
   const toggleCheckedQualitySelection = (qCat: QualityCategory) => {
-    const qUrls = (parsedSortedGroups.episodesByQuality.get(qCat) || []).map(e => e.result.url);
+    const qUrls = (parsedSortedGroups.episodesByQuality.get(qCat) || [])
+      .filter(e => !isMissingPixeldrain(e.result))
+      .map(e => e.result.url);
     const allSel = qUrls.length > 0 && qUrls.every(u => selectedUrls.has(u));
     setSelectedUrls(prev => {
       const next = new Set(prev);
@@ -3746,7 +3756,11 @@ export const LinkCheckerModal: React.FC<Props> = ({
     const epUrls: string[] = [];
     parsedSortedGroups.sortedEpKeys.forEach(k => {
       const list = parsedSortedGroups.episodesMap.get(k) || [];
-      list.forEach(e => epUrls.push(e.result.url));
+      list.forEach(e => {
+        if (!isMissingPixeldrain(e.result)) {
+          epUrls.push(e.result.url);
+        }
+      });
     });
     const allSel = epUrls.length > 0 && epUrls.every(u => selectedUrls.has(u));
     setSelectedUrls(prev => {
@@ -3761,7 +3775,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
   };
 
   const toggleCheckedPacksSelection = () => {
-    const packUrls = parsedSortedGroups.packs.map(e => e.result.url);
+    const packUrls = parsedSortedGroups.packs
+      .filter(e => !isMissingPixeldrain(e.result))
+      .map(e => e.result.url);
     const allSel = packUrls.length > 0 && packUrls.every(u => selectedUrls.has(u));
     setSelectedUrls(prev => {
       const next = new Set(prev);
@@ -4462,19 +4478,26 @@ export const LinkCheckerModal: React.FC<Props> = ({
                         </button>
                         <button 
                           onClick={() => {
-                            if (mdriveResults.length > 0 && mdriveSelectedIndices.size === mdriveResults.length) {
+                            const hasAnySelection = mdriveSelectedIndices.size > 0 || Object.values(selectedSubEpisodes).some(s => s.size > 0);
+                            if (hasAnySelection) {
                               setMdriveSelectedIndices(new Set());
+                              setSelectedSubEpisodes({});
                             } else {
                               setMdriveSelectedIndices(new Set(mdriveResults.keys()));
+                              const allSubs: Record<string, Set<string>> = {};
+                              Object.entries(preloadedEpisodes).forEach(([pUrl, list]) => {
+                                allSubs[pUrl] = new Set(list.map(h => h.url));
+                              });
+                              setSelectedSubEpisodes(allSubs);
                             }
                           }}
                           className={`text-xs font-bold px-3 py-1 rounded-lg transition-colors ${
-                            mdriveResults.length > 0 && mdriveSelectedIndices.size === mdriveResults.length
+                            (mdriveSelectedIndices.size > 0 || Object.values(selectedSubEpisodes).some(s => s.size > 0))
                               ? "text-red-500 hover:text-red-400 bg-red-500/10"
                               : "text-cyan-500 hover:text-cyan-400 bg-cyan-500/10"
                           }`}
                         >
-                          {mdriveResults.length > 0 && mdriveSelectedIndices.size === mdriveResults.length ? "Deselect All" : "Select All"}
+                          {(mdriveSelectedIndices.size > 0 || Object.values(selectedSubEpisodes).some(s => s.size > 0)) ? "Deselect All" : "Select All"}
                         </button>
                         <button 
                           onClick={handleClose}
@@ -4570,7 +4593,10 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
                             <button
                               type="button"
-                              onClick={() => setMdriveSelectedIndices(new Set())}
+                              onClick={() => {
+                                setMdriveSelectedIndices(new Set());
+                                setSelectedSubEpisodes({});
+                              }}
                               className="px-2.5 py-1 text-xs font-bold rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/20 transition"
                             >
                               Deselect All
