@@ -24,7 +24,7 @@ export function setHubcloudDomain(domain: string): void {
   safeStorage.setItem('custom_hubcloud_domain', domain.trim());
 }
 
-export const DEFAULT_MOVIESDRIVE_DOMAIN = 'https://moviesdrives.cfd';
+export const DEFAULT_MOVIESDRIVE_DOMAIN = 'https://new3.moviesdrive.christmas';
 export const DEFAULT_SKYMOVIES_DOMAIN = 'https://skymovieshd.meme';
 export const DEFAULT_FILMYGO_DOMAIN = 'https://filmycab.press';
 export const DEFAULT_HDHUB4U_DOMAIN = 'https://new5.hdhub4u.cl';
@@ -38,7 +38,7 @@ export function getMoviesdriveDomain(): string {
       domain = 'https://' + domain;
     }
     const clean = domain.replace(/\/+$/, '');
-    if (clean.includes('new6.moviesdrives.my') || clean.includes('moviesdrives.my')) {
+    if (clean.includes('new6.moviesdrives.my') || clean.includes('moviesdrives.my') || clean.includes('moviesdrives.cfd')) {
       safeStorage.setItem('custom_moviesdrive_domain', DEFAULT_MOVIESDRIVE_DOMAIN);
       return DEFAULT_MOVIESDRIVE_DOMAIN;
     }

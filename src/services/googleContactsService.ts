@@ -1,7 +1,7 @@
 import firebaseConfig from '../../firebase-applet-config.json';
 import { UserProfile } from '../types';
 import { isUserExpired } from '../contexts/UsersContext';
-import { doc, updateDoc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
+import { doc, updateDoc, getDoc, setDoc, deleteDoc, deleteField } from 'firebase/firestore';
 import { db } from '../firebase';
 
 const CONTACTS_SCOPE = 'https://www.googleapis.com/auth/contacts';
@@ -9,9 +9,172 @@ const STORAGE_TOKEN_KEY = 'gcontacts_access_token';
 const STORAGE_EXPIRY_KEY = 'gcontacts_token_expiry';
 const STORAGE_EMAIL_KEY = 'gcontacts_account_email';
 const STORAGE_AUTHORIZED_KEY = 'gcontacts_is_authorized';
+const STORAGE_PENDING_KEY = 'gcontacts_pending_sync_queue';
+
+export interface PendingContactItem {
+  uid: string;
+  user: UserProfile;
+  queuedAt: string;
+  reason?: string;
+  attempts?: number;
+  lastAttemptAt?: string;
+  lastError?: string;
+}
 
 // Memory cache for contact group resource names during session
 const groupResourceCache: Record<string, string> = {};
+
+/**
+ * Gets local pending contacts queue from localStorage
+ */
+export function getLocalPendingQueue(): Record<string, PendingContactItem> {
+  try {
+    const data = localStorage.getItem(STORAGE_PENDING_KEY);
+    if (data) {
+      return JSON.parse(data) || {};
+    }
+  } catch (e) {
+    console.warn('[Google Contacts] Error reading local pending queue:', e);
+  }
+  return {};
+}
+
+/**
+ * Saves local pending contacts queue to localStorage
+ */
+export function saveLocalPendingQueue(queue: Record<string, PendingContactItem>): void {
+  try {
+    localStorage.setItem(STORAGE_PENDING_KEY, JSON.stringify(queue));
+    // Dispatch custom event to notify components in the same window
+    window.dispatchEvent(new CustomEvent('gcontacts_pending_updated', { detail: queue }));
+  } catch (e) {
+    console.warn('[Google Contacts] Error saving local pending queue:', e);
+  }
+}
+
+/**
+ * Returns array of currently pending contacts
+ */
+export function getPendingContactsList(): PendingContactItem[] {
+  const queue = getLocalPendingQueue();
+  return Object.values(queue);
+}
+
+/**
+ * Adds a user to the Pending Contact Sync queue in both localStorage and Firestore settings/google_contacts
+ */
+export async function addToPendingContactsSync(user: UserProfile, reason: string = 'Sync pending / token refresh needed'): Promise<void> {
+  if (!user || !user.uid) return;
+
+  const item: PendingContactItem = {
+    uid: user.uid,
+    user: { ...user },
+    queuedAt: new Date().toISOString(),
+    reason,
+    attempts: 0
+  };
+
+  // 1. Update localStorage
+  const localQueue = getLocalPendingQueue();
+  localQueue[user.uid] = item;
+  saveLocalPendingQueue(localQueue);
+
+  // 2. Update Firestore settings/google_contacts
+  try {
+    const docRef = doc(db, 'settings', 'google_contacts');
+    await setDoc(docRef, {
+      [`pendingContacts.${user.uid}`]: item,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+  } catch (err) {
+    console.warn('[Google Contacts] Error saving pending contact to Firestore settings:', err);
+  }
+
+  // 3. Mark in user profile
+  try {
+    if (!user.uid.startsWith('pending_')) {
+      const userDocRef = doc(db, 'users', user.uid);
+      await updateDoc(userDocRef, {
+        contactSyncStatus: 'pending',
+        contactSyncPendingAt: new Date().toISOString()
+      }).catch(() => {});
+    }
+  } catch (e) {}
+
+  console.log(`[Google Contacts Queue] Queued user ${user.displayName || user.phone || user.uid} to pending sync: ${reason}`);
+}
+
+/**
+ * Removes a user from the Pending Contact Sync queue once successfully synced
+ */
+export async function removeFromPendingContactsSync(uid: string): Promise<void> {
+  if (!uid) return;
+
+  // 1. Update localStorage
+  const localQueue = getLocalPendingQueue();
+  if (localQueue[uid]) {
+    delete localQueue[uid];
+    saveLocalPendingQueue(localQueue);
+  }
+
+  // 2. Remove from Firestore settings/google_contacts
+  try {
+    const docRef = doc(db, 'settings', 'google_contacts');
+    await updateDoc(docRef, {
+      [`pendingContacts.${uid}`]: deleteField(),
+      updatedAt: new Date().toISOString()
+    }).catch(async () => {
+      // If document or field doesn't exist yet, fetch and re-save
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.pendingContacts && data.pendingContacts[uid]) {
+          delete data.pendingContacts[uid];
+          await setDoc(docRef, { pendingContacts: data.pendingContacts }, { merge: true });
+        }
+      }
+    });
+  } catch (err) {
+    console.warn('[Google Contacts] Error removing pending contact from Firestore settings:', err);
+  }
+
+  // 3. Mark in user profile as synced
+  try {
+    if (!uid.startsWith('pending_')) {
+      const userDocRef = doc(db, 'users', uid);
+      await updateDoc(userDocRef, {
+        contactSyncStatus: 'synced',
+        contactLastSyncedAt: new Date().toISOString()
+      }).catch(() => {});
+    }
+  } catch (e) {}
+
+  console.log(`[Google Contacts Queue] Removed user ${uid} from pending sync queue (synced successfully)`);
+}
+
+/**
+ * Fetches latest pending contacts from Firestore settings/google_contacts and merges with localStorage
+ */
+export async function fetchPendingContactsFromFirestore(): Promise<PendingContactItem[]> {
+  const localQueue = getLocalPendingQueue();
+
+  try {
+    const docRef = doc(db, 'settings', 'google_contacts');
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      if (data.pendingContacts && typeof data.pendingContacts === 'object') {
+        const merged = { ...localQueue, ...data.pendingContacts };
+        saveLocalPendingQueue(merged);
+        return Object.values(merged);
+      }
+    }
+  } catch (err) {
+    console.warn('[Google Contacts] Error fetching pending contacts from Firestore:', err);
+  }
+
+  return Object.values(localQueue);
+}
 
 /**
  * Gets or creates a Google Contacts Group / Label by name (e.g., "Created by MovizNow" or "Modified by MovizNow")
@@ -281,6 +444,91 @@ export function normalizePhone(phoneStr: string | null | undefined): PhoneNormal
 }
 
 /**
+ * Extracts city name from contact name if present in parentheses e.g. "Ikram Raza (Lahore)" -> "Lahore",
+ * or "AV27/01/25 1Y Muhammad Khalid Khan (Peshawar) +1100" -> "Peshawar".
+ * Ignores phone numbers and pure digits in parentheses like "(03001234567)".
+ */
+export function extractCityFromContactName(contactName: string | null | undefined): string | null {
+  if (!contactName || !contactName.trim()) return null;
+  const parenMatches = Array.from(contactName.matchAll(/\(([^)]+)\)/g));
+  let fallbackCity: string | null = null;
+
+  for (const match of parenMatches) {
+    const candidate = match[1].trim();
+    if (!candidate) continue;
+    // Skip if it's purely digits, plus/minus, or a phone number
+    if (/^[\d\s\+\-\(\)]+$/.test(candidate)) continue;
+
+    if (candidate.toLowerCase() === 'city') {
+      fallbackCity = 'City';
+    } else {
+      return candidate; // Found actual city name (e.g. Peshawar, Lahore, Karachi, Islamabad)
+    }
+  }
+
+  return fallbackCity;
+}
+
+/**
+ * Replaces or cleanly formats the parenthesized city in a contact name string without duplicating.
+ * Handles strings with suffixes like "1Y Muhammad Khalid Khan (Peshawar) +1100" or already duplicated "(Peshawar) (Peshawar)".
+ */
+export function formatNameWithCity(restOfName: string, targetCity: string): string {
+  if (!restOfName || !restOfName.trim()) {
+    return `User (${targetCity})`;
+  }
+
+  const trimmed = restOfName.trim();
+  const parenMatches = Array.from(trimmed.matchAll(/\(([^)]+)\)/g));
+  const cityMatches: { match: string; index: number; content: string }[] = [];
+
+  for (const m of parenMatches) {
+    const candidate = m[1].trim();
+    if (candidate && !/^[\d\s\+\-\(\)]+$/.test(candidate)) {
+      cityMatches.push({
+        match: m[0],
+        index: m.index ?? -1,
+        content: candidate
+      });
+    }
+  }
+
+  if (cityMatches.length > 0) {
+    // There is at least one existing city parenthesis (e.g. (Peshawar), (Lahore), or (City))
+    // Replace the first city parenthesis with (${targetCity}) and strip any subsequent duplicate city parentheses
+    let result = '';
+    let lastIndex = 0;
+
+    for (let i = 0; i < cityMatches.length; i++) {
+      const cm = cityMatches[i];
+      if (cm.index < 0) continue;
+
+      result += trimmed.slice(lastIndex, cm.index);
+      if (i === 0) {
+        // Replace first city match with targetCity
+        result += `(${targetCity})`;
+      } else {
+        // Remove duplicate city match
+      }
+      lastIndex = cm.index + cm.match.length;
+    }
+    result += trimmed.slice(lastIndex);
+    return result.replace(/\s{2,}/g, ' ').trim();
+  }
+
+  // If no city parenthesis was found:
+  // Check if there is a trailing note / amount / suffix (e.g. " +1100", " +500", " 1100", " Paid", " [Paid]")
+  const suffixMatch = trimmed.match(/\s+(\+\d+|\d+|Paid|VIP)$/i);
+  if (suffixMatch && suffixMatch.index !== undefined) {
+    const beforeSuffix = trimmed.slice(0, suffixMatch.index).trim();
+    const suffix = suffixMatch[0].trim();
+    return `${beforeSuffix} (${targetCity}) ${suffix}`;
+  }
+
+  return `${trimmed} (${targetCity})`;
+}
+
+/**
  * Formats or updates contact name according to specifications:
  * For VIP users:
  *   Not expired: AVYY/MM/DD {Name} ({City}) eg AV26/10/13 Ikram Raza (Lahore)
@@ -296,7 +544,7 @@ export function normalizePhone(phoneStr: string | null | undefined): PhoneNormal
  *
  * If existingContactName is provided:
  *   Replaces the status (Exd ) and prefix date (AVYY/MM/DD / ABYY/MM/DD),
- *   preserves/cleans {Name}, and updates the parenthesized ({City}) part.
+ *   preserves/cleans {Name}, and updates the parenthesized ({City}) part without duplicating.
  */
 export function formatContactName(user: UserProfile, existingContactName?: string | null): string {
   const roleLower = (user.role || '').toLowerCase();
@@ -342,53 +590,45 @@ export function formatContactName(user: UserProfile, existingContactName?: strin
 
   const newPrefix = `${statusPrefix}${prefixCode}${datePart}`;
 
-  // If city is missing, save or update contact in name (city) eg Ahmad Ali (City)
+  // Recognize city:
+  // 1. From user profile
   const rawCity = user.city?.trim();
-  const hasValidCity = Boolean(rawCity && rawCity.toLowerCase() !== 'city');
-  const targetCity = hasValidCity ? (rawCity as string) : 'City';
+  let validCity: string | null = (rawCity && rawCity.toLowerCase() !== 'city') ? rawCity : null;
+
+  // 2. If user profile has no city, try extracting from existingContactName
+  if (!validCity) {
+    const cityFromExisting = extractCityFromContactName(existingContactName);
+    if (cityFromExisting && cityFromExisting.toLowerCase() !== 'city') {
+      validCity = cityFromExisting;
+    }
+  }
+
+  // 3. If still no city, try extracting from user displayName (e.g. "Muhammad Khalid Khan (Peshawar)")
+  if (!validCity) {
+    const cityFromDisplay = extractCityFromContactName(user.displayName);
+    if (cityFromDisplay && cityFromDisplay.toLowerCase() !== 'city') {
+      validCity = cityFromDisplay;
+    }
+  }
+
+  const targetCity = validCity || 'City';
 
   if (existingContactName && existingContactName.trim()) {
     const trimmedExisting = existingContactName.trim();
-    // Matches status prefix (Exd ), tier code (AV/AB/AU), and date (YY/MM/DD)
-    const prefixRegex = /^(?:Exd\s+)?(?:[A-Za-z]{2})?\s*\d{2,4}[\/\.-]\d{2}[\/\.-]\d{2,4}\s*/i;
+    // Matches status prefix (Exd ), tier code (AV/AB/AU), and date (YY/MM/DD or YYYY-MM-DD)
+    const prefixRegex = /^(?:(?:Exd|EXD|exd)\s+)?(?:[A-Za-z]{2,3})?\s*\d{2,4}[\/\.-]\d{2}[\/\.-]\d{2,4}\s*/i;
     const restOfName = trimmedExisting.replace(prefixRegex, '').trim();
 
     if (restOfName) {
-      const cityRegex = /\s*\(([^)]+)\)$/;
-      const cityMatch = restOfName.match(cityRegex);
-
-      let baseName = restOfName;
-      if (cityMatch) {
-        const insideParen = cityMatch[1].trim();
-        // Only strip if inside parenthesis is a city (not pure digits or phone number)
-        if (!/^[\d\s\+\-\(\)]+$/.test(insideParen)) {
-          baseName = restOfName.slice(0, cityMatch.index).trim();
-        }
-      }
-
-      // If user profile has displayName, but baseName is generic 'User' or empty, use displayName
-      if ((!baseName || baseName.toLowerCase() === 'user') && user.displayName?.trim()) {
-        baseName = user.displayName.trim();
-        const dnMatch = baseName.match(/\s*\(([^)]+)\)$/);
-        if (dnMatch && !/^[\d\s\+\-\(\)]+$/.test(dnMatch[1])) {
-          baseName = baseName.slice(0, dnMatch.index).trim();
-        }
-      }
-
-      const nameWithCity = `${baseName || 'User'} (${targetCity})`;
-      return `${newPrefix} ${nameWithCity}`;
+      const formattedRest = formatNameWithCity(restOfName, targetCity);
+      return `${newPrefix} ${formattedRest}`;
     }
   }
 
   // Default format for new contacts
   let name = user.displayName?.trim() || user.email?.split('@')[0] || (user.phone ? `User (${user.phone.trim()})` : 'User');
-  // Strip trailing parenthesized city from name if user already entered "(City)" or "(Lahore)" in displayName
-  const nameCityMatch = name.match(/\s*\(([^)]+)\)$/);
-  if (nameCityMatch && !/^[\d\s\+\-\(\)]+$/.test(nameCityMatch[1]) && !name.toLowerCase().startsWith('user (')) {
-    name = name.slice(0, nameCityMatch.index).trim();
-  }
-
-  return `${newPrefix} ${name} (${targetCity})`;
+  const formattedRest = formatNameWithCity(name, targetCity);
+  return `${newPrefix} ${formattedRest}`;
 }
 
 /**
@@ -819,7 +1059,16 @@ export async function syncSingleUserContact(
   user: UserProfile,
   accessToken: string,
   cachedConnections?: GoogleContactPerson[]
-): Promise<{ success: boolean; created: boolean; updated: boolean; photoUpdated?: boolean; contactName: string; phoneUsed: string; error?: string }> {
+): Promise<{
+  success: boolean;
+  created: boolean;
+  updated: boolean;
+  photoUpdated?: boolean;
+  contactName: string;
+  phoneUsed: string;
+  error?: string;
+  isTokenError?: boolean;
+}> {
   if (!user.phone) {
     return {
       success: false,
@@ -888,12 +1137,9 @@ export async function syncSingleUserContact(
       let extractedCity: string | undefined = undefined;
 
       if (existingDisplayName) {
-        const cityMatch = existingDisplayName.match(/\s*\(([^)]+)\)$/);
-        if (cityMatch && cityMatch[1]) {
-          const candidateCity = cityMatch[1].trim();
-          if (candidateCity.toLowerCase() !== 'city' && !/^[\d\s\+\-\(\)]+$/.test(candidateCity)) {
-            extractedCity = candidateCity;
-          }
+        const detectedCity = extractCityFromContactName(existingDisplayName);
+        if (detectedCity && detectedCity.toLowerCase() !== 'city') {
+          extractedCity = detectedCity;
         }
       }
 
@@ -915,6 +1161,12 @@ export async function syncSingleUserContact(
               .join(' ')
               .trim();
             existingDisplayName = primaryName.displayName || combined || primaryName.givenName || existingDisplayName;
+            if (existingDisplayName && !extractedCity) {
+              const detectedCity = extractCityFromContactName(existingDisplayName);
+              if (detectedCity && detectedCity.toLowerCase() !== 'city') {
+                extractedCity = detectedCity;
+              }
+            }
           }
           if (fetchedPerson.phoneNumbers && fetchedPerson.phoneNumbers.length > 0) {
             phoneNumbersToUse = fetchedPerson.phoneNumbers;
@@ -1006,11 +1258,31 @@ export async function syncSingleUserContact(
 
       if (res.status === 401) {
         console.warn('[Google Contacts] 401 Unauthorized in updateContact. Token may be expired.');
+        return {
+          success: false,
+          created: false,
+          updated: false,
+          contactName: formattedName,
+          phoneUsed: normalized,
+          isTokenError: true,
+          error: '401 Unauthorized: Google Contacts token is expired or invalid'
+        };
       }
 
       // Fallback if update fails: retry with basic updateFields
       if (!res.ok) {
         const errText = await res.text();
+        if (res.status === 401 || errText.includes('401') || errText.includes('UNAUTHENTICATED') || errText.includes('invalid_grant')) {
+          return {
+            success: false,
+            created: false,
+            updated: false,
+            contactName: formattedName,
+            phoneUsed: normalized,
+            isTokenError: true,
+            error: 'Google Contacts authentication expired'
+          };
+        }
         console.warn(`Primary contact update failed for ${existingPerson.resourceName} (${res.status}): ${errText}. Retrying update...`);
 
         const fallbackUrl = `https://people.googleapis.com/v1/${existingPerson.resourceName}:updateContact?updatePersonFields=names,phoneNumbers,emailAddresses,birthdays`;
@@ -1034,7 +1306,16 @@ export async function syncSingleUserContact(
 
         if (!res.ok) {
           const fallbackErr = await res.text();
-          throw new Error(`Failed to replace contact name & details: ${fallbackErr}`);
+          const isTok = res.status === 401 || fallbackErr.includes('401') || fallbackErr.includes('UNAUTHENTICATED') || fallbackErr.includes('invalid_grant');
+          return {
+            success: false,
+            created: false,
+            updated: false,
+            contactName: formattedName,
+            phoneUsed: normalized,
+            isTokenError: isTok,
+            error: `Failed to replace contact name & details: ${fallbackErr}`
+          };
         }
       }
 
@@ -1130,6 +1411,15 @@ export async function syncSingleUserContact(
 
       if (res.status === 401) {
         console.warn('[Google Contacts] 401 Unauthorized in createContact. Token may be expired.');
+        return {
+          success: false,
+          created: false,
+          updated: false,
+          contactName: formattedName,
+          phoneUsed: normalized,
+          isTokenError: true,
+          error: '401 Unauthorized: Google Contacts token is expired or invalid'
+        };
       }
 
       // Fallback if creating with memberships fails: create without memberships
@@ -1147,7 +1437,16 @@ export async function syncSingleUserContact(
 
       if (!res.ok) {
         const errText = await res.text();
-        throw new Error(`Failed to create contact: ${errText}`);
+        const isTok = res.status === 401 || errText.includes('401') || errText.includes('UNAUTHENTICATED') || errText.includes('invalid_grant');
+        return {
+          success: false,
+          created: false,
+          updated: false,
+          contactName: formattedName,
+          phoneUsed: normalized,
+          isTokenError: isTok,
+          error: `Failed to create contact: ${errText}`
+        };
       }
 
       const createdPerson = await res.json().catch(() => null);
@@ -1178,13 +1477,16 @@ export async function syncSingleUserContact(
     }
   } catch (err: any) {
     console.error(`Error syncing contact for user ${user.uid}:`, err);
+    const errMsg = err?.message || String(err || '');
+    const isTok = errMsg.includes('401') || errMsg.includes('UNAUTHENTICATED') || errMsg.includes('invalid_grant') || errMsg.includes('Invalid Credentials') || errMsg.includes('Token');
     return {
       success: false,
       created: false,
       updated: false,
       contactName: formattedName,
       phoneUsed: normalized,
-      error: err?.message || 'Unknown error during Google Contacts API call'
+      isTokenError: isTok,
+      error: errMsg || 'Unknown error during Google Contacts API call'
     };
   }
 }
@@ -1228,6 +1530,8 @@ export async function syncMultipleUsersContacts(
       if (res.created) created++;
       if (res.updated) updated++;
       if (res.photoUpdated) photosUpdated++;
+      // Auto-remove from pending queue if present
+      removeFromPendingContactsSync(u.uid).catch(() => {});
     } else {
       failed++;
       errors.push(`${u.displayName || u.phone}: ${res.error}`);
@@ -1242,5 +1546,162 @@ export async function syncMultipleUsersContacts(
     photosUpdated,
     failed,
     errors
+  };
+}
+
+/**
+ * Processes and syncs all contacts in the pending queue.
+ * Removes contacts that sync successfully, keeping any failing or un-synced contacts in the queue.
+ */
+export async function processPendingContactsQueue(
+  accessToken: string,
+  onProgress?: (current: number, total: number) => void
+): Promise<{ total: number; synced: number; failed: number; remaining: number; isTokenError: boolean }> {
+  const pendingItems = await fetchPendingContactsFromFirestore();
+  if (pendingItems.length === 0) {
+    return { total: 0, synced: 0, failed: 0, remaining: 0, isTokenError: false };
+  }
+
+  let synced = 0;
+  let failed = 0;
+  let isTokenError = false;
+
+  // Pre-fetch connections for performance
+  let connections: GoogleContactPerson[] = [];
+  try {
+    connections = await fetchAllGoogleContacts(accessToken);
+  } catch (e: any) {
+    const msg = e?.message || '';
+    if (msg.includes('401') || msg.includes('UNAUTHENTICATED')) {
+      return { total: pendingItems.length, synced: 0, failed: pendingItems.length, remaining: pendingItems.length, isTokenError: true };
+    }
+  }
+
+  for (let i = 0; i < pendingItems.length; i++) {
+    const item = pendingItems[i];
+    if (onProgress) {
+      onProgress(i + 1, pendingItems.length);
+    }
+
+    if (!item.user || !item.user.phone) {
+      // User has no phone or is invalid, remove from pending
+      await removeFromPendingContactsSync(item.uid);
+      continue;
+    }
+
+    const res = await syncSingleUserContact(item.user, accessToken, connections);
+    if (res.success) {
+      synced++;
+      await removeFromPendingContactsSync(item.uid);
+    } else {
+      failed++;
+      if (res.isTokenError) {
+        isTokenError = true;
+        console.warn(`[Google Contacts Queue] Token error while syncing pending user ${item.uid}, aborting queue.`);
+        break; // Stop processing rest of queue until next valid token
+      } else {
+        // Record attempt count
+        const currentQueue = getLocalPendingQueue();
+        if (currentQueue[item.uid]) {
+          currentQueue[item.uid].attempts = (currentQueue[item.uid].attempts || 0) + 1;
+          currentQueue[item.uid].lastAttemptAt = new Date().toISOString();
+          currentQueue[item.uid].lastError = res.error;
+          saveLocalPendingQueue(currentQueue);
+        }
+      }
+    }
+  }
+
+  const remaining = getPendingContactsList().length;
+  console.log(`[Google Contacts Queue Processed] Synced: ${synced}, Failed: ${failed}, Remaining Pending: ${remaining}`);
+
+  return {
+    total: pendingItems.length,
+    synced,
+    failed,
+    remaining,
+    isTokenError
+  };
+}
+
+/**
+ * Handles always-sync contact flow on user edit / update:
+ * 1. Checks if user has phone; if not, returns.
+ * 2. Attempts to sync immediately with stored/active token.
+ * 3. If token is expired, invalid, missing, or fails with 401:
+ *    - Immediately queues user into Pending Contacts Sync.
+ *    - Opens Google OAuth popup for token refresh (if interactive).
+ *    - Once token is retrieved, automatically flushes and syncs all pending contacts.
+ *    - If OAuth is cancelled/fails, user remains in Pending Contacts until synced successfully.
+ */
+export async function syncUserContactWithAutoOAuth(
+  userToSync: UserProfile,
+  interactivePromptIfNoToken: boolean = true
+): Promise<{ success: boolean; pending: boolean; contactName?: string; error?: string; syncedCount?: number }> {
+  if (!userToSync.phone) {
+    return { success: true, pending: false };
+  }
+
+  // 1. Check existing token
+  const tokenState = await ensureValidContactsToken(false);
+  let accessToken = tokenState.accessToken;
+  const accountEmail = tokenState.email || getConnectedAccountEmail() || 'wmoviznow@gmail.com';
+
+  if (accessToken) {
+    // 2. Try immediate sync with active token
+    const res = await syncSingleUserContact(userToSync, accessToken);
+    if (res.success) {
+      await removeFromPendingContactsSync(userToSync.uid);
+      // Background flush any previously queued contacts
+      processPendingContactsQueue(accessToken).catch(() => {});
+      return { success: true, pending: false, contactName: res.contactName };
+    }
+
+    if (!res.isTokenError) {
+      // Non-token error (e.g. invalid phone number format)
+      await addToPendingContactsSync(userToSync, res.error || 'Failed to sync contact');
+      return { success: false, pending: true, error: res.error };
+    }
+  }
+
+  // 3. Token is missing, expired, or rejected with 401:
+  // Move contact to Pending Sync queue immediately
+  await addToPendingContactsSync(userToSync, 'Token expired / authentication required');
+
+  if (!interactivePromptIfNoToken) {
+    return {
+      success: false,
+      pending: true,
+      error: 'Google Contacts token expired. User moved to Pending Sync.'
+    };
+  }
+
+  // 4. Open OAuth for token refresh
+  try {
+    console.log('[Google Contacts Auto-Sync] Opening OAuth to refresh token and sync pending contact...');
+    const conn = await connectGoogleContacts(accountEmail, false);
+    if (conn && conn.accessToken) {
+      // 5. Successfully got token! Sync this user & all pending contacts immediately
+      const queueRes = await processPendingContactsQueue(conn.accessToken);
+      return {
+        success: true,
+        pending: queueRes.remaining > 0,
+        contactName: formatContactName(userToSync),
+        syncedCount: queueRes.synced
+      };
+    }
+  } catch (authErr: any) {
+    console.warn('[Google Contacts Auto-Sync] OAuth connection cancelled or failed:', authErr);
+    return {
+      success: false,
+      pending: true,
+      error: authErr?.message || 'OAuth authorization cancelled. Contact remains in Pending Sync.'
+    };
+  }
+
+  return {
+    success: false,
+    pending: true,
+    error: 'Contact kept in Pending Sync until token is authorized.'
   };
 }

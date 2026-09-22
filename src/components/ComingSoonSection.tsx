@@ -41,6 +41,7 @@ import {
   TMDBImagesResult
 } from '../services/tmdb';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useAuth } from '../contexts/AuthContext';
 import { useContent } from '../contexts/ContentContext';
 import { useHaptics } from '../hooks/useHaptics';
 import { useModalBehavior } from '../hooks/useModalBehavior';
@@ -50,10 +51,14 @@ import SharePreviewModal from './SharePreviewModal';
 
 interface ComingSoonSectionProps {
   className?: string;
+  profile?: any;
+  onRequireLogin?: (message?: string, title?: string) => void;
 }
 
-export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className }) => {
+export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className, profile, onRequireLogin }) => {
   const { t, language, translate } = useLanguage();
+  const { profile: authProfile } = useAuth();
+  const activeProfile = profile || authProfile;
   const { vibrate } = useHaptics();
   const { contentList, qualities } = useContent();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -101,7 +106,9 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className 
   const [copiedMin, setCopiedMin] = useState(false);
   const [copiedRow, setCopiedRow] = useState(false);
 
-  const isComingSoonViewAllOpen = searchParams.get('view_all') === 'coming_soon' || searchParams.get('v') === 'cs';
+  const isComingSoonViewAllOpen =
+    Boolean(activeProfile) &&
+    (searchParams.get('view_all') === 'coming_soon' || searchParams.get('v') === 'cs');
 
   // Restore scroll position when modal opens
   useEffect(() => {
@@ -707,6 +714,10 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className 
 
           <button
             onClick={() => {
+              if (!activeProfile) {
+                onRequireLogin?.(t("Please sign in or create an account to view all upcoming releases."));
+                return;
+              }
               const updated = new URLSearchParams(searchParams);
               updated.set("view_all", "coming_soon");
               setSearchParams(updated);
@@ -897,6 +908,10 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className 
             <div className="shrink-0 flex items-center justify-center pr-4 snap-start h-full self-center">
               <button
                 onClick={() => {
+                  if (!activeProfile) {
+                    onRequireLogin?.(t("Please sign in or create an account to view all upcoming releases."));
+                    return;
+                  }
                   const updated = new URLSearchParams(searchParams);
                   updated.set("view_all", "coming_soon");
                   setSearchParams(updated);

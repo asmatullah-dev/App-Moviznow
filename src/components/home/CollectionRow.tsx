@@ -21,6 +21,7 @@ interface CollectionRowProps {
   genres: Genre[];
   toggleFavorite: (id: string) => void;
   toggleWatchLater: (id: string) => void;
+  onRequireLogin?: (message?: string, title?: string) => void;
 }
 
 export const CollectionRow: React.FC<CollectionRowProps> = React.memo(({
@@ -37,6 +38,7 @@ export const CollectionRow: React.FC<CollectionRowProps> = React.memo(({
   genres,
   toggleFavorite,
   toggleWatchLater,
+  onRequireLogin,
 }) => {
   const { t } = useLanguage();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -55,29 +57,30 @@ export const CollectionRow: React.FC<CollectionRowProps> = React.memo(({
   const cParam = searchParams.get("c");
 
   const isViewAllOpen =
-    viewAllParam === scrollKey ||
-    (isTrending && (
-      viewAllParam === "trending" ||
-      viewAllParam === "scroll_trending" ||
-      viewAllParam === "tr" ||
-      vParam === "tr" ||
-      vParam === "trending" ||
-      vParam === "scroll_trending" ||
-      cParam === "tr" ||
-      cParam === "trending" ||
-      cParam === "scroll_trending"
-    )) ||
-    (isNewlyAdded && (
-      viewAllParam === "newly_added" ||
-      viewAllParam === "scroll_newly_added" ||
-      viewAllParam === "na" ||
-      vParam === "na" ||
-      vParam === "newly_added" ||
-      vParam === "scroll_newly_added" ||
-      cParam === "na" ||
-      cParam === "newly_added" ||
-      cParam === "scroll_newly_added"
-    ));
+    Boolean(profile) &&
+    (viewAllParam === scrollKey ||
+      (isTrending && (
+        viewAllParam === "trending" ||
+        viewAllParam === "scroll_trending" ||
+        viewAllParam === "tr" ||
+        vParam === "tr" ||
+        vParam === "trending" ||
+        vParam === "scroll_trending" ||
+        cParam === "tr" ||
+        cParam === "trending" ||
+        cParam === "scroll_trending"
+      )) ||
+      (isNewlyAdded && (
+        viewAllParam === "newly_added" ||
+        viewAllParam === "scroll_newly_added" ||
+        viewAllParam === "na" ||
+        vParam === "na" ||
+        vParam === "newly_added" ||
+        vParam === "scroll_newly_added" ||
+        cParam === "na" ||
+        cParam === "newly_added" ||
+        cParam === "scroll_newly_added"
+      )));
 
   // Restore scroll position when modal opens
   useEffect(() => {
@@ -198,6 +201,16 @@ export const CollectionRow: React.FC<CollectionRowProps> = React.memo(({
 
           <button
             onClick={() => {
+              if (!profile) {
+                onRequireLogin?.(
+                  isTrending
+                    ? t("Please sign in or create an account to view all trending titles.")
+                    : isNewlyAdded
+                    ? t("Please sign in or create an account to view all newly added titles.")
+                    : t("Please sign in or create an account to view all items.")
+                );
+                return;
+              }
               const updated = new URLSearchParams(searchParams);
               updated.set("view_all", scrollKey);
               setSearchParams(updated);
@@ -251,6 +264,16 @@ export const CollectionRow: React.FC<CollectionRowProps> = React.memo(({
                   <div className="shrink-0 flex items-center justify-center pr-4 snap-start h-full self-center">
                     <button
                       onClick={() => {
+                        if (!profile) {
+                          onRequireLogin?.(
+                            isTrending
+                              ? t("Please sign in or create an account to view all trending titles.")
+                              : isNewlyAdded
+                              ? t("Please sign in or create an account to view all newly added titles.")
+                              : t("Please sign in or create an account to view all items.")
+                          );
+                          return;
+                        }
                         const updated = new URLSearchParams(searchParams);
                         updated.set("view_all", scrollKey);
                         setSearchParams(updated);

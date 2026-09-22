@@ -88,22 +88,33 @@ export default function Home({
   const navigate = useNavigate();
   const location = useLocation();
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
+  const [loginPromptConfig, setLoginPromptConfig] = useState<{ title?: string; message?: string }>({});
+
+  const requireLogin = useCallback((customMessage?: string, customTitle?: string) => {
+    if (!profile) {
+      setLoginPromptConfig({
+        title: customTitle || t("Sign In Required"),
+        message: customMessage || t("Please sign in or create an account to access this feature."),
+      });
+      setShowLoginPrompt(true);
+      return false;
+    }
+    return true;
+  }, [profile, t]);
 
   const handleToggleFavorite = useCallback(async (id: string) => {
-    if (!profile) {
-      setShowLoginPrompt(true);
+    if (!requireLogin(t("Please sign in or create an account to save movies to your favorites."))) {
       return;
     }
     await toggleFavorite(id);
-  }, [profile, toggleFavorite]);
+  }, [requireLogin, toggleFavorite, t]);
 
   const handleToggleWatchLater = useCallback(async (id: string) => {
-    if (!profile) {
-      setShowLoginPrompt(true);
+    if (!requireLogin(t("Please sign in or create an account to save movies to your watchlist."))) {
       return;
     }
     await toggleWatchLater(id);
-  }, [profile, toggleWatchLater]);
+  }, [requireLogin, toggleWatchLater, t]);
 
   // Search parameters sync
   useEffect(() => {
@@ -223,11 +234,14 @@ export default function Home({
 
   const handleSelectCollection = useCallback((col: AppCollection) => {
     vibrate(50);
+    if (!requireLogin(t("Please sign in or create an account to view this collection."))) {
+      return;
+    }
     setSelectedCollection(col);
     const updated = new URLSearchParams(searchParams);
     updated.set("c", col.id);
     setSearchParams(updated, { replace: true });
-  }, [vibrate, searchParams, setSearchParams]);
+  }, [vibrate, searchParams, setSearchParams, requireLogin, t]);
 
   const handleCloseCollection = useCallback(() => {
     const prevId = selectedCollection?.id;
@@ -248,6 +262,13 @@ export default function Home({
 
   // Sync selectedCollection with searchParams "c" or direct custom collection "v" / "view_all"
   useEffect(() => {
+    if (!profile) {
+      if (selectedCollection) {
+        setSelectedCollection(null);
+      }
+      return;
+    }
+
     const cParam = searchParams.get("c");
     const vParam = searchParams.get("v");
     const viewAllParam = searchParams.get("view_all");
@@ -277,7 +298,59 @@ export default function Home({
         setSelectedCollection(null);
       }
     }
-  }, [searchParams, collections]);
+  }, [searchParams, collections, profile, selectedCollection]);
+
+  // Guard against unauthenticated users attempting to access pagination > 1, View All rows, or Collections
+  useEffect(() => {
+    if (!profile) {
+      if (currentPage > 1) {
+        setCurrentPage(1);
+        sessionStorage.setItem("home_page", "1");
+      }
+
+      const cParam = searchParams.get("c");
+      const vParam = searchParams.get("v");
+      const viewAllParam = searchParams.get("view_all");
+
+      const hasRestrictedParam = Boolean(cParam || vParam || viewAllParam);
+
+      if (hasRestrictedParam) {
+        const isTrending =
+          ["tr", "trending", "scroll_trending"].includes(viewAllParam || "") ||
+          ["tr", "trending", "scroll_trending"].includes(vParam || "") ||
+          ["tr", "trending", "scroll_trending"].includes(cParam || "");
+        const isNewlyAdded =
+          ["na", "newly_added", "scroll_newly_added"].includes(viewAllParam || "") ||
+          ["na", "newly_added", "scroll_newly_added"].includes(vParam || "") ||
+          ["na", "newly_added", "scroll_newly_added"].includes(cParam || "");
+        const isComingSoon =
+          viewAllParam === "coming_soon" || vParam === "cs" || cParam === "cs";
+        const isCollections =
+          ["collections", "col", "all"].includes(viewAllParam || "") ||
+          ["collections", "col", "all"].includes(vParam || "") ||
+          Boolean(cParam);
+
+        const updated = new URLSearchParams(searchParams);
+        updated.delete("view_all");
+        updated.delete("v");
+        updated.delete("c");
+        setSearchParams(updated, { replace: true });
+        setSelectedCollection(null);
+
+        let msg = t("Please sign in or create an account to access this section.");
+        if (isTrending) {
+          msg = t("Please sign in or create an account to view all trending titles.");
+        } else if (isNewlyAdded) {
+          msg = t("Please sign in or create an account to view all newly added titles.");
+        } else if (isComingSoon) {
+          msg = t("Please sign in or create an account to view all upcoming releases.");
+        } else if (isCollections) {
+          msg = t("Please sign in or create an account to view collections.");
+        }
+        requireLogin(msg);
+      }
+    }
+  }, [profile, currentPage, searchParams, setSearchParams, requireLogin, t]);
 
   // Sync filters and page to sessionStorage
   useEffect(() => {
@@ -1071,6 +1144,7 @@ export default function Home({
               genres={genres}
               toggleFavorite={handleToggleFavorite}
               toggleWatchLater={handleToggleWatchLater}
+              onRequireLogin={requireLogin}
             />
           )}
 
@@ -1115,6 +1189,7 @@ export default function Home({
                 genres={genres}
                 toggleFavorite={handleToggleFavorite}
                 toggleWatchLater={handleToggleWatchLater}
+                onRequireLogin={requireLogin}
               />
               <AdBanner className="my-6" />
             </>
@@ -1130,6 +1205,10 @@ export default function Home({
               onToggleVisibility={toggleCollectionsVisibility}
               onSelectCollection={handleSelectCollection}
               onViewAll={() => {
+                if (!profile) {
+                  requireLogin(t("Please sign in or create an account to view all collections."));
+                  return;
+                }
                 const updated = new URLSearchParams(searchParams);
                 updated.set("view_all", "collections");
                 setSearchParams(updated);
@@ -1139,7 +1218,11 @@ export default function Home({
 
           {/* Coming Soon Section */}
           {currentPage === 1 && !hideScrollingTabs && (
-            <ComingSoonSection className="mb-8" />
+            <ComingSoonSection
+              className="mb-8"
+              profile={profile}
+              onRequireLogin={requireLogin}
+            />
           )}
 
           {/* Ad Banner for Basic Users */}
@@ -1240,6 +1323,10 @@ export default function Home({
                     key={col.id}
                     onClick={() => {
                       vibrate(50);
+                      if (!profile) {
+                        requireLogin(t("Please sign in or create an account to explore this collection."));
+                        return;
+                      }
                       if (col.isVirtual) {
                         const updated = new URLSearchParams(searchParams);
                         updated.set("view_all", col.scrollKey);
@@ -1326,7 +1413,12 @@ export default function Home({
                     <button
                       onClick={() => {
                         vibrate(50);
-                        setCurrentPage((prev) => Math.max(1, prev - 1));
+                        const targetPage = Math.max(1, currentPage - 1);
+                        if (targetPage > 1 && !profile) {
+                          requireLogin(t("Please sign in or create an account to explore more pages of our catalog."));
+                          return;
+                        }
+                        setCurrentPage(targetPage);
                         window.scrollTo({ top: 0, behavior: "smooth" });
                       }}
                       disabled={currentPage === 1}
@@ -1351,6 +1443,10 @@ export default function Home({
                                 key={i}
                                 onClick={() => {
                                   vibrate(50);
+                                  if (i > 1 && !profile) {
+                                    requireLogin(t("Please sign in or create an account to explore more pages of our catalog."));
+                                    return;
+                                  }
                                   setCurrentPage(i);
                                   window.scrollTo({ top: 0, behavior: "smooth" });
                                 }}
@@ -1404,6 +1500,10 @@ export default function Home({
                     <button
                       onClick={() => {
                         vibrate(50);
+                        if (!profile) {
+                          requireLogin(t("Please sign in or create an account to explore more pages of our catalog."));
+                          return;
+                        }
                         setCurrentPage((prev) => Math.min(totalPages, prev + 1));
                         window.scrollTo({ top: 0, behavior: "smooth" });
                       }}
@@ -1526,8 +1626,8 @@ export default function Home({
 
       <ConfirmModal
         isOpen={showLoginPrompt}
-        title={t("Sign In Required")}
-        message={t("Please sign in or create an account to save movies to your favorites and watchlist.")}
+        title={loginPromptConfig.title || t("Sign In Required")}
+        message={loginPromptConfig.message || t("Please sign in or create an account to continue.")}
         confirmText={t("Sign In / Register")}
         cancelText={t("Cancel")}
         onConfirm={() => {
@@ -1539,7 +1639,7 @@ export default function Home({
 
       {/* Collection Modal */}
       <CollectionModal
-        collection={selectedCollection}
+        collection={profile ? selectedCollection : null}
         onClose={handleCloseCollection}
         collectionSort={collectionSort}
         setCollectionSort={setCollectionSort}
@@ -1556,10 +1656,12 @@ export default function Home({
 
       <CollectionsGridModal
         isOpen={
-          searchParams.get("view_all") === "collections" ||
-          searchParams.get("v") === "collections" ||
-          searchParams.get("v") === "col" ||
-          searchParams.get("v") === "all"
+          Boolean(profile) && (
+            searchParams.get("view_all") === "collections" ||
+            searchParams.get("v") === "collections" ||
+            searchParams.get("v") === "col" ||
+            searchParams.get("v") === "all"
+          )
         }
         onClose={() => {
           const updated = new URLSearchParams(searchParams);

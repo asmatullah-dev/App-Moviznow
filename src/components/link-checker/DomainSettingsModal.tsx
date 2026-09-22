@@ -60,7 +60,7 @@ export const DomainSettingsModal: React.FC<DomainSettingsModalProps> = ({
             type="text"
             value={moviesdriveDomainInput}
             onChange={(e) => setMoviesdriveDomainInput(e.target.value)}
-            placeholder="https://moviesdrives.cfd"
+            placeholder="https://new3.moviesdrive.christmas"
             className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-amber-500 font-mono"
           />
         </div>
