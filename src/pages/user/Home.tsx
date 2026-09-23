@@ -147,10 +147,11 @@ export default function Home({
   const [hasUserRated, setHasUserRated] = useState<boolean>(() => safeStorage.getItem("has_rated") === "true");
 
   useEffect(() => {
+    let isCancelled = false;
     const loadReviews = async () => {
       try {
-        // Initial load for all users defaults to static reviews
         const data = await fetchReviewsFromChunks();
+        if (isCancelled) return;
         if (Array.isArray(data) && data.length > 0) {
           const avg = (data.reduce((acc: number, curr: any) => acc + (curr.rating || 5), 0) / data.length).toFixed(1);
           setReviewsData({ average: avg, total: data.length });
@@ -166,7 +167,20 @@ export default function Home({
         console.error("Failed to pre-load reviews on home:", e);
       }
     };
-    loadReviews();
+    
+    // Idle/deferred loading so home page mounts and transitions immediately in 0ms
+    const idleId = typeof window !== 'undefined' && 'requestIdleCallback' in window
+      ? (window as any).requestIdleCallback(loadReviews)
+      : setTimeout(loadReviews, 300);
+
+    return () => {
+      isCancelled = true;
+      if (typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+        (window as any).cancelIdleCallback(idleId);
+      } else {
+        clearTimeout(idleId);
+      }
+    };
   }, [profile?.uid, profile?.email]);
 
   const [sort, setSort] = useState<"default" | "newest" | "year" | "az">(
@@ -601,19 +615,15 @@ export default function Home({
 
   const uniqueYears = useMemo(() => {
     const years = new Set<number>();
-    permittedContentList.forEach((c) => {
-      if (c.year && !isNaN(Number(c.year))) years.add(Number(c.year));
-      if (c.type === "series" && c.seasons) {
-        try {
-          const seasons = Array.isArray(c.seasons)
-            ? c.seasons
-            : JSON.parse(c.seasons || "[]");
-          seasons.forEach((s: any) => {
-            if (s.year && !isNaN(Number(s.year))) years.add(Number(s.year));
-          });
-        } catch (e) {}
+    for (let i = 0; i < permittedContentList.length; i++) {
+      const c = permittedContentList[i];
+      if (c.year) {
+        const y = Number(c.year);
+        if (!isNaN(y) && y > 1900 && y < 2100) {
+          years.add(y);
+        }
       }
-    });
+    }
     return Array.from(years).sort((a, b) => b - a);
   }, [permittedContentList]);
 

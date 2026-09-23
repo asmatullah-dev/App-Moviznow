@@ -613,21 +613,20 @@ export function formatContactName(user: UserProfile, existingContactName?: strin
 
   const targetCity = validCity || 'City';
 
-  if (existingContactName && existingContactName.trim()) {
-    const trimmedExisting = existingContactName.trim();
-    // Matches status prefix (Exd ), tier code (AV/AB/AU), and date (YY/MM/DD or YYYY-MM-DD)
-    const prefixRegex = /^(?:(?:Exd|EXD|exd)\s+)?(?:[A-Za-z]{2,3})?\s*\d{2,4}[\/\.-]\d{2}[\/\.-]\d{2,4}\s*/i;
-    const restOfName = trimmedExisting.replace(prefixRegex, '').trim();
+  // Matches status prefix (Exd ), tier code (AV/AB/AU), and date (YY/MM/DD or YYYY-MM-DD)
+  const prefixRegex = /^(?:(?:Exd|EXD|exd)\s+)?(?:[A-Za-z]{2,3})?\s*\d{2,4}[\/\.-]\d{2}[\/\.-]\d{2,4}\s*/i;
 
-    if (restOfName) {
-      const formattedRest = formatNameWithCity(restOfName, targetCity);
-      return `${newPrefix} ${formattedRest}`;
-    }
+  let baseName = '';
+  if (existingContactName && existingContactName.trim()) {
+    baseName = existingContactName.trim().replace(prefixRegex, '').trim();
   }
 
-  // Default format for new contacts
-  let name = user.displayName?.trim() || user.email?.split('@')[0] || (user.phone ? `User (${user.phone.trim()})` : 'User');
-  const formattedRest = formatNameWithCity(name, targetCity);
+  if (!baseName) {
+    const fallbackDisplayName = user.displayName?.trim() || user.email?.split('@')[0] || (user.phone ? `User (${user.phone.trim()})` : 'User');
+    baseName = fallbackDisplayName.replace(prefixRegex, '').trim();
+  }
+
+  const formattedRest = formatNameWithCity(baseName, targetCity);
   return `${newPrefix} ${formattedRest}`;
 }
 

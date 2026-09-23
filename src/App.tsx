@@ -237,8 +237,6 @@ export default function App() {
     };
   }, []);
 
-  useModalBehavior(isMediaModalOpen, () => setIsMediaModalOpen(false));
-
   return (
     <ThemeProvider>
       <LanguageProvider>

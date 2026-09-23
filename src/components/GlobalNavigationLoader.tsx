@@ -9,28 +9,6 @@ export function GlobalNavigationLoader() {
   const completeTimerRef = useRef<NodeJS.Timeout | null>(null);
   const prevPathRef = useRef(location.pathname + location.search);
 
-  const startProgress = () => {
-    if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
-    if (timerRef.current) clearInterval(timerRef.current);
-
-    setIsVisible(true);
-    setProgress(15);
-
-    let current = 15;
-    timerRef.current = setInterval(() => {
-      current += (90 - current) * 0.18;
-      if (current >= 88) {
-        if (timerRef.current) clearInterval(timerRef.current);
-      }
-      setProgress(Math.min(current, 88));
-    }, 100);
-
-    // Safety fallback: auto-finish after 1200ms if route transition completes or hangs
-    completeTimerRef.current = setTimeout(() => {
-      finishProgress();
-    }, 1200);
-  };
-
   const finishProgress = () => {
     if (timerRef.current) clearInterval(timerRef.current);
     setProgress(100);
@@ -38,43 +16,42 @@ export function GlobalNavigationLoader() {
     completeTimerRef.current = setTimeout(() => {
       setIsVisible(false);
       setProgress(0);
-    }, 280);
+    }, 150);
   };
 
-  // Trigger progress bar whenever location changes
+  const startProgress = () => {
+    if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+    if (timerRef.current) clearInterval(timerRef.current);
+
+    setIsVisible(true);
+    setProgress(30);
+
+    let current = 30;
+    timerRef.current = setInterval(() => {
+      current += (90 - current) * 0.2;
+      if (current >= 88) {
+        if (timerRef.current) clearInterval(timerRef.current);
+      }
+      setProgress(Math.min(current, 88));
+    }, 80);
+
+    completeTimerRef.current = setTimeout(() => {
+      finishProgress();
+    }, 800);
+  };
+
+  // Only trigger loader if a route change is slow (not instant SPA route transitions)
   useEffect(() => {
     const currentPath = location.pathname + location.search;
     if (prevPathRef.current !== currentPath) {
       prevPathRef.current = currentPath;
-      startProgress();
-      
-      // Complete after small delay to give time for child components to mount
-      const t = setTimeout(() => {
+      // For immediate client routes, do nothing to prevent visual flash or lag.
+      // If there's an active loader, finish it immediately.
+      if (isVisible) {
         finishProgress();
-      }, 200);
-
-      return () => clearTimeout(t);
-    }
-  }, [location.pathname, location.search]);
-
-  // Intercept global link / button clicks for immediate feedback before route resolution
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      const target = (e.target as HTMLElement)?.closest("a, button, [role='button'], .cursor-pointer");
-      if (!target) return;
-
-      // If it's a link to another page
-      if (target instanceof HTMLAnchorElement && target.href) {
-        const url = new URL(target.href, window.location.href);
-        if (url.origin === window.location.origin && url.pathname !== window.location.pathname) {
-          startProgress();
-        }
       }
-    };
-
-    window.addEventListener("click", handleClick);
-    return () => window.removeEventListener("click", handleClick);
-  }, []);
+    }
+  }, [location.pathname, location.search, isVisible]);
 
   if (!isVisible && progress === 0) return null;
 

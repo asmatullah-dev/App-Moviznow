@@ -545,6 +545,11 @@ export default function UserManagement() {
           lastExpiryNoticeFor: u?.expiryDate || todayStr,
           lastExpiryNoticeSentAt: new Date().toISOString(),
         };
+
+        // Automatically sync contact to Google Contacts (with Exd prefix) or add to pending queue
+        if (u && u.phone) {
+          autoSyncUserToContacts({ ...u, status: 'expired' }, false);
+        }
       });
 
       updateMultipleUserFields(batchUpdates);
@@ -552,7 +557,7 @@ export default function UserManagement() {
     } catch (err) {
       console.error("[UserManagement] Error triggering immediate expiry notification:", err);
     }
-  }, [profile?.uid, profile?.role, allUsers, updateMultipleUserFields, finalizeUserChanges]);
+  }, [profile?.uid, profile?.role, allUsers, updateMultipleUserFields, finalizeUserChanges, autoSyncUserToContacts]);
 
   // Helper to delete sent notification data older than 15 days (from safeStorage/localStorage and Firestore)
   const cleanSentNotificationDataOlderThan15Days = useCallback(async (userList?: UserProfile[]) => {
@@ -673,7 +678,7 @@ export default function UserManagement() {
     return () => clearInterval(interval);
   }, [authLoading, profile?.role, runDailyAutoExpiryCheck]);
 
-  // Track status changes to 'expired' across user updates and trigger immediate notifications
+  // Track status changes to 'expired' across user updates and trigger immediate notifications & contact sync
   useEffect(() => {
     if (!allUsers || allUsers.length === 0) return;
     const immediateExpiredUids: string[] = [];
@@ -681,7 +686,13 @@ export default function UserManagement() {
     allUsers.forEach(u => {
       if (u && u.uid && u.role !== 'admin' && u.role !== 'owner') {
         const prevStatus = prevUsersMapRef.current.get(u.uid);
-        if (prevStatus !== undefined && prevStatus !== 'expired' && u.status === 'expired') {
+        const isNowExpired = u.status === 'expired' || isUserExpired(u.expiryDate);
+        if (prevStatus !== undefined && prevStatus !== 'expired' && isNowExpired) {
+          // Trigger automatic contact sync with Exd prefix (or add to pending queue)
+          if (u.phone) {
+            autoSyncUserToContacts({ ...u, status: 'expired' }, false);
+          }
+
           // Only send if it has less than 5 days of expiry and not already sent recently
           if (isExpiredWithinDays(u.expiryDate, 5) && !isNoticeSentRecently(u.uid, u.expiryDate, 5)) {
             changedToExpiredUidsRef.current.add(u.uid);
@@ -696,7 +707,7 @@ export default function UserManagement() {
       console.log(`[UserManagement Live] Status changed to expired for ${immediateExpiredUids.length} user(s). Sending immediate notification.`);
       sendImmediateExpiryNotifications(immediateExpiredUids);
     }
-  }, [allUsers, profile?.role, sendImmediateExpiryNotifications]);
+  }, [allUsers, profile?.role, sendImmediateExpiryNotifications, autoSyncUserToContacts]);
 
   // Fetch fresh data on mount and force sync on unmount
   const profileRef = useRef(profile);
@@ -1338,13 +1349,22 @@ export default function UserManagement() {
     const welcomeText = isJoiningDate ? `Welcome to ${settings?.headerText || 'MovizNow'} App. ` : '';
     const membershipType = user.role === 'trial' ? 'Trial' : 'Membership';
     
-    if (user.expiryDate) {
-      const expiryDate = new Date(user.expiryDate);
-      const diffTime = expiryDate.getTime() - now.getTime();
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const isExpired = user.status === 'expired' || (!!user.expiryDate && user.expiryDate !== 'Lifetime' && isUserExpired(user.expiryDate));
+
+    if (isExpired) {
+      message = `Assalam O Alaikum! ${name},\n\nYour ${membershipType} for ${settings?.headerText || 'MovizNow'} app is Expired. Please renew to continue enjoying our services.\nVisit Now: MovizNow.com\nThank You`;
+    } else if (user.expiryDate && user.expiryDate !== 'Lifetime') {
+      const cleanDateStr = user.expiryDate.split('T')[0];
+      const parts = cleanDateStr.split('-');
+      let diffDays = 30;
+      if (parts.length === 3) {
+        const targetDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+        const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        diffDays = Math.ceil((targetDate.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24));
+      }
       const expiryStr = formatDateToMonthDDYYYY(user.expiryDate);
 
-      if (diffDays < 0) {
+      if (diffDays <= 0) {
         message = `Assalam O Alaikum! ${name},\n\nYour ${membershipType} for ${settings?.headerText || 'MovizNow'} app is Expired. Please renew to continue enjoying our services.\nVisit Now: MovizNow.com\nThank You`;
       } else if (diffDays > 5) {
         message = `Assalam O Alaikum! ${name},\n\nYour Membership Expiry date for MovizNow is *${expiryStr}*\nEnjoy all Unlimited new latest & old Movies & Series on MovizNow without any restrictions with Direct Play (MX Player, VLC and All Video Players) & Download (Also download able with telegram)\nVisit Now: MovizNow.com\nThank You`;
@@ -2467,7 +2487,7 @@ export default function UserManagement() {
                       )}
                       <div className="min-w-0 flex-1">
                         <div className="font-medium text-zinc-900 dark:text-white flex items-center gap-2 truncate">
-                          {getUserDisplayName(user)} {user.city && <span className="text-zinc-500 font-normal">({user.city})</span>}
+                          {getUserDisplayName(user)} {user.city && !getUserDisplayName(user).toLowerCase().includes(`(${user.city.toLowerCase().trim()})`) && <span className="text-zinc-500 font-normal">({user.city})</span>}
                         </div>
                         <div className="text-zinc-500 dark:text-zinc-400 text-xs mt-0.5 truncate" title={user.email}>
                           {user.email && !user.email.endsWith('@moviznow.com') ? user.email : (user.phone ? `${user.phone} (Phone)` : 'No Email')}

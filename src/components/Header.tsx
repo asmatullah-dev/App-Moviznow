@@ -43,7 +43,10 @@ export function Header({
         <div className="flex items-center gap-2">
           {showBackButton && (
             <button
-              onClick={() => navigate("/")}
+              onClick={() => {
+                sessionStorage.setItem("from_movie_details", "true");
+                navigate("/");
+              }}
               className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors flex items-center justify-center mr-1"
               title={t("Back to Home")}
             >

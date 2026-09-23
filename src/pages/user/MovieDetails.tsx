@@ -1,5 +1,5 @@
 import { standardizePhone } from "../../contexts/AuthContext";
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
   useParams,
   Link,
@@ -295,10 +295,7 @@ export default function MovieDetails() {
   const [isVideoAdOpen, setIsVideoAdOpen] = useState(false);
   const videoAdResolveRef = useRef<((completed: boolean) => void) | null>(null);
 
-  useModalBehavior(alertConfig.isOpen, () =>
-    setAlertConfig((prev) => ({ ...prev, isOpen: false })),
-  );
-  useModalBehavior(showLoginPrompt, () => setShowLoginPrompt(false));
+  // Removed duplicate useModalBehavior(showLoginPrompt) as ConfirmModal handles its own modal stack
   useModalBehavior(isTrailerPopupOpen, () => {
     setIsTrailerPopupOpen(false);
     setActiveTrailerUrl(null);
@@ -306,16 +303,24 @@ export default function MovieDetails() {
   useModalBehavior(isTrailerSelectionOpen, () =>
     setIsTrailerSelectionOpen(false),
   );
-  useModalBehavior(sharePreviewModal.isOpen, () =>
-    setSharePreviewModal({ ...sharePreviewModal, isOpen: false }),
-  );
   useModalBehavior(linkPopup?.isOpen || false, () => setLinkPopup(null));
-  useModalBehavior(!!deleteId, () => setDeleteId(null));
-  useModalBehavior(isMediaModalOpen, () => setIsMediaModalOpen(false));
   useModalBehavior(isPosterExpanded, () => setIsPosterExpanded(false));
+  useModalBehavior(isVideoAdOpen, () => {
+    setIsVideoAdOpen(false);
+    if (videoAdResolveRef.current) {
+      videoAdResolveRef.current(false);
+      videoAdResolveRef.current = null;
+    }
+  });
 
   const hasLoggedView = useRef(false);
   const navigate = useNavigate();
+
+  const handleGoBack = useCallback(() => {
+    sessionStorage.setItem("from_movie_details", "true");
+    navigate("/");
+  }, [navigate]);
+
   const handleFilterNavigation = (key: string, value: string) => {
     const keys = ['home_search', 'home_sort', 'home_genre', 'home_language', 'home_type', 'home_quality', 'home_year', 'home_page'];
     keys.forEach(k => sessionStorage.removeItem(k));
@@ -2703,10 +2708,7 @@ export default function MovieDetails() {
 
         <div className="absolute top-0 left-0 w-full p-4 md:p-6 z-[100] pointer-events-none flex justify-between items-center">
           <button
-            onClick={() => {
-              sessionStorage.setItem("from_movie_details", "true");
-              navigate("/");
-            }}
+            onClick={handleGoBack}
             className="inline-flex items-center gap-2 text-white hover:text-emerald-400 bg-black/60 hover:bg-black/80 backdrop-blur-xl px-5 py-2.5 rounded-full transition-all duration-300 pointer-events-auto cursor-pointer border border-white/20 shadow-xl hover:scale-105 active:scale-95"
           >
             <ArrowLeft className="w-5 h-5" /> <span className="font-semibold text-sm">{t('Back')}</span>
