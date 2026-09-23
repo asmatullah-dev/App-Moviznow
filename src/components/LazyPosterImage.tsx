@@ -3,47 +3,8 @@ import { getOptimizedImageUrl } from "../utils/imageUtils";
 import { Film } from "lucide-react";
 import { clsx } from "clsx";
 
-// High-performance shared IntersectionObserver pool for low-end hardware devices
-type ObserverCallback = (entry: IntersectionObserverEntry) => void;
-const listeners = new Map<Element, ObserverCallback>();
-
-let sharedObserver: IntersectionObserver | null = null;
-
-function getSharedObserver(): IntersectionObserver | null {
-  if (typeof window === "undefined" || !("IntersectionObserver" in window)) {
-    return null;
-  }
-  if (!sharedObserver) {
-    sharedObserver = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          const callback = listeners.get(entry.target);
-          if (callback && entry.isIntersecting) {
-            callback(entry);
-          }
-        });
-      },
-      {
-        rootMargin: "150px 0px 150px 0px", // Loads smoothly just before entering viewport
-        threshold: 0.01,
-      }
-    );
-  }
-  return sharedObserver;
-}
-
-function observeElement(el: Element, callback: ObserverCallback) {
-  const observer = getSharedObserver();
-  if (!observer) return () => {};
-
-  listeners.set(el, callback);
-  observer.observe(el);
-
-  return () => {
-    listeners.delete(el);
-    observer.unobserve(el);
-  };
-}
+// Global cache of already-loaded image URLs in this session for instant 0ms display
+const loadedPostersCache = new Set<string>();
 
 interface LazyPosterImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
   src?: string;
@@ -53,6 +14,7 @@ interface LazyPosterImageProps extends React.ImgHTMLAttributes<HTMLImageElement>
   containerClassName?: string;
   className?: string;
   placeholderIcon?: React.ReactNode;
+  priority?: boolean;
 }
 
 export const LazyPosterImage: React.FC<LazyPosterImageProps> = React.memo(
@@ -64,65 +26,70 @@ export const LazyPosterImage: React.FC<LazyPosterImageProps> = React.memo(
     containerClassName,
     className,
     placeholderIcon,
+    priority = false,
     ...props
   }) => {
-    const containerRef = useRef<HTMLDivElement | null>(null);
-    const [isVisible, setIsVisible] = useState(false);
-    const [isLoaded, setIsLoaded] = useState(false);
+    const imgRef = useRef<HTMLImageElement | null>(null);
     const [hasError, setHasError] = useState(false);
 
-    useEffect(() => {
-      const el = containerRef.current;
-      if (!el) return;
+    const rawUrl = hasError ? fallbackSrc : (src?.trim() || fallbackSrc);
+    const optimizedUrl = getOptimizedImageUrl(rawUrl, targetWidth) || rawUrl;
 
-      // If IntersectionObserver is not supported, load immediately
-      if (typeof window !== "undefined" && !("IntersectionObserver" in window)) {
-        setIsVisible(true);
+    const isAlreadyCached = loadedPostersCache.has(optimizedUrl);
+    const [isLoaded, setIsLoaded] = useState<boolean>(isAlreadyCached);
+
+    useEffect(() => {
+      if (isAlreadyCached) {
+        setIsLoaded(true);
         return;
       }
 
-      // Check if already in viewport or observe
-      const unobserve = observeElement(el, () => {
-        setIsVisible(true);
-        unobserve();
-      });
+      // Check if image is already cached by browser
+      if (imgRef.current && imgRef.current.complete && imgRef.current.naturalWidth > 0) {
+        loadedPostersCache.add(optimizedUrl);
+        setIsLoaded(true);
+      }
+    }, [optimizedUrl, isAlreadyCached]);
 
-      return () => {
-        unobserve();
-      };
-    }, []);
+    const handleLoad = () => {
+      if (optimizedUrl) {
+        loadedPostersCache.add(optimizedUrl);
+      }
+      setIsLoaded(true);
+    };
 
-    const rawUrl = hasError ? fallbackSrc : (src?.trim() || fallbackSrc);
-    const optimizedUrl = isVisible ? (getOptimizedImageUrl(rawUrl, targetWidth) || rawUrl) : "";
+    const handleError = () => {
+      if (!hasError) {
+        setHasError(true);
+        setIsLoaded(false);
+      }
+    };
 
     return (
       <div
-        ref={containerRef}
         className={clsx("relative w-full h-full bg-zinc-900 overflow-hidden", containerClassName)}
-        style={{ contentVisibility: "auto", containIntrinsicSize: "200px 300px" }}
       >
-        {/* Placeholder skeleton before entering viewport or before image loads */}
-        {(!isVisible || !isLoaded) && (
-          <div className="absolute inset-0 bg-zinc-800/80 dark:bg-zinc-900/90 flex items-center justify-center animate-pulse">
+        {/* Placeholder skeleton before image is loaded */}
+        {!isLoaded && (
+          <div className="absolute inset-0 bg-zinc-800/80 dark:bg-zinc-900/90 flex items-center justify-center animate-pulse z-0">
             {placeholderIcon || <Film className="w-6 h-6 text-zinc-600 dark:text-zinc-700 opacity-40" />}
           </div>
         )}
 
-        {/* Only render and attach image src when visible in screen / viewport */}
-        {isVisible && optimizedUrl && (
+        {/* High-speed native browser image loading */}
+        {optimizedUrl && (
           <img
+            ref={imgRef}
             src={optimizedUrl}
             alt={alt}
+            loading={priority ? "eager" : "lazy"}
             decoding="async"
+            fetchPriority={priority ? "high" : "auto"}
             referrerPolicy="no-referrer"
-            onLoad={() => setIsLoaded(true)}
-            onError={() => {
-              if (!hasError) {
-                setHasError(true);
-              }
-            }}
+            onLoad={handleLoad}
+            onError={handleError}
             className={clsx(
-              "w-full h-full object-cover transition-opacity duration-300",
+              "w-full h-full object-cover relative z-10 transition-opacity duration-200",
               isLoaded ? "opacity-100" : "opacity-0",
               className
             )}

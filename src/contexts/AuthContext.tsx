@@ -398,7 +398,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         let isChunkMetaChecked = false;
         let isUidInChunkMeta = false;
         if (navigator.onLine) {
-          setIsSyncing(true);
+          if (force || reason === 'manual') {
+            setIsSyncing(true);
+          }
           try {
             const { getChunkMeta } = await import("../utils/chunkMeta");
             const meta = await getChunkMeta(force);

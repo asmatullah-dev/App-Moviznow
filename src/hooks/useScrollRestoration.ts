@@ -10,7 +10,7 @@ export function useScrollRestoration<T extends HTMLElement>(key: string, isWindo
     if (!ready) return;
 
     // Restore scroll position
-    const savedPosition = globalScrollState.get(key) ?? 0;
+    const savedPosition = globalScrollState.get(key) ?? Number(sessionStorage.getItem(key) || 0);
     
     const restore = () => {
       if (isWindow) {
@@ -53,6 +53,13 @@ export function useScrollRestoration<T extends HTMLElement>(key: string, isWindo
         target.removeEventListener('scroll', handleScroll);
       }
       if (rafId) cancelAnimationFrame(rafId);
+      if (isWindow && window.scrollY > 0) {
+        globalScrollState.set(key, window.scrollY);
+        try { sessionStorage.setItem(key, String(window.scrollY)); } catch (e) {}
+      } else if (ref.current && ref.current.scrollLeft > 0) {
+        globalScrollState.set(key, ref.current.scrollLeft);
+        try { sessionStorage.setItem(key, String(ref.current.scrollLeft)); } catch (e) {}
+      }
     };
   }, [key, isWindow]);
 

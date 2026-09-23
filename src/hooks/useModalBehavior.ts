@@ -10,6 +10,15 @@ interface ModalEntry {
 const modalStack: ModalEntry[] = [];
 let isHandlingPopState = false;
 let isProgrammaticBack = false;
+let programmaticBackTimeout: NodeJS.Timeout | null = null;
+
+function setProgrammaticBack() {
+  isProgrammaticBack = true;
+  if (programmaticBackTimeout) clearTimeout(programmaticBackTimeout);
+  programmaticBackTimeout = setTimeout(() => {
+    isProgrammaticBack = false;
+  }, 250);
+}
 
 function updateBodyScroll() {
   if (typeof document === 'undefined') return;
@@ -33,6 +42,7 @@ if (typeof window !== 'undefined') {
   window.addEventListener('popstate', () => {
     if (isProgrammaticBack) {
       isProgrammaticBack = false;
+      if (programmaticBackTimeout) clearTimeout(programmaticBackTimeout);
       return;
     }
 
@@ -77,10 +87,8 @@ export function useModalBehavior(isOpen: boolean, onClose: () => void) {
         // If this modal pushed a history state and we are NOT handling a popstate event,
         // pop the history state programmatically to keep history clean.
         if (removed.pushedHistory && !isHandlingPopState && typeof window !== 'undefined') {
-          if (window.history.state?.__modalId === modalId) {
-            isProgrammaticBack = true;
-            window.history.back();
-          }
+          setProgrammaticBack();
+          window.history.back();
         }
       }
       hasPushedRef.current = false;
@@ -109,9 +117,12 @@ export function useModalBehavior(isOpen: boolean, onClose: () => void) {
       // Component unmounting while modal was open
       const idx = modalStack.findIndex(m => m.id === modalId);
       if (idx !== -1) {
-        modalStack.splice(idx, 1);
+        const [removed] = modalStack.splice(idx, 1);
         updateBodyScroll();
-        // On unmount, do NOT call window.history.back() to avoid skipping route transitions
+        if (removed.pushedHistory && !isHandlingPopState && typeof window !== 'undefined') {
+          setProgrammaticBack();
+          window.history.back();
+        }
       }
     };
   }, [isOpen, modalId]);

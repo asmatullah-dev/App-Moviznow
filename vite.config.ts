@@ -105,5 +105,28 @@ export default defineConfig(({mode}) => {
       // Do not modify
       hmr: process.env.DISABLE_HMR !== 'true',
     },
+    build: {
+      target: 'es2020',
+      cssCodeSplit: true,
+      chunkSizeWarningLimit: 1200,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules/firebase/')) {
+              return 'vendor-firebase';
+            }
+            if (id.includes('node_modules/lucide-react/')) {
+              return 'vendor-lucide';
+            }
+            if (id.includes('node_modules/recharts/') || id.includes('node_modules/d3-')) {
+              return 'vendor-charts';
+            }
+            if (id.includes('node_modules/canvas-confetti/')) {
+              return 'vendor-confetti';
+            }
+          }
+        }
+      }
+    }
   };
 });

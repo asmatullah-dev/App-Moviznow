@@ -55,6 +55,79 @@ interface ComingSoonSectionProps {
   onRequireLogin?: (message?: string, title?: string) => void;
 }
 
+// Helper functions moved to module level to prevent re-creation
+const isHdPrint = (str: string) => {
+  if (!str) return false;
+  const s = str.toLowerCase();
+  const isHd =
+    s.includes('web-dl') ||
+    s.includes('webdl') ||
+    s.includes('hdrip') ||
+    s.includes('bluray') ||
+    s.includes('blu-ray') ||
+    s.includes('webrip') ||
+    s.includes('brrip') ||
+    s.includes('1080p') ||
+    s.includes('2160p') ||
+    s.includes('4k');
+  const isLow =
+    s.includes('cam') ||
+    s.includes('hdcam') ||
+    s.includes('predvd') ||
+    s.includes('telesync') ||
+    s.includes('hdts') ||
+    s.includes('hdtc');
+  return isHd && !isLow;
+};
+
+const normalizeNumerals = (str: string): string => {
+  return str
+    .toLowerCase()
+    .replace(/\bpart\s*one\b/gi, 'part 1')
+    .replace(/\bpart\s*two\b/gi, 'part 2')
+    .replace(/\bpart\s*three\b/gi, 'part 3')
+    .replace(/\bpart\s*four\b/gi, 'part 4')
+    .replace(/\bpart\s*five\b/gi, 'part 5')
+    .replace(/\bchapter\s*one\b/gi, 'chapter 1')
+    .replace(/\bchapter\s*two\b/gi, 'chapter 2')
+    .replace(/\bchapter\s*three\b/gi, 'chapter 3')
+    .replace(/\bchapter\s*four\b/gi, 'chapter 4')
+    .replace(/\bchapter\s*five\b/gi, 'chapter 5')
+    .replace(/\b(viii|8th)\b/gi, '8')
+    .replace(/\b(vii|7th)\b/gi, '7')
+    .replace(/\b(vi|6th)\b/gi, '6')
+    .replace(/\b(iv|4th)\b/gi, '4')
+    .replace(/\b(v|5th)\b/gi, '5')
+    .replace(/\b(iii|3rd)\b/gi, '3')
+    .replace(/\b(ii|2nd)\b/gi, '2')
+    .replace(/\b(ix|9th)\b/gi, '9')
+    .replace(/\b(x|10th)\b/gi, '10');
+};
+
+const extractSequelTag = (str: string): string | null => {
+  const norm = normalizeNumerals(str);
+  const partMatch = norm.match(/\b(?:part|chapter|volume|vol)\s*(\d+)\b/i);
+  if (partMatch) return `part${partMatch[1]}`;
+  const numMatch = norm.match(/\b(\d+)\b/);
+  if (numMatch && (numMatch[1].length < 4 || parseInt(numMatch[1], 10) < 1900)) {
+    return numMatch[1];
+  }
+  return null;
+};
+
+const normalizeClean = (str: string): string => {
+  return normalizeNumerals(str)
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/\b(a|an|the)\b/gi, ' ')
+    .replace(/[^a-z0-9]/g, '');
+};
+
+interface LibraryMatchInfo {
+  year?: number;
+  sequelTag: string | null;
+}
+
 export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className, profile, onRequireLogin }) => {
   const { t, language, translate } = useLanguage();
   const { profile: authProfile } = useAuth();
@@ -65,8 +138,19 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className,
   const comingSoonScrollRef = useRef<HTMLDivElement>(null);
 
   const [filter, setFilter] = useState<'all' | 'movie' | 'tv'>('all');
-  const [items, setItems] = useState<TMDBUpcomingItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<TMDBUpcomingItem[]>(() => {
+    try {
+      const local = localStorage.getItem('moviz_upcoming_v2_all');
+      if (local) {
+        const parsed = JSON.parse(local);
+        if (parsed.data && Array.isArray(parsed.data) && parsed.data.length > 0) {
+          return parsed.data;
+        }
+      }
+    } catch (e) {}
+    return [];
+  });
+  const [loading, setLoading] = useState(() => items.length === 0);
   const [error, setError] = useState<string | null>(null);
 
   // Modal states
@@ -234,7 +318,9 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className,
 
   const loadData = useCallback(async (forcedFilter?: 'all' | 'movie' | 'tv', isRefresh = false) => {
     const currentFilter = forcedFilter || filter;
-    setLoading(true);
+    if (items.length === 0 || isRefresh) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const data = await fetchUpcomingCombined(currentFilter, isRefresh);
@@ -248,201 +334,100 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className,
     } finally {
       setLoading(false);
     }
-  }, [filter, t]);
+  }, [filter, items.length, t]);
 
   useEffect(() => {
     loadData(filter);
   }, [filter, loadData]);
 
-  // Filter out items that are already present in library with an HD print (WEB-DL, HDRip, BluRay, WEBRip, BRRip)
+  // Pre-index HD content in library in O(N) once, so checking upcoming items is O(1)
+  const hdLibraryMap = useMemo(() => {
+    const map = new Map<string, LibraryMatchInfo[]>();
+    if (!contentList || contentList.length === 0) return map;
+
+    const qualityNameMap = new Map(qualities.map((q) => [q.id, q.name]));
+
+    const addTitle = (title: string, year?: number) => {
+      if (!title) return;
+      const clean = normalizeClean(title);
+      if (!clean) return;
+      const info: LibraryMatchInfo = {
+        year,
+        sequelTag: extractSequelTag(title),
+      };
+      const existing = map.get(clean);
+      if (existing) {
+        existing.push(info);
+      } else {
+        map.set(clean, [info]);
+      }
+    };
+
+    for (let i = 0; i < contentList.length; i++) {
+      const c = contentList[i];
+      // Quick check: does this item have links?
+      const hasLinks = Boolean(
+        (c.movieLinks && c.movieLinks.length > 5) ||
+        (c.seasons && c.seasons.length > 5) ||
+        (c.fullSeasonZip && c.fullSeasonZip.length > 5) ||
+        (c.fullSeasonMkv && c.fullSeasonMkv.length > 5)
+      );
+      if (!hasLinks) continue;
+
+      // Check if HD print
+      const qName = c.qualityId ? qualityNameMap.get(c.qualityId) : '';
+      const isQualityHd = qName ? isHdPrint(qName) : false;
+      const linksHd = (c.movieLinks && isHdPrint(c.movieLinks)) ||
+                      (c.seasons && isHdPrint(c.seasons)) ||
+                      (c.fullSeasonZip && isHdPrint(c.fullSeasonZip)) ||
+                      (c.fullSeasonMkv && isHdPrint(c.fullSeasonMkv));
+
+      if (isQualityHd || linksHd) {
+        if (c.title) addTitle(c.title, c.year);
+        if (c.secondTitle) addTitle(c.secondTitle, c.year);
+      }
+    }
+
+    return map;
+  }, [contentList, qualities]);
+
+  // Filter out items that are already present in library with an HD print
   const visibleItems = useMemo(() => {
     if (!items || items.length === 0) return [];
-
-    const isHdPrint = (str: string) => {
-      const s = str.toLowerCase();
-      const isHd =
-        s.includes('web-dl') ||
-        s.includes('webdl') ||
-        s.includes('hdrip') ||
-        s.includes('bluray') ||
-        s.includes('blu-ray') ||
-        s.includes('webrip') ||
-        s.includes('brrip') ||
-        s.includes('1080p') ||
-        s.includes('2160p') ||
-        s.includes('4k');
-      const isLow =
-        s.includes('cam') ||
-        s.includes('hdcam') ||
-        s.includes('predvd') ||
-        s.includes('telesync') ||
-        s.includes('hdts') ||
-        s.includes('hdtc');
-      return isHd && !isLow;
-    };
-
-    const normalizeNumerals = (str: string): string => {
-      return str
-        .toLowerCase()
-        .replace(/\bpart\s*one\b/gi, 'part 1')
-        .replace(/\bpart\s*two\b/gi, 'part 2')
-        .replace(/\bpart\s*three\b/gi, 'part 3')
-        .replace(/\bpart\s*four\b/gi, 'part 4')
-        .replace(/\bpart\s*five\b/gi, 'part 5')
-        .replace(/\bchapter\s*one\b/gi, 'chapter 1')
-        .replace(/\bchapter\s*two\b/gi, 'chapter 2')
-        .replace(/\bchapter\s*three\b/gi, 'chapter 3')
-        .replace(/\bchapter\s*four\b/gi, 'chapter 4')
-        .replace(/\bchapter\s*five\b/gi, 'chapter 5')
-        .replace(/\b(viii|8th)\b/gi, '8')
-        .replace(/\b(vii|7th)\b/gi, '7')
-        .replace(/\b(vi|6th)\b/gi, '6')
-        .replace(/\b(iv|4th)\b/gi, '4')
-        .replace(/\b(v|5th)\b/gi, '5')
-        .replace(/\b(iii|3rd)\b/gi, '3')
-        .replace(/\b(ii|2nd)\b/gi, '2')
-        .replace(/\b(ix|9th)\b/gi, '9')
-        .replace(/\b(x|10th)\b/gi, '10');
-    };
-
-    const extractSequelTag = (str: string): string | null => {
-      const norm = normalizeNumerals(str);
-      const partMatch = norm.match(/\b(?:part|chapter|volume|vol)\s*(\d+)\b/i);
-      if (partMatch) return `part${partMatch[1]}`;
-      const numMatch = norm.match(/\b(\d+)\b/);
-      if (numMatch && (numMatch[1].length < 4 || parseInt(numMatch[1], 10) < 1900)) {
-        return numMatch[1];
-      }
-      return null;
-    };
-
-    const normalizeClean = (str: string): string => {
-      return normalizeNumerals(str)
-        .toLowerCase()
-        .replace(/&/g, ' and ')
-        .replace(/\b(a|an|the)\b/gi, ' ')
-        .replace(/[^a-z0-9]/g, '');
-    };
-
-    const isMatch = (itemTitle: string, libTitle: string): boolean => {
-      if (!itemTitle || !libTitle) return false;
-      const normI = normalizeClean(itemTitle);
-      const normL = normalizeClean(libTitle);
-      if (normI && normL && normI === normL) return true;
-
-      const seqI = extractSequelTag(itemTitle);
-      const seqL = extractSequelTag(libTitle);
-      if (seqI !== seqL) {
-        if (seqI || seqL) return false;
-      }
-
-      return false;
-    };
+    if (hdLibraryMap.size === 0) return items;
 
     return items.filter((item) => {
-      const matchedInLibrary = contentList.find((c) => {
-        const titleMatch =
-          isMatch(item.title, c.title) ||
-          (item.originalTitle ? isMatch(item.originalTitle, c.title) : false) ||
-          (c.secondTitle ? isMatch(item.title, c.secondTitle) : false) ||
-          (c.secondTitle && item.originalTitle ? isMatch(item.originalTitle, c.secondTitle) : false);
+      const titlesToCheck = [item.title, item.originalTitle].filter(Boolean) as string[];
+      for (const t of titlesToCheck) {
+        const clean = normalizeClean(t);
+        const matches = clean ? hdLibraryMap.get(clean) : null;
+        if (matches && matches.length > 0) {
+          const itemTag = extractSequelTag(t);
+          let itemYear: number | null = null;
+          if (item.releaseDate) {
+            itemYear = parseInt(item.releaseDate.split('-')[0], 10) || null;
+          }
 
-        if (!titleMatch) return false;
+          // Check if any match aligns in sequel tag and year
+          const isTrueMatch = matches.some((m) => {
+            if (itemTag !== m.sequelTag) {
+              if (itemTag || m.sequelTag) return false;
+            }
+            if (m.year && itemYear && Math.abs(m.year - itemYear) > 1) {
+              return false;
+            }
+            return true;
+          });
 
-        // Compare release year if both available
-        if (c.year && item.releaseDate) {
-          const itemYear = parseInt(item.releaseDate.split('-')[0], 10);
-          if (itemYear && Math.abs(c.year - itemYear) > 1) {
+          if (isTrueMatch) {
+            // Already available in HD in library!
             return false;
           }
         }
-        return true;
-      });
-
-      if (!matchedInLibrary) return true;
-
-      // Verify library item has actual media download links
-      let hasLinks = false;
-      if (matchedInLibrary.movieLinks) {
-        try {
-          const links = JSON.parse(matchedInLibrary.movieLinks);
-          if (Array.isArray(links) && links.some((l: any) => l?.url)) hasLinks = true;
-        } catch (e) {}
       }
-      if (matchedInLibrary.fullSeasonZip) {
-        try {
-          const links = JSON.parse(matchedInLibrary.fullSeasonZip);
-          if (Array.isArray(links) && links.some((l: any) => l?.url)) hasLinks = true;
-        } catch (e) {}
-      }
-      if (matchedInLibrary.fullSeasonMkv) {
-        try {
-          const links = JSON.parse(matchedInLibrary.fullSeasonMkv);
-          if (Array.isArray(links) && links.some((l: any) => l?.url)) hasLinks = true;
-        } catch (e) {}
-      }
-      if (matchedInLibrary.seasons) {
-        try {
-          const seasons = JSON.parse(matchedInLibrary.seasons);
-          if (Array.isArray(seasons)) {
-            for (const s of seasons) {
-              if (Array.isArray(s.zipLinks) && s.zipLinks.some((l: any) => l?.url)) hasLinks = true;
-              if (Array.isArray(s.mkvLinks) && s.mkvLinks.some((l: any) => l?.url)) hasLinks = true;
-              if (Array.isArray(s.episodes)) {
-                for (const ep of s.episodes) {
-                  if (Array.isArray(ep.links) && ep.links.some((l: any) => l?.url)) hasLinks = true;
-                }
-              }
-            }
-          }
-        } catch (e) {}
-      }
-
-      if (!hasLinks) return true; // If 0 download links in library, content is still considered upcoming
-
-      // Check if library item has HD quality tag
-      const qualityObj = qualities.find((q) => q.id === matchedInLibrary.qualityId);
-      if (qualityObj?.name && isHdPrint(qualityObj.name)) {
-        return false;
-      }
-
-      // Check movieLinks for HD print
-      if (matchedInLibrary.movieLinks) {
-        try {
-          const links = JSON.parse(matchedInLibrary.movieLinks);
-          if (Array.isArray(links)) {
-            for (const l of links) {
-              const lName = l.name || l.quality || '';
-              if (isHdPrint(lName)) return false;
-            }
-          }
-        } catch (e) {}
-      }
-
-      // Check seasons / episodes for HD print
-      if (matchedInLibrary.seasons) {
-        try {
-          const seasons = JSON.parse(matchedInLibrary.seasons);
-          if (Array.isArray(seasons)) {
-            for (const s of seasons) {
-              if (Array.isArray(s.episodes)) {
-                for (const ep of s.episodes) {
-                  if (Array.isArray(ep.links)) {
-                    for (const l of ep.links) {
-                      const lName = l.name || l.quality || '';
-                      if (isHdPrint(lName)) return false;
-                    }
-                  }
-                }
-              }
-            }
-          }
-        } catch (e) {}
-      }
-
       return true;
     });
-  }, [items, contentList, qualities]);
+  }, [items, hdLibraryMap]);
 
   // Open item modal: Load posters/backdrops, AI OTT detection if missing, and AI synopsis translation
   const handleOpenItem = async (item: TMDBUpcomingItem) => {

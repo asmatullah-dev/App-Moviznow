@@ -52,17 +52,18 @@ export function RefreshAppDataManager() {
     }
 
     isRefreshingRef.current = true;
-    (window as any).__isAppDataSyncing = true;
-
-    // Dispatch start toast (spinning icon on both header button & user profile menu)
-    window.dispatchEvent(new CustomEvent('sync_status', {
-      detail: {
-        status: 'syncing',
-        isInitialLoad: false,
-        isManual: isManualTrigger,
-        message: isManualTrigger ? 'Refreshing...' : 'Updating data...'
-      }
-    }));
+    if (isManualTrigger) {
+      (window as any).__isAppDataSyncing = true;
+      // Dispatch start toast (spinning icon on both header button & user profile menu)
+      window.dispatchEvent(new CustomEvent('sync_status', {
+        detail: {
+          status: 'syncing',
+          isInitialLoad: false,
+          isManual: true,
+          message: 'Refreshing...'
+        }
+      }));
+    }
 
     try {
       // ==========================================
@@ -184,14 +185,16 @@ export function RefreshAppDataManager() {
     } catch (err: any) {
       console.error('Error during Unified Refresh & Sync:', err);
 
-      window.dispatchEvent(new CustomEvent('sync_status', {
-        detail: {
-          status: 'error',
-          isInitialLoad: false,
-          isManual: isManualTrigger,
-          message: isManualTrigger ? 'Sync failed' : 'Sync failed. Will retry automatically.'
-        }
-      }));
+      if (isManualTrigger) {
+        window.dispatchEvent(new CustomEvent('sync_status', {
+          detail: {
+            status: 'error',
+            isInitialLoad: false,
+            isManual: true,
+            message: 'Sync failed'
+          }
+        }));
+      }
     } finally {
       (window as any).__isAppDataSyncing = false;
       isRefreshingRef.current = false;

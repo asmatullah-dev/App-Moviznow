@@ -231,7 +231,6 @@ export default function Home({
   });
   const [collectionSort, setCollectionSort] = useState<"default" | "newest" | "az">("default");
 
-  useScrollRestoration("home_window_scroll", true, !loading);
   const collectionScrollRef = useScrollRestoration<HTMLDivElement>(
     "home_selected_collection_scroll",
     false,
@@ -378,6 +377,7 @@ export default function Home({
     sessionStorage.setItem("home_ott", selectedOttPlatform);
     sessionStorage.setItem("home_resolution", selectedResolution);
     sessionStorage.setItem("home_page", currentPage.toString());
+    sessionStorage.setItem("last_browse_location", window.location.pathname + window.location.search);
   }, [
     search,
     sort,
@@ -421,8 +421,27 @@ export default function Home({
     sessionStorage.removeItem("home_page");
     sessionStorage.removeItem("home_search");
 
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    window.scrollTo({ top: 0, behavior: "instant" as any });
   }, [vibrate]);
+
+  useEffect(() => {
+    const handleResetHome = () => {
+      setCurrentPage(1);
+      clearFilters();
+      window.scrollTo({ top: 0, behavior: "instant" as any });
+    };
+    window.addEventListener("reset_home_first_page", handleResetHome);
+    return () => window.removeEventListener("reset_home_first_page", handleResetHome);
+  }, [clearFilters]);
+
+  const scrollToCatalog = useCallback(() => {
+    const el = document.getElementById("explore-catalog");
+    if (el) {
+      el.scrollIntoView({ behavior: "instant" as any, block: "start" });
+    } else {
+      window.scrollTo({ top: 0, behavior: "instant" as any });
+    }
+  }, []);
 
   const hasActiveFilters =
     sort !== "default" ||
@@ -437,18 +456,14 @@ export default function Home({
 
   const hideScrollingTabs = hasActiveFilters || currentPage > 1;
 
-  const [recentlyViewed, setRecentlyViewed] = useState<Content[]>([]);
-
-  useEffect(() => {
+  const [recentlyViewed, setRecentlyViewed] = useState<Content[]>(() => {
     try {
       const recentStr = localStorage.getItem("recently_viewed");
-      if (recentStr) {
-        setRecentlyViewed(JSON.parse(recentStr));
-      }
+      return recentStr ? JSON.parse(recentStr) : [];
     } catch (e) {
-      console.error("Failed to load recently viewed", e);
+      return [];
     }
-  }, []);
+  });
 
   const permittedContentList = useMemo(() => {
     let result = [...contentList];
@@ -492,6 +507,16 @@ export default function Home({
     return new Map(permittedContentList.map((c) => [c.id, c]));
   }, [permittedContentList]);
 
+  // Fast O(1) timestamp lookup map to avoid tens of thousands of Date.parse calls during sorting
+  const createdAtTimeMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (let i = 0; i < permittedContentList.length; i++) {
+      const c = permittedContentList[i];
+      map.set(c.id, Date.parse(c.createdAt || "") || 0);
+    }
+    return map;
+  }, [permittedContentList]);
+
   const trendingCollection = useMemo(() => {
     const found = collections.find(
       (c) =>
@@ -531,7 +556,7 @@ export default function Home({
     if (found) return found;
 
     const latestSorted = [...permittedContentList]
-      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+      .sort((a, b) => (createdAtTimeMap.get(b.id) || 0) - (createdAtTimeMap.get(a.id) || 0))
       .slice(0, 20)
       .map((c) => c.id);
     if (latestSorted.length >= 2) {
@@ -546,7 +571,7 @@ export default function Home({
       };
     }
     return null;
-  }, [collections, permittedContentList]);
+  }, [collections, permittedContentList, createdAtTimeMap]);
 
   const otherCollections = useMemo(
     () =>
@@ -663,11 +688,12 @@ export default function Home({
   // Precomputed canPlay map for instant sorting lookups
   const canPlayMap = useMemo(() => {
     const map = new Map<string, boolean>();
+    if (canPlayBase) return map; // Empty map means all can play
     permittedContentList.forEach((c) => {
       map.set(c.id, getCanPlay(c));
     });
     return map;
-  }, [permittedContentList, getCanPlay]);
+  }, [permittedContentList, getCanPlay, canPlayBase]);
 
   // Precomputed trending items
   const trendingItems = useMemo(() => {
@@ -676,12 +702,14 @@ export default function Home({
       .map((id) => contentMap.get(id))
       .filter((c): c is Content => Boolean(c));
 
+    if (canPlayBase) return items;
+
     return items.sort((a, b) => {
-      const aCanPlay = canPlayMap.get(a.id) ? 1 : 0;
-      const bCanPlay = canPlayMap.get(b.id) ? 1 : 0;
+      const aCanPlay = (canPlayMap.get(a.id) ?? true) ? 1 : 0;
+      const bCanPlay = (canPlayMap.get(b.id) ?? true) ? 1 : 0;
       return bCanPlay - aCanPlay;
     });
-  }, [trendingCollection, contentMap, canPlayMap]);
+  }, [trendingCollection, contentMap, canPlayMap, canPlayBase]);
 
   // Precomputed newly added items
   const newlyAddedItems = useMemo(() => {
@@ -690,12 +718,14 @@ export default function Home({
       .map((id) => contentMap.get(id))
       .filter((c): c is Content => Boolean(c));
 
+    if (canPlayBase) return items;
+
     return items.sort((a, b) => {
-      const aCanPlay = canPlayMap.get(a.id) ? 1 : 0;
-      const bCanPlay = canPlayMap.get(b.id) ? 1 : 0;
+      const aCanPlay = (canPlayMap.get(a.id) ?? true) ? 1 : 0;
+      const bCanPlay = (canPlayMap.get(b.id) ?? true) ? 1 : 0;
       return bCanPlay - aCanPlay;
     });
-  }, [newlyAddedCollection, contentMap, canPlayMap]);
+  }, [newlyAddedCollection, contentMap, canPlayMap, canPlayBase]);
 
   // Memoized sorted filter lists
   const sortedGenres = useMemo(() => [...genres].sort((a, b) => a.name.localeCompare(b.name)), [genres]);
@@ -798,10 +828,11 @@ export default function Home({
     }
 
     result.sort((a, b) => {
-      const aCanPlay = canPlayMap.get(a.id) ? 1 : 0;
-      const bCanPlay = canPlayMap.get(b.id) ? 1 : 0;
-
-      if (aCanPlay !== bCanPlay) return bCanPlay - aCanPlay;
+      if (!canPlayBase) {
+        const aCanPlay = (canPlayMap.get(a.id) ?? true) ? 1 : 0;
+        const bCanPlay = (canPlayMap.get(b.id) ?? true) ? 1 : 0;
+        if (aCanPlay !== bCanPlay) return bCanPlay - aCanPlay;
+      }
 
       if (debouncedSearch && (sort === "default" || sort === "newest")) {
         return 0;
@@ -817,9 +848,9 @@ export default function Home({
         if (a.order !== undefined && b.order !== undefined) return b.order - a.order;
         if (a.order === undefined && b.order !== undefined) return 1;
         if (a.order !== undefined && b.order === undefined) return -1;
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        return (createdAtTimeMap.get(b.id) || 0) - (createdAtTimeMap.get(a.id) || 0);
       } else if (sort === "newest") {
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        return (createdAtTimeMap.get(b.id) || 0) - (createdAtTimeMap.get(a.id) || 0);
       } else if (sort === "year") {
         return (b.year || 0) - (a.year || 0);
       } else {
@@ -830,6 +861,7 @@ export default function Home({
     return result;
   }, [
     permittedContentList,
+    createdAtTimeMap,
     debouncedSearch,
     sort,
     selectedType,
@@ -841,6 +873,7 @@ export default function Home({
     selectedResolution,
     profile?.role,
     canPlayMap,
+    canPlayBase,
     assignedContentSet,
     sortedQualities,
   ]);
@@ -1099,7 +1132,7 @@ export default function Home({
           )}
 
           {/* Recently Viewed Section */}
-          {!hideScrollingTabs && (
+          <div className={hideScrollingTabs ? "hidden" : "block"}>
             <RecentlyViewedSection
               recentlyViewed={enrichedRecentlyViewed}
               isVisible={isRecentVisible}
@@ -1112,64 +1145,66 @@ export default function Home({
               toggleFavorite={handleToggleFavorite}
               toggleWatchLater={handleToggleWatchLater}
             />
-          )}
+          </div>
 
           {/* Trending Section */}
-          {(!hideScrollingTabs ||
-            searchParams.get("v") === "tr" ||
-            searchParams.get("v") === "trending" ||
-            searchParams.get("v") === "scroll_trending" ||
-            searchParams.get("view_all") === "tr" ||
-            searchParams.get("view_all") === "trending" ||
-            searchParams.get("view_all") === "scroll_trending" ||
-            searchParams.get("c") === "tr" ||
-            searchParams.get("c") === "trending" ||
-            searchParams.get("c") === "scroll_trending") && trendingCollection && (
-            <CollectionRow
-              title={t("Trending Now")}
-              description={trendingCollection.description}
-              icon={
-                <div className="p-2 rounded-xl bg-pink-500/10 border border-pink-500/20 text-pink-500 shadow-sm">
-                  <TrendingUp className="w-5 h-5" />
-                </div>
-              }
-              scrollKey="scroll_trending"
-              items={trendingItems}
-              isVisible={
-                isTrendingRowVisible ||
-                searchParams.get("v") === "tr" ||
-                searchParams.get("v") === "trending" ||
-                searchParams.get("v") === "scroll_trending" ||
-                searchParams.get("view_all") === "tr" ||
-                searchParams.get("view_all") === "trending" ||
-                searchParams.get("view_all") === "scroll_trending" ||
-                searchParams.get("c") === "tr" ||
-                searchParams.get("c") === "trending" ||
-                searchParams.get("c") === "scroll_trending"
-              }
-              onToggleVisibility={toggleTrendingRowVisibility}
-              profile={profile}
-              qualities={qualities}
-              languages={languages}
-              genres={genres}
-              toggleFavorite={handleToggleFavorite}
-              toggleWatchLater={handleToggleWatchLater}
-              onRequireLogin={requireLogin}
-            />
+          {trendingCollection && (
+            <div className={(!hideScrollingTabs ||
+              searchParams.get("v") === "tr" ||
+              searchParams.get("v") === "trending" ||
+              searchParams.get("v") === "scroll_trending" ||
+              searchParams.get("view_all") === "tr" ||
+              searchParams.get("view_all") === "trending" ||
+              searchParams.get("view_all") === "scroll_trending" ||
+              searchParams.get("c") === "tr" ||
+              searchParams.get("c") === "trending" ||
+              searchParams.get("c") === "scroll_trending") ? "block" : "hidden"}>
+              <CollectionRow
+                title={t("Trending Now")}
+                description={trendingCollection.description}
+                icon={
+                  <div className="p-2 rounded-xl bg-pink-500/10 border border-pink-500/20 text-pink-500 shadow-sm">
+                    <TrendingUp className="w-5 h-5" />
+                  </div>
+                }
+                scrollKey="scroll_trending"
+                items={trendingItems}
+                isVisible={
+                  isTrendingRowVisible ||
+                  searchParams.get("v") === "tr" ||
+                  searchParams.get("v") === "trending" ||
+                  searchParams.get("v") === "scroll_trending" ||
+                  searchParams.get("view_all") === "tr" ||
+                  searchParams.get("view_all") === "trending" ||
+                  searchParams.get("view_all") === "scroll_trending" ||
+                  searchParams.get("c") === "tr" ||
+                  searchParams.get("c") === "trending" ||
+                  searchParams.get("c") === "scroll_trending"
+                }
+                onToggleVisibility={toggleTrendingRowVisibility}
+                profile={profile}
+                qualities={qualities}
+                languages={languages}
+                genres={genres}
+                toggleFavorite={handleToggleFavorite}
+                toggleWatchLater={handleToggleWatchLater}
+                onRequireLogin={requireLogin}
+              />
+            </div>
           )}
 
           {/* Newly Added Section */}
-          {(!hideScrollingTabs ||
-            searchParams.get("v") === "na" ||
-            searchParams.get("v") === "newly_added" ||
-            searchParams.get("v") === "scroll_newly_added" ||
-            searchParams.get("view_all") === "na" ||
-            searchParams.get("view_all") === "newly_added" ||
-            searchParams.get("view_all") === "scroll_newly_added" ||
-            searchParams.get("c") === "na" ||
-            searchParams.get("c") === "newly_added" ||
-            searchParams.get("c") === "scroll_newly_added") && newlyAddedCollection && (
-            <>
+          {newlyAddedCollection && (
+            <div className={(!hideScrollingTabs ||
+              searchParams.get("v") === "na" ||
+              searchParams.get("v") === "newly_added" ||
+              searchParams.get("v") === "scroll_newly_added" ||
+              searchParams.get("view_all") === "na" ||
+              searchParams.get("view_all") === "newly_added" ||
+              searchParams.get("view_all") === "scroll_newly_added" ||
+              searchParams.get("c") === "na" ||
+              searchParams.get("c") === "newly_added" ||
+              searchParams.get("c") === "scroll_newly_added") ? "block" : "hidden"}>
               <CollectionRow
                 title={t("Newly Added")}
                 description={newlyAddedCollection.description}
@@ -1202,11 +1237,11 @@ export default function Home({
                 onRequireLogin={requireLogin}
               />
               <AdBanner className="my-6" />
-            </>
+            </div>
           )}
 
           {/* Curated Collections Overview */}
-          {!hideScrollingTabs && (
+          <div className={hideScrollingTabs ? "hidden" : "block"}>
             <CuratedCollectionsOverview
               collections={otherCollections}
               contentMap={contentMap}
@@ -1224,22 +1259,22 @@ export default function Home({
                 setSearchParams(updated);
               }}
             />
-          )}
+          </div>
 
           {/* Coming Soon Section */}
-          {currentPage === 1 && !hideScrollingTabs && (
+          <div className={(currentPage !== 1 || hideScrollingTabs) ? "hidden" : "block"}>
             <ComingSoonSection
               className="mb-8"
               profile={profile}
               onRequireLogin={requireLogin}
             />
-          )}
+          </div>
 
           {/* Ad Banner for Basic Users */}
           <AdBanner className="mb-6" />
 
           {/* Grid Title */}
-          <div className="flex items-center justify-between mb-6 pb-2 border-b border-zinc-200/80 dark:border-zinc-800/80 mt-10">
+          <div id="explore-catalog" className="flex items-center justify-between mb-6 pb-2 border-b border-zinc-200/80 dark:border-zinc-800/80 mt-10">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 shadow-sm">
                 <Film className="w-5 h-5" />
@@ -1256,8 +1291,9 @@ export default function Home({
                 onClick={() => {
                   vibrate(30);
                   setCurrentPage(1);
+                  sessionStorage.setItem("home_page", "1");
                   clearFilters();
-                  window.scrollTo({ top: 0, behavior: "smooth" });
+                  window.scrollTo({ top: 0, behavior: "instant" as any });
                 }}
                 className="px-3.5 py-1.5 rounded-xl text-xs sm:text-sm text-emerald-500 hover:text-emerald-400 font-bold border border-emerald-500/20 bg-emerald-500/10 transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
               >
@@ -1429,7 +1465,11 @@ export default function Home({
                           return;
                         }
                         setCurrentPage(targetPage);
-                        window.scrollTo({ top: 0, behavior: "smooth" });
+                        if (targetPage === 1) {
+                          window.scrollTo({ top: 0, behavior: "instant" as any });
+                        } else {
+                          scrollToCatalog();
+                        }
                       }}
                       disabled={currentPage === 1}
                       className="h-9 sm:h-10 px-3 sm:px-4 rounded-xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-sm font-medium hover:bg-zinc-200 dark:hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
@@ -1458,7 +1498,11 @@ export default function Home({
                                     return;
                                   }
                                   setCurrentPage(i);
-                                  window.scrollTo({ top: 0, behavior: "smooth" });
+                                  if (i === 1) {
+                                    window.scrollTo({ top: 0, behavior: "instant" as any });
+                                  } else {
+                                    scrollToCatalog();
+                                  }
                                 }}
                                 className={clsx(
                                   "w-9 h-9 sm:w-10 sm:h-10 rounded-xl text-sm font-medium transition-colors",
@@ -1515,7 +1559,7 @@ export default function Home({
                           return;
                         }
                         setCurrentPage((prev) => Math.min(totalPages, prev + 1));
-                        window.scrollTo({ top: 0, behavior: "smooth" });
+                        scrollToCatalog();
                       }}
                       disabled={currentPage === totalPages}
                       className="h-9 sm:h-10 px-3 sm:px-4 rounded-xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-sm font-medium hover:bg-zinc-200 dark:hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1"

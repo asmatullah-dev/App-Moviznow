@@ -50,30 +50,23 @@ let knownServerVersion: string | null = null;
 let initialOpenRetryAttempted = false;
 
 const handleVersionSuccess = (serverVersion: string) => {
-  // Check if server version is different from the currently running client build ID
-  const isNewerThanClient =
-    CURRENT_BUILD_ID &&
-    CURRENT_BUILD_ID !== 'unknown' &&
-    serverVersion !== CURRENT_BUILD_ID;
+  if (!serverVersion || serverVersion === 'unknown') return;
 
-  // Check if a new version was deployed while app was running
-  const isNewerThanKnown =
-    knownServerVersion !== null &&
-    serverVersion !== knownServerVersion;
+  // On initial open/launch: record current running server version without reloading
+  if (knownServerVersion === null) {
+    knownServerVersion = serverVersion;
+    console.log('[Auto-Update] Server version initialized:', serverVersion);
+    return;
+  }
 
-  if (isNewerThanClient || isNewerThanKnown) {
-    console.log('[Auto-Update] Newer version detected!', {
-      client: CURRENT_BUILD_ID,
-      knownServer: knownServerVersion,
+  // If server version changes while the app is running in background (new deployment published):
+  if (serverVersion !== knownServerVersion) {
+    console.log('[Auto-Update] Newer version detected during runtime!', {
+      previous: knownServerVersion,
       newServer: serverVersion,
     });
     knownServerVersion = serverVersion;
-    triggerAppReload(`Newer version detected (Server: ${serverVersion}, Current: ${CURRENT_BUILD_ID})`);
-  } else {
-    if (!knownServerVersion) {
-      console.log('[Auto-Update] Version verified:', serverVersion);
-    }
-    knownServerVersion = serverVersion;
+    triggerAppReload(`Newer version detected (Server updated to: ${serverVersion})`);
   }
 };
 
@@ -227,34 +220,17 @@ if (typeof window !== 'undefined') {
     );
   };
 
-  document.addEventListener('touchstart', (e: TouchEvent) => {
-    const touch = e.touches[0];
+  document.addEventListener('touchstart', () => {
     touchStartTime = Date.now();
-    startX = touch.clientX;
-    startY = touch.clientY;
-    hasMovedSignificant = false;
-  }, { passive: true });
-
-  document.addEventListener('touchmove', (e: TouchEvent) => {
-    if (touchStartTime > 0) {
-      const touch = e.touches[0];
-      const dx = touch.clientX - startX;
-      const dy = touch.clientY - startY;
-      if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
-        hasMovedSignificant = true;
-      }
-    }
   }, { passive: true });
 
   document.addEventListener('touchend', (e: TouchEvent) => {
     const elapsed = Date.now() - touchStartTime;
     touchStartTime = 0;
-    
-    // If it's a short tap (not a long press) or they moved significantly, clear selection
-    if ((elapsed < 500 || hasMovedSignificant) && !isInputElement(e.target)) {
+    if (elapsed < 350 && !isInputElement(e.target)) {
       setTimeout(() => {
         const selection = window.getSelection();
-        if (selection) {
+        if (selection && selection.type === 'Range') {
           selection.removeAllRanges();
         }
       }, 10);
@@ -262,45 +238,19 @@ if (typeof window !== 'undefined') {
   }, { passive: true });
 
   document.addEventListener('mousedown', (e: MouseEvent) => {
-    if (e.button !== 0) return; // Only left click
-    mouseStartTime = Date.now();
-    startX = e.clientX;
-    startY = e.clientY;
-    hasMovedSignificant = false;
-  }, { passive: true });
-
-  document.addEventListener('mousemove', (e: MouseEvent) => {
-    if (mouseStartTime > 0) {
-      const dx = e.clientX - startX;
-      const dy = e.clientY - startY;
-      if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
-        hasMovedSignificant = true;
-      }
-    }
+    if (e.button === 0) mouseStartTime = Date.now();
   }, { passive: true });
 
   document.addEventListener('mouseup', (e: MouseEvent) => {
     const elapsed = Date.now() - mouseStartTime;
     mouseStartTime = 0;
-
-    // If it's a short click (not a long press) or they moved significantly, clear selection
-    if ((elapsed < 500 || hasMovedSignificant) && !isInputElement(e.target)) {
+    if (elapsed < 350 && !isInputElement(e.target)) {
       setTimeout(() => {
         const selection = window.getSelection();
-        if (selection) {
+        if (selection && selection.type === 'Range') {
           selection.removeAllRanges();
         }
       }, 10);
-    }
-  }, { passive: true });
-
-  // Clear selections on any double click as well to prevent double-click selection
-  document.addEventListener('dblclick', (e: MouseEvent) => {
-    if (!isInputElement(e.target)) {
-      const selection = window.getSelection();
-      if (selection) {
-        selection.removeAllRanges();
-      }
     }
   }, { passive: true });
 }

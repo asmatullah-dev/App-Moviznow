@@ -133,17 +133,23 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       return foundInState;
     }
 
-    // 2. Check in local chunk storage
+    // 2. Check in local chunk storage (sync memory first, then async IDB)
     const localChunkId = findLocalChunkForContent(id);
     if (localChunkId) {
-      const chunkStr = safeStorage.getItem(`content_chunk_${localChunkId}`) || 
-                      safeStorage.getItem(`static_content_chunk_${localChunkId}`) ||
-                      safeStorage.getItem(localChunkId);
+      let chunkStr = safeStorage.getItem(`content_chunk_${localChunkId}`) || 
+                     safeStorage.getItem(`static_content_chunk_${localChunkId}`) ||
+                     safeStorage.getItem(localChunkId);
+      if (!chunkStr) {
+        chunkStr = await safeStorage.getItemAsync(`content_chunk_${localChunkId}`) ||
+                   await safeStorage.getItemAsync(`static_content_chunk_${localChunkId}`);
+      }
       if (chunkStr) {
         try {
           const items = JSON.parse(chunkStr);
           if (items[id]) {
-            return expandContent({ ...items[id], id }, localChunkId);
+            const expanded = expandContent({ ...items[id], id }, localChunkId);
+            if (foundInState?.order !== undefined) expanded.order = foundInState.order;
+            return expanded;
           }
         } catch (e) {}
       }

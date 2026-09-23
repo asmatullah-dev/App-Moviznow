@@ -45,15 +45,33 @@ export function Header({
             <button
               onClick={() => {
                 sessionStorage.setItem("from_movie_details", "true");
-                navigate("/");
+                const target = sessionStorage.getItem("last_browse_location") || "/";
+                navigate(target);
               }}
-              className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors flex items-center justify-center mr-1"
+              className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors flex items-center justify-center mr-1 cursor-pointer"
               title={t("Back to Home")}
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
           )}
-          <Link to="/" className="flex items-center gap-2">
+          <Link 
+            to="/" 
+            onClick={() => {
+              sessionStorage.setItem("home_page", "1");
+              sessionStorage.removeItem("home_search");
+              sessionStorage.removeItem("home_genre");
+              sessionStorage.removeItem("home_type");
+              sessionStorage.removeItem("home_language");
+              sessionStorage.removeItem("home_quality");
+              sessionStorage.removeItem("home_year");
+              sessionStorage.removeItem("home_sort");
+              sessionStorage.removeItem("home_ott");
+              sessionStorage.removeItem("home_resolution");
+              window.dispatchEvent(new CustomEvent("reset_home_first_page"));
+              window.scrollTo({ top: 0, behavior: 'instant' as any });
+            }}
+            className="flex items-center gap-2"
+          >
             <div className="flex items-center gap-2">
               <img
                 src="/Blacklogo.svg"

@@ -5,53 +5,35 @@ export function GlobalNavigationLoader() {
   const location = useLocation();
   const [progress, setProgress] = useState(0);
   const [isVisible, setIsVisible] = useState(false);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const completeTimerRef = useRef<NodeJS.Timeout | null>(null);
   const prevPathRef = useRef(location.pathname + location.search);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const fadeTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const finishProgress = () => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    setProgress(100);
-
-    completeTimerRef.current = setTimeout(() => {
-      setIsVisible(false);
-      setProgress(0);
-    }, 150);
-  };
-
-  const startProgress = () => {
-    if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
-    if (timerRef.current) clearInterval(timerRef.current);
-
-    setIsVisible(true);
-    setProgress(30);
-
-    let current = 30;
-    timerRef.current = setInterval(() => {
-      current += (90 - current) * 0.2;
-      if (current >= 88) {
-        if (timerRef.current) clearInterval(timerRef.current);
-      }
-      setProgress(Math.min(current, 88));
-    }, 80);
-
-    completeTimerRef.current = setTimeout(() => {
-      finishProgress();
-    }, 800);
-  };
-
-  // Only trigger loader if a route change is slow (not instant SPA route transitions)
   useEffect(() => {
     const currentPath = location.pathname + location.search;
     if (prevPathRef.current !== currentPath) {
       prevPathRef.current = currentPath;
-      // For immediate client routes, do nothing to prevent visual flash or lag.
-      // If there's an active loader, finish it immediately.
-      if (isVisible) {
-        finishProgress();
-      }
+
+      if (timerRef.current) clearTimeout(timerRef.current);
+      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+
+      setIsVisible(true);
+      setProgress(40);
+
+      timerRef.current = setTimeout(() => {
+        setProgress(100);
+        fadeTimerRef.current = setTimeout(() => {
+          setIsVisible(false);
+          setTimeout(() => setProgress(0), 200);
+        }, 200);
+      }, 80);
     }
-  }, [location.pathname, location.search, isVisible]);
+
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    };
+  }, [location.pathname, location.search]);
 
   if (!isVisible && progress === 0) return null;
 

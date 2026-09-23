@@ -15,6 +15,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useHaptics } from '../hooks/useHaptics';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useImdbRating } from '../hooks/useImdbRating';
+import { globalScrollState } from '../hooks/useScrollRestoration';
 import { Translate } from './Translate';
 
 interface ContentCardProps {
@@ -48,25 +49,27 @@ const ContentCard = React.memo(({
   const { vibrate } = useHaptics();
   const { t } = useLanguage();
   const navigate = useNavigate();
-  const { rating: imdbRating, ottPlatform: cachedOtt, refreshRating } = useImdbRating(
+  const { rating: imdbRating, ottPlatform: cachedOtt } = useImdbRating(
     content,
     { enableLiveFetch: false, skipLiveFetch: true }
   );
   const ottBadge = getOttBadgeConfig(content.ottPlatform || (content as any).ott_platform || cachedOtt);
   const [isTrailerSelectionOpen, setIsTrailerSelectionOpen] = React.useState(false);
   const [selectedTrailerUrl, setSelectedTrailerUrl] = React.useState<string | null>(null);
-  const [isClicked, setIsClicked] = React.useState(false);
 
-  React.useEffect(() => {
-    let timer: any;
-    if (isClicked) {
-      // Automatically reset the click state after a short delay so it doesn't get stuck
-      timer = setTimeout(() => {
-        setIsClicked(false);
-      }, 500);
+  const targetPath = `/${content.type === 'series' ? 'series' : 'movie'}/${content.id}`;
+
+  const handleCardClick = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('button, [role="button"], a')) {
+      return;
     }
-    return () => clearTimeout(timer);
-  }, [isClicked]);
+    try {
+      globalScrollState.set("home_window_scroll", window.scrollY);
+      sessionStorage.setItem("home_window_scroll", String(window.scrollY));
+      sessionStorage.setItem("last_browse_location", window.location.pathname + window.location.search);
+    } catch (err) {}
+    navigate(targetPath);
+  };
 
   const isInCart = cart.some(item => item.contentId === content.id);
 
@@ -204,45 +207,46 @@ const ContentCard = React.memo(({
 
   return (
     <div 
-      className={clsx("group relative flex flex-col transition-transform duration-200 hover:-translate-y-1 active:scale-[0.98]", {
-        "scale-105 z-30": isClicked
-      })}
+      className="group relative flex flex-col transition-transform duration-200 hover:-translate-y-1 active:scale-[0.98] cursor-pointer"
+      onClick={handleCardClick}
     >
       {/* Modern Sleek Card Container */}
       <div className="relative flex flex-col bg-white dark:bg-zinc-900/90 rounded-2xl overflow-hidden border border-zinc-200/80 dark:border-zinc-800/80 hover:border-emerald-500/50 dark:hover:border-emerald-500/50 shadow-md hover:shadow-xl hover:shadow-emerald-500/10 transition-shadow duration-200 transform-gpu backface-hidden">
+        {/* Clickable Poster Element */}
         <Link 
-          to={`/${content.type === 'series' ? 'series' : 'movie'}/${content.id}`} 
-          onClick={() => {
-            setIsClicked(true);
-            refreshRating();
+          to={targetPath}
+          onClick={(e) => {
+            if ((e.target as HTMLElement).closest('button, [role="button"]')) {
+              e.preventDefault();
+              e.stopPropagation();
+              return;
+            }
+            try {
+              globalScrollState.set("home_window_scroll", window.scrollY);
+              sessionStorage.setItem("home_window_scroll", String(window.scrollY));
+              sessionStorage.setItem("last_browse_location", window.location.pathname + window.location.search);
+            } catch (err) {}
           }}
-          className="absolute inset-0 z-10" aria-label={`View details for ${content.title}`} />
-        
-        <div className="relative aspect-[2/3] w-full bg-zinc-100 dark:bg-zinc-800 block overflow-hidden">
+          className="relative aspect-[2/3] w-full bg-zinc-100 dark:bg-zinc-800 block overflow-hidden cursor-pointer select-none group/poster"
+          aria-label={`View details for ${content.title}`}
+        >
           <LazyPosterImage
             src={rawPoster}
             fallbackSrc={defaultFallbackImage}
             alt={content.title}
             targetWidth={isSmall ? 185 : 342}
-            className="w-full h-full object-cover transition-transform duration-200 ease-out group-hover:scale-105"
+            className="w-full h-full object-cover transition-transform duration-200 ease-out group-hover:scale-105 pointer-events-none"
           />
           
-          {/* Subtle Dark Vignette & Play/Loading Indicator */}
-          <div className={clsx(
-            "absolute inset-0 bg-gradient-to-t from-zinc-950/90 via-zinc-950/40 to-transparent transition-opacity duration-200 flex items-center justify-center",
-            isClicked ? "opacity-100 bg-zinc-950/60 backdrop-blur-[2px]" : "opacity-0 group-hover:opacity-100"
-          )}>
+          {/* Subtle Dark Vignette & Play Indicator */}
+          <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/90 via-zinc-950/40 to-transparent transition-opacity duration-200 flex items-center justify-center opacity-0 group-hover:opacity-100 pointer-events-none">
             <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-400 text-white flex items-center justify-center shadow-lg shadow-emerald-500/40 transform scale-75 group-hover:scale-100 transition-transform duration-200">
-              {isClicked ? (
-                <Loader2 className="w-5 h-5 sm:w-6 sm:h-6 animate-spin text-white" />
-              ) : (
-                <Play className="w-5 h-5 sm:w-6 sm:h-6 fill-current translate-x-0.5" />
-              )}
+              <Play className="w-5 h-5 sm:w-6 sm:h-6 fill-current translate-x-0.5" />
             </div>
           </div>
 
           {/* Top Right Badges */}
-          <div className="absolute top-2 right-2 flex flex-col items-end gap-1 z-10">
+          <div className="absolute top-2 right-2 flex flex-col items-end gap-1 z-10 pointer-events-none">
             <div className={clsx(
               "px-1.5 py-0.5 rounded-md font-extrabold uppercase tracking-wider text-white shadow-md border border-white/20",
               content.type === 'movie' ? 'bg-blue-600' : 'bg-purple-600',
@@ -323,7 +327,7 @@ const ContentCard = React.memo(({
               </div>
             )}
           </div>
-        </div>
+        </Link>
 
         {/* Action Buttons - High Z-index to be clickable over the Link overlay */}
         <div className="absolute bottom-[88px] right-2 flex flex-col gap-2 z-20 opacity-0 lg:group-hover:opacity-100 transition-opacity pointer-events-none lg:group-hover:pointer-events-auto hidden lg:flex">
@@ -402,10 +406,22 @@ const ContentCard = React.memo(({
             "flex flex-col bg-white dark:bg-zinc-900/90",
             isSmall ? 'p-2' : 'flex-1 p-3 sm:p-3.5'
           )}>
-            <h3 className={clsx(
-              "font-extrabold leading-snug mb-1 text-zinc-900 dark:text-white group-hover:text-emerald-500 transition-colors",
-              isSmall ? 'text-[11px] line-clamp-2' : 'text-sm sm:text-base line-clamp-3'
-            )}>{formatContentTitle(content)}</h3>
+            <Link 
+              to={targetPath} 
+              onClick={() => {
+                try {
+                  globalScrollState.set("home_window_scroll", window.scrollY);
+                  sessionStorage.setItem("home_window_scroll", String(window.scrollY));
+                  sessionStorage.setItem("last_browse_location", window.location.pathname + window.location.search);
+                } catch (err) {}
+              }}
+              className="block group/title focus:outline-none"
+            >
+              <h3 className={clsx(
+                "font-extrabold leading-snug mb-1 text-zinc-900 dark:text-white group-hover:text-emerald-500 transition-colors",
+                isSmall ? 'text-[11px] line-clamp-2' : 'text-sm sm:text-base line-clamp-3'
+              )}>{formatContentTitle(content)}</h3>
+            </Link>
             <div className={clsx(
               "flex items-center gap-2 text-zinc-500 dark:text-zinc-400 font-medium",
               isSmall ? 'text-[9px]' : 'text-xs mb-1.5'

@@ -184,11 +184,10 @@ export default function MovieDetails() {
   }, [contentList, adminContentList, id, isAdminOrEditor]);
 
   const [loading, setLoading] = useState(() => {
-    if (!isAdminOrEditor) {
-      return !contentList.some((c) => c.id === id);
-    }
-    const found = contentList.some((c) => c.id === id) || (isAdminOrEditor && adminContentList.some((c) => c.id === id));
-    return !found;
+    if (!id) return false;
+    const hasCachedFull = Boolean(safeStorage.getItem(`movie_details_${id}`));
+    const hasInList = contentList.some((c) => c.id === id) || (isAdminOrEditor && adminContentList.some((c) => c.id === id));
+    return !hasCachedFull && !hasInList;
   });
   const [alertConfig, setAlertConfig] = useState<{
     isOpen: boolean;
@@ -318,7 +317,8 @@ export default function MovieDetails() {
 
   const handleGoBack = useCallback(() => {
     sessionStorage.setItem("from_movie_details", "true");
-    navigate("/");
+    const target = sessionStorage.getItem("last_browse_location") || "/";
+    navigate(target);
   }, [navigate]);
 
   const handleFilterNavigation = (key: string, value: string) => {
@@ -369,55 +369,59 @@ export default function MovieDetails() {
   // Reset state and load cache on ID change
   useEffect(() => {
     let activeId = id;
-    if (!isAdminOrEditor) {
-      if (!contentList.some((c) => c.id === id)) {
-        setLoading(true);
-      } else {
-        setLoading(false);
-      }
-    } else {
-      const foundInList = contentList.some((c) => c.id === id) || (isAdminOrEditor && adminContentList.some((c) => c.id === id));
-      if (!foundInList) setLoading(true);
+    if (!id) {
+      setLoading(false);
+      setFullContent(null);
+      setCachedMetadata({ id: "", data: {} });
+      return;
     }
 
-    // Clear state synchronously for new ID
-    setFullContent(null);
-    setCachedMetadata({ id: id || "", data: {} });
+    const cachedSync = safeStorage.getItem(`movie_details_${id}`);
+    let syncFull: Content | null = null;
+    if (cachedSync) {
+      try {
+        const parsed = JSON.parse(cachedSync);
+        if (parsed.id === id) syncFull = parsed;
+      } catch (e) {}
+    }
+
+    const hasInList = contentList.some((c) => c.id === id) || (isAdminOrEditor && adminContentList.some((c) => c.id === id));
+    setLoading(!syncFull && !hasInList);
+
+    // Set initial fullContent synchronously if available
+    setFullContent(syncFull);
+    setCachedMetadata({ id: id, data: {} });
     setTmdbGalleryImages({ posters: [], backdrops: [] });
     setActiveGalleryIndex(0);
     setLoadingTmdbGallery(false);
     setIsPosterExpanded(false);
     setIsLightboxImageLoading(true);
 
-    if (id) {
-      touchMetadataUsage(id);
-      // Load full content cache asynchronously
-      safeStorage.getItemAsync(`movie_details_${id}`).then((cachedFull) => {
-        if (activeId !== id) return; // Prevent state updates from stale closures
-        if (cachedFull) {
-          try {
-            const parsed = JSON.parse(cachedFull);
-            if (parsed.id === id) {
-              setFullContent(prev => prev?.id === id ? prev : parsed);
-            }
-          } catch (e) {
-            // Ignore parse errors, let fetchFullContent handle fetching
-          }
-        }
-      });
-
-      // Load metadata cache
-      const cachedMeta = safeStorage.getItem(`content_cache_${id}`);
-      if (cachedMeta && activeId === id) {
+    touchMetadataUsage(id);
+    // Load full content cache asynchronously if not in sync cache
+    safeStorage.getItemAsync(`movie_details_${id}`).then((cachedFull) => {
+      if (activeId !== id) return; // Prevent state updates from stale closures
+      if (cachedFull) {
         try {
-          setCachedMetadata({ id: id, data: JSON.parse(cachedMeta) });
+          const parsed = JSON.parse(cachedFull);
+          if (parsed.id === id) {
+            setFullContent(prev => prev?.id === id ? prev : parsed);
+            setLoading(false);
+          }
         } catch (e) {
-          // ignore
+          // Ignore parse errors, let fetchFullContent handle fetching
         }
       }
-    } else {
-      setFullContent(null);
-      setCachedMetadata({ id: "", data: {} });
+    });
+
+    // Load metadata cache
+    const cachedMeta = safeStorage.getItem(`content_cache_${id}`);
+    if (cachedMeta && activeId === id) {
+      try {
+        setCachedMetadata({ id: id, data: JSON.parse(cachedMeta) });
+      } catch (e) {
+        // ignore
+      }
     }
     setLiveRating(null);
     setFetchFailed(false);
@@ -492,35 +496,6 @@ export default function MovieDetails() {
       hasFetchedFull.current[id] = true;
       const fetchFullContent = async () => {
         try {
-          if (!isAdminOrEditor) {
-            if (content && (content as any).chunkId) {
-              const { safeStorage } = await import("../../utils/safeStorage");
-              const { expandContent } = await import("../../utils/chunkUtils");
-              const chunkStr = safeStorage.getItem(
-                "content_chunk_" + (content as any).chunkId,
-              );
-              if (chunkStr) {
-                const items = JSON.parse(chunkStr);
-                if (items[id]) {
-                  const expanded = expandContent(
-                    { ...items[id], id },
-                    (content as any).chunkId,
-                  );
-                  expanded.order = content.order;
-                  setFullContent(expanded);
-                  setLoading(false);
-                  safeStorage.setItemAsync(
-                    `movie_details_${id}`,
-                    JSON.stringify(expanded),
-                  );
-                  return; // STOP! Don't fetch from Firestore
-                }
-              }
-            }
-            setLoading(false);
-            return;
-          }
-
           const data = isAdminOrEditor ? await getAdminContent(id) : await getContent(id);
           if (data) {
             setFullContent(data);
@@ -530,25 +505,26 @@ export default function MovieDetails() {
               JSON.stringify(data),
             );
           } else {
-            setFetchFailed(true);
+            if (!content && !fullContent) {
+              setFetchFailed(true);
+            }
             setLoading(false);
-            setFullContent(null);
-            safeStorage.removeItemAsync(`movie_details_${id}`);
-            safeStorage.removeItemAsync(`content_cache_${id}`);
           }
         } catch (e) {
           console.error("Failed to fetch full content", e);
-          setFetchFailed(true);
+          if (!content && !fullContent) {
+            setFetchFailed(true);
+          }
           setLoading(false);
         }
       };
       fetchFullContent();
     }
-  }, [isMinimal, isStale, id, fetchFailed, isOffline, content, contentLoading]);
+  }, [isMinimal, isStale, id, fetchFailed, isOffline, content, fullContent, contentLoading, isAdminOrEditor]);
 
   const mergedContent = useMemo(() => {
-    // If it's completely missing from contentList and we've finished loading contentList, it doesn't exist anymore
-    if (!content && !contentLoading && !isOffline) return null;
+    // If it's completely missing from contentList and fullContent is not loaded, and we've finished loading contentList, it doesn't exist anymore
+    if (!content && !fullContent && !contentLoading && !isOffline) return null;
 
     if (!content && !fullContent) return null;
     // Prioritize cachedMetadata (TMDB updates/local edits), then fresh fullContent from DB, then partial content from list
@@ -1605,6 +1581,7 @@ export default function MovieDetails() {
   };
 
   useEffect(() => {
+    sessionStorage.setItem("from_movie_details", "true");
     return () => {
       // Set flag when leaving MovieDetails to trigger WhatsApp prompt on Home
       sessionStorage.setItem("from_movie_details", "true");
