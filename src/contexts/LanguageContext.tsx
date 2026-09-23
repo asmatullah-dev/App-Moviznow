@@ -722,6 +722,7 @@ const translations: Record<string, Record<Language, string>> = {
   'Back': { en: 'Back', 'ur-roman': 'Wapis', ur: 'واپس' },
   'View Full Poster & Gallery': { en: 'View Full Poster & Gallery', 'ur-roman': 'Mukammal Poster aur Gallery Dekhein', ur: 'مکمل پوسٹر اور گیلری دیکھیں' },
   'View Poster & Gallery': { en: 'View Poster & Gallery', 'ur-roman': 'Poster aur Gallery Dekhein', ur: 'پوسٹر اور گیلری دیکھیں' },
+  'Click to View More': { en: 'Click to View More', 'ur-roman': 'Mazeed Dekhne Ke Liye Click Karein', ur: 'مزید دیکھنے کے لیے کلک کریں' },
   'Open Poster to View More': { en: 'Open Poster to View More', 'ur-roman': 'Mazeed Dekhne Ke Liye Poster Kholein', ur: 'مزید دیکھنے کے لیے پوسٹر کھولیں' },
   'Tap to expand HD gallery': { en: 'Tap to expand HD gallery', 'ur-roman': 'HD gallery kholne ke liye tap karein', ur: 'ایچ ڈی گیلری کھولنے کے لیے ٹیپ کریں' },
   'Saved Queue': { en: 'Saved Queue', 'ur-roman': 'Mehfooz List', ur: 'محفوظ شدہ فہرست' },

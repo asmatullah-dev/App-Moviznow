@@ -3110,6 +3110,16 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
     }
   });
 
+  // FilmyFly Extraction & Search API Helper Slug Generator
+  function generateFilmyflySlug(title: string): string {
+    const s = String(title || "")
+      .replace(/[()]/g, "")
+      .replace(/[^A-Za-z0-9 ]/g, "")
+      .replace(/\s+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    return s !== "" ? s : "item";
+  }
+
   // FilmyFly Extraction & Search API
   app.get('/api/filmyfly', async (req: express.Request, res: express.Response) => {
     try {
@@ -3118,7 +3128,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       let queryStr = typeof search === 'string' ? search.trim() : '';
 
       if (!targetUrl && queryStr) {
-        targetUrl = `https://filmyfly.sale/search.html?search=${encodeURIComponent(queryStr)}`;
+        targetUrl = `https://filmyfly.army/search.html?search=${encodeURIComponent(queryStr)}`;
       }
 
       if (!targetUrl) {
@@ -3129,11 +3139,11 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         targetUrl = 'https://' + targetUrl;
       }
 
-      // Automatically migrate outdated FilmyFly domains (e.g. filmyfly.green, filmyfly.vin, etc.) to active filmyfly.sale
+      // Automatically migrate outdated FilmyFly domains (e.g. filmyfly.green, filmyfly.vin, filmyfly.sale, filmyfly.bingo, etc.) to active filmyfly.army
       try {
         const u = new URL(targetUrl);
-        if (u.hostname.includes('filmyfly') && u.hostname !== 'filmyfly.bingo' && u.hostname !== 'filmyfly.sale') {
-          u.hostname = 'filmyfly.bingo';
+        if (u.hostname.includes('filmyfly') && u.hostname !== 'filmyfly.army') {
+          u.hostname = 'filmyfly.army';
           u.protocol = 'https:';
           targetUrl = u.toString();
         }
@@ -3142,16 +3152,76 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       console.log(`[FilmyFly] Processing request for: ${targetUrl}`);
 
       let isSearch = false;
+      let searchQuery = queryStr;
+      let targetPage = 1;
+
       try {
         const urlObj = new URL(targetUrl);
-        isSearch = targetUrl.includes('search.html') || targetUrl.includes('?search=') || urlObj.searchParams.has('search') || urlObj.searchParams.has('page') || urlObj.pathname === '/' || urlObj.pathname === '' || urlObj.pathname.endsWith('index.html');
+        if (!searchQuery) {
+          searchQuery = urlObj.searchParams.get('search') || urlObj.searchParams.get('to-search') || urlObj.searchParams.get('q') || urlObj.searchParams.get('s') || '';
+        }
+        const pVal = parseInt(urlObj.searchParams.get('page') || urlObj.searchParams.get('to-page') || urlObj.searchParams.get('p') || urlObj.searchParams.get('pg') || '1', 10);
+        if (!isNaN(pVal) && pVal > 0) targetPage = pVal;
+
+        isSearch = targetUrl.includes('search.html') || targetUrl.includes('?search=') || targetUrl.includes('?q=') || urlObj.searchParams.has('search') || urlObj.searchParams.has('q') || urlObj.pathname === '/' || urlObj.pathname === '' || urlObj.pathname.endsWith('index.html');
       } catch (e) {
-        isSearch = targetUrl.includes('search.html') || targetUrl.includes('?search=');
+        isSearch = targetUrl.includes('search.html') || targetUrl.includes('?search=') || Boolean(queryStr);
       }
 
       if (isSearch) {
-        console.log(`[FilmyFly] Search / catalog query: ${targetUrl}`);
-        const { html: searchHtml } = await fetchWithVddos(targetUrl, { 'Referer': 'https://filmyfly.bingo/' });
+        console.log(`[FilmyFly] Search / catalog query: "${searchQuery}" (Page ${targetPage}, URL: ${targetUrl})`);
+        
+        // 1. Try FilmyFly modern JSON search API (webfind.filmyflydla.space)
+        try {
+          const apiBase = 'https://webfind.filmyflydla.space';
+          const apiUrl = searchQuery.trim()
+            ? `${apiBase}/search?q=${encodeURIComponent(searchQuery.trim())}&page=${targetPage}&per_page=20`
+            : `${apiBase}/latest?page=${targetPage}&per_page=20`;
+
+          const apiRes = await axios.get(apiUrl, {
+            headers: {
+              'Accept': 'application/json, text/plain, */*',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Referer': 'https://filmyfly.army/'
+            },
+            timeout: 7000,
+            validateStatus: (status) => status === 200 || status === 404
+          });
+
+          if (apiRes.status === 200 && apiRes.data && Array.isArray(apiRes.data.results)) {
+            const rawResults = apiRes.data.results;
+            const currentDomain = 'https://filmyfly.army';
+            const posts = rawResults.map((item: any) => {
+              const slug = generateFilmyflySlug(item.title);
+              const movieUrl = `${currentDomain}/movie/${encodeURIComponent(item.filmyfly || '')}/${encodeURIComponent(slug)}.html`;
+              return {
+                title: item.title || 'Untitled',
+                url: movieUrl,
+                image: item.poster || undefined
+              };
+            });
+
+            const total = typeof apiRes.data.total === 'number' ? apiRes.data.total : posts.length;
+            const totalPages = typeof apiRes.data.total_pages === 'number' && apiRes.data.total_pages > 0
+              ? apiRes.data.total_pages
+              : (total > posts.length ? Math.ceil(total / 20) : 1);
+
+            return res.json({
+              is_search: true,
+              posts,
+              found: posts.length,
+              page: targetPage,
+              total_pages: totalPages,
+              has_more: targetPage < totalPages,
+              total_found: total
+            });
+          }
+        } catch (apiErr: any) {
+          console.warn('[FilmyFly] JSON Search API error, falling back to HTML fetch:', apiErr.message);
+        }
+
+        // 2. Fallback to HTML fetch & scrape
+        const { html: searchHtml } = await fetchWithVddos(targetUrl, { 'Referer': 'https://filmyfly.army/' });
         const $ = cheerio.load(searchHtml || '');
 
         const postsMap = new Map<string, { title: string; url: string; image?: string }>();
@@ -3184,27 +3254,27 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
           is_search: true,
           posts,
           found: posts.length,
-          page: pag.currentPage,
-          total_pages: pag.totalPages,
-          has_more: pag.hasMore,
-          total_found: pag.totalPages * posts.length
+          page: pag.currentPage || targetPage,
+          total_pages: pag.totalPages || 1,
+          has_more: pag.hasMore || false,
+          total_found: (pag.totalPages || 1) * posts.length
         });
       }
 
       // Catalog / Movie Page or Direct Linkmake / FilesDL extraction
       console.log(`[FilmyFly] Extracting content/movie page: ${targetUrl}`);
-      let { html: movieHtml } = await fetchWithVddos(targetUrl, { 'Referer': 'https://filmyfly.sale/' });
+      let { html: movieHtml } = await fetchWithVddos(targetUrl, { 'Referer': 'https://filmyfly.army/' });
       let $movie = cheerio.load(movieHtml || '');
 
       // Guard against old domain redirecting to bare homepage while a movie page was requested
       const canonical = $movie('link[rel="canonical"]').attr('href') || '';
-      if ((canonical.endsWith('filmyfly.sale/') || canonical.endsWith('filmyfly.sale')) && targetUrl.includes('/movie/')) {
+      if ((canonical.endsWith('filmyfly.army/') || canonical.endsWith('filmyfly.army') || canonical.endsWith('filmyfly.sale/') || canonical.endsWith('filmyfly.bingo/')) && targetUrl.includes('/movie/')) {
         try {
           const u = new URL(targetUrl);
           if (u.pathname && u.pathname !== '/' && u.pathname !== '/index.html') {
-            const directUrl = `https://filmyfly.sale${u.pathname}${u.search}`;
+            const directUrl = `https://filmyfly.army${u.pathname}${u.search}`;
             console.log(`[FilmyFly] Detected homepage redirect for movie path, retrying on: ${directUrl}`);
-            const { html: retryHtml } = await fetchWithVddos(directUrl, { 'Referer': 'https://filmyfly.sale/' });
+            const { html: retryHtml } = await fetchWithVddos(directUrl, { 'Referer': 'https://filmyfly.army/' });
             if (retryHtml && retryHtml.length > 500) {
               movieHtml = retryHtml;
               $movie = cheerio.load(movieHtml);

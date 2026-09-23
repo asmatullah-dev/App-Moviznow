@@ -28,7 +28,7 @@ export const DEFAULT_MOVIESDRIVE_DOMAIN = 'https://new3.moviesdrive.christmas';
 export const DEFAULT_SKYMOVIES_DOMAIN = 'https://skymovieshd.meme';
 export const DEFAULT_FILMYGO_DOMAIN = 'https://filmycab.press';
 export const DEFAULT_HDHUB4U_DOMAIN = 'https://new5.hdhub4u.cl';
-export const DEFAULT_FILMYFLY_DOMAIN = 'https://filmyfly.bingo';
+export const DEFAULT_FILMYFLY_DOMAIN = 'https://filmyfly.army';
 
 export function getMoviesdriveDomain(): string {
   const stored = safeStorage.getItem('custom_moviesdrive_domain');
@@ -117,7 +117,14 @@ export function getFilmyflyDomain(): string {
       domain = 'https://' + domain;
     }
     const clean = domain.replace(/\/+$/, '');
-    if (clean.includes('filmyfly.green') || clean.includes('filmyfly.vin')) {
+    if (
+      clean.includes('filmyfly.green') ||
+      clean.includes('filmyfly.vin') ||
+      clean.includes('filmyfly.sale') ||
+      clean.includes('filmyfly.bingo') ||
+      clean.includes('filmyfly.trade') ||
+      clean.includes('filmyfly.reisen')
+    ) {
       safeStorage.setItem('custom_filmyfly_domain', DEFAULT_FILMYFLY_DOMAIN);
       return DEFAULT_FILMYFLY_DOMAIN;
     }

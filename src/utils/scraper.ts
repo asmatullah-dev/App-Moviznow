@@ -211,7 +211,7 @@ export async function scrapeFilmyflyPosts(
   try {
     const domain = getFilmyflyDomain();
     const sUrl = `${domain}/search.html?search=${encodeURIComponent(query)}&page=${page}`;
-    const res = await fetch(`/api/filmyfly?url=${encodeURIComponent(sUrl)}`, { signal });
+    const res = await fetch(`/api/filmyfly?url=${encodeURIComponent(sUrl)}&search=${encodeURIComponent(query)}`, { signal });
     if (!res.ok) return [];
     const data = await res.json();
     return data.posts || [];

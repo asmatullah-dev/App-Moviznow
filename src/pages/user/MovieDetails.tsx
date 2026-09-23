@@ -222,7 +222,6 @@ export default function MovieDetails() {
     formattedTitle?: string;
   } | null>(null);
   const [isPosterExpanded, setIsPosterExpanded] = useState(false);
-  const [isPosterHintDismissed, setIsPosterHintDismissed] = useState(false);
   const [tmdbGalleryImages, setTmdbGalleryImages] = useState<{ posters: string[]; backdrops: string[] }>({ posters: [], backdrops: [] });
   const [loadingTmdbGallery, setLoadingTmdbGallery] = useState(false);
   const [activeGalleryIndex, setActiveGalleryIndex] = useState(0);
@@ -2755,60 +2754,17 @@ export default function MovieDetails() {
                   </div>
                 </div>
 
-                {/* Floating & Shaking Big Label Popup with Dismiss (X) button */}
-                <AnimatePresence>
-                  {!isPosterHintDismissed && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 15, scale: 0.9 }}
-                      animate={{
-                        opacity: 1,
-                        y: [0, -6, 0, -4, 0, 0, 0],
-                        x: [0, 0, -2, 2, -2, 2, -1, 1, 0, 0],
-                        rotate: [0, 0, -2, 2, -2.5, 2.5, -1, 1, 0, 0],
-                        scale: [1, 1.02, 1, 1.02, 1, 1, 1],
-                      }}
-                      exit={{ opacity: 0, y: 10, scale: 0.9 }}
-                      transition={{
-                        opacity: { duration: 0.3 },
-                        y: { duration: 3.2, repeat: Infinity, ease: "easeInOut" },
-                        x: { duration: 3.2, repeat: Infinity, ease: "easeInOut" },
-                        rotate: { duration: 3.2, repeat: Infinity, ease: "easeInOut" },
-                        scale: { duration: 3.2, repeat: Infinity, ease: "easeInOut" },
-                      }}
-                      className="absolute -bottom-6 inset-x-0 z-20 flex justify-center px-1 pointer-events-none"
-                    >
-                      <div 
-                        onClick={handleOpenPosterLightbox}
-                        className="pointer-events-auto group/hint cursor-pointer bg-zinc-950/95 hover:bg-zinc-900 border-2 border-emerald-400 text-white pl-3.5 pr-2 py-2 rounded-2xl shadow-2xl shadow-emerald-950/80 backdrop-blur-xl flex items-center gap-2.5 transition-all duration-300 hover:scale-[1.04] active:scale-95 ring-4 ring-emerald-500/25 animate-pulse"
-                      >
-                        <div className="relative p-1.5 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shrink-0">
-                          <ImageIcon className="w-4 h-4" />
-                          <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-400 rounded-full animate-ping" />
-                        </div>
-                        <div className="flex flex-col text-left">
-                          <span className="text-xs sm:text-sm font-extrabold text-white tracking-tight flex items-center gap-1.5 whitespace-nowrap">
-                            {t('Open Poster to View More')}
-                            <Maximize2 className="w-3.5 h-3.5 text-emerald-400 opacity-80 group-hover/hint:opacity-100 animate-bounce" />
-                          </span>
-                          <span className="text-[10px] text-zinc-400 font-medium">
-                            {t('Tap to expand HD gallery')}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setIsPosterHintDismissed(true);
-                          }}
-                          className="ml-1 p-1.5 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800/90 transition-colors border border-transparent hover:border-zinc-700 shrink-0"
-                          title={t('Dismiss')}
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                {/* Text / Button Right Under Poster */}
+                <button
+                  type="button"
+                  onClick={handleOpenPosterLightbox}
+                  className="mt-2.5 w-full py-1.5 px-3 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-700/60 hover:border-emerald-500/50 shadow-sm transition-all duration-200 flex items-center justify-center gap-1.5 group/poster-btn text-xs font-medium cursor-pointer"
+                  title={t('View Full Poster & Gallery')}
+                >
+                  <ImageIcon className="w-3.5 h-3.5 text-emerald-400 group-hover/poster-btn:scale-110 transition-transform" />
+                  <span>{t('Click to View More')}</span>
+                  <Maximize2 className="w-3 h-3 text-zinc-400 group-hover/poster-btn:text-emerald-400 transition-colors" />
+                </button>
               </div>
             </div>
 

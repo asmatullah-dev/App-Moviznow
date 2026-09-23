@@ -1488,10 +1488,11 @@ export const LinkCheckerModal: React.FC<Props> = ({
     } else if (isFilmyfly) {
       if (query) {
         newUrl = `${origin}/search.html?search=${encodeURIComponent(query)}&page=${targetPage}`;
+        endpoint = `/api/filmyfly?url=${encodeURIComponent(newUrl)}&search=${encodeURIComponent(query)}`;
       } else {
         newUrl = targetPage === 1 ? `${origin}/` : `${origin}/?page=${targetPage}`;
+        endpoint = `/api/filmyfly?url=${encodeURIComponent(newUrl)}`;
       }
-      endpoint = `/api/filmyfly?url=${encodeURIComponent(newUrl)}`;
     } else {
       if (query) {
         newUrl = targetPage === 1 
