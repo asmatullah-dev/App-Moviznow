@@ -146,15 +146,14 @@ export const requestNotificationPermission = async (force: boolean = false) => {
       }
 
       const vapidKey = import.meta.env.VITE_FCM_VAPID_KEY;
-      if (!vapidKey) {
-        console.warn('FCM VAPID key is missing. Notifications will not work.');
-        return null;
+      const tokenOptions: any = {
+        serviceWorkerRegistration: registration
+      };
+      if (vapidKey) {
+        tokenOptions.vapidKey = vapidKey;
       }
 
-      const token = await getToken(messaging, {
-        vapidKey,
-        serviceWorkerRegistration: registration
-      });
+      const token = await getToken(messaging, tokenOptions);
       
       if (token) {
         // Fast path: If token is already cached for this user/device, skip all Firestore reads and writes

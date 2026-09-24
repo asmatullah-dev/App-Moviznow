@@ -55,7 +55,9 @@ export const AdBlockDetector: React.FC = () => {
         if (styles.display === 'none' || styles.visibility === 'hidden' || bait.offsetHeight === 0) {
           adBlockDetected = true;
         }
-        document.body.removeChild(bait);
+        if (bait.parentNode) {
+          bait.parentNode.removeChild(bait);
+        }
       }
 
       // 3. Verification check: Are our actual ad scripts missing?

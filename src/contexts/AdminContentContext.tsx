@@ -176,9 +176,16 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
   useEffect(() => {
     let isMounted = true;
 
+    // Safety watchdog: Guarantee loading is unblocked within 1500ms max
+    const safetyTimer = setTimeout(() => {
+      if (isMounted) setLoading(false);
+    }, 1500);
+
     const hydrateAndLoad = async () => {
-      // 1. Wait for safeStorage IndexedDB hydration
-      await safeStorage.whenHydrated();
+      // 1. Wait for safeStorage IndexedDB hydration with 1000ms max race timeout
+      const hydratePromise = safeStorage.whenHydrated();
+      const timeoutPromise = new Promise<void>((resolve) => setTimeout(resolve, 1000));
+      await Promise.race([hydratePromise, timeoutPromise]);
       if (!isMounted) return;
 
       // 2. Initial sync from local storage for IMMEDIATE UI feedback
@@ -243,6 +250,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
 
     return () => {
       isMounted = false;
+      clearTimeout(safetyTimer);
       window.removeEventListener('safe_storage_hydrated', handleStorageHydrated);
       window.removeEventListener('collections_updated_locally', handleCollectionsUpdated);
     };

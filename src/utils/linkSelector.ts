@@ -162,6 +162,22 @@ export function isHitHevc(h: any): boolean {
 }
 
 /**
+ * Detects if a hit is an x264 encode (and NOT a Hybrid / AMZN encode).
+ */
+export function isHitX264(h: any): boolean {
+  const text = `${h.file_name || ''} ${h.fileName || ''} ${h.label || ''} ${h.quality || ''} ${h.rawQuality || ''} ${h.url || ''}`.toLowerCase();
+  return /\bx264\b/i.test(text) && !/\bhybrid\b/i.test(text);
+}
+
+/**
+ * Detects if a hit is H264, H265, or a Hybrid encode.
+ */
+export function isHitH264OrHybrid(h: any): boolean {
+  const text = `${h.file_name || ''} ${h.fileName || ''} ${h.label || ''} ${h.quality || ''} ${h.rawQuality || ''} ${h.url || ''}`.toLowerCase();
+  return /\b(hybrid|h264|h\.264|h265|h\.265)\b/i.test(text);
+}
+
+/**
  * Helper to identify if 4k tag is part of a DS4K / downscaled 4k / 4k source tag (not true 4K resolution)
  */
 export function isDs4kOrSource4k(text: string): boolean {
@@ -713,8 +729,16 @@ function selectStandardQualityPool(candidateHits: any[]): any[] {
   const hit720pHevc = getSmallestHit(all720pHevc);
 
   // 1080p candidates
-  const all1080p = candidateHits.filter((h) => getHitResolution(h) === '1080p' && !isHitHevc(h));
+  const all1080pRaw = candidateHits.filter((h) => getHitResolution(h) === '1080p' && !isHitHevc(h));
   const all1080pHevc = candidateHits.filter((h) => getHitResolution(h) === '1080p' && isHitHevc(h));
+
+  // Priority: x264 has first priority over Hybrid, H264, or H265
+  const has1080pX264 = all1080pRaw.some(isHitX264);
+  const all1080p = has1080pX264
+    ? all1080pRaw.filter(h => isHitX264(h) && !isHitH264OrHybrid(h))
+    : all1080pRaw.filter(h => !isHitH264OrHybrid(h)).length > 0
+      ? all1080pRaw.filter(h => !isHitH264OrHybrid(h))
+      : all1080pRaw;
 
   const cand1080pUnder5GB = all1080p.filter((h) => {
     const sizeGB = getHitSizeGB(h);
@@ -1022,6 +1046,13 @@ export function filterSkymoviesHits(hits: any[], pageUrl: string = ''): any[] {
   });
   if (nonGdflixHits.length === 0) return [];
 
+  if (isSeriesPostOrHits(nonGdflixHits, pageUrl)) {
+    const seriesResult = selectMoviesdriveOrHdhub4uSeriesLinks(nonGdflixHits, pageUrl);
+    if (seriesResult.canAutoSelect && seriesResult.selectedHits.length > 0) {
+      return seriesResult.selectedHits;
+    }
+  }
+
   const isSampleHit = (h: any): boolean => {
     return Boolean(
       h.is_sample ||
@@ -1038,7 +1069,67 @@ export function filterSkymoviesHits(hits: any[], pageUrl: string = ''): any[] {
   const regularHits = nonGdflixHits.filter((h) => !isSampleHit(h));
   const candidateHits = regularHits.length > 0 ? regularHits : nonGdflixHits;
 
-  const selected = selectStandardQualityPool(candidateHits);
+  // Enrich hits that lack resolution tag using pageUrl
+  const pageRes = getHitResolution({ url: pageUrl, file_name: pageUrl });
+  const enrichedHits = candidateHits.map((h) => {
+    if (getHitResolution(h) === 'other' && pageRes !== 'other') {
+      return {
+        ...h,
+        file_name: `${h.file_name || ''} ${pageRes}`.trim()
+      };
+    }
+    return h;
+  });
+
+  // If pageUrl points to a specific resolution post (e.g. 1080p, 720p, 480p)
+  if (pageRes !== 'other') {
+    const hitsForPageRes = enrichedHits.filter(h => getHitResolution(h) === pageRes);
+    if (hitsForPageRes.length > 0) {
+      let chosenHits: any[] = [];
+      if (pageRes === '1080p') {
+        const x264Hits = hitsForPageRes.filter(h => isHitX264(h) && !isHitH264OrHybrid(h));
+        if (x264Hits.length > 0) {
+          const best = getSmallestHit(x264Hits);
+          chosenHits = best ? [best] : [x264Hits[0]];
+        } else {
+          const nonHybridHits = hitsForPageRes.filter(h => !isHitH264OrHybrid(h));
+          if (nonHybridHits.length > 0) {
+            const best = getSmallestHit(nonHybridHits);
+            chosenHits = best ? [best] : [nonHybridHits[0]];
+          } else {
+            const best = getSmallestHit(hitsForPageRes);
+            chosenHits = best ? [best] : [hitsForPageRes[0]];
+          }
+        }
+      } else {
+        const pool = selectStandardQualityPool(hitsForPageRes);
+        chosenHits = pool.length > 0 ? pool : [hitsForPageRes[0]];
+      }
+
+      if (sampleHits.length > 0) {
+        chosenHits.push(sampleHits[0]);
+      }
+
+      const uniqueHits: any[] = [];
+      const seen = new Set<string>();
+      for (const item of chosenHits) {
+        if (!item || !item.url) continue;
+        const norm = String(item.url).trim().toLowerCase();
+        if (seen.has(norm)) continue;
+        seen.add(norm);
+        uniqueHits.push(item);
+      }
+      return uniqueHits;
+    }
+  }
+
+  let selected = selectStandardQualityPool(enrichedHits);
+
+  // If selectStandardQualityPool returned nothing, fallback to candidate hits
+  if (selected.length === 0 && candidateHits.length > 0) {
+    selected = [...candidateHits];
+  }
+
   if (sampleHits.length > 0) {
     selected.push(sampleHits[0]);
   }

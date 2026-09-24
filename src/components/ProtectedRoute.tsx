@@ -19,6 +19,7 @@ export function ProtectedRoute({ children, requireAdmin = false, requireAuth = f
 
   const [maxWaitReached, setMaxWaitReached] = React.useState(false);
   const [adminWaitReached, setAdminWaitReached] = React.useState(false);
+  const [showSlowNote, setShowSlowNote] = useState(false);
   const [whatsappNumber, setWhatsappNumber] = useState("");
   const [whatsappError, setWhatsappError] = useState<string | null>(null);
   const [isSavingWhatsapp, setIsSavingWhatsapp] = useState(false);
@@ -27,16 +28,21 @@ export function ProtectedRoute({ children, requireAdmin = false, requireAuth = f
     // Safety cap: allow Firebase auth to resolve from persistence without premature timeouts
     const timer = setTimeout(() => {
       setMaxWaitReached(true);
-    }, 3000);
+    }, 2000);
 
-    // Safety cap for admin profile check: max 2500ms
+    // Safety cap for admin profile check: max 2000ms
     const adminTimer = setTimeout(() => {
       setAdminWaitReached(true);
-    }, 2500);
+    }, 2000);
+
+    const slowTimer = setTimeout(() => {
+      setShowSlowNote(true);
+    }, 3500);
 
     return () => {
       clearTimeout(timer);
       clearTimeout(adminTimer);
+      clearTimeout(slowTimer);
     };
   }, []);
 
@@ -47,18 +53,31 @@ export function ProtectedRoute({ children, requireAdmin = false, requireAuth = f
 
   if (isChecking) {
     return (
-      <div className="min-h-screen bg-white dark:bg-zinc-950 flex flex-col items-center justify-center gap-6 transition-colors duration-300">
+      <div className="min-h-screen bg-white dark:bg-zinc-950 flex flex-col items-center justify-center gap-6 transition-colors duration-300 p-4 text-center">
         <div className="flex flex-col items-center animate-pulse">
           <img src="/Blacklogo.svg" alt="Logo" className="w-auto h-32 block dark:hidden" />
           <img src="/Whitelogo.svg" alt="Logo" className="w-auto h-32 hidden dark:block" />
         </div>
         <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />
+        {showSlowNote && (
+          <div className="mt-2 flex flex-col items-center gap-3 animate-fade-in max-w-xs">
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              Connecting is taking longer than usual...
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="px-4 py-2 text-xs font-semibold rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white shadow-md transition-all active:scale-95"
+            >
+              Refresh Page
+            </button>
+          </div>
+        )}
       </div>
     );
   }
 
-  // If this route strictly requires an authenticated user or admin, wait until authLoading is false
-  if ((requireAuth || requireAdmin) && !authLoading && !user && !profile) {
+  // If this route strictly requires an authenticated user or admin, redirect if not logged in once auth check finishes
+  if ((requireAuth || requireAdmin) && !hasCachedUser && (!authLoading || maxWaitReached)) {
     console.log('ProtectedRoute: Protected route requires authentication, redirecting to login', location);
     return <Navigate to="/login" state={{ from: location }} replace />;
   }

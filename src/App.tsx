@@ -99,23 +99,48 @@ function CatchAllRedirect() {
 
 import { GlobalNavigationLoader } from './components/GlobalNavigationLoader';
 
-const LoadingFallback = () => (
-  <div className="min-h-screen bg-white dark:bg-zinc-950 transition-colors duration-300 flex flex-col items-center justify-center gap-6 p-4">
-    <div className="flex flex-col items-center animate-pulse">
-      <img src="/Blacklogo.svg" alt="Logo" className="w-auto h-24 block dark:hidden object-contain" />
-      <img src="/Whitelogo.svg" alt="Logo" className="w-auto h-24 hidden dark:block object-contain" />
-    </div>
-    <div className="flex flex-col items-center gap-3">
-      <div className="relative flex items-center justify-center">
-        <div className="w-10 h-10 rounded-full border-3 border-emerald-500/20 dark:border-emerald-500/10 animate-ping absolute"></div>
-        <Loader2 className="w-8 h-8 animate-spin text-emerald-500 relative z-10" />
+const LoadingFallback = () => {
+  const [showSlowNote, setShowSlowNote] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowSlowNote(true);
+    }, 3500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-white dark:bg-zinc-950 transition-colors duration-300 flex flex-col items-center justify-center gap-6 p-4 text-center">
+      <div className="flex flex-col items-center animate-pulse">
+        <img src="/Blacklogo.svg" alt="Logo" className="w-auto h-24 block dark:hidden object-contain" />
+        <img src="/Whitelogo.svg" alt="Logo" className="w-auto h-24 hidden dark:block object-contain" />
       </div>
-      <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400 animate-pulse">
-        Loading...
-      </p>
+      <div className="flex flex-col items-center gap-3">
+        <div className="relative flex items-center justify-center">
+          <div className="w-10 h-10 rounded-full border-3 border-emerald-500/20 dark:border-emerald-500/10 animate-ping absolute"></div>
+          <Loader2 className="w-8 h-8 animate-spin text-emerald-500 relative z-10" />
+        </div>
+        <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400 animate-pulse">
+          Loading...
+        </p>
+      </div>
+
+      {showSlowNote && (
+        <div className="mt-2 flex flex-col items-center gap-3 animate-fade-in max-w-xs">
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            Connecting is taking longer than usual...
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 text-xs font-semibold rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white shadow-md transition-all active:scale-95"
+          >
+            Refresh Page
+          </button>
+        </div>
+      )}
     </div>
-  </div>
-);
+  );
+};
 
 function MediaModalController({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const navigate = useNavigate();

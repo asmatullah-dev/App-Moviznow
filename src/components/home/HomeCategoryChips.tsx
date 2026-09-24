@@ -76,7 +76,10 @@ export const HomeCategoryChips: React.FC<HomeCategoryChipsProps> = React.memo(({
       </button>
 
       <button
-        onClick={() => setShowCatalogFilters((prev) => !prev)}
+        onClick={() => {
+          vibrate(30);
+          setShowCatalogFilters((prev) => !prev);
+        }}
         className={clsx(
           "px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all active:scale-95 flex items-center gap-2 border ml-auto",
           hasActiveFilters || showCatalogFilters

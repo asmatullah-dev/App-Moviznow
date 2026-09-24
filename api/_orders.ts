@@ -29,37 +29,91 @@ function generate9DigitOrderId(): string {
   return Math.floor(100000000 + Math.random() * 900000000).toString();
 }
 
-// Retrieve stored Gmail Token from Firestore or memory
+// Retrieve stored Gmail Token from Firestore or memory with Auto-Refresh capability
 async function getActiveGmailToken(providedToken?: string): Promise<string | null> {
-  // If the admin is passing a token directly to test/use, use it for this request, but DO NOT overwrite the global token memory cache
-  // This prevents random users from poisoning the token pool.
-  
   if (providedToken && providedToken.trim()) {
     return providedToken.trim();
   }
 
-  if (storedGmailToken) {
-    return storedGmailToken;
-  }
-
   const firestore = getDb();
-  if (firestore) {
-    try {
-      const snap = await firestore.collection("system_meta").doc("gmail_auth").get();
-      if (snap.exists) {
-        const data = snap.data();
-        if (data?.token) {
+  if (!firestore) return storedGmailToken;
+
+  try {
+    const snap = await firestore.collection("system_meta").doc("gmail_auth").get();
+    if (snap.exists) {
+      const data = snap.data();
+      if (data) {
+        const now = new Date();
+        const expiresAt = data.expiresAt ? new Date(data.expiresAt) : null;
+        
+        // 1. If we have a valid, non-expired token, return it
+        if (data.token && (!expiresAt || expiresAt > now)) {
           storedGmailToken = data.token;
           lastGmailTokenUpdate = data.updatedAt || null;
           return storedGmailToken;
         }
+
+        // 2. Proactive refresh if token is expired (or about to expire) and we have a refreshToken
+        if (data.refreshToken) {
+          const clientId = data.clientId || "460140141169-nlm0no0uhcaaaot9037sp4g31r36i808.apps.googleusercontent.com";
+          const clientSecret = data.clientSecret;
+
+          if (clientSecret) {
+            console.log("[Gmail API] Access token expired or expiring. Refreshing in background...");
+            try {
+              const params = new URLSearchParams({
+                client_id: clientId,
+                client_secret: clientSecret.trim(),
+                refresh_token: data.refreshToken.trim(),
+                grant_type: "refresh_token",
+              });
+
+              const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: params.toString(),
+              });
+
+              if (tokenRes.ok) {
+                const tokenData: any = await tokenRes.json();
+                if (tokenData.access_token) {
+                  const newAccessToken = tokenData.access_token;
+                  const expiresIn = tokenData.expires_in || 3600;
+                  const newExpiresAt = new Date(Date.now() + (expiresIn - 180) * 1000).toISOString(); // 3 mins buffer
+                  const updatedAt = new Date().toISOString();
+
+                  await firestore.collection("system_meta").doc("gmail_auth").set({
+                    token: newAccessToken,
+                    expiresAt: newExpiresAt,
+                    updatedAt,
+                  }, { merge: true });
+
+                  storedGmailToken = newAccessToken;
+                  lastGmailTokenUpdate = updatedAt;
+                  console.log("[Gmail API] Background token refresh succeeded!");
+                  return newAccessToken;
+                }
+              } else {
+                const errText = await tokenRes.text();
+                console.warn("[Gmail API] Background refresh request failed:", errText);
+              }
+            } catch (refErr) {
+              console.error("[Gmail API] Background refresh fetch error:", refErr);
+            }
+          }
+        }
+
+        // Return whatever token is there as fallback
+        storedGmailToken = data.token || null;
+        lastGmailTokenUpdate = data.updatedAt || null;
+        return storedGmailToken;
       }
-    } catch (e) {
-      console.warn("Failed to read gmail token from Firestore:", e);
     }
+  } catch (e) {
+    console.warn("Failed to read/refresh gmail token from Firestore:", e);
   }
 
-  return null;
+  return storedGmailToken;
 }
 
 // Helper to normalize dates to YYYY-MM-DD
@@ -414,6 +468,22 @@ ordersRouter.get("/gmail-status", async (req, res) => {
       }
     }
 
+    // Load configuration details from Firestore to return to Admin settings
+    let clientId = "460140141169-nlm0no0uhcaaaot9037sp4g31r36i808.apps.googleusercontent.com";
+    let clientSecret = "";
+    let hasRefreshToken = false;
+
+    const firestore = getDb();
+    if (firestore) {
+      const snap = await firestore.collection("system_meta").doc("gmail_auth").get();
+      if (snap.exists) {
+        const d = snap.data();
+        if (d?.clientId) clientId = d.clientId;
+        if (d?.clientSecret) clientSecret = d.clientSecret;
+        if (d?.refreshToken) hasRefreshToken = true;
+      }
+    }
+
     return res.json({
       connected: !!token,
       isValid: isLiveValid,
@@ -422,6 +492,9 @@ ordersRouter.get("/gmail-status", async (req, res) => {
       messagesTotal,
       lastUpdated: lastGmailTokenUpdate,
       errorDetail: isLiveValid ? null : errorDetail,
+      clientId,
+      clientSecret,
+      hasRefreshToken,
     });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
@@ -1190,5 +1263,189 @@ ordersRouter.post("/admin-verify-order", async (req, res) => {
   } catch (error: any) {
     console.error("Admin verify order error:", error);
     return res.status(500).json({ error: error.message || "Verification failed" });
+  }
+});
+
+// 6. Exchange Authorization Code for permanent Refresh Token and temporary Access Token (Gmail & Contacts)
+ordersRouter.post("/exchange-oauth-code", async (req, res) => {
+  try {
+    const { code, clientId, clientSecret, scopes } = req.body;
+    if (!code || !clientId || !clientSecret) {
+      return res.status(400).json({ error: "Missing code, clientId, or clientSecret in request body" });
+    }
+
+    // Exchange code via Google Token endpoint
+    const params = new URLSearchParams({
+      code: code.trim(),
+      client_id: clientId.trim(),
+      client_secret: clientSecret.trim(),
+      redirect_uri: "postmessage",
+      grant_type: "authorization_code"
+    });
+
+    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString()
+    });
+
+    if (!tokenRes.ok) {
+      const errText = await tokenRes.text();
+      console.error("[Google OAuth] Exchange failed:", errText);
+      return res.status(400).json({ error: "Google OAuth exchange failed", details: errText });
+    }
+
+    const tokenData: any = await tokenRes.json();
+    const accessToken = tokenData.access_token;
+    const refreshToken = tokenData.refresh_token;
+    const expiresIn = tokenData.expires_in || 3600;
+    const expiresAt = new Date(Date.now() + (expiresIn - 180) * 1000).toISOString();
+    const updatedAt = new Date().toISOString();
+
+    if (!accessToken) {
+      return res.status(400).json({ error: "Google did not return an access token" });
+    }
+
+    let detectedEmail = "wmoviznow@gmail.com";
+    try {
+      const userinfoRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      if (userinfoRes.ok) {
+        const uinfo: any = await userinfoRes.json();
+        if (uinfo.email) {
+          detectedEmail = uinfo.email;
+        }
+      }
+    } catch (e) {
+      console.warn("Could not get userinfo during code exchange:", e);
+    }
+
+    const firestore = getDb();
+    if (!firestore) {
+      return res.status(500).json({ error: "Firestore database is unavailable" });
+    }
+
+    const requestedScopes = scopes || "";
+    const isGmailScope = requestedScopes.includes("gmail") || requestedScopes.includes("mail.google.com");
+    const isContactsScope = requestedScopes.includes("contacts");
+
+    const authRecord: any = {
+      token: accessToken,
+      expiresAt,
+      email: detectedEmail,
+      clientId: clientId.trim(),
+      clientSecret: clientSecret.trim(),
+      updatedAt,
+      isAuthorized: true
+    };
+    if (refreshToken) {
+      authRecord.refreshToken = refreshToken.trim();
+    }
+
+    if (isGmailScope) {
+      await firestore.collection("system_meta").doc("gmail_auth").set(authRecord, { merge: true });
+      storedGmailToken = accessToken;
+      lastGmailTokenUpdate = updatedAt;
+      console.log(`[Google OAuth] Saved Gmail authentication for ${detectedEmail}`);
+    }
+
+    if (isContactsScope) {
+      const contactsAuthRecord: any = {
+        accessToken: accessToken,
+        expiry: Date.now() + (expiresIn - 60) * 1000,
+        email: detectedEmail,
+        clientId: clientId.trim(),
+        clientSecret: clientSecret.trim(),
+        updatedAt,
+        isAuthorized: true
+      };
+      if (refreshToken) {
+        contactsAuthRecord.refreshToken = refreshToken.trim();
+      }
+      await firestore.collection("settings").doc("google_contacts").set(contactsAuthRecord, { merge: true });
+      console.log(`[Google OAuth] Saved Google Contacts authentication for ${detectedEmail}`);
+    }
+
+    return res.json({
+      success: true,
+      email: detectedEmail,
+      hasRefreshToken: !!refreshToken || !!authRecord.refreshToken,
+      message: `Google Workspace authentication succeeded for ${detectedEmail}! Both Gmail and Contacts are now configured with permanent Offline Refresh Access.`,
+    });
+  } catch (error: any) {
+    console.error("Failed to exchange OAuth code:", error);
+    return res.status(500).json({ error: error.message || "OAuth Code exchange server error" });
+  }
+});
+
+// 7. Refresh Google Contacts token from server-side using refresh token
+ordersRouter.post("/refresh-contacts-token", async (req, res) => {
+  try {
+    const firestore = getDb();
+    if (!firestore) {
+      return res.status(500).json({ error: "Firestore database is unavailable" });
+    }
+
+    const snap = await firestore.collection("settings").doc("google_contacts").get();
+    if (!snap.exists) {
+      return res.status(404).json({ error: "Google Contacts integration is not configured." });
+    }
+
+    const data = snap.data();
+    if (!data || !data.refreshToken || !data.clientSecret) {
+      return res.status(400).json({ error: "No permanent refresh token or client secret configured for Google Contacts." });
+    }
+
+    const clientId = data.clientId || "460140141169-nlm0no0uhcaaaot9037sp4g31r36i808.apps.googleusercontent.com";
+    const clientSecret = data.clientSecret;
+
+    const params = new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret.trim(),
+      refresh_token: data.refreshToken.trim(),
+      grant_type: "refresh_token"
+    });
+
+    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString()
+    });
+
+    if (!tokenRes.ok) {
+      const errText = await tokenRes.text();
+      console.error("[Google Contacts API] Refresh failed:", errText);
+      return res.status(400).json({ error: "Google Contacts refresh failed", details: errText });
+    }
+
+    const tokenData: any = await tokenRes.json();
+    const newAccessToken = tokenData.access_token;
+    const expiresIn = tokenData.expires_in || 3600;
+    const expiry = Date.now() + (expiresIn - 60) * 1000;
+    const updatedAt = new Date().toISOString();
+
+    if (!newAccessToken) {
+      return res.status(400).json({ error: "Google did not return a fresh access token" });
+    }
+
+    // Save back to Firestore
+    await firestore.collection("settings").doc("google_contacts").set({
+      accessToken: newAccessToken,
+      expiry,
+      updatedAt
+    }, { merge: true });
+
+    console.log(`[Google Contacts API] Access token refreshed on server for ${data.email || 'contacts admin'}`);
+
+    return res.json({
+      success: true,
+      accessToken: newAccessToken,
+      expiry,
+      email: data.email || null
+    });
+  } catch (err: any) {
+    console.error("Failed to refresh contacts token on server:", err);
+    return res.status(500).json({ error: err.message || "Failed to refresh contacts token" });
   }
 });

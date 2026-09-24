@@ -82,24 +82,23 @@ export const CollectionRow: React.FC<CollectionRowProps> = React.memo(({
         cParam === "scroll_newly_added"
       )));
 
-  // Restore scroll position when modal opens
+  // Restore scroll position when modal opens immediately without delay
   useEffect(() => {
     if (isViewAllOpen) {
-      // Prevent body scrolling while modal is open
       document.body.style.overflow = "hidden";
       
-      const timer = setTimeout(() => {
+      const frameId = requestAnimationFrame(() => {
         if (gridScrollRef.current) {
           const savedScroll = sessionStorage.getItem(`view_all_scroll_${scrollKey}`);
           if (savedScroll) {
             gridScrollRef.current.scrollTop = parseInt(savedScroll, 10);
           }
         }
-      }, 100);
+      });
 
       return () => {
         document.body.style.overflow = "";
-        clearTimeout(timer);
+        cancelAnimationFrame(frameId);
       };
     }
   }, [isViewAllOpen, scrollKey]);
@@ -298,27 +297,36 @@ export const CollectionRow: React.FC<CollectionRowProps> = React.memo(({
       {/* View All Pop-up Modal Grid */}
       <AnimatePresence>
         {isViewAllOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md"
+            onClick={handleCloseViewAll}
+          >
             <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              initial={{ opacity: 0, scale: 0.96, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              transition={{ duration: 0.25, ease: "easeOut" }}
-              className="relative w-full max-w-7xl h-[90vh] bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl overflow-hidden flex flex-col shadow-2xl"
+              exit={{ opacity: 0, scale: 0.96, y: 10 }}
+              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+              style={{ willChange: 'transform, opacity' }}
+              className="relative w-full max-w-7xl h-[92vh] max-h-[92vh] bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl overflow-hidden flex flex-col shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
-              <div className="flex items-center justify-between p-5 sm:p-6 border-b border-zinc-200/80 dark:border-zinc-800/80 shrink-0">
+              <div className="flex items-center justify-between p-4 sm:p-6 border-b border-zinc-200/80 dark:border-zinc-800/80 shrink-0">
                 <div className="flex items-center gap-3">
                   {icon}
                   <div>
-                    <h2 className="text-xl font-black text-zinc-900 dark:text-white flex items-center gap-2">
+                    <h2 className="text-lg sm:text-xl font-black text-zinc-900 dark:text-white flex items-center gap-2">
                       {title}
                       <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
                         {items.length} {t("items")}
                       </span>
                     </h2>
                     {description && (
-                      <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium line-clamp-1">
                         {description}
                       </p>
                     )}
@@ -327,7 +335,7 @@ export const CollectionRow: React.FC<CollectionRowProps> = React.memo(({
                 <div className="flex items-center gap-3">
                   <button
                     onClick={handleCloseViewAll}
-                    className="p-2 rounded-full bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 transition-colors cursor-pointer"
+                    className="p-2 rounded-full bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 transition-colors cursor-pointer active:scale-95"
                     title={t("Close")}
                   >
                     <X className="w-5 h-5" />
@@ -339,9 +347,9 @@ export const CollectionRow: React.FC<CollectionRowProps> = React.memo(({
               <div
                 ref={gridScrollRef}
                 onScroll={handleScroll}
-                className="flex-1 overflow-y-auto p-5 sm:p-6 custom-scrollbar"
+                className="flex-1 overflow-y-auto p-4 sm:p-6 custom-scrollbar"
               >
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-5 pb-6">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-5 pb-6">
                   {items.map((content) => (
                     <div key={content.id} className="w-full">
                       <ContentCard
@@ -359,7 +367,7 @@ export const CollectionRow: React.FC<CollectionRowProps> = React.memo(({
                 </div>
               </div>
             </motion.div>
-          </div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

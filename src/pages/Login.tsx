@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { UserProfile } from '../types';
 import { getUserDisplayName } from '../utils/userUtils';
 import { purgeAllAdElements } from '../utils/adUtils';
+import { safeStorage } from '../utils/safeStorage';
 
 type LoginStep = 'social' | 'identifier' | 'password' | 'reset-password' | 'create_password';
 
@@ -80,7 +81,8 @@ export default function Login() {
   }, [location]);
 
   useEffect(() => {
-    if (user && profile) {
+    const hasActiveUser = !!user || !!profile || !!safeStorage.getItem('profile_cache');
+    if (hasActiveUser) {
       // Instantly purge all ad scripts and social ads upon login
       purgeAllAdElements(true);
       try {
@@ -88,18 +90,18 @@ export default function Login() {
       } catch (e) {}
 
       // If user is suspended, don't redirect to home, just show error
-      if (profile.status === 'suspended') {
+      if (profile?.status === 'suspended') {
         setCustomError("Your account has been suspended. Please contact admin.");
         return;
       }
 
       // If user requires password reset, force them to reset it
-      if (profile.requirePasswordReset && step !== 'reset-password') {
+      if (profile?.requirePasswordReset && step !== 'reset-password') {
         setStep('reset-password');
         return;
       }
       
-      if (!profile.requirePasswordReset) {
+      if (!profile?.requirePasswordReset) {
         const searchParams = new URLSearchParams(location.search);
         let redirectUrl = searchParams.get('redirect');
         let from = location.state?.from;
@@ -128,7 +130,7 @@ export default function Login() {
         }
 
         if (!from) {
-          from = profile.role === 'admin' ? '/admin' : '/';
+          from = profile?.role === 'admin' ? '/admin' : '/';
         }
 
         let targetPath: any = from;

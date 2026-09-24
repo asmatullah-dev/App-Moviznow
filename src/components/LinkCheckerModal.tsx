@@ -3955,8 +3955,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
   return (
     <AnimatePresence>
       {isOpen ? (
-        <motion.div className={`fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm ${moviesdriveSearchUrl ? 'p-2 sm:p-4' : 'p-4'}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-          <motion.div initial={{ opacity: 0, y: 20, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 10, scale: 0.98 }} transition={{ duration: 0.18 }} className={`w-full ${moviesdriveSearchUrl ? 'max-w-6xl max-h-[98vh]' : 'max-w-5xl max-h-[95vh]'} overflow-y-auto custom-scrollbar`}>
+        <motion.div className={`fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm ${moviesdriveSearchUrl ? 'p-2 sm:p-4' : 'p-4'}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }}>
+          <motion.div initial={{ opacity: 0, scale: 0.96, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 8 }} transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }} style={{ willChange: 'transform, opacity' }} className={`w-full ${moviesdriveSearchUrl ? 'max-w-6xl max-h-[98vh]' : 'max-w-5xl max-h-[95vh]'} overflow-y-auto custom-scrollbar`}>
             <div className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 shadow-2xl overflow-hidden transition-colors duration-300">
               <div className={moviesdriveSearchUrl ? "p-3 sm:p-5 space-y-3" : "p-5 md:p-6 space-y-5"}>
                 {!moviesdriveSearchUrl && (

@@ -22,6 +22,7 @@ import { useCart } from "../../contexts/CartContext";
 import { useHaptics } from "../../hooks/useHaptics";
 import { globalScrollState } from "../../hooks/useScrollRestoration";
 import { safeStorage } from "../../utils/safeStorage";
+import { getContentBackTarget } from "../../utils/navigation";
 import {
   Film,
   Phone,
@@ -316,8 +317,8 @@ export default function MovieDetails() {
   const navigate = useNavigate();
 
   const handleGoBack = useCallback(() => {
-    sessionStorage.setItem("from_movie_details", "true");
-    const target = sessionStorage.getItem("last_browse_location") || "/";
+    const currentLoc = window.location.pathname + window.location.search;
+    const target = getContentBackTarget(currentLoc);
     navigate(target);
   }, [navigate]);
 
@@ -2652,6 +2653,7 @@ export default function MovieDetails() {
         }}
         adUrl={settings?.adVideoUrl || ""}
       />
+      <PageTransition className="w-full">
       <div className="min-h-screen bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white pb-20 transition-colors duration-300">
       <Helmet>
         <title>{title}</title>
@@ -2686,17 +2688,17 @@ export default function MovieDetails() {
         <div className="absolute top-0 left-0 w-full p-4 md:p-6 z-[100] pointer-events-none flex justify-between items-center">
           <button
             onClick={handleGoBack}
-            className="inline-flex items-center gap-2 text-white hover:text-emerald-400 bg-black/60 hover:bg-black/80 backdrop-blur-xl px-5 py-2.5 rounded-full transition-all duration-300 pointer-events-auto cursor-pointer border border-white/20 shadow-xl hover:scale-105 active:scale-95"
+            className="group inline-flex items-center gap-2 text-white hover:text-emerald-400 bg-black/60 hover:bg-black/85 backdrop-blur-xl px-5 py-2.5 rounded-full transition-all duration-200 pointer-events-auto cursor-pointer border border-white/20 shadow-xl hover:scale-105 active:scale-95 hover:border-emerald-500/40"
           >
-            <ArrowLeft className="w-5 h-5" /> <span className="font-semibold text-sm">{t('Back')}</span>
+            <ArrowLeft className="w-5 h-5 transition-transform duration-200 group-hover:-translate-x-1" /> <span className="font-semibold text-sm">{t('Back')}</span>
           </button>
           <div className="pointer-events-auto"></div>
         </div>
 
         <motion.div
-          initial={{ opacity: 0, y: 30 }}
+          initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
           className="relative z-10 flex items-end justify-center p-4 sm:p-8 pt-28 sm:pt-36 pb-6 w-full"
         >
           <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center md:items-end gap-6 sm:gap-10 text-center md:text-left w-full">
@@ -2929,7 +2931,7 @@ export default function MovieDetails() {
       </div>
 
       {/* Main Content Area */}
-      <PageTransition className="w-full">
+      <div className="w-full">
       <div className="max-w-7xl mx-auto px-8 pt-0 pb-12">
         {!profile ? (
           <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 p-6 rounded-2xl mb-8 flex items-center justify-between gap-4">
@@ -3901,7 +3903,7 @@ export default function MovieDetails() {
           </div>
         </div>
       </div>
-      </PageTransition>
+      </div>
 
       <ConfirmModal
         isOpen={!!deleteId}
@@ -3913,194 +3915,204 @@ export default function MovieDetails() {
 
       <AnimatePresence>
         {linkPopup && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4"
-            onClick={closeLinkPopup}
-          >
+          <div key="link-popup-wrapper" className="relative z-[9999]">
+            {/* Backdrop */}
             <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 max-w-md w-full relative shadow-2xl overflow-hidden"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <button
-                onClick={closeLinkPopup}
-                className="absolute top-5 right-5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors p-1 rounded-full hover:bg-zinc-200 dark:hover:bg-zinc-800"
-                disabled={extractingLinkId === linkPopup.url}
+              key="link-popup-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="fixed inset-0 bg-black/80 backdrop-blur-md"
+              onClick={closeLinkPopup}
+            />
+
+            {/* Dialog Card */}
+            <div className="fixed inset-0 flex items-center justify-center p-4 pointer-events-none">
+              <motion.div
+                key="link-popup-card"
+                initial={{ opacity: 0, scale: 0.96, y: 8 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.96, y: 8 }}
+                transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+                style={{ willChange: 'transform, opacity' }}
+                className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 max-w-md w-full relative shadow-2xl overflow-hidden pointer-events-auto"
+                onClick={(e) => e.stopPropagation()}
               >
-                <X className="w-5 h-5" />
-              </button>
-              <h3 className="text-xl font-bold mb-2 text-zinc-900 dark:text-white">{t('Play Content')}</h3>
-              <div className="flex justify-between items-center mb-6 gap-2">
-                <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">
-                  {t('How would you like to open')} <span dir="ltr" className="inline-block mx-1 font-bold text-zinc-900 dark:text-zinc-100">"{linkPopup.name}"</span>{language === 'ur' ? '؟' : '?'}
-                </p>
-                {linkPopup.size && (
-                  <span className="px-3 py-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-bold whitespace-nowrap">
-                    {linkPopup.size}
-                  </span>
-                )}
-              </div>
-
-              {extractingLinkId === linkPopup.url && (
-                <div className="absolute inset-0 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm z-20 flex flex-col items-center justify-center rounded-3xl">
-                  <Loader2 className="animate-spin h-9 w-9 text-emerald-500 mb-3" />
-                  <p className="text-sm font-bold text-zinc-900 dark:text-white">
-                    {t('Extracting link...')}
+                <button
+                  onClick={closeLinkPopup}
+                  className="absolute top-5 right-5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors p-1 rounded-full hover:bg-zinc-200 dark:hover:bg-zinc-800"
+                  disabled={extractingLinkId === linkPopup.url}
+                >
+                  <X className="w-5 h-5" />
+                </button>
+                <h3 className="text-xl font-bold mb-2 text-zinc-900 dark:text-white">{t('Play Content')}</h3>
+                <div className="flex justify-between items-center mb-6 gap-2">
+                  <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                    {t('How would you like to open')} <span dir="ltr" className="inline-block mx-1 font-bold text-zinc-900 dark:text-zinc-100">"{linkPopup.name}"</span>{language === 'ur' ? '؟' : '?'}
                   </p>
+                  {linkPopup.size && (
+                    <span className="px-3 py-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-bold whitespace-nowrap">
+                      {linkPopup.size}
+                    </span>
+                  )}
                 </div>
-              )}
 
-              <div className="flex flex-col gap-3">
-                {linkPopup.candidates && linkPopup.candidates.filter(c => {
-                  const lowerT = (c.text || '').toLowerCase();
-                  const lowerH = (c.href || '').toLowerCase();
-                  return !lowerT.includes('login') && !lowerH.includes('login') &&
-                         !lowerT.includes('moviesdrive') && !lowerH.includes('moviesdrive') &&
-                         !lowerT.includes('mdrive') && !lowerH.includes('mdrive') &&
-                         !lowerT.includes('telegram') && !lowerH.includes('telegram');
-                }).length > 0 && (
-                  <div className="mb-1">
-                    <label className="block text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-2">
-                      {t('Select Server')}:
-                    </label>
-                    <select
-                      value={linkPopup.url}
-                      onChange={(e) =>
-                        setLinkPopup({ ...linkPopup, url: e.target.value })
-                      }
-                      className="w-full bg-zinc-100 dark:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-700/60 rounded-xl p-3 text-sm font-medium text-zinc-900 dark:text-white outline-none ring-2 ring-transparent focus:ring-emerald-500 transition-all cursor-pointer"
-                    >
-                      {linkPopup.candidates.filter(c => {
-                        const lowerT = (c.text || '').toLowerCase();
-                        const lowerH = (c.href || '').toLowerCase();
-                        return !lowerT.includes('login') && !lowerH.includes('login') &&
-                               !lowerT.includes('moviesdrive') && !lowerH.includes('moviesdrive') &&
-                               !lowerT.includes('mdrive') && !lowerH.includes('mdrive') &&
-                               !lowerT.includes('telegram') && !lowerH.includes('telegram');
-                      }).map((c, i) => (
-                        <option key={i} value={c.href}>
-                          {c.text
-                            .replace(/download|download file/gi, "")
-                            .trim() || `Server ${i + 1}`}
-                        </option>
-                      ))}
-                    </select>
+                {extractingLinkId === linkPopup.url && (
+                  <div className="absolute inset-0 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm z-20 flex flex-col items-center justify-center rounded-3xl">
+                    <Loader2 className="animate-spin h-9 w-9 text-emerald-500 mb-3" />
+                    <p className="text-sm font-bold text-zinc-900 dark:text-white">
+                      {t('Extracting link...')}
+                    </p>
                   </div>
                 )}
-                {!(
-                  linkPopup.isZip ||
-                  linkPopup.name.toLowerCase().includes("zip") ||
-                  (linkPopup.url.toLowerCase().includes(".zip") &&
-                    !linkPopup.url.toLowerCase().includes("vcloud.zip"))
-                ) ? (
-                  <>
+
+                <div className="flex flex-col gap-3">
+                  {linkPopup.candidates && linkPopup.candidates.filter(c => {
+                    const lowerT = (c.text || '').toLowerCase();
+                    const lowerH = (c.href || '').toLowerCase();
+                    return !lowerT.includes('login') && !lowerH.includes('login') &&
+                           !lowerT.includes('moviesdrive') && !lowerH.includes('moviesdrive') &&
+                           !lowerT.includes('mdrive') && !lowerH.includes('mdrive') &&
+                           !lowerT.includes('telegram') && !lowerH.includes('telegram');
+                  }).length > 0 && (
+                    <div className="mb-1">
+                      <label className="block text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-2">
+                        {t('Select Server')}:
+                      </label>
+                      <select
+                        value={linkPopup.url}
+                        onChange={(e) =>
+                          setLinkPopup({ ...linkPopup, url: e.target.value })
+                        }
+                        className="w-full bg-zinc-100 dark:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-700/60 rounded-xl p-3 text-sm font-medium text-zinc-900 dark:text-white outline-none ring-2 ring-transparent focus:ring-emerald-500 transition-all cursor-pointer"
+                      >
+                        {linkPopup.candidates.filter(c => {
+                          const lowerT = (c.text || '').toLowerCase();
+                          const lowerH = (c.href || '').toLowerCase();
+                          return !lowerT.includes('login') && !lowerH.includes('login') &&
+                                 !lowerT.includes('moviesdrive') && !lowerH.includes('moviesdrive') &&
+                                 !lowerT.includes('mdrive') && !lowerH.includes('mdrive') &&
+                                 !lowerT.includes('telegram') && !lowerH.includes('telegram');
+                        }).map((c, i) => (
+                          <option key={i} value={c.href}>
+                            {c.text
+                              .replace(/download|download file/gi, "")
+                              .trim() || `Server ${i + 1}`}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  {!(
+                    linkPopup.isZip ||
+                    linkPopup.name.toLowerCase().includes("zip") ||
+                    (linkPopup.url.toLowerCase().includes(".zip") &&
+                      !linkPopup.url.toLowerCase().includes("vcloud.zip"))
+                  ) ? (
+                    <>
+                      <button
+                        onClick={() => handlePlayExternal("generic")}
+                        className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 px-6 text-sm sm:text-base rounded-xl transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2"
+                      >
+                        <Play className="w-5 h-5 fill-current" /> {t('Play in Video Player')}
+                      </button>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <button
+                          onClick={() => handlePlayExternal("mx")}
+                          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 text-sm"
+                        >
+                          <svg
+                            width="20"
+                            height="20"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            xmlns="http://www.w3.org/2000/svg"
+                            className="w-5 h-5 shrink-0"
+                          >
+                            <rect
+                              width="24"
+                              height="24"
+                              rx="6"
+                              fill="white"
+                              fillOpacity="0.2"
+                            />
+                            <path
+                              d="M16.5 12L9 16.5V7.5L16.5 12Z"
+                              fill="currentColor"
+                            />
+                          </svg>
+                          {t('MX Player')}
+                        </button>
+                        <button
+                          onClick={() => handlePlayExternal("vlc")}
+                          className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 text-sm"
+                        >
+                          <svg
+                            width="20"
+                            height="20"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            xmlns="http://www.w3.org/2000/svg"
+                            className="w-5 h-5 shrink-0"
+                          >
+                            <path d="M12 2L5 22H19L12 2Z" fill="currentColor" />
+                            <path
+                              d="M6.5 17H17.5"
+                              stroke="#ea580c"
+                              strokeWidth="2.5"
+                            />
+                            <path
+                              d="M9 10H15"
+                              stroke="#ea580c"
+                              strokeWidth="2.5"
+                            />
+                          </svg>
+                          {t('VLC Player')}
+                        </button>
+                      </div>
+                    </>
+                  ) : null}
+
+                  <button
+                    onClick={() => {
+                      if (!profile) {
+                        setShowLoginPrompt(true);
+                        return;
+                      }
+                      setShowReportConfirm(true);
+                    }}
+                    disabled={isReporting}
+                    className="w-full bg-red-500/10 hover:bg-red-500/20 text-red-500 font-bold py-3 px-6 text-sm rounded-xl transition-colors flex items-center justify-center gap-2 border border-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isReporting ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4" />
+                    )}
+                    {isReporting ? t("Sending...") : t("Report Link (if not Working)")}
+                  </button>
+
+                  <div className="grid grid-cols-2 gap-3">
                     <button
-                      onClick={() => handlePlayExternal("generic")}
-                      className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 px-6 text-sm sm:text-base rounded-xl transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2"
+                      onClick={() => handlePlayExternal("download")}
+                      className="w-full bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white font-bold py-3 px-4 text-sm rounded-xl transition-colors flex items-center justify-center gap-2"
                     >
-                      <Play className="w-5 h-5 fill-current" /> {t('Play in Video Player')}
+                      <Copy className="w-4 h-4" /> {t('Copy Link')}
                     </button>
 
-                    <div className="grid grid-cols-2 gap-3">
-                      <button
-                        onClick={() => handlePlayExternal("mx")}
-                        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 text-sm"
-                      >
-                        <svg
-                          width="20"
-                          height="20"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          xmlns="http://www.w3.org/2000/svg"
-                          className="w-5 h-5 shrink-0"
-                        >
-                          <rect
-                            width="24"
-                            height="24"
-                            rx="6"
-                            fill="white"
-                            fillOpacity="0.2"
-                          />
-                          <path
-                            d="M16.5 12L9 16.5V7.5L16.5 12Z"
-                            fill="currentColor"
-                          />
-                        </svg>
-                        {t('MX Player')}
-                      </button>
-                      <button
-                        onClick={() => handlePlayExternal("vlc")}
-                        className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 text-sm"
-                      >
-                        <svg
-                          width="20"
-                          height="20"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          xmlns="http://www.w3.org/2000/svg"
-                          className="w-5 h-5 shrink-0"
-                        >
-                          <path d="M12 2L5 22H19L12 2Z" fill="currentColor" />
-                          <path
-                            d="M6.5 17H17.5"
-                            stroke="#ea580c"
-                            strokeWidth="2.5"
-                          />
-                          <path
-                            d="M9 10H15"
-                            stroke="#ea580c"
-                            strokeWidth="2.5"
-                          />
-                        </svg>
-                        {t('VLC Player')}
-                      </button>
-                    </div>
-                  </>
-                ) : null}
-
-                <button
-                  onClick={() => {
-                    if (!profile) {
-                      setShowLoginPrompt(true);
-                      return;
-                    }
-                    setShowReportConfirm(true);
-                  }}
-                  disabled={isReporting}
-                  className="w-full bg-red-500/10 hover:bg-red-500/20 text-red-500 font-bold py-3 px-6 text-sm rounded-xl transition-colors flex items-center justify-center gap-2 border border-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isReporting ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <AlertTriangle className="w-4 h-4" />
-                  )}
-                  {isReporting ? t("Sending...") : t("Report Link (if not Working)")}
-                </button>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={() => handlePlayExternal("download")}
-                    className="w-full bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white font-bold py-3 px-4 text-sm rounded-xl transition-colors flex items-center justify-center gap-2"
-                  >
-                    <Copy className="w-4 h-4" /> {t('Copy Link')}
-                  </button>
-
-                  <button
-                    onClick={handlePlayDirectly}
-                    className="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 px-4 text-sm rounded-xl transition-colors shadow-md flex items-center justify-center gap-2"
-                  >
-                    <Download className="w-4 h-4" /> Download
-                  </button>
+                    <button
+                      onClick={handlePlayDirectly}
+                      className="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 px-4 text-sm rounded-xl transition-colors shadow-md flex items-center justify-center gap-2"
+                    >
+                      <Download className="w-4 h-4" /> Download
+                    </button>
+                  </div>
                 </div>
-              </div>
-            </motion.div>
-          </motion.div>
+              </motion.div>
+            </div>
+          </div>
         )}
       </AnimatePresence>
 
@@ -4110,7 +4122,7 @@ export default function MovieDetails() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/95 backdrop-blur-md flex flex-col items-center justify-between z-[100] p-4 sm:p-6 select-none"
+            className="fixed inset-0 bg-black/95 backdrop-blur-md flex flex-col items-center justify-between z-[10000] p-4 sm:p-6 select-none"
             onClick={closePosterPopup}
             onTouchStart={handleLightboxTouchStart}
             onTouchMove={handleLightboxTouchMove}
@@ -4225,64 +4237,71 @@ export default function MovieDetails() {
           </motion.div>
         )}
       </AnimatePresence>
+
       {/* Trailer Selection Modal */}
       <AnimatePresence>
         {isTrailerSelectionOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[100] p-4"
-            onClick={() => setIsTrailerSelectionOpen(false)}
-          >
+          <div key="trailer-selection-wrapper" className="relative z-[9999]">
             <motion.div
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 max-w-md w-full relative shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <button
-                onClick={() => setIsTrailerSelectionOpen(false)}
-                className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-1 rounded-full hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+              key="trailer-selection-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="fixed inset-0 bg-black/80 backdrop-blur-md"
+              onClick={() => setIsTrailerSelectionOpen(false)}
+            />
+            <div className="fixed inset-0 flex items-center justify-center p-4 pointer-events-none">
+              <motion.div
+                key="trailer-selection-card"
+                initial={{ opacity: 0, scale: 0.96, y: 8 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.96, y: 8 }}
+                transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+                style={{ willChange: 'transform, opacity' }}
+                className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 max-w-md w-full relative shadow-2xl pointer-events-auto"
+                onClick={(e) => e.stopPropagation()}
               >
-                <X className="w-6 h-6" />
-              </button>
-              <h3 className="text-xl font-bold mb-4 text-zinc-900 dark:text-white">
-                {t('Select Trailer')}
-              </h3>
-              <div className="flex flex-col gap-3">
-                {allTrailers.map((trailer, idx) => {
-                  const label =
-                    trailer.title ||
-                    (trailer.seasonNumber
-                      ? `Season ${trailer.seasonNumber} Trailer`
-                      : trailer.youtubeTitle || `Trailer ${idx + 1}`);
-                  return (
-                    <button
-                      key={`trailer-select-${trailer.id}-${idx}`}
-                      onClick={() => {
-                        setActiveTrailerUrl(trailer.url);
-                        setIsTrailerSelectionOpen(false);
-                        // Use a small timeout to ensure state updates are processed
-                        setTimeout(() => setIsTrailerPopupOpen(true), 50);
-                      }}
-                      className={`w-full font-bold py-3 px-6 text-base rounded-xl transition-colors flex items-center justify-between border ${
-                        getYouTubeEmbedUrl(trailer.url)
-                          ? "bg-red-500/10 hover:bg-red-500/20 text-red-500 border-red-500/20"
-                          : "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 border-emerald-500/20"
-                      }`}
-                    >
-                      <span>{label}</span>
-                      <Play className="w-5 h-5" />
-                    </button>
-                  );
-                })}
-              </div>
-            </motion.div>
-          </motion.div>
+                <button
+                  onClick={() => setIsTrailerSelectionOpen(false)}
+                  className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-1 rounded-full hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+                <h3 className="text-xl font-bold mb-4 text-zinc-900 dark:text-white">
+                  {t('Select Trailer')}
+                </h3>
+                <div className="flex flex-col gap-3">
+                  {allTrailers.map((trailer, idx) => {
+                    const label =
+                      trailer.title ||
+                      (trailer.seasonNumber
+                        ? `Season ${trailer.seasonNumber} Trailer`
+                        : trailer.youtubeTitle || `Trailer ${idx + 1}`);
+                    return (
+                      <button
+                        key={`trailer-select-${trailer.id}-${idx}`}
+                        onClick={() => {
+                          setActiveTrailerUrl(trailer.url);
+                          setIsTrailerSelectionOpen(false);
+                          // Use a small timeout to ensure state updates are processed
+                          setTimeout(() => setIsTrailerPopupOpen(true), 50);
+                        }}
+                        className={`w-full font-bold py-3 px-6 text-base rounded-xl transition-colors flex items-center justify-between border ${
+                          getYouTubeEmbedUrl(trailer.url)
+                            ? "bg-red-500/10 hover:bg-red-500/20 text-red-500 border-red-500/20"
+                            : "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 border-emerald-500/20"
+                        }`}
+                      >
+                        <span>{label}</span>
+                        <Play className="w-5 h-5" />
+                      </button>
+                    );
+                  })}
+                </div>
+              </motion.div>
+            </div>
+          </div>
         )}
       </AnimatePresence>
 
@@ -4290,67 +4309,73 @@ export default function MovieDetails() {
       <AnimatePresence>
         {isTrailerPopupOpen &&
           (activeTrailerUrl || mergedContent.trailerUrl) && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-              className="fixed inset-0 bg-black/95 backdrop-blur-md flex items-center justify-center z-[100] p-4"
-              onClick={() => {
-                setIsTrailerPopupOpen(false);
-                setActiveTrailerUrl(null);
-              }}
-            >
+            <div key="trailer-popup-wrapper" className="relative z-[10000]">
               <motion.div
-                initial={{ scale: 0.9, opacity: 0, y: 20 }}
-                animate={{ scale: 1, opacity: 1, y: 0 }}
-                exit={{ scale: 0.9, opacity: 0, y: 20 }}
-                transition={{ type: "spring", damping: 25, stiffness: 300 }}
-                className="relative w-full max-w-5xl aspect-video bg-black rounded-2xl overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] ring-1 ring-white/10"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {getYouTubeEmbedUrl(
-                  activeTrailerUrl || mergedContent.trailerUrl || "",
-                ) ? (
-                  <div className="w-full h-full relative group">
-                    <iframe
-                      src={`${getYouTubeEmbedUrl(activeTrailerUrl || mergedContent.trailerUrl || "")}?autoplay=1`}
-                      title="Trailer"
-                      className="w-full h-full border-0"
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                      allowFullScreen
-                    ></iframe>
-                    <div className="absolute top-4 right-12 z-50">
+                key="trailer-popup-backdrop"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="fixed inset-0 bg-black/95 backdrop-blur-md"
+                onClick={() => {
+                  setIsTrailerPopupOpen(false);
+                  setActiveTrailerUrl(null);
+                }}
+              />
+              <div className="fixed inset-0 flex items-center justify-center p-4 pointer-events-none">
+                <motion.div
+                  key="trailer-popup-card"
+                  initial={{ opacity: 0, scale: 0.96, y: 8 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.96, y: 8 }}
+                  transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+                  style={{ willChange: 'transform, opacity' }}
+                  className="relative w-full max-w-5xl aspect-video bg-black rounded-2xl overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] ring-1 ring-white/10 pointer-events-auto"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {getYouTubeEmbedUrl(
+                    activeTrailerUrl || mergedContent.trailerUrl || "",
+                  ) ? (
+                    <div className="w-full h-full relative group">
+                      <iframe
+                        src={`${getYouTubeEmbedUrl(activeTrailerUrl || mergedContent.trailerUrl || "")}?autoplay=1`}
+                        title="Trailer"
+                        className="w-full h-full border-0"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                      ></iframe>
+                      <div className="absolute top-4 right-12 z-50">
+                        <a
+                          href={
+                            activeTrailerUrl || mergedContent.trailerUrl || ""
+                          }
+                          target="_blank"
+                          rel="noreferrer"
+                          className="bg-black/60 backdrop-blur-md text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-black/80 transition-colors border border-white/10 shadow-lg flex items-center gap-1.5"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <Youtube className="w-3.5 h-3.5" />
+                          {t('Open externally')}
+                        </a>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center text-zinc-900 dark:text-white gap-4 bg-zinc-50 dark:bg-zinc-900">
+                      <Play className="w-16 h-16 opacity-50" />
+                      <p>{t('This trailer cannot be played directly here.')}</p>
                       <a
-                        href={
-                          activeTrailerUrl || mergedContent.trailerUrl || ""
-                        }
+                        href={activeTrailerUrl || mergedContent.trailerUrl || ""}
                         target="_blank"
                         rel="noreferrer"
-                        className="bg-black/60 backdrop-blur-md text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-black/80 transition-colors border border-white/10 shadow-lg flex items-center gap-1.5"
-                        onClick={(e) => e.stopPropagation()}
+                        className="bg-emerald-500 hover:bg-emerald-600 px-6 py-3 text-sm sm:text-base rounded-xl font-bold transition-colors"
                       >
-                        <Youtube className="w-3.5 h-3.5" />
-                        {t('Open externally')}
+                        {t('Open in New Tab')}
                       </a>
                     </div>
-                  </div>
-                ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center text-zinc-900 dark:text-white gap-4 bg-zinc-50 dark:bg-zinc-900">
-                    <Play className="w-16 h-16 opacity-50" />
-                    <p>{t('This trailer cannot be played directly here.')}</p>
-                    <a
-                      href={activeTrailerUrl || mergedContent.trailerUrl || ""}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="bg-emerald-500 hover:bg-emerald-600 px-6 py-3 text-sm sm:text-base rounded-xl font-bold transition-colors"
-                    >
-                      {t('Open in New Tab')}
-                    </a>
-                  </div>
-                )}
-              </motion.div>
-            </motion.div>
+                  )}
+                </motion.div>
+              </div>
+            </div>
           )}
       </AnimatePresence>
       
@@ -4707,6 +4732,7 @@ export default function MovieDetails() {
         }}
       />
     </div>
+    </PageTransition>
     </>
   );
 }

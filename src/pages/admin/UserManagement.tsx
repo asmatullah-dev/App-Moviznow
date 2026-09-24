@@ -200,7 +200,7 @@ export default function UserManagement() {
     };
   }, []);
 
-  const autoSyncUserToContacts = useCallback(async (userToSync: UserProfile, interactive = true) => {
+  const autoSyncUserToContacts = useCallback(async (userToSync: UserProfile, interactive = false) => {
     if (!userToSync.phone) return;
     setIsSyncingContacts(true);
     try {

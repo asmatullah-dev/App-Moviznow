@@ -378,6 +378,7 @@ export default function Home({
     sessionStorage.setItem("home_resolution", selectedResolution);
     sessionStorage.setItem("home_page", currentPage.toString());
     sessionStorage.setItem("last_browse_location", window.location.pathname + window.location.search);
+    sessionStorage.setItem("last_root_browse_location", window.location.pathname + window.location.search);
   }, [
     search,
     sort,
@@ -434,14 +435,22 @@ export default function Home({
     return () => window.removeEventListener("reset_home_first_page", handleResetHome);
   }, [clearFilters]);
 
-  const scrollToCatalog = useCallback(() => {
-    const el = document.getElementById("explore-catalog");
-    if (el) {
-      el.scrollIntoView({ behavior: "instant" as any, block: "start" });
-    } else {
-      window.scrollTo({ top: 0, behavior: "instant" as any });
-    }
+  const scrollToFilterBar = useCallback((behavior: ScrollBehavior = "smooth") => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const el = document.getElementById("explore-catalog");
+        if (el) {
+          const headerOffset = 76; // 64px header + 12px breathing room
+          const targetY = Math.max(0, el.getBoundingClientRect().top + window.pageYOffset - headerOffset);
+          window.scrollTo({ top: targetY, behavior });
+        } else {
+          window.scrollTo({ top: 0, behavior });
+        }
+      });
+    });
   }, []);
+
+  const scrollToCatalog = scrollToFilterBar;
 
   const hasActiveFilters =
     sort !== "default" ||
@@ -905,6 +914,18 @@ export default function Home({
       return;
     }
     setCurrentPage(1);
+
+    // If returning from movie details, let ScrollToTopOrRestore handle scroll position
+    const fromMovieDetails = sessionStorage.getItem("from_movie_details") === "true";
+    if (fromMovieDetails) {
+      return;
+    }
+
+    // When filters are active (hiding trending/newly added tabs),
+    // ensure the page smoothly starts from the filter bar
+    if (hasActiveFilters) {
+      scrollToFilterBar("smooth");
+    }
   }, [
     debouncedSearch,
     sort,
@@ -913,6 +934,10 @@ export default function Home({
     selectedLanguage,
     selectedQuality,
     selectedYear,
+    selectedOttPlatform,
+    selectedResolution,
+    hasActiveFilters,
+    scrollToFilterBar,
   ]);
 
   useEffect(() => {
@@ -924,7 +949,8 @@ export default function Home({
   const handleSelectCategory = useCallback((type: string) => {
     setSelectedType(type);
     setCurrentPage(1);
-  }, []);
+    scrollToFilterBar("smooth");
+  }, [scrollToFilterBar]);
 
   return (
     <div className="min-h-screen bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white flex flex-col transition-colors duration-300">
@@ -1274,7 +1300,7 @@ export default function Home({
           <AdBanner className="mb-6" />
 
           {/* Grid Title */}
-          <div id="explore-catalog" className="flex items-center justify-between mb-6 pb-2 border-b border-zinc-200/80 dark:border-zinc-800/80 mt-10">
+          <div id="explore-catalog" className="flex items-center justify-between mb-6 pb-2 border-b border-zinc-200/80 dark:border-zinc-800/80 mt-10 scroll-mt-24">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 shadow-sm">
                 <Film className="w-5 h-5" />
@@ -1429,7 +1455,13 @@ export default function Home({
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6">
+              <motion.div 
+                key={`grid-page-${currentPage}-${selectedType}-${selectedGenre}-${selectedLanguage}-${sort}`}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6 will-change-[opacity,transform]"
+              >
                 {paginatedContent.map((content, index) => (
                   <React.Fragment key={content.id}>
                     <ContentCard
@@ -1450,7 +1482,7 @@ export default function Home({
                     )}
                   </React.Fragment>
                 ))}
-              </div>
+              </motion.div>
 
               {/* Pagination */}
               {totalPages > 1 && (
@@ -1465,14 +1497,14 @@ export default function Home({
                           return;
                         }
                         setCurrentPage(targetPage);
-                        if (targetPage === 1) {
+                        if (targetPage === 1 && !hasActiveFilters) {
                           window.scrollTo({ top: 0, behavior: "instant" as any });
                         } else {
-                          scrollToCatalog();
+                          scrollToFilterBar("smooth");
                         }
                       }}
                       disabled={currentPage === 1}
-                      className="h-9 sm:h-10 px-3 sm:px-4 rounded-xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-sm font-medium hover:bg-zinc-200 dark:hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
+                      className="h-9 sm:h-10 px-3 sm:px-4 rounded-xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-sm font-medium hover:bg-zinc-200 dark:hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-95 duration-150 flex items-center gap-1"
                     >
                       <ChevronLeft className="w-4 h-4" />
                       <span className="hidden sm:inline">{t("Previous")}</span>
@@ -1498,16 +1530,16 @@ export default function Home({
                                     return;
                                   }
                                   setCurrentPage(i);
-                                  if (i === 1) {
+                                  if (i === 1 && !hasActiveFilters) {
                                     window.scrollTo({ top: 0, behavior: "instant" as any });
                                   } else {
-                                    scrollToCatalog();
+                                    scrollToFilterBar("smooth");
                                   }
                                 }}
                                 className={clsx(
-                                  "w-9 h-9 sm:w-10 sm:h-10 rounded-xl text-sm font-medium transition-colors",
+                                  "w-9 h-9 sm:w-10 sm:h-10 rounded-xl text-sm font-medium transition-all active:scale-95 duration-150",
                                   currentPage === i
-                                    ? "bg-emerald-500 text-white"
+                                    ? "bg-emerald-500 text-white shadow-md shadow-emerald-500/25"
                                     : "bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800",
                                 )}
                               >
@@ -1559,10 +1591,10 @@ export default function Home({
                           return;
                         }
                         setCurrentPage((prev) => Math.min(totalPages, prev + 1));
-                        scrollToCatalog();
+                        scrollToFilterBar("smooth");
                       }}
                       disabled={currentPage === totalPages}
-                      className="h-9 sm:h-10 px-3 sm:px-4 rounded-xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-sm font-medium hover:bg-zinc-200 dark:hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
+                      className="h-9 sm:h-10 px-3 sm:px-4 rounded-xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-sm font-medium hover:bg-zinc-200 dark:hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-95 duration-150 flex items-center gap-1"
                     >
                       <span className="hidden sm:inline">{t("Next")}</span>
                       <ChevronRight className="w-4 h-4" />
@@ -1693,7 +1725,7 @@ export default function Home({
 
       {/* Collection Modal */}
       <CollectionModal
-        collection={profile ? selectedCollection : null}
+        collection={selectedCollection}
         onClose={handleCloseCollection}
         collectionSort={collectionSort}
         setCollectionSort={setCollectionSort}
@@ -1710,12 +1742,10 @@ export default function Home({
 
       <CollectionsGridModal
         isOpen={
-          Boolean(profile) && (
-            searchParams.get("view_all") === "collections" ||
-            searchParams.get("v") === "collections" ||
-            searchParams.get("v") === "col" ||
-            searchParams.get("v") === "all"
-          )
+          searchParams.get("view_all") === "collections" ||
+          searchParams.get("v") === "collections" ||
+          searchParams.get("v") === "col" ||
+          searchParams.get("v") === "all"
         }
         onClose={() => {
           const updated = new URLSearchParams(searchParams);

@@ -11,6 +11,7 @@ import { AdminButtons } from '../../components/AdminButtons';
 import { CartButton } from '../../components/CartButton';
 import ContentCard from '../../components/ContentCard';
 import { AdBanner } from '../../components/AdBanner';
+import { PageTransition } from '../../components/PageTransition';
 
 export default function Favorites() {
   const { profile, toggleFavorite, toggleWatchLater } = useAuth();
@@ -64,7 +65,8 @@ export default function Favorites() {
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white flex flex-col transition-colors duration-300">
-      <header className="sticky top-0 z-40 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md border-b border-zinc-200/80 dark:border-zinc-800/80 transition-colors duration-300">
+      <header className="sticky top-0 z-40 border-b border-zinc-200/80 dark:border-zinc-800/80 transition-colors duration-300">
+        <div className="absolute inset-0 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md -z-10 pointer-events-none" />
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link 
@@ -89,6 +91,7 @@ export default function Favorites() {
         </div>
       </header>
 
+      <PageTransition className="flex-1 w-full">
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-8">
         {/* Hero Banner */}
         <div className="relative mb-8 rounded-3xl overflow-hidden bg-gradient-to-r from-rose-600 via-pink-600 to-red-600 p-6 md:p-8 text-white shadow-xl shadow-rose-500/10">
@@ -170,6 +173,7 @@ export default function Favorites() {
           </div>
         )}
       </main>
+      </PageTransition>
     </div>
   );
 }

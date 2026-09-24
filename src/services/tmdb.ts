@@ -226,12 +226,21 @@ export async function predictOttPlatformWithAI(
  */
 export async function fetchTMDBImages(id: number, type: 'movie' | 'tv'): Promise<TMDBImagesResult> {
   try {
-    const res = await fetchTmdb(`${type}/${id}/images`, { include_image_language: 'en,hi,null' });
-    if (!res.ok) return { posters: [], backdrops: [] };
-    const data = await res.json();
+    let res = await fetchTmdb(`${type}/${id}/images`, { include_image_language: 'en,hi,null' });
+    let data: any = res.ok ? await res.json() : null;
+
+    // Fallback: If no posters returned, fetch all languages without filter
+    if (!data || (!data.posters?.length && !data.backdrops?.length)) {
+      const allRes = await fetchTmdb(`${type}/${id}/images`);
+      if (allRes.ok) {
+        data = await allRes.json();
+      }
+    }
+
+    if (!data) return { posters: [], backdrops: [] };
     
     const posters = (data.posters || [])
-      .map((p: any) => p.file_path ? `https://image.tmdb.org/t/p/w500${p.file_path}` : null)
+      .map((p: any) => p.file_path ? `https://image.tmdb.org/t/p/w780${p.file_path}` : null)
       .filter(Boolean) as string[];
 
     const backdrops = (data.backdrops || [])

@@ -99,13 +99,26 @@ class SafeStorage {
 
   /**
    * Background hydration from IndexedDB without blocking the main event loop.
+   * Capped with a 1200ms timeout to guarantee zero app startup freezing.
    */
   public hydrate(): Promise<void> {
     if (this.hydrationPromise) return this.hydrationPromise;
     this.hydrationPromise = (async () => {
       try {
-        const db = await this.initDB();
+        const initPromise = this.initDB();
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Hydration timeout')), 1200)
+        );
+        const db = await Promise.race([initPromise, timeoutPromise]);
         await new Promise<void>((resolve) => {
+          let cursorDone = false;
+          const cursorTimer = setTimeout(() => {
+            if (!cursorDone) {
+              cursorDone = true;
+              resolve();
+            }
+          }, 1000);
+
           const tx = db.transaction('cache', 'readonly');
           const store = tx.objectStore('cache');
           const req = store.openCursor();
@@ -119,10 +132,20 @@ class SafeStorage {
               }
               cursor.continue();
             } else {
+              if (!cursorDone) {
+                cursorDone = true;
+                clearTimeout(cursorTimer);
+                resolve();
+              }
+            }
+          };
+          req.onerror = () => {
+            if (!cursorDone) {
+              cursorDone = true;
+              clearTimeout(cursorTimer);
               resolve();
             }
           };
-          req.onerror = () => resolve();
         });
       } catch (e) {
         // Fallback silently

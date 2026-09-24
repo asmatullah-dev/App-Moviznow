@@ -724,6 +724,33 @@ export async function ensureValidContactsToken(forceInteractiveIfFailed = false)
           localStorage.setItem(STORAGE_AUTHORIZED_KEY, 'true');
         } catch (e) {}
         return { accessToken: fToken, email: fEmail };
+      } else if (firestoreAuthData?.refreshToken) {
+        // Method 1: Refresh token is available! Call server to refresh the token.
+        try {
+          console.log('[Google Contacts] Token expired. Requesting server-side refresh...');
+          const refreshRes = await fetch('/api/orders/refresh-contacts-token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          if (refreshRes.ok) {
+            const rData = await refreshRes.json();
+            if (rData.success && rData.accessToken) {
+              const newExpiry = rData.expiry;
+              const newEmail = rData.email || fEmail;
+              
+              try {
+                localStorage.setItem(STORAGE_TOKEN_KEY, rData.accessToken);
+                localStorage.setItem(STORAGE_EXPIRY_KEY, String(newExpiry));
+                localStorage.setItem(STORAGE_EMAIL_KEY, newEmail);
+                localStorage.setItem(STORAGE_AUTHORIZED_KEY, 'true');
+              } catch (e) {}
+              
+              return { accessToken: rData.accessToken, email: newEmail };
+            }
+          }
+        } catch (refErr) {
+          console.warn('[Google Contacts] Failed server-side refresh attempt:', refErr);
+        }
       }
     }
   } catch (err) {

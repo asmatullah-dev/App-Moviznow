@@ -103,4 +103,55 @@ body {
   will-change: transform;
 }
 
+@keyframes pageIn {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes contentReveal {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes cardHoverGlow {
+  0%, 100% {
+    box-shadow: 0 4px 14px 0 rgba(16, 185, 129, 0.1);
+  }
+  50% {
+    box-shadow: 0 8px 24px 0 rgba(16, 185, 129, 0.22);
+  }
+}
+
+.animate-page-in {
+  animation: pageIn 0.24s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: opacity, transform;
+}
+
+.animate-content-reveal {
+  animation: contentReveal 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: opacity, transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-page-in,
+  .animate-content-reveal,
+  .animate-marquee {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+}
+
 

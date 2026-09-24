@@ -453,42 +453,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
-        // Check if user has been deleted and no UID available in chunk_meta or user data
-        if (navigator.onLine) {
-          const isDocCheckedAndMissing = docSnap !== undefined && !docSnap.exists();
-          const isDeletedInUserDoc = serverProfile && (serverProfile.status as any) === "deleted";
-          const isDeletedOrMissingInMeta = isChunkMetaChecked && !isUidInChunkMeta;
-
-          if (isDeletedInUserDoc || (isDeletedOrMissingInMeta && isDocCheckedAndMissing)) {
-            const isNewSignup =
-              justLoggedInRef.current ||
-              !!safeStorage.getItem("pending_signup_profile") ||
-              !!sessionStorage.getItem("pending_signup_phone") ||
-              (currentUser.metadata?.creationTime &&
-                Date.now() - new Date(currentUser.metadata.creationTime).getTime() < 3 * 60 * 1000);
-
-            if (!isNewSignup) {
-              console.warn(
-                `[AuthContext] User UID ${currentUser.uid} is deleted (no UID in chunk_meta or user data). Signing out and routing to login.`
-              );
-              safeStorage.removeItem("profile_cache");
-              safeStorage.removeItem("profile_doc_snap");
-              safeStorage.removeItem(`profile_version_${currentUser.uid}`);
-              localStorage.removeItem(`last_user_sync_time_v2_${currentUser.uid}`);
-              safeStorage.removeItem("needs_user_sync");
-              safeStorage.removeItem("pending_user_updates");
-              safeStorage.removeItem("pending_signup_profile");
-              sessionStorage.removeItem("session_started");
-              setProfile(null);
-              setUser(null);
-              setLoading(false);
-              await signOut(auth).catch(() => {});
-              window.location.replace("/login");
-              return false;
-            }
-          }
-        }
-
         if (localProfile && localProfile.uid && localProfile.uid !== currentUser.uid) {
           console.warn("UID mismatch between auth and local storage. Resetting local profile cache.");
           safeStorage.removeItem("profile_cache");
@@ -501,6 +465,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         let mergedProfile: UserProfile | null = localProfile
           ? ({ ...localProfile } as UserProfile)
           : null;
+
+        if (!mergedProfile && currentUser) {
+          mergedProfile = {
+            uid: currentUser.uid,
+            email: currentUser.email || "",
+            displayName: currentUser.displayName || currentUser.email?.split("@")[0] || "Movie Fan",
+            role: "user",
+            status: "active",
+            createdAt: new Date().toISOString(),
+            favorites: [],
+            watchLater: [],
+            orders: [],
+            timeSpent: 0,
+          } as UserProfile;
+        }
         if (serverProfile) {
           mergedProfile = {
             ...(localProfile || {}),
@@ -1201,36 +1180,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               }, {} as any);
             } else {
               // No existing matching profile found in search
-              if (isChunkMetaChecked && !isUidInChunkMeta) {
-                const isNewSignup =
-                  justLoggedInRef.current ||
-                  !!safeStorage.getItem("pending_signup_profile") ||
-                  !!sessionStorage.getItem("pending_signup_phone") ||
-                  (currentUser.metadata?.creationTime &&
-                    Date.now() - new Date(currentUser.metadata.creationTime).getTime() < 3 * 60 * 1000);
-
-                if (!isNewSignup) {
-                  console.warn(
-                    `[AuthContext] User UID ${currentUser.uid} was deleted and no UID available in chunk_meta or user data. Signing out and routing to login.`
-                  );
-                  safeStorage.removeItem("profile_cache");
-                  safeStorage.removeItem("profile_doc_snap");
-                  safeStorage.removeItem(`profile_version_${currentUser.uid}`);
-                  localStorage.removeItem(`last_user_sync_time_v2_${currentUser.uid}`);
-                  safeStorage.removeItem("needs_user_sync");
-                  safeStorage.removeItem("pending_user_updates");
-                  safeStorage.removeItem("pending_signup_profile");
-                  sessionStorage.removeItem("session_started");
-                  setProfile(null);
-                  setUser(null);
-                  setLoading(false);
-                  await signOut(auth).catch(() => {});
-                  window.location.replace("/login");
-                  return false;
-                }
-              }
               console.log(
-                `No existing matching profile found for ${currentUser.uid}; initializing fresh profile.`
+                `No existing matching profile found for ${currentUser.uid}; preserving local/cached profile or initializing fresh.`
               );
             }
           } catch (e) {
@@ -1436,6 +1387,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refreshProfile]);
 
   useEffect(() => {
+    // Safety watchdog: ensure authLoading and loading ALWAYS resolve within 2500ms
+    // even if Firebase onAuthStateChanged or network calls stall or fail
+    const safetyTimer = setTimeout(() => {
+      setAuthLoading((prev) => {
+        if (prev) console.warn("[AuthContext] Auth loading safety watchdog reached (2500ms). Unblocking auth state.");
+        return false;
+      });
+      setLoading((prev) => {
+        if (prev) console.warn("[AuthContext] Profile loading safety watchdog reached (2500ms). Unblocking profile state.");
+        return false;
+      });
+    }, 2500);
+
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       setAuthLoading(false);
@@ -1708,6 +1672,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
+      clearTimeout(safetyTimer);
       unsubscribe();
       clearInterval(timeTrackerInterval);
       document.removeEventListener("visibilitychange", handleVisibilityChange);

@@ -3759,11 +3759,20 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       if (!response.ok) throw new Error(`SkymoviesHD returned ${response.status}`);
       const text = await response.text();
 
+      // Extract movie page metadata for accurate link naming & quality/size matching
+      const movieTitleMatch = text.match(/<div class=["']Robiul["'][^>]*><b>(.*?)<\/b>/i) || text.match(/<title>(.*?)<\/title>/i);
+      let movieTitle = movieTitleMatch ? movieTitleMatch[1].replace(/<[^>]+>/g, "").trim() : "";
+      movieTitle = movieTitle.replace(/Full Movie Download/gi, "").replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+
+      const pageSizeMatch = text.match(/<b>\s*Size\s*:\s*<\/b>\s*([^<]+)/i) || movieTitle.match(/\[([\d\.]+\s*(?:GB|MB|KB))\]/i);
+      const defaultPageSize = pageSizeMatch ? pageSizeMatch[1].trim().toUpperCase() : null;
+
       const hbData = new Map<string, { label: string }>();
+      const directHits: any[] = [];
       const parts = text.split('<a ');
       for(let i = 1; i < parts.length; i++) {
         const p = parts[i];
-        const m = p.match(/href=["']([^"']*(?:howblogs\.xyz|howblog\.xyz|sky-blogs\.xyz|sky-blog\.xyz|moviesapi|skymovies)\/[^"']*)["']/i);
+        const m = p.match(/href=["']([^"']*(?:howblogs|howblog|sky-blogs|sky-blog|moviesapi|skymovies|hubcloud|hubdrive)\.[a-z0-9]+\/[^"']*)["']/i);
         if (m) {
           const hbUrl = m[1].trim();
           
@@ -3780,12 +3789,25 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
           
           if (!label) label = "Download Link";
           label = label.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
-          
-          hbData.set(hbUrl, { label });
+
+          if (/hubcloud\.[a-z0-9]+/i.test(hbUrl)) {
+            let name = movieTitle || label;
+            if (/\b(480p|720p|1080p|2160p|4k|hevc)\b/i.test(label) && !name.toLowerCase().includes(label.toLowerCase())) {
+              name = `${movieTitle} - ${label}`;
+            }
+            directHits.push({
+              file_name: name,
+              url: normalizeDomain(hbUrl),
+              size: defaultPageSize,
+              is_direct: true
+            });
+          } else if (!hbData.has(hbUrl)) {
+            hbData.set(hbUrl, { label });
+          }
         }
       }
       
-      if (hbData.size === 0) {
+      if (hbData.size === 0 && directHits.length === 0) {
         // Fallback: Check if page contains catalog post links
         const $ = cheerio.load(text);
         const postsMap = new Map<string, { title: string; image?: string }>();
@@ -3826,67 +3848,115 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         return res.json({ hits: [], found: 0 });
       }
 
-      const results = await Promise.all(Array.from(hbData.keys()).map(async (hbUrl) => {
+      const results = await Promise.all(Array.from(hbData.entries()).map(async ([hbUrl, meta]) => {
         try {
-          const hbRes = await fetch(hbUrl, { headers, signal: AbortSignal.timeout(6000) });
+          const hbRes = await fetch(hbUrl, { headers, signal: AbortSignal.timeout(8000) });
           if (!hbRes.ok) return [];
           const hbText = await hbRes.text();
           
-          const hubcloudMatch = hbText.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|hubdrive|skymovies|moviesdrive|mdrive|filmygo)\.[^"'\s<>\[\]]*/gi);
-          if (hubcloudMatch) {
-            const sizeMatch = hbText.match(/\[?(\d+(?:\.\d+)?\s*(?:GB|MB|KB))\]?/i) || hbText.match(/Size:\s*([^<]+)/i);
-            const size = sizeMatch ? (sizeMatch[1] || sizeMatch[2]).toUpperCase() : null;
-
-            let finalName = hbData.get(hbUrl)?.label || "HubCloud Link";
-            if (size) {
-                const escapedSize = size.replace(/\./g, '\\.');
-                finalName = finalName.replace(new RegExp(`\\[?${escapedSize}\\]?`, 'gi'), "").trim();
-                finalName = finalName.replace(/[\[\]()\-_\s]+$/, "").trim();
+          // Match all hubcloud / vcloud / hubdrive links
+          const rawMatches = hbText.match(/https?:\/\/[^"'\s<>\[\]\(\)]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|vcloud|hubdrive)\.[^"'\s<>\[\]\(\)]*/gi) || [];
+          const cleanedRaw = rawMatches.map(u => u.replace(/[\r\n\t]+$/, '').replace(/[.,;!?]+$/, ''));
+          
+          const uniquePageUrls = Array.from(new Set(cleanedRaw));
+          const subHits: any[] = [];
+          
+          // Strip URLs and anchor tags before matching size to prevent matching URL path tokens (e.g. gh29mb)
+          const textWithoutTags = hbText.replace(/<a\b[^>]*>(.*?)<\/a>/gi, '').replace(/https?:\/\/[^\s<>"']+/g, '');
+          const sizeMatch = textWithoutTags.match(/\b(\d+(?:\.\d+)?\s*(?:GB|MB))\b/i) || hbText.match(/Size:\s*([^<\r\n]+)/i);
+          const size = sizeMatch ? sizeMatch[1].trim().toUpperCase() : defaultPageSize;
+          
+          for (const rawUrl of uniquePageUrls) {
+            let finalUrl = rawUrl;
+            
+            // If it is a hubdrive link, try to fetch it to resolve the direct [HubCloud Server] link
+            if (rawUrl.includes('hubdrive.') && !rawUrl.includes('/tg/')) {
+              try {
+                const hdRes = await fetch(rawUrl, { headers, signal: AbortSignal.timeout(4000) });
+                if (hdRes.ok) {
+                  const hdText = await hdRes.text();
+                  const directHubcloud = hdText.match(/href=["'](https?:\/\/[^"'\s<>\[\]\(\)]*hubcloud\.[^"'\s<>\[\]\(\)]*\/drive\/[^"'\s<>\[\]\(\)]*)["']/i);
+                  if (directHubcloud) {
+                    finalUrl = directHubcloud[1].replace(/[\r\n\t]+$/, '');
+                  }
+                }
+              } catch (e) {}
+            }
+            
+            let name = movieTitle || meta.label || "HubCloud Link";
+            if (/\b(480p|720p|1080p|2160p|4k|hevc)\b/i.test(meta.label) && !name.toLowerCase().includes(meta.label.toLowerCase())) {
+              name = `${movieTitle} - ${meta.label}`;
             }
 
-            return hubcloudMatch.map(hubUrl => ({
-              file_name: finalName || "HubCloud Link",
-              url: normalizeDomain(hubUrl),
-              size: size,
+            let finalSize = size;
+            // If the final link is HubCloud, fetch its real file name from title
+            if (/(hubcloud|vcloud)/i.test(finalUrl)) {
+              try {
+                const hubRes = await fetch(finalUrl, { headers, signal: AbortSignal.timeout(3000) });
+                if (hubRes.ok) {
+                  const hubHtml = await hubRes.text();
+                  const tMatch = hubHtml.match(/<title>(.*?)<\/title>/i);
+                  if (tMatch) {
+                    const rawTitle = tMatch[1].replace(/Please Wait While Page is loading/i, "").trim();
+                    if (rawTitle && !rawTitle.toLowerCase().includes("just a moment") && !rawTitle.toLowerCase().includes("cloudflare")) {
+                      name = rawTitle;
+                    }
+                  }
+                  const sMatch = hubHtml.match(/(?:File\s*)?Size\s*:\s*<\/?[^>]*>\s*([0-9.]+\s*(?:GB|MB|KB))/i) ||
+                                 hubHtml.match(/(?:File\s*)?Size\s*:\s*([0-9.]+\s*(?:GB|MB|KB))/i);
+                  if (sMatch) {
+                    finalSize = sMatch[1].trim().toUpperCase();
+                  }
+                }
+              } catch (e) {}
+            }
+
+            subHits.push({
+              file_name: name,
+              url: normalizeDomain(finalUrl),
+              size: finalSize,
               is_direct: true
-            }));
+            });
           }
-          return [];
+          
+          return subHits;
         } catch (e) {
           return [];
         }
       }));
 
-      let finalHits = results.flat().filter((hit, index, self) => 
-        index === self.findIndex((t) => t.url === hit.url)
-      );
-
-      // Deduplicate Hubdrive vs Hubcloud based on finalName
-      const dedupedHits: any[] = [];
-      const seenFiles = new Map<string, string>(); // Add URL host to know which we kept
+      const allHits = [...directHits, ...results.flat()];
       
-      for (const hit of finalHits) {
-         const isHubdrive = hit.url.includes('hubdrive.');
-         const existing = seenFiles.get(hit.file_name);
-         
-         if (existing) {
-             if (isHubdrive && !existing.includes('hubdrive.')) {
-                 continue;
-             }
-             if (!isHubdrive && existing.includes('hubdrive.')) {
-                 const idx = dedupedHits.findIndex(h => h.file_name === hit.file_name && h.url === existing);
-                 if (idx !== -1) dedupedHits.splice(idx, 1);
-                 dedupedHits.push(hit);
-                 seenFiles.set(hit.file_name, hit.url);
-                 continue;
-             }
-             continue;
-         }
-         
-         dedupedHits.push(hit);
-         seenFiles.set(hit.file_name, hit.url);
+      // Deduplicate strictly by normalized URL
+      const uniqueHits: any[] = [];
+      const seenUrls = new Set<string>();
+      for (const hit of allHits) {
+        if (!hit.url) continue;
+        const norm = hit.url.toLowerCase();
+        if (!seenUrls.has(norm)) {
+          seenUrls.add(norm);
+          uniqueHits.push(hit);
+        }
       }
-      finalHits = dedupedHits;
+      
+      // If we have both HubCloud links and HubDrive links:
+      // Filter out HubDrive links if HubCloud links are already present for the same resolution/quality
+      const hasHubcloud = uniqueHits.some(h => /(hubcloud|vcloud)/i.test(h.url));
+      let finalHits = uniqueHits;
+      if (hasHubcloud) {
+        const hubcloudResolutions = new Set(
+          uniqueHits.filter(h => /(hubcloud|vcloud)/i.test(h.url)).map(h => {
+            const m = (h.file_name || '').match(/\b(480p|720p|1080p|2160p|4k)\b/i);
+            return m ? m[1].toLowerCase() : 'main';
+          })
+        );
+        finalHits = uniqueHits.filter(h => {
+          if (!h.url.includes('hubdrive.')) return true;
+          const m = (h.file_name || '').match(/\b(480p|720p|1080p|2160p|4k)\b/i);
+          const resKey = m ? m[1].toLowerCase() : 'main';
+          return !hubcloudResolutions.has(resKey);
+        });
+      }
       
       res.json({ hits: finalHits, found: finalHits.length });
     } catch (error: any) {
@@ -4022,6 +4092,95 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         const { title, body, imageUrl, url, buttonUrl, targetUserIds } = req.body;
         const targetUrl = buttonUrl || url || "/";
 
+        let totalSuccess = 0;
+        let totalFailure = 0;
+
+        // 1. Direct Token Multicast (guarantees delivery to registered device tokens in Firestore)
+        if (db) {
+          try {
+            const tokensSnap = await db.collection("fcm_tokens").get();
+            let matchedDocs = tokensSnap.docs;
+
+            if (Array.isArray(targetUserIds) && targetUserIds.length > 0) {
+              matchedDocs = matchedDocs.filter(d => targetUserIds.includes(d.data().userId));
+            }
+
+            const activeTokens = Array.from(
+              new Set(
+                matchedDocs
+                  .map(d => d.data().token)
+                  .filter((t): t is string => typeof t === "string" && t.length > 0)
+              )
+            );
+
+            if (activeTokens.length > 0) {
+              console.log(`[FCM Multicast] Dispatching to ${activeTokens.length} direct tokens...`);
+              for (let i = 0; i < activeTokens.length; i += 500) {
+                const batchTokens = activeTokens.slice(i, i + 500);
+                const multicastPayload: any = {
+                  tokens: batchTokens,
+                  notification: {
+                    title,
+                    body,
+                    imageUrl: imageUrl || undefined,
+                  },
+                  data: {
+                    title,
+                    body,
+                    imageUrl: imageUrl || "",
+                    url: targetUrl,
+                    link: targetUrl,
+                    click_action: targetUrl,
+                  },
+                  webpush: {
+                    fcmOptions: {
+                      link: targetUrl,
+                    },
+                    notification: {
+                      title,
+                      body,
+                      icon: imageUrl || "/launcher.svg",
+                      badge: "/launcher.svg",
+                      image: imageUrl || undefined,
+                      data: {
+                        url: targetUrl,
+                        link: targetUrl,
+                        click_action: targetUrl,
+                      },
+                    },
+                  },
+                };
+
+                const batchRes = await admin.messaging().sendEachForMulticast(multicastPayload);
+                totalSuccess += batchRes.successCount;
+                totalFailure += batchRes.failureCount;
+
+                // Clean up expired/unregistered tokens
+                if (batchRes.failureCount > 0) {
+                  batchRes.responses.forEach((resp, idx) => {
+                    if (!resp.success && resp.error) {
+                      const errCode = resp.error.code;
+                      if (
+                        errCode === "messaging/invalid-registration-token" ||
+                        errCode === "messaging/registration-token-not-registered"
+                      ) {
+                        const expiredToken = batchTokens[idx];
+                        const docToDelete = matchedDocs.find(d => d.data().token === expiredToken);
+                        if (docToDelete) {
+                          docToDelete.ref.delete().catch(() => {});
+                        }
+                      }
+                    }
+                  });
+                }
+              }
+            }
+          } catch (multicastErr: any) {
+            console.warn("[FCM Multicast Direct Send Warning]:", multicastErr?.message || multicastErr);
+          }
+        }
+
+        // 2. Topic Messaging Fallback / Broadcast
         try {
           if (Array.isArray(targetUserIds) && targetUserIds.length > 0) {
             let activeUserIds = targetUserIds;
@@ -4047,54 +4206,48 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
               activeUserIds = filteredList;
             }
 
-            if (activeUserIds.length === 0) {
-              return res.json({ success: true, successCount: 0, failureCount: 0, message: "No active users with FCM enabled." });
-            }
-
-            const messages: any[] = activeUserIds.map((uid: string) => ({
-              notification: {
-                title,
-                body,
-                imageUrl: imageUrl || undefined,
-              },
-              data: {
-                title,
-                body,
-                imageUrl: imageUrl || "",
-                url: targetUrl,
-                link: targetUrl,
-                click_action: targetUrl,
-              },
-              webpush: {
-                fcmOptions: {
-                  link: targetUrl,
-                },
+            if (activeUserIds.length > 0) {
+              const messages: any[] = activeUserIds.map((uid: string) => ({
                 notification: {
                   title,
                   body,
-                  icon: imageUrl || "/launcher.svg",
-                  badge: "/launcher.svg",
-                  image: imageUrl || undefined,
-                  data: {
-                    url: targetUrl,
+                  imageUrl: imageUrl || undefined,
+                },
+                data: {
+                  title,
+                  body,
+                  imageUrl: imageUrl || "",
+                  url: targetUrl,
+                  link: targetUrl,
+                  click_action: targetUrl,
+                },
+                webpush: {
+                  fcmOptions: {
                     link: targetUrl,
-                    click_action: targetUrl,
+                  },
+                  notification: {
+                    title,
+                    body,
+                    icon: imageUrl || "/launcher.svg",
+                    badge: "/launcher.svg",
+                    image: imageUrl || undefined,
+                    data: {
+                      url: targetUrl,
+                      link: targetUrl,
+                      click_action: targetUrl,
+                    },
                   },
                 },
-              },
-              topic: `user_${uid}`,
-            }));
-            
-            let successCount = 0;
-            let failureCount = 0;
-            
-            for (let i = 0; i < messages.length; i += 500) {
-              const batch = messages.slice(i, i + 500);
-              const response = await admin.messaging().sendEach(batch);
-              successCount += response.successCount;
-              failureCount += response.failureCount;
+                topic: `user_${uid}`,
+              }));
+
+              for (let i = 0; i < messages.length; i += 500) {
+                const batch = messages.slice(i, i + 500);
+                const response = await admin.messaging().sendEach(batch);
+                totalSuccess += response.successCount;
+                totalFailure += response.failureCount;
+              }
             }
-            res.json({ success: true, successCount, failureCount });
           } else {
             const message: any = {
               notification: {
@@ -4131,15 +4284,13 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
             };
 
             const response = await admin.messaging().send(message);
-            res.json({ success: true, messageId: response });
+            if (response) totalSuccess += 1;
           }
-        } catch (fcmError: any) {
-          console.error("FCM Send failed:", fcmError.message);
-          res.status(500).json({
-            error: "FCM not configured or failed",
-            details: fcmError.message,
-          });
+        } catch (topicErr: any) {
+          console.warn("[FCM Topic Send Warning]:", topicErr?.message || topicErr);
         }
+
+        res.json({ success: true, successCount: totalSuccess, failureCount: totalFailure });
       } catch (error) {
         console.error("Error in send notification endpoint:", error);
         res.status(500).json({ error: "Internal Server Error" });

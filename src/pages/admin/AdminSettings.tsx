@@ -98,6 +98,10 @@ export default function AdminSettings() {
   const [showBlockedHelp, setShowBlockedHelp] = useState(false);
   const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
 
+  const [googleClientId, setGoogleClientId] = useState('460140141169-nlm0no0uhcaaaot9037sp4g31r36i808.apps.googleusercontent.com');
+  const [googleClientSecret, setGoogleClientSecret] = useState('');
+  const [hasRefreshToken, setHasRefreshToken] = useState(false);
+
   const copyToClipboard = (text: string, label: string) => {
     try {
       navigator.clipboard.writeText(text);
@@ -115,6 +119,9 @@ export default function AdminSettings() {
       if (res.ok) {
         const data = await res.json();
         setGmailStatus(data);
+        if (data.clientId) setGoogleClientId(data.clientId);
+        if (data.clientSecret) setGoogleClientSecret(data.clientSecret);
+        if (data.hasRefreshToken !== undefined) setHasRefreshToken(data.hasRefreshToken);
       }
     } catch (err) {
       console.error('Failed to fetch Gmail status:', err);
@@ -226,6 +233,104 @@ export default function AdminSettings() {
     } catch (err: any) {
       console.error('Gmail connect error:', err);
       handleConnectWithPopup();
+    }
+  };
+
+  const loadGsiScript = () => {
+    return new Promise<void>((resolve, reject) => {
+      if ((window as any).google?.accounts?.oauth2) {
+        resolve();
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://accounts.google.com/gsi/client';
+      script.async = true;
+      script.defer = true;
+      script.onload = () => resolve();
+      script.onerror = (e) => reject(new Error('Failed to load Google Identity Services script.'));
+      document.body.appendChild(script);
+    });
+  };
+
+  const handleConnectOfflineAccess = async () => {
+    if (!googleClientId.trim() || !googleClientSecret.trim()) {
+      setError("Please fill out both Google Client ID and Google Client Secret before connecting.");
+      return;
+    }
+
+    setConnectingGmail(true);
+    setError(null);
+
+    try {
+      await loadGsiScript();
+      const googleObj = (window as any).google;
+      if (!googleObj?.accounts?.oauth2) {
+        throw new Error("Google Identity Services script failed to initialize.");
+      }
+
+      const codeClient = googleObj.accounts.oauth2.initCodeClient({
+        client_id: googleClientId.trim(),
+        scope: "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/contacts",
+        ux_mode: "popup",
+        select_account: true,
+        access_type: "offline", // VERY CRITICAL for getting the refresh_token!
+        prompt: "consent", // Ensures Google prompts for consent to return the refresh_token!
+        callback: async (response: any) => {
+          if (response.error) {
+            setError(`Google authorization failed: ${response.error_description || response.error}`);
+            setConnectingGmail(false);
+            return;
+          }
+
+          if (!response.code) {
+            setError("Google did not return an authorization code.");
+            setConnectingGmail(false);
+            return;
+          }
+
+          try {
+            // Send the code to our backend to exchange it for permanent offline tokens!
+            const res = await fetch("/api/orders/exchange-oauth-code", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                code: response.code,
+                clientId: googleClientId.trim(),
+                clientSecret: googleClientSecret.trim(),
+                scopes: "gmail contacts"
+              })
+            });
+
+            const data = await res.json();
+            if (res.ok && data.success) {
+              setAlertConfig({
+                isOpen: true,
+                title: 'Permanent Offline Sync Enabled!',
+                message: `Successfully connected ${data.email || 'Google Workspace'}. Both Gmail (AI Verification) and Contacts (Sync) are now operating under Method 1 (Offline Refresh / 100% Automatic background refresh). No more hourly manual reconnections required!`
+              });
+              await fetchGmailStatus();
+            } else {
+              setError(data.error || data.details || "Failed to exchange authorization code on backend.");
+            }
+          } catch (serverErr: any) {
+            setError(`Connection to backend failed during OAuth exchange: ${serverErr.message}`);
+          } finally {
+            setConnectingGmail(false);
+          }
+        },
+        error_callback: (err: any) => {
+          console.error("GSI offline client error:", err);
+          setError(`Google Offline auth popup closed or cancelled: ${err.message || 'Access blocked'}`);
+          setConnectingGmail(false);
+        }
+      });
+
+      // Launch Google's code client popup!
+      codeClient.requestCode();
+    } catch (err: any) {
+      console.error("Failed to initiate offline connection:", err);
+      setError(err.message || "Failed to initialize GSI client.");
+      setConnectingGmail(false);
     }
   };
 
@@ -1789,6 +1894,79 @@ export default function AdminSettings() {
                 )}
               </div>
             )}
+
+            {/* Method 1: Permanent Offline Access Section */}
+            <div className="mt-6 p-5 rounded-2xl border border-dashed border-purple-300 dark:border-purple-800 bg-purple-500/5 dark:bg-purple-500/10 space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold text-purple-700 dark:text-purple-300 flex items-center gap-1.5">
+                  <span className="flex h-2 w-2 relative">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-purple-500"></span>
+                  </span>
+                  Method 1: Permanent Offline Sync (Recommended for Gmail & Contacts)
+                </h3>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                  Authorize once to grant permanent, automatic background synchronization for Gmail verification and Google Contacts sync. No manual reconnection required!
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1">
+                    Google Client ID
+                  </label>
+                  <input
+                    type="text"
+                    value={googleClientId}
+                    onChange={(e) => {
+                      setGoogleClientId(e.target.value);
+                      localStorage.setItem('google_client_id_input', e.target.value);
+                    }}
+                    placeholder="Enter your GCP OAuth Client ID"
+                    className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-zinc-800 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1">
+                    Google Client Secret
+                  </label>
+                  <input
+                    type="password"
+                    value={googleClientSecret}
+                    onChange={(e) => {
+                      setGoogleClientSecret(e.target.value);
+                      localStorage.setItem('google_client_secret_input', e.target.value);
+                    }}
+                    placeholder="Enter GCP Client Secret (to generate permanent Refresh Token)"
+                    className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-zinc-800 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between flex-wrap gap-2 pt-2">
+                <div className="flex items-center gap-1.5 text-xs">
+                  {hasRefreshToken ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold border border-emerald-500/10">
+                      ✓ Offline Token Active
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
+                      Not Configured
+                    </span>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  disabled={connectingGmail}
+                  onClick={handleConnectOfflineAccess}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-all flex items-center gap-2"
+                >
+                  {connectingGmail ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                  <span>Authorize & Enable Method 1 (Sync)</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 

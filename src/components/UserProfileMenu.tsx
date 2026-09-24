@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { createPortal } from 'react-dom';
 import { Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
@@ -64,16 +63,20 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
   const [newRequest, setNewRequest] = useState({ title: '', type: 'movie' as 'movie' | 'series', year: '' });
   const [submittingRequest, setSubmittingRequest] = useState(false);
+  const [requestError, setRequestError] = useState<string | null>(null);
+  const [requestSuccess, setRequestSuccess] = useState<string | null>(null);
   const { updateUserProfileData } = useAuth();
   
   const handleRequestSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setRequestError(null);
+    setRequestSuccess(null);
     if (!profile || !newRequest.title.trim() || submittingRequest) return;
     
     // Auto purge logic is in AuthContext but we check counts here
     const activeRequests = (profile.movieRequests || []).filter(r => r.status === 'pending').length;
     if (activeRequests >= 3) {
-      alert(t("You can only have 3 pending requests at a time."));
+      setRequestError(t("You can only have 3 pending requests at a time."));
       return;
     }
     
@@ -84,31 +87,37 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
       );
 
       if (alreadyRequested) {
-        alert(t("You have already requested this exact movie."));
-      } else {
-        const requestId = Math.floor(10000000 + Math.random() * 90000000).toString();
-        const requestData = {
-          id: requestId,
-          title: newRequest.title.trim(),
-          type: newRequest.type,
-          year: newRequest.type === 'movie' ? newRequest.year?.trim() : undefined,
-          status: 'pending',
-          createdAt: new Date().toISOString(),
-          requestedBy: [profile.uid],
-          requestCount: 1
-        };
-
-        await updateUserProfileData({
-          movieRequests: [...(profile.movieRequests || []), requestData]
-        }, undefined, true);
-        alert(t("Request submitted successfully!"));
+        setRequestError(t("You have already requested this exact title."));
+        setSubmittingRequest(false);
+        return;
       }
 
-      setNewRequest({ title: '', type: 'movie', year: '' });
-      setIsRequestModalOpen(false);
+      const requestId = Math.floor(10000000 + Math.random() * 90000000).toString();
+      const requestData = {
+        id: requestId,
+        title: newRequest.title.trim(),
+        type: newRequest.type,
+        year: newRequest.type === 'movie' ? newRequest.year?.trim() : undefined,
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        requestedBy: [profile.uid],
+        requestCount: 1
+      };
+
+      await updateUserProfileData({
+        movieRequests: [...(profile.movieRequests || []), requestData]
+      }, undefined, true);
+
+      setRequestSuccess(t("Request submitted successfully!"));
+      setTimeout(() => {
+        setNewRequest({ title: '', type: 'movie', year: '' });
+        setRequestSuccess(null);
+        setRequestError(null);
+        setIsRequestModalOpen(false);
+      }, 1200);
     } catch (error) {
       console.error("Error submitting request:", error);
-      alert(t("Failed to submit request."));
+      setRequestError(t("Failed to submit request. Please try again."));
     } finally {
       setSubmittingRequest(false);
     }
@@ -204,11 +213,12 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
       <AnimatePresence>
         {isOpen && (
           <motion.div 
-            initial={{ opacity: 0, y: -10, scale: 0.9, transformOrigin: 'top right' }}
+            initial={{ opacity: 0, y: -6, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -10, scale: 0.9 }}
-            transition={{ type: "spring", damping: 20, stiffness: 300 }}
-            className="absolute right-0 mt-2 w-72 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-2xl overflow-y-auto custom-scrollbar max-h-[85vh] z-50"
+            exit={{ opacity: 0, y: -6, scale: 0.95 }}
+            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+            style={{ transformOrigin: 'top right', willChange: 'transform, opacity' }}
+            className="absolute right-0 mt-2 w-72 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-2xl border border-zinc-200/80 dark:border-zinc-800/80 rounded-2xl shadow-2xl overflow-y-auto custom-scrollbar max-h-[85vh] z-50"
           >
             <div className="p-3.5 border-b border-zinc-200/80 dark:border-zinc-800/80 bg-gradient-to-b from-emerald-500/5 via-transparent to-transparent">
               <div className="flex items-center gap-3 mb-2.5">
@@ -611,24 +621,25 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
         )}
       </AnimatePresence>
 
-      {typeof document !== 'undefined' && document.body && createPortal(
-        <AnimatePresence>
-          {isRequestModalOpen && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="fixed inset-0 bg-black/60 backdrop-blur-md"
-                onClick={() => setIsRequestModalOpen(false)}
-              />
-              <motion.div
-                initial={{ scale: 0.9, opacity: 0, y: 15 }}
-                animate={{ scale: 1, opacity: 1, y: 0 }}
-                exit={{ scale: 0.9, opacity: 0, y: 15 }}
-                transition={{ type: "spring", damping: 24, stiffness: 320 }}
-                className="relative my-auto w-full max-w-sm bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800/80 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[calc(100vh-2rem)] z-10"
-              >
+      <AnimatePresence>
+        {isRequestModalOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 overflow-y-auto bg-black/60 backdrop-blur-md"
+            onClick={() => setIsRequestModalOpen(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.96, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.96, opacity: 0, y: 10 }}
+              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+              style={{ willChange: 'transform, opacity' }}
+              className="relative my-auto w-full max-w-sm bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800/80 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[calc(100vh-2rem)] z-10"
+              onClick={(e) => e.stopPropagation()}
+            >
               <div className="p-4 sm:p-5 border-b border-zinc-200/80 dark:border-zinc-800/80 flex justify-between items-center bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-transparent shrink-0">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-500 text-white flex items-center justify-center shadow-md shadow-emerald-500/25 shrink-0">
@@ -650,6 +661,26 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
               </div>
 
               <div className="p-4 sm:p-5 overflow-y-auto">
+                {requestError && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="mb-4 p-3 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-xs font-semibold flex items-center gap-2"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                    <span>{requestError}</span>
+                  </motion.div>
+                )}
+                {requestSuccess && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="mb-4 p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-semibold flex items-center gap-2"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                    <span>{requestSuccess}</span>
+                  </motion.div>
+                )}
                 <form onSubmit={handleRequestSubmit} className="space-y-4">
                   <div>
                     <label className="block text-[11px] font-extrabold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">{t("Title")}</label>
@@ -665,17 +696,24 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
 
                   <div>
                     <label className="block text-[11px] font-extrabold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">{t("Type")}</label>
-                    <div className="grid grid-cols-2 gap-2 p-1 bg-zinc-100 dark:bg-zinc-950 rounded-2xl border border-zinc-200/60 dark:border-zinc-800/60">
+                    <div className="relative grid grid-cols-2 gap-1.5 p-1 bg-zinc-100 dark:bg-zinc-950 rounded-2xl border border-zinc-200/60 dark:border-zinc-800/60">
                       <button 
                         type="button" 
                         onClick={() => setNewRequest({...newRequest, type: 'movie'})} 
                         className={clsx(
-                          "py-2.5 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer", 
+                          "relative py-2.5 text-xs font-bold rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer z-10", 
                           newRequest.type === 'movie' 
-                            ? "bg-white dark:bg-zinc-800 text-emerald-600 dark:text-emerald-400 shadow-sm font-extrabold" 
+                            ? "text-emerald-600 dark:text-emerald-400 font-extrabold" 
                             : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white"
                         )}
                       >
+                        {newRequest.type === 'movie' && (
+                          <motion.div 
+                            layoutId="requestTypeIndicator"
+                            className="absolute inset-0 bg-white dark:bg-zinc-800 rounded-xl shadow-xs -z-10"
+                            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                          />
+                        )}
                         <Film className="w-3.5 h-3.5" />
                         <span>{t("Movie")}</span>
                       </button>
@@ -683,56 +721,71 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                         type="button" 
                         onClick={() => setNewRequest({...newRequest, type: 'series'})} 
                         className={clsx(
-                          "py-2.5 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer", 
+                          "relative py-2.5 text-xs font-bold rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer z-10", 
                           newRequest.type === 'series' 
-                            ? "bg-white dark:bg-zinc-800 text-emerald-600 dark:text-emerald-400 shadow-sm font-extrabold" 
+                            ? "text-emerald-600 dark:text-emerald-400 font-extrabold" 
                             : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white"
                         )}
                       >
+                        {newRequest.type === 'series' && (
+                          <motion.div 
+                            layoutId="requestTypeIndicator"
+                            className="absolute inset-0 bg-white dark:bg-zinc-800 rounded-xl shadow-xs -z-10"
+                            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                          />
+                        )}
                         <Tv className="w-3.5 h-3.5" />
                         <span>{t("Series")}</span>
                       </button>
                     </div>
                   </div>
 
-                  {newRequest.type === 'movie' && (
-                    <div>
-                      <label className="block text-[11px] font-extrabold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">{t("Year")}</label>
-                      <input
-                        type="text"
-                        className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all shadow-2xs"
-                        placeholder="e.g. 2024"
-                        value={newRequest.year}
-                        onChange={e => setNewRequest({...newRequest, year: e.target.value})}
-                        required
-                      />
-                    </div>
-                  )}
+                  <AnimatePresence initial={false}>
+                    {newRequest.type === 'movie' && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="overflow-hidden"
+                      >
+                        <label className="block text-[11px] font-extrabold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">{t("Year")}</label>
+                        <input
+                          type="text"
+                          className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl px-4 py-3 text-sm font-semibold text-zinc-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all shadow-2xs"
+                          placeholder="e.g. 2024"
+                          value={newRequest.year}
+                          onChange={e => setNewRequest({...newRequest, year: e.target.value})}
+                          required
+                        />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
 
                   <div className="flex gap-2.5 pt-2">
-                    <button 
+                    <motion.button 
+                      whileTap={{ scale: 0.96 }}
                       type="button" 
                       onClick={() => setIsRequestModalOpen(false)} 
-                      className="flex-1 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 font-bold py-3 rounded-2xl transition-all text-xs active:scale-95 cursor-pointer"
+                      className="flex-1 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 font-bold py-3 rounded-2xl transition-all text-xs cursor-pointer"
                     >
                       {t("Cancel")}
-                    </button>
-                    <button 
+                    </motion.button>
+                    <motion.button 
+                      whileTap={{ scale: 0.96 }}
                       type="submit" 
                       disabled={submittingRequest || !newRequest.title.trim() || (newRequest.type === 'movie' && !newRequest.year)} 
-                      className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-extrabold py-3 rounded-2xl transition-all disabled:opacity-50 shadow-lg shadow-emerald-500/25 active:scale-95 text-xs cursor-pointer"
+                      className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-extrabold py-3 rounded-2xl transition-all disabled:opacity-50 shadow-lg shadow-emerald-500/25 text-xs cursor-pointer"
                     >
                       {submittingRequest ? t("Submitting...") : t("Submit Request")}
-                    </button>
+                    </motion.button>
                   </div>
                 </form>
               </div>
             </motion.div>
-          </div>
-          )}
-        </AnimatePresence>,
-        document.body
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 });

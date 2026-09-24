@@ -195,6 +195,7 @@ export const VideoAdInterstitial: React.FC<VideoAdInterstitialProps> = ({
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
+        transition={{ duration: 0.3 }}
         className="fixed inset-0 z-[10000] bg-black flex flex-col items-center justify-center overflow-hidden select-none"
       >
         {/* Ad Container */}

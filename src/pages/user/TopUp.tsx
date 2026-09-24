@@ -113,7 +113,8 @@ export default function TopUp() {
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white flex flex-col transition-colors duration-300">
-      <header className="sticky top-0 z-40 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md border-b border-zinc-200/80 dark:border-zinc-800/80 transition-colors duration-300">
+      <header className="sticky top-0 z-40 border-b border-zinc-200/80 dark:border-zinc-800/80 transition-colors duration-300">
+        <div className="absolute inset-0 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md -z-10 pointer-events-none" />
         <div className="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button 

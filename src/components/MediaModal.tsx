@@ -1063,9 +1063,17 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+          transition={{ duration: 0.3 }}
+          className="fixed inset-0 bg-black/80 flex items-center justify-center z-[10000] p-4"
         >
-      <div className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl w-full max-w-3xl max-h-[90vh] flex flex-col shadow-2xl transition-colors duration-300">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.96, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.96, y: 8 }}
+            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+            style={{ willChange: 'transform, opacity' }}
+            className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl w-full max-w-3xl max-h-[90vh] flex flex-col shadow-2xl transition-colors duration-300"
+          >
         <div className="flex items-center justify-between p-4 border-b border-zinc-100 dark:border-zinc-800 transition-colors duration-300">
           <h2 className="text-lg font-semibold text-zinc-900 dark:text-white">Master Fetch</h2>
           <button onClick={onClose} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-all active:scale-95"><X className="w-5 h-5" /></button>
@@ -1383,9 +1391,9 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
             </div>
           )}
         </div>
-      </div>
+      </motion.div>
     </motion.div>
   )}
 </AnimatePresence>
-  );
+);
 };

@@ -149,14 +149,14 @@
       </div>
     </div>
     <script>
-      // Startup watchdog: if slow internet stalls script evaluation past 5 seconds, reveal recovery option
+      // Startup watchdog: if slow internet or script evaluation stalls, reveal recovery option after 3.5 seconds
       setTimeout(function() {
         var splash = document.getElementById('app-initial-splash');
         if (splash && document.getElementById('root') && document.getElementById('root').contains(splash)) {
           var note = document.getElementById('splash-slow-note');
           if (note) note.style.display = 'block';
         }
-      }, 5000);
+      }, 3500);
     </script>
 
     <!-- Semantic Crawler and Non-JS SEO Fallback: Crawlers without JS see full textual content and links -->

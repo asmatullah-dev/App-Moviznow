@@ -2760,7 +2760,8 @@ export default function ContentManagement() {
         contentId: content.id,
         posterUrl: content.posterUrl,
         type: content.type,
-        createdBy: "admin", // In a real app, this would be the admin's UID
+        createdBy: "admin",
+        sendFcm: true,
       } as any;
 
       // Add to Firestore for in-app history using chunks
@@ -2778,6 +2779,7 @@ export default function ContentManagement() {
             body,
             imageUrl: content.posterUrl,
             url: `/${content.type === 'series' ? 'series' : 'movie'}/${content.id}`,
+            sendFcm: true,
           }),
         });
       } catch (fcmError) {
@@ -3916,8 +3918,8 @@ export default function ContentManagement() {
         await Promise.all(linkPromises);
       }
 
-      seasonsToShare.forEach((season) => {
-        text += `\n📺 *Season ${season.seasonNumber}${season.year ? ` (${season.year})` : updatedContent.year ? ` (${updatedContent.year})` : ""}*\n`;
+      seasonsToShare.forEach((season, seasonIdx) => {
+        text += `${seasonIdx > 0 ? "\n" : ""}📺 *Season ${season.seasonNumber}${season.year ? ` (${season.year})` : updatedContent.year ? ` (${updatedContent.year})` : ""}*\n`;
         const zipLinks = parseLinks(JSON.stringify(season.zipLinks))
           .filter((l) => l && l.url)
           .sort((a, b) => {
@@ -4221,8 +4223,8 @@ export default function ContentManagement() {
         const parsedSeasons: Season[] = Array.isArray(content.seasons)
           ? content.seasons
           : JSON.parse(content.seasons || "[]");
-        parsedSeasons.forEach((season) => {
-          text += `\n📺 *Season ${season.seasonNumber}${season.year ? ` (${season.year})` : content.year ? ` (${content.year})` : ""}*\n`;
+        parsedSeasons.forEach((season, seasonIdx) => {
+          text += `${seasonIdx > 0 ? "\n" : ""}📺 *Season ${season.seasonNumber}${season.year ? ` (${season.year})` : content.year ? ` (${content.year})` : ""}*\n`;
           const zipLinks = parseLinks(JSON.stringify(season.zipLinks));
           const mkvLinks = parseLinks(JSON.stringify(season.mkvLinks || []));
 
@@ -6782,13 +6784,15 @@ export default function ContentManagement() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
             className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 z-[60]"
           >
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.2 }}
+              initial={{ opacity: 0, scale: 0.96, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 8 }}
+              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+              style={{ willChange: 'transform, opacity' }}
               className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl"
             >
               <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-900/50">
@@ -7115,13 +7119,15 @@ export default function ContentManagement() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
             className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4"
           >
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.2 }}
+              initial={{ opacity: 0, scale: 0.96, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 8 }}
+              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+              style={{ willChange: 'transform, opacity' }}
               className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-md w-full relative shadow-2xl"
             >
               <button
@@ -7769,7 +7775,9 @@ export default function ContentManagement() {
                 } catch (err) {
                   setAlertConfig({ isOpen: true, title: "Error", message: "Failed to copy." });
                 } finally {
-                  document.body.removeChild(textArea);
+                  try {
+                    if (textArea.parentNode) textArea.parentNode.removeChild(textArea);
+                  } catch (e) {}
                 }
               }}
               className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-2 rounded-xl font-bold transition-colors flex items-center gap-2"

@@ -76,16 +76,19 @@ export const CollectionModal: React.FC<CollectionModalProps> = React.memo(({
     return items;
   }, [collection, contentMap, collectionSort, canPlayMap]);
 
+  if (typeof document === "undefined" || !document.body) return null;
+
   return (
     <AnimatePresence>
       {collection && (
         <motion.div
           key="collection-modal"
-          initial={{ opacity: 0, y: "100%" }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: "100%" }}
-          transition={{ type: "spring", damping: 28, stiffness: 250 }}
-          className="fixed inset-0 z-[100] bg-white dark:bg-zinc-950 flex flex-col overflow-hidden"
+          initial={{ opacity: 0, scale: 0.96, y: 10 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.96, y: 10 }}
+          transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+          style={{ willChange: 'transform, opacity' }}
+          className="fixed inset-0 z-[9999] bg-white dark:bg-zinc-950 flex flex-col overflow-hidden"
         >
           <div className="shrink-0 z-50 flex items-center justify-between gap-3 p-3.5 sm:p-5 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 shadow-md">
             <div className="flex items-center gap-2.5 min-w-0 flex-1">

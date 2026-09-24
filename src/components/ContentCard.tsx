@@ -17,6 +17,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { useImdbRating } from '../hooks/useImdbRating';
 import { globalScrollState } from '../hooks/useScrollRestoration';
 import { Translate } from './Translate';
+import { recordNavigationToContent, isContentPath } from '../utils/navigation';
 
 interface ContentCardProps {
   content: Content;
@@ -64,9 +65,12 @@ const ContentCard = React.memo(({
       return;
     }
     try {
-      globalScrollState.set("home_window_scroll", window.scrollY);
-      sessionStorage.setItem("home_window_scroll", String(window.scrollY));
-      sessionStorage.setItem("last_browse_location", window.location.pathname + window.location.search);
+      const currentLoc = window.location.pathname + window.location.search;
+      if (!isContentPath(currentLoc)) {
+        globalScrollState.set("home_window_scroll", window.scrollY);
+        sessionStorage.setItem("home_window_scroll", String(window.scrollY));
+      }
+      recordNavigationToContent(currentLoc);
     } catch (err) {}
     navigate(targetPath);
   };
@@ -207,11 +211,11 @@ const ContentCard = React.memo(({
 
   return (
     <div 
-      className="group relative flex flex-col transition-transform duration-200 hover:-translate-y-1 active:scale-[0.98] cursor-pointer"
+      className="group relative flex flex-col transition-all duration-200 hover:-translate-y-1.5 active:scale-[0.98] cursor-pointer will-change-transform"
       onClick={handleCardClick}
     >
       {/* Modern Sleek Card Container */}
-      <div className="relative flex flex-col bg-white dark:bg-zinc-900/90 rounded-2xl overflow-hidden border border-zinc-200/80 dark:border-zinc-800/80 hover:border-emerald-500/50 dark:hover:border-emerald-500/50 shadow-md hover:shadow-xl hover:shadow-emerald-500/10 transition-shadow duration-200 transform-gpu backface-hidden">
+      <div className="relative flex flex-col bg-white dark:bg-zinc-900/90 rounded-2xl overflow-hidden border border-zinc-200/80 dark:border-zinc-800/80 hover:border-emerald-500/50 dark:hover:border-emerald-500/50 shadow-md hover:shadow-xl hover:shadow-emerald-500/15 transition-all duration-200 transform-gpu backface-hidden">
         {/* Clickable Poster Element */}
         <Link 
           to={targetPath}
@@ -222,9 +226,12 @@ const ContentCard = React.memo(({
               return;
             }
             try {
-              globalScrollState.set("home_window_scroll", window.scrollY);
-              sessionStorage.setItem("home_window_scroll", String(window.scrollY));
-              sessionStorage.setItem("last_browse_location", window.location.pathname + window.location.search);
+              const currentLoc = window.location.pathname + window.location.search;
+              if (!isContentPath(currentLoc)) {
+                globalScrollState.set("home_window_scroll", window.scrollY);
+                sessionStorage.setItem("home_window_scroll", String(window.scrollY));
+              }
+              recordNavigationToContent(currentLoc);
             } catch (err) {}
           }}
           className="relative aspect-[2/3] w-full bg-zinc-100 dark:bg-zinc-800 block overflow-hidden cursor-pointer select-none group/poster"
@@ -235,12 +242,12 @@ const ContentCard = React.memo(({
             fallbackSrc={defaultFallbackImage}
             alt={content.title}
             targetWidth={isSmall ? 185 : 342}
-            className="w-full h-full object-cover transition-transform duration-200 ease-out group-hover:scale-105 pointer-events-none"
+            className="w-full h-full object-cover transition-transform duration-300 ease-out group-hover:scale-105 pointer-events-none"
           />
           
           {/* Subtle Dark Vignette & Play Indicator */}
           <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/90 via-zinc-950/40 to-transparent transition-opacity duration-200 flex items-center justify-center opacity-0 group-hover:opacity-100 pointer-events-none">
-            <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-400 text-white flex items-center justify-center shadow-lg shadow-emerald-500/40 transform scale-75 group-hover:scale-100 transition-transform duration-200">
+            <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-400 text-white flex items-center justify-center shadow-lg shadow-emerald-500/40 transform scale-75 group-hover:scale-100 transition-all duration-200 ease-out">
               <Play className="w-5 h-5 sm:w-6 sm:h-6 fill-current translate-x-0.5" />
             </div>
           </div>
@@ -410,9 +417,12 @@ const ContentCard = React.memo(({
               to={targetPath} 
               onClick={() => {
                 try {
-                  globalScrollState.set("home_window_scroll", window.scrollY);
-                  sessionStorage.setItem("home_window_scroll", String(window.scrollY));
-                  sessionStorage.setItem("last_browse_location", window.location.pathname + window.location.search);
+                  const currentLoc = window.location.pathname + window.location.search;
+                  if (!isContentPath(currentLoc)) {
+                    globalScrollState.set("home_window_scroll", window.scrollY);
+                    sessionStorage.setItem("home_window_scroll", String(window.scrollY));
+                  }
+                  recordNavigationToContent(currentLoc);
                 } catch (err) {}
               }}
               className="block group/title focus:outline-none"

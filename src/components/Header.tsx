@@ -11,6 +11,7 @@ import { CartButton } from "./CartButton";
 import { UserProfileMenu } from "./UserProfileMenu";
 import { AdminButtons } from "./AdminButtons";
 import { HeaderRefreshButton } from "./HeaderRefreshButton";
+import { getContentBackTarget } from "../utils/navigation";
 
 interface HeaderProps {
   showSearchAndFilters?: boolean;
@@ -38,20 +39,21 @@ export function Header({
   const navigate = useNavigate();
 
   return (
-    <header className="sticky top-0 z-50 bg-white/85 dark:bg-zinc-950/85 backdrop-blur-xl border-b border-zinc-200/80 dark:border-zinc-800/80 shadow-sm transition-all duration-300">
+    <header className="sticky top-0 z-50 border-b border-zinc-200/80 dark:border-zinc-800/80 shadow-sm transition-all duration-300">
+      <div className="absolute inset-0 bg-white/85 dark:bg-zinc-950/85 backdrop-blur-xl -z-10 pointer-events-none" />
       <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
         <div className="flex items-center gap-2">
           {showBackButton && (
             <button
               onClick={() => {
-                sessionStorage.setItem("from_movie_details", "true");
-                const target = sessionStorage.getItem("last_browse_location") || "/";
+                const currentLoc = window.location.pathname + window.location.search;
+                const target = getContentBackTarget(currentLoc);
                 navigate(target);
               }}
-              className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors flex items-center justify-center mr-1 cursor-pointer"
+              className="group p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-all duration-200 active:scale-90 flex items-center justify-center mr-1 cursor-pointer hover:text-emerald-500"
               title={t("Back to Home")}
             >
-              <ArrowLeft className="w-5 h-5" />
+              <ArrowLeft className="w-5 h-5 transition-transform duration-200 group-hover:-translate-x-1" />
             </button>
           )}
           <Link 
@@ -70,21 +72,21 @@ export function Header({
               window.dispatchEvent(new CustomEvent("reset_home_first_page"));
               window.scrollTo({ top: 0, behavior: 'instant' as any });
             }}
-            className="flex items-center gap-2"
+            className="group flex items-center gap-2 transition-transform duration-150 active:scale-95"
           >
             <div className="flex items-center gap-2">
               <img
                 src="/Blacklogo.svg"
                 alt="Logo"
-                className="w-auto h-8 block dark:hidden"
+                className="w-auto h-8 block dark:hidden transition-transform duration-200 group-hover:scale-105"
               />
               <img
                 src="/Whitelogo.svg"
                 alt="Logo"
-                className="w-auto h-8 hidden dark:block"
+                className="w-auto h-8 hidden dark:block transition-transform duration-200 group-hover:scale-105"
               />
             </div>
-            <span className="text-xl font-bold tracking-tight text-emerald-500 whitespace-nowrap">
+            <span className="text-xl font-bold tracking-tight text-emerald-500 whitespace-nowrap transition-colors duration-200 group-hover:text-emerald-400">
               {settings?.headerText || "MovizNow"}
             </span>
           </Link>

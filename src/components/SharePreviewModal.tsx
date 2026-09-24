@@ -152,7 +152,9 @@ export default function SharePreviewModal({
         document.body.appendChild(textarea);
         textarea.select();
         document.execCommand('copy');
-        document.body.removeChild(textarea);
+        try {
+          if (textarea.parentNode) textarea.parentNode.removeChild(textarea);
+        } catch (e) {}
       }
       setCopied(true);
       setStatusNotice(t('Text copied to clipboard!'));
@@ -257,7 +259,9 @@ export default function SharePreviewModal({
           a.download = `${(contentTitle || 'poster').replace(/[^a-zA-Z0-9_-]/g, '_')}_poster.jpg`;
           document.body.appendChild(a);
           a.click();
-          document.body.removeChild(a);
+          try {
+            if (a.parentNode) a.parentNode.removeChild(a);
+          } catch (e) {}
           setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
         } catch (dlErr) {
           console.warn('Download fallback failed:', dlErr);
@@ -282,21 +286,20 @@ export default function SharePreviewModal({
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-5 overflow-y-auto bg-black/80 backdrop-blur-md">
-          {/* Backdrop click close */}
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.3 }}
+          className="fixed inset-0 z-[10000] flex items-center justify-center p-3.5 sm:p-5 overflow-y-auto bg-black/80 backdrop-blur-md"
+          onClick={onClose}
+        >
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0"
-            onClick={onClose}
-          />
-
-          <motion.div
-            initial={{ opacity: 0, scale: 0.94, y: 20 }}
+            initial={{ opacity: 0, scale: 0.96, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.94, y: 20 }}
-            transition={{ type: 'spring', damping: 25, stiffness: 350 }}
+            exit={{ opacity: 0, scale: 0.96, y: 10 }}
+            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+            style={{ willChange: 'transform, opacity' }}
             className="relative w-full max-w-xl sm:max-w-2xl my-auto bg-white dark:bg-zinc-950 border border-zinc-200/90 dark:border-zinc-800/90 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] z-10"
             onClick={(e) => e.stopPropagation()}
           >
@@ -580,7 +583,7 @@ export default function SharePreviewModal({
               </div>
             </div>
           </motion.div>
-        </div>
+        </motion.div>
       )}
     </AnimatePresence>
   );

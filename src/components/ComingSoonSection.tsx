@@ -194,21 +194,21 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className,
     Boolean(activeProfile) &&
     (searchParams.get('view_all') === 'coming_soon' || searchParams.get('v') === 'cs');
 
-  // Restore scroll position when modal opens
+  // Restore scroll position when modal opens immediately without delay
   useEffect(() => {
     if (isComingSoonViewAllOpen) {
       document.body.style.overflow = "hidden";
-      const timer = setTimeout(() => {
+      const frameId = requestAnimationFrame(() => {
         if (comingSoonScrollRef.current) {
           const savedScroll = sessionStorage.getItem("view_all_scroll_coming_soon");
           if (savedScroll) {
             comingSoonScrollRef.current.scrollTop = parseInt(savedScroll, 10);
           }
         }
-      }, 100);
+      });
       return () => {
         document.body.style.overflow = "";
-        clearTimeout(timer);
+        cancelAnimationFrame(frameId);
       };
     }
   }, [isComingSoonViewAllOpen]);
@@ -922,31 +922,43 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className,
       {/* Upcoming Detail & Media Modal */}
       <AnimatePresence>
         {selectedItem && (
-          <div className="fixed inset-0 z-[120] flex items-center justify-center p-2.5 sm:p-4 overflow-y-auto bg-black/85 backdrop-blur-md">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              transition={{ duration: 0.2 }}
-              className="relative w-full max-w-3xl my-auto bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] sm:max-h-[92vh]"
+            <div 
+              className="fixed inset-0 z-[9999] flex items-center justify-center p-2.5 sm:p-4 overflow-y-auto bg-black/85 backdrop-blur-md"
+              onClick={() => {
+                setSelectedItem(null);
+                setIsPlayingTrailer(false);
+                setTrailerUrl(null);
+                setTrailerNotFound(false);
+                setItemImages({ posters: [], backdrops: [] });
+                setTranslatedSynopsis(null);
+                setShowOriginalSynopsis(false);
+              }}
             >
-              {/* Close Button */}
-              <button
-                id="close-coming-soon-modal"
-                onClick={() => {
-                  vibrate(30);
-                  setSelectedItem(null);
-                  setIsPlayingTrailer(false);
-                  setTrailerUrl(null);
-                  setTrailerNotFound(false);
-                  setItemImages({ posters: [], backdrops: [] });
-                  setTranslatedSynopsis(null);
-                  setShowOriginalSynopsis(false);
-                }}
-                className="absolute top-3 right-3 z-40 w-9 h-9 rounded-full bg-black/80 hover:bg-black text-white flex items-center justify-center border border-white/20 transition-all active:scale-95 shadow-xl"
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                transition={{ duration: 0.2 }}
+                className="relative w-full max-w-3xl my-auto bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] sm:max-h-[92vh]"
+                onClick={(e) => e.stopPropagation()}
               >
-                <X className="w-4 h-4" />
-              </button>
+                {/* Close Button */}
+                <button
+                  id="close-coming-soon-modal"
+                  onClick={() => {
+                    vibrate(30);
+                    setSelectedItem(null);
+                    setIsPlayingTrailer(false);
+                    setTrailerUrl(null);
+                    setTrailerNotFound(false);
+                    setItemImages({ posters: [], backdrops: [] });
+                    setTranslatedSynopsis(null);
+                    setShowOriginalSynopsis(false);
+                  }}
+                  className="absolute top-3 right-3 z-40 w-9 h-9 rounded-full bg-black/80 hover:bg-black text-white flex items-center justify-center border border-white/20 transition-all active:scale-95 shadow-xl"
+                >
+                  <X className="w-4 h-4" />
+                </button>
 
               {/* TOP MEDIA GALLERY: All posters in full size portrait format */}
               {allModalImages.length > 0 && (
@@ -1180,372 +1192,397 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className,
       {/* FULLSCREEN TRAILER PLAYER MODAL */}
       <AnimatePresence>
         {isPlayingTrailer && selectedItem && (
-          <div className="fixed inset-0 z-[140] flex items-center justify-center bg-black/95 backdrop-blur-xl p-3 sm:p-6">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.2 }}
-              className="relative w-full max-w-5xl aspect-video bg-zinc-950 rounded-2xl sm:rounded-3xl border border-zinc-800 shadow-2xl overflow-hidden flex flex-col"
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+              className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/95 backdrop-blur-xl p-3 sm:p-6"
+              onClick={() => setIsPlayingTrailer(false)}
             >
-              {/* Header Bar */}
-              <div className="absolute top-3 left-3 right-3 z-50 flex items-center justify-between text-white pointer-events-auto">
-                <div className="flex items-center gap-2 bg-black/75 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-white/20">
-                  <Film className="w-4 h-4 text-amber-400" />
-                  <span className="text-xs sm:text-sm font-bold truncate max-w-[200px] sm:max-w-md">
-                    {selectedItem.title} • {t('Official Trailer')}
-                  </span>
+              <motion.div
+                initial={{ opacity: 0, scale: 0.96, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.96, y: 10 }}
+                transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                style={{ willChange: 'transform, opacity' }}
+                className="relative w-full max-w-5xl aspect-video bg-zinc-950 rounded-2xl sm:rounded-3xl border border-zinc-800 shadow-2xl overflow-hidden flex flex-col"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Header Bar */}
+                <div className="absolute top-3 left-3 right-3 z-50 flex items-center justify-between text-white pointer-events-auto">
+                  <div className="flex items-center gap-2 bg-black/75 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-white/20">
+                    <Film className="w-4 h-4 text-amber-400" />
+                    <span className="text-xs sm:text-sm font-bold truncate max-w-[200px] sm:max-w-md">
+                      {selectedItem.title} • {t('Official Trailer')}
+                    </span>
+                  </div>
+
+                  <button
+                    id="close-fullscreen-trailer-btn"
+                    onClick={() => {
+                      vibrate(20);
+                      setIsPlayingTrailer(false);
+                    }}
+                    className="w-10 h-10 rounded-full bg-black/75 hover:bg-black text-white flex items-center justify-center border border-white/20 transition-all active:scale-95 shadow-xl cursor-pointer"
+                    title={t('Close Trailer')}
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
                 </div>
 
-                <button
-                  id="close-fullscreen-trailer-btn"
-                  onClick={() => {
-                    vibrate(20);
-                    setIsPlayingTrailer(false);
-                  }}
-                  className="w-10 h-10 rounded-full bg-black/75 hover:bg-black text-white flex items-center justify-center border border-white/20 transition-all active:scale-95 shadow-xl"
-                  title={t('Close Trailer')}
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Video Player or Loading State */}
-              <div className="w-full h-full flex items-center justify-center bg-zinc-950">
-                {loadingTrailer ? (
-                  <div className="flex flex-col items-center gap-3 text-white">
-                    <div className="w-10 h-10 border-3 border-amber-500 border-t-transparent rounded-full animate-spin" />
-                    <span className="text-sm font-bold">{t('Loading Official Trailer...')}</span>
-                  </div>
-                ) : trailerUrl ? (
-                  <iframe
-                    src={getYouTubeEmbedUrl(trailerUrl) || ''}
-                    title={`${selectedItem.title} Official Trailer`}
-                    className="w-full h-full border-0"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                  />
-                ) : trailerNotFound ? (
-                  <div className="flex flex-col items-center gap-3 text-center p-6">
-                    <Film className="w-12 h-12 text-zinc-600 mb-1" />
-                    <p className="text-sm sm:text-base font-bold text-zinc-300">
-                      {t('Direct trailer embed not found on TMDB.')}
-                    </p>
-                    <a
-                      href={`https://www.youtube.com/results?search_query=${encodeURIComponent(selectedItem.title + ' ' + (selectedItem.type === 'movie' ? 'Movie' : 'Series') + ' official trailer')}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-sm font-bold flex items-center gap-2 transition-all active:scale-95 shadow-xl"
-                    >
-                      <Search className="w-4 h-4" />
-                      <span>{t('Search & Watch on YouTube')}</span>
-                    </a>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center gap-3 text-white">
-                    <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
-                  </div>
-                )}
-              </div>
+                {/* Video Player or Loading State */}
+                <div className="w-full h-full flex items-center justify-center bg-zinc-950">
+                  {loadingTrailer ? (
+                    <div className="flex flex-col items-center gap-3 text-white">
+                      <div className="w-10 h-10 border-3 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                      <span className="text-sm font-bold">{t('Loading Official Trailer...')}</span>
+                    </div>
+                  ) : trailerUrl ? (
+                    <iframe
+                      src={getYouTubeEmbedUrl(trailerUrl) || ''}
+                      title={`${selectedItem.title} Official Trailer`}
+                      className="w-full h-full border-0"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                    />
+                  ) : trailerNotFound ? (
+                    <div className="flex flex-col items-center gap-3 text-center p-6">
+                      <Film className="w-12 h-12 text-zinc-600 mb-1" />
+                      <p className="text-sm sm:text-base font-bold text-zinc-300">
+                        {t('Direct trailer embed not found on TMDB.')}
+                      </p>
+                      <a
+                        href={`https://www.youtube.com/results?search_query=${encodeURIComponent(selectedItem.title + ' ' + (selectedItem.type === 'movie' ? 'Movie' : 'Series') + ' official trailer')}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-sm font-bold flex items-center gap-2 transition-all active:scale-95 shadow-xl"
+                      >
+                        <Search className="w-4 h-4" />
+                        <span>{t('Search & Watch on YouTube')}</span>
+                      </a>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-3 text-white">
+                      <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  )}
+                </div>
+              </motion.div>
             </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+          )}
+        </AnimatePresence>
 
       {/* FULLSCREEN LIGHTBOX VIEWER FOR ALL GALLERY IMAGES WITH LOADING SPINNER */}
       <AnimatePresence>
         {fullscreenImageIndex !== null && allModalImages[fullscreenImageIndex] && (
-          <div
-            className="fixed inset-0 z-[130] flex items-center justify-center bg-black/95 backdrop-blur-lg p-2 sm:p-6 select-none"
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={handleTouchEnd}
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.2 }}
-              className="relative w-full h-full flex flex-col items-center justify-center"
+            <div
+              className="fixed inset-0 z-[10001] flex items-center justify-center bg-black/95 backdrop-blur-lg p-2 sm:p-6 select-none"
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+              onClick={() => setFullscreenImageIndex(null)}
             >
-              {/* Header Bar */}
-              <div className="absolute top-3 left-3 right-3 z-50 flex items-center justify-between text-white">
-                <div className="flex items-center gap-2 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/20">
-                  <span className="text-xs font-bold">
-                    {selectedItem?.title} • {allModalImages[fullscreenImageIndex].label}
-                  </span>
-                  <span className="text-xs text-zinc-400">
-                    ({fullscreenImageIndex + 1} / {allModalImages.length})
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      vibrate(20);
-                      setFullscreenImageIndex(null);
-                    }}
-                    className="w-10 h-10 rounded-full bg-black/60 hover:bg-black text-white flex items-center justify-center border border-white/20 transition-all active:scale-95 cursor-pointer"
-                    title={t('Close Fullscreen')}
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Main Fullscreen Image with Loading Spinner */}
-              <div className="relative max-w-full max-h-[85vh] flex items-center justify-center overflow-hidden p-2">
-                {isLightboxImageLoading && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center z-20 bg-black/40 backdrop-blur-sm rounded-xl">
-                    <div className="w-10 h-10 border-3 border-amber-500 border-t-transparent rounded-full animate-spin mb-2" />
-                    <span className="text-xs font-bold text-white tracking-wide">
-                      {t('Loading Image...')}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                transition={{ duration: 0.2 }}
+                className="relative w-full h-full flex flex-col items-center justify-center"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Header Bar */}
+                <div className="absolute top-3 left-3 right-3 z-50 flex items-center justify-between text-white">
+                  <div className="flex items-center gap-2 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/20">
+                    <span className="text-xs font-bold">
+                      {selectedItem?.title} • {allModalImages[fullscreenImageIndex].label}
+                    </span>
+                    <span className="text-xs text-zinc-400">
+                      ({fullscreenImageIndex + 1} / {allModalImages.length})
                     </span>
                   </div>
-                )}
-                <img
-                  src={allModalImages[fullscreenImageIndex].url}
-                  alt={`${selectedItem?.title} Fullscreen ${fullscreenImageIndex + 1}`}
-                  onLoad={() => setIsLightboxImageLoading(false)}
-                  onError={() => setIsLightboxImageLoading(false)}
-                  className={clsx(
-                    "max-w-full max-h-[82vh] object-contain rounded-xl sm:rounded-2xl shadow-2xl transition-opacity duration-300",
-                    isLightboxImageLoading ? "opacity-30" : "opacity-100"
-                  )}
-                />
-              </div>
 
-              {/* Previous / Next Buttons */}
-              {allModalImages.length > 1 && (
-                <>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      vibrate(20);
-                      setIsLightboxImageLoading(true);
-                      setFullscreenImageIndex((prev) =>
-                        prev === null ? 0 : (prev - 1 + allModalImages.length) % allModalImages.length
-                      );
-                    }}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 w-11 h-11 sm:w-13 sm:h-13 rounded-full bg-black/70 hover:bg-amber-500 hover:text-black text-white border border-white/20 flex items-center justify-center transition-all active:scale-95 shadow-xl cursor-pointer"
-                  >
-                    <ChevronLeft className="w-6 h-6" />
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      vibrate(20);
-                      setIsLightboxImageLoading(true);
-                      setFullscreenImageIndex((prev) =>
-                        prev === null ? 0 : (prev + 1) % allModalImages.length
-                      );
-                    }}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 w-11 h-11 sm:w-13 sm:h-13 rounded-full bg-black/70 hover:bg-amber-500 hover:text-black text-white border border-white/20 flex items-center justify-center transition-all active:scale-95 shadow-xl cursor-pointer"
-                  >
-                    <ChevronRight className="w-6 h-6" />
-                  </button>
-                </>
-              )}
-
-              {/* Bottom Thumbnail Strip */}
-              {allModalImages.length > 1 && (
-                <div
-                  className="absolute bottom-4 left-1/2 -translate-x-1/2 max-w-[90vw] overflow-x-auto p-1.5 rounded-2xl bg-black/70 backdrop-blur-md border border-white/15 flex gap-2 hide-scrollbar"
-                  onClick={(e) => e.stopPropagation()}
-                  onTouchStart={(e) => e.stopPropagation()}
-                  onTouchMove={(e) => e.stopPropagation()}
-                  onTouchEnd={(e) => e.stopPropagation()}
-                >
-                  {allModalImages.map((img, i) => (
+                  <div className="flex items-center gap-2">
                     <button
-                      key={i}
                       onClick={() => {
-                        if (i !== fullscreenImageIndex) {
-                          vibrate(20);
-                          setIsLightboxImageLoading(true);
-                          setFullscreenImageIndex(i);
-                        }
+                        vibrate(20);
+                        setFullscreenImageIndex(null);
                       }}
-                      className={clsx(
-                        "w-10 h-14 sm:w-12 sm:h-16 rounded-lg overflow-hidden shrink-0 border-2 transition-all cursor-pointer",
-                        i === fullscreenImageIndex
-                          ? "border-amber-400 dark:border-amber-400 scale-110 shadow-lg shadow-amber-500/30 opacity-100"
-                          : "border-zinc-500 dark:border-zinc-500 opacity-80 hover:opacity-100 hover:border-zinc-300"
-                      )}
+                      className="w-10 h-10 rounded-full bg-black/60 hover:bg-black text-white flex items-center justify-center border border-white/20 transition-all active:scale-95 cursor-pointer"
+                      title={t('Close Fullscreen')}
                     >
-                      <img src={getOptimizedImageUrl(img.url, 100)} alt="" className="w-full h-full object-cover" />
+                      <X className="w-5 h-5" />
                     </button>
-                  ))}
+                  </div>
                 </div>
-              )}
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+
+                {/* Main Fullscreen Image with Loading Spinner */}
+                <div className="relative max-w-full max-h-[85vh] flex items-center justify-center overflow-hidden p-2">
+                  {isLightboxImageLoading && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center z-20 bg-black/40 backdrop-blur-sm rounded-xl">
+                      <div className="w-10 h-10 border-3 border-amber-500 border-t-transparent rounded-full animate-spin mb-2" />
+                      <span className="text-xs font-bold text-white tracking-wide">
+                        {t('Loading Image...')}
+                      </span>
+                    </div>
+                  )}
+                  <img
+                    src={allModalImages[fullscreenImageIndex].url}
+                    alt={`${selectedItem?.title} Fullscreen ${fullscreenImageIndex + 1}`}
+                    onLoad={() => setIsLightboxImageLoading(false)}
+                    onError={() => setIsLightboxImageLoading(false)}
+                    className={clsx(
+                      "max-w-full max-h-[82vh] object-contain rounded-xl sm:rounded-2xl shadow-2xl transition-opacity duration-300",
+                      isLightboxImageLoading ? "opacity-30" : "opacity-100"
+                    )}
+                  />
+                </div>
+
+                {/* Previous / Next Buttons */}
+                {allModalImages.length > 1 && (
+                  <>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        vibrate(20);
+                        setIsLightboxImageLoading(true);
+                        setFullscreenImageIndex((prev) =>
+                          prev === null ? 0 : (prev - 1 + allModalImages.length) % allModalImages.length
+                        );
+                      }}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 w-11 h-11 sm:w-13 sm:h-13 rounded-full bg-black/70 hover:bg-amber-500 hover:text-black text-white border border-white/20 flex items-center justify-center transition-all active:scale-95 shadow-xl cursor-pointer"
+                    >
+                      <ChevronLeft className="w-6 h-6" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        vibrate(20);
+                        setIsLightboxImageLoading(true);
+                        setFullscreenImageIndex((prev) =>
+                          prev === null ? 0 : (prev + 1) % allModalImages.length
+                        );
+                      }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 w-11 h-11 sm:w-13 sm:h-13 rounded-full bg-black/70 hover:bg-amber-500 hover:text-black text-white border border-white/20 flex items-center justify-center transition-all active:scale-95 shadow-xl cursor-pointer"
+                    >
+                      <ChevronRight className="w-6 h-6" />
+                    </button>
+                  </>
+                )}
+
+                {/* Bottom Thumbnail Strip */}
+                {allModalImages.length > 1 && (
+                  <div
+                    className="absolute bottom-4 left-1/2 -translate-x-1/2 max-w-[90vw] overflow-x-auto p-1.5 rounded-2xl bg-black/70 backdrop-blur-md border border-white/15 flex gap-2 hide-scrollbar"
+                    onClick={(e) => e.stopPropagation()}
+                    onTouchStart={(e) => e.stopPropagation()}
+                    onTouchMove={(e) => e.stopPropagation()}
+                    onTouchEnd={(e) => e.stopPropagation()}
+                  >
+                    {allModalImages.map((img, i) => (
+                      <button
+                        key={i}
+                        onClick={() => {
+                          if (i !== fullscreenImageIndex) {
+                            vibrate(20);
+                            setIsLightboxImageLoading(true);
+                            setFullscreenImageIndex(i);
+                          }
+                        }}
+                        className={clsx(
+                          "w-10 h-14 sm:w-12 sm:h-16 rounded-lg overflow-hidden shrink-0 border-2 transition-all cursor-pointer",
+                          i === fullscreenImageIndex
+                            ? "border-amber-400 dark:border-amber-400 scale-110 shadow-lg shadow-amber-500/30 opacity-100"
+                            : "border-zinc-500 dark:border-zinc-500 opacity-80 hover:opacity-100 hover:border-zinc-300"
+                        )}
+                      >
+                        <img src={getOptimizedImageUrl(img.url, 100)} alt="" className="w-full h-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
 
       {/* Coming Soon View All Modal Grid */}
       <AnimatePresence>
         {isComingSoonViewAllOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 15 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              transition={{ duration: 0.25, ease: "easeOut" }}
-              className="relative w-full max-w-7xl h-[90vh] bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl overflow-hidden flex flex-col shadow-2xl"
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+              className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md"
+              onClick={() => {
+                const updated = new URLSearchParams(searchParams);
+                updated.delete("view_all");
+                updated.delete("v");
+                setSearchParams(updated);
+              }}
             >
-              {/* Header */}
-              <div className="flex items-center justify-between p-5 sm:p-6 border-b border-zinc-200/80 dark:border-zinc-800/80 shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 sm:p-2.5 rounded-xl bg-gradient-to-tr from-amber-500/20 to-orange-500/10 border border-amber-500/30 text-amber-500 shadow-sm shrink-0">
-                    <Calendar className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h2 className="text-xl font-black text-zinc-900 dark:text-white flex items-center gap-2">
-                      {t('Coming Soon')}
-                      <span className="text-xs font-bold text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
-                        {visibleItems.length} {t("items")}
-                      </span>
-                    </h2>
-                    <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-                      {t('Upcoming digital & OTT releases starting from today')}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => {
-                      const updated = new URLSearchParams(searchParams);
-                      updated.delete("view_all");
-                      updated.delete("v");
-                      setSearchParams(updated);
-                    }}
-                    className="p-2 rounded-full bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 transition-colors cursor-pointer"
-                    title={t("Close")}
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Grid content */}
-              <div
-                ref={comingSoonScrollRef}
-                onScroll={(e) => {
-                  sessionStorage.setItem("view_all_scroll_coming_soon", e.currentTarget.scrollTop.toString());
-                }}
-                className="flex-1 overflow-y-auto p-5 sm:p-6 custom-scrollbar"
+              <motion.div
+                initial={{ opacity: 0, scale: 0.96, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.96, y: 10 }}
+                transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                style={{ willChange: 'transform, opacity' }}
+                className="relative w-full max-w-7xl h-[92vh] max-h-[92vh] bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl overflow-hidden flex flex-col shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
               >
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-5 pb-6">
-                  {visibleItems.map((item) => {
-                    const daysLeft = item.hasOttDate && item.releaseDate ? getDaysUntilRelease(item.releaseDate) : null;
-                    const typeLabel = item.type === 'movie' ? 'Movie' : 'Series';
+                {/* Header */}
+                <div className="flex items-center justify-between p-4 sm:p-6 border-b border-zinc-200/80 dark:border-zinc-800/80 shrink-0">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 sm:p-2.5 rounded-xl bg-gradient-to-tr from-amber-500/20 to-orange-500/10 border border-amber-500/30 text-amber-500 shadow-sm shrink-0">
+                      <Calendar className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg sm:text-xl font-black text-zinc-900 dark:text-white flex items-center gap-2">
+                        {t('Coming Soon')}
+                        <span className="text-xs font-bold text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+                          {visibleItems.length} {t("items")}
+                        </span>
+                      </h2>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium line-clamp-1">
+                        {t('Upcoming digital & OTT releases starting from today')}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => {
+                        const updated = new URLSearchParams(searchParams);
+                        updated.delete("view_all");
+                        updated.delete("v");
+                        setSearchParams(updated);
+                      }}
+                      className="p-2 rounded-full bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 transition-colors cursor-pointer active:scale-95"
+                      title={t("Close")}
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                </div>
 
-                    return (
-                      <div
-                        key={`${item.type}-${item.id}`}
-                        onClick={() => handleOpenItem(item)}
-                        className="group relative flex flex-col h-full rounded-xl overflow-hidden bg-white dark:bg-zinc-900 border border-zinc-200/90 dark:border-zinc-800/90 hover:border-amber-500/50 dark:hover:border-amber-500/50 shadow-sm hover:shadow-xl hover:shadow-amber-500/10 transition-all duration-300 cursor-pointer transform-gpu"
-                      >
-                        {/* Poster Thumbnail */}
-                        <div className="relative aspect-[2/3] w-full overflow-hidden bg-zinc-100 dark:bg-zinc-950">
-                          {item.posterPath ? (
-                            <img
-                              src={getOptimizedImageUrl(item.posterPath, 342)}
-                              alt={item.title}
-                              loading="lazy"
-                              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex flex-col items-center justify-center text-zinc-400 bg-zinc-800/40 p-2 text-center">
-                              <Film className="w-8 h-8 mb-2 opacity-30" />
-                              <span className="text-[10px] font-medium">{t('No Poster')}</span>
+                {/* Grid content */}
+                <div
+                  ref={comingSoonScrollRef}
+                  onScroll={(e) => {
+                    sessionStorage.setItem("view_all_scroll_coming_soon", e.currentTarget.scrollTop.toString());
+                  }}
+                  className="flex-1 overflow-y-auto p-4 sm:p-6 custom-scrollbar"
+                >
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-5 pb-6">
+                    {visibleItems.map((item) => {
+                      const daysLeft = item.hasOttDate && item.releaseDate ? getDaysUntilRelease(item.releaseDate) : null;
+                      const typeLabel = item.type === 'movie' ? 'Movie' : 'Series';
+
+                      return (
+                        <div
+                          key={`${item.type}-${item.id}`}
+                          onClick={() => handleOpenItem(item)}
+                          className="group relative flex flex-col h-full rounded-xl overflow-hidden bg-white dark:bg-zinc-900 border border-zinc-200/90 dark:border-zinc-800/90 hover:border-amber-500/50 dark:hover:border-amber-500/50 shadow-sm hover:shadow-xl hover:shadow-amber-500/10 transition-all duration-300 cursor-pointer transform-gpu"
+                        >
+                          {/* Poster Thumbnail */}
+                          <div className="relative aspect-[2/3] w-full overflow-hidden bg-zinc-100 dark:bg-zinc-950">
+                            {item.posterPath ? (
+                              <img
+                                src={getOptimizedImageUrl(item.posterPath, 342)}
+                                alt={item.title}
+                                loading="lazy"
+                                className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex flex-col items-center justify-center text-zinc-400 bg-zinc-800/40 p-2 text-center">
+                                <Film className="w-8 h-8 mb-2 opacity-30" />
+                                <span className="text-[10px] font-medium">{t('No Poster')}</span>
+                              </div>
+                            )}
+
+                            {/* Gradient Overlay */}
+                            <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/25 to-transparent opacity-85 group-hover:opacity-95 transition-opacity" />
+
+                            {/* Top Left: Star Rating Badge */}
+                            {item.voteAverage > 0 && (
+                              <div className="absolute top-2 left-2 z-10 pointer-events-none">
+                                <div className="flex items-center gap-1 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg bg-black/85 text-yellow-400 border border-yellow-500/40 backdrop-blur-md shadow-lg">
+                                  <Star className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-yellow-400 text-yellow-400 shrink-0" />
+                                  <span className="font-black text-xs sm:text-sm text-amber-300 dark:text-yellow-400 leading-none">
+                                    {item.voteAverage.toFixed(1)}
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Top Right: Type Badge & OTT Platform Label */}
+                            <div className="absolute top-2 right-2 flex flex-col items-end gap-1 z-10 pointer-events-none">
+                              <span
+                                className={clsx(
+                                  "px-2 py-0.5 rounded-md font-extrabold uppercase tracking-wider text-white shadow-md border border-white/20 text-[9px] sm:text-[10px]",
+                                  item.type === 'movie' ? 'bg-blue-600' : 'bg-purple-600'
+                                )}
+                              >
+                                {typeLabel}
+                              </span>
+                              {item.ottPlatform ? (
+                                <OttBadge platform={item.ottPlatform} />
+                              ) : (
+                                <span className="px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-black/75 text-amber-400 border border-amber-500/30 backdrop-blur-md flex items-center gap-1">
+                                  <Tv2 className="w-2.5 h-2.5" />
+                                  OTT
+                                </span>
+                              )}
                             </div>
-                          )}
 
-                          {/* Gradient Overlay */}
-                          <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/25 to-transparent opacity-85 group-hover:opacity-95 transition-opacity" />
+                            {/* Hover indicator */}
+                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 backdrop-blur-[2px]">
+                              <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-amber-500 to-orange-400 text-black flex items-center justify-center shadow-lg shadow-amber-500/40 transform group-hover:scale-110 transition-transform">
+                                <Play className="w-5 h-5 fill-current ml-0.5" />
+                              </div>
+                            </div>
 
-                          {/* Top Left: Star Rating Badge */}
-                          {item.voteAverage > 0 && (
-                            <div className="absolute top-2 left-2 z-10 pointer-events-none">
-                              <div className="flex items-center gap-1 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg bg-black/85 text-yellow-400 border border-yellow-500/40 backdrop-blur-md shadow-lg">
-                                <Star className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-yellow-400 text-yellow-400 shrink-0" />
-                                <span className="font-black text-xs sm:text-sm text-amber-300 dark:text-yellow-400 leading-none">
-                                  {item.voteAverage.toFixed(1)}
+                            {/* OTT Release Date & Countdown at Bottom of Poster */}
+                            <div className="absolute bottom-2 left-2 right-2 flex flex-col gap-0.5 pointer-events-none">
+                              {daysLeft && (
+                                <span className="text-[9px] sm:text-[10px] font-extrabold uppercase tracking-wide text-amber-300 drop-shadow-md flex items-center gap-1">
+                                  <Sparkles className="w-2.5 h-2.5" />
+                                  {daysLeft}
+                                </span>
+                              )}
+                              <div className="flex items-center gap-1 text-[11px] sm:text-xs font-bold text-white drop-shadow-md">
+                                <Calendar className="w-3 h-3 text-amber-400 shrink-0" />
+                                <span className="truncate">
+                                  {item.hasOttDate && item.releaseDate
+                                    ? `OTT: ${formatReleaseDate(item.releaseDate)}`
+                                    : t('OTT Date TBA')}
                                 </span>
                               </div>
                             </div>
-                          )}
+                          </div>
 
-                          {/* Top Right: Type Badge & OTT Platform Label */}
-                          <div className="absolute top-2 right-2 flex flex-col items-end gap-1 z-10 pointer-events-none">
-                            <span
-                              className={clsx(
-                                "px-2 py-0.5 rounded-md font-extrabold uppercase tracking-wider text-white shadow-md border border-white/20 text-[9px] sm:text-[10px]",
-                                item.type === 'movie' ? 'bg-blue-600' : 'bg-purple-600'
+                          {/* Card Info */}
+                          <div className="p-3 flex-1 flex flex-col justify-between">
+                            <div>
+                              <h3 className="font-bold text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 line-clamp-1 group-hover:text-amber-500 transition-colors">
+                                {item.title}
+                              </h3>
+                              {item.genres && item.genres.length > 0 && (
+                                <p className="text-[10px] text-zinc-500 dark:text-zinc-400 line-clamp-1 mt-0.5 font-medium">
+                                  {item.genres.slice(0, 2).join(' • ')}
+                                </p>
                               )}
-                            >
-                              {typeLabel}
-                            </span>
-                            {item.ottPlatform ? (
-                              <OttBadge platform={item.ottPlatform} />
-                            ) : (
-                              <span className="px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-black/75 text-amber-400 border border-amber-500/30 backdrop-blur-md flex items-center gap-1">
-                                <Tv2 className="w-2.5 h-2.5" />
-                                OTT
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Hover indicator */}
-                          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 backdrop-blur-[2px]">
-                            <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-amber-500 to-orange-400 text-black flex items-center justify-center shadow-lg shadow-amber-500/40 transform group-hover:scale-110 transition-transform">
-                              <Play className="w-5 h-5 fill-current ml-0.5" />
-                            </div>
-                          </div>
-
-                          {/* OTT Release Date & Countdown at Bottom of Poster */}
-                          <div className="absolute bottom-2 left-2 right-2 flex flex-col gap-0.5 pointer-events-none">
-                            {daysLeft && (
-                              <span className="text-[9px] sm:text-[10px] font-extrabold uppercase tracking-wide text-amber-300 drop-shadow-md flex items-center gap-1">
-                                <Sparkles className="w-2.5 h-2.5" />
-                                {daysLeft}
-                              </span>
-                            )}
-                            <div className="flex items-center gap-1 text-[11px] sm:text-xs font-bold text-white drop-shadow-md">
-                              <Calendar className="w-3 h-3 text-amber-400 shrink-0" />
-                              <span className="truncate">
-                                {item.hasOttDate && item.releaseDate
-                                  ? `OTT: ${formatReleaseDate(item.releaseDate)}`
-                                  : t('OTT Date TBA')}
-                              </span>
                             </div>
                           </div>
                         </div>
-
-                        {/* Card Info */}
-                        <div className="p-3 flex-1 flex flex-col justify-between">
-                          <div>
-                            <h3 className="font-bold text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 line-clamp-1 group-hover:text-amber-500 transition-colors">
-                              {item.title}
-                            </h3>
-                            {item.genres && item.genres.length > 0 && (
-                              <p className="text-[10px] text-zinc-500 dark:text-zinc-400 line-clamp-1 mt-0.5 font-medium">
-                                {item.genres.slice(0, 2).join(' • ')}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              </motion.div>
             </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+          )}
+        </AnimatePresence>
 
       {/* Share Preview Modal */}
       <SharePreviewModal
