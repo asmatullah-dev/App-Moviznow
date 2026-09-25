@@ -3714,7 +3714,7 @@ export default function ContentManagement() {
 
                 if (isUpcoming) {
                   const upDateStr = airDateStr ? ` [${airDateStr}]` : "";
-                  text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${upDateStr}\n(Coming Soon)\n`;
+                  text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${upDateStr}\n   (Coming Soon)\n`;
                 } else if (link) {
                   const finalUrl = link.tinyUrl || link.url;
                   if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
@@ -3733,7 +3733,7 @@ export default function ContentManagement() {
 
                 if (isUpcoming) {
                   const upDateStr = airDateStr ? ` [${airDateStr}]` : "";
-                  text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${upDateStr}\n(Coming Soon)\n`;
+                  text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${upDateStr}\n   (Coming Soon)\n`;
                 } else {
                   text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${datePart}\n`;
                   epLinks.forEach((link) => {
@@ -4111,7 +4111,7 @@ export default function ContentManagement() {
 
               if (isUpcoming) {
                 const upDateStr = airDateStr ? ` [${airDateStr}]` : "";
-                text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${upDateStr}\n(Coming Soon)\n`;
+                text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${upDateStr}\n   (Coming Soon)\n`;
               } else if (link) {
                 const finalUrl = link.tinyUrl || link.url;
                 if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
@@ -4130,7 +4130,7 @@ export default function ContentManagement() {
 
               if (isUpcoming) {
                 const upDateStr = airDateStr ? ` [${airDateStr}]` : "";
-                text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${upDateStr}\n(Coming Soon)\n`;
+                text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${upDateStr}\n   (Coming Soon)\n`;
               } else {
                 text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${datePart}\n`;
                 epLinks.sort((a, b) => {
