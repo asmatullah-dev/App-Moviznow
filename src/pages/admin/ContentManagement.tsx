@@ -3689,7 +3689,7 @@ export default function ContentManagement() {
               const epLinks = parseLinks(JSON.stringify(ep.links || [])).filter((l: any) => l && l.url);
               return !ep.isUpcoming && epLinks.length > 0;
             });
-            const allEpLinks = episodesList.flatMap((ep) =>
+            const allEpLinks = availableEpisodes.flatMap((ep) =>
               parseLinks(JSON.stringify(ep.links || [])).filter((l) => l && l.url),
             );
             const uniqueQualities = [...new Set(allEpLinks.map((l) => l.name).filter(Boolean))];
@@ -3702,39 +3702,30 @@ export default function ContentManagement() {
                     .length === 1,
               );
 
-            if (hasUniformQuality) {
-              text += `\n🎬 *Episodes (${uniqueQualities[0]}):*\n`;
-              episodesList.forEach((ep) => {
-                const epLinks = parseLinks(JSON.stringify(ep.links || [])).filter((l) => l && l.url);
-                const link = epLinks[0];
-                const rawDate = ep.airDate;
-                const airDateStr = rawDate ? formatDateToMonDDYYYY(rawDate) : "";
-                const datePart = areAirDatesDifferent && airDateStr ? ` [${airDateStr}]` : "";
-                const isUpcoming = ep.isUpcoming || epLinks.length === 0;
+            if (availableEpisodes.length > 0) {
+              if (hasUniformQuality) {
+                text += `\n🎬 *Episodes (${uniqueQualities[0]}):*\n`;
+                availableEpisodes.forEach((ep) => {
+                  const epLinks = parseLinks(JSON.stringify(ep.links || [])).filter((l) => l && l.url);
+                  const link = epLinks[0];
+                  const rawDate = ep.airDate;
+                  const airDateStr = rawDate ? formatDateToMonDDYYYY(rawDate) : "";
+                  const datePart = areAirDatesDifferent && airDateStr ? ` [${airDateStr}]` : "";
 
-                if (isUpcoming) {
-                  const upDateStr = airDateStr ? ` [${airDateStr}]` : "";
-                  text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${upDateStr}\n   (Coming Soon)\n`;
-                } else if (link) {
-                  const finalUrl = link.tinyUrl || link.url;
-                  if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
-                    text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${datePart} (${link.size}${link.unit})\n${finalUrl}\n`;
+                  if (link) {
+                    const finalUrl = link.tinyUrl || link.url;
+                    if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
+                      text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${datePart} (${link.size}${link.unit})\n${finalUrl}\n`;
+                    }
                   }
-                }
-              });
-            } else {
-              text += `\n🎬 *Episodes:*\n`;
-              episodesList.forEach((ep) => {
-                const epLinks = parseLinks(JSON.stringify(ep.links || [])).filter((l) => l && l.url);
-                const rawDate = ep.airDate;
-                const airDateStr = rawDate ? formatDateToMonDDYYYY(rawDate) : "";
-                const datePart = areAirDatesDifferent && airDateStr ? ` [${airDateStr}]` : "";
-                const isUpcoming = ep.isUpcoming || epLinks.length === 0;
-
-                if (isUpcoming) {
-                  const upDateStr = airDateStr ? ` [${airDateStr}]` : "";
-                  text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${upDateStr}\n   (Coming Soon)\n`;
-                } else {
+                });
+              } else {
+                text += `\n🎬 *Episodes:*\n`;
+                availableEpisodes.forEach((ep) => {
+                  const epLinks = parseLinks(JSON.stringify(ep.links || [])).filter((l) => l && l.url);
+                  const rawDate = ep.airDate;
+                  const airDateStr = rawDate ? formatDateToMonDDYYYY(rawDate) : "";
+                  const datePart = areAirDatesDifferent && airDateStr ? ` [${airDateStr}]` : "";
                   text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${datePart}\n`;
                   epLinks.forEach((link) => {
                     const finalUrl = link.tinyUrl || link.url;
@@ -3742,6 +3733,25 @@ export default function ContentManagement() {
                       text += `- ${link.name} (${link.size}${link.unit})\n${finalUrl}\n`;
                     }
                   });
+                });
+              }
+            }
+
+            const upcomingEpisodes = episodesList.filter((ep: any) => {
+              const epLinks = parseLinks(JSON.stringify(ep.links || [])).filter((l: any) => l && l.url);
+              return ep.isUpcoming || epLinks.length === 0;
+            });
+
+            if (upcomingEpisodes.length > 0) {
+              text += `\n🗓️ *Upcoming Schedule:*\n`;
+              upcomingEpisodes.forEach((ep) => {
+                const rawDate = ep.airDate;
+                const airDateStr = rawDate ? formatDateToMonDDYYYY(rawDate) : "";
+                const durStr = ep.duration ? ` (${ep.duration})` : "";
+                if (airDateStr) {
+                  text += `E${ep.episodeNumber}: ${ep.title}${durStr} — ${airDateStr}\n`;
+                } else {
+                  text += `E${ep.episodeNumber}: ${ep.title}${durStr} — Coming Soon\n`;
                 }
               });
             }
@@ -4086,7 +4096,7 @@ export default function ContentManagement() {
             const epLinks = parseLinks(JSON.stringify(ep.links || [])).filter((l: any) => l && l.url);
             return !ep.isUpcoming && epLinks.length > 0;
           });
-          const allEpLinks = episodesList.flatMap((ep) =>
+          const allEpLinks = availableEpisodes.flatMap((ep) =>
             parseLinks(JSON.stringify(ep.links)).filter((l) => l && l.url),
           );
           const uniqueQualities = [...new Set(allEpLinks.map((l) => l.name).filter(Boolean))];
@@ -4099,39 +4109,30 @@ export default function ContentManagement() {
                   .length === 1,
             );
 
-          if (hasUniformQuality) {
-            text += `\n🎬 *Episodes (${uniqueQualities[0]}):*\n`;
-            episodesList.forEach((ep) => {
-              const epLinks = parseLinks(JSON.stringify(ep.links)).filter((l) => l && l.url);
-              const link = epLinks[0];
-              const rawDate = ep.airDate;
-              const airDateStr = rawDate ? formatDateToMonDDYYYY(rawDate) : "";
-              const datePart = areAirDatesDifferent && airDateStr ? ` [${airDateStr}]` : "";
-              const isUpcoming = ep.isUpcoming || epLinks.length === 0;
+          if (availableEpisodes.length > 0) {
+            if (hasUniformQuality) {
+              text += `\n🎬 *Episodes (${uniqueQualities[0]}):*\n`;
+              availableEpisodes.forEach((ep) => {
+                const epLinks = parseLinks(JSON.stringify(ep.links)).filter((l) => l && l.url);
+                const link = epLinks[0];
+                const rawDate = ep.airDate;
+                const airDateStr = rawDate ? formatDateToMonDDYYYY(rawDate) : "";
+                const datePart = areAirDatesDifferent && airDateStr ? ` [${airDateStr}]` : "";
 
-              if (isUpcoming) {
-                const upDateStr = airDateStr ? ` [${airDateStr}]` : "";
-                text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${upDateStr}\n   (Coming Soon)\n`;
-              } else if (link) {
-                const finalUrl = link.tinyUrl || link.url;
-                if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
-                  text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${datePart} (${link.size}${link.unit})\n${finalUrl}\n`;
+                if (link) {
+                  const finalUrl = link.tinyUrl || link.url;
+                  if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
+                    text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${datePart} (${link.size}${link.unit})\n${finalUrl}\n`;
+                  }
                 }
-              }
-            });
-          } else {
-            text += `\n🎬 *Episodes:*\n`;
-            episodesList.forEach((ep) => {
-              const epLinks = parseLinks(JSON.stringify(ep.links)).filter((l) => l && l.url);
-              const rawDate = ep.airDate;
-              const airDateStr = rawDate ? formatDateToMonDDYYYY(rawDate) : "";
-              const datePart = areAirDatesDifferent && airDateStr ? ` [${airDateStr}]` : "";
-              const isUpcoming = ep.isUpcoming || epLinks.length === 0;
-
-              if (isUpcoming) {
-                const upDateStr = airDateStr ? ` [${airDateStr}]` : "";
-                text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${upDateStr}\n   (Coming Soon)\n`;
-              } else {
+              });
+            } else {
+              text += `\n🎬 *Episodes:*\n`;
+              availableEpisodes.forEach((ep) => {
+                const epLinks = parseLinks(JSON.stringify(ep.links)).filter((l) => l && l.url);
+                const rawDate = ep.airDate;
+                const airDateStr = rawDate ? formatDateToMonDDYYYY(rawDate) : "";
+                const datePart = areAirDatesDifferent && airDateStr ? ` [${airDateStr}]` : "";
                 text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${datePart}\n`;
                 epLinks.sort((a, b) => {
                   const pA = getLinkPriority(a);
@@ -4146,6 +4147,25 @@ export default function ContentManagement() {
                     }
                   }
                 });
+              });
+            }
+          }
+
+          const upcomingEpisodes = episodesList.filter((ep: any) => {
+            const epLinks = parseLinks(JSON.stringify(ep.links || [])).filter((l: any) => l && l.url);
+            return ep.isUpcoming || epLinks.length === 0;
+          });
+
+          if (upcomingEpisodes.length > 0) {
+            text += `\n🗓️ *Upcoming Schedule:*\n`;
+            upcomingEpisodes.forEach((ep) => {
+              const rawDate = ep.airDate;
+              const airDateStr = rawDate ? formatDateToMonDDYYYY(rawDate) : "";
+              const durStr = ep.duration ? ` (${ep.duration})` : "";
+              if (airDateStr) {
+                text += `E${ep.episodeNumber}: ${ep.title}${durStr} — ${airDateStr}\n`;
+              } else {
+                text += `E${ep.episodeNumber}: ${ep.title}${durStr} — Coming Soon\n`;
               }
             });
           }
