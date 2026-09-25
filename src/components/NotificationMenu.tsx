@@ -6,6 +6,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { formatDistanceToNow } from 'date-fns';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import { popoverAnimation, modalGpuStyle } from '../utils/modalAnimations';
 
 interface NotificationMenuProps {}
 
@@ -92,11 +93,8 @@ export const NotificationMenu = React.memo(() => {
       <AnimatePresence>
         {isOpen && (
           <motion.div 
-            initial={{ scale: 0.95, opacity: 0, y: -4 }}
-            animate={{ scale: 1, opacity: 1, y: 0 }}
-            exit={{ scale: 0.95, opacity: 0, y: -4 }}
-            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-            style={{ transformOrigin: 'top right', willChange: 'transform, opacity' }}
+            {...popoverAnimation}
+            style={{ ...modalGpuStyle, transformOrigin: 'top right' }}
             className="absolute right-0 top-full mt-2 w-80 sm:w-96 max-w-[calc(100vw-1.5rem)] bg-white/95 dark:bg-zinc-900/95 backdrop-blur-2xl border border-zinc-200/80 dark:border-zinc-800/80 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[75vh] z-[100]"
           >
             <div className="p-4 sm:p-5 border-b border-zinc-200/80 dark:border-zinc-800/80 flex items-center justify-between bg-zinc-50/80 dark:bg-zinc-950/80 shrink-0">

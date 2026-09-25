@@ -17,6 +17,11 @@ import {
 } from 'lucide-react';
 import { useModalBehavior } from '../hooks/useModalBehavior';
 import { useHaptics } from '../hooks/useHaptics';
+import {
+  modalBackdropAnimation,
+  modalContainerAnimation,
+  modalGpuStyle,
+} from '../utils/modalAnimations';
 import { useAdminContent } from '../contexts/AdminContentContext';
 import { Content, Language, Quality, QualityLinks, Season, Episode, LinkDef } from '../types';
 import { ScrapedLinkItem } from './LinkCheckerModal';
@@ -389,21 +394,20 @@ export const QualityUpgradeAlertsModal: React.FC<Props> = ({
   const upgradableCount = candidates.filter((c) => c.status === 'upgradable' && !upgradedIds.has(c.content.id)).length;
 
   return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.3 }}
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
-    >
-      <motion.div
-        initial={{ opacity: 0, scale: 0.96, y: 10 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.96, y: 10 }}
-        transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-        style={{ willChange: 'transform, opacity' }}
-        className="relative w-full max-w-3xl max-h-[90vh] bg-zinc-900 border border-zinc-800 rounded-2xl flex flex-col shadow-2xl overflow-hidden text-zinc-100"
-      >
+    <AnimatePresence mode="wait">
+      {isOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-hidden">
+          <motion.div 
+            {...modalBackdropAnimation}
+            className="fixed inset-0 bg-black/75 backdrop-blur-xs transform-gpu will-change-[opacity]"
+            onClick={onClose}
+          />
+          <motion.div
+            {...modalContainerAnimation}
+            style={modalGpuStyle}
+            className="relative w-full max-w-3xl max-h-[90vh] bg-zinc-900 border border-zinc-800 rounded-3xl flex flex-col shadow-2xl overflow-hidden text-zinc-100 z-10 transform-gpu overscroll-contain"
+            onClick={(e) => e.stopPropagation()}
+          >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 bg-zinc-950/60">
           <div className="flex items-center gap-3">
@@ -595,6 +599,8 @@ export const QualityUpgradeAlertsModal: React.FC<Props> = ({
           )}
         </div>
       </motion.div>
-    </motion.div>
+    </div>
+    )}
+  </AnimatePresence>
   );
 };

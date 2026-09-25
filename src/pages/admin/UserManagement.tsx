@@ -19,6 +19,12 @@ import { useModalBehavior } from '../../hooks/useModalBehavior';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useAdminContent } from '../../contexts/AdminContentContext';
 import { PhoneWhitelistManager } from '../../components/PhoneWhitelistManager';
+import {
+  modalBackdropAnimation,
+  modalContainerAnimation,
+  fullScreenModalAnimation,
+  modalGpuStyle,
+} from '../../utils/modalAnimations';
 
 import { useLocation, useNavigate } from 'react-router-dom';
 
@@ -2640,9 +2646,20 @@ export default function UserManagement() {
       )}
     </div>
 
-      {selectedUser && (
-        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-          <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
+      <AnimatePresence>
+        {selectedUser && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-hidden">
+            <motion.div
+              {...modalBackdropAnimation}
+              className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+              onClick={() => { setSelectedUser(null); setIsEditingOverlay(false); setEditingId(null); }}
+            />
+            <motion.div
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh] relative z-10 shadow-2xl transform-gpu"
+              onClick={(e) => e.stopPropagation()}
+            >
             <div className="p-4 md:p-6 border-b border-zinc-200 dark:border-zinc-800 flex justify-between items-center shrink-0">
               <h2 className="text-xl font-bold">{isEditingOverlay ? 'Edit User' : 'User Details'}</h2>
               <button onClick={() => { setSelectedUser(null); setIsEditingOverlay(false); setEditingId(null); }} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors">
@@ -3522,14 +3539,26 @@ export default function UserManagement() {
                 </>
               )}
             </div>
-          </div>
+          </motion.div>
         </div>
       )}
+    </AnimatePresence>
 
       {/* Content Picker Modal */}
-      {isContentPickerOpen && selectedUser && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
-          <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+      <AnimatePresence>
+        {isContentPickerOpen && selectedUser && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 overflow-hidden">
+            <motion.div
+              {...modalBackdropAnimation}
+              className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+              onClick={() => setIsContentPickerOpen(false)}
+            />
+            <motion.div
+              {...fullScreenModalAnimation}
+              style={modalGpuStyle}
+              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-2xl max-h-[80vh] flex flex-col relative z-10 shadow-2xl transform-gpu"
+              onClick={(e) => e.stopPropagation()}
+            >
             <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h2 className="text-xl font-bold">Manage Access</h2>
@@ -3649,9 +3678,10 @@ export default function UserManagement() {
                 Save Changes
               </Button>
             </div>
-          </div>
+          </motion.div>
         </div>
       )}
+    </AnimatePresence>
 
       <AlertModal
         isOpen={alertConfig.isOpen}
@@ -3684,31 +3714,54 @@ export default function UserManagement() {
       />
 
       {/* Whitelist Modal */}
-      {isWhitelistModalOpen && (
-        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-          <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="p-4 md:p-6 border-b border-zinc-200 dark:border-zinc-800 flex justify-between items-center shrink-0">
-              <h2 className="text-xl font-bold">Manage Whitelist</h2>
-              <button onClick={() => setIsWhitelistModalOpen(false)} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors">
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-            <div className="p-4 md:p-6 overflow-y-auto">
-              <PhoneWhitelistManager />
-            </div>
-            <div className="p-4 md:p-6 border-t border-zinc-200 dark:border-zinc-800 flex gap-3 shrink-0">
-              <Button onClick={() => setIsWhitelistModalOpen(false)} variant="secondary" className="w-full">
-                Close
-              </Button>
-            </div>
+      <AnimatePresence>
+        {isWhitelistModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-hidden">
+            <motion.div
+              {...modalBackdropAnimation}
+              className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+              onClick={() => setIsWhitelistModalOpen(false)}
+            />
+            <motion.div
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh] relative z-10 shadow-2xl transform-gpu"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-4 md:p-6 border-b border-zinc-200 dark:border-zinc-800 flex justify-between items-center shrink-0">
+                <h2 className="text-xl font-bold">Manage Whitelist</h2>
+                <button onClick={() => setIsWhitelistModalOpen(false)} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              <div className="p-4 md:p-6 overflow-y-auto">
+                <PhoneWhitelistManager />
+              </div>
+              <div className="p-4 md:p-6 border-t border-zinc-200 dark:border-zinc-800 flex gap-3 shrink-0">
+                <Button onClick={() => setIsWhitelistModalOpen(false)} variant="secondary" className="w-full">
+                  Close
+                </Button>
+              </div>
+            </motion.div>
           </div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
 
       {/* Add User Modal */}
-      {isAddUserModalOpen && (
-        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-          <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
+      <AnimatePresence>
+        {isAddUserModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-hidden">
+            <motion.div
+              {...modalBackdropAnimation}
+              className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+              onClick={() => { setIsAddUserModalOpen(false); setSearchStatus('idle'); setFoundUser(null); }}
+            />
+            <motion.div
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh] relative z-10 shadow-2xl transform-gpu"
+              onClick={(e) => e.stopPropagation()}
+            >
             <div className="p-4 md:p-6 border-b border-zinc-200 dark:border-zinc-800 flex justify-between items-center shrink-0">
               <h2 className="text-xl font-bold">{(profile?.role === 'admin' || profile?.role === 'owner') ? 'Add User' : 'Add Pending User'}</h2>
               <button onClick={() => { setIsAddUserModalOpen(false); setSearchStatus('idle'); setFoundUser(null); }} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors">
@@ -3891,33 +3944,45 @@ export default function UserManagement() {
                 </Button>
               )}
             </div>
-          </div>
+          </motion.div>
         </div>
       )}
+    </AnimatePresence>
 
       {/* Google Contacts Sync Progress Modal */}
-      {isSyncingContacts && contactsSyncProgress && (
-        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 w-full max-w-sm text-center space-y-4">
-            <div className="mx-auto w-12 h-12 rounded-full bg-indigo-500/10 text-indigo-500 flex items-center justify-center">
-              <RefreshCw className="w-6 h-6 animate-spin" />
-            </div>
-            <div>
-              <h3 className="font-bold text-lg text-zinc-900 dark:text-zinc-100">Syncing Google Contacts</h3>
-              <p className="text-xs text-zinc-500 mt-1">
-                Processing {contactsSyncProgress.current} of {contactsSyncProgress.total} contacts...
-              </p>
-            </div>
-            <div className="w-full bg-zinc-100 dark:bg-zinc-800 rounded-full h-2 overflow-hidden">
-              <div
-                className="bg-indigo-500 h-full transition-all duration-300"
-                style={{ width: `${Math.round((contactsSyncProgress.current / contactsSyncProgress.total) * 100)}%` }}
-              />
-            </div>
-            <p className="text-[11px] text-zinc-400">Please leave this window open until sync completes.</p>
+      <AnimatePresence>
+        {isSyncingContacts && contactsSyncProgress && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-hidden">
+            <motion.div
+              {...modalBackdropAnimation}
+              style={modalGpuStyle}
+              className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+            />
+            <motion.div
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="relative z-10 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 w-full max-w-sm text-center space-y-4 shadow-2xl"
+            >
+              <div className="mx-auto w-12 h-12 rounded-full bg-indigo-500/10 text-indigo-500 flex items-center justify-center">
+                <RefreshCw className="w-6 h-6 animate-spin" />
+              </div>
+              <div>
+                <h3 className="font-bold text-lg text-zinc-900 dark:text-zinc-100">Syncing Google Contacts</h3>
+                <p className="text-xs text-zinc-500 mt-1">
+                  Processing {contactsSyncProgress.current} of {contactsSyncProgress.total} contacts...
+                </p>
+              </div>
+              <div className="w-full bg-zinc-100 dark:bg-zinc-800 rounded-full h-2 overflow-hidden">
+                <div
+                  className="bg-indigo-500 h-full transition-all duration-300"
+                  style={{ width: `${Math.round((contactsSyncProgress.current / contactsSyncProgress.total) * 100)}%` }}
+                />
+              </div>
+              <p className="text-[11px] text-zinc-400">Please leave this window open until sync completes.</p>
+            </motion.div>
           </div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
 
       {/* Google Contacts Sync Result Modal */}
       {contactsSyncResult && (

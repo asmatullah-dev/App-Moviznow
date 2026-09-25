@@ -2,6 +2,11 @@ import React, { useState } from 'react';
 import { X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useModalBehavior } from '../hooks/useModalBehavior';
+import {
+  modalBackdropAnimation,
+  modalContainerAnimation,
+  modalGpuStyle,
+} from '../utils/modalAnimations';
 
 interface CommentModalProps {
   isOpen: boolean;
@@ -16,28 +21,23 @@ export default function CommentModal({ isOpen, onClose, onSave, initialComment }
   useModalBehavior(isOpen, onClose);
 
   return (
-    <AnimatePresence>
+    <AnimatePresence mode="wait">
       {isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-hidden">
           <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            {...modalBackdropAnimation}
+            className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
             onClick={onClose}
           />
           <motion.div 
-            initial={{ opacity: 0, scale: 0.96, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 10 }}
-            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-            style={{ willChange: 'transform, opacity' }}
-            className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-md p-6 shadow-2xl transition-colors duration-300"
+            {...modalContainerAnimation}
+            style={modalGpuStyle}
+            className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-md p-6 shadow-2xl transition-colors duration-200 z-10 transform-gpu"
+            onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-lg font-bold text-zinc-900 dark:text-white transition-colors duration-300">Add Comment</h2>
-              <button onClick={onClose} className="text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors">
+              <button onClick={onClose} className="text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors cursor-pointer p-1 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -45,13 +45,13 @@ export default function CommentModal({ isOpen, onClose, onSave, initialComment }
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               placeholder="Enter comment..."
-              className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 text-sm text-zinc-900 dark:text-white placeholder:text-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 min-h-[120px] mb-4 transition-colors duration-300"
+              className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 text-sm text-zinc-900 dark:text-white placeholder:text-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 min-h-[120px] mb-4 transition-colors duration-200"
             />
             <div className="flex justify-end gap-2">
-              <button onClick={onClose} className="px-4 py-2 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white text-sm transition-colors">Cancel</button>
+              <button onClick={onClose} className="px-4 py-2 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white text-sm transition-colors cursor-pointer">Cancel</button>
               <button 
                 onClick={() => { onSave(comment); onClose(); }}
-                className="px-4 py-2 bg-emerald-600 text-zinc-900 dark:text-white rounded-lg text-sm font-bold hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-500/20"
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-bold transition-all active:scale-95 shadow-lg shadow-emerald-500/20 cursor-pointer"
               >
                 Save Comment
               </button>

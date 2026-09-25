@@ -1,9 +1,15 @@
 import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Database, CheckCircle2, AlertCircle, Loader2, ShieldCheck, Save, ArrowUp, ArrowDown, ArrowLeftRight, Search, Key, RefreshCw } from 'lucide-react';
 import { clsx } from 'clsx';
 import { db as sourceDb } from '../../firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { useSettings } from '../../contexts/SettingsContext';
+import {
+  modalBackdropAnimation,
+  fullScreenModalAnimation,
+  modalGpuStyle,
+} from '../../utils/modalAnimations';
 
 interface LogEntry {
   timestamp: string;
@@ -671,80 +677,92 @@ export default function ContentSync() {
         </div>
 
       {/* Comparison Modal */}
-      {viewingItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl border border-zinc-200 dark:border-zinc-800">
-            <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-800/50">
-              <div>
-                <h3 className="text-xl font-bold flex items-center gap-2">
-                  <ArrowLeftRight className="w-6 h-6 text-emerald-500" />
-                  Compare: {viewingItem.item.title || viewingItem.item.id}
-                </h3>
-                <p className="text-sm text-zinc-500">Collection: {viewingItem.collection} | ID: {viewingItem.item.id}</p>
-              </div>
-              <button 
-                onClick={() => setViewingItem(null)}
-                className="p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-full transition-colors"
-              >
-                <AlertCircle className="w-6 h-6 rotate-45" />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between px-4 py-2 bg-emerald-500/10 text-emerald-600 rounded-xl font-bold text-sm">
-                  <span>Source (This App)</span>
-                  <ArrowUp className="w-4 h-4" />
+      <AnimatePresence>
+        {viewingItem && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-hidden">
+            <motion.div
+              {...modalBackdropAnimation}
+              className="fixed inset-0 bg-black/60 backdrop-blur-xs transform-gpu will-change-[opacity]"
+              onClick={() => setViewingItem(null)}
+            />
+            <motion.div
+              {...fullScreenModalAnimation}
+              style={modalGpuStyle}
+              className="bg-white dark:bg-zinc-900 rounded-3xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl border border-zinc-200 dark:border-zinc-800 relative z-10 transform-gpu"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-800/50">
+                <div>
+                  <h3 className="text-xl font-bold flex items-center gap-2">
+                    <ArrowLeftRight className="w-6 h-6 text-emerald-500" />
+                    Compare: {viewingItem.item.title || viewingItem.item.id}
+                  </h3>
+                  <p className="text-sm text-zinc-500">Collection: {viewingItem.collection} | ID: {viewingItem.item.id}</p>
                 </div>
-                <pre className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 font-mono text-xs overflow-x-auto h-[400px]">
-                  {viewingItem.item.sourceData ? JSON.stringify(viewingItem.item.sourceData, null, 2) : '// No data in source'}
-                </pre>
-                <button
-                  onClick={() => {
-                    handleStartSync({ [viewingItem.collection]: [viewingItem.item.id] });
-                    setViewingItem(null);
-                  }}
-                  disabled={!viewingItem.item.sourceData || isPushing || isPulling}
-                  className="w-full py-3 bg-emerald-500 text-white font-bold rounded-xl hover:bg-emerald-600 transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20"
+                <button 
+                  onClick={() => setViewingItem(null)}
+                  className="p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-full transition-colors"
                 >
-                  <ArrowUp className="w-4 h-4" />
-                  Push This Version
+                  <AlertCircle className="w-6 h-6 rotate-45" />
                 </button>
               </div>
 
-              <div className="space-y-3">
-                <div className="flex items-center justify-between px-4 py-2 bg-zinc-900 dark:bg-zinc-800 text-white rounded-xl font-bold text-sm">
-                  <span>Target (Remote)</span>
-                  <ArrowDown className="w-4 h-4" />
+              <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between px-4 py-2 bg-emerald-500/10 text-emerald-600 rounded-xl font-bold text-sm">
+                    <span>Source (This App)</span>
+                    <ArrowUp className="w-4 h-4" />
+                  </div>
+                  <pre className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 font-mono text-xs overflow-x-auto h-[400px]">
+                    {viewingItem.item.sourceData ? JSON.stringify(viewingItem.item.sourceData, null, 2) : '// No data in source'}
+                  </pre>
+                  <button
+                    onClick={() => {
+                      handleStartSync({ [viewingItem.collection]: [viewingItem.item.id] });
+                      setViewingItem(null);
+                    }}
+                    disabled={!viewingItem.item.sourceData || isPushing || isPulling}
+                    className="w-full py-3 bg-emerald-500 text-white font-bold rounded-xl hover:bg-emerald-600 transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20"
+                  >
+                    <ArrowUp className="w-4 h-4" />
+                    Push This Version
+                  </button>
                 </div>
-                <pre className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 font-mono text-xs overflow-x-auto h-[400px]">
-                  {viewingItem.item.targetData ? JSON.stringify(viewingItem.item.targetData, null, 2) : '// No data in target'}
-                </pre>
-                <button
-                  onClick={() => {
-                    handleStartPull({ [viewingItem.collection]: [viewingItem.item.id] });
-                    setViewingItem(null);
-                  }}
-                  disabled={!viewingItem.item.targetData || isPushing || isPulling}
-                  className="w-full py-3 bg-zinc-900 dark:bg-zinc-700 text-white font-bold rounded-xl hover:bg-black transition-all flex items-center justify-center gap-2 shadow-lg"
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between px-4 py-2 bg-zinc-900 dark:bg-zinc-800 text-white rounded-xl font-bold text-sm">
+                    <span>Target (Remote)</span>
+                    <ArrowDown className="w-4 h-4" />
+                  </div>
+                  <pre className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 font-mono text-xs overflow-x-auto h-[400px]">
+                    {viewingItem.item.targetData ? JSON.stringify(viewingItem.item.targetData, null, 2) : '// No data in target'}
+                  </pre>
+                  <button
+                    onClick={() => {
+                      handleStartPull({ [viewingItem.collection]: [viewingItem.item.id] });
+                      setViewingItem(null);
+                    }}
+                    disabled={!viewingItem.item.targetData || isPushing || isPulling}
+                    className="w-full py-3 bg-zinc-900 dark:bg-zinc-700 text-white font-bold rounded-xl hover:bg-black transition-all flex items-center justify-center gap-2 shadow-lg"
+                  >
+                    <ArrowDown className="w-4 h-4" />
+                    Pull This Version
+                  </button>
+                </div>
+              </div>
+              
+              <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 border-t border-zinc-100 dark:border-zinc-800 flex justify-end">
+                <button 
+                  onClick={() => setViewingItem(null)}
+                  className="px-6 py-2 text-zinc-500 font-bold hover:text-zinc-900 dark:hover:text-white transition-colors"
                 >
-                  <ArrowDown className="w-4 h-4" />
-                  Pull This Version
+                  Close
                 </button>
               </div>
-            </div>
-            
-            <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 border-t border-zinc-100 dark:border-zinc-800 flex justify-end">
-              <button 
-                onClick={() => setViewingItem(null)}
-                className="px-6 py-2 text-zinc-500 font-bold hover:text-zinc-900 dark:hover:text-white transition-colors"
-              >
-                Close
-              </button>
-            </div>
+            </motion.div>
           </div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
     </div>
   );
 }

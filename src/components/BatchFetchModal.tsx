@@ -6,6 +6,11 @@ import { LinkCheckResult, performFullLinkScan, guessLinkType } from '../utils/li
 import { searchTMDBByTitle, fetchTMDBDetails, fetchSeriesSeasons, fetchIMDbRating, getBestTrailer, searchYouTubeTrailer, fetchKinoCheckTrailer, getBestAlternativeTitle } from './MediaModal';
 import { normalizeOttPlatformName, extractOttPlatformFromTMDBDetails, fetchMovieDigitalReleaseDate, predictOttPlatformWithAI } from '../services/tmdb';
 import { useAdminContent } from '../contexts/AdminContentContext';
+import {
+  modalBackdropAnimation,
+  modalContainerAnimation,
+  modalGpuStyle,
+} from '../utils/modalAnimations';
 
 interface Props {
   isOpen: boolean;
@@ -447,22 +452,19 @@ export const BatchFetchModal: React.FC<Props> = ({
   };
 
   return (
-    <AnimatePresence>
+    <AnimatePresence mode="wait">
       {isOpen && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.3 }}
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[70] flex items-center justify-center p-4"
-        >
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 overflow-hidden">
           <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: 8 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 8 }}
-            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-            style={{ willChange: 'transform, opacity' }}
-            className="bg-zinc-950 border border-zinc-800 rounded-xl w-full max-w-xl shadow-2xl flex flex-col max-h-[80vh]"
+            {...modalBackdropAnimation}
+            className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+            onClick={onClose}
+          />
+          <motion.div
+            {...modalContainerAnimation}
+            style={modalGpuStyle}
+            className="bg-zinc-950 border border-zinc-800 rounded-2xl w-full max-w-xl shadow-2xl flex flex-col max-h-[80vh] z-10 transform-gpu overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
           >
             <div className="p-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-900 rounded-t-xl z-20 sticky top-0">
               <div>
@@ -544,7 +546,7 @@ export const BatchFetchModal: React.FC<Props> = ({
                </button>
             </div>
           </motion.div>
-        </motion.div>
+        </div>
       )}
     </AnimatePresence>
   );

@@ -18,7 +18,7 @@ import {
   Filter, 
   Zap 
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { fetchReviewsFromChunks, saveReviewToChunk, deleteReviewFromChunk } from '../../utils/chunkUtils';
 import { safeStorage } from '../../utils/safeStorage';

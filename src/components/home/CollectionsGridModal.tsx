@@ -4,6 +4,11 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Collection as AppCollection, Content } from "../../types";
 import { useLanguage } from "../../contexts/LanguageContext";
 import { LazyPosterImage } from "../LazyPosterImage";
+import {
+  modalBackdropAnimation,
+  modalContainerAnimation,
+  modalGpuStyle,
+} from "../../utils/modalAnimations";
 
 interface CollectionsGridModalProps {
   isOpen: boolean;
@@ -25,23 +30,18 @@ export const CollectionsGridModal: React.FC<CollectionsGridModalProps> = ({
   const { t } = useLanguage();
 
   return (
-    <AnimatePresence>
+    <AnimatePresence mode="wait">
       {isOpen && (
-        <motion.div 
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.3 }}
-          className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md"
-          onClick={onClose}
-        >
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-6 overflow-hidden">
+          <motion.div 
+            {...modalBackdropAnimation}
+            className="fixed inset-0 bg-black/85 backdrop-blur-xs transform-gpu will-change-[opacity]"
+            onClick={onClose}
+          />
           <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 10 }}
-            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-            style={{ willChange: 'transform, opacity' }}
-            className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-5xl h-[90vh] max-h-[90vh] overflow-hidden flex flex-col shadow-2xl"
+            {...modalContainerAnimation}
+            style={modalGpuStyle}
+            className="relative bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-5xl h-[90vh] max-h-[90vh] overflow-hidden flex flex-col shadow-2xl z-10 transform-gpu"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between p-6 border-b border-zinc-100 dark:border-zinc-800">
@@ -124,7 +124,7 @@ export const CollectionsGridModal: React.FC<CollectionsGridModalProps> = ({
               </div>
             </div>
           </motion.div>
-        </motion.div>
+        </div>
       )}
     </AnimatePresence>
   );

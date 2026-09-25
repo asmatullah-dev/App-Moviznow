@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
 import { collection, doc, getDoc, setDoc, deleteDoc, query, getDocs } from 'firebase/firestore';
@@ -9,6 +10,11 @@ import ConfirmModal from '../../components/ConfirmModal';
 import AlertModal from '../../components/AlertModal';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
+import {
+  modalBackdropAnimation,
+  modalContainerAnimation,
+  modalGpuStyle,
+} from '../../utils/modalAnimations';
 
 export default function IncomeManagement() {
   const [incomes, setIncomes] = useState<Income[]>(() => {
@@ -204,78 +210,90 @@ export default function IncomeManagement() {
         </div>
       </div>
 
-      {isAdding && (
-        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-          <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-md overflow-hidden">
-            <div className="p-6 border-b border-zinc-200 dark:border-zinc-800">
-              <h2 className="text-xl font-bold">Add Income Record</h2>
-            </div>
-            <form onSubmit={handleAdd} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-2">Amount ($)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  required
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"
-                  placeholder="0.00"
-                />
+      <AnimatePresence>
+        {isAdding && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-hidden">
+            <motion.div
+              {...modalBackdropAnimation}
+              className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+              onClick={() => setIsAdding(false)}
+            />
+            <motion.div
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden relative z-10 shadow-2xl transform-gpu"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-6 border-b border-zinc-200 dark:border-zinc-800">
+                <h2 className="text-xl font-bold">Add Income Record</h2>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-2">User / Source Name</label>
-                <input
-                  type="text"
-                  value={userName}
-                  onChange={(e) => setUserName(e.target.value)}
-                  className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"
-                  placeholder="e.g. John Doe"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-2">Description</label>
-                <input
-                  type="text"
-                  required
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"
-                  placeholder="e.g. 1 Month Subscription"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-2">Date</label>
-                <input
-                  type="date"
-                  required
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-              <div className="flex justify-between gap-2 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setIsAdding(false)}
-                  disabled={processing.add}
-                  className="px-5 py-2.5 text-sm bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl font-bold transition-colors disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={processing.add}
-                  className="px-5 py-2.5 text-sm bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  {processing.add && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {processing.add ? 'Saving...' : 'Save Record'}
-                </button>
-              </div>
-            </form>
+              <form onSubmit={handleAdd} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-2">Amount ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"
+                    placeholder="0.00"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-2">User / Source Name</label>
+                  <input
+                    type="text"
+                    value={userName}
+                    onChange={(e) => setUserName(e.target.value)}
+                    className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"
+                    placeholder="e.g. John Doe"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-2">Description</label>
+                  <input
+                    type="text"
+                    required
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"
+                    placeholder="e.g. 1 Month Subscription"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-2">Date</label>
+                  <input
+                    type="date"
+                    required
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                    className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div className="flex justify-between gap-2 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setIsAdding(false)}
+                    disabled={processing.add}
+                    className="px-5 py-2.5 text-sm bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl font-bold transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={processing.add}
+                    className="px-5 py-2.5 text-sm bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {processing.add && <Loader2 className="w-4 h-4 animate-spin" />}
+                    {processing.add ? 'Saving...' : 'Save Record'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
           </div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
 
       <ConfirmModal
         isOpen={!!deleteId}

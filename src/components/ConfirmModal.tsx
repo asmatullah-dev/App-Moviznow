@@ -3,6 +3,11 @@ import { AlertTriangle, X, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useModalBehavior } from '../hooks/useModalBehavior';
 import { useLanguage } from '../contexts/LanguageContext';
+import {
+  modalBackdropAnimation,
+  modalContainerAnimation,
+  modalGpuStyle,
+} from '../utils/modalAnimations';
 
 interface ConfirmModalProps {
   isOpen: boolean;
@@ -53,24 +58,18 @@ export default function ConfirmModal({
   const cancelClass = hasUrdu(translatedCancel) ? 'urdu-font ' : '';
 
   return (
-    <AnimatePresence>
+    <AnimatePresence mode="wait">
       {isOpen && (
-        <motion.div className="fixed inset-0 z-[10000] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 overflow-hidden">
           <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            className="absolute inset-0 bg-black/80 backdrop-blur-md"
+            {...modalBackdropAnimation}
+            className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
             onClick={!isLoading ? onCancel : undefined}
           />
           <motion.div 
-            initial={{ opacity: 0, scale: 0.96, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 10 }}
-            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-            style={{ willChange: 'transform, opacity' }}
-            className="relative bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl transition-colors duration-300"
+            {...modalContainerAnimation}
+            style={modalGpuStyle}
+            className="relative bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl transition-colors duration-200 z-10 transform-gpu"
           >
             <div className="p-6">
               <div className="flex items-start justify-between mb-4">
@@ -104,7 +103,7 @@ export default function ConfirmModal({
               </div>
             </div>
           </motion.div>
-        </motion.div>
+        </div>
       )}
     </AnimatePresence>
   );

@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  modalBackdropAnimation,
+  modalGpuStyle,
+} from '../utils/modalAnimations';
 import { Timer, ChevronRight, ShieldCheck, RefreshCw, Loader2, AlertCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
@@ -187,18 +191,17 @@ export const VideoAdInterstitial: React.FC<VideoAdInterstitialProps> = ({
     }
   };
 
-  if (!isOpen || isExempt || isInterstitialsDisabled) return null;
+  if (isExempt || isInterstitialsDisabled) return null;
 
   return (
     <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.3 }}
-        className="fixed inset-0 z-[10000] bg-black flex flex-col items-center justify-center overflow-hidden select-none"
-      >
-        {/* Ad Container */}
+      {isOpen && (
+        <motion.div
+          {...modalBackdropAnimation}
+          style={modalGpuStyle}
+          className="fixed inset-0 z-[10000] bg-black flex flex-col items-center justify-center overflow-hidden select-none"
+        >
+          {/* Ad Container */}
         <div className="relative w-full h-full bg-zinc-950">
           {currentIframeUrl && (
             <iframe
@@ -333,7 +336,8 @@ export const VideoAdInterstitial: React.FC<VideoAdInterstitialProps> = ({
           <div className="absolute inset-0 z-[10001] bg-transparent cursor-wait pointer-events-none" />
         )}
       </motion.div>
-    </AnimatePresence>
+    )}
+  </AnimatePresence>
   );
 };
 

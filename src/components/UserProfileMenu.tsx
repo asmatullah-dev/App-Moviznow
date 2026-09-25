@@ -14,6 +14,12 @@ import { clsx } from 'clsx';
 import { format } from 'date-fns';
 import ConfirmModal from './ConfirmModal';
 import { motion, AnimatePresence } from 'framer-motion';
+import {
+  popoverAnimation,
+  modalBackdropAnimation,
+  modalContainerAnimation,
+  modalGpuStyle,
+} from '../utils/modalAnimations';
 import { useContent } from '../contexts/ContentContext';
 import { useHaptics } from '../hooks/useHaptics';
 
@@ -213,11 +219,8 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
       <AnimatePresence>
         {isOpen && (
           <motion.div 
-            initial={{ opacity: 0, y: -6, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -6, scale: 0.95 }}
-            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-            style={{ transformOrigin: 'top right', willChange: 'transform, opacity' }}
+            {...popoverAnimation}
+            style={{ ...modalGpuStyle, transformOrigin: 'top right' }}
             className="absolute right-0 mt-2 w-72 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-2xl border border-zinc-200/80 dark:border-zinc-800/80 rounded-2xl shadow-2xl overflow-y-auto custom-scrollbar max-h-[85vh] z-50"
           >
             <div className="p-3.5 border-b border-zinc-200/80 dark:border-zinc-800/80 bg-gradient-to-b from-emerald-500/5 via-transparent to-transparent">
@@ -623,21 +626,16 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
 
       <AnimatePresence>
         {isRequestModalOpen && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 overflow-y-auto bg-black/60 backdrop-blur-md"
-            onClick={() => setIsRequestModalOpen(false)}
-          >
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 overflow-hidden">
             <motion.div
-              initial={{ scale: 0.96, opacity: 0, y: 10 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.96, opacity: 0, y: 10 }}
-              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-              style={{ willChange: 'transform, opacity' }}
-              className="relative my-auto w-full max-w-sm bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800/80 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[calc(100vh-2rem)] z-10"
+              {...modalBackdropAnimation}
+              className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+              onClick={() => setIsRequestModalOpen(false)}
+            />
+            <motion.div
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="relative my-auto w-full max-w-sm bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800/80 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[calc(100vh-2rem)] z-10 transform-gpu"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="p-4 sm:p-5 border-b border-zinc-200/80 dark:border-zinc-800/80 flex justify-between items-center bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-transparent shrink-0">
@@ -783,7 +781,7 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                 </form>
               </div>
             </motion.div>
-          </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

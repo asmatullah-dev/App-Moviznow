@@ -4,6 +4,11 @@ import { X, Plus, Trash2, GripVertical, Save, Loader2, Search, Edit2, Check } fr
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { smartSearch } from '../utils/searchUtils';
 import { useModalBehavior } from '../hooks/useModalBehavior';
+import {
+  modalBackdropAnimation,
+  modalContainerAnimation,
+  modalGpuStyle,
+} from '../utils/modalAnimations';
 
 interface Item {
   id: string;
@@ -120,22 +125,20 @@ const ManageModal: React.FC<Props> = ({ isOpen, title, onClose, type, items: ini
   if (!isOpen) return null;
 
   return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.3 }}
-        className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
-      >
-        <motion.div
-          initial={{ opacity: 0, scale: 0.96, y: 8 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.96, y: 8 }}
-          transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-          style={{ willChange: 'transform, opacity' }}
-          className="w-full max-w-2xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]"
-        >
+    <AnimatePresence mode="wait">
+      {isOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 overflow-hidden">
+          <motion.div
+            {...modalBackdropAnimation}
+            className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+            onClick={onClose}
+          />
+          <motion.div
+            {...modalContainerAnimation}
+            style={modalGpuStyle}
+            className="relative w-full max-w-2xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] z-10 transform-gpu"
+            onClick={(e) => e.stopPropagation()}
+          >
           {/* Header */}
           <div className="flex items-center justify-between p-5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50">
             <h2 className="text-xl font-bold text-zinc-900 dark:text-white">{title}</h2>
@@ -303,7 +306,8 @@ const ManageModal: React.FC<Props> = ({ isOpen, title, onClose, type, items: ini
             </button>
           </div>
         </motion.div>
-      </motion.div>
+      </div>
+      )}
     </AnimatePresence>
   );
 };

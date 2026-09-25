@@ -5,6 +5,11 @@ import { useModalBehavior } from '../hooks/useModalBehavior';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useHaptics } from '../hooks/useHaptics';
 import { fetchTmdb } from '../services/tmdbClient';
+import {
+  modalBackdropAnimation,
+  modalContainerAnimation,
+  modalGpuStyle,
+} from '../utils/modalAnimations';
 import clsx from 'clsx';
 
 interface SharePreviewModalProps {
@@ -286,21 +291,17 @@ export default function SharePreviewModal({
   return (
     <AnimatePresence>
       {isOpen && (
-        <motion.div 
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.3 }}
-          className="fixed inset-0 z-[10000] flex items-center justify-center p-3.5 sm:p-5 overflow-y-auto bg-black/80 backdrop-blur-md"
+        <motion.div
+          key="share-preview-backdrop"
+          {...modalBackdropAnimation}
+          className="fixed inset-0 z-[10000] flex items-center justify-center p-3.5 sm:p-5 overflow-hidden bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
           onClick={onClose}
         >
           <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 10 }}
-            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-            style={{ willChange: 'transform, opacity' }}
-            className="relative w-full max-w-xl sm:max-w-2xl my-auto bg-white dark:bg-zinc-950 border border-zinc-200/90 dark:border-zinc-800/90 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] z-10"
+            key="share-preview-dialog"
+            {...modalContainerAnimation}
+            style={modalGpuStyle}
+            className="relative w-full max-w-xl sm:max-w-2xl my-auto bg-white dark:bg-zinc-950 border border-zinc-200/90 dark:border-zinc-800/90 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] z-10 transform-gpu overscroll-contain"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header with gradient accent */}

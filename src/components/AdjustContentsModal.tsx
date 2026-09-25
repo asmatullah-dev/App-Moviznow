@@ -9,6 +9,11 @@ import { writeBatch, doc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
 import { getContrastColor } from '../utils/contentUtils';
 import { useModalBehavior } from '../hooks/useModalBehavior';
+import {
+  modalBackdropAnimation,
+  modalContainerAnimation,
+  modalGpuStyle,
+} from '../utils/modalAnimations';
 
 import { useAdminContent } from '../contexts/AdminContentContext';
 
@@ -362,22 +367,18 @@ export const AdjustContentsModal: React.FC<Props> = ({ isOpen, onClose, contentL
   };
 
   return (
-    <AnimatePresence>
+    <AnimatePresence mode="wait">
       {isOpen && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.3 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/90 backdrop-blur-sm"
-        >
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden">
           <motion.div
-            initial={{ scale: 0.96, opacity: 0, y: 8 }}
-            animate={{ scale: 1, opacity: 1, y: 0 }}
-            exit={{ scale: 0.96, opacity: 0, y: 8 }}
-            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-            style={{ willChange: 'transform, opacity' }}
-            className="w-full h-full max-h-[100dvh] flex flex-col bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white transition-colors duration-300"
+            {...modalBackdropAnimation}
+            className="fixed inset-0 bg-zinc-950/90 backdrop-blur-xs transform-gpu will-change-[opacity]"
+            onClick={onClose}
+          />
+          <motion.div
+            {...modalContainerAnimation}
+            style={modalGpuStyle}
+            className="w-full h-full max-h-[100dvh] flex flex-col bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white z-10 transform-gpu transition-colors duration-200"
           >
             {/* Header */}
             <div className="flex items-center justify-between p-3 md:p-4 border-b border-zinc-100 dark:border-zinc-800 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md sticky top-0 z-[60] transition-colors duration-300">
@@ -550,7 +551,7 @@ export const AdjustContentsModal: React.FC<Props> = ({ isOpen, onClose, contentL
               )}
             </div>
           </motion.div>
-        </motion.div>
+        </div>
       )}
     </AnimatePresence>
   );

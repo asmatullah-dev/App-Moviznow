@@ -3,8 +3,12 @@ import { AlertCircle, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useModalBehavior } from '../hooks/useModalBehavior';
 import { useHaptics } from '../hooks/useHaptics';
-
 import { useLanguage } from '../contexts/LanguageContext';
+import {
+  modalBackdropAnimation,
+  modalContainerAnimation,
+  modalGpuStyle,
+} from '../utils/modalAnimations';
 
 interface AlertModalProps {
   isOpen: boolean;
@@ -42,24 +46,19 @@ export default function AlertModal({
   const buttonClass = hasUrdu(effectiveButtonText) ? 'urdu-font ' : '';
 
   return (
-    <AnimatePresence>
+    <AnimatePresence mode="wait">
       {isOpen && (
-        <motion.div className="fixed inset-0 z-[10000] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 overflow-hidden">
           <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            className="absolute inset-0 bg-black/80 backdrop-blur-md"
+            {...modalBackdropAnimation}
+            className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
             onClick={onClose}
           />
           <motion.div 
-            initial={{ opacity: 0, scale: 0.96, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 10 }}
-            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-            style={{ willChange: 'transform, opacity' }}
-            className="relative bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl"
+            {...modalContainerAnimation}
+            style={modalGpuStyle}
+            className="relative bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl z-10 transform-gpu transition-colors duration-200"
+            onClick={(e) => e.stopPropagation()}
           >
             <div className="p-6">
               <div className="flex items-start justify-between mb-4">
@@ -69,7 +68,7 @@ export default function AlertModal({
                   </div>
                   <h2 className={`text-xl font-bold text-zinc-900 dark:text-white ${titleClass}`}>{translatedTitle}</h2>
                 </div>
-                <button onClick={onClose} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-1 rounded-full hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-all">
+                <button onClick={onClose} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-1 rounded-full hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-all cursor-pointer">
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -79,7 +78,7 @@ export default function AlertModal({
                   <div className="flex justify-end">
                     <button
                       onClick={onClose}
-                      className={`w-full py-3 px-6 text-sm rounded-xl font-bold bg-emerald-500 hover:bg-emerald-600 text-white transition-all active:scale-95 shadow-lg shadow-emerald-500/20 ${buttonClass}`}
+                      className={`w-full py-3 px-6 text-sm rounded-xl font-bold bg-emerald-500 hover:bg-emerald-600 text-white transition-all active:scale-95 shadow-lg shadow-emerald-500/20 cursor-pointer ${buttonClass}`}
                     >
                       {effectiveButtonText}
                     </button>
@@ -88,7 +87,7 @@ export default function AlertModal({
               </div>
             </div>
           </motion.div>
-        </motion.div>
+        </div>
       )}
     </AnimatePresence>
   );

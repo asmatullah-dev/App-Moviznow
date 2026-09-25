@@ -9,6 +9,11 @@ import { useAuth } from "../contexts/AuthContext";
 import { useSettings } from "../contexts/SettingsContext";
 import { isUserExemptFromAds, registerAppWhitelistedUrl } from "../utils/adUtils";
 import { openInNewTab } from "../utils/playerUtils";
+import {
+  modalBackdropAnimation,
+  modalContainerAnimation,
+  modalGpuStyle,
+} from "../utils/modalAnimations";
 
 interface TelegramDownloadModalProps {
   isOpen: boolean;
@@ -136,115 +141,108 @@ export function TelegramDownloadModal({
           }
         }}
       />
-      <AnimatePresence>
-      {isOpen && (
-        <>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            onClick={onClose}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
-          />
-          <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 10 }}
-            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-            style={{ willChange: 'transform, opacity' }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 pointer-events-none"
-          >
-            <div className="bg-white dark:bg-zinc-900 w-full max-w-lg rounded-2xl shadow-2xl relative flex flex-col pointer-events-auto max-h-[85vh]">
+      <AnimatePresence mode="wait">
+        {isOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-hidden">
+            <motion.div
+              {...modalBackdropAnimation}
+              onClick={onClose}
+              className="fixed inset-0 bg-black/70 backdrop-blur-xs transform-gpu will-change-[opacity]"
+            />
+            <motion.div
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="relative bg-white dark:bg-zinc-900 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] z-10 transform-gpu overscroll-contain transition-colors duration-200"
+              onClick={(e) => e.stopPropagation()}
+            >
               {/* Header */}
               <div className="flex items-center justify-between p-4 sm:p-6 border-b border-zinc-100 dark:border-zinc-800 shrink-0">
                 <div className="flex items-center gap-3">
-                   <div className="w-10 h-10 rounded-xl bg-[rgb(36,161,222)]/10 flex items-center justify-center">
-                     <Download className="w-5 h-5 text-[rgb(36,161,222)]" />
-                   </div>
-                   <div>
-                     <h2 className="text-lg font-bold text-zinc-900 dark:text-white">
-                        {t("Telegram Download")}
-                     </h2>
-                     <p className="text-xs text-zinc-500">
-                        {content.title}
-                     </p>
-                   </div>
+                  <div className="w-10 h-10 rounded-xl bg-[rgb(36,161,222)]/10 flex items-center justify-center">
+                    <Download className="w-5 h-5 text-[rgb(36,161,222)]" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-zinc-900 dark:text-white">
+                      {t("Telegram Download")}
+                    </h2>
+                    <p className="text-xs text-zinc-500">
+                      {content.title}
+                    </p>
+                  </div>
                 </div>
                 <button
                   onClick={onClose}
-                  className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                  className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
               {/* Body */}
-              <div className="p-4 sm:p-6 overflow-y-auto custom-scrollbar flex-1 space-y-6">
-                 {content.type === "movie" && content.movieLinks && (
-                   <div className="space-y-4">
-                     <h3 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t("Movie Links")}</h3>
-                     {renderQualityLinks(content.movieLinks, "movie")}
-                   </div>
-                 )}
+              <div className="p-4 sm:p-6 overflow-y-auto custom-scrollbar flex-1 space-y-6 overscroll-contain">
+                {content.type === "movie" && content.movieLinks && (
+                  <div className="space-y-4">
+                    <h3 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t("Movie Links")}</h3>
+                    {renderQualityLinks(content.movieLinks, "movie")}
+                  </div>
+                )}
 
-                 {content.type === "series" && (
-                   <div className="space-y-6">
-                     {content.fullSeasonZip && renderQualityLinks(content.fullSeasonZip, "full_zip") && (
-                       <div className="space-y-4">
-                          <h3 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t("Full Series ZIP")}</h3>
-                          {renderQualityLinks(content.fullSeasonZip, "full_zip")}
-                       </div>
-                     )}
-                     {content.fullSeasonMkv && renderQualityLinks(content.fullSeasonMkv, "full_mkv") && (
-                       <div className="space-y-4">
-                          <h3 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t("Full Series MKV")}</h3>
-                          {renderQualityLinks(content.fullSeasonMkv, "full_mkv")}
-                       </div>
-                     )}
-                     {seasons.map((season: any, sIdx: number) => (
-                       <div key={season.id || `season_${sIdx}`} className="space-y-4">
-                         <h3 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t("Season")} {season.seasonNumber || (sIdx + 1)}</h3>
-                         
-                         {season.zipLinks && (
-                           <div className="mb-4">
-                              <h4 className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-2">ZIP Links</h4>
-                              {renderQualityLinks(season.zipLinks, `sz_${season.id}`)}
-                           </div>
-                         )}
+                {content.type === "series" && (
+                  <div className="space-y-6">
+                    {content.fullSeasonZip && renderQualityLinks(content.fullSeasonZip, "full_zip") && (
+                      <div className="space-y-4">
+                        <h3 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t("Full Series ZIP")}</h3>
+                        {renderQualityLinks(content.fullSeasonZip, "full_zip")}
+                      </div>
+                    )}
+                    {content.fullSeasonMkv && renderQualityLinks(content.fullSeasonMkv, "full_mkv") && (
+                      <div className="space-y-4">
+                        <h3 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t("Full Series MKV")}</h3>
+                        {renderQualityLinks(content.fullSeasonMkv, "full_mkv")}
+                      </div>
+                    )}
+                    {seasons.map((season: any, sIdx: number) => (
+                      <div key={season.id || `season_${sIdx}`} className="space-y-4">
+                        <h3 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t("Season")} {season.seasonNumber || (sIdx + 1)}</h3>
+                        
+                        {season.zipLinks && (
+                          <div className="mb-4">
+                            <h4 className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-2">ZIP Links</h4>
+                            {renderQualityLinks(season.zipLinks, `sz_${season.id}`)}
+                          </div>
+                        )}
 
-                         {season.mkvLinks && (
-                           <div className="mb-4">
-                              <h4 className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-2">MKV Links</h4>
-                              {renderQualityLinks(season.mkvLinks, `smk_${season.id}`)}
-                           </div>
-                         )}
+                        {season.mkvLinks && (
+                          <div className="mb-4">
+                            <h4 className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-2">MKV Links</h4>
+                            {renderQualityLinks(season.mkvLinks, `smk_${season.id}`)}
+                          </div>
+                        )}
 
-                         {season.episodes && season.episodes.length > 0 && (
-                           <div>
-                              <h4 className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-2">{t("Episodes")}</h4>
-                              <div className="space-y-3">
-                                {season.episodes.map((ep: any, epIdx: number) => (
-                                  <div key={ep.id || `ep_${epIdx}`} className="p-3 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-zinc-50/50 dark:bg-zinc-800/30">
-                                    <div className="text-xs font-bold text-zinc-800 dark:text-zinc-200 mb-2">Ep {ep.episodeNumber || (epIdx + 1)} - {ep.title || "Episode"}</div>
-                                    <div className="space-y-2">
-                                      {ep.links ? renderQualityLinks(ep.links, `se_${season.id}_${ep.id}`) : <span className="text-xs text-zinc-500">{t("No links")}</span>}
-                                    </div>
+                        {season.episodes && season.episodes.length > 0 && (
+                          <div>
+                            <h4 className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-2">{t("Episodes")}</h4>
+                            <div className="space-y-3">
+                              {season.episodes.map((ep: any, epIdx: number) => (
+                                <div key={ep.id || `ep_${epIdx}`} className="p-3 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-zinc-50/50 dark:bg-zinc-800/30">
+                                  <div className="text-xs font-bold text-zinc-800 dark:text-zinc-200 mb-2">Ep {ep.episodeNumber || (epIdx + 1)} - {ep.title || "Episode"}</div>
+                                  <div className="space-y-2">
+                                    {ep.links ? renderQualityLinks(ep.links, `se_${season.id}_${ep.id}`) : <span className="text-xs text-zinc-500">{t("No links")}</span>}
                                   </div>
-                                ))}
-                              </div>
-                           </div>
-                         )}
-                       </div>
-                     ))}
-                   </div>
-                 )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            </div>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
-  </>
-);
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+    </>
+  );
 }

@@ -1,5 +1,5 @@
 import React from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { Heart, Clock, ShoppingCart, Play, X, Lock, Star, Loader2 } from 'lucide-react';
@@ -18,6 +18,12 @@ import { useImdbRating } from '../hooks/useImdbRating';
 import { globalScrollState } from '../hooks/useScrollRestoration';
 import { Translate } from './Translate';
 import { recordNavigationToContent, isContentPath } from '../utils/navigation';
+import {
+  modalBackdropAnimation,
+  modalContainerAnimation,
+  fullScreenModalAnimation,
+  modalGpuStyle,
+} from '../utils/modalAnimations';
 
 interface ContentCardProps {
   content: Content;
@@ -462,70 +468,89 @@ const ContentCard = React.memo(({
         </div>
 
       {/* Trailer Selection Modal */}
-      {isTrailerSelectionOpen && (
-        <div 
-          className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[100] p-4"
-          onClick={() => setIsTrailerSelectionOpen(false)}
-        >
-          <div 
-            className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-md w-full relative shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
+      <AnimatePresence>
+        {isTrailerSelectionOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-hidden">
+            <motion.div
+              {...modalBackdropAnimation}
+              className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
               onClick={() => setIsTrailerSelectionOpen(false)}
-              className="absolute top-4 right-4 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors"
+            />
+            <motion.div
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 max-w-md w-full relative shadow-2xl z-10 transform-gpu"
+              onClick={(e) => e.stopPropagation()}
             >
-              <X className="w-6 h-6" />
-            </button>
-            <h3 className="text-xl font-bold mb-4">{t('Select Trailer')}</h3>
-            <div className="flex flex-col gap-3">
-              {getAllTrailers().map((trailer) => (
-                <button
-                  key={trailer.id}
-                  onClick={() => {
-                    const embedUrl = getYouTubeEmbedUrl(trailer.url);
-                    if (embedUrl) {
-                      setSelectedTrailerUrl(embedUrl);
-                    } else {
-                      window.open(trailer.url, '_blank');
-                    }
-                    setIsTrailerSelectionOpen(false);
-                  }}
-                  className={`w-full font-bold py-3 px-4 rounded-xl transition-colors flex items-center justify-between border ${
-                    trailer.id === 'main' 
-                      ? 'bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white border-transparent' 
-                      : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 border-emerald-500/20'
-                  }`}
-                >
-                  <span>{trailer.title}</span>
-                  <Play className="w-4 h-4" />
-                </button>
-              ))}
-            </div>
+              <button
+                onClick={() => setIsTrailerSelectionOpen(false)}
+                className="absolute top-4 right-4 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+              <h3 className="text-xl font-bold mb-4">{t('Select Trailer')}</h3>
+              <div className="flex flex-col gap-3">
+                {getAllTrailers().map((trailer) => (
+                  <button
+                    key={trailer.id}
+                    onClick={() => {
+                      const embedUrl = getYouTubeEmbedUrl(trailer.url);
+                      if (embedUrl) {
+                        setSelectedTrailerUrl(embedUrl);
+                      } else {
+                        window.open(trailer.url, '_blank');
+                      }
+                      setIsTrailerSelectionOpen(false);
+                    }}
+                    className={`w-full font-bold py-3 px-4 rounded-xl transition-colors flex items-center justify-between border ${
+                      trailer.id === 'main' 
+                        ? 'bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white border-transparent' 
+                        : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 border-emerald-500/20'
+                    }`}
+                  >
+                    <span>{trailer.title}</span>
+                    <Play className="w-4 h-4" />
+                  </button>
+                ))}
+              </div>
+            </motion.div>
           </div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
 
       {/* YouTube Trailer Modal */}
-      {selectedTrailerUrl && (
-        <div 
-          className="fixed inset-0 bg-black/95 backdrop-blur-md flex items-center justify-center z-[110] p-4"
-          onClick={() => setSelectedTrailerUrl(null)}
-        >
-          <div 
-            className="relative w-full max-w-5xl aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl"
-            onClick={e => e.stopPropagation()}
-          >
-            <iframe
-              src={`${selectedTrailerUrl}?autoplay=1`}
-              title="Trailer"
-              className="w-full h-full border-0"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-            ></iframe>
+      <AnimatePresence>
+        {selectedTrailerUrl && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 overflow-hidden">
+            <motion.div
+              {...modalBackdropAnimation}
+              className="fixed inset-0 bg-black/95 backdrop-blur-xs transform-gpu will-change-[opacity]"
+              onClick={() => setSelectedTrailerUrl(null)}
+            />
+            <motion.div
+              {...fullScreenModalAnimation}
+              style={modalGpuStyle}
+              className="relative w-full max-w-5xl aspect-video bg-black rounded-3xl overflow-hidden shadow-2xl z-10 transform-gpu border border-zinc-800"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                onClick={() => setSelectedTrailerUrl(null)}
+                className="absolute top-4 right-4 z-50 text-white/70 hover:text-white bg-black/60 hover:bg-black/80 p-2 rounded-full transition-colors"
+                title="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <iframe
+                src={`${selectedTrailerUrl}?autoplay=1`}
+                title="Trailer"
+                className="w-full h-full border-0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              />
+            </motion.div>
           </div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
     </div>
   );
 });

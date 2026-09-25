@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAdminContent } from '../../contexts/AdminContentContext';
 import { useUsers } from '../../contexts/UsersContext';
@@ -9,6 +10,11 @@ import { format } from 'date-fns';
 import ConfirmModal from '../../components/ConfirmModal';
 import CommentModal from '../../components/CommentModal';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
+import {
+  modalBackdropAnimation,
+  modalContainerAnimation,
+  modalGpuStyle,
+} from '../../utils/modalAnimations';
 
 interface MovieRequest {
   id: string;
@@ -427,76 +433,88 @@ export default function MovieRequestsManagement() {
       )}
 
       {/* Content Picker Modal */}
-      {isPickerOpen && (
-        <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4">
-          <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[80vh] relative">
-            <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
-              <h2 className="text-lg font-bold">Select Existing Content</h2>
-              <button 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsPickerOpen(false);
-                }} 
-                className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-colors"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-            
-            <div className="p-4 border-b border-zinc-200 dark:border-zinc-800">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
-                <input
-                  type="text"
-                  placeholder="Search movies or series..."
-                  value={contentSearch}
-                  onChange={(e) => setContentSearch(e.target.value)}
-                  className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm focus:outline-none focus:border-emerald-500"
-                />
+      <AnimatePresence>
+        {isPickerOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-hidden">
+            <motion.div
+              {...modalBackdropAnimation}
+              className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+              onClick={() => setIsPickerOpen(false)}
+            />
+            <motion.div
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden flex flex-col max-h-[80vh] relative z-10 shadow-2xl transform-gpu"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
+                <h2 className="text-lg font-bold">Select Existing Content</h2>
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsPickerOpen(false);
+                  }} 
+                  className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+                >
+                  <X className="w-6 h-6" />
+                </button>
               </div>
-            </div>
-
-            <div className="overflow-y-auto flex-1 p-2 space-y-1">
-              {allContent
-                .filter(c => c.title.toLowerCase().includes(contentSearch.toLowerCase()))
-                .slice(0, 20)
-                .map(item => (
-                  <button
-                    key={item.id}
-                    disabled={isSelecting !== null}
-                    onClick={() => handleSelectContent(item.id)}
-                    className={clsx(
-                      "w-full p-2 flex items-center gap-3 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-xl transition-colors text-left",
-                      isSelecting === item.id && "bg-emerald-500/10 border border-emerald-500/50"
-                    )}
-                  >
-                    <img src={item.posterUrl} className="w-10 h-14 object-cover rounded-lg" referrerPolicy="no-referrer" />
-                    <div className="flex-1">
-                      <p className="font-bold text-sm text-zinc-100">{item.title}</p>
-                      <p className="text-[10px] uppercase font-bold flex items-center gap-1.5">
-                        <span className={clsx(
-                          "px-1.5 py-0.5 rounded text-white",
-                          item.type === 'movie' ? "bg-blue-500/90" : "bg-purple-500/90"
-                        )}>
-                          {item.type}
-                        </span>
-                        <span className="text-zinc-500 tracking-wider">• {item.year}</span>
-                      </p>
-                    </div>
-                    {isSelecting === item.id && (
-                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-emerald-500 border-t-transparent"></div>
-                    )}
-                  </button>
-                ))}
-              {allContent.filter(c => c.title.toLowerCase().includes(contentSearch.toLowerCase())).length === 0 && (
-                <div className="p-8 text-center text-zinc-500 text-sm">
-                  No content found.
+              
+              <div className="p-4 border-b border-zinc-200 dark:border-zinc-800">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                  <input
+                    type="text"
+                    placeholder="Search movies or series..."
+                    value={contentSearch}
+                    onChange={(e) => setContentSearch(e.target.value)}
+                    className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                  />
                 </div>
-              )}
-            </div>
+              </div>
+
+              <div className="overflow-y-auto flex-1 p-2 space-y-1">
+                {allContent
+                  .filter(c => c.title.toLowerCase().includes(contentSearch.toLowerCase()))
+                  .slice(0, 20)
+                  .map(item => (
+                    <button
+                      key={item.id}
+                      disabled={isSelecting !== null}
+                      onClick={() => handleSelectContent(item.id)}
+                      className={clsx(
+                        "w-full p-2 flex items-center gap-3 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-xl transition-colors text-left",
+                        isSelecting === item.id && "bg-emerald-500/10 border border-emerald-500/50"
+                      )}
+                    >
+                      <img src={item.posterUrl} className="w-10 h-14 object-cover rounded-lg" referrerPolicy="no-referrer" />
+                      <div className="flex-1">
+                        <p className="font-bold text-sm text-zinc-100">{item.title}</p>
+                        <p className="text-[10px] uppercase font-bold flex items-center gap-1.5">
+                          <span className={clsx(
+                            "px-1.5 py-0.5 rounded text-white",
+                            item.type === 'movie' ? "bg-blue-500/90" : "bg-purple-500/90"
+                          )}>
+                            {item.type}
+                          </span>
+                          <span className="text-zinc-500 tracking-wider">• {item.year}</span>
+                        </p>
+                      </div>
+                      {isSelecting === item.id && (
+                        <div className="animate-spin rounded-full h-4 w-4 border-2 border-emerald-500 border-t-transparent"></div>
+                      )}
+                    </button>
+                  ))}
+                {allContent.filter(c => c.title.toLowerCase().includes(contentSearch.toLowerCase())).length === 0 && (
+                  <div className="p-8 text-center text-zinc-500 text-sm">
+                    No content found.
+                  </div>
+                )}
+              </div>
+            </motion.div>
           </div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
     </div>
   );
 }

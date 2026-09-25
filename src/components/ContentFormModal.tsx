@@ -4,6 +4,11 @@ import { clsx } from 'clsx';
 import { Plus, Edit2, Trash2, Share2, Film, Tv, X, Save, Upload, Search, Eye, EyeOff, ArrowUp, ArrowDown, Copy, ClipboardPaste, GripVertical, Bell, RefreshCw, ChevronDown, ChevronUp, User, Lock, Loader2, MessageCircle, MoreVertical, Link2, AlertCircle, Check, TrendingUp, Clock, ArrowUpDown } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { Content, Genre, Language, Quality, QualityLinks, Season, Episode, LinkDef, Role, Trailer } from '../types';
+import {
+  modalBackdropAnimation,
+  modalContainerAnimation,
+  modalGpuStyle,
+} from '../utils/modalAnimations';
 
 interface QualityInputsProps {
   links: QualityLinks;
@@ -271,22 +276,18 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
   } = actions;
 
   return (
-    <AnimatePresence>
+    <AnimatePresence mode="wait">
         {isModalOpen && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50"
-          >
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-hidden">
             <motion.div 
-              initial={{ opacity: 0, scale: 0.96, y: 8 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96, y: 8 }}
-              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-              style={{ willChange: 'transform, opacity' }}
-              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-4xl my-8 flex flex-col max-h-[90vh] shadow-2xl"
+              {...modalBackdropAnimation}
+              className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+              onClick={() => {}}
+            />
+            <motion.div 
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="relative bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-4xl my-8 flex flex-col max-h-[90vh] shadow-2xl z-10 transform-gpu"
             >
               <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between sticky top-0 bg-zinc-50 dark:bg-zinc-900 z-10 rounded-t-2xl">
                 <div className="flex items-center gap-2 sm:gap-4">
@@ -1114,7 +1115,7 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
               </button>
             </div>
           </motion.div>
-        </motion.div>
+        </div>
         )}
       </AnimatePresence>
   );

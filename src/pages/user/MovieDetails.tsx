@@ -70,6 +70,12 @@ import SharePreviewModal from "../../components/SharePreviewModal";
 import { clsx } from "clsx";
 import { motion, AnimatePresence } from "framer-motion";
 import {
+  modalBackdropAnimation,
+  modalContainerAnimation,
+  fullScreenModalAnimation,
+  modalGpuStyle,
+} from "../../utils/modalAnimations";
+import {
   formatContentTitle,
   formatReleaseDate,
   formatRuntime,
@@ -1987,55 +1993,68 @@ export default function MovieDetails() {
         let extractionFailed = false;
 
         if (shouldExtract) {
-          try {
-            const res = await fetch("/api/hubcloud/direct-link", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ url: targetUrl, isVcloud, forceExtract: isVcloudName }),
-            });
-            if (res.ok) {
-              const data = await res.json();
-              if (data.url && data.url !== targetUrl && !isHubcloudRawLink(data.url)) {
-                finalUrl = data.url;
-                finalTinyUrl = undefined;
-                finalCandidates = Array.isArray(data.candidates)
-                  ? data.candidates.filter((c: any) => {
-                      const lowerT = (c.text || '').toLowerCase();
-                      const lowerH = (c.href || '').toLowerCase();
-                      return !lowerT.includes('login') && !lowerH.includes('login') &&
-                             !lowerT.includes('moviesdrive') && !lowerH.includes('moviesdrive') &&
-                             !lowerT.includes('mdrive') && !lowerH.includes('mdrive') &&
-                             !lowerT.includes('telegram') && !lowerH.includes('telegram');
-                    })
-                  : data.candidates;
-                finalSize = data.size;
+          let attempts = 0;
+          const maxAttempts = 3;
+          let successExtraction = false;
 
-                const cacheEntry = {
-                  url: finalUrl,
-                  candidates: finalCandidates,
-                  size: finalSize,
-                  timestamp: Date.now(),
-                };
-                hubcloudCacheRef.current[targetUrl] = cacheEntry;
-                try {
-                  const cacheStr = localStorage.getItem(
-                    "hubcloud_extraction_cache",
-                  );
-                  const cacheObj = cacheStr ? JSON.parse(cacheStr) : {};
-                  cacheObj[targetUrl] = cacheEntry;
-                  localStorage.setItem(
-                    "hubcloud_extraction_cache",
-                    JSON.stringify(cacheObj),
-                  );
-                } catch (e) {}
-              } else {
-                extractionFailed = true;
+          while (attempts < maxAttempts && !successExtraction) {
+            attempts++;
+            try {
+              const res = await fetch("/api/hubcloud/direct-link", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ url: targetUrl, isVcloud, forceExtract: isVcloudName }),
+              });
+              if (res.ok) {
+                const data = await res.json();
+                if (data.url && data.url !== targetUrl && !isHubcloudRawLink(data.url)) {
+                  finalUrl = data.url;
+                  finalTinyUrl = undefined;
+                  finalCandidates = Array.isArray(data.candidates)
+                    ? data.candidates.filter((c: any) => {
+                        const lowerT = (c.text || '').toLowerCase();
+                        const lowerH = (c.href || '').toLowerCase();
+                        return !lowerT.includes('login') && !lowerH.includes('login') &&
+                               !lowerT.includes('moviesdrive') && !lowerH.includes('moviesdrive') &&
+                               !lowerT.includes('mdrive') && !lowerH.includes('mdrive') &&
+                               !lowerT.includes('telegram') && !lowerH.includes('telegram');
+                      })
+                    : data.candidates;
+                  finalSize = data.size;
+
+                  const cacheEntry = {
+                    url: finalUrl,
+                    candidates: finalCandidates,
+                    size: finalSize,
+                    timestamp: Date.now(),
+                  };
+                  hubcloudCacheRef.current[targetUrl] = cacheEntry;
+                  try {
+                    const cacheStr = localStorage.getItem(
+                      "hubcloud_extraction_cache",
+                    );
+                    const cacheObj = cacheStr ? JSON.parse(cacheStr) : {};
+                    cacheObj[targetUrl] = cacheEntry;
+                    localStorage.setItem(
+                      "hubcloud_extraction_cache",
+                      JSON.stringify(cacheObj),
+                    );
+                  } catch (e) {}
+
+                  successExtraction = true;
+                  break;
+                }
               }
-            } else {
-              extractionFailed = true;
+            } catch (e) {
+              console.warn(`Extraction attempt ${attempts} failed:`, e);
             }
-          } catch (e) {
-            console.error("Failed to resolve link", e);
+
+            if (!successExtraction && attempts < maxAttempts) {
+              await new Promise((r) => setTimeout(r, 600));
+            }
+          }
+
+          if (!successExtraction) {
             extractionFailed = true;
           }
         }
@@ -2702,11 +2721,12 @@ export default function MovieDetails() {
           className="relative z-10 flex items-end justify-center p-4 sm:p-8 pt-28 sm:pt-36 pb-6 w-full"
         >
           <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center md:items-end gap-6 sm:gap-10 text-center md:text-left w-full">
-            <div className="relative group shrink-0 flex flex-col items-center">
-              <div className="relative">
+            <div className="shrink-0 flex flex-col items-center gap-2.5 max-w-full">
+              {/* Poster Box with Glow */}
+              <div className="relative w-44 sm:w-56 md:w-64 aspect-[2/3] rounded-2xl group">
                 <div className="absolute -inset-1 bg-gradient-to-r from-emerald-500 to-cyan-500 rounded-3xl blur opacity-30 group-hover:opacity-75 transition duration-500"></div>
                 <div 
-                  className="relative w-44 sm:w-56 md:w-64 rounded-2xl shadow-2xl cursor-pointer hover:scale-[1.03] transition-all duration-300 border border-white/20 dark:border-zinc-800/80 aspect-[2/3] overflow-hidden group/poster"
+                  className="relative w-full h-full rounded-2xl shadow-2xl cursor-pointer hover:scale-[1.03] transition-all duration-300 border border-white/20 dark:border-zinc-800/80 overflow-hidden group/poster"
                   onClick={handleOpenPosterLightbox}
                   title={t('View Full Poster & Gallery')}
                 >
@@ -2728,25 +2748,25 @@ export default function MovieDetails() {
                       <div className="p-3 bg-emerald-500 text-white rounded-full shadow-lg shadow-emerald-500/40">
                         <Maximize2 className="w-6 h-6" />
                       </div>
-                      <span className="text-xs font-bold tracking-wider uppercase bg-black/75 px-3.5 py-1 rounded-full border border-white/20 shadow-md">
+                      <span className="text-xs font-bold tracking-wider uppercase bg-black/75 px-3.5 py-1 rounded-full border border-white/20 shadow-md text-center">
                         {t('View Poster & Gallery')}
                       </span>
                     </div>
                   </div>
                 </div>
-
-                {/* Text / Button Right Under Poster */}
-                <button
-                  type="button"
-                  onClick={handleOpenPosterLightbox}
-                  className="mt-2.5 w-full py-1.5 px-3 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-700/60 hover:border-emerald-500/50 shadow-sm transition-all duration-200 flex items-center justify-center gap-1.5 group/poster-btn text-xs font-medium cursor-pointer"
-                  title={t('View Full Poster & Gallery')}
-                >
-                  <ImageIcon className="w-3.5 h-3.5 text-emerald-400 group-hover/poster-btn:scale-110 transition-transform" />
-                  <span>{t('Click to View More')}</span>
-                  <Maximize2 className="w-3 h-3 text-zinc-400 group-hover/poster-btn:text-emerald-400 transition-colors" />
-                </button>
               </div>
+
+              {/* Text / Button Right Under Poster - Single Line Centered */}
+              <button
+                type="button"
+                onClick={handleOpenPosterLightbox}
+                className="w-auto max-w-full py-1.5 sm:py-2 px-3 sm:px-4 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-700/60 hover:border-emerald-500/50 shadow-sm transition-all duration-200 flex items-center justify-center gap-1.5 sm:gap-2 group/poster-btn text-[11px] sm:text-xs font-medium cursor-pointer text-center whitespace-nowrap"
+                title={t('View Full Poster & Gallery')}
+              >
+                <ImageIcon className="w-3.5 h-3.5 shrink-0 text-emerald-400 group-hover/poster-btn:scale-110 transition-transform" />
+                <span className="whitespace-nowrap">{t('Click Poster to View More')}</span>
+                <Maximize2 className="w-3 h-3 shrink-0 text-zinc-400 group-hover/poster-btn:text-emerald-400 transition-colors" />
+              </button>
             </div>
 
             <div className="flex-1 space-y-4">
@@ -3915,30 +3935,20 @@ export default function MovieDetails() {
 
       <AnimatePresence>
         {linkPopup && (
-          <div key="link-popup-wrapper" className="relative z-[9999]">
-            {/* Backdrop */}
-            <motion.div
-              key="link-popup-backdrop"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="fixed inset-0 bg-black/80 backdrop-blur-md"
-              onClick={closeLinkPopup}
-            />
-
+          <motion.div
+            key="link-popup-backdrop"
+            {...modalBackdropAnimation}
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-4 overflow-hidden bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+            onClick={closeLinkPopup}
+          >
             {/* Dialog Card */}
-            <div className="fixed inset-0 flex items-center justify-center p-4 pointer-events-none">
-              <motion.div
-                key="link-popup-card"
-                initial={{ opacity: 0, scale: 0.96, y: 8 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.96, y: 8 }}
-                transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-                style={{ willChange: 'transform, opacity' }}
-                className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 max-w-md w-full relative shadow-2xl overflow-hidden pointer-events-auto"
-                onClick={(e) => e.stopPropagation()}
-              >
+            <motion.div
+              key="link-popup-card"
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="relative bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 max-w-md w-full shadow-2xl overflow-hidden z-10 transform-gpu my-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
                 <button
                   onClick={closeLinkPopup}
                   className="absolute top-5 right-5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors p-1 rounded-full hover:bg-zinc-200 dark:hover:bg-zinc-800"
@@ -4111,17 +4121,15 @@ export default function MovieDetails() {
                   </div>
                 </div>
               </motion.div>
-            </div>
-          </div>
+          </motion.div>
         )}
       </AnimatePresence>
 
       <AnimatePresence>
         {isPosterExpanded && (
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            {...modalBackdropAnimation}
+            style={modalGpuStyle}
             className="fixed inset-0 bg-black/95 backdrop-blur-md flex flex-col items-center justify-between z-[10000] p-4 sm:p-6 select-none"
             onClick={closePosterPopup}
             onTouchStart={handleLightboxTouchStart}
@@ -4239,29 +4247,22 @@ export default function MovieDetails() {
       </AnimatePresence>
 
       {/* Trailer Selection Modal */}
-      <AnimatePresence>
+      <AnimatePresence mode="wait">
         {isTrailerSelectionOpen && (
-          <div key="trailer-selection-wrapper" className="relative z-[9999]">
+          <div key="trailer-selection-wrapper" className="fixed inset-0 z-[9999] flex items-center justify-center p-4 overflow-hidden">
             <motion.div
               key="trailer-selection-backdrop"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="fixed inset-0 bg-black/80 backdrop-blur-md"
+              {...modalBackdropAnimation}
+              className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
               onClick={() => setIsTrailerSelectionOpen(false)}
             />
-            <div className="fixed inset-0 flex items-center justify-center p-4 pointer-events-none">
-              <motion.div
-                key="trailer-selection-card"
-                initial={{ opacity: 0, scale: 0.96, y: 8 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.96, y: 8 }}
-                transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-                style={{ willChange: 'transform, opacity' }}
-                className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 max-w-md w-full relative shadow-2xl pointer-events-auto"
-                onClick={(e) => e.stopPropagation()}
-              >
+            <motion.div
+              key="trailer-selection-card"
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="relative bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 max-w-md w-full shadow-2xl z-10 transform-gpu"
+              onClick={(e) => e.stopPropagation()}
+            >
                 <button
                   onClick={() => setIsTrailerSelectionOpen(false)}
                   className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-1 rounded-full hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
@@ -4299,40 +4300,32 @@ export default function MovieDetails() {
                     );
                   })}
                 </div>
-              </motion.div>
-            </div>
+            </motion.div>
           </div>
         )}
       </AnimatePresence>
 
       {/* Trailer Popup */}
-      <AnimatePresence>
+      <AnimatePresence mode="wait">
         {isTrailerPopupOpen &&
           (activeTrailerUrl || mergedContent.trailerUrl) && (
-            <div key="trailer-popup-wrapper" className="relative z-[10000]">
+            <div key="trailer-popup-wrapper" className="fixed inset-0 z-[10000] flex items-center justify-center p-4 overflow-hidden">
               <motion.div
                 key="trailer-popup-backdrop"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.2 }}
-                className="fixed inset-0 bg-black/95 backdrop-blur-md"
+                {...modalBackdropAnimation}
+                className="fixed inset-0 bg-black/95 backdrop-blur-xs transform-gpu will-change-[opacity]"
                 onClick={() => {
                   setIsTrailerPopupOpen(false);
                   setActiveTrailerUrl(null);
                 }}
               />
-              <div className="fixed inset-0 flex items-center justify-center p-4 pointer-events-none">
-                <motion.div
-                  key="trailer-popup-card"
-                  initial={{ opacity: 0, scale: 0.96, y: 8 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.96, y: 8 }}
-                  transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-                  style={{ willChange: 'transform, opacity' }}
-                  className="relative w-full max-w-5xl aspect-video bg-black rounded-2xl overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] ring-1 ring-white/10 pointer-events-auto"
-                  onClick={(e) => e.stopPropagation()}
-                >
+              <motion.div
+                key="trailer-popup-card"
+                {...fullScreenModalAnimation}
+                style={modalGpuStyle}
+                className="relative w-full max-w-5xl aspect-video bg-black rounded-2xl overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] ring-1 ring-white/10 z-10 transform-gpu"
+                onClick={(e) => e.stopPropagation()}
+              >
                   {getYouTubeEmbedUrl(
                     activeTrailerUrl || mergedContent.trailerUrl || "",
                   ) ? (
@@ -4374,7 +4367,6 @@ export default function MovieDetails() {
                     </div>
                   )}
                 </motion.div>
-              </div>
             </div>
           )}
       </AnimatePresence>

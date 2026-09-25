@@ -11,6 +11,11 @@ import { performFullLinkScan, LinkCheckResult } from '../../utils/linkScanner';
 import { linkScannerManager } from '../../utils/linkScannerManager';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
 import { clsx } from 'clsx';
+import {
+  modalBackdropAnimation,
+  modalContainerAnimation,
+  modalGpuStyle,
+} from '../../utils/modalAnimations';
 
 const parseLinks = (linksStr: string | undefined): QualityLinks => {
   if (!linksStr) return [];
@@ -1174,20 +1179,17 @@ export default function ErrorLinks() {
       {/* Add Links Modal */}
       <AnimatePresence>
         {isAddLinksModalOpen && addLinksContent && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50"
-          >
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-hidden">
             <motion.div 
-              initial={{ opacity: 0, scale: 0.96, y: 8 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96, y: 8 }}
-              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-              style={{ willChange: 'transform, opacity' }}
-              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-lg p-6"
+              {...modalBackdropAnimation}
+              className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+              onClick={() => setIsAddLinksModalOpen(false)}
+            />
+            <motion.div 
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-lg p-6 relative z-10 shadow-2xl transform-gpu"
+              onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Add Links to {addLinksContent.title}</h2>
@@ -1369,27 +1371,24 @@ export default function ErrorLinks() {
                 </div>
               </div>
             </motion.div>
-          </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
       {/* Edit Modal */}
       <AnimatePresence>
         {editingLink && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50"
-          >
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-hidden">
             <motion.div 
-              initial={{ opacity: 0, scale: 0.96, y: 8 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96, y: 8 }}
-              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-              style={{ willChange: 'transform, opacity' }}
-              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-md p-6"
+              {...modalBackdropAnimation}
+              className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+              onClick={() => setEditingLink(null)}
+            />
+            <motion.div 
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-md p-6 relative z-10 shadow-2xl transform-gpu"
+              onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-bold">Edit Link</h2>
@@ -1510,7 +1509,7 @@ export default function ErrorLinks() {
                 </button>
               </div>
             </motion.div>
-          </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

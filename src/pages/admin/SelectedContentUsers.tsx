@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { db } from '../../firebase';
 import { collection, doc, updateDoc, writeBatch, query} from 'firebase/firestore';
 import { UserProfile, Content, Role, Status } from '../../types';
@@ -11,6 +12,11 @@ import { useAdminContent } from '../../contexts/AdminContentContext';
 import { useUsers } from '../../contexts/UsersContext';
 import { safeStorage } from '../../utils/safeStorage';
 import { updateChunkMetaLocalCache, getUtcVersion } from '../../utils/chunkMeta';
+import {
+  modalBackdropAnimation,
+  modalContainerAnimation,
+  modalGpuStyle,
+} from '../../utils/modalAnimations';
 
 import { getUserDisplayName } from '../../utils/userUtils';
 
@@ -275,9 +281,20 @@ export default function SelectedContentUsers() {
       </div>
 
       {/* Access Modal */}
-      {selectedUser && (
-        <div className="fixed inset-0 bg-black/60 dark:bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl transition-colors duration-300">
+      <AnimatePresence>
+        {selectedUser && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-hidden">
+            <motion.div
+              {...modalBackdropAnimation}
+              className="fixed inset-0 bg-black/60 dark:bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+              onClick={handleExit}
+            />
+            <motion.div
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl relative z-10 transform-gpu transition-colors duration-300"
+              onClick={(e) => e.stopPropagation()}
+            >
             <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h2 className="text-xl font-bold text-zinc-900 dark:text-white transition-colors duration-300">Manage Access</h2>
@@ -389,9 +406,10 @@ export default function SelectedContentUsers() {
                 Save Changes
               </button>
             </div>
-          </div>
+          </motion.div>
         </div>
       )}
+    </AnimatePresence>
 
       <AlertModal
         isOpen={alertConfig.isOpen}

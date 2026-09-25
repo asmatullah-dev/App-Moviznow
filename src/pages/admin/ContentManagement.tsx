@@ -50,6 +50,11 @@ import {
   Trailer,
 } from "../../types";
 import { motion, AnimatePresence } from "framer-motion";
+import {
+  modalBackdropAnimation,
+  modalContainerAnimation,
+  modalGpuStyle,
+} from "../../utils/modalAnimations";
 import { clsx } from "clsx";
 import {
   Plus,
@@ -6780,20 +6785,20 @@ export default function ContentManagement() {
       {/* Auto-Fill Modal */}
       <AnimatePresence>
         {isAutoFillModalOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 z-[60]"
-          >
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 overflow-hidden">
             <motion.div
-              initial={{ opacity: 0, scale: 0.96, y: 8 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96, y: 8 }}
-              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-              style={{ willChange: 'transform, opacity' }}
-              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl"
+              {...modalBackdropAnimation}
+              style={modalGpuStyle}
+              className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+              onClick={() => {
+                setAutoFillText("");
+                setIsAutoFillModalOpen(false);
+              }}
+            />
+            <motion.div
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="relative z-10 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl"
             >
               <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-900/50">
                 <div>
@@ -6841,7 +6846,7 @@ export default function ContentManagement() {
                 </div>
               </div>
             </motion.div>
-          </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
@@ -6956,17 +6961,17 @@ export default function ContentManagement() {
 
       <AnimatePresence>
         {showMergeConfirm && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[80] flex items-center justify-center p-4"
-          >
+          <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 overflow-hidden">
             <motion.div
-              initial={{ scale: 0.95 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0.95 }}
-              className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden"
+              {...modalBackdropAnimation}
+              style={modalGpuStyle}
+              className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+              onClick={() => setShowMergeConfirm(false)}
+            />
+            <motion.div
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="relative z-10 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden"
             >
               <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex justify-between items-center bg-zinc-50 dark:bg-zinc-900/50">
                 <h2 className="text-xl font-bold flex items-center gap-2">
@@ -7060,7 +7065,7 @@ export default function ContentManagement() {
                 </button>
               </div>
             </motion.div>
-          </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
@@ -7115,20 +7120,17 @@ export default function ContentManagement() {
 
       <AnimatePresence>
         {imdbSeasonsPopup && imdbSeasonsPopup.isOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4"
-          >
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 overflow-hidden">
             <motion.div
-              initial={{ opacity: 0, scale: 0.96, y: 8 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96, y: 8 }}
-              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-              style={{ willChange: 'transform, opacity' }}
-              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-md w-full relative shadow-2xl"
+              {...modalBackdropAnimation}
+              style={modalGpuStyle}
+              className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+              onClick={() => setImdbSeasonsPopup(null)}
+            />
+            <motion.div
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="relative z-10 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-md w-full shadow-2xl"
             >
               <button
                 onClick={() => setImdbSeasonsPopup(null)}
@@ -7207,487 +7209,421 @@ export default function ContentManagement() {
                 </button>
               </div>
             </motion.div>
-          </motion.div>
+          </div>
         )}
       </AnimatePresence>
-      {shareSeasonModal.isOpen && shareSeasonModal.content && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
-          <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-md w-full relative">
-            <button
+      {/* Share Season Modal */}
+      <AnimatePresence>
+        {shareSeasonModal.isOpen && shareSeasonModal.content && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 overflow-hidden">
+            <motion.div
+              {...modalBackdropAnimation}
+              style={modalGpuStyle}
+              className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
               onClick={() =>
                 setShareSeasonModal({ ...shareSeasonModal, isOpen: false })
               }
-              className="absolute top-4 right-4 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors"
+            />
+            <motion.div
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="relative z-10 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-md w-full shadow-2xl"
             >
-              <X className="w-5 h-5" />
-            </button>
-            <h3 className="text-xl font-bold mb-2">Share Series</h3>
-            <p className="text-zinc-500 dark:text-zinc-400 mb-6">
-              Select which seasons of "{shareSeasonModal.content.title}" you
-              want to share on WhatsApp.
-            </p>
-
-            <div className="max-h-60 overflow-y-auto space-y-2 mb-6 pr-2 custom-scrollbar">
-              <label
-                className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer border transition-colors ${selectedShareSeasons.length === shareSeasonModal.seasons.length ? "bg-emerald-500/10 border-emerald-500 text-emerald-500" : "bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800/50"}`}
-              >
-                <input
-                  type="checkbox"
-                  checked={
-                    selectedShareSeasons.length ===
-                    shareSeasonModal.seasons.length
-                  }
-                  onChange={(e) => {
-                    if (e.target.checked) {
-                      setSelectedShareSeasons(
-                        shareSeasonModal.seasons.map((s) => Number(s.seasonNumber)),
-                      );
-                    } else {
-                      setSelectedShareSeasons([]);
-                    }
-                  }}
-                  className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-700 text-emerald-500 focus:ring-emerald-500/20 bg-white dark:bg-zinc-950"
-                />
-                <span className="font-medium">All Seasons</span>
-              </label>
-              <div className="h-px bg-zinc-100 dark:bg-zinc-800 my-2" />
-              {shareSeasonModal.seasons.map((season) => (
-                <label
-                  key={season.id}
-                  className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer border transition-colors ${selectedShareSeasons.includes(Number(season.seasonNumber)) ? "bg-emerald-500/10 border-emerald-500 text-emerald-500" : "bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800/50"}`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedShareSeasons.includes(Number(season.seasonNumber))}
-                    onChange={(e) => {
-                      const num = Number(season.seasonNumber);
-                      if (e.target.checked) {
-                        setSelectedShareSeasons((prev) => [
-                          ...prev,
-                          num,
-                        ]);
-                      } else {
-                        setSelectedShareSeasons((prev) =>
-                          prev.filter((s) => s !== num),
-                        );
-                      }
-                    }}
-                    className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-700 text-emerald-500 focus:ring-emerald-500/20 bg-white dark:bg-zinc-950"
-                  />
-                  <span className="font-medium">
-                    Season {season.seasonNumber}
-                  </span>
-                </label>
-              ))}
-            </div>
-
-            <div className="flex justify-end gap-3">
               <button
                 onClick={() =>
                   setShareSeasonModal({ ...shareSeasonModal, isOpen: false })
                 }
-                className="px-6 py-2 rounded-xl font-medium hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                className="absolute top-4 right-4 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors"
               >
-                Cancel
+                <X className="w-5 h-5" />
               </button>
-              <button
-                onClick={() => {
-                  if (shareSeasonModal.content) {
-                    const content = shareSeasonModal.content;
-                    const mode = shareSeasonModal.mode;
-                    const seasons = selectedShareSeasons;
-                    setShareSeasonModal({ ...shareSeasonModal, isOpen: false });
-                    setTimeout(() => {
-                      handleSharePipeline(content, mode, seasons);
-                    }, 150);
-                  }
-                }}
-                disabled={selectedShareSeasons.length === 0}
-                className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-xl font-bold transition-colors flex items-center gap-2"
-              >
-                {shareSeasonModal.mode === "whatsapp" ? (
-                  <MessageCircle className="w-4 h-4" />
-                ) : (
-                  <Share2 className="w-4 h-4" />
-                )}{" "}
-                Share ({selectedShareSeasons.length})
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Check Links Season Modal */}
-      {checkLinksSeasonModal.isOpen && checkLinksSeasonModal.content && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
-          <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-md w-full relative">
-            <button
-              onClick={() =>
-                setCheckLinksSeasonModal({ ...checkLinksSeasonModal, isOpen: false })
-              }
-              className="absolute top-4 right-4 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <h3 className="text-xl font-bold mb-2">Check Links</h3>
-            <p className="text-zinc-500 dark:text-zinc-400 mb-6">
-              Select which seasons of "{checkLinksSeasonModal.content.title}" you
-              want to check links for.
-            </p>
-
-            <div className="max-h-60 overflow-y-auto space-y-2 mb-6 pr-2 custom-scrollbar">
-              <label
-                className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer border transition-colors ${selectedCheckLinksSeasons.length === checkLinksSeasonModal.seasons.length ? "bg-emerald-500/10 border-emerald-500 text-emerald-500" : "bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800/50"}`}
-              >
-                <input
-                  type="checkbox"
-                  checked={
-                    selectedCheckLinksSeasons.length ===
-                    checkLinksSeasonModal.seasons.length
-                  }
-                  onChange={(e) => {
-                    if (e.target.checked) {
-                      setSelectedCheckLinksSeasons(
-                        checkLinksSeasonModal.seasons.map((s) => Number(s.seasonNumber)),
-                      );
-                    } else {
-                      setSelectedCheckLinksSeasons([]);
-                    }
-                  }}
-                  className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-700 text-emerald-500 focus:ring-emerald-500/20 bg-white dark:bg-zinc-950"
-                />
-                <span className="font-medium">All Seasons</span>
-              </label>
-
-              <div className="h-px bg-zinc-100 dark:bg-zinc-800 my-2" />
-
-              {checkLinksSeasonModal.seasons.map((season) => {
-                const isSelected = selectedCheckLinksSeasons.includes(
-                  Number(season.seasonNumber),
-                );
-                return (
-                  <label
-                    key={season.seasonNumber}
-                    className={`flex items-center justify-between p-3 rounded-xl cursor-pointer border transition-colors ${isSelected ? "bg-emerald-500/5 border-emerald-500/50 text-emerald-600 dark:text-emerald-400" : "bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800/50"}`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={(e) => {
-                          const num = Number(season.seasonNumber);
-                          if (e.target.checked) {
-                            setSelectedCheckLinksSeasons((prev) =>
-                              [...prev, num].sort((a, b) => a - b),
-                            );
-                          } else {
-                            setSelectedCheckLinksSeasons((prev) =>
-                              prev.filter((n) => n !== num),
-                            );
-                          }
-                        }}
-                        className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-700 text-emerald-500 focus:ring-emerald-500/20 bg-white dark:bg-zinc-950"
-                      />
-                      <span className="font-medium">Season {season.seasonNumber}</span>
-                    </div>
-                  </label>
-                );
-              })}
-            </div>
-
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() =>
-                  setCheckLinksSeasonModal({ ...checkLinksSeasonModal, isOpen: false })
-                }
-                className="px-6 py-2 rounded-xl font-medium hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  if (checkLinksSeasonModal.content) {
-                    const content = checkLinksSeasonModal.content;
-                    const seasons = selectedCheckLinksSeasons;
-                    setCheckLinksSeasonModal({ ...checkLinksSeasonModal, isOpen: false });
-                    setTimeout(() => {
-                      handleCheckLinks(content, seasons);
-                    }, 150);
-                  }
-                }}
-                disabled={selectedCheckLinksSeasons.length === 0}
-                className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-xl font-bold transition-colors flex items-center gap-2"
-              >
-                <Link2 className="w-4 h-4" /> Check Links ({selectedCheckLinksSeasons.length})
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Notification Modal */}
-      {notificationModal.isOpen && notificationModal.content && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
-          <div className="bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-6 max-w-md w-full border border-zinc-200 dark:border-zinc-800 shadow-2xl">
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <Bell className="w-6 h-6 text-blue-500" />
-              Send Notification
-            </h2>
-
-            <div className="bg-white dark:bg-zinc-950 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 mb-6 flex gap-4">
-              {notificationModal.content.posterUrl && (
-                <img
-                  src={notificationModal.content.posterUrl}
-                  alt="Poster"
-                  className="w-16 h-24 object-cover rounded-md shrink-0"
-                  referrerPolicy="no-referrer"
-                />
-              )}
-              <div>
-                <h3 className="font-bold text-zinc-900 dark:text-white mb-1">
-                  {getNotificationPreview(notificationModal.content).title}
-                </h3>
-                <p className="text-sm text-zinc-500 dark:text-zinc-400 line-clamp-2">
-                  {getNotificationPreview(notificationModal.content).body}
-                </p>
-              </div>
-            </div>
-
-            {notificationModal.status === "idle" && (
+              <h3 className="text-xl font-bold mb-2">Share Series</h3>
               <p className="text-zinc-500 dark:text-zinc-400 mb-6">
-                This will send a push notification to all users about this new
-                content. Do you want to proceed?
+                Select which seasons of "{shareSeasonModal.content.title}" you
+                want to share on WhatsApp.
               </p>
-            )}
 
-            {notificationModal.status === "sending" && (
-              <div className="flex flex-col items-center justify-center py-6">
-                <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-blue-500 mb-4"></div>
-                <p className="text-blue-500 font-medium">
-                  Sending notification...
-                </p>
-              </div>
-            )}
-
-            {notificationModal.status === "success" && (
-              <div className="flex flex-col items-center justify-center py-6">
-                <div className="w-12 h-12 bg-emerald-500/20 rounded-full flex items-center justify-center mb-4">
-                  <svg
-                    className="w-6 h-6 text-emerald-500"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
+              <div className="max-h-60 overflow-y-auto space-y-2 mb-6 pr-2 custom-scrollbar">
+                <label
+                  className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer border transition-colors ${selectedShareSeasons.length === shareSeasonModal.seasons.length ? "bg-emerald-500/10 border-emerald-500 text-emerald-500" : "bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800/50"}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={
+                      selectedShareSeasons.length ===
+                      shareSeasonModal.seasons.length
+                    }
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedShareSeasons(
+                          shareSeasonModal.seasons.map((s) => Number(s.seasonNumber)),
+                        );
+                      } else {
+                        setSelectedShareSeasons([]);
+                      }
+                    }}
+                    className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-700 text-emerald-500 focus:ring-emerald-500/20 bg-white dark:bg-zinc-950"
+                  />
+                  <span className="font-medium">All Seasons</span>
+                </label>
+                <div className="h-px bg-zinc-100 dark:bg-zinc-800 my-2" />
+                {shareSeasonModal.seasons.map((season) => (
+                  <label
+                    key={season.id}
+                    className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer border transition-colors ${selectedShareSeasons.includes(Number(season.seasonNumber)) ? "bg-emerald-500/10 border-emerald-500 text-emerald-500" : "bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800/50"}`}
                   >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      d="M5 13l4 4L19 7"
-                    ></path>
-                  </svg>
-                </div>
-                <p className="text-emerald-500 font-medium">
-                  Notification successfully pushed!
-                </p>
+                    <input
+                      type="checkbox"
+                      checked={selectedShareSeasons.includes(Number(season.seasonNumber))}
+                      onChange={(e) => {
+                        const num = Number(season.seasonNumber);
+                        if (e.target.checked) {
+                          setSelectedShareSeasons((prev) => [
+                            ...prev,
+                            num,
+                          ]);
+                        } else {
+                          setSelectedShareSeasons((prev) =>
+                            prev.filter((s) => s !== num),
+                          );
+                        }
+                      }}
+                      className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-700 text-emerald-500 focus:ring-emerald-500/20 bg-white dark:bg-zinc-950"
+                    />
+                    <span className="font-medium">
+                      Season {season.seasonNumber}
+                    </span>
+                  </label>
+                ))}
               </div>
-            )}
 
-            {notificationModal.status === "error" && (
-              <div className="flex flex-col items-center justify-center py-6">
-                <div className="w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mb-4">
-                  <X className="w-6 h-6 text-red-500" />
-                </div>
-                <p className="text-red-500 font-medium">
-                  Error sending notification.
-                </p>
-              </div>
-            )}
-
-            {notificationModal.status === "idle" && (
               <div className="flex justify-end gap-3">
                 <button
                   onClick={() =>
-                    setNotificationModal({
-                      isOpen: false,
-                      content: null,
-                      status: "idle",
-                    })
+                    setShareSeasonModal({ ...shareSeasonModal, isOpen: false })
                   }
                   className="px-6 py-2 rounded-xl font-medium hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={handleSendNotification}
-                  className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-xl font-bold transition-colors flex items-center gap-2"
+                  onClick={() => {
+                    if (shareSeasonModal.content) {
+                      const content = shareSeasonModal.content;
+                      const mode = shareSeasonModal.mode;
+                      const seasons = selectedShareSeasons;
+                      setShareSeasonModal({ ...shareSeasonModal, isOpen: false });
+                      setTimeout(() => {
+                        handleSharePipeline(content, mode, seasons);
+                      }, 150);
+                    }
+                  }}
+                  disabled={selectedShareSeasons.length === 0}
+                  className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-xl font-bold transition-colors flex items-center gap-2"
                 >
-                  <Bell className="w-4 h-4" /> Send Now
+                  {shareSeasonModal.mode === "whatsapp" ? (
+                    <MessageCircle className="w-4 h-4" />
+                  ) : (
+                    <Share2 className="w-4 h-4" />
+                  )}{" "}
+                  Share ({selectedShareSeasons.length})
                 </button>
               </div>
-            )}
-
-            {notificationModal.status === "error" && (
-              <div className="flex justify-end gap-3 mt-4">
-                <button
-                  onClick={() =>
-                    setNotificationModal({
-                      isOpen: false,
-                      content: null,
-                      status: "idle",
-                    })
-                  }
-                  className="bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-6 py-2 rounded-xl font-bold transition-colors"
-                >
-                  Close
-                </button>
-              </div>
-            )}
+            </motion.div>
           </div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
 
-      {emailModal.isOpen && emailModal.content && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
-          <div className="bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-6 max-w-md w-full border border-zinc-200 dark:border-zinc-800 shadow-2xl">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold flex items-center gap-2 text-zinc-900 dark:text-white">
-                <Mail className="w-6 h-6 text-rose-500" />
-                Send Email to All Users
-              </h2>
+      {/* Check Links Season Modal */}
+      <AnimatePresence>
+        {checkLinksSeasonModal.isOpen && checkLinksSeasonModal.content && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 overflow-hidden">
+            <motion.div
+              {...modalBackdropAnimation}
+              style={modalGpuStyle}
+              className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+              onClick={() =>
+                setCheckLinksSeasonModal({ ...checkLinksSeasonModal, isOpen: false })
+              }
+            />
+            <motion.div
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="relative z-10 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-md w-full shadow-2xl"
+            >
               <button
                 onClick={() =>
-                  setEmailModal({
-                    isOpen: false,
-                    content: null,
-                    customMessage: "",
-                    status: "idle",
-                    resultMessage: "",
-                  })
+                  setCheckLinksSeasonModal({ ...checkLinksSeasonModal, isOpen: false })
                 }
-                className="p-1 rounded-lg text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                className="absolute top-4 right-4 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
-            </div>
 
-            <div className="bg-white dark:bg-zinc-950 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 mb-4 flex gap-4">
-              {emailModal.content.posterUrl && (
-                <img
-                  src={emailModal.content.posterUrl}
-                  alt="Poster"
-                  className="w-16 h-24 object-cover rounded-md shrink-0 border border-zinc-200 dark:border-zinc-800"
-                  referrerPolicy="no-referrer"
-                />
-              )}
-              <div className="flex-1 min-w-0">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-rose-500 bg-rose-500/10 px-2 py-0.5 rounded">
-                  {emailModal.content.type === "series" ? "TV Series" : "Movie"}
-                </span>
-                <h3 className="font-bold text-zinc-900 dark:text-white mt-1 mb-0.5 line-clamp-1">
-                  {emailModal.content.title} {emailModal.content.year ? `(${emailModal.content.year})` : ""}
-                </h3>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 line-clamp-2">
-                  {emailModal.content.description || "No description provided."}
-                </p>
-              </div>
-            </div>
+              <h3 className="text-xl font-bold mb-2">Check Links</h3>
+              <p className="text-zinc-500 dark:text-zinc-400 mb-6">
+                Select which seasons of "{checkLinksSeasonModal.content.title}" you
+                want to check links for.
+              </p>
 
-            {emailModal.status === "idle" && (
-              <div className="space-y-4 mb-6">
-                <div>
-                  <label className="block text-xs font-bold text-zinc-500 uppercase mb-1.5">
-                    Optional Custom Message / Note
-                  </label>
-                  <textarea
-                    rows={3}
-                    value={emailModal.customMessage}
-                    onChange={(e) =>
-                      setEmailModal((prev) => ({
-                        ...prev,
-                        customMessage: e.target.value,
-                      }))
+              <div className="max-h-60 overflow-y-auto space-y-2 mb-6 pr-2 custom-scrollbar">
+                <label
+                  className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer border transition-colors ${selectedCheckLinksSeasons.length === checkLinksSeasonModal.seasons.length ? "bg-emerald-500/10 border-emerald-500 text-emerald-500" : "bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800/50"}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={
+                      selectedCheckLinksSeasons.length ===
+                      checkLinksSeasonModal.seasons.length
                     }
-                    placeholder="e.g. Watch in 4K Ultra HD print now available! Special weekend release..."
-                    className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-rose-500 resize-none"
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedCheckLinksSeasons(
+                          checkLinksSeasonModal.seasons.map((s) => Number(s.seasonNumber)),
+                        );
+                      } else {
+                        setSelectedCheckLinksSeasons([]);
+                      }
+                    }}
+                    className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-700 text-emerald-500 focus:ring-emerald-500/20 bg-white dark:bg-zinc-950"
                   />
-                </div>
-                <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-600 dark:text-rose-400">
-                  📧 This will send a styled release email for <strong>{emailModal.content.title}</strong> to every user email address registered in the database.
-                </div>
-                <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[11px] text-amber-700 dark:text-amber-400 space-y-1">
-                  <span className="font-bold block">⚠️ Sandbox / Test Domain Notice:</span>
-                  <p className="leading-relaxed">
-                    If your Resend API is not linked to a verified custom domain, emails can <strong>only</strong> be successfully delivered to your own registered Resend account email address (due to Resend sandbox restrictions on <code className="font-mono bg-amber-500/15 dark:bg-amber-500/20 px-1 py-0.5 rounded text-amber-600 dark:text-amber-300">onboarding@resend.dev</code>).
-                  </p>
-                </div>
-              </div>
-            )}
+                  <span className="font-medium">All Seasons</span>
+                </label>
 
-            {emailModal.status === "sending" && (
-              <div className="flex flex-col items-center justify-center py-6">
-                <Loader2 className="w-10 h-10 animate-spin text-rose-500 mb-4" />
-                <p className="text-rose-500 font-medium">
-                  Sending release email to all database users...
-                </p>
-              </div>
-            )}
+                <div className="h-px bg-zinc-100 dark:bg-zinc-800 my-2" />
 
-            {emailModal.status === "success" && (
-              <div className="flex flex-col items-center justify-center py-6 text-center">
-                <div className="w-12 h-12 bg-emerald-500/20 rounded-full flex items-center justify-center mb-4">
-                  <Check className="w-6 h-6 text-emerald-500" />
-                </div>
-                <p className="text-emerald-500 font-bold text-base mb-1">
-                  Emails Sent Successfully!
-                </p>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-xs">
-                  {emailModal.resultMessage}
-                </p>
+                {checkLinksSeasonModal.seasons.map((season) => {
+                  const isSelected = selectedCheckLinksSeasons.includes(
+                    Number(season.seasonNumber),
+                  );
+                  return (
+                    <label
+                      key={season.seasonNumber}
+                      className={`flex items-center justify-between p-3 rounded-xl cursor-pointer border transition-colors ${isSelected ? "bg-emerald-500/5 border-emerald-500/50 text-emerald-600 dark:text-emerald-400" : "bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800/50"}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={(e) => {
+                            const num = Number(season.seasonNumber);
+                            if (e.target.checked) {
+                              setSelectedCheckLinksSeasons((prev) =>
+                                [...prev, num].sort((a, b) => a - b),
+                              );
+                            } else {
+                              setSelectedCheckLinksSeasons((prev) =>
+                                prev.filter((n) => n !== num),
+                              );
+                            }
+                          }}
+                          className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-700 text-emerald-500 focus:ring-emerald-500/20 bg-white dark:bg-zinc-950"
+                        />
+                        <span className="font-medium">Season {season.seasonNumber}</span>
+                      </div>
+                    </label>
+                  );
+                })}
               </div>
-            )}
 
-            {emailModal.status === "error" && (
-              <div className="flex flex-col items-center justify-center py-6 text-center">
-                <div className="w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mb-4">
-                  <X className="w-6 h-6 text-red-500" />
-                </div>
-                <p className="text-red-500 font-bold text-base mb-1">
-                  Failed to Send Email
-                </p>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-xs">
-                  {emailModal.resultMessage}
-                </p>
-              </div>
-            )}
-
-            {emailModal.status === "idle" && (
               <div className="flex justify-end gap-3">
                 <button
                   onClick={() =>
-                    setEmailModal({
-                      isOpen: false,
-                      content: null,
-                      customMessage: "",
-                      status: "idle",
-                      resultMessage: "",
-                    })
+                    setCheckLinksSeasonModal({ ...checkLinksSeasonModal, isOpen: false })
                   }
-                  className="px-5 py-2.5 rounded-xl font-medium text-sm hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                  className="px-6 py-2 rounded-xl font-medium hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={handleSendEmailToAll}
-                  className="bg-rose-500 hover:bg-rose-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm transition-colors flex items-center gap-2 shadow-lg shadow-rose-500/20"
+                  onClick={() => {
+                    if (checkLinksSeasonModal.content) {
+                      const content = checkLinksSeasonModal.content;
+                      const seasons = selectedCheckLinksSeasons;
+                      setCheckLinksSeasonModal({ ...checkLinksSeasonModal, isOpen: false });
+                      setTimeout(() => {
+                        handleCheckLinks(content, seasons);
+                      }, 150);
+                    }
+                  }}
+                  disabled={selectedCheckLinksSeasons.length === 0}
+                  className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-xl font-bold transition-colors flex items-center gap-2"
                 >
-                  <Mail className="w-4 h-4" /> Send Email Alert
+                  <Link2 className="w-4 h-4" /> Check Links ({selectedCheckLinksSeasons.length})
                 </button>
               </div>
-            )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
-            {emailModal.status === "error" && (
-              <div className="flex justify-end gap-3 mt-4">
+      {/* Notification Modal */}
+      <AnimatePresence>
+        {notificationModal.isOpen && notificationModal.content && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 overflow-hidden">
+            <motion.div
+              {...modalBackdropAnimation}
+              style={modalGpuStyle}
+              className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+              onClick={() =>
+                setNotificationModal({
+                  isOpen: false,
+                  content: null,
+                  status: "idle",
+                })
+              }
+            />
+            <motion.div
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="relative z-10 bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-6 max-w-md w-full border border-zinc-200 dark:border-zinc-800 shadow-2xl"
+            >
+              <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+                <Bell className="w-6 h-6 text-blue-500" />
+                Send Notification
+              </h2>
+
+              <div className="bg-white dark:bg-zinc-950 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 mb-6 flex gap-4">
+                {notificationModal.content.posterUrl && (
+                  <img
+                    src={notificationModal.content.posterUrl}
+                    alt="Poster"
+                    className="w-16 h-24 object-cover rounded-md shrink-0"
+                    referrerPolicy="no-referrer"
+                  />
+                )}
+                <div>
+                  <h3 className="font-bold text-zinc-900 dark:text-white mb-1">
+                    {getNotificationPreview(notificationModal.content).title}
+                  </h3>
+                  <p className="text-sm text-zinc-500 dark:text-zinc-400 line-clamp-2">
+                    {getNotificationPreview(notificationModal.content).body}
+                  </p>
+                </div>
+              </div>
+
+              {notificationModal.status === "idle" && (
+                <p className="text-zinc-500 dark:text-zinc-400 mb-6">
+                  This will send a push notification to all users about this new
+                  content. Do you want to proceed?
+                </p>
+              )}
+
+              {notificationModal.status === "sending" && (
+                <div className="flex flex-col items-center justify-center py-6">
+                  <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-blue-500 mb-4"></div>
+                  <p className="text-blue-500 font-medium">
+                    Sending notification...
+                  </p>
+                </div>
+              )}
+
+              {notificationModal.status === "success" && (
+                <div className="flex flex-col items-center justify-center py-6">
+                  <div className="w-12 h-12 bg-emerald-500/20 rounded-full flex items-center justify-center mb-4">
+                    <svg
+                      className="w-6 h-6 text-emerald-500"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        d="M5 13l4 4L19 7"
+                      ></path>
+                    </svg>
+                  </div>
+                  <p className="text-emerald-500 font-medium">
+                    Notification successfully pushed!
+                  </p>
+                </div>
+              )}
+
+              {notificationModal.status === "error" && (
+                <div className="flex flex-col items-center justify-center py-6">
+                  <div className="w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mb-4">
+                    <X className="w-6 h-6 text-red-500" />
+                  </div>
+                  <p className="text-red-500 font-medium">
+                    Error sending notification.
+                  </p>
+                </div>
+              )}
+
+              {notificationModal.status === "idle" && (
+                <div className="flex justify-end gap-3">
+                  <button
+                    onClick={() =>
+                      setNotificationModal({
+                        isOpen: false,
+                        content: null,
+                        status: "idle",
+                      })
+                    }
+                    className="px-6 py-2 rounded-xl font-medium hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSendNotification}
+                    className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-xl font-bold transition-colors flex items-center gap-2"
+                  >
+                    <Bell className="w-4 h-4" /> Send Now
+                  </button>
+                </div>
+              )}
+
+              {notificationModal.status === "error" && (
+                <div className="flex justify-end gap-3 mt-4">
+                  <button
+                    onClick={() =>
+                      setNotificationModal({
+                        isOpen: false,
+                        content: null,
+                        status: "idle",
+                      })
+                    }
+                    className="bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-6 py-2 rounded-xl font-bold transition-colors"
+                  >
+                    Close
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Email Modal */}
+      <AnimatePresence>
+        {emailModal.isOpen && emailModal.content && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 overflow-hidden">
+            <motion.div
+              {...modalBackdropAnimation}
+              style={modalGpuStyle}
+              className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+              onClick={() =>
+                setEmailModal({
+                  isOpen: false,
+                  content: null,
+                  customMessage: "",
+                  status: "idle",
+                  resultMessage: "",
+                })
+              }
+            />
+            <motion.div
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="relative z-10 bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-6 max-w-md w-full border border-zinc-200 dark:border-zinc-800 shadow-2xl"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold flex items-center gap-2 text-zinc-900 dark:text-white">
+                  <Mail className="w-6 h-6 text-rose-500" />
+                  Send Email to All Users
+                </h2>
                 <button
                   onClick={() =>
                     setEmailModal({
@@ -7698,15 +7634,149 @@ export default function ContentManagement() {
                       resultMessage: "",
                     })
                   }
-                  className="bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-6 py-2 rounded-xl font-bold text-sm transition-colors"
+                  className="p-1 rounded-lg text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
                 >
-                  Close
+                  <X className="w-5 h-5" />
                 </button>
               </div>
-            )}
+
+              <div className="bg-white dark:bg-zinc-950 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 mb-4 flex gap-4">
+                {emailModal.content.posterUrl && (
+                  <img
+                    src={emailModal.content.posterUrl}
+                    alt="Poster"
+                    className="w-16 h-24 object-cover rounded-md shrink-0 border border-zinc-200 dark:border-zinc-800"
+                    referrerPolicy="no-referrer"
+                  />
+                )}
+                <div className="flex-1 min-w-0">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-rose-500 bg-rose-500/10 px-2 py-0.5 rounded">
+                    {emailModal.content.type === "series" ? "TV Series" : "Movie"}
+                  </span>
+                  <h3 className="font-bold text-zinc-900 dark:text-white mt-1 mb-0.5 line-clamp-1">
+                    {emailModal.content.title} {emailModal.content.year ? `(${emailModal.content.year})` : ""}
+                  </h3>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 line-clamp-2">
+                    {emailModal.content.description || "No description provided."}
+                  </p>
+                </div>
+              </div>
+
+              {emailModal.status === "idle" && (
+                <div className="space-y-4 mb-6">
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-500 uppercase mb-1.5">
+                      Optional Custom Message / Note
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={emailModal.customMessage}
+                      onChange={(e) =>
+                        setEmailModal((prev) => ({
+                          ...prev,
+                          customMessage: e.target.value,
+                        }))
+                      }
+                      placeholder="e.g. Watch in 4K Ultra HD print now available! Special weekend release..."
+                      className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-rose-500 resize-none"
+                    />
+                  </div>
+                  <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-600 dark:text-rose-400">
+                    📧 This will send a styled release email for <strong>{emailModal.content.title}</strong> to every user email address registered in the database.
+                  </div>
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[11px] text-amber-700 dark:text-amber-400 space-y-1">
+                    <span className="font-bold block">⚠️ Sandbox / Test Domain Notice:</span>
+                    <p className="leading-relaxed">
+                      If your Resend API is not linked to a verified custom domain, emails can <strong>only</strong> be successfully delivered to your own registered Resend account email address (due to Resend sandbox restrictions on <code className="font-mono bg-amber-500/15 dark:bg-amber-500/20 px-1 py-0.5 rounded text-amber-600 dark:text-amber-300">onboarding@resend.dev</code>).
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {emailModal.status === "sending" && (
+                <div className="flex flex-col items-center justify-center py-6">
+                  <Loader2 className="w-10 h-10 animate-spin text-rose-500 mb-4" />
+                  <p className="text-rose-500 font-medium">
+                    Sending release email to all database users...
+                  </p>
+                </div>
+              )}
+
+              {emailModal.status === "success" && (
+                <div className="flex flex-col items-center justify-center py-6 text-center">
+                  <div className="w-12 h-12 bg-emerald-500/20 rounded-full flex items-center justify-center mb-4">
+                    <Check className="w-6 h-6 text-emerald-500" />
+                  </div>
+                  <p className="text-emerald-500 font-bold text-base mb-1">
+                    Emails Sent Successfully!
+                  </p>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-xs">
+                    {emailModal.resultMessage}
+                  </p>
+                </div>
+              )}
+
+              {emailModal.status === "error" && (
+                <div className="flex flex-col items-center justify-center py-6 text-center">
+                  <div className="w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mb-4">
+                    <X className="w-6 h-6 text-red-500" />
+                  </div>
+                  <p className="text-red-500 font-bold text-base mb-1">
+                    Failed to Send Email
+                  </p>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-xs">
+                    {emailModal.resultMessage}
+                  </p>
+                </div>
+              )}
+
+              {emailModal.status === "idle" && (
+                <div className="flex justify-end gap-3">
+                  <button
+                    onClick={() =>
+                      setEmailModal({
+                        isOpen: false,
+                        content: null,
+                        customMessage: "",
+                        status: "idle",
+                        resultMessage: "",
+                      })
+                    }
+                    className="px-5 py-2.5 rounded-xl font-medium text-sm hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSendEmailToAll}
+                    className="bg-rose-500 hover:bg-rose-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm transition-colors flex items-center gap-2 shadow-lg shadow-rose-500/20"
+                  >
+                    <Mail className="w-4 h-4" /> Send Email Alert
+                  </button>
+                </div>
+              )}
+
+              {emailModal.status === "error" && (
+                <div className="flex justify-end gap-3 mt-4">
+                  <button
+                    onClick={() =>
+                      setEmailModal({
+                        isOpen: false,
+                        content: null,
+                        customMessage: "",
+                        status: "idle",
+                        resultMessage: "",
+                      })
+                    }
+                    className="bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-6 py-2 rounded-xl font-bold text-sm transition-colors"
+                  >
+                    Close
+                  </button>
+                </div>
+              )}
+            </motion.div>
           </div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
 
       <ConfirmModal
         isOpen={shareAnywayConfig.isOpen}
@@ -7819,62 +7889,74 @@ export default function ContentManagement() {
       />
       
       {/* GitHub Sync Modal */}
-      {isGithubModalOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-zinc-900 rounded-xl w-full max-w-md overflow-hidden shadow-2xl border border-zinc-200 dark:border-zinc-800">
-            <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
-              <h3 className="text-xl font-bold text-zinc-900 dark:text-white flex items-center gap-2">
-                <Github className="w-5 h-5" />
-                GitHub Sync
-              </h3>
-              <button
-                onClick={() => setIsGithubModalOpen(false)}
-                className="text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-6 space-y-4">
-              <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                Trigger the GitHub Actions workflow manually on demand to export and update your catalog JSON files in your repository (automatic schedule is disabled).
-              </p>
-              <div>
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                  GitHub Repository
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. username/repository"
-                  value={githubRepo}
-                  onChange={(e) => setGithubRepo(e.target.value)}
-                  className="w-full px-4 py-2 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-zinc-900 dark:text-white"
-                />
+      <AnimatePresence>
+        {isGithubModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-hidden">
+            <motion.div
+              {...modalBackdropAnimation}
+              style={modalGpuStyle}
+              className="fixed inset-0 bg-black/60 backdrop-blur-xs transform-gpu will-change-[opacity]"
+              onClick={() => setIsGithubModalOpen(false)}
+            />
+            <motion.div
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="relative z-10 bg-white dark:bg-zinc-900 rounded-xl w-full max-w-md overflow-hidden shadow-2xl border border-zinc-200 dark:border-zinc-800"
+            >
+              <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+                <h3 className="text-xl font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+                  <Github className="w-5 h-5" />
+                  GitHub Sync
+                </h3>
+                <button
+                  onClick={() => setIsGithubModalOpen(false)}
+                  className="text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                  Personal Access Token (PAT)
-                </label>
-                <input
-                  type="password"
-                  placeholder="ghp_xxxxxxxxxxxx"
-                  value={githubPat}
-                  onChange={(e) => setGithubPat(e.target.value)}
-                  className="w-full px-4 py-2 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-zinc-900 dark:text-white"
-                />
-                <p className="text-xs text-zinc-500 mt-1">Requires the "repo" scope.</p>
+              <div className="p-6 space-y-4">
+                <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                  Trigger the GitHub Actions workflow manually on demand to export and update your catalog JSON files in your repository (automatic schedule is disabled).
+                </p>
+                <div>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                    GitHub Repository
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. username/repository"
+                    value={githubRepo}
+                    onChange={(e) => setGithubRepo(e.target.value)}
+                    className="w-full px-4 py-2 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-zinc-900 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                    Personal Access Token (PAT)
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="ghp_xxxxxxxxxxxx"
+                    value={githubPat}
+                    onChange={(e) => setGithubPat(e.target.value)}
+                    className="w-full px-4 py-2 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-zinc-900 dark:text-white"
+                  />
+                  <p className="text-xs text-zinc-500 mt-1">Requires the "repo" scope.</p>
+                </div>
               </div>
-            </div>
-            <div className="p-6 border-t border-zinc-200 dark:border-zinc-800 flex justify-end gap-3">
-              <Button variant="secondary" onClick={() => setIsGithubModalOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleTriggerGithubExport} disabled={isTriggeringWorkflow}>
-                {isTriggeringWorkflow ? <Loader2 className="w-4 h-4 animate-spin" /> : "Trigger Sync"}
-              </Button>
-            </div>
+              <div className="p-6 border-t border-zinc-200 dark:border-zinc-800 flex justify-end gap-3">
+                <Button variant="secondary" onClick={() => setIsGithubModalOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleTriggerGithubExport} disabled={isTriggeringWorkflow}>
+                  {isTriggeringWorkflow ? <Loader2 className="w-4 h-4 animate-spin" /> : "Trigger Sync"}
+                </Button>
+              </div>
+            </motion.div>
           </div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
 
       {/* Quality Upgrade Alerts Modal */}
       <QualityUpgradeAlertsModal

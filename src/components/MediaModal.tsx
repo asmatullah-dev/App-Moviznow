@@ -3,6 +3,11 @@ import { X, Search, Loader2, Film, Save, ArrowUpDown } from 'lucide-react';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useModalBehavior } from '../hooks/useModalBehavior';
+import {
+  modalBackdropAnimation,
+  modalContainerAnimation,
+  modalGpuStyle,
+} from '../utils/modalAnimations';
 import { isRomanized } from '../utils/contentUtils';
 import { saveImdbRatingToStorage } from '../services/imdbRatingService';
 import { normalizeOttPlatformName, extractOttPlatformFromTMDBDetails, fetchMovieDigitalReleaseDate, predictOttPlatformWithAI } from '../services/tmdb';
@@ -1057,22 +1062,19 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
   };
 
   return (
-    <AnimatePresence>
+    <AnimatePresence mode="wait">
       {isOpen && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.3 }}
-          className="fixed inset-0 bg-black/80 flex items-center justify-center z-[10000] p-4"
-        >
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 overflow-hidden">
+          <motion.div
+            {...modalBackdropAnimation}
+            className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+            onClick={onClose}
+          />
           <motion.div 
-            initial={{ opacity: 0, scale: 0.96, y: 8 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 8 }}
-            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-            style={{ willChange: 'transform, opacity' }}
-            className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl w-full max-w-3xl max-h-[90vh] flex flex-col shadow-2xl transition-colors duration-300"
+            {...modalContainerAnimation}
+            style={modalGpuStyle}
+            className="relative bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col shadow-2xl transition-colors duration-300 z-10 transform-gpu"
+            onClick={(e) => e.stopPropagation()}
           >
         <div className="flex items-center justify-between p-4 border-b border-zinc-100 dark:border-zinc-800 transition-colors duration-300">
           <h2 className="text-lg font-semibold text-zinc-900 dark:text-white">Master Fetch</h2>
@@ -1392,7 +1394,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
           )}
         </div>
       </motion.div>
-    </motion.div>
+    </div>
   )}
 </AnimatePresence>
 );

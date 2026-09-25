@@ -12,6 +12,12 @@ import ConfirmModal from '../../components/ConfirmModal';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useUsers, isUserExpired } from '../../contexts/UsersContext';
+import {
+  modalBackdropAnimation,
+  modalContainerAnimation,
+  fullScreenModalAnimation,
+  modalGpuStyle,
+} from '../../utils/modalAnimations';
 
 const CACHE_KEY = 'admin_orders_cache';
 const PHONES_CACHE_KEY = 'admin_user_phones_cache';
@@ -637,20 +643,16 @@ export default function OrdersManagement() {
       {/* Order Details Modal */}
       <AnimatePresence>
         {selectedOrder && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
-          >
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-hidden">
+            <motion.div 
+              {...modalBackdropAnimation}
+              className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+              onClick={() => setSelectedOrder(null)}
+            />
             <motion.div
-              initial={{ opacity: 0, scale: 0.96, y: 8 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96, y: 8 }}
-              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-              style={{ willChange: 'transform, opacity' }}
-              className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 w-full max-w-xl shadow-2xl overflow-y-auto max-h-[90vh]"
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 w-full max-w-xl shadow-2xl overflow-y-auto max-h-[90vh] relative z-10 transform-gpu"
             >
               <div className="flex justify-between items-center mb-6">
                 <div>
@@ -933,28 +935,24 @@ export default function OrdersManagement() {
                 </div>
               )}
             </motion.div>
-          </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
       {/* Full-size Image Lightbox Modal */}
       <AnimatePresence>
         {previewImageUrl && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            onClick={() => setPreviewImageUrl(null)}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md cursor-zoom-out"
-          >
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-hidden">
             <motion.div 
-              initial={{ opacity: 0, scale: 0.96, y: 8 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96, y: 8 }}
-              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-              style={{ willChange: 'transform, opacity' }}
-              className="relative max-w-3xl max-h-[90vh] overflow-hidden rounded-2xl"
+              {...modalBackdropAnimation}
+              className="fixed inset-0 bg-black/90 backdrop-blur-xs transform-gpu will-change-[opacity]"
+              onClick={() => setPreviewImageUrl(null)}
+            />
+            <motion.div 
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="relative max-w-3xl max-h-[90vh] overflow-hidden rounded-3xl z-10 transform-gpu"
+              onClick={(e) => e.stopPropagation()}
             >
               <button
                 onClick={() => setPreviewImageUrl(null)}
@@ -966,10 +964,10 @@ export default function OrdersManagement() {
                 src={previewImageUrl} 
                 alt="Full Screenshot" 
                 referrerPolicy="no-referrer"
-                className="max-w-full max-h-[85vh] object-contain rounded-2xl"
+                className="max-w-full max-h-[85vh] object-contain rounded-3xl shadow-2xl"
               />
             </motion.div>
-          </motion.div>
+          </div>
         )}
       </AnimatePresence>
 

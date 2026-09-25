@@ -33,6 +33,12 @@ import { ScrollableRow } from './ScrollableRow';
 import { OttBadge } from './OttBadge';
 import { safeStorage } from '../utils/safeStorage';
 import {
+  modalBackdropAnimation,
+  modalContainerAnimation,
+  fullScreenModalAnimation,
+  modalGpuStyle,
+} from '../utils/modalAnimations';
+import {
   fetchUpcomingCombined,
   fetchTMDBTrailer,
   fetchTMDBImages,
@@ -922,8 +928,10 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className,
       {/* Upcoming Detail & Media Modal */}
       <AnimatePresence>
         {selectedItem && (
-            <div 
-              className="fixed inset-0 z-[9999] flex items-center justify-center p-2.5 sm:p-4 overflow-y-auto bg-black/85 backdrop-blur-md"
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-2.5 sm:p-4 overflow-hidden">
+            <motion.div
+              {...modalBackdropAnimation}
+              className="fixed inset-0 bg-black/85 backdrop-blur-xs transform-gpu will-change-[opacity]"
               onClick={() => {
                 setSelectedItem(null);
                 setIsPlayingTrailer(false);
@@ -933,15 +941,13 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className,
                 setTranslatedSynopsis(null);
                 setShowOriginalSynopsis(false);
               }}
+            />
+            <motion.div
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="relative w-full max-w-3xl my-auto bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] sm:max-h-[92vh] z-10 transform-gpu"
+              onClick={(e) => e.stopPropagation()}
             >
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: 10 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                transition={{ duration: 0.2 }}
-                className="relative w-full max-w-3xl my-auto bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] sm:max-h-[92vh]"
-                onClick={(e) => e.stopPropagation()}
-              >
                 {/* Close Button */}
                 <button
                   id="close-coming-soon-modal"
@@ -1192,23 +1198,18 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className,
       {/* FULLSCREEN TRAILER PLAYER MODAL */}
       <AnimatePresence>
         {isPlayingTrailer && selectedItem && (
+          <div className="fixed inset-0 z-[10000] flex items-center justify-center p-3 sm:p-6 overflow-hidden">
             <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-              className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/95 backdrop-blur-xl p-3 sm:p-6"
+              {...modalBackdropAnimation}
+              className="fixed inset-0 bg-black/95 backdrop-blur-xs transform-gpu will-change-[opacity]"
               onClick={() => setIsPlayingTrailer(false)}
+            />
+            <motion.div
+              {...fullScreenModalAnimation}
+              style={modalGpuStyle}
+              className="relative w-full max-w-5xl aspect-video bg-zinc-950 rounded-2xl sm:rounded-3xl border border-zinc-800 shadow-2xl overflow-hidden flex flex-col z-10 transform-gpu"
+              onClick={(e) => e.stopPropagation()}
             >
-              <motion.div
-                initial={{ opacity: 0, scale: 0.96, y: 10 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.96, y: 10 }}
-                transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-                style={{ willChange: 'transform, opacity' }}
-                className="relative w-full max-w-5xl aspect-video bg-zinc-950 rounded-2xl sm:rounded-3xl border border-zinc-800 shadow-2xl overflow-hidden flex flex-col"
-                onClick={(e) => e.stopPropagation()}
-              >
                 {/* Header Bar */}
                 <div className="absolute top-3 left-3 right-3 z-50 flex items-center justify-between text-white pointer-events-auto">
                   <div className="flex items-center gap-2 bg-black/75 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-white/20">
@@ -1269,28 +1270,30 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className,
                   )}
                 </div>
               </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* FULLSCREEN LIGHTBOX VIEWER FOR ALL GALLERY IMAGES WITH LOADING SPINNER */}
       <AnimatePresence>
         {fullscreenImageIndex !== null && allModalImages[fullscreenImageIndex] && (
-            <div
-              className="fixed inset-0 z-[10001] flex items-center justify-center bg-black/95 backdrop-blur-lg p-2 sm:p-6 select-none"
-              onTouchStart={handleTouchStart}
-              onTouchMove={handleTouchMove}
-              onTouchEnd={handleTouchEnd}
+          <div
+            className="fixed inset-0 z-[10001] flex items-center justify-center p-2 sm:p-6 select-none overflow-hidden"
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+          >
+            <motion.div
+              {...modalBackdropAnimation}
+              className="fixed inset-0 bg-black/95 backdrop-blur-xs transform-gpu will-change-[opacity]"
               onClick={() => setFullscreenImageIndex(null)}
+            />
+            <motion.div
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="relative w-full h-full flex flex-col items-center justify-center z-10 transform-gpu"
+              onClick={(e) => e.stopPropagation()}
             >
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                transition={{ duration: 0.2 }}
-                className="relative w-full h-full flex flex-col items-center justify-center"
-                onClick={(e) => e.stopPropagation()}
-              >
                 {/* Header Bar */}
                 <div className="absolute top-3 left-3 right-3 z-50 flex items-center justify-between text-white">
                   <div className="flex items-center gap-2 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/20">
@@ -1409,28 +1412,23 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className,
       {/* Coming Soon View All Modal Grid */}
       <AnimatePresence>
         {isComingSoonViewAllOpen && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-6 overflow-hidden">
             <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-              className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md"
+              {...modalBackdropAnimation}
+              className="fixed inset-0 bg-black/85 backdrop-blur-xs transform-gpu will-change-[opacity]"
               onClick={() => {
                 const updated = new URLSearchParams(searchParams);
                 updated.delete("view_all");
                 updated.delete("v");
                 setSearchParams(updated);
               }}
+            />
+            <motion.div
+              {...fullScreenModalAnimation}
+              style={modalGpuStyle}
+              className="relative w-full max-w-7xl h-[92vh] max-h-[92vh] bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl overflow-hidden flex flex-col shadow-2xl z-10 transform-gpu"
+              onClick={(e) => e.stopPropagation()}
             >
-              <motion.div
-                initial={{ opacity: 0, scale: 0.96, y: 10 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.96, y: 10 }}
-                transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-                style={{ willChange: 'transform, opacity' }}
-                className="relative w-full max-w-7xl h-[92vh] max-h-[92vh] bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl overflow-hidden flex flex-col shadow-2xl"
-                onClick={(e) => e.stopPropagation()}
-              >
                 {/* Header */}
                 <div className="flex items-center justify-between p-4 sm:p-6 border-b border-zinc-200/80 dark:border-zinc-800/80 shrink-0">
                   <div className="flex items-center gap-3">
@@ -1580,9 +1578,9 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className,
                   </div>
                 </div>
               </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Share Preview Modal */}
       <SharePreviewModal

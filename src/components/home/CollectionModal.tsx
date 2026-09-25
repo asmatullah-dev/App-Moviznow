@@ -4,6 +4,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Collection as AppCollection, Content, Genre, Language, Quality } from "../../types";
 import ContentCard from "../ContentCard";
 import { useLanguage } from "../../contexts/LanguageContext";
+import {
+  fullScreenModalAnimation,
+  modalGpuStyle,
+} from "../../utils/modalAnimations";
 
 interface CollectionModalProps {
   collection: AppCollection | null;
@@ -79,16 +83,13 @@ export const CollectionModal: React.FC<CollectionModalProps> = React.memo(({
   if (typeof document === "undefined" || !document.body) return null;
 
   return (
-    <AnimatePresence>
+    <AnimatePresence mode="wait">
       {collection && (
         <motion.div
           key="collection-modal"
-          initial={{ opacity: 0, scale: 0.96, y: 10 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.96, y: 10 }}
-          transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-          style={{ willChange: 'transform, opacity' }}
-          className="fixed inset-0 z-[9999] bg-white dark:bg-zinc-950 flex flex-col overflow-hidden"
+          {...fullScreenModalAnimation}
+          style={modalGpuStyle}
+          className="fixed inset-0 z-[9999] bg-white dark:bg-zinc-950 flex flex-col overflow-hidden transform-gpu"
         >
           <div className="shrink-0 z-50 flex items-center justify-between gap-3 p-3.5 sm:p-5 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 shadow-md">
             <div className="flex items-center gap-2.5 min-w-0 flex-1">

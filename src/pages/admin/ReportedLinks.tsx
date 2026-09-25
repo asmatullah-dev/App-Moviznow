@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   AlertTriangle,
   Edit2,
@@ -15,6 +16,11 @@ import { Content, QualityLinks, Season } from "../../types";
 import { LinkCheckerModal } from "../../components/LinkCheckerModal";
 import AlertModal from "../../components/AlertModal";
 import { useModalBehavior } from "../../hooks/useModalBehavior";
+import {
+  modalBackdropAnimation,
+  modalContainerAnimation,
+  modalGpuStyle,
+} from "../../utils/modalAnimations";
 
 interface ReportedLink {
   id: string;
@@ -672,117 +678,129 @@ export default function ReportedLinks() {
         </div>
       </div>
 
-      {editingReport && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-6 max-w-lg w-full border border-zinc-200 dark:border-zinc-800 shadow-2xl">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-bold text-zinc-900 dark:text-white">
-                Edit Link
-              </h3>
-              <button
-                onClick={() => setEditingReport(null)}
-                className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">
-                  Content
-                </label>
-                <div className="text-zinc-900 dark:text-white font-medium">
-                  {editingReport.contentTitle}
-                </div>
+      <AnimatePresence>
+        {editingReport && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-hidden">
+            <motion.div
+              {...modalBackdropAnimation}
+              className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+              onClick={() => setEditingReport(null)}
+            />
+            <motion.div
+              {...modalContainerAnimation}
+              style={modalGpuStyle}
+              className="bg-zinc-50 dark:bg-zinc-900 rounded-3xl p-6 max-w-lg w-full border border-zinc-200 dark:border-zinc-800 shadow-2xl relative z-10 transform-gpu"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-bold text-zinc-900 dark:text-white">
+                  Edit Link
+                </h3>
+                <button
+                  onClick={() => setEditingReport(null)}
+                  className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors"
+                >
+                  <X className="w-6 h-6" />
+                </button>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">
-                  Link Name
-                </label>
-                <input
-                  type="text"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">
-                  URL
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="url"
-                    value={editUrl}
-                    onChange={(e) => setEditUrl(e.target.value)}
-                    onBlur={(e) => handleUrlBlur(e.target.value)}
-                    className="flex-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
-                  />
-                  <button
-                    onClick={() => setIsLinkCheckerModalOpen(true)}
-                    className="bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 px-4 py-3 rounded-xl font-medium transition-colors whitespace-nowrap"
-                  >
-                    Check Link
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">
-                    Size
+                    Content
+                  </label>
+                  <div className="text-zinc-900 dark:text-white font-medium">
+                    {editingReport.contentTitle}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">
+                    Link Name
                   </label>
                   <input
                     type="text"
-                    value={editSize}
-                    onChange={(e) => setEditSize(e.target.value)}
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
                     className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
-                    placeholder="e.g. 1.5"
                   />
                 </div>
+
                 <div>
                   <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">
-                    Unit
+                    URL
                   </label>
-                  <select
-                    value={editUnit}
-                    onChange={(e) => setEditUnit(e.target.value as "MB" | "GB")}
-                    className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
-                  >
-                    <option value="MB">MB</option>
-                    <option value="GB">GB</option>
-                  </select>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      value={editUrl}
+                      onChange={(e) => setEditUrl(e.target.value)}
+                      onBlur={(e) => handleUrlBlur(e.target.value)}
+                      className="flex-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                    />
+                    <button
+                      onClick={() => setIsLinkCheckerModalOpen(true)}
+                      className="bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 px-4 py-3 rounded-xl font-medium transition-colors whitespace-nowrap"
+                    >
+                      Check Link
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">
+                      Size
+                    </label>
+                    <input
+                      type="text"
+                      value={editSize}
+                      onChange={(e) => setEditSize(e.target.value)}
+                      className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                      placeholder="e.g. 1.5"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">
+                      Unit
+                    </label>
+                    <select
+                      value={editUnit}
+                      onChange={(e) => setEditUnit(e.target.value as "MB" | "GB")}
+                      className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                    >
+                      <option value="MB">MB</option>
+                      <option value="GB">GB</option>
+                    </select>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="flex justify-end gap-3 mt-8">
-              <button
-                onClick={() => setEditingReport(null)}
-                className="px-6 py-2.5 rounded-xl font-bold text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
-                disabled={saving}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveEdit}
-                disabled={saving || !editUrl.trim()}
-                className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-2.5 rounded-xl font-bold transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {saving ? (
-                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : (
-                  <Save className="w-5 h-5" />
-                )}
-                Save Changes
-              </button>
-            </div>
+              <div className="flex justify-end gap-3 mt-8">
+                <button
+                  onClick={() => setEditingReport(null)}
+                  className="px-6 py-2.5 rounded-xl font-bold text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                  disabled={saving}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveEdit}
+                  disabled={saving || !editUrl.trim()}
+                  className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-2.5 rounded-xl font-bold transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {saving ? (
+                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <Save className="w-5 h-5" />
+                  )}
+                  Save Changes
+                </button>
+              </div>
+            </motion.div>
           </div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
 
       <LinkCheckerModal
         isOpen={isLinkCheckerModalOpen}
