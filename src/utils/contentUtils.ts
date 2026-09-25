@@ -153,12 +153,77 @@ export const formatRuntime = (runtime?: string) => {
   return runtime;
 };
 
+export const formatDateToMonDDYYYY = (dateString?: string) => {
+  if (!dateString) return '';
+  const cleanDate = dateString.trim().split('T')[0];
+  const parts = cleanDate.split(/[-/.]/);
+
+  const monNames = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+  ];
+  const fullMonthNames = [
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december"
+  ];
+
+  if (parts.length === 3) {
+    let year = '', month = '', day = '';
+    // Check if YYYY-MM-DD
+    if (parts[0].length === 4) {
+      [year, month, day] = parts;
+    } 
+    // Check if DD-MM-YYYY
+    else if (parts[2].length === 4) {
+      [day, month, year] = parts;
+    }
+
+    if (year && month && day) {
+      const monthIndex = parseInt(month, 10) - 1;
+      if (monthIndex >= 0 && monthIndex < 12) {
+        const dayNum = parseInt(day, 10);
+        const dayStr = dayNum < 10 ? `0${dayNum}` : `${dayNum}`;
+        return `${monNames[monthIndex]} ${dayStr}, ${year}`;
+      }
+    }
+  }
+
+  // Handle strings like "March 30, 2025" or "Mar 30, 2025"
+  const monthMatch = cleanDate.match(/^([a-zA-Z]+)\s+(\d{1,2}),?\s+(\d{4})$/);
+  if (monthMatch) {
+    const monthStr = monthMatch[1].toLowerCase();
+    const dayNum = parseInt(monthMatch[2], 10);
+    const dayStr = dayNum < 10 ? `0${dayNum}` : `${dayNum}`;
+    const year = monthMatch[3];
+    const mIdx = fullMonthNames.findIndex(m => m.startsWith(monthStr.slice(0, 3)));
+    if (mIdx >= 0) {
+      return `${monNames[mIdx]} ${dayStr}, ${year}`;
+    }
+  }
+
+  // Fallback to Date parser
+  const d = new Date(dateString);
+  if (!isNaN(d.getTime())) {
+    const dayNum = d.getDate();
+    const dayStr = dayNum < 10 ? `0${dayNum}` : `${dayNum}`;
+    return `${monNames[d.getMonth()]} ${dayStr}, ${d.getFullYear()}`;
+  }
+
+  return dateString;
+};
+
 export const formatDateToMonthDDYYYY = (dateString?: string) => {
   if (!dateString) return '';
+  const cleanDate = dateString.trim().split('T')[0];
+  const parts = cleanDate.split(/[-/.]/);
   
-  const parts = dateString.split('-');
+  const monthNames = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
+
   if (parts.length === 3) {
-    let year, month, day;
+    let year = '', month = '', day = '';
     
     // Check if YYYY-MM-DD
     if (parts[0].length === 4) {
@@ -167,19 +232,32 @@ export const formatDateToMonthDDYYYY = (dateString?: string) => {
     // Check if DD-MM-YYYY
     else if (parts[2].length === 4) {
       [day, month, year] = parts;
-    } else {
-      return dateString;
     }
     
-    const monthNames = [
-      "January", "February", "March", "April", "May", "June",
-      "July", "August", "September", "October", "November", "December"
-    ];
-    
-    const monthIndex = parseInt(month, 10) - 1;
-    if (monthIndex >= 0 && monthIndex < 12) {
-      return `${monthNames[monthIndex]} ${parseInt(day, 10)}, ${year}`;
+    if (year && month && day) {
+      const monthIndex = parseInt(month, 10) - 1;
+      if (monthIndex >= 0 && monthIndex < 12) {
+        return `${monthNames[monthIndex]} ${parseInt(day, 10)}, ${year}`;
+      }
     }
+  }
+
+  // Handle strings like "March 30, 2025" or "Mar 30, 2025"
+  const monthMatch = cleanDate.match(/^([a-zA-Z]+)\s+(\d{1,2}),?\s+(\d{4})$/);
+  if (monthMatch) {
+    const monthStr = monthMatch[1].toLowerCase();
+    const day = parseInt(monthMatch[2], 10);
+    const year = monthMatch[3];
+    const mIdx = monthNames.findIndex(m => m.toLowerCase().startsWith(monthStr.slice(0, 3)));
+    if (mIdx >= 0) {
+      return `${monthNames[mIdx]} ${day}, ${year}`;
+    }
+  }
+
+  // Fallback to Date parser
+  const d = new Date(dateString);
+  if (!isNaN(d.getTime())) {
+    return `${monthNames[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
   }
   
   return dateString;

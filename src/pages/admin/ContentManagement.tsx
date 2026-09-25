@@ -122,6 +122,7 @@ import { OttBadge } from "../../components/OttBadge";
 import {
   formatContentTitle,
   formatReleaseDate,
+  formatDateToMonDDYYYY,
   formatRuntime,
   formatDateToMonthDDYYYY,
   getContrastColor,
@@ -231,24 +232,49 @@ const isExtractableLink = (url: string) => {
   );
 };
 
-const directLinkExtractionCache = new Map<string, string>();
+const EXTRACTION_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+interface CachedDirectLink {
+  url: string;
+  timestamp: number;
+}
+
+const directLinkExtractionCache = new Map<string, CachedDirectLink>();
 
 const getCachedDirectLink = (url: string): string | null => {
   if (!url) return null;
+  const now = Date.now();
+
   if (directLinkExtractionCache.has(url)) {
-    const mem = directLinkExtractionCache.get(url)!;
-    if (mem && !isExtractableLink(mem) && mem !== url) {
-      return mem;
+    const entry = directLinkExtractionCache.get(url)!;
+    if (now - entry.timestamp < EXTRACTION_CACHE_TTL_MS && entry.url && !isExtractableLink(entry.url) && entry.url !== url) {
+      return entry.url;
     }
     directLinkExtractionCache.delete(url);
   }
+
   try {
-    const stored = sessionStorage.getItem(`direct_link_${url}`);
-    if (stored && !isExtractableLink(stored) && stored !== url) {
-      directLinkExtractionCache.set(url, stored);
-      return stored;
-    } else if (stored) {
-      sessionStorage.removeItem(`direct_link_${url}`);
+    const stored = safeStorage.getItem(`direct_link_${url}`) || sessionStorage.getItem(`direct_link_${url}`);
+    if (stored) {
+      let directUrl = stored;
+      let timestamp = 0;
+      try {
+        const parsed = JSON.parse(stored);
+        if (parsed && typeof parsed === "object" && parsed.url && parsed.timestamp) {
+          directUrl = parsed.url;
+          timestamp = parsed.timestamp;
+        }
+      } catch {
+        // legacy non-JSON cache: treat as expired
+      }
+
+      if (timestamp && now - timestamp < EXTRACTION_CACHE_TTL_MS && !isExtractableLink(directUrl) && directUrl !== url) {
+        directLinkExtractionCache.set(url, { url: directUrl, timestamp });
+        return directUrl;
+      } else {
+        safeStorage.removeItem(`direct_link_${url}`);
+        sessionStorage.removeItem(`direct_link_${url}`);
+      }
     }
   } catch {}
   return null;
@@ -256,9 +282,13 @@ const getCachedDirectLink = (url: string): string | null => {
 
 const setCachedDirectLink = (url: string, directUrl: string) => {
   if (!url || !directUrl || isExtractableLink(directUrl) || directUrl === url) return;
-  directLinkExtractionCache.set(url, directUrl);
+  const now = Date.now();
+  const entry: CachedDirectLink = { url: directUrl, timestamp: now };
+  directLinkExtractionCache.set(url, entry);
   try {
-    sessionStorage.setItem(`direct_link_${url}`, directUrl);
+    const payload = JSON.stringify(entry);
+    safeStorage.setItem(`direct_link_${url}`, payload);
+    sessionStorage.setItem(`direct_link_${url}`, payload);
   } catch {}
 };
 
@@ -266,6 +296,7 @@ const removeCachedDirectLink = (url: string) => {
   if (!url) return;
   directLinkExtractionCache.delete(url);
   try {
+    safeStorage.removeItem(`direct_link_${url}`);
     sessionStorage.removeItem(`direct_link_${url}`);
   } catch {}
 };
@@ -3166,32 +3197,6 @@ export default function ContentManagement() {
     }
   };
 
-  const persistExtractedLinks = async (origContent: Content, updatedContent: Content) => {
-    try {
-      const changedFields: Record<string, any> = {};
-      if (updatedContent.movieLinks && updatedContent.movieLinks !== origContent.movieLinks) {
-        changedFields.movieLinks = updatedContent.movieLinks;
-      }
-      if (updatedContent.sampleUrl && updatedContent.sampleUrl !== origContent.sampleUrl) {
-        changedFields.sampleUrl = updatedContent.sampleUrl;
-      }
-      if (updatedContent.seasons && updatedContent.seasons !== origContent.seasons) {
-        changedFields.seasons = updatedContent.seasons;
-      }
-      if (Object.keys(changedFields).length > 0) {
-        await updateContentFields([
-          {
-            id: origContent.id,
-            chunkId: origContent.chunkId,
-            fields: changedFields,
-          },
-        ]);
-      }
-    } catch (e) {
-      console.warn("Could not save extracted links to database in background:", e);
-    }
-  };
-
   const handleSharePipeline = async (
     content: Content,
     mode: "standard" | "whatsapp" = "standard",
@@ -3298,13 +3303,9 @@ export default function ContentManagement() {
 
       const linkPromise = (async () => {
          let newContent = { ...content };
-         let hasAnyLinkExtracted = false;
 
          if (newContent.sampleUrl && isExtractableLink(newContent.sampleUrl)) {
             let processedSampleUrl = await extractDirectLinkFast(newContent.sampleUrl);
-            if (processedSampleUrl !== newContent.sampleUrl && !isExtractableLink(processedSampleUrl)) {
-              hasAnyLinkExtracted = true;
-            }
             if (processedSampleUrl.length > 100 && !processedSampleUrl.includes('pixeldrain.com') && !processedSampleUrl.includes('pixeldrain.dev') && !processedSampleUrl.includes('pixeldrain.net') && !processedSampleUrl.includes('t.me')) {
                const tinyUrl = await generateTinyUrl(processedSampleUrl, true, settings?.supportNumber || '3416286423');
                if (tinyUrl && !tinyUrl.toLowerCase().includes('<html')) processedSampleUrl = tinyUrl;
@@ -3315,13 +3316,6 @@ export default function ContentManagement() {
          if (newContent.type === "movie" && newContent.movieLinks) {
            const links = parseLinks(newContent.movieLinks);
            const processedLinks = await Promise.all(links.map(processLinkFast));
-           const wasExtracted = processedLinks.some((pl, idx) => {
-             const orig = links[idx]?.url;
-             return orig && isExtractableLink(orig) && pl.url && !isExtractableLink(pl.url);
-           });
-           if (wasExtracted) {
-             hasAnyLinkExtracted = true;
-           }
            newContent.movieLinks = JSON.stringify(processedLinks);
          } else if (newContent.type === "series" && newContent.seasons) {
            const parsedSeasons: Season[] = Array.isArray(newContent.seasons)
@@ -3353,22 +3347,7 @@ export default function ContentManagement() {
              }
            }
            await Promise.all(linkPromises);
-           const newSeasonsStr = JSON.stringify(parsedSeasons);
-           const origSeasonsStr = typeof newContent.seasons === "string" ? newContent.seasons : JSON.stringify(newContent.seasons);
-           if (newSeasonsStr !== origSeasonsStr) {
-             const anyBecameDirect = parsedSeasons.some((s: any) => {
-               const check = (list: any[]) => Array.isArray(list) && list.some((l: any) => l && l.url && !isExtractableLink(l.url));
-               return check(s.zipLinks) || check(s.mkvLinks) || (Array.isArray(s.episodes) && s.episodes.some((e: any) => check(e.links)));
-             });
-             if (anyBecameDirect) {
-               hasAnyLinkExtracted = true;
-             }
-           }
-           newContent.seasons = newSeasonsStr;
-         }
-
-         if (hasAnyLinkExtracted) {
-           persistExtractedLinks(content, newContent);
+           newContent.seasons = JSON.stringify(parsedSeasons);
          }
 
          return newContent;
@@ -3706,14 +3685,18 @@ export default function ContentManagement() {
             const uniqueAirDates = [...new Set(validAirDates)];
             const areAirDatesDifferent = uniqueAirDates.length > 1;
 
+            const availableEpisodes = episodesList.filter((ep: any) => {
+              const epLinks = parseLinks(JSON.stringify(ep.links || [])).filter((l: any) => l && l.url);
+              return !ep.isUpcoming && epLinks.length > 0;
+            });
             const allEpLinks = episodesList.flatMap((ep) =>
               parseLinks(JSON.stringify(ep.links || [])).filter((l) => l && l.url),
             );
-            const uniqueQualities = [...new Set(allEpLinks.map((l) => l.name))];
+            const uniqueQualities = [...new Set(allEpLinks.map((l) => l.name).filter(Boolean))];
             const hasUniformQuality =
               uniqueQualities.length === 1 &&
-              allEpLinks.length === episodesList.length &&
-              episodesList.every(
+              availableEpisodes.length > 0 &&
+              availableEpisodes.every(
                 (ep) =>
                   parseLinks(JSON.stringify(ep.links || [])).filter((l) => l && l.url)
                     .length === 1,
@@ -3725,13 +3708,13 @@ export default function ContentManagement() {
                 const epLinks = parseLinks(JSON.stringify(ep.links || [])).filter((l) => l && l.url);
                 const link = epLinks[0];
                 const rawDate = ep.airDate;
-                const airDateStr = rawDate ? formatReleaseDate(rawDate) : "";
+                const airDateStr = rawDate ? formatDateToMonDDYYYY(rawDate) : "";
                 const datePart = areAirDatesDifferent && airDateStr ? ` [${airDateStr}]` : "";
                 const isUpcoming = ep.isUpcoming || epLinks.length === 0;
 
                 if (isUpcoming) {
-                  const upDateStr = airDateStr ? ` [🗓️ ${airDateStr}]` : "";
-                  text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${upDateStr} ✨ (Coming Soon)\n`;
+                  const upDateStr = airDateStr ? ` [${airDateStr}]` : "";
+                  text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${upDateStr}\n(Coming Soon)\n`;
                 } else if (link) {
                   const finalUrl = link.tinyUrl || link.url;
                   if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
@@ -3744,13 +3727,13 @@ export default function ContentManagement() {
               episodesList.forEach((ep) => {
                 const epLinks = parseLinks(JSON.stringify(ep.links || [])).filter((l) => l && l.url);
                 const rawDate = ep.airDate;
-                const airDateStr = rawDate ? formatReleaseDate(rawDate) : "";
+                const airDateStr = rawDate ? formatDateToMonDDYYYY(rawDate) : "";
                 const datePart = areAirDatesDifferent && airDateStr ? ` [${airDateStr}]` : "";
                 const isUpcoming = ep.isUpcoming || epLinks.length === 0;
 
                 if (isUpcoming) {
-                  const upDateStr = airDateStr ? ` [🗓️ ${airDateStr}]` : "";
-                  text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${upDateStr} ✨ (Coming Soon)\n`;
+                  const upDateStr = airDateStr ? ` [${airDateStr}]` : "";
+                  text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${upDateStr}\n(Coming Soon)\n`;
                 } else {
                   text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${datePart}\n`;
                   epLinks.forEach((link) => {
@@ -4099,14 +4082,18 @@ export default function ContentManagement() {
           const uniqueAirDates = [...new Set(validAirDates)];
           const areAirDatesDifferent = uniqueAirDates.length > 1;
 
+          const availableEpisodes = episodesList.filter((ep: any) => {
+            const epLinks = parseLinks(JSON.stringify(ep.links || [])).filter((l: any) => l && l.url);
+            return !ep.isUpcoming && epLinks.length > 0;
+          });
           const allEpLinks = episodesList.flatMap((ep) =>
             parseLinks(JSON.stringify(ep.links)).filter((l) => l && l.url),
           );
-          const uniqueQualities = [...new Set(allEpLinks.map((l) => l.name))];
+          const uniqueQualities = [...new Set(allEpLinks.map((l) => l.name).filter(Boolean))];
           const hasUniformQuality =
             uniqueQualities.length === 1 &&
-            allEpLinks.length === episodesList.length &&
-            episodesList.every(
+            availableEpisodes.length > 0 &&
+            availableEpisodes.every(
               (ep) =>
                 parseLinks(JSON.stringify(ep.links)).filter((l) => l && l.url)
                   .length === 1,
@@ -4118,13 +4105,13 @@ export default function ContentManagement() {
               const epLinks = parseLinks(JSON.stringify(ep.links)).filter((l) => l && l.url);
               const link = epLinks[0];
               const rawDate = ep.airDate;
-              const airDateStr = rawDate ? formatReleaseDate(rawDate) : "";
+              const airDateStr = rawDate ? formatDateToMonDDYYYY(rawDate) : "";
               const datePart = areAirDatesDifferent && airDateStr ? ` [${airDateStr}]` : "";
               const isUpcoming = ep.isUpcoming || epLinks.length === 0;
 
               if (isUpcoming) {
-                const upDateStr = airDateStr ? ` [🗓️ ${airDateStr}]` : "";
-                text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${upDateStr} ✨ (Coming Soon)\n`;
+                const upDateStr = airDateStr ? ` [${airDateStr}]` : "";
+                text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${upDateStr}\n(Coming Soon)\n`;
               } else if (link) {
                 const finalUrl = link.tinyUrl || link.url;
                 if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
@@ -4137,13 +4124,13 @@ export default function ContentManagement() {
             episodesList.forEach((ep) => {
               const epLinks = parseLinks(JSON.stringify(ep.links)).filter((l) => l && l.url);
               const rawDate = ep.airDate;
-              const airDateStr = rawDate ? formatReleaseDate(rawDate) : "";
+              const airDateStr = rawDate ? formatDateToMonDDYYYY(rawDate) : "";
               const datePart = areAirDatesDifferent && airDateStr ? ` [${airDateStr}]` : "";
               const isUpcoming = ep.isUpcoming || epLinks.length === 0;
 
               if (isUpcoming) {
-                const upDateStr = airDateStr ? ` [🗓️ ${airDateStr}]` : "";
-                text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${upDateStr} ✨ (Coming Soon)\n`;
+                const upDateStr = airDateStr ? ` [${airDateStr}]` : "";
+                text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${upDateStr}\n(Coming Soon)\n`;
               } else {
                 text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${datePart}\n`;
                 epLinks.sort((a, b) => {
