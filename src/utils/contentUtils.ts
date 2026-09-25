@@ -72,6 +72,40 @@ export const formatReleaseDate = (dateString?: string) => {
   return dateString;
 };
 
+export const isFutureAirDate = (dateString?: string): boolean => {
+  if (!dateString) return false;
+  const cleanDate = dateString.trim().split('T')[0];
+  const parts = cleanDate.split(/[-/.]/);
+  let year: number, month: number, day: number;
+
+  if (parts.length === 3) {
+    if (parts[0].length === 4) {
+      year = parseInt(parts[0], 10);
+      month = parseInt(parts[1], 10) - 1;
+      day = parseInt(parts[2], 10);
+    } else if (parts[2].length === 4) {
+      year = parseInt(parts[2], 10);
+      month = parseInt(parts[1], 10) - 1;
+      day = parseInt(parts[0], 10);
+    } else {
+      return false;
+    }
+  } else {
+    const parsed = new Date(dateString);
+    if (isNaN(parsed.getTime())) return false;
+    year = parsed.getFullYear();
+    month = parsed.getMonth();
+    day = parsed.getDate();
+  }
+
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return false;
+
+  const airDateObj = new Date(year, month, day, 23, 59, 59, 999);
+  const now = new Date();
+
+  return airDateObj.getTime() > now.getTime();
+};
+
 export const formatRuntime = (runtime?: string) => {
   if (!runtime) return '';
   

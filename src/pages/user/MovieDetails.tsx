@@ -86,6 +86,7 @@ import {
 import {
   formatContentTitle,
   formatReleaseDate,
+  isFutureAirDate,
   formatRuntime,
   getContrastColor,
   isRomanized,
@@ -3746,7 +3747,7 @@ export default function MovieDetails() {
                             <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
                               <span>✨ {t('Coming Soon')}</span>
                             </span>
-                            {mergedContent.releaseDate && (
+                            {mergedContent.releaseDate && isFutureAirDate(mergedContent.releaseDate) && (
                               <span className="text-xs font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded">
                                 🗓️ {t('Expected Air Date')}: {formatReleaseDate(mergedContent.releaseDate)}
                               </span>
@@ -4045,7 +4046,7 @@ export default function MovieDetails() {
                                                           </span>
                                                         )}
 
-                                                        {effectiveAirDate && (
+                                                        {effectiveAirDate && (hasLinks || isFutureAirDate(effectiveAirDate)) && (
                                                           <span className={`text-xs font-medium px-1.5 py-0.5 rounded whitespace-nowrap flex items-center gap-1 ${!hasLinks ? 'text-amber-600 dark:text-amber-400 bg-amber-500/10' : 'text-zinc-600 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800'}`}>
                                                             {!hasLinks ? (
                                                               <span>🗓️ {t('Expected Air Date')}: {formatReleaseDate(effectiveAirDate)}</span>
@@ -4160,7 +4161,7 @@ export default function MovieDetails() {
                                             <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30">
                                               ✨ {t('Coming Soon')}
                                             </span>
-                                            {season.airDate && (
+                                            {season.airDate && isFutureAirDate(season.airDate) && (
                                               <span className="text-xs font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded">
                                                 🗓️ {t('Expected Air Date')}: {formatReleaseDate(season.airDate)}
                                               </span>
