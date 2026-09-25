@@ -32,6 +32,7 @@ export interface BatchMediaPreferences {
   genres: boolean;
   seasons: boolean;
   episodes: boolean;
+  upcomingEpisodes: boolean;
   posterUrl: boolean;
   ottPlatform: boolean;
 }
@@ -52,6 +53,7 @@ export const DEFAULT_BATCH_PREFERENCES: BatchMediaPreferences = {
   genres: true,
   seasons: true,
   episodes: true,
+  upcomingEpisodes: true,
   posterUrl: true,
   ottPlatform: true,
 };
@@ -80,6 +82,7 @@ export function getBatchMediaPreferences(): BatchMediaPreferences {
         genres: parsed.genres !== undefined ? Boolean(parsed.genres) : true,
         seasons: parsed.seasons !== undefined ? Boolean(parsed.seasons) : true,
         episodes: parsed.episodes !== undefined ? Boolean(parsed.episodes) : true,
+        upcomingEpisodes: parsed.upcomingEpisodes !== undefined ? Boolean(parsed.upcomingEpisodes) : true,
         posterUrl: parsed.posterUrl !== undefined ? Boolean(parsed.posterUrl) : true,
         ottPlatform: parsed.ottPlatform !== undefined ? Boolean(parsed.ottPlatform) : true,
       };
@@ -473,7 +476,20 @@ export function applyPreferencesToContent(
   let seasonsStr: string | undefined = baseContent.seasons;
   if (finalType === 'series') {
     if (p.seasons && tmdbData?.seasons && tmdbData.seasons.length > 0) {
-      seasonsStr = JSON.stringify(tmdbData.seasons);
+      let finalSeasons = tmdbData.seasons;
+      if (p.upcomingEpisodes === false) {
+        finalSeasons = tmdbData.seasons.map((s: any) => ({
+          ...s,
+          episodes: (s.episodes || []).filter((ep: any) => {
+            const rawAirDate = ep.air_date || ep.airDate || '';
+            const isFuture = rawAirDate ? new Date(rawAirDate).getTime() > Date.now() : false;
+            const hasLinks = ep.links && Array.isArray(ep.links) && ep.links.some((l: any) => l.url && l.url.trim() !== '');
+            const isUpcoming = ep.isUpcoming || isFuture || !hasLinks;
+            return !isUpcoming;
+          })
+        }));
+      }
+      seasonsStr = JSON.stringify(finalSeasons);
     } else if (!seasonsStr) {
       seasonsStr = JSON.stringify([]);
     }

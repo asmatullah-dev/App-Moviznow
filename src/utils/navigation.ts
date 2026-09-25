@@ -4,9 +4,25 @@
  * and ensures returning to the original browse page (Home with filters, Favorites, etc.).
  */
 
-export const isContentPath = (path: string): boolean => {
+export function isContentPath(path: string): boolean {
   return /^\/(movie|series)\//.test(path);
-};
+}
+
+/**
+ * Clear all movie details navigation history stack and root location trackers.
+ * Called when user explicitly navigates to Home.
+ */
+export function clearMovieDetailsHistory() {
+  try {
+    sessionStorage.setItem("cleared_movie_history", "true");
+    sessionStorage.removeItem("movie_nav_stack");
+    sessionStorage.removeItem("last_root_browse_location");
+    sessionStorage.removeItem("last_browse_location");
+    sessionStorage.removeItem("from_movie_details");
+  } catch (err) {
+    console.error("Failed to clear movie details history:", err);
+  }
+}
 
 /**
  * Record navigation when user clicks a movie or series card.
@@ -16,6 +32,7 @@ export const isContentPath = (path: string): boolean => {
  */
 export function recordNavigationToContent(currentLocation: string) {
   try {
+    sessionStorage.removeItem("cleared_movie_history");
     if (!currentLocation) return;
 
     if (!isContentPath(currentLocation)) {

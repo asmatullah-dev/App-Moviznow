@@ -36,6 +36,8 @@ const FIELD_ORDER = [
   'genres',
   'seasons',
   'episodes',
+  'addUpcomingEpisodes',
+  'episodeAirDates',
   'posterUrl',
 ];
 
@@ -69,6 +71,8 @@ export const BatchFetchModal: React.FC<Props> = ({
       genres: true,
       seasons: true,
       episodes: true,
+      addUpcomingEpisodes: true,
+      episodeAirDates: true,
       posterUrl: true,
     };
     if (saved) {
@@ -305,18 +309,38 @@ export const BatchFetchModal: React.FC<Props> = ({
 
                     if (fetchedSeason.episodes && Array.isArray(fetchedSeason.episodes)) {
                         fetchedSeason.episodes.forEach((fetchedEp: any) => {
-                            const existingEpIndex = mergedEpisodes.findIndex((e: any) => e.episodeNumber === fetchedEp.episode_number);
+                            const epNum = fetchedEp.episode_number || fetchedEp.episodeNumber;
+                            const existingEpIndex = mergedEpisodes.findIndex((e: any) => e.episodeNumber === epNum);
+                            const airDate = fetchedEp.air_date || fetchedEp.airDate || '';
+                            const isFuture = airDate ? new Date(airDate).getTime() > Date.now() : false;
                             
                             if (existingEpIndex !== -1) {
+                                const currentEp = mergedEpisodes[existingEpIndex];
+                                const hasLinks = currentEp.links && currentEp.links.some((l: any) => l.url && l.url.trim() !== '');
+                                const isUpcoming = isFuture || !hasLinks;
+                                const finalAirDate = isUpcoming ? airDate : (fetchFields.episodeAirDates ? (airDate || currentEp.airDate || '') : (currentEp.airDate || ''));
+
                                 mergedEpisodes[existingEpIndex] = {
-                                    ...mergedEpisodes[existingEpIndex],
-                                    title: fetchedEp.name || mergedEpisodes[existingEpIndex].title || `Episode ${fetchedEp.episode_number}`,
-                                    duration: fetchedEp.runtime ? `${fetchedEp.runtime}m` : mergedEpisodes[existingEpIndex].duration || '',
-                                    description: fetchFields.description ? (fetchedEp.overview || mergedEpisodes[existingEpIndex].description || '') : (mergedEpisodes[existingEpIndex].description || '')
+                                    ...currentEp,
+                                    title: fetchedEp.name || fetchedEp.title || currentEp.title || `Episode ${epNum}`,
+                                    duration: fetchedEp.runtime ? `${fetchedEp.runtime}m` : currentEp.duration || '',
+                                    description: fetchFields.description ? (fetchedEp.overview || currentEp.description || '') : (currentEp.description || ''),
+                                    airDate: finalAirDate,
+                                    isUpcoming,
                                 };
+                            } else if (fetchFields.addUpcomingEpisodes !== false) {
+                                // Add unadded episode from TMDB as upcoming
+                                mergedEpisodes.push({
+                                    id: `ep_tmdb_${fetchedSeason.season}_${epNum}`,
+                                    episodeNumber: epNum,
+                                    title: fetchedEp.name || fetchedEp.title || `Episode ${epNum}`,
+                                    description: fetchFields.description ? (fetchedEp.overview || '') : '',
+                                    duration: fetchedEp.runtime ? `${fetchedEp.runtime}m` : '',
+                                    links: [],
+                                    airDate,
+                                    isUpcoming: true,
+                                });
                             }
-                            // Removed the 'else' block that was adding new episodes with empty links
-                            // to fix the issue: "it added episodes that no links exists for such episodes"
                         });
                     }
                     
@@ -488,17 +512,26 @@ export const BatchFetchModal: React.FC<Props> = ({
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-sm font-medium text-zinc-300">Select data to fetch:</h3>
                     <div className="flex gap-2">
-                       <button onClick={() => setFetchFields({title:true, secondTitle:true, description:true, type:true, year:true, releaseDate:true, country:true, runtime:true, imdbRating:true, imdbLink:true, trailerUrl:true, cast:true, genres:true, seasons:true, episodes:true, posterUrl:true})} className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 rounded text-zinc-300">Select All</button>
-                       <button onClick={() => setFetchFields({title:false, secondTitle:false, description:false, type:false, year:false, releaseDate:false, country:false, runtime:false, imdbRating:false, imdbLink:false, trailerUrl:false, cast:false, genres:false, seasons:false, episodes:false, posterUrl:false})} className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 rounded text-zinc-300">Deselect All</button>
+                       <button onClick={() => {
+                         const all: Record<string, boolean> = {};
+                         FIELD_ORDER.forEach(k => all[k] = true);
+                         setFetchFields(all);
+                       }} className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 rounded text-zinc-300">Select All</button>
+                       <button onClick={() => {
+                         const none: Record<string, boolean> = {};
+                         FIELD_ORDER.forEach(k => none[k] = false);
+                         setFetchFields(none);
+                       }} className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 rounded text-zinc-300">Deselect All</button>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto custom-scrollbar">
                     {FIELD_ORDER.map((key) => {
                       const val = fetchFields[key] ?? false;
+                      const label = key === 'secondTitle' ? '2nd Title' : key === 'episodeAirDates' ? 'Episode Release Dates' : key === 'addUpcomingEpisodes' ? 'Add Upcoming Episodes' : key.replace(/([A-Z])/g, ' $1').trim();
                       return (
                         <label key={key} className="flex items-center gap-2 cursor-pointer">
                           <input type="checkbox" checked={val} onChange={e => setFetchFields(f => ({ ...f, [key]: e.target.checked }))} className="w-4 h-4 rounded border-zinc-700 text-emerald-500 focus:ring-emerald-500/20 bg-zinc-900" />
-                          <span className="text-xs text-zinc-400 font-medium uppercase">{key === 'secondTitle' ? '2nd Title' : key.replace(/([A-Z])/g, ' $1').trim()}</span>
+                          <span className="text-xs text-zinc-400 font-medium uppercase">{label}</span>
                         </label>
                       );
                     })}

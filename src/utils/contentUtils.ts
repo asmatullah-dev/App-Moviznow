@@ -55,12 +55,18 @@ export const formatContentTitle = (content: Content) => {
 
 export const formatReleaseDate = (dateString?: string) => {
   if (!dateString) return '';
-  const parts = dateString.split('-');
+  const cleanDate = dateString.trim().split('T')[0];
+  const parts = cleanDate.split(/[-/.]/);
   if (parts.length === 3) {
-    // Check if first part is a 4-digit year (YYYY-MM-DD)
+    // Check if first part is a 4-digit year (YYYY-MM-DD or YYYY/MM/DD)
     if (parts[0].length === 4) {
       const [year, month, day] = parts;
-      return `${day}-${month}-${year}`;
+      return `${day.padStart(2, '0')}-${month.padStart(2, '0')}-${year}`;
+    }
+    // Check if last part is a 4-digit year (DD-MM-YYYY or MM-DD-YYYY)
+    if (parts[2].length === 4) {
+      const [p1, p2, year] = parts;
+      return `${p1.padStart(2, '0')}-${p2.padStart(2, '0')}-${year}`;
     }
   }
   return dateString;

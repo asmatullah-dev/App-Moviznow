@@ -1683,15 +1683,48 @@ export default function ContentManagement() {
     e.preventDefault();
     setIsSaving(true);
     try {
-      // Sort seasons and episodes before saving
+      // Sort and clean seasons and episodes before saving
+      const hasValidMovieLinks = Array.isArray(movieLinks) && movieLinks.some((l: any) => l && l.url && l.url.trim() !== "");
+
       const sortedSeasons = [...seasons]
         .sort((a, b) => a.seasonNumber - b.seasonNumber)
-        .map((s) => ({
-          ...s,
-          episodes: [...s.episodes].sort(
-            (a, b) => a.episodeNumber - b.episodeNumber,
-          ),
-        }));
+        .map((s) => {
+          const hasZip = Array.isArray(s.zipLinks) && s.zipLinks.some((l: any) => l && l.url && l.url.trim() !== "");
+          const hasMkv = Array.isArray(s.mkvLinks) && s.mkvLinks.some((l: any) => l && l.url && l.url.trim() !== "");
+
+          const cleanedEpisodes = [...s.episodes]
+            .sort((a, b) => a.episodeNumber - b.episodeNumber)
+            .map((ep) => {
+              const hasEpLinks = Array.isArray(ep.links) && ep.links.some((l: any) => l && l.url && l.url.trim() !== "");
+              if (hasEpLinks) {
+                // Remove airDate and unmark isUpcoming when links exist to minimize data payload
+                const { airDate, isUpcoming, ...rest } = ep as any;
+                return {
+                  ...rest,
+                  isUpcoming: false,
+                };
+              }
+              return {
+                ...ep,
+                isUpcoming: true,
+              };
+            });
+
+          const allEpsHaveLinks = cleanedEpisodes.length > 0 && cleanedEpisodes.every((ep) => !ep.isUpcoming);
+          if (hasZip || hasMkv || allEpsHaveLinks) {
+            const { airDate, isUpcoming, ...restSeason } = s as any;
+            return {
+              ...restSeason,
+              isUpcoming: false,
+              episodes: cleanedEpisodes,
+            };
+          }
+
+          return {
+            ...s,
+            episodes: cleanedEpisodes,
+          };
+        });
 
       const currentEditingId = editingId;
       const existingContent = currentEditingId
@@ -1733,6 +1766,7 @@ export default function ContentManagement() {
         year: Number(year) || new Date().getFullYear(),
         releaseDate: releaseDate || "",
         runtime: runtime || "",
+        isUpcoming: type === "movie" ? !hasValidMovieLinks : sortedSeasons.some((s) => s.isUpcoming || s.episodes.some((ep) => ep.isUpcoming)),
         updatedAt: new Date().toISOString(),
       };
 
@@ -2648,40 +2682,91 @@ export default function ContentManagement() {
           if (existingSeasonIndex !== -1) {
             // Merge episodes
             const existingSeason = updatedSeasons[existingSeasonIndex];
-            if (fetchedSeason.seasonYear)
-              existingSeason.year = fetchedSeason.seasonYear;
+            if (fetchedSeason.seasonYear || fetchedSeason.year)
+              existingSeason.year = fetchedSeason.seasonYear || fetchedSeason.year;
             if (fetchedSeason.title) existingSeason.title = fetchedSeason.title;
             if (fetchedSeason.trailerUrl)
               existingSeason.trailerUrl = fetchedSeason.trailerUrl;
-            fetchedSeason.episodes.forEach((fetchedEp: any) => {
+            if (fetchedSeason.airDate)
+              existingSeason.airDate = fetchedSeason.airDate;
+            if (fetchedSeason.isUpcoming !== undefined)
+              existingSeason.isUpcoming = fetchedSeason.isUpcoming;
+
+            (fetchedSeason.episodes || []).forEach((fetchedEp: any) => {
               const existingEpIndex = existingSeason.episodes.findIndex(
                 (ep) => ep.episodeNumber === fetchedEp.episodeNumber,
               );
               if (existingEpIndex !== -1) {
-                // Update title, description, duration, keep links
+                // Update title, description, duration, airDate, keep existing links
+                const currentEp = existingSeason.episodes[existingEpIndex];
+                const hasLinks = currentEp.links && currentEp.links.some((l) => l.url && l.url.trim() !== "");
+                const airDate = fetchedEp.airDate || currentEp.airDate || "";
+                const isFuture = airDate ? new Date(airDate).getTime() > Date.now() : false;
+                const isUpcoming = fetchedEp.isUpcoming !== undefined ? fetchedEp.isUpcoming : (isFuture || !hasLinks);
+
                 existingSeason.episodes[existingEpIndex] = {
-                  ...existingSeason.episodes[existingEpIndex],
+                  ...currentEp,
                   title:
-                    (!existingSeason.episodes[existingEpIndex].title ||
-                      /^Episode\s+\d+$/i.test(
-                        existingSeason.episodes[existingEpIndex].title,
-                      )) &&
+                    (!currentEp.title ||
+                      /^Episode\s+\d+$/i.test(currentEp.title)) &&
                     fetchedEp.title
                       ? fetchedEp.title
-                      : existingSeason.episodes[existingEpIndex].title,
+                      : currentEp.title,
                   description:
-                    fetchedEp.description ||
-                    existingSeason.episodes[existingEpIndex].description,
+                    fetchedEp.description || currentEp.description,
                   duration:
-                    fetchedEp.duration ||
-                    existingSeason.episodes[existingEpIndex].duration,
+                    fetchedEp.duration || currentEp.duration,
+                  airDate,
+                  isUpcoming,
                 };
+              } else {
+                // TMDB episode not yet in content form -> add as upcoming episode
+                const airDate = fetchedEp.airDate || "";
+                const isFuture = airDate ? new Date(airDate).getTime() > Date.now() : false;
+                existingSeason.episodes.push({
+                  id: `ep_tmdb_${existingSeason.seasonNumber}_${fetchedEp.episodeNumber}`,
+                  episodeNumber: fetchedEp.episodeNumber,
+                  title: fetchedEp.title || `Episode ${fetchedEp.episodeNumber}`,
+                  description: fetchedEp.description || "",
+                  duration: fetchedEp.duration || "",
+                  links: [],
+                  airDate,
+                  isUpcoming: true,
+                });
               }
             });
             // Sort episodes
             existingSeason.episodes.sort(
               (a, b) => a.episodeNumber - b.episodeNumber,
             );
+          } else {
+            // Add entire new season from TMDB with upcoming episodes
+            const newEpisodes = (fetchedSeason.episodes || []).map((fetchedEp: any) => {
+              const airDate = fetchedEp.airDate || "";
+              return {
+                id: `ep_tmdb_${fetchedSeason.seasonNumber}_${fetchedEp.episodeNumber}`,
+                episodeNumber: fetchedEp.episodeNumber,
+                title: fetchedEp.title || `Episode ${fetchedEp.episodeNumber}`,
+                description: fetchedEp.description || "",
+                duration: fetchedEp.duration || "",
+                links: [],
+                airDate,
+                isUpcoming: true,
+              };
+            });
+
+            updatedSeasons.push({
+              id: `s${fetchedSeason.seasonNumber}`,
+              seasonNumber: fetchedSeason.seasonNumber,
+              title: fetchedSeason.title || "",
+              year: fetchedSeason.seasonYear || fetchedSeason.year,
+              trailerUrl: fetchedSeason.trailerUrl || "",
+              airDate: fetchedSeason.airDate || "",
+              isUpcoming: fetchedSeason.isUpcoming,
+              zipLinks: [],
+              mkvLinks: [],
+              episodes: newEpisodes,
+            });
           }
         });
 
@@ -3181,7 +3266,7 @@ export default function ContentManagement() {
                     ? JSON.parse(content.seasons || "[]")
                     : content.seasons || [];
                 needsDuration = parsedSeasons.some((s) =>
-                  s.episodes?.some((e) => !e.duration),
+                  s.episodes?.some((e) => !e.duration || !e.airDate),
                 );
                 if (needsDuration) {
                   promises.push(fetchSeriesSeasons(tmdbItem.id));
@@ -3329,21 +3414,43 @@ export default function ContentManagement() {
                     (fs: any) => fs.season === s.seasonNumber,
                   );
                   if (fetchedSeason) {
+                    const mergedEps = (s.episodes || []).map((e: any) => {
+                      const fetchedEpisode = fetchedSeason.episodes?.find(
+                        (fe: any) => fe.episode_number === e.episodeNumber,
+                      );
+                      return {
+                        ...e,
+                        duration:
+                          e.duration ||
+                          (fetchedEpisode?.runtime
+                            ? `${fetchedEpisode.runtime}m`
+                            : ""),
+                        airDate: e.airDate || fetchedEpisode?.air_date || "",
+                      };
+                    });
+
+                    // Also include unadded TMDB episodes as upcoming
+                    if (fetchedSeason.episodes) {
+                      fetchedSeason.episodes.forEach((fe: any) => {
+                        const exists = mergedEps.some((me: any) => me.episodeNumber === fe.episode_number);
+                        if (!exists) {
+                          mergedEps.push({
+                            id: `ep_tmdb_${s.seasonNumber}_${fe.episode_number}`,
+                            episodeNumber: fe.episode_number,
+                            title: fe.name || `Episode ${fe.episode_number}`,
+                            description: fe.overview || "",
+                            duration: fe.runtime ? `${fe.runtime}m` : "",
+                            links: [],
+                            airDate: fe.air_date || "",
+                            isUpcoming: true,
+                          });
+                        }
+                      });
+                    }
+
                     return {
                       ...s,
-                      episodes: s.episodes?.map((e: any) => {
-                        const fetchedEpisode = fetchedSeason.episodes.find(
-                          (fe: any) => fe.episode_number === e.episodeNumber,
-                        );
-                        return {
-                          ...e,
-                          duration:
-                            e.duration ||
-                            (fetchedEpisode?.runtime
-                              ? `${fetchedEpisode.runtime}m`
-                              : ""),
-                        };
-                      }),
+                      episodes: mergedEps.sort((a: any, b: any) => a.episodeNumber - b.episodeNumber),
                     };
                   }
                   return s;
@@ -3592,14 +3699,21 @@ export default function ContentManagement() {
             });
           }
           if (season.episodes && season.episodes.length > 0) {
-            const allEpLinks = season.episodes.flatMap((ep) =>
+            const episodesList = season.episodes;
+            const validAirDates = episodesList
+              .map((ep: any) => ep.airDate)
+              .filter((d: string) => Boolean(d && d.trim()));
+            const uniqueAirDates = [...new Set(validAirDates)];
+            const areAirDatesDifferent = uniqueAirDates.length > 1;
+
+            const allEpLinks = episodesList.flatMap((ep) =>
               parseLinks(JSON.stringify(ep.links || [])).filter((l) => l && l.url),
             );
             const uniqueQualities = [...new Set(allEpLinks.map((l) => l.name))];
             const hasUniformQuality =
               uniqueQualities.length === 1 &&
-              allEpLinks.length === season.episodes.length &&
-              season.episodes.every(
+              allEpLinks.length === episodesList.length &&
+              episodesList.every(
                 (ep) =>
                   parseLinks(JSON.stringify(ep.links || [])).filter((l) => l && l.url)
                     .length === 1,
@@ -3607,28 +3721,45 @@ export default function ContentManagement() {
 
             if (hasUniformQuality) {
               text += `\n🎬 *Episodes (${uniqueQualities[0]}):*\n`;
-              season.episodes.forEach((ep) => {
-                const link = parseLinks(JSON.stringify(ep.links || [])).find(
-                  (l) => l && l.url,
-                );
-                if (link) {
+              episodesList.forEach((ep) => {
+                const epLinks = parseLinks(JSON.stringify(ep.links || [])).filter((l) => l && l.url);
+                const link = epLinks[0];
+                const rawDate = ep.airDate;
+                const airDateStr = rawDate ? formatReleaseDate(rawDate) : "";
+                const datePart = areAirDatesDifferent && airDateStr ? ` [${airDateStr}]` : "";
+                const isUpcoming = ep.isUpcoming || epLinks.length === 0;
+
+                if (isUpcoming) {
+                  const upDateStr = airDateStr ? ` [🗓️ ${airDateStr}]` : "";
+                  text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${upDateStr} ✨ (Coming Soon)\n`;
+                } else if (link) {
                   const finalUrl = link.tinyUrl || link.url;
                   if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
-                    text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""} (${link.size}${link.unit})\n${finalUrl}\n`;
+                    text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${datePart} (${link.size}${link.unit})\n${finalUrl}\n`;
                   }
                 }
               });
             } else {
               text += `\n🎬 *Episodes:*\n`;
-              season.episodes.forEach((ep) => {
-                text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}\n`;
+              episodesList.forEach((ep) => {
                 const epLinks = parseLinks(JSON.stringify(ep.links || [])).filter((l) => l && l.url);
-                epLinks.forEach((link) => {
-                  const finalUrl = link.tinyUrl || link.url;
-                  if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
-                    text += `- ${link.name} (${link.size}${link.unit})\n${finalUrl}\n`;
-                  }
-                });
+                const rawDate = ep.airDate;
+                const airDateStr = rawDate ? formatReleaseDate(rawDate) : "";
+                const datePart = areAirDatesDifferent && airDateStr ? ` [${airDateStr}]` : "";
+                const isUpcoming = ep.isUpcoming || epLinks.length === 0;
+
+                if (isUpcoming) {
+                  const upDateStr = airDateStr ? ` [🗓️ ${airDateStr}]` : "";
+                  text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${upDateStr} ✨ (Coming Soon)\n`;
+                } else {
+                  text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${datePart}\n`;
+                  epLinks.forEach((link) => {
+                    const finalUrl = link.tinyUrl || link.url;
+                    if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
+                      text += `- ${link.name} (${link.size}${link.unit})\n${finalUrl}\n`;
+                    }
+                  });
+                }
               });
             }
           }
@@ -3961,14 +4092,21 @@ export default function ContentManagement() {
           });
         }
         if (season.episodes && season.episodes.length > 0) {
-          const allEpLinks = season.episodes.flatMap((ep) =>
+          const episodesList = season.episodes;
+          const validAirDates = episodesList
+            .map((ep: any) => ep.airDate)
+            .filter((d: string) => Boolean(d && d.trim()));
+          const uniqueAirDates = [...new Set(validAirDates)];
+          const areAirDatesDifferent = uniqueAirDates.length > 1;
+
+          const allEpLinks = episodesList.flatMap((ep) =>
             parseLinks(JSON.stringify(ep.links)).filter((l) => l && l.url),
           );
           const uniqueQualities = [...new Set(allEpLinks.map((l) => l.name))];
           const hasUniformQuality =
             uniqueQualities.length === 1 &&
-            allEpLinks.length === season.episodes.length &&
-            season.episodes.every(
+            allEpLinks.length === episodesList.length &&
+            episodesList.every(
               (ep) =>
                 parseLinks(JSON.stringify(ep.links)).filter((l) => l && l.url)
                   .length === 1,
@@ -3976,35 +4114,52 @@ export default function ContentManagement() {
 
           if (hasUniformQuality) {
             text += `\n🎬 *Episodes (${uniqueQualities[0]}):*\n`;
-            season.episodes.forEach((ep) => {
-              const link = parseLinks(JSON.stringify(ep.links)).find(
-                (l) => l && l.url,
-              );
-              if (link) {
+            episodesList.forEach((ep) => {
+              const epLinks = parseLinks(JSON.stringify(ep.links)).filter((l) => l && l.url);
+              const link = epLinks[0];
+              const rawDate = ep.airDate;
+              const airDateStr = rawDate ? formatReleaseDate(rawDate) : "";
+              const datePart = areAirDatesDifferent && airDateStr ? ` [${airDateStr}]` : "";
+              const isUpcoming = ep.isUpcoming || epLinks.length === 0;
+
+              if (isUpcoming) {
+                const upDateStr = airDateStr ? ` [🗓️ ${airDateStr}]` : "";
+                text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${upDateStr} ✨ (Coming Soon)\n`;
+              } else if (link) {
                 const finalUrl = link.tinyUrl || link.url;
                 if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
-                  text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""} (${link.size}${link.unit})\n${finalUrl}\n`;
+                  text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${datePart} (${link.size}${link.unit})\n${finalUrl}\n`;
                 }
               }
             });
           } else {
             text += `\n🎬 *Episodes:*\n`;
-            season.episodes.forEach((ep) => {
-              text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}\n`;
-              const epLinks = parseLinks(JSON.stringify(ep.links)).sort((a, b) => {
+            episodesList.forEach((ep) => {
+              const epLinks = parseLinks(JSON.stringify(ep.links)).filter((l) => l && l.url);
+              const rawDate = ep.airDate;
+              const airDateStr = rawDate ? formatReleaseDate(rawDate) : "";
+              const datePart = areAirDatesDifferent && airDateStr ? ` [${airDateStr}]` : "";
+              const isUpcoming = ep.isUpcoming || epLinks.length === 0;
+
+              if (isUpcoming) {
+                const upDateStr = airDateStr ? ` [🗓️ ${airDateStr}]` : "";
+                text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${upDateStr} ✨ (Coming Soon)\n`;
+              } else {
+                text += `E${ep.episodeNumber}: ${ep.title}${ep.duration ? ` (${ep.duration})` : ""}${datePart}\n`;
+                epLinks.sort((a, b) => {
                   const pA = getLinkPriority(a);
                   const pB = getLinkPriority(b);
                   if (pA !== pB) return pA - pB;
                   return getSizeInMB(a.size, a.unit) - getSizeInMB(b.size, b.unit);
-              });
-              epLinks.forEach((link) => {
-                if (link && link.url) {
-                  const finalUrl = link.tinyUrl || link.url;
-                  if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
-                    text += `- ${link.name} (${link.size}${link.unit})\n${finalUrl}\n`;
+                }).forEach((link) => {
+                  if (link && link.url) {
+                    const finalUrl = link.tinyUrl || link.url;
+                    if (finalUrl && !finalUrl.toLowerCase().includes("<html")) {
+                      text += `- ${link.name} (${link.size}${link.unit})\n${finalUrl}\n`;
+                    }
                   }
-                }
-              });
+                });
+              }
             });
           }
         }
@@ -4793,23 +4948,25 @@ export default function ContentManagement() {
               labels.push("Missing Seasons Data");
             } else {
               seasonsList.forEach((s: any) => {
-                if (!s.year) labels.push(`Missing S${s.seasonNumber} Year`);
+                const seasonIsUpcoming = s.isUpcoming || (s.airDate && new Date(s.airDate).getTime() > Date.now());
+                if (!s.year && !seasonIsUpcoming) labels.push(`Missing S${s.seasonNumber} Year`);
 
                 const zips = safeParse(s.zipLinks);
                 const mkvs = safeParse(s.mkvLinks);
 
-                if (zips.length === 0)
+                if (zips.length === 0 && !seasonIsUpcoming)
                   labels.push(`Missing S${s.seasonNumber} Zip`);
-                if (mkvs.length === 0)
+                if (mkvs.length === 0 && !seasonIsUpcoming)
                   labels.push(`Missing S${s.seasonNumber} MKV`);
 
                 if (
-                  !s.episodes ||
+                  (!s.episodes ||
                   !Array.isArray(s.episodes) ||
-                  s.episodes.length === 0
+                  s.episodes.length === 0) &&
+                  !seasonIsUpcoming
                 ) {
                   labels.push(`Missing S${s.seasonNumber} Episodes`);
-                } else {
+                } else if (Array.isArray(s.episodes)) {
                   const seasonHas1080pEpisode = s.episodes.some((ep: any) => {
                     const epLinks = safeParse(ep.links);
                     return epLinks.some(
@@ -4820,11 +4977,12 @@ export default function ContentManagement() {
 
                   s.episodes.forEach((ep: any) => {
                     const epLinks = safeParse(ep.links);
-                    if (epLinks.length === 0) {
+                    const epIsUpcoming = ep.isUpcoming || (ep.airDate && new Date(ep.airDate).getTime() > Date.now()) || seasonIsUpcoming;
+                    if (epLinks.length === 0 && !epIsUpcoming) {
                       labels.push(
                         `Missing S${s.seasonNumber}E${ep.episodeNumber}`,
                       );
-                    } else {
+                    } else if (epLinks.length > 0) {
                       const isStd = (l: any, res: string) =>
                         (l.name?.includes(res) || l.quality === res) &&
                         !l.name?.toUpperCase().includes("HEVC") &&

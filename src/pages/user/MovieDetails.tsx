@@ -22,12 +22,13 @@ import { useCart } from "../../contexts/CartContext";
 import { useHaptics } from "../../hooks/useHaptics";
 import { globalScrollState } from "../../hooks/useScrollRestoration";
 import { safeStorage } from "../../utils/safeStorage";
-import { getContentBackTarget } from "../../utils/navigation";
+import { getContentBackTarget, clearMovieDetailsHistory } from "../../utils/navigation";
 import {
   Film,
   Phone,
   MessageSquare,
   ArrowLeft,
+  Home,
   Play,
   Clock,
   Heart,
@@ -61,7 +62,14 @@ import {
   Image as ImageIcon,
   Volume2,
   VolumeX,
+  Bell,
+  BellRing,
 } from "lucide-react";
+import {
+  isSubscribedToUpcoming,
+  toggleUpcomingSubscription,
+  checkUpcomingSubscriptionsAndNotify,
+} from "../../utils/upcomingNotifications";
 import { logEvent } from "../../services/analytics";
 import { touchMetadataUsage } from "../../services/cacheManager";
 import AlertModal from "../../components/AlertModal";
@@ -294,6 +302,49 @@ export default function MovieDetails() {
     data: Partial<Content>;
   }>(() => ({ id: "", data: {} }));
 
+  const handleToggleUpcoming = useCallback((item: {
+    contentId: string;
+    contentTitle: string;
+    posterUrl?: string;
+    seasonNumber?: number;
+    episodeNumber?: number;
+    episodeTitle?: string;
+    airDate?: string;
+  }) => {
+    vibrate();
+    const result = toggleUpcomingSubscription(item, profile, updateUserProfileData);
+    if (result.isSubscribed) {
+      setAlertConfig({
+        isOpen: true,
+        title: t('Subscribed for Release Notification'),
+        message: t('You will be notified as soon as this release becomes available!'),
+      });
+    } else {
+      setAlertConfig({
+        isOpen: true,
+        title: t('Notification Removed'),
+        message: t('Upcoming notification subscription removed.'),
+      });
+    }
+  }, [profile, updateUserProfileData, vibrate, t]);
+
+  useEffect(() => {
+    if (contentList && contentList.length > 0) {
+      checkUpcomingSubscriptionsAndNotify(
+        contentList,
+        profile,
+        updateUserProfileData,
+        (notif) => {
+          setAlertConfig({
+            isOpen: true,
+            title: notif.title,
+            message: notif.body,
+          });
+        }
+      );
+    }
+  }, [contentList, profile, updateUserProfileData]);
+
   const [isReporting, setIsReporting] = useState(false);
   const [liveRating, setLiveRating] = useState<string | null>(null);
   const [fetchingImdb, setFetchingImdb] = useState(false);
@@ -327,6 +378,12 @@ export default function MovieDetails() {
     const target = getContentBackTarget(currentLoc);
     navigate(target);
   }, [navigate]);
+
+  useEffect(() => {
+    if (sessionStorage.getItem("cleared_movie_history") === "true") {
+      navigate("/", { replace: true });
+    }
+  }, [id, navigate]);
 
   const handleFilterNavigation = (key: string, value: string) => {
     const keys = ['home_search', 'home_sort', 'home_genre', 'home_language', 'home_type', 'home_quality', 'home_year', 'home_page'];
@@ -565,9 +622,11 @@ export default function MovieDetails() {
             ...fs,
             year: ms.year || fs.year,
             title: ms.title || fs.title,
+            airDate: fs.airDate || ms.airDate || ms.air_date || "",
+            isUpcoming: fs.isUpcoming !== undefined ? fs.isUpcoming : ms.isUpcoming,
           };
           if (fs.episodes && ms.episodes) {
-            rescued.episodes = fs.episodes.map((fe: any) => {
+            const mergedEps = fs.episodes.map((fe: any) => {
               const me = ms.episodes.find(
                 (m: any) => m.episodeNumber === fe.episodeNumber,
               );
@@ -580,8 +639,30 @@ export default function MovieDetails() {
                 title: me.title || fe.title,
                 description: (isFeDescPlaceholder && me.description) ? me.description : (me.description || fe.description),
                 duration: (isFeDurPlaceholder && me.duration) ? me.duration : (me.duration || fe.duration),
+                airDate: fe.airDate || me.airDate || me.air_date || "",
+                isUpcoming: fe.isUpcoming !== undefined ? fe.isUpcoming : me.isUpcoming,
               };
             });
+
+            // If TMDB had upcoming episodes not in fs.episodes yet, include them
+            ms.episodes.forEach((me: any) => {
+              const exists = mergedEps.some((fe: any) => fe.episodeNumber === (me.episode_number || me.episodeNumber));
+              if (!exists) {
+                const epNum = me.episode_number || me.episodeNumber;
+                mergedEps.push({
+                  id: `ep_meta_${fs.seasonNumber}_${epNum}`,
+                  episodeNumber: epNum,
+                  title: me.name || me.title || `Episode ${epNum}`,
+                  description: me.overview || me.description || "",
+                  duration: me.runtime ? `${me.runtime}m` : (me.duration || ""),
+                  links: [],
+                  airDate: me.air_date || me.airDate || "",
+                  isUpcoming: true,
+                });
+              }
+            });
+
+            rescued.episodes = mergedEps.sort((a: any, b: any) => a.episodeNumber - b.episodeNumber);
           }
           return rescued;
         });
@@ -1495,16 +1576,22 @@ export default function MovieDetails() {
                   season.year = parseInt(tmdbSeason.year);
                   seasonsUpdated = true;
                 }
-                if (tmdbSeason.episodes) {
+                if (tmdbSeason.episodes && Array.isArray(tmdbSeason.episodes)) {
                   const existingEpisodes = season.episodes || [];
                   let episodeUpdated = false;
-                  season.episodes = existingEpisodes.map((existingEp: any) => {
+
+                  const updatedEpisodes = existingEpisodes.map((existingEp: any) => {
                     const tmdbEp = tmdbSeason.episodes.find(
                       (ep: any) =>
                         parseInt(ep.episode_number || ep.episode) ===
                         parseInt(existingEp.episodeNumber.toString()),
                     );
                     if (tmdbEp) {
+                      const newAirDate = existingEp.airDate || tmdbEp.air_date || "";
+                      const isFuture = newAirDate ? new Date(newAirDate).getTime() > Date.now() : false;
+                      const hasNoLinks = !existingEp.links || existingEp.links.length === 0;
+                      const isUpcomingDetected = existingEp.isUpcoming || isFuture || (hasNoLinks && (isFuture || !tmdbEp.overview || !tmdbEp.name));
+
                       const newTitle =
                         (!existingEp.title ||
                           /^Episode\s+\d+$/i.test(existingEp.title)) &&
@@ -1512,14 +1599,12 @@ export default function MovieDetails() {
                           ? tmdbEp.name
                           : existingEp.title;
 
-                      // Only keep existing description if it's not a placeholder
                       const isDescPlaceholder = !existingEp.description || /^episode/i.test(existingEp.description);
                       const newDesc =
                         isDescPlaceholder
                           ? tmdbEp.overview || tmdbEp.description || ""
                           : existingEp.description;
 
-                      // Only keep existing duration if it's valid and not a placeholder
                       const isDurPlaceholder = !existingEp.duration || existingEp.duration === "N/A";
                       const fallbackDur = tmdbEp.runtime ? `${tmdbEp.runtime}m` : (details.episode_run_time && details.episode_run_time[0] ? `${details.episode_run_time[0]}m` : "");
                       const newDur =
@@ -1530,7 +1615,9 @@ export default function MovieDetails() {
                       if (
                         newTitle !== existingEp.title ||
                         newDesc !== existingEp.description ||
-                        (newDur && newDur !== existingEp.duration)
+                        (newDur && newDur !== existingEp.duration) ||
+                        newAirDate !== existingEp.airDate ||
+                        isUpcomingDetected !== existingEp.isUpcoming
                       ) {
                         episodeUpdated = true;
                         return {
@@ -1538,12 +1625,38 @@ export default function MovieDetails() {
                           title: newTitle,
                           description: newDesc,
                           duration: newDur,
+                          airDate: newAirDate,
+                          isUpcoming: isUpcomingDetected,
                         };
                       }
                     }
                     return existingEp;
                   });
-                  if (episodeUpdated) seasonsUpdated = true;
+
+                  // Add missing TMDB episodes as upcoming placeholders
+                  const existingNums = new Set(existingEpisodes.map((e: any) => parseInt(e.episodeNumber.toString())));
+                  tmdbSeason.episodes.forEach((tmdbEp: any) => {
+                    const epNum = parseInt(tmdbEp.episode_number || tmdbEp.episode);
+                    if (epNum && !existingNums.has(epNum)) {
+                      updatedEpisodes.push({
+                        id: `ep_tmdb_${season.seasonNumber}_${epNum}`,
+                        episodeNumber: epNum,
+                        title: tmdbEp.name || `Episode ${epNum}`,
+                        description: tmdbEp.overview || "",
+                        duration: tmdbEp.runtime ? `${tmdbEp.runtime}m` : "",
+                        links: [],
+                        airDate: tmdbEp.air_date || "",
+                        isUpcoming: true,
+                      });
+                      episodeUpdated = true;
+                    }
+                  });
+
+                  if (episodeUpdated) {
+                    updatedEpisodes.sort((a: any, b: any) => a.episodeNumber - b.episodeNumber);
+                    season.episodes = updatedEpisodes;
+                    seasonsUpdated = true;
+                  }
                 }
               }
             }
@@ -2711,7 +2824,17 @@ export default function MovieDetails() {
           >
             <ArrowLeft className="w-5 h-5 transition-transform duration-200 group-hover:-translate-x-1" /> <span className="font-semibold text-sm">{t('Back')}</span>
           </button>
-          <div className="pointer-events-auto"></div>
+          <button
+            onClick={() => {
+              vibrate(30);
+              clearMovieDetailsHistory();
+              navigate('/', { replace: true });
+            }}
+            className="group inline-flex items-center gap-2 text-white hover:text-emerald-400 bg-black/60 hover:bg-black/85 backdrop-blur-xl px-5 py-2.5 rounded-full transition-all duration-200 pointer-events-auto cursor-pointer border border-white/20 shadow-xl hover:scale-105 active:scale-95 hover:border-emerald-500/40"
+            title={t('Home')}
+          >
+            <Home className="w-5 h-5 transition-transform duration-200 group-hover:scale-110" /> <span className="font-semibold text-sm">{t('Home')}</span>
+          </button>
         </div>
 
         <motion.div
@@ -2779,6 +2902,28 @@ export default function MovieDetails() {
                     {mergedContent.year}
                   </span>
                 )}
+                {(() => {
+                  const movieLinksArr = getLinksArray(mergedContent.movieLinks);
+                  const hasMovieLinks = movieLinksArr.some((l) => l && l.url && l.url.trim() !== "");
+                  const hasSeasonLinks = seasons.some((s) =>
+                    (s.zipLinks && s.zipLinks.some((l) => l && l.url && l.url.trim() !== "")) ||
+                    (s.mkvLinks && s.mkvLinks.some((l) => l && l.url && l.url.trim() !== "")) ||
+                    (s.episodes && s.episodes.some((ep) => ep.links && ep.links.some((l) => l && l.url && l.url.trim() !== "")))
+                  );
+                  const isUpcoming = Boolean(
+                    mergedContent.isUpcoming ||
+                    (mergedContent.status as any) === "upcoming" ||
+                    (mergedContent.type === "movie" ? !hasMovieLinks : !hasSeasonLinks) ||
+                    (mergedContent.releaseDate && new Date(mergedContent.releaseDate).getTime() > Date.now())
+                  );
+
+                  if (!isUpcoming) return null;
+                  return (
+                    <span className="bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider flex items-center gap-1 shadow-md">
+                      ✨ {t('Coming Soon')}
+                    </span>
+                  );
+                })()}
                 {mergedContent.qualityId &&
                   (() => {
                     const qualityObj = qualities.find(
@@ -2806,6 +2951,54 @@ export default function MovieDetails() {
               </h1>
 
               <div className="flex flex-wrap items-center justify-center md:justify-start gap-2.5 pt-2">
+                {(() => {
+                  const movieLinksArr = getLinksArray(mergedContent.movieLinks);
+                  const hasMovieLinks = movieLinksArr.some((l) => l && l.url && l.url.trim() !== "");
+                  const hasSeasonLinks = seasons.some((s) =>
+                    (s.zipLinks && s.zipLinks.some((l) => l && l.url && l.url.trim() !== "")) ||
+                    (s.mkvLinks && s.mkvLinks.some((l) => l && l.url && l.url.trim() !== "")) ||
+                    (s.episodes && s.episodes.some((ep) => ep.links && ep.links.some((l) => l && l.url && l.url.trim() !== "")))
+                  );
+                  const isUpcoming = Boolean(
+                    mergedContent.isUpcoming ||
+                    (mergedContent.status as any) === "upcoming" ||
+                    (mergedContent.type === "movie" ? !hasMovieLinks : !hasSeasonLinks) ||
+                    (mergedContent.releaseDate && new Date(mergedContent.releaseDate).getTime() > Date.now())
+                  );
+
+                  if (!isUpcoming) return null;
+                  const isSubscribed = isSubscribedToUpcoming(mergedContent.id, undefined, undefined, profile);
+
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => handleToggleUpcoming({
+                        contentId: mergedContent.id,
+                        contentTitle: mergedContent.title,
+                        posterUrl: mergedContent.posterUrl,
+                        airDate: mergedContent.releaseDate,
+                      })}
+                      className={`px-5 py-3.5 text-sm sm:text-base rounded-2xl font-bold flex items-center gap-2 transition-all select-none shadow-lg active:scale-95 ${
+                        isSubscribed
+                          ? "bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/40"
+                          : "bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-amber-500/20"
+                      }`}
+                    >
+                      {isSubscribed ? (
+                        <>
+                          <BellRing className="w-5 h-5 text-amber-500 animate-pulse" />
+                          <span>{t('Subscribed for Release Notification')}</span>
+                        </>
+                      ) : (
+                        <>
+                          <Bell className="w-5 h-5" />
+                          <span>{t('Notify Me')}</span>
+                        </>
+                      )}
+                    </button>
+                  );
+                })()}
+
                 {(mergedContent.trailerUrl ||
                   (mergedContent.type === "series" &&
                     seasons.some((s) => s.trailerUrl))) && (
@@ -3507,28 +3700,88 @@ export default function MovieDetails() {
               </div>
 
               {mergedContent.type === "movie" &&
-                mergedContent.movieLinks &&
                 (() => {
                   try {
                     const links = getLinksArray(mergedContent.movieLinks);
-                    const rendered = renderLinks(
-                      links,
-                      false,
-                      undefined,
-                      !canPlay,
+                    const validLinks = links.filter((l) => l && l.url && l.url.trim() !== "");
+                    const hasValidLinks = validLinks.length > 0;
+                    const isUpcomingMovie = Boolean(
+                      mergedContent.isUpcoming ||
+                      (mergedContent.status as any) === "upcoming" ||
+                      !hasValidLinks ||
+                      (mergedContent.releaseDate && new Date(mergedContent.releaseDate).getTime() > Date.now())
                     );
-                    if (!rendered) return null;
+
+                    if (hasValidLinks) {
+                      const rendered = renderLinks(
+                        validLinks,
+                        false,
+                        undefined,
+                        !canPlay,
+                      );
+
+                      if (rendered) {
+                        return (
+                          <div className="bg-gradient-to-br from-zinc-50 via-white to-zinc-100/60 dark:from-zinc-900/90 dark:via-zinc-900 dark:to-zinc-950 border border-zinc-200 dark:border-zinc-800/80 rounded-3xl p-6 sm:p-8 shadow-xl">
+                            <div className="flex items-center justify-between mb-5 pb-3 border-b border-zinc-200/80 dark:border-zinc-800/80">
+                              <h3 className="font-extrabold text-base sm:text-lg text-zinc-800 dark:text-zinc-200 uppercase tracking-wider flex items-center gap-2">
+                                <Film className="w-5 h-5 text-emerald-500" /> {t('Movie Links')}
+                              </h3>
+                              <span className="text-xs font-semibold text-zinc-500 bg-zinc-200/80 dark:bg-zinc-800 px-3 py-1 rounded-full">
+                                {validLinks.length} {validLinks.length === 1 ? 'Option' : 'Options'}
+                              </span>
+                            </div>
+                            {rendered}
+                          </div>
+                        );
+                      }
+                    }
+
+                    // If no valid links or marked upcoming:
+                    const isSubscribed = isSubscribedToUpcoming(mergedContent.id, undefined, undefined, profile);
                     return (
-                      <div className="bg-gradient-to-br from-zinc-50 via-white to-zinc-100/60 dark:from-zinc-900/90 dark:via-zinc-900 dark:to-zinc-950 border border-zinc-200 dark:border-zinc-800/80 rounded-3xl p-6 sm:p-8 shadow-xl">
-                        <div className="flex items-center justify-between mb-5 pb-3 border-b border-zinc-200/80 dark:border-zinc-800/80">
-                          <h3 className="font-extrabold text-base sm:text-lg text-zinc-800 dark:text-zinc-200 uppercase tracking-wider flex items-center gap-2">
-                            <Film className="w-5 h-5 text-emerald-500" /> {t('Movie Links')}
-                          </h3>
-                          <span className="text-xs font-semibold text-zinc-500 bg-zinc-200/80 dark:bg-zinc-800 px-3 py-1 rounded-full">
-                            {links.length} {links.length === 1 ? 'Option' : 'Options'}
-                          </span>
+                      <div className="bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/30 rounded-3xl p-6 sm:p-8 shadow-xl flex flex-col sm:flex-row items-center justify-between gap-5">
+                        <div className="flex flex-col gap-2 text-center sm:text-left">
+                          <div className="flex items-center justify-center sm:justify-start flex-wrap gap-2">
+                            <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                              <span>✨ {t('Coming Soon')}</span>
+                            </span>
+                            {mergedContent.releaseDate && (
+                              <span className="text-xs font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded">
+                                🗓️ {t('Expected Air Date')}: {formatReleaseDate(mergedContent.releaseDate)}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-zinc-600 dark:text-zinc-300 font-medium">
+                            {t('This movie is upcoming and will be available for streaming and download soon.')}
+                          </p>
                         </div>
-                        {rendered}
+                        <button
+                          type="button"
+                          onClick={() => handleToggleUpcoming({
+                            contentId: mergedContent.id,
+                            contentTitle: mergedContent.title,
+                            posterUrl: mergedContent.posterUrl,
+                            airDate: mergedContent.releaseDate,
+                          })}
+                          className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-2 transition-all select-none shrink-0 ${
+                            isSubscribed
+                              ? "bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/40"
+                              : "bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-md shadow-amber-500/20 active:scale-95"
+                          }`}
+                        >
+                          {isSubscribed ? (
+                            <>
+                              <BellRing className="w-4 h-4 text-amber-500 animate-pulse" />
+                              <span>{t('Subscribed for Release Notification')}</span>
+                            </>
+                          ) : (
+                            <>
+                              <Bell className="w-4 h-4" />
+                              <span>{t('Notify Me')}</span>
+                            </>
+                          )}
+                        </button>
                       </div>
                     );
                   } catch (e) {
@@ -3566,21 +3819,28 @@ export default function MovieDetails() {
                               className={`bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden ${!isAccessible && profile ? "opacity-75" : ""}`}
                             >
                             <div className="bg-white/50 dark:bg-zinc-950/50 p-6 border-b border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                              <h3 className="text-xl font-bold">
-                                Season {season.seasonNumber}{" "}
-                                {season.title ? (
-                                  <>
-                                    - <Translate loadingFallback={<div className="h-5 bg-zinc-200 dark:bg-zinc-800 rounded w-32 animate-pulse inline-block align-middle ml-1"></div>}>{season.title}</Translate>
-                                  </>
-                                ) : (
-                                  ""
-                                )}
-                                {season.year && (
-                                  <span className="text-sm text-zinc-500 ml-2">
-                                    ({season.year})
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h3 className="text-xl font-bold">
+                                  Season {season.seasonNumber}{" "}
+                                  {season.title ? (
+                                    <>
+                                      - <Translate loadingFallback={<div className="h-5 bg-zinc-200 dark:bg-zinc-800 rounded w-32 animate-pulse inline-block align-middle ml-1"></div>}>{season.title}</Translate>
+                                    </>
+                                  ) : (
+                                    ""
+                                  )}
+                                  {season.year && (
+                                    <span className="text-sm text-zinc-500 ml-2">
+                                      ({season.year})
+                                    </span>
+                                  )}
+                                </h3>
+                                {(season.isUpcoming || (season.airDate && new Date(season.airDate).getTime() > Date.now())) && (
+                                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                                    <span>✨ {t('Coming Soon')}</span>
                                   </span>
                                 )}
-                              </h3>
+                              </div>
                               <div className="flex flex-wrap items-center gap-3">
                                 {!isAccessible && profile && (
                                   <>
@@ -3728,59 +3988,75 @@ export default function MovieDetails() {
                                       </div>
                                     )}
 
-                                    {season.episodes &&
-                                      season.episodes.filter(
-                                        (ep) =>
-                                          getLinksArray(ep.links).length > 0,
-                                      ).length > 0 && (
+                                    {season.episodes && season.episodes.length > 0 && (
                                         <div>
                                           <h4 className="font-semibold text-zinc-500 dark:text-zinc-400 mb-4 text-sm uppercase tracking-wider">
                                             Episodes
                                           </h4>
                                           <div className="space-y-4">
                                             {season.episodes
-                                              .filter(
-                                                (ep) =>
-                                                  getLinksArray(ep.links)
-                                                    .length > 0,
-                                              )
                                               .map((ep, eIdx, epArr) => {
                                                 const isGenericTitle = /^episode\s+\d+$/i.test(ep.title?.trim() || "");
+                                                const links = getLinksArray(ep.links);
+                                                const hasLinks = links.some((l) => l && l.url && l.url.trim() !== "");
+                                                const isSubscribed = isSubscribedToUpcoming(mergedContent.id, season.seasonNumber, ep.episodeNumber, profile);
+                                                const ep1AirDate = season.episodes?.find((e: any) => e.episodeNumber === 1)?.airDate || season.airDate || "";
+                                                const effectiveAirDate = ep.airDate || ep1AirDate;
+                                                const hasEpisodeDesc = Boolean(ep.description && ep.description.trim() !== "" && ep.description.trim().toLowerCase() !== ep.title?.trim().toLowerCase());
                                                 return (
                                                   <React.Fragment key={ep.id || `ep-${eIdx}`}>
                                                     <div
                                                       className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 flex flex-col gap-4"
                                                     >
                                                     <div className="flex flex-col gap-2">
-                                                      <div className="flex items-center flex-wrap gap-2">
+                                                      <div className="flex items-center flex-wrap gap-1.5">
                                                         <span className="text-emerald-500 font-bold">
                                                           E{ep.episodeNumber}
                                                         </span>
                                                         <span className="font-medium">
                                                           {isGenericTitle ? ep.title : <Translate loadingFallback={<div className="h-4 bg-zinc-200 dark:bg-zinc-800 rounded w-32 animate-pulse inline-block align-middle"></div>}>{ep.title}</Translate>}
                                                         </span>
-                                                        <button
-                                                          onClick={() =>
-                                                            setExpandedEpisodes(
-                                                              (prev) => ({
-                                                                ...prev,
-                                                                [`${season.id}-${ep.id}`]:
-                                                                  !prev[`${season.id}-${ep.id}`],
-                                                              }),
-                                                            )
-                                                          }
-                                                          className="text-xs text-zinc-500 dark:text-zinc-400 hover:text-emerald-500 transition-colors"
-                                                        >
-                                                          {expandedEpisodes[
-                                                            `${season.id}-${ep.id}`
-                                                          ] ? (
-                                                            <ChevronUp className="w-4 h-4" />
-                                                          ) : (
-                                                            <ChevronDown className="w-4 h-4" />
-                                                          )}
-                                                        </button>
+                                                        {hasEpisodeDesc && (
+                                                          <button
+                                                            onClick={() =>
+                                                              setExpandedEpisodes(
+                                                                (prev) => ({
+                                                                  ...prev,
+                                                                  [`${season.id}-${ep.id}`]:
+                                                                    !prev[`${season.id}-${ep.id}`],
+                                                                }),
+                                                              )
+                                                            }
+                                                            className="text-xs text-zinc-500 dark:text-zinc-400 hover:text-emerald-500 transition-colors -ml-0.5"
+                                                          >
+                                                            {expandedEpisodes[
+                                                              `${season.id}-${ep.id}`
+                                                            ] ? (
+                                                              <ChevronUp className="w-4 h-4" />
+                                                            ) : (
+                                                              <ChevronDown className="w-4 h-4" />
+                                                            )}
+                                                          </button>
+                                                        )}
+
+                                                        {!hasLinks && (
+                                                          <span className="px-1.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                                                            <span>✨ {t('Coming Soon')}</span>
+                                                          </span>
+                                                        )}
+
+                                                        {effectiveAirDate && (
+                                                          <span className={`text-xs font-medium px-1.5 py-0.5 rounded whitespace-nowrap flex items-center gap-1 ${!hasLinks ? 'text-amber-600 dark:text-amber-400 bg-amber-500/10' : 'text-zinc-600 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800'}`}>
+                                                            {!hasLinks ? (
+                                                              <span>🗓️ {t('Expected Air Date')}: {formatReleaseDate(effectiveAirDate)}</span>
+                                                            ) : (
+                                                              <span>{formatReleaseDate(effectiveAirDate)}</span>
+                                                            )}
+                                                          </span>
+                                                        )}
+
                                                         {ep.duration && (
-                                                          <span className="text-xs text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded whitespace-nowrap">
+                                                          <span className="text-xs text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded whitespace-nowrap">
                                                             {ep.duration}
                                                           </span>
                                                         )}
@@ -3808,29 +4084,58 @@ export default function MovieDetails() {
                                                       )}
                                                     </div>
 
-                                                    {getLinksArray(ep.links)
-                                                      .length > 0 && (
+                                                    {hasLinks ? (
                                                       <div className="flex justify-center">
                                                         {renderLinks(
-                                                          getLinksArray(ep.links),
+                                                          links,
                                                           false,
                                                           `S${season.seasonNumber} E${ep.episodeNumber}`,
                                                           !isAccessible,
                                                           {
                                                             id: season.id,
-                                                            number:
-                                                              season.seasonNumber,
+                                                            number: season.seasonNumber,
                                                             title: season.title,
                                                           },
                                                           {
-                                                            number:
-                                                              ep.episodeNumber,
-                                                            title:
-                                                              (ep as any).name ||
-                                                              ep.title ||
-                                                              `Episode ${ep.episodeNumber}`,
+                                                            number: ep.episodeNumber,
+                                                            title: (ep as any).name || ep.title || `Episode ${ep.episodeNumber}`,
                                                           },
                                                         )}
+                                                      </div>
+                                                    ) : (
+                                                      <div className="flex items-center justify-between bg-zinc-100/80 dark:bg-zinc-900/80 p-3 rounded-lg flex-wrap gap-2">
+                                                        <span className="text-xs text-zinc-600 dark:text-zinc-400 font-medium flex items-center gap-1.5">
+                                                          <span>🔔 {t('Notify Me when Episode Releases')}</span>
+                                                        </span>
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => handleToggleUpcoming({
+                                                            contentId: mergedContent.id,
+                                                            contentTitle: mergedContent.title,
+                                                            posterUrl: mergedContent.posterUrl,
+                                                            seasonNumber: season.seasonNumber,
+                                                            episodeNumber: ep.episodeNumber,
+                                                            episodeTitle: ep.title,
+                                                            airDate: ep.airDate,
+                                                          })}
+                                                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all select-none ${
+                                                            isSubscribed
+                                                              ? "bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/40"
+                                                              : "bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-md shadow-amber-500/20 active:scale-95"
+                                                          }`}
+                                                        >
+                                                          {isSubscribed ? (
+                                                            <>
+                                                              <BellRing className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
+                                                              <span>{t('Subscribed for Release Notification')}</span>
+                                                            </>
+                                                          ) : (
+                                                            <>
+                                                              <Bell className="w-3.5 h-3.5" />
+                                                              <span>{t('Notify Me')}</span>
+                                                            </>
+                                                          )}
+                                                        </button>
                                                       </div>
                                                     )}
                                                   </div>
@@ -3847,6 +4152,53 @@ export default function MovieDetails() {
                                             </div>
                                         </div>
                                       )}
+
+                                    {zipLinks.length === 0 && mkvLinks.length === 0 && (!season.episodes || season.episodes.length === 0) && (
+                                      <div className="bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/30 rounded-2xl p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+                                        <div className="flex flex-col gap-1 text-center sm:text-left">
+                                          <div className="flex items-center justify-center sm:justify-start gap-2">
+                                            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                                              ✨ {t('Coming Soon')}
+                                            </span>
+                                            {season.airDate && (
+                                              <span className="text-xs font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded">
+                                                🗓️ {t('Expected Air Date')}: {formatReleaseDate(season.airDate)}
+                                              </span>
+                                            )}
+                                          </div>
+                                          <p className="text-sm text-zinc-600 dark:text-zinc-300 font-medium mt-1">
+                                            {t('This season is upcoming and will be available soon.')}
+                                          </p>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleToggleUpcoming({
+                                            contentId: mergedContent.id,
+                                            contentTitle: `${mergedContent.title} - Season ${season.seasonNumber}`,
+                                            posterUrl: mergedContent.posterUrl,
+                                            seasonNumber: season.seasonNumber,
+                                            airDate: season.airDate,
+                                          })}
+                                          className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-2 transition-all select-none shrink-0 ${
+                                            isSubscribedToUpcoming(mergedContent.id, season.seasonNumber, undefined, profile)
+                                              ? "bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/40"
+                                              : "bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-md shadow-amber-500/20 active:scale-95"
+                                          }`}
+                                        >
+                                          {isSubscribedToUpcoming(mergedContent.id, season.seasonNumber, undefined, profile) ? (
+                                            <>
+                                              <BellRing className="w-4 h-4 text-amber-500 animate-pulse" />
+                                              <span>{t('Subscribed for Release Notification')}</span>
+                                            </>
+                                          ) : (
+                                            <>
+                                              <Bell className="w-4 h-4" />
+                                              <span>{t('Notify Me for Full Season')}</span>
+                                            </>
+                                          )}
+                                        </button>
+                                      </div>
+                                    )}
                                   </>
                                 );
                               })()}

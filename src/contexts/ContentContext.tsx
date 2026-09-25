@@ -11,6 +11,7 @@ import {
 import { Content, Genre, Language, Quality, Collection as AppCollection } from '../types';
 import { expandContent, findLocalChunkForContent } from '../utils/chunkUtils';
 import { safeStorage } from '../utils/safeStorage';
+import { checkUpcomingSubscriptionsAndNotify } from '../utils/upcomingNotifications';
 
 interface ContentContextType {
   contentList: Content[];
@@ -73,6 +74,17 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       if (timeoutId) clearTimeout(timeoutId);
     };
   }, []);
+
+  // Check upcoming notifications whenever contentList is loaded/updated
+  useEffect(() => {
+    if (contentList && contentList.length > 0) {
+      try {
+        checkUpcomingSubscriptionsAndNotify(contentList);
+      } catch (e) {
+        console.warn('Error checking upcoming subscriptions:', e);
+      }
+    }
+  }, [contentList]);
 
   // Listen to local content updates (e.g., from Admin or background storage syncs)
   useEffect(() => {

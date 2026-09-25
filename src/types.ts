@@ -31,6 +31,20 @@ export interface UserNotificationPreferences {
   email?: Partial<EmailNotificationChannelSettings>;
 }
 
+export interface UpcomingSubscription {
+  id: string;
+  contentId: string;
+  contentTitle: string;
+  posterUrl?: string;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  episodeTitle?: string;
+  airDate?: string;
+  createdAt: string;
+  notified?: boolean;
+  notifiedAt?: string;
+}
+
 export interface UserProfile {
   uid: string;
   email: string;
@@ -77,6 +91,7 @@ export interface UserProfile {
   reviewRewardClaimed?: boolean;
   claimedReferralSignups?: string[];
   claimedReferralActivations?: string[];
+  upcomingSubscriptions?: UpcomingSubscription[];
   referralStats?: {
     total_clicks: number;
     lastUpdated: string;
@@ -193,6 +208,8 @@ export interface Episode {
   description?: string;
   duration?: string;
   links: QualityLinks;
+  isUpcoming?: boolean;
+  airDate?: string;
 }
 
 export interface Season {
@@ -204,6 +221,8 @@ export interface Season {
   zipLinks: QualityLinks;
   mkvLinks?: QualityLinks;
   episodes: Episode[];
+  isUpcoming?: boolean;
+  airDate?: string;
 }
 
 export interface Income {
@@ -258,6 +277,8 @@ export interface Content {
   subtitles?: boolean; // Added subtitles
   country?: string; // Added country
   ottPlatform?: string | null; // Added OTT platform (Netflix, Prime Video, Disney+, etc.)
+  isUpcoming?: boolean;
+  upcomingDate?: string;
   order?: number; // Added order for sorting
   chunkId?: string; // Added chunkId for lazy loading
 }

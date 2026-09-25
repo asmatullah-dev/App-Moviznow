@@ -939,6 +939,37 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                                   className="flex-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 text-sm"
                                 />
                               </div>
+                              <div className="flex flex-col gap-1.5 pt-1">
+                                <label className="flex items-center gap-1.5 text-xs font-semibold cursor-pointer select-none text-amber-600 dark:text-amber-400">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!season.isUpcoming}
+                                    onChange={(e) => {
+                                      const newSeasons = [...seasons];
+                                      newSeasons[sIdx].isUpcoming = e.target.checked;
+                                      setSeasons(newSeasons);
+                                    }}
+                                    className="rounded border-zinc-300 text-amber-500 focus:ring-amber-500"
+                                  />
+                                  <span>Upcoming / Coming Soon</span>
+                                </label>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs text-zinc-500 font-medium">Release Date:</span>
+                                  <input
+                                    type="date"
+                                    value={season.airDate || ''}
+                                    onChange={(e) => {
+                                      const newSeasons = [...seasons];
+                                      newSeasons[sIdx].airDate = e.target.value;
+                                      if (e.target.value && new Date(e.target.value).getTime() > Date.now()) {
+                                        newSeasons[sIdx].isUpcoming = true;
+                                      }
+                                      setSeasons(newSeasons);
+                                    }}
+                                    className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded px-2 py-0.5 text-xs text-zinc-900 dark:text-zinc-100"
+                                  />
+                                </div>
+                              </div>
                             </div>
                             <button type="button" onClick={() => setSeasons(seasons.filter((_, i) => i !== sIdx))} className="text-red-500 hover:text-red-400 p-1">
                               <Trash2 className="w-4 h-4" />
@@ -1003,7 +1034,7 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                             <div className="space-y-4">
                               {season.episodes.map((ep, eIdx) => (
                                 <div key={ep.id} className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4">
-                                  <div className="flex gap-1 mb-4">
+                                  <div className="flex gap-1 mb-2">
                                     <input
                                       type="number"
                                       value={ep.episodeNumber}
@@ -1052,6 +1083,40 @@ export const ContentFormModal = ({ state, actions }: { state: any, actions: any 
                                     }} className="text-red-500 hover:text-red-400 p-2">
                                       <Trash2 className="w-4 h-4" />
                                     </button>
+                                  </div>
+
+                                  <div className="flex flex-col gap-1.5 mb-3 px-1 text-xs">
+                                    <div>
+                                      <label className="inline-flex items-center gap-1.5 font-semibold cursor-pointer select-none text-amber-600 dark:text-amber-400">
+                                        <input
+                                          type="checkbox"
+                                          checked={!!ep.isUpcoming}
+                                          onChange={(e) => {
+                                            const newSeasons = [...seasons];
+                                            newSeasons[sIdx].episodes[eIdx].isUpcoming = e.target.checked;
+                                            setSeasons(newSeasons);
+                                          }}
+                                          className="rounded border-zinc-300 text-amber-500 focus:ring-amber-500"
+                                        />
+                                        <span>Upcoming / Coming Soon</span>
+                                      </label>
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-zinc-500 font-medium">Release Date:</span>
+                                      <input
+                                        type="date"
+                                        value={ep.airDate || ''}
+                                        onChange={(e) => {
+                                          const newSeasons = [...seasons];
+                                          newSeasons[sIdx].episodes[eIdx].airDate = e.target.value;
+                                          if (e.target.value && new Date(e.target.value).getTime() > Date.now()) {
+                                            newSeasons[sIdx].episodes[eIdx].isUpcoming = true;
+                                          }
+                                          setSeasons(newSeasons);
+                                        }}
+                                        className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded px-2 py-0.5 text-zinc-900 dark:text-zinc-100"
+                                      />
+                                    </div>
                                   </div>
                                   
                                   {expandedEpisodes[ep.id] && (

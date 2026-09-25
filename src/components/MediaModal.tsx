@@ -461,6 +461,7 @@ export async function fetchSeriesSeasons(tmdbId: string, knownSeasons?: any[]) {
       season: season.season_number,
       name: season.name,
       year: season.air_date ? season.air_date.split('-')[0] : 'N/A',
+      airDate: season.air_date || '',
       trailerUrl: getBestTrailer(seasonData.videos) || '',
       episodes: seasonData.episodes || []
     };
@@ -561,12 +562,28 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
     const saved = localStorage.getItem('mediaModal_includeEpisodeDescriptions');
     return saved ? JSON.parse(saved) : true;
   });
+  const [includeEpisodeReleaseDates, setIncludeEpisodeReleaseDates] = useState(() => {
+    const saved = localStorage.getItem('mediaModal_includeEpisodeReleaseDates');
+    return saved ? JSON.parse(saved) : true;
+  });
+  const [addUpcomingEpisodes, setAddUpcomingEpisodes] = useState(() => {
+    const saved = localStorage.getItem('mediaModal_addUpcomingEpisodes');
+    return saved ? JSON.parse(saved) : true;
+  });
 
   useModalBehavior(isOpen, onClose);
 
   React.useEffect(() => {
     localStorage.setItem('mediaModal_includeEpisodeDescriptions', JSON.stringify(includeEpisodeDescriptions));
   }, [includeEpisodeDescriptions]);
+
+  React.useEffect(() => {
+    localStorage.setItem('mediaModal_includeEpisodeReleaseDates', JSON.stringify(includeEpisodeReleaseDates));
+  }, [includeEpisodeReleaseDates]);
+
+  React.useEffect(() => {
+    localStorage.setItem('mediaModal_addUpcomingEpisodes', JSON.stringify(addUpcomingEpisodes));
+  }, [addUpcomingEpisodes]);
 
   React.useEffect(() => {
     if (Object.keys(selectedFields).length > 0) {
@@ -1019,15 +1036,36 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
         title: s.name && !/^Season\s+\d+$/i.test(s.name) ? s.name : '',
         year: s.year && s.year !== 'N/A' ? parseInt(s.year.toString()) : undefined,
         seasonYear: s.year && s.year !== 'N/A' ? parseInt(s.year.toString()) : undefined,
+        airDate: s.airDate || s.air_date || '',
+        isUpcoming: Boolean((s.airDate || s.air_date) && new Date(s.airDate || s.air_date).getTime() > Date.now()),
         trailerUrl: s.trailerUrl || '',
-        episodes: s.episodes.map((e: any) => ({
-          id: `e${e.episode_number}`,
-          episodeNumber: e.episode_number,
-          title: e.name,
-          description: includeEpisodeDescriptions ? (e.overview || '') : '',
-          duration: e.runtime ? `${e.runtime}m` : '',
-          videoUrl: ''
-        }))
+        episodes: (s.episodes || [])
+          .filter((e: any) => {
+            if (addUpcomingEpisodes) return true;
+            const rawAirDate = e.air_date || e.airDate || '';
+            const isFuture = rawAirDate ? new Date(rawAirDate).getTime() > Date.now() : false;
+            const hasLinks = e.links && Array.isArray(e.links) && e.links.some((l: any) => l.url && l.url.trim() !== '');
+            const isUpcoming = isFuture || !hasLinks;
+            return !isUpcoming;
+          })
+          .map((e: any) => {
+          const rawAirDate = e.air_date || e.airDate || '';
+          const isFuture = rawAirDate ? new Date(rawAirDate).getTime() > Date.now() : false;
+          const hasLinks = e.links && Array.isArray(e.links) && e.links.some((l: any) => l.url && l.url.trim() !== '');
+          const isUpcoming = isFuture || !hasLinks;
+          const airDate = isUpcoming ? rawAirDate : (includeEpisodeReleaseDates ? rawAirDate : '');
+
+          return {
+            id: `e${e.episode_number || e.episodeNumber}`,
+            episodeNumber: e.episode_number || e.episodeNumber,
+            title: e.name || e.title || `Episode ${e.episode_number || e.episodeNumber}`,
+            description: includeEpisodeDescriptions ? (e.overview || e.description || '') : '',
+            duration: e.runtime ? `${e.runtime}m` : (e.duration || ''),
+            links: e.links || [],
+            airDate,
+            isUpcoming,
+          };
+        })
       }));
 
       // Map season trailers to the main trailers array if they exist
@@ -1337,17 +1375,37 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
 
               {fetchedData.seasons && fetchedData.seasons.length > 0 && (
                 <div className="border-t border-zinc-100 dark:border-zinc-800 pt-4 mt-4 transition-colors duration-300">
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
                     <h4 className="font-semibold text-zinc-900 dark:text-white">Select Seasons:</h4>
-                    <label className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400 cursor-pointer hover:text-zinc-700 dark:hover:text-zinc-600 dark:text-zinc-300 transition-colors">
-                      <input 
-                        type="checkbox" 
-                        checked={includeEpisodeDescriptions}
-                        onChange={(e) => setIncludeEpisodeDescriptions(e.target.checked)}
-                        className="rounded bg-zinc-100 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700 text-emerald-500 focus:ring-emerald-500"
-                      />
-                      Include Episode Descriptions
-                    </label>
+                    <div className="flex flex-wrap items-center gap-4">
+                      <label className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400 cursor-pointer hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors">
+                        <input 
+                          type="checkbox" 
+                          checked={includeEpisodeReleaseDates}
+                          onChange={(e) => setIncludeEpisodeReleaseDates(e.target.checked)}
+                          className="rounded bg-zinc-100 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700 text-emerald-500 focus:ring-emerald-500"
+                        />
+                        Include Release Dates
+                      </label>
+                      <label className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400 cursor-pointer hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors">
+                        <input 
+                          type="checkbox" 
+                          checked={includeEpisodeDescriptions}
+                          onChange={(e) => setIncludeEpisodeDescriptions(e.target.checked)}
+                          className="rounded bg-zinc-100 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700 text-emerald-500 focus:ring-emerald-500"
+                        />
+                        Include Episode Descriptions
+                      </label>
+                      <label className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400 cursor-pointer hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors">
+                        <input 
+                          type="checkbox" 
+                          checked={addUpcomingEpisodes}
+                          onChange={(e) => setAddUpcomingEpisodes(e.target.checked)}
+                          className="rounded bg-zinc-100 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700 text-emerald-500 focus:ring-emerald-500"
+                        />
+                        Add Upcoming Episodes
+                      </label>
+                    </div>
                   </div>
                   <div className="space-y-3">
                     {fetchedData.seasons.map((s: any) => (

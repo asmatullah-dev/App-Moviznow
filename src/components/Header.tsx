@@ -11,7 +11,7 @@ import { CartButton } from "./CartButton";
 import { UserProfileMenu } from "./UserProfileMenu";
 import { AdminButtons } from "./AdminButtons";
 import { HeaderRefreshButton } from "./HeaderRefreshButton";
-import { getContentBackTarget } from "../utils/navigation";
+import { getContentBackTarget, clearMovieDetailsHistory } from "../utils/navigation";
 
 interface HeaderProps {
   showSearchAndFilters?: boolean;
@@ -59,6 +59,7 @@ export function Header({
           <Link 
             to="/" 
             onClick={() => {
+              clearMovieDetailsHistory();
               sessionStorage.setItem("home_page", "1");
               sessionStorage.removeItem("home_search");
               sessionStorage.removeItem("home_genre");
