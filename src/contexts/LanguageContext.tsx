@@ -838,6 +838,30 @@ const translations: Record<string, Record<Language, string>> = {
   'Permission Active': { en: 'Permission Active', 'ur-roman': 'Ijazat Faal Hai', ur: 'اجازت فعال ہے' },
   'Enable in Browser': { en: 'Enable in Browser', 'ur-roman': 'Browser Mein On Karein', ur: 'براؤزر میں آن کریں' },
   'Notifications are blocked in your browser settings.': { en: 'Notifications are blocked in your browser settings.', 'ur-roman': 'Aap ke browser ki settings mein notifications blocked hain.', ur: 'آپ کے براؤزر کی سیٹنگز میں اطلاعات مسدود ہیں۔' },
+  'Version Information': { en: 'Version Information', 'ur-roman': 'Version ki Maloomat', ur: 'ورژن کی معلومات' },
+  'For major changes in the app (core architecture, major UI overhauls, new features, breaking features).': {
+    en: 'For major changes in the app (core architecture, major UI overhauls, new features, breaking features).',
+    'ur-roman': 'App mein baray tabdeeliyaan ke liye (core architecture, baray UI overhauls, nayi features, breaking features).',
+    ur: 'ایپ میں بڑی تبدیلیوں کے لیے (بنیادی ڈھانچہ، بڑے یو آئی اوور ہالز، نئی خصوصیات، بنیادی تبدیلیاں)۔'
+  },
+  'For minor changes in the app (Improving features, UI tweaks/stability, performance fixes, system stability).': {
+    en: 'For minor changes in the app (Improving features, UI tweaks/stability, performance fixes, system stability).',
+    'ur-roman': 'App mein choti tabdeeliyaan ke liye (features behtari, UI tweaks, performance fixes, system stability).',
+    ur: 'ایپ میں چھوٹی تبدیلیوں کے لیے (خصوصیات میں بہتری، یو آئی استحکام، کارکردگی اور سسٹم استحکام)۔'
+  },
+  'For updates in content (Movie & Series Catalog updates, collections, trending, newly added updates).': {
+    en: 'For updates in content (Movie & Series Catalog updates, collections, trending, newly added updates).',
+    'ur-roman': 'Content ki updates ke liye (Movie & Series Catalog updates, collections, trending, nayi updates).',
+    ur: 'مواد کی اپ ڈیٹس کے لیے (موویز اور سیریز کیٹلاگ اپ ڈیٹس، کلیکشنز، ٹرینڈنگ، نئے شامل کردہ اپ ڈیٹس)۔'
+  },
+  'Major for major Changes in app': { en: 'Major for major Changes in app', 'ur-roman': 'App mein baray tabdeeliyaan ke liye Major', ur: 'ایپ میں بڑی تبدیلیوں کے لیے میجر' },
+  'Minor for minor changes in app': { en: 'Minor for minor changes in app', 'ur-roman': 'App mein choti tabdeeliyaan ke liye Minor', ur: 'ایپ میں چھوٹی تبدیلیوں کے لیے مائنر' },
+  'Content for updates in content': { en: 'Content for updates in content', 'ur-roman': 'Content ki updates ke liye Content', ur: 'مواد کی اپ ڈیٹس کے لیے مواد ورژن' },
+  'Major': { en: 'Major', 'ur-roman': 'Major', ur: 'میجر' },
+  'Minor': { en: 'Minor', 'ur-roman': 'Minor', ur: 'مائنر' },
+  'Content': { en: 'Content', 'ur-roman': 'Content', ur: 'مواد' },
+  'Got it': { en: 'Got it', 'ur-roman': 'Samajh aa gaya', ur: 'سمجھ گیا' },
+  'Click to view version details': { en: 'Click to view version details', 'ur-roman': 'Version ki tafseelat dekhne ke liye click karein', ur: 'ورژن کی تفصیلات دیکھنے کے لیے کلک کریں' },
 };
 
 interface LanguageContextType {

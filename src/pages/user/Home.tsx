@@ -22,6 +22,7 @@ import {
   RefreshCw,
   FolderOpen,
   Send,
+  Info,
 } from "lucide-react";
 
 import { AdBanner } from "../../components/AdBanner";
@@ -49,6 +50,7 @@ import { ScrollingBanner } from "../../components/ScrollingBanner";
 import { ComingSoonSection } from "../../components/ComingSoonSection";
 import ContentCard from "../../components/ContentCard";
 import ConfirmModal from "../../components/ConfirmModal";
+import VersionInfoModal from "../../components/VersionInfoModal";
 
 import { HomeFilters } from "../../components/home/HomeFilters";
 import { RecentlyViewedSection } from "../../components/home/RecentlyViewedSection";
@@ -89,6 +91,7 @@ export default function Home({
   const location = useLocation();
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
   const [loginPromptConfig, setLoginPromptConfig] = useState<{ title?: string; message?: string }>({});
+  const [isVersionModalOpen, setIsVersionModalOpen] = useState(false);
 
   const requireLogin = useCallback((customMessage?: string, customTitle?: string) => {
     if (!profile) {
@@ -1696,8 +1699,19 @@ export default function Home({
           </div>
         </Link>
 
-        <div className="text-center text-xs text-zinc-500 dark:text-zinc-600 font-mono">
-          v{APP_VERSION}
+        <div className="flex flex-col items-center justify-center gap-1 mt-2">
+          <button
+            onClick={() => {
+              if (vibrate) vibrate(20);
+              setIsVersionModalOpen(true);
+            }}
+            type="button"
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-100 dark:bg-zinc-900/90 hover:bg-zinc-200 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-800/80 text-xs text-zinc-600 dark:text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 font-mono transition-all active:scale-95 group cursor-pointer shadow-xs"
+            title={t("Click to view version details")}
+          >
+            <Info className="w-3.5 h-3.5 text-zinc-400 group-hover:text-emerald-500 transition-colors shrink-0" />
+            <span>v{APP_VERSION}</span>
+          </button>
         </div>
       </footer>
 
@@ -1757,6 +1771,11 @@ export default function Home({
         contentMap={contentMap}
         defaultAppImage={settings?.defaultAppImage}
         onSelectCollection={handleSelectCollection}
+      />
+
+      <VersionInfoModal
+        isOpen={isVersionModalOpen}
+        onClose={() => setIsVersionModalOpen(false)}
       />
     </div>
   );
