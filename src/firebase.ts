@@ -247,7 +247,13 @@ export const requestNotificationPermission = async (force: boolean = false) => {
                if (cachedStr) {
                  const profileCache = JSON.parse(cachedStr);
                  profileCache.notification = 'yes';
-                 safeStorage.setItem('profile_cache', JSON.stringify(profileCache));
+                 const json = JSON.stringify(profileCache);
+                 safeStorage.setItem('profile_cache', json);
+                 safeStorage.setItem('profile_cache_timestamp', Date.now().toString());
+                 try {
+                   window.localStorage.setItem('profile_cache', json);
+                   window.localStorage.setItem('profile_cache_timestamp', Date.now().toString());
+                 } catch (e) {}
                  window.dispatchEvent(new Event('profile_cache_updated'));
                }
             } catch (e) {

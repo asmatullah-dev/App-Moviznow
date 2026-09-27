@@ -142,59 +142,65 @@ export const standardizePhone = (phone: string) => {
 
 
 
+const getInitialProfileFromStorage = (): UserProfile | null => {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = safeStorage.getItem("profile_cache") || window.localStorage.getItem("profile_cache");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && (parsed.uid || parsed.email || parsed.role)) {
+      return normalizeUserStatusAndExpiry(parsed);
+    }
+  } catch (e) {
+    console.warn("[AuthContext] Error reading initial cached profile:", e);
+  }
+  return null;
+};
+
+const persistProfileCache = (p: UserProfile | null) => {
+  if (!p) {
+    safeStorage.removeItem("profile_cache");
+    safeStorage.removeItem("profile_cache_timestamp");
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.removeItem("profile_cache");
+        window.localStorage.removeItem("profile_cache_timestamp");
+      } catch (e) {}
+    }
+  } else {
+    try {
+      const json = JSON.stringify(p);
+      safeStorage.setItem("profile_cache", json);
+      safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("profile_cache", json);
+        window.localStorage.setItem("profile_cache_timestamp", Date.now().toString());
+      }
+    } catch (e) {}
+  }
+};
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [profile, setProfile] = useState<UserProfile | null>(() => getInitialProfileFromStorage());
   const [user, setUser] = useState<User | null>(() => {
     if (auth.currentUser) return auth.currentUser;
     if (typeof window === "undefined") return null;
-    const cached = safeStorage.getItem("profile_cache");
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached);
-        if (parsed && parsed.uid) {
-          return {
-            uid: parsed.uid,
-            email: parsed.email || null,
-            displayName: parsed.displayName || null,
-            phoneNumber: parsed.phone || null,
-            providerData: parsed.email?.endsWith("@gmail.com") 
-              ? [{ providerId: "google.com" }] 
-              : [],
-          } as any;
-        }
-      } catch (e) {}
+    const cached = getInitialProfileFromStorage();
+    if (cached && cached.uid) {
+      return {
+        uid: cached.uid,
+        email: cached.email || null,
+        displayName: cached.displayName || null,
+        phoneNumber: cached.phone || null,
+        providerData: cached.email?.endsWith("@gmail.com") 
+          ? [{ providerId: "google.com" }] 
+          : [],
+      } as any;
     }
     return null;
   });
-  const [profile, setProfile] = useState<UserProfile | null>(() => {
-    const cached = safeStorage.getItem("profile_cache");
-    const timestampStr = safeStorage.getItem("profile_cache_timestamp");
-    if (cached && timestampStr) {
-      const timestamp = parseInt(timestampStr, 10);
-      const now = Date.now();
-      if (now - timestamp <= 30 * 60 * 60 * 1000) {
-        try {
-          const parsed = JSON.parse(cached);
-          return normalizeUserStatusAndExpiry(parsed);
-        } catch (e) {
-          return null;
-        }
-      }
-    }
-    return null;
-  });
-  const [loading, setLoading] = useState(() => {
-    const cached = safeStorage.getItem("profile_cache");
-    const timestampStr = safeStorage.getItem("profile_cache_timestamp");
-    if (cached && timestampStr) {
-      const timestamp = parseInt(timestampStr, 10);
-      const now = Date.now();
-      if (now - timestamp <= 30 * 60 * 60 * 1000) {
-        return false;
-      }
-    }
-    return true;
-  });
-  const [authLoading, setAuthLoading] = useState(!auth.currentUser);
+  const [loading, setLoading] = useState(() => !getInitialProfileFromStorage());
+  const [authLoading, setAuthLoading] = useState(() => !auth.currentUser && !getInitialProfileFromStorage());
   const [error, setError] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -413,7 +419,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const normLocal = normalizeUserStatusAndExpiry(localProfile);
           setProfile(normLocal);
           if (normLocal.status !== localProfile.status) {
-            safeStorage.setItem("profile_cache", JSON.stringify(normLocal));
+            persistProfileCache(normLocal);
           }
           setLoading(false); // Unblock immediately if we have cached data
         }
@@ -814,10 +820,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (mergedProfile && Object.keys(mergedProfile).length > 0) {
-          const profileJson = JSON.stringify(mergedProfile);
-          safeStorage.setItem("profile_cache", profileJson);
-          safeStorage.setItemAsync("profile_cache", profileJson).catch(() => {});
-          safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
+          persistProfileCache(mergedProfile);
           setProfile(mergedProfile);
         }
 
@@ -1417,8 +1420,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               await fbBatch.commit();
             } catch (e) {}
           }
-          safeStorage.setItem("profile_cache", JSON.stringify(newProfile));
-          safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
+          persistProfileCache(newProfile);
           safeStorage.setItem(
             localVersionKey,
             (serverVersion || getUtcVersion()),
@@ -1485,9 +1487,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             } else if (cachedP && cachedP.uid === currentUser.uid) {
               const normCachedP = normalizeUserStatusAndExpiry(cachedP);
               setProfile(normCachedP);
-              if (normCachedP.status !== cachedP.status) {
-                safeStorage.setItem("profile_cache", JSON.stringify(normCachedP));
-              }
+              persistProfileCache(normCachedP);
               hasValidCachedProfile = true;
             }
           } catch (e) {}
@@ -1552,8 +1552,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         // Firebase Auth confirms no user is currently authenticated
         setProfile(null);
-        safeStorage.removeItem("profile_cache");
-        safeStorage.removeItem("profile_cache_timestamp");
+        persistProfileCache(null);
         setLoading(false);
 
         if (sessionStartTimeRef.current) {
@@ -1870,7 +1869,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setProfile((prev: any) => {
               if (!prev) return prev;
               const newProfile = { ...prev, ...updates };
-              safeStorage.setItem("profile_cache", JSON.stringify(newProfile));
+              persistProfileCache(newProfile);
               return newProfile;
             });
           } catch (e) {}
@@ -2580,8 +2579,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const updatedProfile = { ...profile, ...data };
       console.log('updateUserProfileData: updating profile with data:', data);
       setProfile(updatedProfile);
-      safeStorage.setItem("profile_cache", JSON.stringify(updatedProfile));
-      safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
+      persistProfileCache(updatedProfile);
 
       try {
         const cachedAllStr = safeStorage.getItem("cached_all_users");
@@ -2671,7 +2669,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     
     // Explicitly clear cache on intentional logout to ensure user is logged out
-    safeStorage.removeItem("profile_cache");
+    persistProfileCache(null);
     safeStorage.removeItem("cached_chunk_users_versions");
     safeStorage.removeItem("referral_stats_count");
     safeStorage.removeItem("referral_stats_activated");
@@ -2698,8 +2696,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Optimistic update
     const updatedProfile = { ...profile, favorites: newFavorites };
     setProfile(updatedProfile);
-    safeStorage.setItem("profile_cache", JSON.stringify(updatedProfile));
-    safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
+    persistProfileCache(updatedProfile);
 
     // Save pending change array
     safeStorage.setItem(
@@ -2719,8 +2716,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Optimistic update
     const updatedProfile = { ...profile, watchLater: newWatchLater };
     setProfile(updatedProfile);
-    safeStorage.setItem("profile_cache", JSON.stringify(updatedProfile));
-    safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
+    persistProfileCache(updatedProfile);
 
     // Save pending change array
     safeStorage.setItem(
@@ -2751,8 +2747,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       : [...current, key].slice(-50);
     const updatedProfile = { ...profile, watched: newWatched };
     setProfile(updatedProfile);
-    safeStorage.setItem("profile_cache", JSON.stringify(updatedProfile));
-    safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
+    persistProfileCache(updatedProfile);
 
     // Save pending change array
     safeStorage.setItem(
@@ -2772,8 +2767,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const newWatched = Array.from(current).slice(-50);
     const updatedProfile = { ...profile, watched: newWatched };
     setProfile(updatedProfile);
-    safeStorage.setItem("profile_cache", JSON.stringify(updatedProfile));
-    safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
+    persistProfileCache(updatedProfile);
 
     // Save pending change array
     safeStorage.setItem(

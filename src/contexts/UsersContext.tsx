@@ -307,6 +307,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           const updatedActiveProfile = normalizeUserStatusAndExpiry({ ...currentProfile, ...updates[currentProfile.uid] });
           safeStorage.setItem('profile_cache', JSON.stringify(updatedActiveProfile));
           safeStorage.setItemAsync('profile_cache', JSON.stringify(updatedActiveProfile)).catch(() => {});
+          try { window.localStorage.setItem('profile_cache', JSON.stringify(updatedActiveProfile)); } catch (e) {}
           window.dispatchEvent(new CustomEvent('user_profile_updated', { detail: updatedActiveProfile }));
         }
       }
@@ -409,6 +410,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
             const updatedActiveProfile = normalizeUserStatusAndExpiry({ ...currentProfile, ...pending[currentProfile.uid] });
             safeStorage.setItem('profile_cache', JSON.stringify(updatedActiveProfile));
             safeStorage.setItemAsync('profile_cache', JSON.stringify(updatedActiveProfile)).catch(() => {});
+            try { window.localStorage.setItem('profile_cache', JSON.stringify(updatedActiveProfile)); } catch (e) {}
             window.dispatchEvent(new CustomEvent('user_profile_updated', { detail: updatedActiveProfile }));
           }
         }

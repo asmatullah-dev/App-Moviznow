@@ -82,7 +82,7 @@ export default function Login() {
 
   useEffect(() => {
     // Only redirect if auth check has completed, there is a valid authenticated Firebase user, and their profile is successfully loaded
-    if (!authLoading && user && profile) {
+    if (!authLoading && user && profile && !location.state?.switch) {
       // Instantly purge all ad scripts and social ads upon login
       purgeAllAdElements(true);
       try {

@@ -393,7 +393,13 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
     if (currentProfile) {
       const localUpdates = { ...updatesToPush, updatedAt: nowIso };
       const updatedProfile = { ...currentProfile, ...localUpdates };
-      safeStorage.setItem('profile_cache', JSON.stringify(updatedProfile));
+      const json = JSON.stringify(updatedProfile);
+      safeStorage.setItem('profile_cache', json);
+      safeStorage.setItem('profile_cache_timestamp', Date.now().toString());
+      try {
+        window.localStorage.setItem('profile_cache', json);
+        window.localStorage.setItem('profile_cache_timestamp', Date.now().toString());
+      } catch (e) {}
     }
 
     localStorage.setItem(lastSyncKey, nowTime.toString());

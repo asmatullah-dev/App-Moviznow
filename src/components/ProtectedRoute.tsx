@@ -52,9 +52,7 @@ export function ProtectedRoute({ children, requireAdmin = false, requireAuth = f
     };
   }, []);
 
-  const hasCachedUser = authLoading 
-    ? (!!user || !!profile) 
-    : (!!user && !!profile);
+  const hasCachedUser = Boolean(user && profile) || (authLoading && Boolean(user || profile));
 
   // Only show loading screen if requireAuth or requireAdmin is requested and auth is still initializing
   const isChecking = (requireAuth || requireAdmin) && !hasCachedUser && authLoading && !maxWaitReached;
