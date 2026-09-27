@@ -28,6 +28,7 @@ import {
   updatePassword,
   setPersistence,
   browserLocalPersistence,
+  indexedDBLocalPersistence,
 } from "firebase/auth";
 import {
   doc,
@@ -83,6 +84,10 @@ interface AuthContextType {
   logout: () => Promise<void>;
   toggleFavorite: (contentId: string) => Promise<void>;
   toggleWatchLater: (contentId: string) => Promise<void>;
+  toggleWatched: (contentId: string, seasonNumber?: number, episodeNumber?: number) => Promise<void>;
+  isWatched: (contentId: string, seasonNumber?: number, episodeNumber?: number) => boolean;
+  watchedList: string[];
+  markMultipleWatched: (keys: string[], shouldMark?: boolean) => Promise<void>;
   refreshProfile: (
     force?: boolean,
     reason?: "auto" | "manual" | "login" | "logout",
@@ -510,6 +515,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                       ...(serverProfile.watchLater || []),
                     ]),
                   ),
+            watched:
+              safeStorage.getItem("needs_user_sync") === "true" &&
+              safeStorage.getItem("pending_watched_marks")
+                ? JSON.parse(safeStorage.getItem("pending_watched_marks")!)
+                : Array.from(
+                    new Set([
+                      ...(localProfile?.watched || []),
+                      ...(serverProfile.watched || []),
+                    ]),
+                  ).slice(-50),
             orders: (() => {
               const localOrders = localProfile?.orders || [];
               const serverOrders = serverProfile.orders || [];
@@ -653,6 +668,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               if (pendFavs) updatesToPush.favorites = JSON.parse(pendFavs);
               const pendWL = safeStorage.getItem("pending_watch_later_array");
               if (pendWL) updatesToPush.watchLater = JSON.parse(pendWL);
+              const pendWatched = safeStorage.getItem("pending_watched_marks");
+              if (pendWatched) updatesToPush.watched = JSON.parse(pendWatched);
 
               // Merge pending orders if any
               const pendOrdersStr = safeStorage.getItem("pending_orders_array");
@@ -751,6 +768,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             safeStorage.setItem("needs_user_sync", "false");
             safeStorage.removeItem("pending_favorites_array");
             safeStorage.removeItem("pending_watch_later_array");
+            safeStorage.removeItem("pending_watched_marks");
             safeStorage.removeItem("pending_orders_array");
             safeStorage.removeItem("pending_content_clicks");
             safeStorage.removeItem("pending_link_clicks");
@@ -826,27 +844,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
+          // Whitelist check for non-admin accounts with phone numbers
+          if (!hasAdminPrivileges) {
+            let phoneToCheck = data.phone || currentUser.phoneNumber || "";
+            if (!phoneToCheck && currentUser.email?.endsWith("@moviznow.com")) {
+              phoneToCheck = currentUser.email.replace("@moviznow.com", "");
+            }
+            if (phoneToCheck) {
+              const standardized = standardizePhone(phoneToCheck);
+              const isWhitelisted = await isPhoneWhitelisted(standardized);
+              if (!isWhitelisted) {
+                console.warn(`User phone ${standardized} is not whitelisted. Enforcing signout.`);
+                await signOut(auth);
+                setProfile(null);
+                safeStorage.removeItem("profile_cache");
+                safeStorage.removeItem("profile_cache_timestamp");
+                setError("This WhatsApp number is not authorized. Please contact admin.");
+                setLoading(false);
+                return false;
+              }
+            }
+          }
+
           // Auto-expire & active restoration logic
           const expiryNow = new Date();
           if (data.role !== "owner" && data.role !== "admin") {
             if (!data.expiryDate || data.expiryDate === "null" || data.expiryDate === "") {
               if (data.status !== "suspended" && data.status !== "pending") {
-                if (!data.status) {
-                  updates.status = "pending";
-                  data.status = "pending";
-                  if (mergedProfile) mergedProfile.status = "pending";
-                } else if (data.status === "active") {
-                  // Active status without explicit expiry date: default to 30 days
-                  const defaultExp = new Date();
-                  defaultExp.setDate(defaultExp.getDate() + 30);
-                  const yyyy = defaultExp.getFullYear();
-                  const mm = String(defaultExp.getMonth() + 1).padStart(2, '0');
-                  const dd = String(defaultExp.getDate()).padStart(2, '0');
-                  const dateIso = `${yyyy}-${mm}-${dd}T23:59:59.999Z`;
-                  updates.expiryDate = dateIso;
-                  data.expiryDate = dateIso;
-                  if (mergedProfile) mergedProfile.expiryDate = dateIso;
-                }
+                // Non-admins without an explicit expiry date cannot be active; mark as pending
+                updates.status = "pending";
+                data.status = "pending";
+                if (mergedProfile) mergedProfile.status = "pending";
               }
             } else if (data.expiryDate !== "Lifetime") {
               if (isUserExpired(data.expiryDate)) {
@@ -993,6 +1021,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (currentUser.isAnonymous || (!currentUser.email && !standardizedUserPhone)) {
              setLoading(false);
              return false;
+          }
+
+          // Whitelist check for new accounts with phone (if not owner/admin)
+          if (!isOwner && !isAdmin && standardizedUserPhone) {
+            const isWhitelisted = await isPhoneWhitelisted(standardizedUserPhone);
+            if (!isWhitelisted) {
+              await signOut(auth);
+              setProfile(null);
+              safeStorage.removeItem("profile_cache");
+              safeStorage.removeItem("profile_cache_timestamp");
+              setError("This WhatsApp number is not authorized for new account creation. Please contact admin.");
+              setLoading(false);
+              return false;
+            }
           }
 
           let mergedOldData: any = {};
@@ -1482,7 +1524,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
       } else {
-        // Do not clear profile cache here to prevent auto logout bug when Firebase auth state drops temporarily
+        // Firebase Auth confirms no user is currently authenticated
+        setProfile(null);
+        safeStorage.removeItem("profile_cache");
+        safeStorage.removeItem("profile_cache_timestamp");
         setLoading(false);
 
         if (sessionStartTimeRef.current) {
@@ -1685,6 +1730,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       setError(null);
       justLoggedInRef.current = true;
+      try {
+        await setPersistence(auth, indexedDBLocalPersistence).catch(() => setPersistence(auth, browserLocalPersistence));
+      } catch (pErr) {}
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
 
@@ -1852,6 +1900,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       justLoggedInRef.current = true;
+      try {
+        await setPersistence(auth, indexedDBLocalPersistence).catch(() => setPersistence(auth, browserLocalPersistence));
+      } catch (pErr) {}
       const result = await signInWithEmailAndPassword(auth, email, password);
 
       // Force refresh app data
@@ -1975,6 +2026,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }));
 
       justLoggedInRef.current = true;
+      try {
+        await setPersistence(auth, indexedDBLocalPersistence).catch(() => setPersistence(auth, browserLocalPersistence));
+      } catch (pErr) {}
       let userCredential;
       try {
         userCredential = await createUserWithEmailAndPassword(
@@ -2086,6 +2140,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }));
 
       justLoggedInRef.current = true;
+      try {
+        await setPersistence(auth, indexedDBLocalPersistence).catch(() => setPersistence(auth, browserLocalPersistence));
+      } catch (pErr) {}
       let userCredential;
       try {
         userCredential = await createUserWithEmailAndPassword(
@@ -2323,6 +2380,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       setError(null);
 
+      // Non-admins cannot modify membership role, status, or expiryDate unless activating a valid trial (max 3 days)
+      const userEmailLower = auth.currentUser.email?.toLowerCase();
+      const isOwner = userEmailLower === "asmatn628@gmail.com";
+      const isAdmin = [
+        "asmatullah9327@gmail.com",
+        "kabirahmaddev@gmail.com",
+        "wamoviesstation@gmail.com",
+      ].includes(userEmailLower || "") || profile.role === "admin" || profile.role === "owner";
+
+      if (!isOwner && !isAdmin) {
+        if (data.role === 'trial' && data.trialActivated && data.status === 'active' && data.expiryDate) {
+          if (profile.trialActivated || profile.role === 'trial' || profile.status === 'active') {
+            // Already had trial or active account; reject mutating role/status/expiry
+            delete data.role;
+            delete data.status;
+            delete data.expiryDate;
+            delete data.trialActivated;
+          } else {
+            // Validate trial expiry is at most 3-4 days ahead
+            const maxTrialExp = new Date();
+            maxTrialExp.setDate(maxTrialExp.getDate() + 4);
+            const reqExp = new Date(data.expiryDate);
+            if (isNaN(reqExp.getTime()) || reqExp.getTime() > maxTrialExp.getTime()) {
+              const safeExp = new Date();
+              safeExp.setDate(safeExp.getDate() + 2);
+              const dateStr = safeExp.toISOString().split('T')[0];
+              data.expiryDate = `${dateStr}T23:59:59.999Z`;
+            }
+          }
+        } else {
+          delete data.role;
+          delete data.status;
+          delete data.expiryDate;
+          delete data.permissions;
+          delete (data as any).isAdmin;
+          delete (data as any).isOwner;
+        }
+      }
+
       // Check for phone duplicate if changing
       if (data.phone && data.phone !== profile.phone) {
         const standardizedNewPhone = standardizePhone(data.phone);
@@ -2400,6 +2496,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (pendFavs) data.favorites = JSON.parse(pendFavs);
         const pendWL = safeStorage.getItem("pending_watch_later_array");
         if (pendWL) data.watchLater = JSON.parse(pendWL);
+        const pendWatched = safeStorage.getItem("pending_watched_marks");
+        if (pendWatched) data.watched = JSON.parse(pendWatched);
         const pendOrders = safeStorage.getItem("pending_orders_array");
         if (pendOrders) {
           data.orders = [...(profile.orders || []), ...JSON.parse(pendOrders)];
@@ -2408,6 +2506,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         safeStorage.setItem("needs_user_sync", "false");
         safeStorage.removeItem("pending_favorites_array");
         safeStorage.removeItem("pending_watch_later_array");
+        safeStorage.removeItem("pending_watched_marks");
         safeStorage.removeItem("pending_content_clicks");
         safeStorage.removeItem("pending_link_clicks");
         safeStorage.removeItem("pending_orders_array");
@@ -2603,7 +2702,58 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     safeStorage.setItem("needs_user_sync", "true");
   }, [profile, user]);
 
+  const watchedList = useMemo(() => profile?.watched || [], [profile?.watched]);
 
+  const isWatched = useCallback((contentId: string, seasonNumber?: number, episodeNumber?: number) => {
+    if (!profile?.watched || profile.watched.length === 0) return false;
+    const key = seasonNumber !== undefined && episodeNumber !== undefined
+      ? `${contentId}:s${seasonNumber}e${episodeNumber}`
+      : contentId;
+    return profile.watched.includes(key);
+  }, [profile?.watched]);
+
+  const toggleWatched = useCallback(async (contentId: string, seasonNumber?: number, episodeNumber?: number) => {
+    if (!profile || !user) return;
+    const key = seasonNumber !== undefined && episodeNumber !== undefined
+      ? `${contentId}:s${seasonNumber}e${episodeNumber}`
+      : contentId;
+    const current = profile.watched || [];
+    const newWatched = current.includes(key)
+      ? current.filter((id) => id !== key)
+      : [...current, key].slice(-50);
+    const updatedProfile = { ...profile, watched: newWatched };
+    setProfile(updatedProfile);
+    safeStorage.setItem("profile_cache", JSON.stringify(updatedProfile));
+    safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
+
+    // Save pending change array
+    safeStorage.setItem(
+      "pending_watched_marks",
+      JSON.stringify(newWatched),
+    );
+    safeStorage.setItem("needs_user_sync", "true");
+  }, [profile, user]);
+
+  const markMultipleWatched = useCallback(async (keys: string[], shouldMark = true) => {
+    if (!profile || !user) return;
+    const current = new Set(profile.watched || []);
+    keys.forEach((k) => {
+      if (shouldMark) current.add(k);
+      else current.delete(k);
+    });
+    const newWatched = Array.from(current).slice(-50);
+    const updatedProfile = { ...profile, watched: newWatched };
+    setProfile(updatedProfile);
+    safeStorage.setItem("profile_cache", JSON.stringify(updatedProfile));
+    safeStorage.setItem("profile_cache_timestamp", Date.now().toString());
+
+    // Save pending change array
+    safeStorage.setItem(
+      "pending_watched_marks",
+      JSON.stringify(newWatched),
+    );
+    safeStorage.setItem("needs_user_sync", "true");
+  }, [profile, user]);
 
   const normalizedProfile = useMemo(() => {
     if (!profile) return null;
@@ -2630,6 +2780,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         logout,
         toggleFavorite,
         toggleWatchLater,
+        toggleWatched,
+        isWatched,
+        watchedList,
+        markMultipleWatched,
         refreshProfile,
         isSyncing,
       }}

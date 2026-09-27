@@ -3749,9 +3749,9 @@ export default function ContentManagement() {
                 const airDateStr = rawDate ? formatDateToMonDDYYYY(rawDate) : "";
                 const durStr = ep.duration ? ` (${ep.duration})` : "";
                 if (airDateStr) {
-                  text += `E${ep.episodeNumber}: ${ep.title}${durStr} — ${airDateStr}\n`;
+                  text += `▫️ ⏳ E${ep.episodeNumber}: ${ep.title}${durStr} — ${airDateStr}\n`;
                 } else {
-                  text += `E${ep.episodeNumber}: ${ep.title}${durStr} — Coming Soon\n`;
+                  text += `▫️ ⏳ E${ep.episodeNumber}: ${ep.title}${durStr} — Coming Soon\n`;
                 }
               });
             }
@@ -4163,9 +4163,9 @@ export default function ContentManagement() {
               const airDateStr = rawDate ? formatDateToMonDDYYYY(rawDate) : "";
               const durStr = ep.duration ? ` (${ep.duration})` : "";
               if (airDateStr) {
-                text += `E${ep.episodeNumber}: ${ep.title}${durStr} — ${airDateStr}\n`;
+                text += `▫️ ⏳ E${ep.episodeNumber}: ${ep.title}${durStr} — ${airDateStr}\n`;
               } else {
-                text += `E${ep.episodeNumber}: ${ep.title}${durStr} — Coming Soon\n`;
+                text += `▫️ ⏳ E${ep.episodeNumber}: ${ep.title}${durStr} — Coming Soon\n`;
               }
             });
           }

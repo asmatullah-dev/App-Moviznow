@@ -2,9 +2,121 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'asmatullah9327@gmail.com' ||
+        request.auth.token.email == 'asmatn628@gmail.com' ||
+        request.auth.token.email == 'kabirahmaddev@gmail.com' ||
+        request.auth.token.email == 'wamoviesstation@gmail.com'
+      );
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      allow read: if isSignedIn() && (isOwner(userId) || isAdmin());
+      allow create: if isSignedIn() && (
+        isAdmin() ||
+        (isOwner(userId) && request.resource.data.uid == userId)
+      );
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        isOwner(userId)
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Settings (Whitelisted Phones, App Settings)
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Chunk metadata and version tracking
+    match /chunk_meta/{metaId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    // Content, Genres, Languages, Qualities, Collections, Chunks
+    match /content/{contentId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /content_chunks/{chunkId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /search_index_chunks/{chunkId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /collection_chunks/{chunkId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /review_chunks/{chunkId} {
+      allow read: if true;
+      allow write: if isSignedIn() || isAdmin();
+    }
+    match /genres/{genreId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /languages/{languageId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /qualities/{qualityId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /notification_chunks/{chunkId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /notification_templates/{templateId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /notifications/{notificationId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /fcm_tokens/{chunkId} {
+      allow read: if true;
+      allow write: if isSignedIn() || isAdmin();
+    }
+    match /referral/{docId} {
+      allow read: if true;
+      allow write: if isSignedIn() || isAdmin();
+    }
+    match /orders/{orderId} {
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && (request.resource.data.userId == request.auth.uid || isAdmin());
+      allow update, delete: if isAdmin();
+    }
+    match /movie_requests/{requestId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+    match /analytics/{eventId} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+
+    // Default fallback
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if isAdmin();
     }
   }
 }
-

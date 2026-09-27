@@ -98,6 +98,7 @@ export interface UserProfile {
     [key: string]: any;
   };
   reported_links?: any[];
+  watched?: string[]; // Array of minimal watched keys (max 50, e.g. id or id:s#e#)
   movieRequests?: any[];
   trialActivated?: boolean;
   notification?: 'yes' | 'no';

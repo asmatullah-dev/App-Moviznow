@@ -64,6 +64,9 @@ import {
   VolumeX,
   Bell,
   BellRing,
+  CheckCircle2,
+  Check,
+  CheckCheck,
 } from "lucide-react";
 import {
   isSubscribedToUpcoming,
@@ -157,10 +160,15 @@ export default function MovieDetails() {
 
   const { vibrate } = useHaptics();
   const {
+    user,
     profile,
     loading: profileLoading,
     toggleFavorite: authToggleFavorite,
     toggleWatchLater: authToggleWatchLater,
+    toggleWatched,
+    isWatched,
+    watchedList,
+    markMultipleWatched,
     updateUserProfileData,
     refreshProfile,
     isSyncing,
@@ -245,6 +253,7 @@ export default function MovieDetails() {
   const [isTrailerSelectionOpen, setIsTrailerSelectionOpen] = useState(false);
   const [showRatePrompt, setShowRatePrompt] = useState(false);
   const [showReportConfirm, setShowReportConfirm] = useState(false);
+  const [pendingReportTarget, setPendingReportTarget] = useState<{ link: any; contextTitle?: string } | null>(null);
   const [hasUserRated, setHasUserRated] = useState<boolean>(() => safeStorage.getItem('has_rated') === 'true');
   const recommendedScrollRef = useRef<HTMLDivElement>(null);
 
@@ -2354,54 +2363,69 @@ export default function MovieDetails() {
     executeAction();
   };
 
-  const handleReportLink = async () => {
+  const [reportingLinkId, setReportingLinkId] = useState<string | null>(null);
+
+  const isLinkReported = useCallback(
+    (link: any) => {
+      if (!profile?.reported_links || !link) return false;
+      const currentUrl = link.originalUrl || link.url || "";
+      return profile.reported_links.some((r: any) => {
+        if (r.status !== "pending") return false;
+        const hasValidIdCheck =
+          r.linkId &&
+          link.id &&
+          link.id !== "unknown" &&
+          link.id !== "sample" &&
+          r.linkId === link.id;
+        const hasValidUrlCheck =
+          r.linkUrl && currentUrl && r.linkUrl === currentUrl;
+        return hasValidIdCheck || hasValidUrlCheck;
+      });
+    },
+    [profile?.reported_links],
+  );
+
+  const handleOneTapReportLink = async (targetLink?: any, contextTitle?: string) => {
+    const link = targetLink || linkPopup;
+    if (!link || !mergedContent) return;
+
     if (!profile) {
       setShowLoginPrompt(true);
       return;
     }
-    if (!linkPopup || !mergedContent) return;
 
-    setIsReporting(true);
-    try {
-      const activeReports = (profile.reported_links || []).filter(
-        (r: any) => r.status === "pending",
-      ).length;
-      if (activeReports >= 5) {
-        setAlertConfig({
-          isOpen: true,
-          title: "Limit Reached",
-          message: "You can only have 5 pending reported links at a time.",
-        });
-        setIsReporting(false);
-        return;
-      }
+    const currentUrl = link.originalUrl || link.url || "";
+    const linkId =
+      link.id && link.id !== "unknown" && link.id !== "sample"
+        ? link.id
+        : currentUrl;
 
-      const alreadyReported = profile.reported_links?.some((r: any) => {
-        if (r.status !== "pending") return false;
-
-        const hasValidIdCheck =
-          r.linkId &&
-          linkPopup.id &&
-          linkPopup.id !== "unknown" &&
-          linkPopup.id !== "sample" &&
-          r.linkId === linkPopup.id;
-        const currentUrl = linkPopup.originalUrl || linkPopup.url;
-        const hasValidUrlCheck =
-          r.linkUrl && currentUrl && r.linkUrl === currentUrl;
-
-        return hasValidIdCheck || hasValidUrlCheck;
+    if (isLinkReported(link)) {
+      setAlertConfig({
+        isOpen: true,
+        title: t("Already Reported"),
+        message: t("You have already reported this link. We are working on it!"),
       });
+      return;
+    }
 
-      if (alreadyReported) {
-        setAlertConfig({
-          isOpen: true,
-          title: "Already Reported",
-          message: "You have already reported this link. We are working on it!",
-        });
-        setIsReporting(false);
-        return;
-      }
+    const activeReports = (profile.reported_links || []).filter(
+      (r: any) => r.status === "pending",
+    ).length;
+    if (activeReports >= 10) {
+      setAlertConfig({
+        isOpen: true,
+        title: t("Limit Reached"),
+        message: t("You can only have 10 pending reported links at a time."),
+      });
+      return;
+    }
 
+    vibrate(40);
+    setIsReporting(true);
+    setReportingLinkId(linkId);
+
+    try {
       const reportId = Math.floor(
         10000000 + Math.random() * 90000000,
       ).toString();
@@ -2413,36 +2437,48 @@ export default function MovieDetails() {
         contentId: mergedContent.id,
         contentTitle: mergedContent.title,
         contentType: mergedContent.type,
-        linkId: linkPopup.id,
-        linkName: linkPopup.name,
-        linkUrl: linkPopup.originalUrl || linkPopup.url,
+        linkId: link.id || linkId,
+        linkName: contextTitle || link.name || "Link",
+        linkUrl: currentUrl,
         status: "pending",
         createdAt: new Date().toISOString(),
       };
 
+      const updatedReports = [...(profile.reported_links || []), reportData];
       await updateUserProfileData(
-        { reported_links: [...(profile.reported_links || []), reportData] },
+        { reported_links: updatedReports },
         undefined,
         true,
       );
+
+      safeStorage.setItem(
+        "pending_reported_links",
+        JSON.stringify(updatedReports),
+      );
+      safeStorage.setItem("needs_user_sync", "true");
+
       setAlertConfig({
         isOpen: true,
-        title: "Report Submitted",
-        message:
-          "Thank you for reporting. We will check and fix this link soon.",
+        title: t("Report Submitted"),
+        message: t("Broken link reported! We will check and update it soon."),
       });
-      closeLinkPopup();
+      if (linkPopup) {
+        closeLinkPopup();
+      }
     } catch (error) {
       console.error("Error reporting link:", error);
       setAlertConfig({
         isOpen: true,
-        title: "Error",
-        message: "Failed to submit report. Please try again later.",
+        title: t("Error"),
+        message: t("Failed to submit report. Please try again later."),
       });
     } finally {
       setIsReporting(false);
+      setReportingLinkId(null);
     }
   };
+
+  const handleReportLink = handleOneTapReportLink;
 
   const handlePlayDirectly = () => {
     if (!linkPopup) return;
@@ -2609,9 +2645,31 @@ export default function MovieDetails() {
                 <span className="text-xs font-black text-zinc-900 dark:text-zinc-100 bg-zinc-200/80 dark:bg-zinc-800/90 border border-zinc-300/50 dark:border-zinc-700/50 px-3 py-1 rounded-xl truncate max-w-[160px] shadow-2xs">
                   {link.name}
                 </span>
-                <span className="text-xs font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-3 py-1 rounded-xl shrink-0 shadow-2xs">
-                  {isLocked ? "Locked" : `${link.size} ${link.unit}`}
-                </span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="text-xs font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-3 py-1 rounded-xl shadow-2xs">
+                    {isLocked ? "Locked" : `${link.size} ${link.unit}`}
+                  </span>
+                  {user && profile && episodeInfo && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        vibrate(40);
+                        toggleWatched(mergedContent.id, seasonInfo?.number, episodeInfo.number);
+                      }}
+                      className={`p-1 rounded-xl border transition-all active:scale-95 cursor-pointer flex items-center justify-center shadow-2xs ${
+                        isWatched(mergedContent.id, seasonInfo?.number, episodeInfo.number)
+                          ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/40 shadow-emerald-500/10"
+                          : "bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-500 border-zinc-200 dark:border-zinc-700"
+                      }`}
+                      title={isWatched(mergedContent.id, seasonInfo?.number, episodeInfo.number) ? t('Mark as Unwatched') : t('Mark as Watched')}
+                    >
+                      <CheckCircle2
+                        className={`w-4 h-4 ${isWatched(mergedContent.id, seasonInfo?.number, episodeInfo.number) ? "fill-emerald-500 text-white dark:text-zinc-950" : ""}`}
+                      />
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="flex items-center gap-2">
@@ -3068,6 +3126,28 @@ export default function MovieDetails() {
                 )}
 
                 <div className="flex items-center gap-2">
+                  {/* Mark as Watched Button */}
+                  <button
+                    onClick={async () => {
+                      vibrate(40);
+                      await toggleWatched(mergedContent.id);
+                    }}
+                    className={`p-3.5 rounded-2xl border transition-all duration-300 active:scale-95 cursor-pointer ${
+                      isWatched(mergedContent.id)
+                        ? "bg-emerald-500/20 border-emerald-500 text-emerald-500 shadow-lg shadow-emerald-500/10"
+                        : "bg-zinc-100/80 dark:bg-zinc-900/80 backdrop-blur-md border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200"
+                    }`}
+                    title={
+                      isWatched(mergedContent.id)
+                        ? t("Mark as Unwatched")
+                        : t("Mark as Watched")
+                    }
+                  >
+                    <CheckCircle2
+                      className={`w-5 h-5 ${isWatched(mergedContent.id) ? "fill-emerald-500 text-white dark:text-zinc-950" : ""}`}
+                    />
+                  </button>
+
                   <button
                     onClick={toggleWatchLater}
                     disabled={isWatchLaterLoading}
@@ -3989,6 +4069,73 @@ export default function MovieDetails() {
                                       </div>
                                     )}
 
+                                    {season.episodes && season.episodes.length > 0 && (() => {
+                                      const episodes = season.episodes;
+                                      const watchedEps = episodes.filter((ep: any) =>
+                                        isWatched(mergedContent.id, season.seasonNumber, ep.episodeNumber),
+                                      );
+                                      const totalEps = episodes.length;
+                                      const progressPercent = totalEps > 0 ? Math.round((watchedEps.length / totalEps) * 100) : 0;
+                                      const isSeasonComplete = progressPercent === 100 && totalEps > 0;
+
+                                      return (
+                                        <div className="bg-gradient-to-r from-zinc-50 to-zinc-100/80 dark:from-zinc-900/90 dark:to-zinc-900/50 border border-zinc-200/90 dark:border-zinc-800/90 rounded-2xl p-4 sm:p-5 mb-6 shadow-xs">
+                                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+                                            <div className="flex items-center gap-2.5">
+                                              <div className={`p-2 rounded-xl border ${isSeasonComplete ? "bg-emerald-500/20 text-emerald-500 border-emerald-500/40 shadow-xs" : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"}`}>
+                                                <CheckCircle2 className="w-5 h-5" />
+                                              </div>
+                                              <div>
+                                                <div className="flex items-center gap-2">
+                                                  <span className="font-black text-sm sm:text-base text-zinc-900 dark:text-white">
+                                                    {t('Season')} {season.seasonNumber} {t('Progress')}
+                                                  </span>
+                                                  {isSeasonComplete && (
+                                                    <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                                      <span>✨ {t('Season Completed')}</span>
+                                                    </span>
+                                                  )}
+                                                </div>
+                                                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                                                  {t('Episode Progress')}: {watchedEps.length} / {totalEps} {t('Episodes Watched')}
+                                                </p>
+                                              </div>
+                                            </div>
+
+                                            <div className="flex items-center justify-between sm:justify-end gap-3">
+                                              <span className="text-sm font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 dark:bg-emerald-500/20 px-2.5 py-1 rounded-xl border border-emerald-500/30">
+                                                {progressPercent}%
+                                              </span>
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  vibrate(40);
+                                                  const allEpKeys = episodes.map((ep: any) => `${mergedContent.id}:s${season.seasonNumber}e${ep.episodeNumber}`);
+                                                  markMultipleWatched(allEpKeys, !isSeasonComplete);
+                                                }}
+                                                className="text-xs font-bold text-zinc-600 dark:text-zinc-300 hover:text-emerald-600 dark:hover:text-emerald-400 bg-white dark:bg-zinc-800 px-3 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 transition-all active:scale-95 shadow-2xs flex items-center gap-1.5 cursor-pointer"
+                                              >
+                                                <CheckCheck className="w-3.5 h-3.5 text-emerald-500" />
+                                                <span>
+                                                  {isSeasonComplete
+                                                    ? t('Mark Season as Unwatched')
+                                                    : t('Mark All Season as Watched')}
+                                                </span>
+                                              </button>
+                                            </div>
+                                          </div>
+
+                                          {/* Progress Track */}
+                                          <div className="w-full bg-zinc-200 dark:bg-zinc-800 rounded-full h-2.5 overflow-hidden">
+                                            <div
+                                              className="bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 h-full rounded-full transition-all duration-500 ease-out"
+                                              style={{ width: `${progressPercent}%` }}
+                                            />
+                                          </div>
+                                        </div>
+                                      );
+                                    })()}
+
                                     {season.episodes && season.episodes.length > 0 && (
                                         <div>
                                           <h4 className="font-semibold text-zinc-500 dark:text-zinc-400 mb-4 text-sm uppercase tracking-wider">
@@ -4004,14 +4151,19 @@ export default function MovieDetails() {
                                                 const ep1AirDate = season.episodes?.find((e: any) => e.episodeNumber === 1)?.airDate || season.airDate || "";
                                                 const effectiveAirDate = ep.airDate || ep1AirDate;
                                                 const hasEpisodeDesc = Boolean(ep.description && ep.description.trim() !== "" && ep.description.trim().toLowerCase() !== ep.title?.trim().toLowerCase());
+                                                const isEpWatched = isWatched(mergedContent.id, season.seasonNumber, ep.episodeNumber);
                                                 return (
                                                   <React.Fragment key={ep.id || `ep-${eIdx}`}>
                                                     <div
-                                                      className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 flex flex-col gap-4"
+                                                      className={`bg-white dark:bg-zinc-950 border rounded-xl p-4 flex flex-col gap-4 transition-all duration-300 ${
+                                                        isEpWatched
+                                                          ? "border-emerald-500/50 bg-emerald-500/[0.02] shadow-xs"
+                                                          : "border-zinc-200 dark:border-zinc-800"
+                                                      }`}
                                                     >
                                                     <div className="flex flex-col gap-2">
                                                       <div className="flex items-center flex-wrap gap-1.5">
-                                                        <span className="text-emerald-500 font-bold">
+                                                        <span className={`font-bold ${isEpWatched ? "text-emerald-600 dark:text-emerald-400" : "text-emerald-500"}`}>
                                                           E{ep.episodeNumber}
                                                         </span>
                                                         <span className="font-medium">
@@ -4061,6 +4213,8 @@ export default function MovieDetails() {
                                                             {ep.duration}
                                                           </span>
                                                         )}
+
+
                                                       </div>
 
                                                       {expandedEpisodes[
@@ -4444,17 +4598,38 @@ export default function MovieDetails() {
                         setShowLoginPrompt(true);
                         return;
                       }
-                      setShowReportConfirm(true);
+                      if (linkPopup && isLinkReported(linkPopup)) {
+                        setAlertConfig({
+                          isOpen: true,
+                          title: t("Already Reported"),
+                          message: t("You have already reported this link. We are working on it!"),
+                        });
+                        return;
+                      }
+                      if (linkPopup) {
+                        setPendingReportTarget({ link: linkPopup, contextTitle: linkPopup.formattedTitle || linkPopup.name });
+                        setShowReportConfirm(true);
+                      }
                     }}
-                    disabled={isReporting}
-                    className="w-full bg-red-500/10 hover:bg-red-500/20 text-red-500 font-bold py-3 px-6 text-sm rounded-xl transition-colors flex items-center justify-center gap-2 border border-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isReporting || (linkPopup ? isLinkReported(linkPopup) : false)}
+                    className={`w-full font-bold py-3 px-6 text-sm rounded-xl transition-all flex items-center justify-center gap-2 border disabled:opacity-75 disabled:cursor-not-allowed ${
+                      linkPopup && isLinkReported(linkPopup)
+                        ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                        : "bg-red-500/10 hover:bg-red-500/20 active:scale-95 text-red-500 border-red-500/30 cursor-pointer"
+                    }`}
                   >
                     {isReporting ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : linkPopup && isLinkReported(linkPopup) ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500" />
                     ) : (
                       <AlertTriangle className="w-4 h-4" />
                     )}
-                    {isReporting ? t("Sending...") : t("Report Link (if not Working)")}
+                    {isReporting
+                      ? t("Sending...")
+                      : linkPopup && isLinkReported(linkPopup)
+                        ? t("Already Reported")
+                        : t("Report Link (if not Working)")}
                   </button>
 
                   <div className="grid grid-cols-2 gap-3">
@@ -5063,16 +5238,22 @@ export default function MovieDetails() {
 
       <ConfirmModal
         isOpen={showReportConfirm}
-        title={t("Report Broken Link")}
+        title={t("Report Link")}
         message={t("Are you sure you want to report this link as broken or not working? Our team will check and update it.")}
         confirmText={t("Report Link")}
         cancelText={t("Cancel")}
         loading={isReporting}
         onConfirm={async () => {
-          await handleReportLink();
+          if (pendingReportTarget) {
+            await handleOneTapReportLink(pendingReportTarget.link, pendingReportTarget.contextTitle);
+            setPendingReportTarget(null);
+          } else {
+            await handleOneTapReportLink();
+          }
           setShowReportConfirm(false);
         }}
         onCancel={() => {
+          setPendingReportTarget(null);
           setShowReportConfirm(false);
         }}
       />

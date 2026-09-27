@@ -51,9 +51,9 @@ export async function runWithNetwork<T>(fn: () => Promise<T>): Promise<T> {
 
 export const auth = getAuth(app);
 if (typeof window !== 'undefined') {
-  setPersistence(auth, browserLocalPersistence)
-    .catch(() => setPersistence(auth, indexedDBLocalPersistence))
-    .catch(() => setPersistence(auth, inMemoryPersistence))
+  // Prioritize indexedDBLocalPersistence to keep user sessions persistently safe across browser sessions
+  setPersistence(auth, indexedDBLocalPersistence)
+    .catch(() => setPersistence(auth, browserLocalPersistence))
     .catch((err) => {
       console.warn('Could not set auth persistence:', err);
     });

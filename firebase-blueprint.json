@@ -22,6 +22,7 @@
         "assignedContent": { "type": "array", "items": { "type": "string" } },
         "watchLater": { "type": "array", "items": { "type": "string" } },
         "favorites": { "type": "array", "items": { "type": "string" } },
+        "watched": { "type": "array", "items": { "type": "string" }, "description": "Minimal keys of watched movies/episodes (max 50, e.g. id or id:s#e#)." },
         "createdAt": { "type": "string", "format": "date-time" },
         "sessionsCount": { "type": "number" },
         "timeSpent": { "type": "number" }

@@ -2,7 +2,7 @@ import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link, useNavigate } from 'react-router-dom';
 
-import { Heart, Clock, ShoppingCart, Play, X, Lock, Star, Loader2 } from 'lucide-react';
+import { Heart, Clock, ShoppingCart, Play, X, Lock, Star, Loader2, Check } from 'lucide-react';
 import { Content, Quality, Language, Genre } from '../types';
 import { formatContentTitle, getContrastColor, getOttBadgeConfig } from '../utils/contentUtils';
 import { OttBadge } from './OttBadge';
@@ -136,6 +136,10 @@ const ContentCard = React.memo(({
 
   const isFavorite = profile?.favorites?.includes(content.id);
   const isWatchLater = profile?.watchLater?.includes(content.id);
+  const isWatched = Boolean(
+    profile?.watched?.includes(content.id) ||
+    profile?.watched?.some((w: string) => w.startsWith(`${content.id},`))
+  );
 
   const canSeeDraft = ['owner', 'admin', 'manager', 'content_manager'].includes(profile?.role);
   
@@ -297,6 +301,20 @@ const ContentCard = React.memo(({
 
           {/* Top Left Badges */}
           <div className="absolute top-2 left-2 flex flex-col items-start gap-1 z-10 pointer-events-none">
+            {isWatched && (
+              <div
+                className={clsx(
+                  "font-bold uppercase tracking-wider bg-emerald-600/95 text-white shadow-md backdrop-blur-md flex items-center select-none rounded-md",
+                  isSmall 
+                    ? "px-1 py-0.5 text-[7px] gap-0.5" 
+                    : "px-1.5 py-0.5 text-[9px] gap-0.5"
+                )}
+                title="Watched"
+              >
+                <Check className={clsx(isSmall ? "w-2 h-2" : "w-2.5 h-2.5")} />
+                <span>Watched</span>
+              </div>
+            )}
             {imdbRating && (
               <div
                 className={clsx(

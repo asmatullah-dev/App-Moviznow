@@ -1772,7 +1772,10 @@ export default function UserManagement() {
         // Check if the displayName is a dummy name
         const isDummyName = !u.displayName || u.displayName.trim() === '' || u.displayName.toLowerCase().startsWith('user (');
         
-        if (!hasEmail && isDummyName && !hasRealPhone) {
+        // Check if user has an active membership
+        const hasActiveSubscription = u.expiryDate && (u.expiryDate === 'Lifetime' || !isUserExpired(u.expiryDate));
+        
+        if (!hasEmail && isDummyName && !hasRealPhone && !hasActiveSubscription) {
           return false;
         }
         return true;

@@ -87,9 +87,9 @@ export default function Trial() {
       // If after 6 PM (18:00), don't count today. Add 3 days total.
       // If before 6 PM, count today. Add 2 days total.
       if (now.getHours() >= 18) {
-        expiry.setDate(expiry.getDate() + 5);
+        expiry.setDate(expiry.getDate() + 3);
       } else {
-        expiry.setDate(expiry.getDate() + 4);
+        expiry.setDate(expiry.getDate() + 2);
       }
 
       const dateStr = expiry.toISOString().split('T')[0];
@@ -105,7 +105,7 @@ export default function Trial() {
       await refreshProfile(true);
 
       setStatus('success');
-      setMessage(t('Trial activated successfully! Enjoy 4 days of access.'));
+      setMessage(t('Trial activated successfully! Enjoy 2-3 days of access.'));
       setTimeout(() => navigate('/'), 3000);
     } catch (error) {
       console.error('Error activating trial:', error);

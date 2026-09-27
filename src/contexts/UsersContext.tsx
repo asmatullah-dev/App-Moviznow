@@ -9,6 +9,13 @@ import { getUtcVersion, parseVersionTime, getChunkMeta, updateChunkMetaLocalCach
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
 import { getUserDisplayName } from '../utils/userUtils';
 
+export const ADMIN_EMAILS = [
+  "asmatn628@gmail.com",
+  "asmatullah9327@gmail.com",
+  "kabirahmaddev@gmail.com",
+  "wamoviesstation@gmail.com"
+];
+
 export function isUserExpired(expiryDate?: string | null): boolean {
   if (!expiryDate || expiryDate === 'Lifetime' || expiryDate === 'null' || expiryDate === '') return false;
   const cleanDateStr = expiryDate.split('T')[0];
@@ -47,6 +54,18 @@ export function normalizeUserStatusAndExpiry(u: UserProfile): UserProfile {
     u = { ...u, createdAt: new Date().toISOString() };
   }
 
+  // Check email for owner / admin privileges first to prevent moving to Guest or pending
+  const emailLower = u.email?.toLowerCase();
+  const isOwner = emailLower === "asmatn628@gmail.com";
+  const isAdmin = ADMIN_EMAILS.includes(emailLower || "");
+
+  if (isOwner) {
+    return { ...u, role: 'owner', status: 'active', expiryDate: 'Lifetime' };
+  }
+  if (isAdmin) {
+    return { ...u, role: 'admin', status: 'active', expiryDate: u.expiryDate || 'Lifetime' };
+  }
+
   // Ensure role is populated
   if (!u.role) {
     u = { ...u, role: 'user' };
@@ -70,16 +89,12 @@ export function normalizeUserStatusAndExpiry(u: UserProfile): UserProfile {
   }
 
   if (!u.expiryDate || u.expiryDate === 'null' || u.expiryDate === '') {
-    if (u.status === 'active') {
-      const defaultExp = new Date();
-      defaultExp.setDate(defaultExp.getDate() + 30);
-      const yyyy = defaultExp.getFullYear();
-      const mm = String(defaultExp.getMonth() + 1).padStart(2, '0');
-      const dd = String(defaultExp.getDate()).padStart(2, '0');
-      return { ...u, expiryDate: `${yyyy}-${mm}-${dd}T23:59:59.999Z` };
+    if (u.role === 'owner' || u.role === 'admin') {
+      return { ...u, status: 'active', expiryDate: 'Lifetime' };
     }
+    // Never auto-grant 30 days to regular users. If they do not have an admin-approved expiry, status is pending
     if (u.status !== 'suspended' && u.status !== 'pending') {
-      return { ...u, status: 'expired' };
+      return { ...u, status: 'pending' };
     }
     return u;
   }
@@ -133,13 +148,6 @@ interface UsersContextType {
 }
 
 const UsersContext = createContext<UsersContextType | undefined>(undefined);
-
-const ADMIN_EMAILS = [
-  "asmatn628@gmail.com",
-  "asmatullah9327@gmail.com",
-  "kabirahmaddev@gmail.com",
-  "wamoviesstation@gmail.com"
-];
 
 function isUserPrivileged(user: any, profile: any): boolean {
   let effectiveProfile = profile;

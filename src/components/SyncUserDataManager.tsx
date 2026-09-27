@@ -57,6 +57,7 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
   // Capture starting state of all pending queues
   const startFavsStr = safeStorage.getItem('pending_favorites_array');
   const startWLStr = safeStorage.getItem('pending_watch_later_array');
+  const startWatchedStr = safeStorage.getItem('pending_watched_marks');
   const startOrdersStr = safeStorage.getItem('pending_orders_array');
   const startReviewsStr = safeStorage.getItem('pending_reviews_array');
   const startReportedStr = safeStorage.getItem('pending_reported_links');
@@ -74,6 +75,7 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
   const hasPending = !!(
     startFavsStr ||
     startWLStr ||
+    startWatchedStr ||
     startOrdersStr ||
     startReviewsStr ||
     startReportedStr ||
@@ -91,12 +93,20 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
   // 2. Prepare updatesToPush from starting states
   const updatesToPush: Record<string, any> = {};
 
-  // Pending Favorites & Watch Later
+  // Pending Favorites & Watch Later & Watched
   if (startFavsStr) {
     try { updatesToPush.favorites = JSON.parse(startFavsStr); } catch (e) {}
   }
   if (startWLStr) {
     try { updatesToPush.watchLater = JSON.parse(startWLStr); } catch (e) {}
+  }
+  if (startWatchedStr) {
+    try {
+      const pendingWatched = JSON.parse(startWatchedStr);
+      if (Array.isArray(pendingWatched)) {
+        updatesToPush.watched = pendingWatched.slice(0, 50);
+      }
+    } catch (e) {}
   }
 
   // Pending Orders
@@ -247,6 +257,25 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
         }
       } catch (e) {
         safeStorage.removeItem('pending_watch_later_array');
+      }
+    }
+
+    // 2b. Watched Marks Cleanup
+    const currentWatchedStr = safeStorage.getItem('pending_watched_marks');
+    if (currentWatchedStr === startWatchedStr) {
+      safeStorage.removeItem('pending_watched_marks');
+    } else if (currentWatchedStr && startWatchedStr) {
+      try {
+        const currentWatched = JSON.parse(currentWatchedStr);
+        const startWatched = JSON.parse(startWatchedStr);
+        const remainingWatched = currentWatched.filter((key: string) => !startWatched.includes(key));
+        if (remainingWatched.length > 0) {
+          safeStorage.setItem('pending_watched_marks', JSON.stringify(remainingWatched.slice(0, 50)));
+        } else {
+          safeStorage.removeItem('pending_watched_marks');
+        }
+      } catch (e) {
+        safeStorage.removeItem('pending_watched_marks');
       }
     }
 

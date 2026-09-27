@@ -81,8 +81,8 @@ export default function Login() {
   }, [location]);
 
   useEffect(() => {
-    const hasActiveUser = !!user || !!profile || !!safeStorage.getItem('profile_cache');
-    if (hasActiveUser) {
+    // Only redirect if auth check has completed and there is a valid authenticated Firebase user
+    if (!authLoading && user) {
       // Instantly purge all ad scripts and social ads upon login
       purgeAllAdElements(true);
       try {
@@ -129,8 +129,16 @@ export default function Login() {
           }
         }
 
+        const userEmailLower = user.email?.toLowerCase();
+        const isAdmin = [
+          "asmatullah9327@gmail.com",
+          "asmatn628@gmail.com",
+          "kabirahmaddev@gmail.com",
+          "wamoviesstation@gmail.com",
+        ].includes(userEmailLower || "") || profile?.role === 'admin' || profile?.role === 'owner';
+
         if (!from) {
-          from = profile?.role === 'admin' ? '/admin' : '/';
+          from = isAdmin ? '/admin' : '/';
         }
 
         let targetPath: any = from;
@@ -149,13 +157,20 @@ export default function Login() {
 
         // Do not redirect to /login
         if (typeof targetPath === 'string' && (targetPath === '/login' || targetPath.startsWith('/login?'))) {
-          targetPath = profile.role === 'admin' ? '/admin' : '/';
+          targetPath = isAdmin ? '/admin' : '/';
         }
 
         navigate(targetPath, { replace: true });
       }
+    } else if (!authLoading && !user) {
+      // User is genuinely not logged in (Guest). Ensure no stale redirect happens and purge orphaned cache.
+      const cached = safeStorage.getItem('profile_cache');
+      if (cached && !profile) {
+        safeStorage.removeItem('profile_cache');
+        safeStorage.removeItem('profile_cache_timestamp');
+      }
     }
-  }, [user, profile, navigate, location, step]);
+  }, [user, profile, authLoading, navigate, location, step]);
 
   useEffect(() => {
     if (error) {
