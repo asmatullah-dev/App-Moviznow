@@ -11,13 +11,12 @@ import { getUserDisplayName } from '../utils/userUtils';
 import { purgeAllAdElements } from '../utils/adUtils';
 import { safeStorage } from '../utils/safeStorage';
 
-type LoginStep = 'social' | 'identifier' | 'password' | 'reset-password' | 'create_password' | 'already_logged_in';
+type LoginStep = 'social' | 'identifier' | 'password' | 'reset-password' | 'create_password';
 
 export default function Login() {
   const { 
     user, 
     profile, 
-    logout,
     signInWithGoogle, 
     signInWithEmail, 
     signUpWithPhoneAndPassword,
@@ -82,22 +81,8 @@ export default function Login() {
   }, [location]);
 
   useEffect(() => {
-    const searchParams = new URLSearchParams(location.search);
-    const isSwitchRequest = searchParams.get('switch') === 'true' || searchParams.get('logout') === 'true' || searchParams.get('force') === 'true' || location.state?.switch === true;
-
-    if (isSwitchRequest && user) {
-      logout().then(() => {
-        setStep('social');
-        clearError();
-        setCustomError(null);
-      }).catch(() => {
-        setStep('social');
-      });
-      return;
-    }
-
-    // Only redirect or set step if auth check has completed and there is a valid authenticated Firebase user
-    if (!authLoading && user && !isSwitchRequest) {
+    // Only redirect if auth check has completed, there is a valid authenticated Firebase user, and their profile is successfully loaded
+    if (!authLoading && user && profile) {
       // Instantly purge all ad scripts and social ads upon login
       purgeAllAdElements(true);
       try {
@@ -115,9 +100,9 @@ export default function Login() {
         setStep('reset-password');
         return;
       }
-
-      // Auto redirect if user just completed login or came from protected route redirect
-      if (isLoggingIn || location.state?.from) {
+      
+      if (!profile?.requirePasswordReset) {
+        const searchParams = new URLSearchParams(location.search);
         let redirectUrl = searchParams.get('redirect');
         let from = location.state?.from;
 
@@ -176,8 +161,6 @@ export default function Login() {
         }
 
         navigate(targetPath, { replace: true });
-      } else {
-        setStep('already_logged_in');
       }
     } else if (!authLoading && !user) {
       // User is genuinely not logged in (Guest). Ensure no stale redirect happens and purge orphaned cache.
@@ -186,11 +169,8 @@ export default function Login() {
         safeStorage.removeItem('profile_cache');
         safeStorage.removeItem('profile_cache_timestamp');
       }
-      if (step === 'already_logged_in') {
-        setStep('social');
-      }
     }
-  }, [user, profile, authLoading, navigate, location, step, isLoggingIn, logout, clearError]);
+  }, [user, profile, authLoading, navigate, location, step]);
 
   useEffect(() => {
     if (error) {
@@ -503,62 +483,6 @@ export default function Login() {
 
         {/* Step Views with AnimatePresence */}
         <AnimatePresence mode="wait">
-          {step === 'already_logged_in' && user && (
-            <motion.div
-              key="already-logged-in-step"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.25 }}
-              className="space-y-4 text-center"
-            >
-              <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex flex-col items-center gap-2">
-                <div className="w-12 h-12 rounded-full bg-emerald-500 text-white flex items-center justify-center font-black text-lg shadow-md">
-                  {(getUserDisplayName(profile || user) || 'U')[0]?.toUpperCase()}
-                </div>
-                <div>
-                  <h3 className="font-extrabold text-sm text-zinc-900 dark:text-white">
-                    {getUserDisplayName(profile || user)}
-                  </h3>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                    {user.email || profile?.phone || 'Logged In Account'}
-                  </p>
-                  <span className="inline-block mt-1 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-md">
-                    {profile?.role || 'Member'} • {profile?.status || 'Active'}
-                  </span>
-                </div>
-              </div>
-
-              <div className="space-y-2.5 pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const isAdmin = profile?.role === 'admin' || profile?.role === 'owner';
-                    navigate(isAdmin ? '/admin' : '/', { replace: true });
-                  }}
-                  className="w-full bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer text-sm"
-                >
-                  <ShieldCheck className="w-4 h-4" />
-                  Continue as {getUserDisplayName(profile || user)}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await logout();
-                    setStep('social');
-                    clearError();
-                    setCustomError(null);
-                  }}
-                  className="w-full bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 active:scale-95 text-zinc-800 dark:text-zinc-200 font-bold py-3 px-4 rounded-xl transition-all text-sm flex items-center justify-center gap-2 cursor-pointer border border-zinc-200/80 dark:border-zinc-700/80"
-                >
-                  <Lock className="w-4 h-4" />
-                  Switch Account / Sign In as Different User
-                </button>
-              </div>
-            </motion.div>
-          )}
-
           {step === 'social' && (
             <motion.div
               key="social-step"

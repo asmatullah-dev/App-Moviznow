@@ -845,8 +845,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
-          // Whitelist check for non-admin accounts with phone numbers (skip if already approved/active)
-          if (!hasAdminPrivileges && data.status !== "active") {
+          // Whitelist check for non-admin accounts with phone numbers (skip if already approved/active, or if logged in via Google)
+          const isGoogleUser = currentUser.providerData?.some(p => p.providerId === "google.com") || currentUser.email?.endsWith("@gmail.com");
+          if (!hasAdminPrivileges && data.status !== "active" && !isGoogleUser) {
             let phoneToCheck = data.phone || currentUser.phoneNumber || "";
             if (!phoneToCheck && currentUser.email?.endsWith("@moviznow.com")) {
               phoneToCheck = currentUser.email.replace("@moviznow.com", "");
@@ -1785,7 +1786,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       const localSessionId = getLocalSessionId();
 
-      const updates: any = {};
+      const updates: any = { uid: result.user.uid };
       const { getDeviceDetails } = await import("../utils/deviceInfo");
       const deviceDetails = await getDeviceDetails();
 
