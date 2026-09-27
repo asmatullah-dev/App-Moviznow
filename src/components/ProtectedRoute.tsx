@@ -29,6 +29,26 @@ export function ProtectedRoute({ children, requireAdmin = false, requireAuth = f
   const [whatsappNumber, setWhatsappNumber] = useState("");
   const [whatsappError, setWhatsappError] = useState<string | null>(null);
   const [isSavingWhatsapp, setIsSavingWhatsapp] = useState(false);
+  const [canShowWhatsappPrompt, setCanShowWhatsappPrompt] = useState(false);
+
+  // Detect any existing phone number across all profile and auth fields
+  const existingPhone = 
+    profile?.phone ||
+    (profile as any)?.phoneNumber ||
+    (profile as any)?.whatsapp ||
+    (profile as any)?.whatsappNumber ||
+    user?.phoneNumber ||
+    (profile?.email?.endsWith('@moviznow.com') ? profile.email.split('@')[0] : '') ||
+    (user?.email?.endsWith('@moviznow.com') ? user.email.split('@')[0] : '');
+
+  const hasPhone = Boolean(existingPhone && existingPhone.trim() !== '');
+
+  // If a phone is already present in another field or auth, auto-sync it to profile.phone silently
+  React.useEffect(() => {
+    if (profile && (!profile.phone || profile.phone.trim() === '') && hasPhone && existingPhone) {
+      updateUserProfileData({ phone: existingPhone }, undefined, true).catch(() => {});
+    }
+  }, [profile, hasPhone, existingPhone, updateUserProfileData]);
 
   React.useEffect(() => {
     // Safety cap: allow Firebase auth to resolve from persistence without premature timeouts
@@ -45,10 +65,16 @@ export function ProtectedRoute({ children, requireAdmin = false, requireAuth = f
       setShowSlowNote(true);
     }, 3500);
 
+    // Allow a grace period on login/mount so in-flight Firestore profile fetch can settle before prompting
+    const promptTimer = setTimeout(() => {
+      setCanShowWhatsappPrompt(true);
+    }, 1500);
+
     return () => {
       clearTimeout(timer);
       clearTimeout(adminTimer);
       clearTimeout(slowTimer);
+      clearTimeout(promptTimer);
     };
   }, []);
 
@@ -96,8 +122,22 @@ export function ProtectedRoute({ children, requireAdmin = false, requireAuth = f
     return <Navigate to="/login" state={{ from: location, suspended: isSuspended, deleted: isDeleted }} replace />;
   }
 
-  // Check for Whatsapp number
-  if (profile && !authProfileLoading && !isSyncing && !profile.phone && profile.role !== 'admin' && profile.role !== 'owner') {
+  // Check for Whatsapp number only after load settles, only if user has no phone in any field, and not staff
+  const shouldPromptWhatsapp = Boolean(
+    profile &&
+    canShowWhatsappPrompt &&
+    !hasPhone &&
+    !authLoading &&
+    !authProfileLoading &&
+    !isSyncing &&
+    profile.role !== 'admin' &&
+    profile.role !== 'owner' &&
+    profile.role !== 'content_manager' &&
+    profile.role !== 'user_manager' &&
+    profile.role !== 'manager'
+  );
+
+  if (shouldPromptWhatsapp) {
     const handleSaveWhatsapp = async () => {
       if (!whatsappNumber.trim()) return;
 

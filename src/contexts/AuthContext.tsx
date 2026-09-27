@@ -1968,6 +1968,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const { updateChunkMetaLocalCache } = await import("../utils/chunkMeta");
           updateChunkMetaLocalCache({ users: { [result.user.uid]: getUtcVersion() } });
         } catch (e) {}
+
+        // Immediately load user document into cache so profile data (including WhatsApp/phone) is ready instantly
+        try {
+          const { getDoc } = await import("firebase/firestore");
+          const userSnap = await getDoc(doc(db, "users", result.user.uid));
+          if (userSnap.exists()) {
+            const userData = userSnap.data() as UserProfile;
+            const normalized = normalizeUserStatusAndExpiry({ ...userData, uid: result.user.uid });
+            persistProfileCache(normalized);
+            setProfile(normalized);
+          }
+        } catch (e) {}
       } catch (e) {}
 
       if (result.user) {

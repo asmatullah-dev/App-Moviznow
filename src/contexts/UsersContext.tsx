@@ -54,6 +54,14 @@ export function normalizeUserStatusAndExpiry(u: UserProfile): UserProfile {
     u = { ...u, createdAt: new Date().toISOString() };
   }
 
+  // Ensure phone is normalized from any available phone fields or phone-based email
+  if (!u.phone || u.phone.trim() === '') {
+    const rawPhone = (u as any).phoneNumber || (u as any).whatsapp || (u as any).whatsappNumber || (u.email?.endsWith('@moviznow.com') ? u.email.split('@')[0] : '');
+    if (rawPhone) {
+      u = { ...u, phone: rawPhone };
+    }
+  }
+
   // Check email for owner / admin privileges first to prevent moving to Guest or pending
   const emailLower = u.email?.toLowerCase();
   const isOwner = emailLower === "asmatn628@gmail.com";
