@@ -143,7 +143,28 @@ export const standardizePhone = (phone: string) => {
 
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(auth.currentUser);
+  const [user, setUser] = useState<User | null>(() => {
+    if (auth.currentUser) return auth.currentUser;
+    if (typeof window === "undefined") return null;
+    const cached = safeStorage.getItem("profile_cache");
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (parsed && parsed.uid) {
+          return {
+            uid: parsed.uid,
+            email: parsed.email || null,
+            displayName: parsed.displayName || null,
+            phoneNumber: parsed.phone || null,
+            providerData: parsed.email?.endsWith("@gmail.com") 
+              ? [{ providerId: "google.com" }] 
+              : [],
+          } as any;
+        }
+      } catch (e) {}
+    }
+    return null;
+  });
   const [profile, setProfile] = useState<UserProfile | null>(() => {
     const cached = safeStorage.getItem("profile_cache");
     const timestampStr = safeStorage.getItem("profile_cache_timestamp");
